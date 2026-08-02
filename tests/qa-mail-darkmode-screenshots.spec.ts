@@ -83,7 +83,6 @@ const CACHED_SUGGESTIONS = [
 async function setupMocks(page: Page) {
   await page.unrouteAll();
 
-  // Accounts
   await page.route("**/api/v1/emails/accounts*", async (route) => {
     await route.fulfill({
       status: 200,
@@ -92,7 +91,6 @@ async function setupMocks(page: Page) {
     });
   });
 
-  // Folders
   await page.route("**/api/v1/emails/folders*", async (route) => {
     await route.fulfill({
       status: 200,
@@ -101,7 +99,6 @@ async function setupMocks(page: Page) {
     });
   });
 
-  // Sync
   await page.route(
     (url) => url.pathname === "/api/v1/emails/sync",
     async (route) => {
@@ -115,7 +112,6 @@ async function setupMocks(page: Page) {
     },
   );
 
-  // Sync-status (polled every 2s)
   await page.route(
     (url) => url.pathname === "/api/v1/emails/sync-status",
     async (route) => {
@@ -145,7 +141,6 @@ async function setupMocks(page: Page) {
     },
   );
 
-  // Single email by UID (for reading)
   await page.route(
     (url) =>
       /\/api\/v1\/emails\/\d+$/.test(url.pathname) &&
@@ -164,7 +159,6 @@ async function setupMocks(page: Page) {
     },
   );
 
-  // Email list
   await page.route(
     (url) =>
       url.pathname === "/api/v1/emails" &&
@@ -179,11 +173,10 @@ async function setupMocks(page: Page) {
     },
   );
 
-  // Suggest endpoint — return cached suggestions (zero-regression test)
+  // Return cached suggestions so the visual path does not contact IMAP.
   await page.route(
     (url) => url.pathname.includes("/emails/suggest/"),
     async (route) => {
-      // Simulate cache hit: instant response
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -203,7 +196,6 @@ test.describe("Mail dark-mode visual QA", () => {
   });
 
   test("Screenshot: inline reply box in dark mode", async ({ page }) => {
-    // Enable dark mode before navigation
     await page.goto(BASE, { waitUntil: "domcontentloaded" });
     await page.evaluate(() => {
       localStorage.setItem("theme", "dark");
@@ -213,31 +205,24 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-    // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
 
-    // Click INBOX to load email list
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
 
-    // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 
-    // Click the first email to open it in the reader
     await emailRows.first().click();
 
-    // Wait for reader pane
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
-    // Click Reply to open inline reply box
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
 
-    // Screenshot the inline reply section (the composer at the bottom of the reader)
     const inlineReply = page.locator("div.min-w-\\[400px\\]").first().locator("..").locator("div.border-t").last();
     await expect(inlineReply).toBeVisible({ timeout: 3000 });
 
@@ -246,45 +231,37 @@ test.describe("Mail dark-mode visual QA", () => {
       fullPage: false,
     });
 
-    // Also take a more targeted screenshot of the reply box
     await inlineReply.screenshot({
       path: path.join(SCREENSHOT_DIR, "dark-mode-inline-reply-box.png"),
     });
   });
 
   test("Screenshot: summarize panel in dark mode", async ({ page }) => {
-    // Use addInitScript to ensure dark mode before any page JS runs
     await page.addInitScript(() => {
       localStorage.setItem("theme", "dark");
       document.cookie = "theme=dark; path=/; max-age=31536000; SameSite=Lax";
     });
-    // Also set browser context cookie so server-side render sees it
+    // Set the context cookie as well so the server render matches the client.
     await page.context().addCookies([
       { name: "theme", value: "dark", domain: "localhost", path: "/" }
     ]);
 
     await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-    // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
 
-    // Click INBOX
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
 
-    // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 
-    // Click the first email
     await emailRows.first().click();
 
-    // Wait for reader pane
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
-    // Mock the summarize endpoint to return a real summary
     await page.route("**/api/v1/emails/summarize/**", async (route) => {
       await route.fulfill({
         status: 200,
@@ -298,12 +275,10 @@ test.describe("Mail dark-mode visual QA", () => {
       });
     });
 
-    // Click "Summarise this email"
     const summariseBtn = readerPane.getByRole("button", { name: "Summarise this email" }).first();
     await expect(summariseBtn).toBeVisible({ timeout: 3000 });
     await summariseBtn.click();
 
-    // Wait for the summary panel to appear
     const summaryPanel = page.locator("text=AI Summary").first();
     await expect(summaryPanel).toBeVisible({ timeout: 5000 });
 
@@ -323,34 +298,26 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-    // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
 
-    // Click INBOX
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
 
-    // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 
-    // Click the first email
     await emailRows.first().click();
 
-    // Wait for reader pane
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
-    // Click Reply to open the inline composer — SmartSuggest renders inside it
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
 
-    // Wait for SmartSuggest to auto-fetch and render suggestion chips in the composer
     await expect(page.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
-    // Take a full reader panel screenshot showing smart suggestions
     const readerSection = page.locator("div.min-w-\\[400px\\]").first();
     await expect(readerSection).toBeVisible();
     await page.screenshot({
@@ -367,7 +334,6 @@ test.describe("Mail dark-mode visual QA", () => {
       document.documentElement.classList.add("dark");
     });
 
-    // Track suggest endpoint calls for timing
     let suggestCallCount = 0;
     let suggestTimestamps: number[] = [];
 
@@ -387,33 +353,25 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-    // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
 
-    // Click INBOX
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
 
-    // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 
-    // Click the first email
     await emailRows.first().click();
 
-    // Click Reply to open the inline composer — SmartSuggest renders inside it
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
     await expect(readerPane).toBeVisible({ timeout: 5000 });
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
 
-    // Wait for SmartSuggest to auto-fetch and render suggestions in composer
     await expect(page.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
-    // Verify Smart Suggestions appeared as compact chips (from cache)
-    // In compact mode, tone labels appear as text in suggestion chips
     const toneChip = page.getByText("professional").first();
 
     await expect(toneChip).toBeVisible({ timeout: 10000 });
@@ -423,7 +381,6 @@ test.describe("Mail dark-mode visual QA", () => {
       fullPage: true,
     });
 
-    // Verify suggest endpoint was called (cache hit path exercised)
     expect(suggestCallCount).toBeGreaterThanOrEqual(1);
   });
 });

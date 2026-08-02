@@ -14,7 +14,7 @@
 
 import { describe, it, expect, afterEach, vi, beforeAll, afterAll } from "vitest";
 import express from "express";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } from "../lib/routes/opencode.js";
 import { opencodeClient, request, buildAuthHeader } from "../lib/opencode-client.js";
@@ -671,6 +671,60 @@ describe("Native provider integrations", () => {
 
     expect(response.status).toBe(502);
     expect(body).toEqual({ error: { code: "HTTP_500", message: "OpenCode request failed." } });
+  });
+});
+
+describe("Encoded dot segment proxy integration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards an encoded dot segment to the sentinel and returns a fixed error promptly", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(404, {
+      name: "NotFoundError",
+      message: "upstream session details",
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const address = new URL(baseUrl);
+      const request = httpRequest({
+        hostname: address.hostname,
+        port: Number(address.port),
+        method: "GET",
+        path: "/api/v1/opencode/sessions/%2E",
+      }, (upstream) => {
+        let body = "";
+        upstream.setEncoding("utf8");
+        upstream.on("data", (chunk) => { body += chunk; });
+        upstream.on("end", () => {
+          clearTimeout(timeout);
+          resolve({ status: upstream.statusCode ?? 0, body });
+        });
+      });
+      const timeout = setTimeout(() => {
+        request.destroy();
+        reject(new Error("Encoded dot segment request did not receive a bounded response"));
+      }, 1_000);
+      request.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      request.end();
+    });
+
+    expect(response.status).toBe(404);
+    expect(JSON.parse(response.body)).toEqual({
+      error: { code: "NotFoundError", message: "OpenCode request failed." },
+    });
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const upstreamPath = new URL(fetchSpy.mock.calls[0]![0] as string).pathname;
+    expect(upstreamPath).toBe("/session/__invalid_opencode_path_segment__");
+    expect(upstreamPath).not.toBe("/");
+    expect(upstreamPath).not.toBe("/session/");
+    expect(upstreamPath).not.toContain("/global/config");
   });
 });
 

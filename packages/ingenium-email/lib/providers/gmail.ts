@@ -1,5 +1,5 @@
 /**
- * GmailProvider — MailProvider implementation backed by the Gmail REST API.
+ * GmailProvider — Gmail REST API adapter.
  *
  * Uses the thin fetch client in gmail-api.ts. Every method calls
  * `getFreshGmailToken()` to ensure the access token is fresh before
@@ -12,7 +12,6 @@
  *   Skipped: DRAFT, CATEGORY_*, CHAT, unknown system labels
  */
 
-import type { MailProvider, CachedEmailWrite } from "./mail-provider.js";
 import type { EmailAccount, OAuthToken, EmailFolder, EmailAttachment } from "../types.js";
 import type { SendOptions } from "../smtp.js";
 import {
@@ -29,6 +28,21 @@ import {
 import { getFreshGmailToken } from "../oauth.js";
 import { simpleParser } from "mailparser";
 import { providerErrorDiagnostic, sanitizeProviderError } from "../provider-errors.js";
+
+/** A write-ready cached email entry returned by Gmail metadata queries. */
+export interface CachedEmailWrite {
+  id: string;
+  folder: string;
+  subject: string | null;
+  fromName: string | null;
+  fromAddr: string | null;
+  date: string | null;
+  snippet: string | null;
+  flags: string[];
+  hasAttachments: boolean;
+  envelopeJson: string | null;
+  changeType?: "added" | "label";
+}
 
 // ── Label ↔ Folder mapping ──────────────────────────────────────────────────
 
@@ -244,7 +258,7 @@ function walkParts(
 
 // ── GmailProvider ───────────────────────────────────────────────────────────
 
-export const GmailProvider: MailProvider = {
+export const GmailProvider = {
   // ── listFolders ─────────────────────────────────────────────────────────
   async listFolders(account: EmailAccount, _tokens: OAuthToken): Promise<EmailFolder[]> {
     const token = await getFreshGmailToken(account.id);

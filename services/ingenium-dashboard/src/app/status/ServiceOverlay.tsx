@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getApiBase } from "@/lib/api";
+import { formatUptime } from "@/lib/time";
 
 const API_URL = getApiBase();
 
@@ -120,16 +121,6 @@ function stateBadgeStyle(state: string) {
         dot: "bg-gray-400",
       };
   }
-}
-
-function formatUptime(seconds: number): string {
-  if (seconds <= 0) return "—";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
 }
 
 function formatTimestamp(seconds?: number): string {

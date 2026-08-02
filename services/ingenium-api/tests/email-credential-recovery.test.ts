@@ -23,6 +23,11 @@ vi.mock("ingenium-email", () => ({
   storeCredentials,
   stopAccountWorker,
   startEngine,
+  sanitizeProviderError: vi.fn(() => ({
+    code: "PROVIDER_ERROR",
+    message: "The email operation could not be completed. Try again later.",
+    retryable: true,
+  })),
 }));
 
 import { emailsRouter } from "../lib/routes/emails.js";
@@ -65,12 +70,12 @@ describe("PATCH /emails/accounts/:id/credentials", () => {
     const body = await response.json();
     expect(body).toEqual({ data: { success: true, accountId: "manual-1" } });
     expect(JSON.stringify(body)).not.toContain("new-secret");
-    expect(storeCredentials).toHaveBeenCalledWith("global-project", "manual-1", {
+    expect(storeCredentials).toHaveBeenCalledWith("manual-1", {
       imapPass: "new-secret",
       smtpPass: "new-secret",
     });
     expect(stopAccountWorker).toHaveBeenCalledWith("manual-1");
-    expect(startEngine).toHaveBeenCalledWith("global-project");
+    expect(startEngine).toHaveBeenCalledWith();
   });
 
   it("returns 404 when account does not exist", async () => {

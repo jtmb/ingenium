@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const PIXEL_TOLERANCE = 1;
 
@@ -15,49 +16,144 @@ test.describe("Chat — end-to-end smoke", () => {
     // Full pipeline: browser → Next.js → API → fixture OpenCode → SSE → rendered response
     test.setTimeout(60000);
 
-    // Navigate to /chat
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
-    // Wait for chat config to load and provider selector to be enabled.
-    // The fixture server at GET /provider returns a free "Fixture Model"
-    // under the "opencode" provider, which the API's chat-config promotes
-    // to the builtin provider list.
+    // The fixture provider is promoted into the chat-config catalog.
     const providerSelect = page.locator('[data-testid="chat-header-provider"]');
     await expect(providerSelect).toBeEnabled({ timeout: 20000 });
 
-    // Wait for the model selector to have options too.
     const modelSelect = page.locator('[data-testid="chat-header-model"]');
     await expect(modelSelect).toBeEnabled({ timeout: 15000 });
 
-    // The composer must not be disabled — session auto-creation and
-    // chat-config loading are complete.
     const composer = page.locator('[data-testid="chat-composer"]');
     await expect(composer).toBeEnabled({ timeout: 15000 });
 
-    // Type and send a message
     await composer.fill("Hello from E2E test");
     await composer.press("Enter");
 
-    // Composer should clear (message was accepted)
     await expect(composer).toHaveValue("", { timeout: 5000 });
 
-    // User message bubble should appear
     await expect(page.getByText("Hello from E2E test").first()).toBeVisible({ timeout: 5000 });
 
-    // Assistant response should appear (streaming from fixture SSE).
-    // The fixture sends three SSE events: message.updated, message.part.delta, session.idle.
+    // The fixture's SSE sequence must produce the assistant response.
     await expect(page.getByText("I've completed the analysis. The chat pipeline is working correctly.")).toBeVisible({ timeout: 30000 });
 
-    // Streaming should have stopped — the stop button must disappear.
-    // The send button is visible (disabled is fine — composer is empty).
     await expect(page.locator('[data-testid="chat-stop-btn"]')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('[data-testid="chat-send-btn"]')).toBeVisible({ timeout: 5000 });
   });
 
+  test("uses selected-project context only when explicitly requested", async ({ page }) => {
+    test.setTimeout(60_000);
+    const runtime = getDefaultSuiteRuntime();
+    const sourceBody = "Blue comet reference body must stay out of chat.";
+    const uploaded = await fetch(
+      `${runtime.apiBase}/context/uploads?project=${encodeURIComponent(runtime.project)}`,
+      {
+        method: "POST",
+        headers: { ...runtime.apiHeaders, "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "CHAT-100 fixture source",
+          content: `## Fixture heading\n${sourceBody}`,
+          mimeType: "text/markdown",
+          sourceReference: "work-item:CHAT-100",
+        }),
+      },
+    );
+    expect(uploaded.status).toBe(201);
+    const sourceSearchUrl = `${runtime.apiBase}/context/rag/search?project=${encodeURIComponent(runtime.project)}&q=blue%20comet`;
+    const firstSearch = await fetch(sourceSearchUrl, { headers: runtime.apiHeaders });
+    expect(firstSearch.status).toBe(200);
+    const firstCitations = (await firstSearch.json()).data as Array<{
+      citationId: string;
+      sourceHash: string;
+      chunkIndex: number;
+      availability: string;
+    }>;
+    expect(firstCitations).toHaveLength(1);
+    const citation = firstCitations[0]!;
+    expect(citation).toMatchObject({
+      citationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      sourceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      chunkIndex: 0,
+      availability: "available",
+    });
+    const repeatedSearch = await fetch(sourceSearchUrl, { headers: runtime.apiHeaders });
+    expect((await repeatedSearch.json()).data.map((entry: { citationId: string }) => entry.citationId))
+      .toEqual(firstCitations.map((entry) => entry.citationId));
+
+    await page.goto(`/chat?project=${encodeURIComponent(runtime.project)}`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20_000 });
+
+    const composer = page.locator('[data-testid="chat-composer"]');
+    const contextControl = page.locator('[data-testid="chat-use-project-context"]');
+    await expect(composer).toBeEnabled({ timeout: 15_000 });
+    await expect(contextControl).toHaveAttribute("aria-pressed", "false");
+    await contextControl.click();
+    await expect(contextControl).toHaveAttribute("aria-pressed", "true");
+    await composer.fill("Which project context mentions blue comet?");
+
+    const contextSearch = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/context/rag/search" && url.searchParams.get("project") === runtime.project;
+    });
+    await composer.press("Enter");
+    expect((await contextSearch).status()).toBe(200);
+
+    const grounding = page.locator('[data-testid="chat-project-context"]').last();
+    await expect(grounding).toContainText("Project context: requested — 1 source used");
+    await expect(grounding).toContainText("CHAT-100 fixture source");
+    await expect(grounding).toContainText("Heading: Fixture heading");
+    await expect(grounding).toContainText("Provenance: direct_upload");
+    await expect(grounding).toContainText("Source: work-item:CHAT-100");
+    await expect(grounding.locator('[data-testid="chat-context-citation-id"]')).toHaveText(citation.citationId);
+    await expect(grounding).toContainText(`Source hash: ${citation.sourceHash}`);
+    await expect(grounding).toContainText("Chunk index: 0 — Availability: available");
+    await expect(page.getByText(sourceBody, { exact: true })).toHaveCount(0);
+    await expect(contextControl).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("validates a persisted session before loading it and renders markdown on desktop and mobile", async ({ page }) => {
+    test.setTimeout(60000);
+    const staleSessionId = "ses_stale_persisted_session";
+    const messageResponses: Array<{ sessionId: string; status: number }> = [];
+
+    page.on("response", (response) => {
+      const match = new URL(response.url()).pathname.match(
+        /^\/api\/v1\/opencode\/sessions\/([^/]+)\/messages$/,
+      );
+      if (match) {
+        messageResponses.push({ sessionId: match[1]!, status: response.status() });
+      }
+    });
+    await page.addInitScript((sessionId) => {
+      localStorage.setItem("opencode-chat-active-session", sessionId);
+    }, staleSessionId);
+
+    await page.goto("/chat", { waitUntil: "domcontentloaded" });
+    await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20000 });
+    const composer = page.locator('[data-testid="chat-composer"]');
+    await expect(composer).toBeEnabled({ timeout: 15000 });
+
+    await expect.poll(() => messageResponses.some(
+      (response) => response.sessionId === "fixture-session-1" && response.status === 200,
+    )).toBe(true);
+    expect(messageResponses).toEqual([{ sessionId: "fixture-session-1", status: 200 }]);
+
+    await composer.fill("Show the fixture markdown");
+    await composer.press("Enter");
+    const markdownCallout = page.locator('[data-testid="chat-assistant-message"] .chat-markdown .callout');
+    await expect(markdownCallout).toContainText("This callout remains plain provider output.", { timeout: 30000 });
+    await markdownCallout.scrollIntoViewIfNeeded();
+    await expect(markdownCallout).toBeInViewport();
+
+    await expect(page.locator('[data-testid="chat-stop-btn"]')).toBeHidden({ timeout: 10000 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(markdownCallout).toBeVisible();
+    await expect(markdownCallout).toBeInViewport();
+  });
+
   test("session survives refresh", async ({ page }) => {
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
-    // After previous test created a session, the config should reload
-    // and the provider selector must be available.
     await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 15000 });
   });
 
@@ -70,7 +166,6 @@ test.describe("Chat — end-to-end smoke", () => {
     );
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
-    // Wait for provider selector
     await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20000 });
 
     // This direct, dynamically-ported fixture request must pass the dashboard
@@ -82,7 +177,6 @@ test.describe("Chat — end-to-end smoke", () => {
       `conversation creation request headers: ${JSON.stringify(await createdResponse.request().allHeaders())}`,
     ).toBe(201);
 
-    // Send a message
     const composer = page.locator('[data-testid="chat-composer"]');
     await expect(composer).toBeEnabled({ timeout: 15000 });
     await composer.fill("Test rich fixture");
@@ -100,7 +194,6 @@ test.describe("Chat — end-to-end smoke", () => {
     );
     await expect(reasoning).toBeVisible({ timeout: 15000 });
 
-    // Reasoning content should contain the fixture text
     await expect(page.locator('[data-testid="chat-reasoning-content"]')).toContainText("think about this");
     await expect(page.locator('[data-testid="chat-reasoning-content"]')).not.toHaveClass(
       /\b(?:border|rounded|bg-)/,
@@ -108,13 +201,11 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(page.getByText("Generating…")).toHaveCount(0);
     await expect(finalResponse).toHaveCount(0);
 
-    // Tool call should render as a non-interactive inline trace.
     const toolTrace = page
       .locator('[data-testid="chat-tool-call"]')
       .filter({ hasText: "Shell" });
     await expect(toolTrace).toBeVisible({ timeout: 10000 });
 
-    // Tool name should show
     await expect(toolTrace.locator('[data-testid="chat-tool-name"]')).toContainText("Shell");
     await expect(toolTrace.locator('[data-testid="chat-tool-summary"]')).toContainText(
       "echo 'Hello from tool'",
@@ -152,7 +243,7 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(activityDrawer).toBeHidden();
     await expect(webSearchTrace.locator('[data-testid="chat-tool-trigger"]')).toBeFocused();
 
-    // The fixture emits completed message metadata before session.idle.
+    // Completion metadata precedes session.idle in the fixture protocol.
     await expect(finalResponse).toBeVisible({ timeout: 10000 });
     const assistantOutput = page.locator('[data-testid="chat-assistant-message"]').last();
     await expect(assistantOutput).not.toHaveClass(/\b(?:border|rounded|bg-)/);

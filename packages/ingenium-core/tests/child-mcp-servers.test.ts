@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import * as childMcpServers from "../lib/tools/child-mcp-servers.js";
+import { MCP_TOOL_CATALOG } from "../lib/tools/mcp-tool-catalog.js";
+import { buildMcpToolConformanceReport } from "../lib/tools/mcp-tool-conformance.js";
 import * as mcpToolStates from "../lib/tools/mcp-tool-states.js";
 import * as projects from "../lib/tools/projects.js";
 
@@ -145,6 +147,29 @@ describe("child MCP definitions", () => {
     expect(mcpToolStates.listToolStatesWithDefaults(project.id)).toContainEqual({ tool_name: toolName, enabled: true });
     mcpToolStates.setToolState(project.id, toolName, false);
     expect(mcpToolStates.getToolState(project.id, toolName)).toBe(false);
+    const report = buildMcpToolConformanceReport({
+      catalog: MCP_TOOL_CATALOG,
+      canonicalRegistrations: MCP_TOOL_CATALOG
+        .filter(({ name }) => name.startsWith("ingenium_"))
+        .map(({ name }) => name),
+      effectiveCatalog: [
+        ...MCP_TOOL_CATALOG,
+        {
+          name: toolName,
+          category,
+          description: "List events from the configured calendar.",
+          projectScope: "per-project",
+          defaultEnabled: true,
+          apiEndpoints: [],
+        },
+      ],
+      effectiveProjection: mcpToolStates.listCategorizedTools(project.id).flatMap(({ category: projectedCategory, tools }) =>
+        tools.map(({ tool_name, enabled }) => ({ tool_name, category: projectedCategory, enabled })),
+      ),
+      rawExplicitStates: mcpToolStates.listToolStates(project.id),
+      expectedEnabledOverrides: { [toolName]: false },
+    });
+    expect(report.issues).toEqual([]);
 
     getDb().prepare("UPDATE mcp_child_server_definitions SET enabled = 0 WHERE project_id = ? AND name = ?")
       .run(project.id, "calendar");

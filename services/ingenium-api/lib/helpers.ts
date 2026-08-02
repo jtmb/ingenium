@@ -2,15 +2,6 @@ import { Request, Response } from "express";
 import { projects } from "ingenium-core";
 
 /**
- * Resolve a project name to its UUID, or null if the project doesn't exist.
- * Projects MUST be created explicitly via POST /api/v1/projects or the dashboard.
- */
-export function resolveProjectId(name: string): string | null {
-  const existing = projects.getProject(name);
-  return existing ? existing.id : null;
-}
-
-/**
  * Express middleware helper that reads the `project` query parameter,
  * validates it exists, resolves it to a UUID, and returns 400/404 if invalid.
  *
@@ -30,12 +21,12 @@ export function requireProject(req: Request, res: Response): string | null {
     res.status(400).json({ error: { code: "BAD_REQUEST", message: "project query parameter is required. Create a project first." } });
     return null;
   }
-  const id = resolveProjectId(name);
-  if (!id) {
+  const project = projects.getProject(name);
+  if (!project || project.archived_at) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${name}' not found. Create it first via POST /api/v1/projects or the dashboard.` } });
     return null;
   }
-  return id;
+  return project.id;
 }
 
 /**
@@ -46,7 +37,7 @@ export function requireProject(req: Request, res: Response): string | null {
  * when a dashboard tab or MCP client still carries an external project
  * context in its URL/request.
  */
-export function requireGlobalProject(_req: Request, res: Response): string | null {
+export function requireActiveGlobalProject(_req: Request, res: Response): { id: string; name: string } | null {
   try {
     const global = projects.getGlobalProject();
     if (!global) {
@@ -58,7 +49,7 @@ export function requireGlobalProject(_req: Request, res: Response): string | nul
       });
       return null;
     }
-    return global.id;
+    return { id: global.id, name: global.name };
   } catch {
     res.status(503).json({
       error: {
@@ -68,4 +59,8 @@ export function requireGlobalProject(_req: Request, res: Response): string | nul
     });
     return null;
   }
+}
+
+export function requireGlobalProject(req: Request, res: Response): string | null {
+  return requireActiveGlobalProject(req, res)?.id ?? null;
 }

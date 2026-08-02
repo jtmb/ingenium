@@ -6,8 +6,19 @@
 import { api } from "../client.js";
 
 /** Create a new task with optional description and assignee. */
-export async function taskCreate(project: string, title: string, description?: string, assignedTo?: string) {
-  const res = await api.post("/tasks", { title, description, assigned_to: assignedTo }, { project });
+export async function taskCreate(
+  project: string,
+  title: string,
+  description?: string,
+  assignedTo?: string,
+  idempotencyKey?: string,
+) {
+  const res = await api.post("/tasks", {
+    title,
+    description,
+    assigned_to: assignedTo,
+    ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
+  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -20,14 +31,31 @@ export async function taskList(project: string, columnId?: string) {
 }
 
 /** Move a task to a different column. */
-export async function taskMove(project: string, taskId: string, columnId: string) {
-  const res = await api.patch(`/tasks/${taskId}`, { column_id: columnId }, { project });
+export async function taskMove(
+  project: string,
+  taskId: string,
+  columnId: string,
+  expectedRevision?: number,
+  idempotencyKey?: string,
+) {
+  const res = await api.patch(`/tasks/${taskId}`, {
+    column_id: columnId,
+    ...taskMutationOptions(expectedRevision, idempotencyKey),
+  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
 /** Mark a task as completed (move to "done" column). */
-export async function taskComplete(project: string, taskId: string) {
-  const res = await api.patch(`/tasks/${taskId}`, { column_id: "done" }, { project });
+export async function taskComplete(
+  project: string,
+  taskId: string,
+  expectedRevision?: number,
+  idempotencyKey?: string,
+) {
+  const res = await api.patch(`/tasks/${taskId}`, {
+    column_id: "done",
+    ...taskMutationOptions(expectedRevision, idempotencyKey),
+  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -38,14 +66,30 @@ export async function taskNext(project: string) {
 }
 
 /** Update task fields (title, description, assigned_to, priority, etc.). */
-export async function taskUpdate(project: string, taskId: string, fields: Record<string, unknown>) {
-  const res = await api.patch(`/tasks/${taskId}`, fields, { project });
+export async function taskUpdate(
+  project: string,
+  taskId: string,
+  fields: Record<string, unknown>,
+  expectedRevision?: number,
+  idempotencyKey?: string,
+) {
+  const res = await api.patch(`/tasks/${taskId}`, {
+    ...withoutTaskMutationFields(fields),
+    ...taskMutationOptions(expectedRevision, idempotencyKey),
+  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
 /** Delete a task by ID. */
-export async function taskDelete(project: string, taskId: string) {
-  await api.del(`/tasks/${taskId}`, { project });
+export async function taskDelete(
+  project: string,
+  taskId: string,
+  expectedRevision?: number,
+  idempotencyKey?: string,
+) {
+  const options = taskMutationOptions(expectedRevision, idempotencyKey);
+  if (Object.keys(options).length > 0) await api.del(`/tasks/${taskId}`, { project }, options);
+  else await api.del(`/tasks/${taskId}`, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: taskId }) }] };
 }
 
@@ -164,7 +208,82 @@ export async function taskNotificationRead(project: string, notificationId: stri
 }
 
 /** Bulk update multiple tasks with the same fields. */
-export async function taskBulkUpdate(project: string, taskIds: string[], fields: Record<string, unknown>) {
-  const res = await api.post("/tasks/bulk", { task_ids: taskIds, ...fields }, { project });
+export async function taskBulkUpdate(
+  project: string,
+  taskIds: string[],
+  fields: Record<string, unknown>,
+  expectedRevision?: number,
+  expectedRevisions?: Record<string, number>,
+  idempotencyKey?: string,
+) {
+  const res = await api.post("/tasks/bulk", {
+    task_ids: taskIds,
+    ...withoutTaskMutationFields(fields),
+    ...taskMutationOptions(expectedRevision, idempotencyKey),
+    ...(expectedRevisions === undefined ? {} : { expected_revisions: expectedRevisions }),
+  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Reserve a task for one cooperative owner/worktree pair. */
+export async function taskReserve(
+  project: string,
+  taskId: string,
+  owner: string,
+  worktree: string,
+  reservationToken: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+) {
+  const res = await api.post(`/tasks/${taskId}/reserve`, {
+    owner,
+    worktree,
+    reservation_token: reservationToken,
+    expected_revision: expectedRevision,
+    idempotency_key: idempotencyKey,
+  }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Release a task reservation for the exact owner/worktree/token that acquired it. */
+export async function taskRelease(
+  project: string,
+  taskId: string,
+  owner: string,
+  worktree: string,
+  reservationToken: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+) {
+  const res = await api.post(`/tasks/${taskId}/release`, {
+    owner,
+    worktree,
+    reservation_token: reservationToken,
+    expected_revision: expectedRevision,
+    idempotency_key: idempotencyKey,
+  }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+const TASK_MUTATION_FIELDS = new Set([
+  "project",
+  "task_id",
+  "task_ids",
+  "expected_revision",
+  "expectedRevision",
+  "expected_revisions",
+  "expectedRevisions",
+  "idempotency_key",
+  "idempotencyKey",
+]);
+
+function withoutTaskMutationFields(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).filter(([key]) => !TASK_MUTATION_FIELDS.has(key)));
+}
+
+function taskMutationOptions(expectedRevision?: number, idempotencyKey?: string): Record<string, unknown> {
+  return {
+    ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+    ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
+  };
 }

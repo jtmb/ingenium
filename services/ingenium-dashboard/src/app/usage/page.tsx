@@ -11,6 +11,7 @@ import {
   type UsageSummary,
 } from "@/lib/api";
 import UsageBreakdownTable from "./components/UsageBreakdownTable";
+import UsageAdvisoryPanel from "./components/UsageAdvisoryPanel";
 import UsageEventsTable from "./components/UsageEventsTable";
 import UsageFilters from "./components/UsageFilters";
 import UsageMetricCard from "./components/UsageMetricCard";
@@ -25,21 +26,23 @@ import {
 } from "./components/usage-presentation";
 
 interface UsageDashboardData {
+  project: string;
   summary: UsageSummary;
   breakdown: UsageBreakdownRow[];
   events: UsageEventsPage;
 }
 
 interface UsageFilterState {
+  project: string;
   draft: UsageFilterDraft;
   appliedQuery: UsageQuery;
 }
 
-function initialUsageFilterState(): UsageFilterState {
+function initialUsageFilterState(project: string): UsageFilterState {
   const draft = defaultUsageFilterDraft();
   const result = validateUsageFilters(draft);
   if (!result.ok) throw new Error(result.message);
-  return { draft, appliedQuery: result.query };
+  return { project, draft, appliedQuery: result.query };
 }
 
 function uniqueRawIdentifiers(values: Array<string | null>): string[] {
@@ -72,7 +75,7 @@ function currentRangeLabel(query: UsageQuery): string {
 /** Provider-neutral, project-scoped usage analytics. */
 export default function UsagePage() {
   const project = useProject();
-  const [filters, setFilters] = useState<UsageFilterState>(initialUsageFilterState);
+  const [filters, setFilters] = useState<UsageFilterState>(() => initialUsageFilterState(project));
   const [data, setData] = useState<UsageDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,14 +83,27 @@ export default function UsagePage() {
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportContinuation, setExportContinuation] = useState<string | null>(null);
+  const [eventsMoreLoading, setEventsMoreLoading] = useState(false);
+  const [eventsMoreError, setEventsMoreError] = useState<string | null>(null);
   const requestVersion = useRef(0);
-  const { draft, appliedQuery } = filters;
+  const eventsRequestVersion = useRef(0);
+  const exportRequestVersion = useRef(0);
+  const resetFilters = useMemo(() => initialUsageFilterState(project), [project]);
+  const currentProject = filters.project === project;
+  const projectFilters = currentProject ? filters : resetFilters;
+  const { draft, appliedQuery } = projectFilters;
+  const displayedData = data?.project === project ? data : null;
+  const displayedValidationMessage = currentProject ? validationMessage : null;
+  const displayedExportMessage = currentProject ? exportMessage : null;
+  const displayedExportContinuation = currentProject ? exportContinuation : null;
+  const displayedExporting = currentProject && exporting;
+  const displayedLoading = currentProject ? loading : true;
+  const displayedError = currentProject ? error : null;
 
   const loadUsage = useCallback(async (query: UsageQuery) => {
     const version = ++requestVersion.current;
     setLoading(true);
     setError(null);
-    setData(null);
     try {
       const [summary, breakdown, events] = await Promise.all([
         api.usage.summary(query, project),
@@ -95,7 +111,8 @@ export default function UsagePage() {
         api.usage.events(query, project, { limit: 100 }),
       ]);
       if (version === requestVersion.current) {
-        setData({ summary: summary.data, breakdown: breakdown.data, events });
+        setData({ project, summary: summary.data, breakdown: breakdown.data, events });
+        setEventsMoreError(null);
       }
     } catch (fetchError: unknown) {
       if (version === requestVersion.current) {
@@ -107,10 +124,29 @@ export default function UsagePage() {
   }, [project]);
 
   useEffect(() => {
-    void Promise.resolve().then(() => loadUsage(appliedQuery));
-  }, [appliedQuery, loadUsage]);
+    if (filters.project === project) return;
+    void Promise.resolve().then(() => {
+      requestVersion.current += 1;
+      eventsRequestVersion.current += 1;
+      exportRequestVersion.current += 1;
+      setFilters(initialUsageFilterState(project));
+      setData(null);
+      setLoading(true);
+      setError(null);
+      setExporting(false);
+      setExportMessage(null);
+      setExportContinuation(null);
+      setEventsMoreLoading(false);
+      setEventsMoreError(null);
+    });
+  }, [filters.project, project]);
 
-  const options = useMemo(() => filterOptions(data), [data]);
+  useEffect(() => {
+    if (filters.project !== project) return;
+    void Promise.resolve().then(() => loadUsage(appliedQuery));
+  }, [appliedQuery, filters.project, loadUsage, project]);
+
+  const options = useMemo(() => filterOptions(displayedData), [displayedData]);
 
   const applyFilters = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -122,6 +158,7 @@ export default function UsagePage() {
     setValidationMessage(null);
     setExportMessage(null);
     setExportContinuation(null);
+    setEventsMoreError(null);
     setFilters((current) => ({ ...current, appliedQuery: result.query }));
   };
 
@@ -145,6 +182,7 @@ export default function UsagePage() {
   const exportCsv = async (cursor?: string) => {
     setExporting(true);
     setExportMessage(null);
+    const version = ++exportRequestVersion.current;
     try {
       const response = await dashboardFetch(api.usage.exportUrl(
         appliedQuery,
@@ -166,21 +204,49 @@ export default function UsagePage() {
       URL.revokeObjectURL(objectUrl);
       const truncated = response.headers.get("X-Export-Truncated") === "true";
       const nextCursor = response.headers.get("X-Export-Next-Cursor");
-      setExportContinuation(truncated ? nextCursor : null);
-      setExportMessage(truncated
-        ? nextCursor
-          ? "CSV page downloaded. More rows are available; download the next page to continue."
-          : "CSV downloaded, but the API truncated the result without a continuation cursor. Narrow the UTC range for a complete file."
-        : "CSV downloaded.");
+      if (version === exportRequestVersion.current) {
+        setExportContinuation(truncated ? nextCursor : null);
+        setExportMessage(truncated
+          ? nextCursor
+            ? "CSV page downloaded. More rows are available; download the next page to continue."
+            : "CSV downloaded, but the API truncated the result without a continuation cursor. Narrow the UTC range for a complete file."
+          : "CSV downloaded.");
+      }
     } catch (exportError: unknown) {
-      setExportMessage(exportError instanceof Error ? `CSV export failed: ${exportError.message}` : "CSV export failed.");
+      if (version === exportRequestVersion.current) setExportMessage(exportError instanceof Error ? `CSV export failed: ${exportError.message}` : "CSV export failed.");
     } finally {
-      setExporting(false);
+      if (version === exportRequestVersion.current) setExporting(false);
     }
   };
 
-  const freshness = data ? freshnessState(data.summary.freshness.lastSuccessfulSyncAt) : "unknown";
-  const empty = data?.summary.totals.requests === 0;
+  const loadMoreEvents = async () => {
+    if (!displayedData?.events.pagination.nextCursor || eventsMoreLoading) return;
+    const version = ++eventsRequestVersion.current;
+    setEventsMoreLoading(true);
+    setEventsMoreError(null);
+    try {
+      const page = await api.usage.events(appliedQuery, project, { limit: 100, cursor: displayedData.events.pagination.nextCursor });
+      if (version !== eventsRequestVersion.current) return;
+      setData((current) => {
+        if (!current || current.project !== project) return current;
+        const seen = new Set(current.events.data.map((event) => event.id));
+        return {
+          ...current,
+          events: {
+            ...page,
+            data: [...current.events.data, ...page.data.filter((event) => !seen.has(event.id))],
+          },
+        };
+      });
+    } catch (eventError: unknown) {
+      if (version === eventsRequestVersion.current) setEventsMoreError(eventError instanceof Error ? eventError.message : "More usage events could not be loaded.");
+    } finally {
+      if (version === eventsRequestVersion.current) setEventsMoreLoading(false);
+    }
+  };
+
+  const freshness = displayedData ? freshnessState(displayedData.summary.freshness.lastSuccessfulSyncAt) : "unknown";
+  const empty = displayedData?.summary.totals.requests === 0;
 
   return (
     <div className="space-y-5" data-testid="usage-page">
@@ -200,39 +266,41 @@ export default function UsagePage() {
         providerOptions={options.providers}
         modelOptions={options.models}
         agentOptions={options.agents}
-        loading={loading}
-        exporting={exporting}
-        validationMessage={validationMessage}
+        loading={displayedLoading}
+        exporting={displayedExporting}
+        validationMessage={displayedValidationMessage}
         onChange={(next) => setFilters((current) => ({ ...current, draft: next }))}
         onSubmit={applyFilters}
         onPreset={setPreset}
         onExport={() => { void exportCsv(); }}
       />
 
-      {exportMessage && (
+      {displayedExportMessage && (
         <p className="rounded-lg border border-[var(--color-info-border)] bg-[var(--color-info-bg)] px-4 py-3 text-sm text-[var(--color-info-text)]" role="status" aria-live="polite">
-          {exportMessage}
+          {displayedExportMessage}
         </p>
       )}
-      {exportContinuation && (
+      {displayedExportContinuation && (
         <div className="flex justify-end">
           <button
             type="button"
-            onClick={() => { void exportCsv(exportContinuation); }}
-            disabled={loading || exporting}
+            onClick={() => { void exportCsv(displayedExportContinuation); }}
+            disabled={loading || displayedExporting}
             className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
           >
-            {exporting ? "Preparing CSV…" : "Download next CSV page"}
+            {displayedExporting ? "Preparing CSV…" : "Download next CSV page"}
           </button>
         </div>
       )}
 
-      {loading && <UsagePageSkeleton />}
+      <UsageAdvisoryPanel key={project} project={project} selectedRange={appliedQuery} />
 
-      {!loading && error && !data && (
+      {displayedLoading && !displayedData && <UsagePageSkeleton />}
+
+      {!displayedLoading && displayedError && !displayedData && (
         <section className="rounded-xl border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center hover:shadow-md transition-shadow" role="alert" data-testid="usage-error-state">
           <h2 className="text-lg font-semibold text-[var(--color-error-text)]">Unable to load usage analytics</h2>
-          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{error}</p>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{displayedError}</p>
           <button
             type="button"
             onClick={() => { void loadUsage(appliedQuery); }}
@@ -243,14 +311,21 @@ export default function UsagePage() {
         </section>
       )}
 
-      {!loading && data && (
+      {!displayedLoading && displayedError && displayedData && (
+        <section className="rounded-xl border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-4 hover:shadow-md transition-shadow" role="alert">
+          <p className="text-sm text-[var(--color-error-text)]">{displayedError}</p>
+          <button type="button" onClick={() => { void loadUsage(appliedQuery); }} className="mt-2 text-sm font-medium text-[var(--color-text-link)] hover:underline">Retry usage data</button>
+        </section>
+      )}
+
+      {displayedData && (
         <>
           <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow" aria-label="Usage data freshness">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Telemetry freshness</h2>
-                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Latest event: {formatUtcTimestamp(data.summary.freshness.latestEventAt)}</p>
-                <p className="text-sm text-[var(--color-text-secondary)]">Last successful sync: {formatUtcTimestamp(data.summary.freshness.lastSuccessfulSyncAt)}</p>
+                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Latest event: {formatUtcTimestamp(displayedData.summary.freshness.latestEventAt)}</p>
+                <p className="text-sm text-[var(--color-text-secondary)]">Last successful sync: {formatUtcTimestamp(displayedData.summary.freshness.lastSuccessfulSyncAt)}</p>
               </div>
               <span className={`w-fit rounded-full border px-3 py-1 text-xs font-medium ${
                 freshness === "fresh"
@@ -275,20 +350,20 @@ export default function UsagePage() {
           ) : (
             <>
               <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Usage totals">
-                <UsageMetricCard title="Requests" value={data.summary.totals.requests} detail="Step-finish events in the selected UTC range." testId="usage-metric-requests" />
-                <UsageMetricCard title="Reported cost" metric={data.summary.totals.cost} cost detail="Only provider-reported cost; no currency conversion or billing estimate." testId="usage-metric-cost" />
-                <UsageMetricCard title="Total tokens" metric={data.summary.totals.tokens.total} detail="Reported total token counter." testId="usage-metric-total" />
-                <UsageMetricCard title="Input tokens" metric={data.summary.totals.tokens.input} detail="Reported input token counter." testId="usage-metric-input" />
-                <UsageMetricCard title="Output tokens" metric={data.summary.totals.tokens.output} detail="Reported output token counter." testId="usage-metric-output" />
-                <UsageMetricCard title="Reasoning tokens" metric={data.summary.totals.tokens.reasoning} detail="Reported numeric reasoning-token counter only; reasoning content is never collected." testId="usage-metric-reasoning" />
-                <UsageMetricCard title="Cache read" metric={data.summary.totals.cache.read} detail="Reported cache-read tokens only." testId="usage-metric-cache-read" />
-                <UsageMetricCard title="Cache write" metric={data.summary.totals.cache.write} detail="Reported cache-write tokens only." testId="usage-metric-cache-write" />
+                <UsageMetricCard title="Requests" value={displayedData.summary.totals.requests} detail="Step-finish events in the selected UTC range." testId="usage-metric-requests" />
+                <UsageMetricCard title="Reported cost" metric={displayedData.summary.totals.cost} cost detail="Only provider-reported cost; no currency conversion or billing estimate." testId="usage-metric-cost" />
+                <UsageMetricCard title="Total tokens" metric={displayedData.summary.totals.tokens.total} detail="Reported total token counter." testId="usage-metric-total" />
+                <UsageMetricCard title="Input tokens" metric={displayedData.summary.totals.tokens.input} detail="Reported input token counter." testId="usage-metric-input" />
+                <UsageMetricCard title="Output tokens" metric={displayedData.summary.totals.tokens.output} detail="Reported output token counter." testId="usage-metric-output" />
+                <UsageMetricCard title="Reasoning tokens" metric={displayedData.summary.totals.tokens.reasoning} detail="Reported numeric reasoning-token counter only; reasoning content is never collected." testId="usage-metric-reasoning" />
+                <UsageMetricCard title="Cache read" metric={displayedData.summary.totals.cache.read} detail="Reported cache-read tokens only." testId="usage-metric-cache-read" />
+                <UsageMetricCard title="Cache write" metric={displayedData.summary.totals.cache.write} detail="Reported cache-write tokens only." testId="usage-metric-cache-write" />
               </section>
 
               <p className="text-sm text-[var(--color-text-muted)]">A cache hit rate is not calculated because cache read/write counters can be omitted by providers.</p>
-              <UsageTrend daily={data.summary.daily} />
-              <UsageBreakdownTable rows={data.breakdown} />
-              <UsageEventsTable page={data.events} />
+              <UsageTrend daily={displayedData.summary.daily} />
+              <UsageBreakdownTable rows={displayedData.breakdown} />
+              <UsageEventsTable page={displayedData.events} loadingMore={eventsMoreLoading} loadMoreError={eventsMoreError} onLoadMore={() => { void loadMoreEvents(); }} />
             </>
           )}
         </>

@@ -12,7 +12,7 @@ description: Iframe sandbox configuration, risk assessment, and deferred securit
 > (`/opencode-web/`, `/opencode-cli/`) were also removed. The Email HTML iframe retains
 > its separate sandbox policy (no `allow-scripts`). CSP/frame-ancestor policy remains
 > deferred pending runtime testing.
-> **Last updated**: 2026-07-19
+> **Last updated**: 2026-08-02
 
 ---
 
@@ -24,12 +24,28 @@ additional standalone iframes in `services/ingenium-dashboard/src/app/standalone
 **All four OpenCode iframes have had the `sandbox` attribute removed** — OpenCode is
 trusted first-party content embedded via local gateway roots or configured HTTPS origins.
 
+The `/vscode` route adds one trusted separate-origin code-server iframe. Its exact
+local origin is `http://vscode.localhost:3000/` on the established port-`3000`
+virtual-host gateway; code-server remains private at `127.0.0.1:4100`. It is also
+unsandboxed and requests only `allow="clipboard-write"`. The local Windows/WSL
+profile assumes localhost-only use and is unsupported for LAN, remote, shared, or
+untrusted users; no host `3002` or public `4100` exposure is supported.
+
+This VS Code surface is administrator-grade local access. code-server is
+preinstalled, but Restricted Mode disables the pinned extension until the user
+explicitly trusts the workspace; Ingenium never auto-trusts. The extension is
+image-baked and installed offline as `appuser` into persistent `vscode-data`;
+there is no runtime registry or marketplace installation. Security acceptance
+also verifies the exact Open VSX artifact identity and SHA-256, engine
+compatibility, ownership, and that no content or secrets enter evidence.
+
 | Iframe | Source | Sandbox | Purpose |
 |--------|--------|---------|---------|
 | OpenCode Web (dashboard) | `Dynamic` (see below) | _(removed)_ | OpenCode Web UI |
 | ttyd Terminal (dashboard) | `Dynamic` (see below) | _(removed)_ | OpenCode CLI via ttyd + xterm.js |
 | OpenCode Web (standalone) | `Dynamic` (see below) | _(removed)_ | Standalone OpenCode Web UI |
 | ttyd Terminal (standalone) | `Dynamic` (see below) | _(removed)_ | Standalone OpenCode CLI terminal |
+| VS Code (`/vscode`, standalone) | `http://vscode.localhost:3000/` | _(removed)_ | Local code-server workspace and terminal |
 
 ### Dynamic Origin Resolution (Updated)
 
@@ -82,6 +98,14 @@ upgrade handshakes are excluded from the dynamic OpenCode bucket so dashboard
 prefetch bursts cannot starve iframe startup. The gateway limits connections
 to 16 per client address.
 
+Only the dashboard's exact `^~ /_next/static/` immutable-asset path bypasses
+the dashboard request bucket. Its trailing slash and Nginx URI normalization
+keep `/_next/data`, RSC queries, server actions, API routes, traversal attempts,
+and near-match paths in the rate-limited dashboard location. The asset location
+uses the same dashboard proxy policy, so browser-controlled credentials and
+identity headers remain stripped while upstream CSP and cache headers remain
+authoritative.
+
 The OpenCode Web and ttyd listeners remain private container upstreams on
 `4098` and `4099`; they are not host endpoints. Before proxying, the gateway
 clears browser authorization, identity, and forwarding headers. The CLI route
@@ -89,6 +113,11 @@ adds only its fixed gateway identity, and the gateway owns the CSP framing
 policy. Direct IPv6 loopback dashboard requests are canonicalized to
 `http://localhost:3000/` because the supported CSP sources are
 `localhost:3000` and `127.0.0.1:3000`, not an IPv6 literal.
+
+The VS Code gateway follows the same dedicated virtual-host boundary on port
+`3000`: only the exact `vscode.localhost` Host selects the private code-server
+listener. The browser origin and CSP/Origin checks are exact; the local profile
+does not provide LAN or remote access controls.
 
 ### What's present — `allow="clipboard-write"`
 

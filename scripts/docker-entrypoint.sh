@@ -2,16 +2,16 @@
 # docker-entrypoint.sh — Ingenium container bootstrap
 #
 # Key design decisions:
-# - Uses `sh` (not bash) for Alpine-based distroless compatibility
+# - Uses POSIX `sh` to keep bootstrap dependencies limited to the slim runtime image
 # - Deliberately omits `-o pipefail` since `sh` doesn't support it;
 #   commands use explicit `|| true` for error tolerance instead
 # - One-shot setup completes before supervisord starts
 # - Supervisord is exec'd so it receives container lifecycle signals as PID 1
 set -eu
 
-# SECURITY: Require auth for OpenCode server — prevents unauthenticated
-# access to the MCP tool execution endpoint exposed via ttyd and the
-# embedded web interface
+# SECURITY: Require the server-side credential used by API OpenCode proxy routes.
+# Browser-facing OpenCode children clear this variable and remain behind the
+# private gateway upstreams.
 if [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
   echo "ERROR: OPENCODE_SERVER_PASSWORD environment variable is required"
   exit 1
@@ -95,7 +95,6 @@ if ! printf '%s\n' "${INGENIUM_EMAIL_ENCRYPTION_KEY}" | grep -qE '^[A-Za-z0-9_-]
   exit 1
 fi
 
-# Ensure writable directories exist with correct ownership
 # HACK: chown errors are suppressed (2>/dev/null || true) because the
 # container may run as non-root in some environments (e.g. OpenShift);
 # the directories themselves are the critical requirement, ownership

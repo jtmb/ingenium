@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
-import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
 import SyncProgress from "./components/SyncProgress";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
-import { dashboardFetch, getApiBase } from "@/lib/api";
+import TaskCaptureModal from "../tasks/components/TaskCaptureModal";
+import { dashboardFetch, getApiBase, type EmailTaskCaptureSource, type TaskCaptureResult } from "@/lib/api";
 
 const API_BASE = getApiBase();
 
@@ -92,6 +93,8 @@ export default function MailPage() {
   const [emailPending, setEmailPending] = useState(false);
   const [emailDownloadError, setEmailDownloadError] = useState<string | null>(null);
   const [pendingEmailUid, setPendingEmailUid] = useState<string | null>(null);
+  const [taskCaptureSource, setTaskCaptureSource] = useState<EmailTaskCaptureSource | null>(null);
+  const [taskCaptureNotice, setTaskCaptureNotice] = useState<{ title: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Resizable EmailList panel state
@@ -209,6 +212,12 @@ export default function MailPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!taskCaptureNotice) return;
+    const timeout = window.setTimeout(() => setTaskCaptureNotice(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [taskCaptureNotice]);
 
   // Fetch emails when account/folder/page/search changes
   // Server-side DB cache serves sub-2ms — no need for in-memory cache
@@ -335,9 +344,6 @@ export default function MailPage() {
     setShowCompose(true);
   }, []);
 
-  // handleReply and handleDraft removed — EmailReader now handles reply/draft inline (FIX 2)
-  // composeInitialData stays undefined (always; kept for modal JXS identity but unused)
-
   const handleComposeSend = useCallback(async (data: any) => {
     setSending(true);
     try {
@@ -395,6 +401,47 @@ export default function MailPage() {
     setShowCompose(false);
   }, []);
 
+  const handleBackToMessages = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setSelectedEmail(null);
+    setSelectedEmailLoading(false);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setPendingEmailUid(null);
+  }, []);
+
+  const handleCreateTask = useCallback(() => {
+    if (
+      !selectedAccount
+      || !selectedEmail
+      || selectedEmail.uid === undefined
+      || selectedEmail.uid === null
+      || typeof selectedEmail.folder !== "string"
+      || selectedEmail.folder.length === 0
+    ) {
+      return;
+    }
+
+    setTaskCaptureSource({
+      source_type: "email",
+      account_id: selectedAccount,
+      folder: selectedEmail.folder,
+      uid: String(selectedEmail.uid),
+    });
+  }, [selectedAccount, selectedEmail]);
+
+  const handleTaskCaptureClose = useCallback(() => {
+    setTaskCaptureSource(null);
+  }, []);
+
+  const handleTaskCaptured = useCallback((result: TaskCaptureResult) => {
+    setTaskCaptureSource(null);
+    setTaskCaptureNotice({ title: result.task.title });
+  }, []);
+
   const handleDelete = useCallback(async () => {
     if (!selectedEmail) return;
     try {
@@ -433,6 +480,10 @@ export default function MailPage() {
     setSelectedAccount(accountId);
     setSelectedFolder("INBOX");
     setSelectedEmail(null);
+    setSelectedEmailLoading(false);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setPendingEmailUid(null);
     setPage(1);
     setSearchQuery("");
     setEmailError(null);
@@ -522,6 +573,10 @@ export default function MailPage() {
   const handleSelectFolder = useCallback((folder: string) => {
     setSelectedFolder(folder);
     setSelectedEmail(null);
+    setSelectedEmailLoading(false);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setPendingEmailUid(null);
     setPage(1);
     setSearchQuery("");
     setEmailError(null);
@@ -565,6 +620,9 @@ export default function MailPage() {
   const isInboxCold = syncStatus !== null && syncStatus.overall === "syncing" && inboxFolderStatus?.cachedCount === 0;
   const selectedFolderStatus = syncStatus?.folders?.find((f: any) => f.folder === selectedFolder);
   const isColdFolder = !loading && emails.length === 0 && selectedFolderStatus?.cachedCount === 0 && selectedFolderStatus?.syncing === true;
+  const hasMobileEmailSelection = Boolean(
+    selectedEmail || selectedEmailLoading || emailPending || pendingEmailUid || emailDownloadError,
+  );
 
   // Detect auth errors from the selected account's raw engine status.
   const selectedEngineAccount = syncStatus?.engine?.accounts?.find(
@@ -614,10 +672,16 @@ export default function MailPage() {
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
-        <EmptyState
-          message="No email accounts configured"
-          action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
-        />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-4">No email accounts configured</p>
+          <button
+            type="button"
+            onClick={() => setShowAccountSetup(true)}
+            className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium"
+          >
+            Add Account
+          </button>
+        </div>
       </div>
     );
   }
@@ -704,41 +768,49 @@ export default function MailPage() {
           )}
           <div className="flex h-[calc(100dvh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
           {/* Folder sidebar */}
-          <FolderSidebar
-            accounts={accounts}
-            selectedAccount={selectedAccount}
-            selectedFolder={selectedFolder}
-            onSelectFolder={handleSelectFolder}
-            onSelectAccount={handleSelectAccount}
-            onCompose={handleCompose}
-            onAddAccount={() => setShowAccountSetup(true)}
-            onDeleteAccount={handleDeleteAccount}
-            onHideAccount={handleHideAccount}
-            onShowAccount={handleShowAccount}
-            folders={folders}
-            syncingFolders={syncingFolders}
-            folderSyncStatuses={syncStatus?.folders ?? []}
-          />
+          <div data-testid="mail-folder-sidebar" className="hidden md:flex">
+            <FolderSidebar
+              accounts={accounts}
+              selectedAccount={selectedAccount}
+              selectedFolder={selectedFolder}
+              onSelectFolder={handleSelectFolder}
+              onSelectAccount={handleSelectAccount}
+              onCompose={handleCompose}
+              onAddAccount={() => setShowAccountSetup(true)}
+              onDeleteAccount={handleDeleteAccount}
+              onHideAccount={handleHideAccount}
+              onShowAccount={handleShowAccount}
+              folders={folders}
+              syncingFolders={syncingFolders}
+              folderSyncStatuses={syncStatus?.folders ?? []}
+            />
+          </div>
 
             {/* Email list + reader — resizable split */}
             <div className="flex items-stretch relative flex-1 min-w-0">
-              <EmailList
-                emails={emails}
-                selectedUid={selectedEmail?.uid}
-                onSelect={handleSelectEmail}
-                onPageChange={setPage}
-                total={total}
-                page={page}
-                loading={loading}
-                onSearch={handleSearch}
-                error={emailError}
-                onRefresh={handleRefresh}
-                source={emailSource}
-                width={listWidth}
-              />
+              <div
+                data-testid="mail-email-list-pane"
+                className={`min-w-0 shrink-0 ${hasMobileEmailSelection ? "hidden md:flex" : "flex flex-1 md:flex-none"}`}
+              >
+                <EmailList
+                  emails={emails}
+                  selectedUid={selectedEmail?.uid}
+                  onSelect={handleSelectEmail}
+                  onPageChange={setPage}
+                  total={total}
+                  page={page}
+                  loading={loading}
+                  onSearch={handleSearch}
+                  error={emailError}
+                  onRefresh={handleRefresh}
+                  source={emailSource}
+                  width={listWidth}
+                />
+              </div>
 
               {/* Resize handle */}
               <div
+                data-testid="mail-email-list-resizer"
                 ref={handleRef}
                 role="separator"
                 aria-valuenow={listWidth}
@@ -757,35 +829,73 @@ export default function MailPage() {
                     setListWidth(w => { const nw = Math.max(240, w - 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
                   }
                 }}
-                className={`w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0 ${isResizing ? "bg-blue-400" : "bg-transparent"}`}
+                className={`hidden md:block w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0 ${isResizing ? "bg-blue-400" : "bg-transparent"}`}
               />
 
-              {/* Email reader — inline reply/draft + summarise (FIX 2/3/4) */}
-              <EmailReader
-                email={selectedEmail}
-                loading={selectedEmailLoading}
-                downloading={emailPending}
-                downloadError={emailDownloadError}
-                onRetry={() => {
-                  if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
-                }}
-                accountId={selectedAccount}
-                project={project}
-                onForward={handleCompose}
-                onDelete={handleDelete}
-                onArchive={handleArchive}
-                accounts={accounts}
-                selectedAccount={selectedAccount}
-                onComposeSend={handleComposeSend}
-                onComposeSave={handleComposeSave}
-                replyWidth={replyWidth}
-                onReplyWidthChange={(w) => {
-                  setReplyWidth(w);
-                  localStorage.setItem("mail-reply-width", String(w));
-                }}
-              />
+              <div
+                data-testid="mail-email-reader-pane"
+                className={hasMobileEmailSelection ? "flex min-w-0 flex-1 flex-col" : "hidden min-w-0 flex-1 flex-col md:flex"}
+              >
+                {hasMobileEmailSelection && (
+                  <button
+                    type="button"
+                    onClick={handleBackToMessages}
+                    className="inline-flex items-center gap-1 border-b border-[var(--color-border)] px-4 py-2 text-left text-sm text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] md:hidden"
+                  >
+                    <span aria-hidden="true">←</span>
+                    Back to messages
+                  </button>
+                )}
+                <EmailReader
+                  email={selectedEmail}
+                  loading={selectedEmailLoading}
+                  downloading={emailPending}
+                  downloadError={emailDownloadError}
+                  onRetry={() => {
+                    if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
+                  }}
+                  accountId={selectedAccount}
+                  project={project}
+                  onForward={handleCompose}
+                  onDelete={handleDelete}
+                  onArchive={handleArchive}
+                  onCreateTask={handleCreateTask}
+                  accounts={accounts}
+                  selectedAccount={selectedAccount}
+                  onComposeSend={handleComposeSend}
+                  onComposeSave={handleComposeSave}
+                  replyWidth={replyWidth}
+                  onReplyWidthChange={(w) => {
+                    setReplyWidth(w);
+                    localStorage.setItem("mail-reply-width", String(w));
+                  }}
+                />
+              </div>
             </div>
           </div>
+
+          {taskCaptureNotice && (
+            <div
+              data-testid="mail-task-capture-status"
+              role="status"
+              aria-live="polite"
+              className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded border border-[var(--color-success-border)] bg-[var(--color-success-bg)] px-4 py-2 text-sm text-[var(--color-success-text)] shadow-lg"
+            >
+              Task created: {" "}
+              <Link href="/tasks" className="font-medium underline">
+                {taskCaptureNotice.title}
+              </Link>
+            </div>
+          )}
+
+          {taskCaptureSource && (
+            <TaskCaptureModal
+              isOpen
+              source={taskCaptureSource}
+              onClose={handleTaskCaptureClose}
+              onCaptured={handleTaskCaptured}
+            />
+          )}
 
           {/* Compose overlay — for New/Forward ONLY (Reply/Draft now inline in EmailReader) */}
           <Overlay

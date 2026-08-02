@@ -30,11 +30,17 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => navigationMock.searchParams,
 }));
 
-vi.mock("../src/app/components/settings/panels", () => ({
-  GeneralPanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Gen"),
-  MailPanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Mail"),
-  PipelinePanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Pipe"),
-  ConfigPanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Config"),
+vi.mock("../src/app/components/settings/panels/GeneralPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Gen"),
+}));
+vi.mock("../src/app/components/settings/panels/MailPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Mail"),
+}));
+vi.mock("../src/app/components/settings/panels/PipelinePanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Pipe"),
+}));
+vi.mock("../src/app/components/settings/panels/ConfigPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Config"),
 }));
 
 // Re-import after mocks

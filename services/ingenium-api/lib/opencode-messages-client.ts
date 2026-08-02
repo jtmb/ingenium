@@ -29,10 +29,11 @@ export function classifyOpenCodeMessagesFailure(status: number): OpenCodeMessage
 /**
  * Construct the API-owned client used by extraction. The bearer is loaded only
  * while constructing the request, installed only in its HTTP headers, and is
- * never returned or logged. `apiOrigin` is injectable solely for isolated tests.
+ * never returned or logged. The endpoint and timeout are injectable solely for isolated tests.
  */
 export function createOpenCodeMessagesClient(
   apiOrigin = `http://127.0.0.1:${config.port}`,
+  requestTimeoutMs = OPENCODE_MESSAGES_REQUEST_TIMEOUT_MS,
 ): OpenCodeMessagesClient {
   return async ({ since, limit, projectName }) => {
     let token: string;
@@ -47,15 +48,14 @@ export function createOpenCodeMessagesClient(
     url.searchParams.set("limit", String(limit));
     url.searchParams.set("project", projectName);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), OPENCODE_MESSAGES_REQUEST_TIMEOUT_MS);
+    const timeoutSignal = AbortSignal.timeout(requestTimeoutMs);
     try {
       const response = await fetch(url, {
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
         },
-        signal: controller.signal,
+        signal: timeoutSignal,
       });
       if (!response.ok) {
         return { messages: [], failure: classifyOpenCodeMessagesFailure(response.status) };
@@ -68,9 +68,7 @@ export function createOpenCodeMessagesClient(
       }
       return { messages };
     } catch {
-      return { messages: [], failure: controller.signal.aborted ? "timeout" : "unavailable" };
-    } finally {
-      clearTimeout(timeout);
+      return { messages: [], failure: timeoutSignal.aborted ? "timeout" : "unavailable" };
     }
   };
 }

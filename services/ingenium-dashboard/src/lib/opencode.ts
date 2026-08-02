@@ -1,4 +1,3 @@
-/** Frontend API client for the OpenCode proxy at /api/v1/opencode/*. */
 import { request } from "./api";
 
 /**
@@ -10,11 +9,6 @@ async function oc<T>(path: string, options?: RequestInit): Promise<T> {
   return res.data;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Types matching the verified OpenCode v1.18.9 contract             */
-/* ------------------------------------------------------------------ */
-
-/* ----- Session ----- */
 
 export interface OpenCodeSession {
   id: string;
@@ -41,7 +35,6 @@ export interface OpenCodeSession {
   revert?: { messageID: string; snapshot?: string; diff?: string };
 }
 
-/* ----- Message ----- */
 
 export interface OpenCodeMessage {
   info: MessageInfo;
@@ -68,7 +61,6 @@ export interface MessageInfo {
   finish?: "stop" | string;
 }
 
-/* ----- Part types ----- */
 
 export interface TextPart {
   id: string;
@@ -144,7 +136,6 @@ export type OpenCodePart =
   | ToolPart
   | FilePart;
 
-/* ----- Provider / Model / Agent ----- */
 
 /**
  * The browser-facing provider DTO returned by the API proxy.
@@ -419,10 +410,6 @@ export interface OpenCodeIntegrationAttempt {
   time: { created: number; expires: number };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Prompt body types                                                 */
-/* ------------------------------------------------------------------ */
-
 export interface OpenCodePromptParams {
   parts: Array<
     | { type: "text"; text: string }
@@ -434,10 +421,6 @@ export interface OpenCodePromptParams {
   tools?: Record<string, boolean>;
   variant?: string;
 }
-
-/* ------------------------------------------------------------------ */
-/*  API client                                                        */
-/* ------------------------------------------------------------------ */
 
 export const opencode = {
   sessions: {

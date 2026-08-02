@@ -80,11 +80,13 @@ test.describe("Docs AI browser request contract", () => {
     await expect(page.getByRole("button", { name: "AI", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "AI", exact: true }).click();
+    const summarize = page.getByRole("menuitem", { name: "Summarize", exact: true });
+    await expect(summarize).toBeEnabled();
     const response = page.waitForResponse((candidate) =>
       new URL(candidate.url()).pathname === "/api/v1/docs/ai"
       && candidate.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Summarize", exact: true }).click();
+    await summarize.click();
     await response;
 
     await expect(page.getByText("This is the large document summary.")).toBeVisible();

@@ -132,7 +132,7 @@ commands, logs, screenshots, or support reports.
 
 Once everything is running:
 
-- **Explore the dashboard** — click through all 20 primary routes plus the Settings overlay
+- **Explore the dashboard** — click through all 21 primary routes plus the Settings overlay
 - **Read feature guides** — see `usage/` for per-feature instructions
 - **Initialize repository resources (optional)** — from the active worktree, run
   `ingenium-init-project --dry-run` to preview the repository-authoritative

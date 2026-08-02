@@ -93,6 +93,8 @@ function createFixture() {
     worktree,
     bin,
     cleanup() {
+      // Each test owns a disposable private tree; force cleanup also covers
+      // partially-created fixtures when an assertion fails.
       rmSync(root, { recursive: true, force: true });
     },
   };

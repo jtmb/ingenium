@@ -345,7 +345,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     view.dispatch({ changes: { from: 0, to: current.length, insert: content } });
   }, [content]);
 
-  // ── Mode change handler ────────────────────────────────────────────────────
   const handleModeChange = useCallback(
     (newMode: EditorMode) => {
       setEditorMode(newMode);
@@ -354,7 +353,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     [onModeChange],
   );
 
-  // ── Insert markdown (for textarea in edit mode) ────────────────────────────
   const handleInsertMarkdown = useCallback(
     (syntax: string) => {
       if (editorMode === "edit" && textareaRef.current) {
@@ -386,7 +384,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     [content, editorMode],
   );
 
-  // ── Content change handler (textarea) ──────────────────────────────────────
   const handleContentChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       contentRef.current = e.target.value;
@@ -434,7 +431,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     }
   }, [content, onSave, page.id]);
 
-  // ── Restore draft ──────────────────────────────────────────────────────────
   const handleRestoreDraft = useCallback(async () => {
     const draft = await fetchDraft(page.id);
     if (draft && draft.content) {
@@ -450,7 +446,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     setShowDraftPrompt(false);
   }, [page.id]);
 
-  // ── AI apply handler ───────────────────────────────────────────────────────
   const handleAIApply = useCallback(
     (application: AIApplyPayload): boolean => {
       const currentContent = codeMirrorViewRef.current?.state.doc.toString() ?? contentRef.current;
@@ -479,7 +474,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     [],
   );
 
-  // ── Dictation handler ──────────────────────────────────────────────────────
   const handleDictation = useCallback(
     (text: string, isFinal: boolean) => {
       if (isFinal) {

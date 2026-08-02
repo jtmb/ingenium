@@ -42,6 +42,7 @@ const PORT_MAP: Record<string, number> = {
   "ingenium-dashboard": 3000,
   "opencode-web": 4098,
   "ttyd-opencode": 4099,
+  vscode: 4100,
 };
 
 const DESCRIPTION_MAP: Record<string, string> = {
@@ -49,11 +50,13 @@ const DESCRIPTION_MAP: Record<string, string> = {
   "ingenium-dashboard": "Next.js Dashboard UI",
   "opencode-web": "OpenCode Web Server",
   "ttyd-opencode": "OpenCode CLI Terminal (ttyd)",
+  vscode: "VS Code Server (code-server)",
 };
 
 const DISPLAY_NAME_MAP: Record<string, string> = {
   "opencode-web": "OpenCode Web",
   "ttyd-opencode": "OpenCode CLI",
+  vscode: "VS Code",
 };
 
 const STATE_MAP: Record<string, ServiceInfo["state"]> = {

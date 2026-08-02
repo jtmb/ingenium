@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import type { UsageStatus } from "@/lib/api";
 import type { UsageFilterDraft } from "./usage-presentation";
+import Select from "../../components/Select";
 
 interface UsageFiltersProps {
   draft: UsageFilterDraft;
@@ -85,7 +86,7 @@ export default function UsageFilters({
         </label>
         <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
           Provider
-          <select
+          <Select
             aria-label="Provider"
             className={selectClassName}
             value={draft.providerId}
@@ -93,11 +94,11 @@ export default function UsageFilters({
           >
             <option value="">All providers</option>
             {providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
           Model
-          <select
+          <Select
             aria-label="Model"
             className={selectClassName}
             value={draft.modelId}
@@ -105,11 +106,11 @@ export default function UsageFilters({
           >
             <option value="">All models</option>
             {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
           Agent
-          <select
+          <Select
             aria-label="Agent"
             className={selectClassName}
             disabled={!agentAttributionAvailable}
@@ -118,11 +119,11 @@ export default function UsageFilters({
           >
             <option value="">{agentAttributionAvailable ? "All attributed agents" : "Agent attribution unavailable"}</option>
             {agentOptions.map((agent) => <option key={agent} value={agent}>{agent}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
           Status
-          <select
+          <Select
             aria-label="Status"
             className={selectClassName}
             value={draft.status}
@@ -133,7 +134,7 @@ export default function UsageFilters({
             <option value="error">Error</option>
             <option value="partial">Partial</option>
             <option value="unknown">Unknown</option>
-          </select>
+          </Select>
         </label>
       </div>
 

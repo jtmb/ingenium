@@ -2,13 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import React, { Suspense } from "react";
 
-// ── Module-level mock state (reconfigured per test) ─────────────────────────
 const mockSearchParams = new Map<string, string>();
 let mockProject = "global-default";
 const mockReplace = vi.fn();
 const mockPush = vi.fn();
 
-// ── Mocks: must be hoisted above imports ─────────────────────────────────────
+// Register mocks before imports so the page's module dependencies are intercepted.
 
 vi.mock("@/lib/api", () => ({ getApiBase: () => "/api/v1" }));
 
@@ -24,8 +23,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 import EmailDetailPage from "@/app/mail/[id]/page";
-
-// ── Helper ───────────────────────────────────────────────────────────────────
 
 /**
  * Render EmailDetailPage wrapped in Suspense.
@@ -46,8 +43,6 @@ async function renderPage(id = "1") {
   });
   return res!;
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("BUG-001: EmailDetailPage account guard", () => {
   afterEach(() => {

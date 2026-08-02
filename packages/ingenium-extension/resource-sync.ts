@@ -21,6 +21,7 @@ import {
   type ExtensionProjectFailureKind,
 } from "./project-resolver.js";
 import { apiRequestHeaders } from "./api-auth.js";
+import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
 
 const API_BASE =
   (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ??
@@ -1507,8 +1508,7 @@ function mergePluginsIntoConfig(
 
   try {
     const raw = readFileSync(configPath, "utf-8");
-    // HACK: Strip JSONC comments before parsing — opencode.json is technically JSONC.
-    // This only handles full-line comments, not trailing inline comments.
+    // opencode.json is strict JSON; tolerate full-line comments during synchronization.
     const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
     const config = JSON.parse(stripped);
     const existing: string[] = Array.isArray(config.plugin) ? config.plugin : [];
@@ -1528,7 +1528,6 @@ function mergePluginsIntoConfig(
     const changed = JSON.stringify(newPlugins.sort()) !== JSON.stringify(existing.sort());
 
     if (changed) {
-      // Reconstruct the JSON preserving comment style
       config.plugin = newPlugins;
       return { config: JSON.stringify(config, null, 2), changed };
     }
@@ -2029,7 +2028,14 @@ async function resolveResource(
 interface SyncOptions {
   /** If true, this is the initial/onboarding sync — push disk items to API. */
   isInitialSync: boolean;
+  /** Optional lifecycle-only warning reporter; lower-level sync never writes to stdio. */
+  onWarning?: ResourceSyncWarningReporter;
 }
+
+type ResourceSyncWarningReporter = (
+  operation: "release_skill_lock" | "acquire_skill_lock" | "validate_api_skill" | "quarantine_broker",
+  reason: "request_failed" | "locked" | "invalid",
+) => void;
 
 /**
  * Acquire a maintenance lock on the skills resource via the API.
@@ -2053,9 +2059,14 @@ async function acquireSkillLock(worktree: string, project: string, ttlMs: number
 /**
  * Release a previously acquired skill lock via the API.
  * Returns true if the lock was successfully released.
- * Logs release failure but does not throw — release is best-effort in finally.
+ * Reports release failure when a lifecycle reporter is supplied; release remains best-effort.
  */
-async function releaseSkillLock(worktree: string, project: string, ownerToken: string): Promise<boolean> {
+async function releaseSkillLock(
+  worktree: string,
+  project: string,
+  ownerToken: string,
+  onWarning?: ResourceSyncWarningReporter,
+): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/skills/locks/release?${encodeProject(project)}`, {
       method: "POST",
@@ -2064,19 +2075,26 @@ async function releaseSkillLock(worktree: string, project: string, ownerToken: s
     });
     const ok = res.ok;
     if (!ok) {
-      logSync("skills", project, `WARNING — lock release failed: HTTP ${res.status}`);
+      logSync(onWarning, "release_skill_lock", "request_failed");
     }
     return ok;
   } catch {
-    logSync("skills", project, "WARNING — lock release request failed");
+    logSync(onWarning, "release_skill_lock", "request_failed");
     return false;
   }
 }
 
-/** Internal logging helper — logs to stderr when no OpenCode client is available. */
-function logSync(category: string, project: string, message: string): void {
-  const ts = new Date().toISOString();
-  process.stderr.write(`[resource-sync] ${ts} [${category}] project=${project} ${message}\n`);
+/** Lower-level sync diagnostics stay inside the lifecycle logger when one exists. */
+function logSync(
+  onWarning: ResourceSyncWarningReporter | undefined,
+  operation: Parameters<ResourceSyncWarningReporter>[0],
+  reason: Parameters<ResourceSyncWarningReporter>[1],
+): void {
+  try {
+    onWarning?.(operation, reason);
+  } catch {
+    // Sync diagnostics must never write to stdio or fail the reconciliation.
+  }
 }
 
 /** API base URL for skill mutation calls that carry a lock token. */
@@ -2103,14 +2121,14 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
     lockToken = await acquireSkillLock(worktree, project, 30_000);
   } catch {
     // Transport/API error — treat as error, preserve manifest
-    logSync("skills", project, "ERROR — lock acquire request failed; manifest preserved");
+    logSync(opts.onWarning, "acquire_skill_lock", "request_failed");
     result.errors = 1;
     return result;
   }
 
   if (!lockToken) {
     // HTTP 423 — intentional skip, lock held by another owner
-    logSync("skills", project, "SKIPPED — skills resource locked by another owner; manifest preserved");
+    logSync(opts.onWarning, "acquire_skill_lock", "locked");
     result.skipped = 1;
     return result;
   }
@@ -2127,7 +2145,7 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
       // Skip API rows with unsafe names (cannot write to disk)
       if (!isSafeName(skill.name)) {
         result.errors++;
-        logSync("skills", project, `ERROR — API skill row has unsafe name, skipping: "${skill.name}"`);
+        logSync(opts.onWarning, "validate_api_skill", "invalid");
         continue;
       }
       const h = hashContent(skill.content || "");
@@ -2233,7 +2251,7 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
     }
   } finally {
     // Always release the lock — whether success or failure.
-    await releaseSkillLock(worktree, project, lockToken);
+    await releaseSkillLock(worktree, project, lockToken, opts.onWarning);
   }
 
   return result;
@@ -2263,7 +2281,7 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
       if (quarantined) result.removed++;
       if (isReservedBroker(agent.name) && (diskMap.has(agent.name) || quarantined)) {
         result.skipped++;
-        logSync("agents", project, "SKIPPED — no enabled trusted API broker; quarantined disk-only broker profiles");
+        logSync(opts.onWarning, "quarantine_broker", "invalid");
       }
       diskMap.delete(agent.name);
       delete manifest.resources.agents[agent.name];
@@ -2278,7 +2296,7 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
       result.skipped++;
       diskMap.delete(agent.name);
       delete manifest.resources.agents[agent.name];
-      logSync("agents", project, "ERROR — rejected non-canonical API broker profile");
+      logSync(opts.onWarning, "quarantine_broker", "invalid");
       continue;
     }
     const trustedAgent = canonicalAgentRecord(agent);
@@ -2339,7 +2357,7 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
     if (diskMap.has(LLM_BROKER_AGENT) || quarantined) {
       result.skipped++;
       if (quarantined) result.removed++;
-      logSync("agents", project, "SKIPPED — no enabled trusted API broker; quarantined disk-only broker profiles");
+      logSync(opts.onWarning, "quarantine_broker", "invalid");
     }
     diskMap.delete(LLM_BROKER_AGENT);
     delete manifest.resources.agents[LLM_BROKER_AGENT];
@@ -2905,11 +2923,8 @@ function resultSummary(label: string, r: SyncResult): string {
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
   let startupProvisioningFailure: ExtensionProjectFailureKind | null = null;
-
-  const reportStartupDiagnostic = (event: "extension_project_init_failed" | "extension_project_init_recovered", reason?: ExtensionProjectFailureKind) => {
-    // These fields are intentionally an allowlist. Do not add caught-error
-    // messages: request errors can include a bearer, URL, or response body.
-    process.stderr.write(`${JSON.stringify(reason ? { event, reason } : { event })}\n`);
+  const reportWarning = (operation: "extension_project_init" | "resource_sync", reason: ExtensionProjectFailureKind | "request_failed") => {
+    logPluginLifecycle(ctx.client, "resource-sync", "warn", `${operation}: ${reason}`);
   };
 
   const recoverStartupProvisioning = async (): Promise<boolean> => {
@@ -2917,7 +2932,7 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
     try {
       await ensureExtensionProject(worktree, API_BASE);
       startupProvisioningFailure = null;
-      reportStartupDiagnostic("extension_project_init_recovered");
+      logPluginLifecycle(ctx.client, "resource-sync", "info", "extension_project_init: recovered");
       return true;
     } catch {
       // The initial failure was already reported with a safe classification.
@@ -2932,7 +2947,7 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
     await ensureExtensionProject(worktree, API_BASE);
   } catch (error) {
     startupProvisioningFailure = classifyExtensionProjectFailure(error);
-    reportStartupDiagnostic("extension_project_init_failed", startupProvisioningFailure);
+    reportWarning("extension_project_init", startupProvisioningFailure);
   }
 
   return {
@@ -2950,15 +2965,11 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
           if (result.restartRequired) {
             lines.push("⚡ OpenCode restart required (plugin/config changes)");
           }
-          await ctx.client.app.log({
-            body: {
-              service: "resource-sync",
-              level: "info",
-              message: lines.join(" | "),
-            },
-          });
+          if (hasSyncErrors(result)) reportWarning("resource_sync", "request_failed");
+          logPluginLifecycle(ctx.client, "resource-sync", "info", lines.join(" | "));
         } catch {
           // Non-fatal — sync failures should not break session startup
+          reportWarning("resource_sync", "request_failed");
         }
       }
 
@@ -2977,17 +2988,12 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
               if (result.restartRequired) {
                 lines.push("⚡ OpenCode restart required (plugin/config changes)");
               }
-              await ctx.client.app.log({
-                body: {
-                  service: "resource-sync",
-                  level: "info",
-                  message: lines.join(" | "),
-                },
-              });
+              if (hasSyncErrors(result)) reportWarning("resource_sync", "request_failed");
+              logPluginLifecycle(ctx.client, "resource-sync", "info", lines.join(" | "));
             }
           }
         } catch {
-          /* non-fatal */
+          reportWarning("resource_sync", "request_failed");
         }
       }
     },

@@ -39,6 +39,14 @@ function IconTerminal() {
   );
 }
 
+function IconCode() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M5.5 4L2.5 8l3 4M10.5 12l3-4-3-4M7 13l2-10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconMail() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -236,16 +244,12 @@ function ChevronDown({ open }: { open: boolean }) {
       viewBox="0 0 12 12"
       fill="none"
       aria-hidden="true"
-      className={`transition-transform duration-200 ${open ? "" : "-rotate-90"}`}
+      className={`transition-transform duration-200 motion-reduce:transition-none ${open ? "" : "-rotate-90"}`}
     >
       <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Data
-// ---------------------------------------------------------------------------
 
 interface NavItem {
   label: string;
@@ -275,6 +279,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Chat", href: "/chat", icon: <IconMessageSquare /> },
       { label: "OpenCode", href: "/opencode", icon: <IconTerminal /> },
+      { label: "VS Code", href: "/vscode", icon: <IconCode /> },
       { label: "Mail", href: "/mail", icon: <IconMail /> },
       { label: "Tasks", href: "/tasks", icon: <IconCheckSquare /> },
       { label: "Docs", href: "/docs", icon: <IconFile /> },
@@ -319,17 +324,24 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Collapse-state persistence via localStorage
-//
 // We store a `Record<groupId, boolean>` keyed by navigation group ID.
 // On first load, defaults are merged with any saved state — saved keys
 // override defaults, unknown keys are ignored. This ensures new groups
 // added in future releases keep their `defaultOpen` behaviour without
 // requiring a migration.
-// ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "ingenium-nav-collapsed";
+const COMPACT_STORAGE_KEY = "ingenium-nav-compact";
+const COMPACT_DATA_ATTRIBUTE = "data-nav-compact";
+const DESKTOP_NAV_ID = "nav-sidebar";
+const MOBILE_DIALOG_ID = "mobile-navigation-dialog";
+const FOCUSABLE_SELECTOR = "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => !element.hasAttribute("disabled") && !element.closest("[inert], [aria-hidden='true']"),
+  );
+}
 
 function loadCollapsedState(defaults: Record<string, boolean>): Record<string, boolean> {
   if (typeof window === "undefined") return { ...defaults };
@@ -358,17 +370,51 @@ function saveCollapsedState(state: Record<string, boolean>) {
   }
 }
 
-// ---------------------------------------------------------------------------
+function loadDesktopCompact(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(COMPACT_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function setRootDesktopCompact(compact: boolean) {
+  if (typeof document === "undefined") return;
+  document.documentElement.setAttribute(COMPACT_DATA_ATTRIBUTE, String(compact));
+}
+
+function readPrepaintDesktopCompact(): boolean {
+  if (typeof document === "undefined") return false;
+  const value = document.documentElement.getAttribute(COMPACT_DATA_ATTRIBUTE);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return loadDesktopCompact();
+}
+
+function saveDesktopCompact(compact: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(COMPACT_STORAGE_KEY, String(compact));
+  } catch {
+    // Keep the current-session preference when storage is unavailable.
+  }
+}
+
 // Navigation Context — bridges the hamburger trigger (in the top bar) with
 // the sidebar component via React context rather than prop-drilling.
 // The mobile drawer close-on-route-change behaviour lives here because
 // this context wraps both trigger and sidebar.
-// ---------------------------------------------------------------------------
 
 interface NavContextValue {
   mobileOpen: boolean;
   setMobileOpen: (v: boolean) => void;
   toggleMobile: () => void;
+  closeMobile: (restoreFocus?: boolean) => void;
+  mobileTriggerRef: React.RefObject<HTMLButtonElement | null>;
+  mobileCloseRestoresFocus: boolean;
+  desktopCompact: boolean;
+  toggleDesktopCompact: () => void;
 }
 
 const NavContext = createContext<NavContextValue | null>(null);
@@ -381,61 +427,137 @@ function useNavContext() {
 
 export function NavigationProvider({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Start full on both SSR and the first client render. The prepaint script
+  // owns the initial visual state; this effect adopts it after hydration.
+  const [desktopCompact, setDesktopCompact] = useState(false);
   const pathname = usePathname();
+  const mobileTriggerRef = useRef<HTMLButtonElement>(null);
+  const previousPathnameRef = useRef(pathname);
+  const [mobileCloseRestoresFocus, setMobileCloseRestoresFocus] = useState(false);
 
-  // Close mobile drawer on route change
   useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+    const compact = readPrepaintDesktopCompact();
+    queueMicrotask(() => {
+      setDesktopCompact(compact);
+      setRootDesktopCompact(compact);
+    });
+  }, []);
 
-  const toggleMobile = useCallback(() => setMobileOpen((prev) => !prev), []);
+  const closeMobile = useCallback((restoreFocus = true) => {
+    setMobileCloseRestoresFocus(restoreFocus);
+    setMobileOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    queueMicrotask(() => closeMobile(false));
+  }, [closeMobile, pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen || typeof window.matchMedia !== "function") return;
+
+    const desktopMedia = window.matchMedia("(min-width: 768px)");
+    const closeAtDesktopBreakpoint = () => {
+      if (desktopMedia.matches) closeMobile(false);
+    };
+
+    desktopMedia.addEventListener("change", closeAtDesktopBreakpoint);
+    closeAtDesktopBreakpoint();
+    return () => desktopMedia.removeEventListener("change", closeAtDesktopBreakpoint);
+  }, [closeMobile, mobileOpen]);
+
+  const toggleMobile = useCallback(() => {
+    setMobileCloseRestoresFocus(mobileOpen);
+    setMobileOpen(!mobileOpen);
+  }, [mobileOpen]);
+
+  const toggleDesktopCompact = useCallback(() => {
+    const next = !desktopCompact;
+    saveDesktopCompact(next);
+    setRootDesktopCompact(next);
+    setDesktopCompact(next);
+  }, [desktopCompact]);
 
   return (
-    <NavContext.Provider value={{ mobileOpen, setMobileOpen, toggleMobile }}>
+    <NavContext.Provider value={{
+      mobileOpen,
+      setMobileOpen,
+      toggleMobile,
+      closeMobile,
+      mobileTriggerRef,
+      mobileCloseRestoresFocus,
+      desktopCompact,
+      toggleDesktopCompact,
+    }}>
       {children}
     </NavContext.Provider>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Exported sub-components
-// ---------------------------------------------------------------------------
-
-/** Hamburger button — place in the top bar. Renders only on mobile (< md). */
+/** The breakpoint-specific navigation control placed immediately before the logo. */
 export function NavigationTrigger() {
-  const { mobileOpen, toggleMobile } = useNavContext();
+  const {
+    mobileOpen,
+    toggleMobile,
+    mobileTriggerRef,
+    desktopCompact,
+    toggleDesktopCompact,
+  } = useNavContext();
+  const triggerClasses = "items-center justify-center p-2 -ml-2 rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-text-link)]";
+
   return (
-    <button
-      type="button"
-      onClick={toggleMobile}
-      className="md:hidden p-2 -ml-2 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]"
-      aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
-      aria-expanded={mobileOpen}
-      aria-controls="nav-sidebar"
-    >
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={toggleDesktopCompact}
+        className={`hidden md:inline-flex ${triggerClasses}`}
+        aria-label={desktopCompact ? "Expand navigation" : "Collapse navigation"}
+        aria-expanded={!desktopCompact}
+        aria-controls={DESKTOP_NAV_ID}
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+      <button
+        ref={mobileTriggerRef}
+        type="button"
+        onClick={toggleMobile}
+        className={`inline-flex md:hidden ${triggerClasses}`}
+        aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={mobileOpen}
+        aria-controls={MOBILE_DIALOG_ID}
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+    </>
   );
 }
 
 /** The main Navigation sidebar — both desktop sidebar and mobile drawer. */
 export default function Navigation() {
-  const { mobileOpen, setMobileOpen } = useNavContext();
+  const {
+    mobileOpen,
+    closeMobile,
+    desktopCompact,
+    mobileTriggerRef,
+    mobileCloseRestoresFocus,
+  } = useNavContext();
   const pathname = usePathname();
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const wasMobileOpenRef = useRef(false);
 
-  // Collapse state
   const defaultCollapsed: Record<string, boolean> = {};
   for (const g of NAV_GROUPS) {
     defaultCollapsed[g.id] = !g.defaultOpen;
   }
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(defaultCollapsed);
 
-  // Load persisted collapse state once on mount (defaultCollapsed is a local constant, not a dep)
   useEffect(() => {
-    setCollapsed(loadCollapsedState(defaultCollapsed));
+    queueMicrotask(() => setCollapsed(loadCollapsedState(defaultCollapsed)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -447,34 +569,60 @@ export default function Navigation() {
     });
   }, []);
 
-  // Close mobile drawer on Escape
   useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && mobileOpen) {
-        setMobileOpen(false);
+    if (!mobileOpen) {
+      if (wasMobileOpenRef.current) {
+        wasMobileOpenRef.current = false;
+        if (mobileCloseRestoresFocus && mobileTriggerRef.current && document.activeElement !== mobileTriggerRef.current) {
+          mobileTriggerRef.current.focus();
+        }
       }
+      return;
     }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [mobileOpen, setMobileOpen]);
 
-  // Focus the first interactive element when mobile drawer opens
-  useEffect(() => {
-    if (mobileOpen && sidebarRef.current) {
-      const first = sidebarRef.current.querySelector<HTMLElement>("a, button");
+    wasMobileOpenRef.current = true;
+    const previousOverflow = document.body.style.overflow;
+    const backgroundState = Array.from(document.querySelectorAll<HTMLElement>("[data-nav-background]")).map((element) => ({
+      element,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    document.body.style.overflow = "hidden";
+    for (const { element } of backgroundState) {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    }
+
+    const focusDrawer = () => {
+      const drawer = sidebarRef.current;
+      const first = drawer?.querySelector<HTMLElement>("[data-nav-initial-focus]") ?? (drawer ? getFocusableElements(drawer)[0] : undefined);
       first?.focus();
-    }
-  }, [mobileOpen]);
+    };
+    const onDocumentFocusIn = (event: FocusEvent) => {
+      const drawer = sidebarRef.current;
+      if (drawer && event.target instanceof Node && !drawer.contains(event.target)) focusDrawer();
+    };
+    document.addEventListener("focusin", onDocumentFocusIn);
+    const first = sidebarRef.current?.querySelector<HTMLElement>("[data-nav-initial-focus]");
+    first?.focus();
 
-  // --- Helpers ---
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("focusin", onDocumentFocusIn);
+      for (const state of backgroundState) {
+        state.element.inert = state.inert;
+        if (state.ariaHidden === null) state.element.removeAttribute("aria-hidden");
+        else state.element.setAttribute("aria-hidden", state.ariaHidden);
+      }
+    };
+  }, [mobileCloseRestoresFocus, mobileOpen, mobileTriggerRef]);
+
   const activeItemClasses =
     "bg-[var(--color-surface-selected)] text-[var(--color-nav-text-active)] border-l-2 border-[var(--color-text-link)] font-medium";
   const inactiveItemClasses =
     "text-[var(--color-nav-text)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-nav-text-hover)] border-l-2 border-transparent";
   const groupHeaderClasses =
     "flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] rounded cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-text-link)]";
-  const itemLinkBaseClasses =
-    "flex items-center gap-2.5 px-3 py-2 text-sm transition-colors";
 
   /**
    * Determine if a nav link matches the current route.
@@ -489,153 +637,174 @@ export default function Navigation() {
     return pathname === href || pathname.startsWith(href + "/");
   }
 
-  // --- Sidebar content (reused for both desktop sidebar and mobile drawer) ---
-  const sidebarContent = (
-    <>
-      {/* Mobile-only: brand header with close button */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--color-nav-border)]">
-        <span className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</span>
-        <button
-          onClick={() => setMobileOpen(false)}
-          className="p-1 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]"
-          aria-label="Close navigation"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
+  const renderSidebarContent = (mode: "desktop" | "mobile", compact: boolean) => {
+    const itemLinkBaseClasses = `flex items-center py-2 text-sm transition-colors motion-reduce:transition-none ${
+      compact ? "justify-center gap-0 px-0" : "gap-2.5 px-3"
+    }`;
+    const contentPrefix = mode === "desktop" ? "desktop" : "mobile";
+    const mobileLinkCloseProps = (href: string) =>
+      mode === "mobile" ? { onClick: () => closeMobile(pathname === href) } : {};
 
-      {/* HOME — always visible */}
-      <div className="px-2 pt-3 pb-1">
-        <Link
-          href={HOME_ITEM.href}
-          prefetch={false}
-          className={`${itemLinkBaseClasses} rounded ${
-            isActive(HOME_ITEM.href) ? activeItemClasses : inactiveItemClasses
-          }`}
-        >
-          <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-text-secondary)]">
-            {HOME_ITEM.icon}
-          </span>
-          <span className="truncate">Home</span>
-        </Link>
-      </div>
+    return (
+      <>
+        {mode === "mobile" && (
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-nav-border)]">
+            <span id="mobile-navigation-title" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</span>
+            <button
+              type="button"
+              data-nav-initial-focus
+              onClick={() => closeMobile()}
+              className="p-1 rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-text-link)]"
+              aria-label="Close navigation"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
 
-      <div className="mx-3 my-1 border-t border-[var(--color-nav-border)]" />
+        <div className="nav-home px-2 pt-3 pb-1">
+          <Link
+            href={HOME_ITEM.href}
+            prefetch={false}
+            className={`${itemLinkBaseClasses} nav-item-link rounded ${
+              isActive(HOME_ITEM.href) ? activeItemClasses : inactiveItemClasses
+            }`}
+            {...mobileLinkCloseProps(HOME_ITEM.href)}
+            {...(compact ? { "aria-label": HOME_ITEM.label, title: HOME_ITEM.label } : {})}
+          >
+            <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-text-secondary)]">
+              {HOME_ITEM.icon}
+            </span>
+            <span className={`nav-label ${compact ? "sr-only" : "truncate"}`}>Home</span>
+          </Link>
+        </div>
 
-      {/* Collapsible groups */}
-      <nav className="px-2 py-1 space-y-0.5" aria-label="Main navigation">
-        {NAV_GROUPS.map((group) => {
-          const isOpen = !collapsed[group.id];
-          return (
-            <div key={group.id}>
-              <button
-                type="button"
-                className={groupHeaderClasses}
-                onClick={() => toggleGroup(group.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    toggleGroup(group.id);
-                  }
-                }}
-                aria-expanded={isOpen}
-                aria-controls={`nav-group-${group.id}`}
-              >
-                <span>{group.label}</span>
-                <ChevronDown open={isOpen} />
-              </button>
+        <div className="nav-divider mx-3 my-1 border-t border-[var(--color-nav-border)]" />
 
-              <ul
-                id={`nav-group-${group.id}`}
-                role="region"
-                aria-label={group.label}
-                className={`overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out ${
-                  isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
-                }`}
-              >
-                {group.items.map((item) => (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      prefetch={false}
-                      className={`${itemLinkBaseClasses} rounded ${
-                        isActive(item.href) ? activeItemClasses : inactiveItemClasses
-                      }`}
-                      {...(item.badge ? { "aria-describedby": `badge-${group.id}-${item.label}` } : {})}
-                    >
-                      <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-text-secondary)]">
-                        {item.icon}
-                      </span>
-                      <span className="truncate flex-1">{item.label}</span>
-                      {item.badge && (
-                        <span
-                          id={`badge-${group.id}-${item.label}`}
-                          className="shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]"
+        <nav className="px-2 py-1 space-y-0.5" aria-label={`${mode === "desktop" ? "Desktop" : "Mobile"} navigation`}>
+          {NAV_GROUPS.map((group) => {
+            const isOpen = !collapsed[group.id];
+            const groupId = `${contentPrefix}-nav-group-${group.id}`;
+            return (
+              <div key={group.id}>
+                <button
+                  type="button"
+                  className={`${groupHeaderClasses} nav-group-control ${compact ? "justify-center px-0" : ""}`}
+                  onClick={() => toggleGroup(group.id)}
+                  aria-expanded={isOpen}
+                  aria-controls={groupId}
+                  {...(compact ? { "aria-label": `${group.label} navigation group`, title: group.label } : {})}
+                >
+                  <span className={`nav-label ${compact ? "sr-only" : ""}`}>{group.label}</span>
+                  <ChevronDown open={isOpen} />
+                </button>
+
+                <ul
+                  id={groupId}
+                  role="region"
+                  aria-label={group.label}
+                  aria-hidden={!isOpen}
+                  inert={!isOpen}
+                  className={`nav-group-items overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out motion-reduce:transition-none ${
+                    isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+                  }`}
+                >
+                  {group.items.map((item) => {
+                    const badgeId = `${contentPrefix}-nav-badge-${group.id}-${item.label}`;
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          prefetch={false}
+                          className={`${itemLinkBaseClasses} nav-item-link rounded ${
+                            isActive(item.href) ? activeItemClasses : inactiveItemClasses
+                          }`}
+                          {...mobileLinkCloseProps(item.href)}
+                          {...(compact ? { "aria-label": item.label, title: item.label } : {})}
+                          {...(item.badge ? { "aria-describedby": badgeId } : {})}
                         >
-                          {item.badge}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </nav>
-    </>
-  );
+                          <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-text-secondary)]">
+                            {item.icon}
+                          </span>
+                          <span className={`nav-label flex-1 ${compact ? "sr-only" : "truncate"}`}>{item.label}</span>
+                          {item.badge && (
+                            <span
+                              id={badgeId}
+                              className={`nav-badge shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] ${compact ? "sr-only" : ""}`}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
+        </nav>
+      </>
+    );
+  };
+
+  const trapDrawerTab = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMobile();
+      return;
+    }
+    if (event.key !== "Tab" || !sidebarRef.current) return;
+
+    const focusable = getFocusableElements(sidebarRef.current);
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <>
-      {/* ---- Desktop sidebar (always visible on md+) ---- */}
       <aside
-        id="nav-sidebar"
-        className="
-          hidden md:flex md:flex-col
-          w-56 shrink-0
-          border-r border-[var(--color-nav-border)]
-          bg-[var(--color-nav-bg)]
-          overflow-y-auto
-        "
+        id={DESKTOP_NAV_ID}
+        data-nav-mode="desktop"
+        className={`desktop-navigation relative hidden md:flex md:flex-col ${desktopCompact ? "w-14" : "w-56"} shrink-0
+           border-r border-[var(--color-nav-border)]
+           bg-[var(--color-nav-bg)]
+           nav-scroll-area
+           overflow-y-auto
+           transition-[width] duration-200 motion-reduce:transition-none`}
       >
-        {sidebarContent}
+        {renderSidebarContent("desktop", desktopCompact)}
       </aside>
 
-      {/* ---- Mobile drawer overlay ---- */}
-      <div
-        className={`md:hidden fixed inset-0 z-40 transition-opacity duration-200 ${
-          mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
-        aria-hidden={!mobileOpen}
-      >
-        {/* Backdrop */}
-        <div
-          className="absolute inset-0 bg-black/50"
-          onClick={() => setMobileOpen(false)}
-        />
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-40" data-nav-mode="mobile">
+          <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={() => closeMobile()} />
 
-        {/* Slide-out panel */}
-        <div
-          ref={sidebarRef}
-          className={`
-            absolute top-0 left-0 bottom-0
-            w-64 max-w-[85vw]
-            bg-[var(--color-nav-bg)]
-            border-r border-[var(--color-nav-border)]
-            overflow-y-auto
-            transition-transform duration-200 ease-in-out
-            ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
-          `}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Navigation"
-        >
-          {sidebarContent}
+          <div
+            ref={sidebarRef}
+            id={MOBILE_DIALOG_ID}
+            className="mobile-navigation-drawer absolute top-0 left-0 bottom-0 flex w-64 max-w-[85vw] flex-col bg-[var(--color-nav-bg)] border-r border-[var(--color-nav-border)] nav-scroll-area overflow-y-auto transition-transform duration-200 ease-out motion-reduce:transition-none"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-navigation-title"
+            onKeyDown={trapDrawerTab}
+          >
+            {renderSidebarContent("mobile", false)}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

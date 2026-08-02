@@ -3,6 +3,7 @@ import {
   API_PROXY_TARGET,
   buildCsp,
   getRewrites,
+  VSCODE_GATEWAY_ORIGIN,
 } from "@/proxy-config";
 
 const initialNodeEnv = process.env.NODE_ENV;
@@ -33,7 +34,7 @@ describe("Dashboard gateway and proxy configuration", () => {
     const csp = buildCsp();
     expect(csp).toContain("connect-src 'self' http://localhost:4097");
     expect(csp).toContain(
-      "frame-src 'self' http://localhost:4098 http://localhost:4099 http://opencode.localhost:3000 http://cli.localhost:3000",
+      "frame-src 'self' http://localhost:4098 http://localhost:4099 http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(csp).not.toMatch(/192\.168|10\.0|\*:|\/opencode-web|\/opencode-cli/);
   });
@@ -45,7 +46,7 @@ describe("Dashboard gateway and proxy configuration", () => {
     const frameSrc = csp.split("; ").find((directive) => directive.startsWith("frame-src "));
 
     expect(frameSrc).toBe(
-      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000",
+      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(frameSrc).not.toContain(":4098");
     expect(frameSrc).not.toContain(":4099");
@@ -62,9 +63,10 @@ describe("Dashboard gateway and proxy configuration", () => {
 
     expect(directives["default-src"]).toBe("'self'");
     expect(directives["frame-src"]).toBe(
-      "'self' http://localhost:4098 http://localhost:4099 http://opencode.localhost:3000 http://cli.localhost:3000",
+      "'self' http://localhost:4098 http://localhost:4099 http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(directives["frame-src"]).not.toContain("*");
+    expect(VSCODE_GATEWAY_ORIGIN).toBe("http://vscode.localhost:3000");
     expect(directives["frame-ancestors"]).toBe("'self'");
   });
 

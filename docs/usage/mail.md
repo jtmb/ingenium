@@ -83,6 +83,26 @@ The inbox displays in a 3-pane layout:
 2. **Middle pane** — email list with subject, sender, date preview (resizable handle)
 3. **Right pane** — full message content when an email is selected, with a responsive reply panel
 
+### Create a task from an email
+
+1. Select an email from the currently loaded account and folder.
+2. In the reader, choose **Create task**.
+3. Enter the task title and confirm with **Create Task**.
+
+The capture uses the exact loaded account, folder, and message UID. It creates a
+title-only task reference in the global Mail project (`global-default`, normally),
+regardless of the dashboard's selected worktree project. It copies no email body,
+attachment, header content, or other message data. Repeating the same capture
+returns the existing task instead of creating another one.
+
+If the message is no longer loaded or the source identity is invalid, the capture
+fails without creating a task and the modal shows the error. Mail account/project
+resolution failures are fail-closed rather than redirected to another project.
+
+On mobile, selecting a row changes from the list to the reader. Use **Back to
+messages** to return to the list, then select another message; use **Create task**
+from the reader while that message is loaded.
+
 ## Composing Messages
 
 1. Click "Compose" button in the left sidebar

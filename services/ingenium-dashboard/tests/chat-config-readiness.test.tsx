@@ -29,6 +29,11 @@ vi.mock("../src/lib/opencode", () => ({
   },
 }));
 
+vi.mock("../src/lib/ProjectContext", () => ({
+  useGlobalProject: () => ({ project: "global-default", loading: false, error: null }),
+  useProject: () => "selected-project",
+}));
+
 vi.mock("../src/lib/use-opencode-sessions", () => ({
   useOpenCodeSessions: () => ({
     sessions: [{ id: "sess-1", title: "Test", time: { created: 1, updated: 1 } }],

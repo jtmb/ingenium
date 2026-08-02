@@ -101,7 +101,7 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const expected = Array.from({ length: 69 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const expected = Array.from({ length: 80 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
@@ -133,6 +133,28 @@ describe("Phase 4C core database boundaries", () => {
     expect(expected).toContain("067_context_migration_repair.sql");
     expect(expected).toContain("068_usage_telemetry.sql");
     expect(expected).toContain("069_context_conversation_snapshot_imports.sql");
+    expect(expected).toContain("070_drop_legacy_rag_embeddings.sql");
+    expect(expected).toContain("071_context_rag_session_source_reference.sql");
+    expect(expected).toContain("072_task_source_references.sql");
+    expect(expected).toContain("073_task_coordination.sql");
+    expect(expected).toContain("074_task_reservation_tokens.sql");
+    expect(expected).toContain("075_coordination_registry.sql");
+    expect(expected).toContain("076_trusted_job_events.sql");
+    expect(expected).toContain("077_job_event_deliveries.sql");
+    expect(expected).toContain("078_usage_advisory_thresholds.sql");
+    expect(expected).toContain("079_usage_attention_items.sql");
+    expect(expected).toContain("080_job_vault_references.sql");
+
+    const coordinationMigration = readFileSync(
+      join(migrationDir, "075_coordination_registry.sql"),
+      "utf8",
+    );
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_worktrees");
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_sessions");
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_claims");
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_mutation_receipts");
+    expect(coordinationMigration).toContain("coordination_mutation_receipts_immutable_update");
+    expect(coordinationMigration).toContain("FOREIGN KEY(project_id, worktree_id)");
 
     const dbSource = readFileSync(resolve(__dirname, "../lib/db.ts"), "utf8");
     for (const migration of expected) {

@@ -36,7 +36,7 @@ export function hasRequiredApplicationIssue(application: ApplicationHealth): boo
 export async function getEmailClientStatus(): Promise<ApplicationHealth> {
   try {
     const email = await import("ingenium-email");
-    const accountCount = email.listAccounts(email.getGlobalProjectId()).length;
+    const accountCount = email.listAccounts().length;
 
     if (accountCount === 0) {
       return {

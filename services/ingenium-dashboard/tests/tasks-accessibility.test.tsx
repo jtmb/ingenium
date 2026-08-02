@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 
 const apiMocks = vi.hoisted(() => ({
@@ -9,6 +9,9 @@ const apiMocks = vi.hoisted(() => ({
   comments: vi.fn(),
   links: vi.fn(),
   list: vi.fn(),
+  search: vi.fn(),
+  addLink: vi.fn(),
+  references: vi.fn(),
 }));
 
 vi.mock("@dnd-kit/core", () => ({
@@ -47,6 +50,9 @@ vi.mock("../src/lib/api", () => ({
       comments: apiMocks.comments,
       links: apiMocks.links,
       list: apiMocks.list,
+      search: apiMocks.search,
+      addLink: apiMocks.addLink,
+      references: { list: apiMocks.references },
     },
   },
 }));
@@ -74,6 +80,9 @@ beforeEach(() => {
   apiMocks.comments.mockResolvedValue({ data: [] });
   apiMocks.links.mockResolvedValue({ data: [] });
   apiMocks.list.mockResolvedValue({ data: [] });
+  apiMocks.search.mockResolvedValue({ data: [] });
+  apiMocks.addLink.mockResolvedValue({ data: { id: "link-1", task_id: "task-1", linked_task_id: "task-2", link_type: "blocks" } });
+  apiMocks.references.mockResolvedValue({ data: [] });
 });
 
 afterEach(() => {
@@ -165,5 +174,51 @@ describe("Tasks accessibility", () => {
     expect(releaseDate.id).toMatch(/^task-detail-[a-z0-9-]+$/);
     expect(releaseDateText.id).toMatch(/^task-detail-[a-z0-9-]+$/);
     expect(releaseDate.id).not.toBe(releaseDateText.id);
+  });
+
+  it("keeps @mention typing in the textarea while exposing the active listbox option", async () => {
+    apiMocks.agentsList.mockResolvedValue({ data: [{ name: "build-agent" }] });
+    render(
+      <TaskDetail
+        task={task}
+        project="test-project"
+        onClose={vi.fn()}
+        onTaskUpdated={vi.fn()}
+      />,
+    );
+
+    const description = await screen.findByRole("textbox", { name: "Description" });
+    Object.defineProperty(description, "selectionStart", { configurable: true, value: 12 });
+    fireEvent.change(description, { target: { value: "Run this @b" } });
+    const option = await screen.findByRole("option", { name: "build-agent" });
+    expect(description.getAttribute("role")).toBe("textbox");
+    expect(description.getAttribute("aria-controls")).toBe(option.parentElement?.id);
+    expect(description.getAttribute("aria-activedescendant")).toBe(option.id);
+
+    fireEvent.keyDown(description, { key: "Tab" });
+    expect((description as HTMLTextAreaElement).value).toContain("@build-agent ");
+  });
+
+  it("uses the shared listbox navigation for dependency search", async () => {
+    apiMocks.search.mockResolvedValue({ data: [{ id: "task-2", title: "Dependency task", column_id: "todo" }] });
+    render(
+      <TaskDetail
+        task={task}
+        project="test-project"
+        onClose={vi.fn()}
+        onTaskUpdated={vi.fn()}
+      />,
+    );
+
+    const search = screen.getByRole("combobox", { name: "Search tasks to link" });
+    fireEvent.change(search, { target: { value: "Dependency" } });
+    const option = await screen.findByRole("option", { name: /Dependency task/ });
+    expect(search.getAttribute("aria-activedescendant")).toBe(option.id);
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(apiMocks.addLink).toHaveBeenCalledWith(
+      "task-1",
+      { linked_task_id: "task-2", link_type: "blocks" },
+      "test-project",
+    ));
   });
 });

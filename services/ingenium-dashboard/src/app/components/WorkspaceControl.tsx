@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, type ReactNode } from "react";
 
 export interface WorkspaceControlProps {
   /** Current page identifier for state encoding in popout URL */
-  pageId: "opencode" | "mail" | "docs" | "chat";
+  pageId: "opencode" | "vscode" | "mail" | "docs" | "chat";
   /** Optional state params to encode in popout URL (e.g., account, folder, messageId for mail) */
   stateParams?: Record<string, string>;
   /** Extra controls to render alongside the standard ones */
@@ -27,7 +27,6 @@ export default function WorkspaceControl({
   stateParams,
   children,
 }: WorkspaceControlProps) {
-  // ── Fullscreen state ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenAvailable, setFullscreenAvailable] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -56,7 +55,6 @@ export default function WorkspaceControl({
     }
   }, [isFullscreen]);
 
-  // ── Pop-out ─────────────────────────────────────────────────────────
   /** Build the standalone URL with current page + state parameters encoded in the query string. */
   const buildPopoutUrl = useCallback(() => {
     const params = new URLSearchParams();
@@ -84,7 +82,6 @@ export default function WorkspaceControl({
     }
   }, [buildPopoutUrl]);
 
-  // ── Standalone detection ────────────────────────────────────────────
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
@@ -119,7 +116,6 @@ export default function WorkspaceControl({
     }
   }, []);
 
-  // ── SVG icons ───────────────────────────────────────────────────────
   const FullscreenEnterIcon = (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -148,7 +144,6 @@ export default function WorkspaceControl({
     </svg>
   );
 
-  // ── Render ──────────────────────────────────────────────────────────
   return (
     <div className="relative">
       <div className="flex items-center gap-1 shrink-0">

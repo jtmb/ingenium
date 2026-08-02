@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -43,6 +43,7 @@ afterEach(() => {
   delete process.env.INGENIUM_API_TOKEN_FILE;
   if (ORIGINAL_OPENCODE_DB_PATH === undefined) delete process.env.INGENIUM_OPENCODE_DB_PATH;
   else process.env.INGENIUM_OPENCODE_DB_PATH = ORIGINAL_OPENCODE_DB_PATH;
+  vi.unstubAllGlobals();
 });
 
 afterAll(async () => {
@@ -98,5 +99,25 @@ describe("authenticated OpenCode messages client", () => {
     } finally {
       await new Promise<void>((resolve) => unauthorizedServer.close(() => resolve()));
     }
+  });
+
+  it("classifies a native timeout signal as a timeout", async () => {
+    const fetchMock = vi.fn((_: unknown, init?: RequestInit) => {
+      const signal = init?.signal;
+      if (!signal) return Promise.reject(new Error("request signal missing"));
+      return new Promise<Response>((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createOpenCodeMessagesClient(origin, 1)({
+      since: 0,
+      limit: 10,
+      projectName: "messages-timeout-project",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result).toEqual({ messages: [], failure: "timeout" });
   });
 });

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+// OCI provenance is compared to the canonical full lowercase Git SHA.
 const revisionPattern = /^[0-9a-f]{40}$/;
+// Reject label names that could carry credential material into image metadata.
 const secretBearingLabelPattern = /(api[-_]?key|credential|password|secret|token)/i;
 
 function fail(message) {

@@ -62,7 +62,6 @@ import {
   deleteAttachment,
   listAttachments,
   getAttachment,
-  getAttachmentsByPage,
   // Tags
   addTag,
   getPageTags,
@@ -220,6 +219,7 @@ describe("createPage: draft lifecycle", () => {
     expect(r.page!.status).toBe("draft");
     expect(r.page!.revision).toBe(0);
     expect(r.page!.title).toBe("Draft Page");
+    expect(r.page!.slug).toBe(`draft-page-${spaceSerial}`);
   });
 
   it("does not create any versions for a draft page", () => {
@@ -276,6 +276,13 @@ describe("createPage: draft lifecycle", () => {
     const r = createPage(space.id, "Big", `big-${seq()}`, tooLong);
     expect(r.error).toBeDefined();
     expect(r.error!.code).toBe("CONTENT_TOO_LONG");
+  });
+
+  it("accepts content at MAX_PAGE_CONTENT_LENGTH", () => {
+    const space = mkSpace();
+    const r = createPage(space.id, "At Limit", `at-limit-${seq()}`, "x".repeat(MAX_PAGE_CONTENT_LENGTH));
+    expect(r.error).toBeUndefined();
+    expect(r.page).toBeDefined();
   });
 });
 
@@ -374,6 +381,14 @@ describe("publishPage: explicit publish", () => {
     expect(versions.length).toBe(2);
     const revs = versions.map(v => v.revision).sort((a, b) => a - b);
     expect(revs).toEqual([1, 2]);
+  });
+
+  it("can publish an unchanged page again", () => {
+    const space = mkSpace();
+    const r = createPage(space.id, "Republish", `republish-${seq()}`, "# V1");
+    publishPage(r.page!.id);
+    publishPage(r.page!.id, 1);
+    expect(listVersions(r.page!.id).map((version) => version.revision).sort()).toEqual([1, 2]);
   });
 
   it("rejects publish when draft content exceeds MAX_PAGE_CONTENT_LENGTH", () => {
@@ -519,6 +534,12 @@ describe("movePage: cycle detection", () => {
     expect(r.error!.code).toBe("PARENT_ARCHIVED");
   });
 
+  it("prevents moving under a nonexistent parent", () => {
+    const space = mkSpace();
+    const page = createPublished(space.id, "No Parent", `no-parent-${seq()}`);
+    expect(movePage(page.id, 99999).error!.code).toBe("PARENT_NOT_FOUND");
+  });
+
   it("allows moving to root (null parent)", () => {
     const space = mkSpace();
     const a = createPublished(space.id, "A", `mv-a-${seq()}`);
@@ -574,18 +595,15 @@ describe("Attachments: ON CONFLICT DO UPDATE", () => {
     expect(deleteAttachment(att.id)).toBeUndefined();
   });
 
-  it("listAttachments and getAttachmentsByPage return same results", () => {
+  it("listAttachments returns page attachments", () => {
     const space = mkSpace();
     const page = createPublished(space.id, "Att List", `att-list-${seq()}`);
     saveAttachment(page.id, "a.pdf", "a.pdf", "application/pdf", 10, "/tmp/a.pdf");
     saveAttachment(page.id, "b.pdf", "b.pdf", "application/pdf", 20, "/tmp/b.pdf");
 
-    const viaList = listAttachments(page.id);
-    const viaGet = getAttachmentsByPage(page.id);
-    expect(viaList.length).toBe(2);
-    expect(viaGet.length).toBe(2);
-    expect(viaList.map(a => a.filename).sort()).toEqual(["a.pdf", "b.pdf"]);
-    expect(viaGet.map(a => a.filename).sort()).toEqual(["a.pdf", "b.pdf"]);
+    const attachments = listAttachments(page.id);
+    expect(attachments.length).toBe(2);
+    expect(attachments.map(a => a.filename).sort()).toEqual(["a.pdf", "b.pdf"]);
   });
 
   it("getAttachment by ID works", () => {
@@ -881,12 +899,17 @@ describe("Slug lookups and templates", () => {
     expect(found!.id).toBe(space.id);
   });
 
+  it("getSpaceBySlug returns undefined for a missing slug", () => {
+    expect(getSpaceBySlug("missing-space")).toBeUndefined();
+  });
+
   it("updateTemplate modifies template", () => {
     const tmpl = createTemplate(`template-${seq()}`, "# Original", "Desc", "test");
     const updated = updateTemplate(tmpl.id, { content: "# New", description: "New desc" });
     expect(updated).toBeDefined();
     expect(updated!.content).toBe("# New");
     expect(updated!.description).toBe("New desc");
+    expect(updated!.name).toBe(tmpl.name);
   });
 
   it("updateTemplate returns undefined for nonexistent", () => {

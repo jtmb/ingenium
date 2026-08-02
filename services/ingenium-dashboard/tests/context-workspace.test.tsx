@@ -5,6 +5,7 @@ import React from "react";
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   listConversations: vi.fn(),
+  listSources: vi.fn(),
   getConversation: vi.fn(),
   listMessages: vi.fn(),
   searchMessages: vi.fn(),
@@ -25,6 +26,9 @@ vi.mock("../src/lib/ProjectContext", () => ({
 vi.mock("../src/lib/api", () => ({
   api: {
     context: {
+      sources: {
+        list: mocks.listSources,
+      },
       conversations: {
         list: mocks.listConversations,
         get: mocks.getConversation,
@@ -103,6 +107,7 @@ const checkpoint = {
 };
 
 function setDefaultResponses() {
+  mocks.listSources.mockResolvedValue({ data: [], total: 0, limit: 20, offset: 0 });
   mocks.listConversations.mockResolvedValue({ data: { data: [conversation], nextCursor: null } });
   mocks.getConversation.mockResolvedValue({ data: conversation });
   mocks.listMessages.mockResolvedValue({ data: { data: messageSummaries, nextCursor: null } });
@@ -143,6 +148,7 @@ describe("ContextWorkspace", () => {
     expect(screen.getByText("Please use concise formatting.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Checkpoint history" })).toBeTruthy();
     expect(mocks.listConversations).toHaveBeenCalledWith("context-project", { limit: 30, cursor: undefined });
+    expect(mocks.listSources).toHaveBeenCalledWith("context-project", { limit: 20, offset: 0 });
     expect(mocks.batchMessages).toHaveBeenCalledWith(
       "conversation-one",
       ["message-one", "message-two"],

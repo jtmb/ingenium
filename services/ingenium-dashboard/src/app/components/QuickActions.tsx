@@ -92,8 +92,6 @@ export default function QuickActions() {
   );
 }
 
-// ── Inline SVG icons ──────────────────────────────────────────────────────────
-
 function DocIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">

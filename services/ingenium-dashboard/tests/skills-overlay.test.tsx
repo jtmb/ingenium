@@ -80,6 +80,17 @@ describe("SkillsPage detail overlay", () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it("wraps skill controls so Upload Skill stays within a mobile viewport", () => {
+    render(<SkillsPage />);
+
+    const controls = screen.getByTestId("skills-search").parentElement;
+    expect(controls?.className).toContain("flex-col");
+    expect(controls?.className).toContain("sm:flex-row");
+    expect(screen.getByTestId("skills-search").className).toContain("w-full");
+    expect(screen.getByRole("combobox", { name: "Sort skills" }).className).toContain("w-full");
+    expect(screen.getByTestId("skills-upload-btn").className).toContain("w-full");
+  });
+
   it("uses the shared accessible dialog with a viewport-bounded responsive preview", async () => {
     render(<SkillsPage />);
 

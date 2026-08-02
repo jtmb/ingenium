@@ -15,14 +15,20 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => navigationMock.searchParams,
 }));
 
-vi.mock("../src/app/components/settings/panels", () => ({
-  GeneralPanel: () => {
+vi.mock("../src/app/components/settings/panels/GeneralPanel", () => ({
+  default: () => {
     if (panelMockState.throwGeneral) throw new Error("test panel failure");
     return <div>General panel</div>;
   },
-  MailPanel: () => <div>Mail panel</div>,
-  PipelinePanel: () => <div>Providers panel</div>,
-  ConfigPanel: () => <div>Config panel</div>,
+}));
+vi.mock("../src/app/components/settings/panels/MailPanel", () => ({
+  default: () => <div>Mail panel</div>,
+}));
+vi.mock("../src/app/components/settings/panels/PipelinePanel", () => ({
+  default: () => <div>Providers panel</div>,
+}));
+vi.mock("../src/app/components/settings/panels/ConfigPanel", () => ({
+  default: () => <div>Config panel</div>,
 }));
 
 import SettingsOverlay from "../src/app/components/settings/SettingsOverlay";

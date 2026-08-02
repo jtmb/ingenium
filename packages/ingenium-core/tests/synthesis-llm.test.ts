@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { callSynthesisLLM, isLLMSynthesisConfigured, getLLMSynthesisConfig, enrichObservations, getFullLLMSynthesisConfig, consolidateTraits } from "../lib/tools/synthesis-llm.js";
+import { callSynthesisLLM, isLLMSynthesisConfigured, enrichObservations, getFullLLMSynthesisConfig, consolidateTraits } from "../lib/tools/synthesis-llm.js";
 import { setSetting } from "../lib/tools/settings.js";
 
 let tempDir: string;
@@ -385,23 +385,10 @@ describe("LLM synthesis configuration", () => {
     expect(isLLMSynthesisConfigured("unused-project-id")).toBe(false);
   });
 
-  it("getLLMSynthesisConfig returns null when not configured", () => {
-    expect(getLLMSynthesisConfig("unused-project-id")).toBeNull();
-  });
-
   it("reports configured when both settings exist on global project", () => {
     setSetting(globalProjectId, "synthesis_model", "test-model");
     setSetting(globalProjectId, "synthesis_api_key", "test-key");
     expect(isLLMSynthesisConfigured("unused-project-id")).toBe(true);
-  });
-
-  it("getLLMSynthesisConfig returns config when configured on global project", () => {
-    setSetting(globalProjectId, "synthesis_model", "gpt-4o");
-    setSetting(globalProjectId, "synthesis_api_key", "sk-test");
-    const config = getLLMSynthesisConfig("unused-project-id");
-    expect(config).not.toBeNull();
-    expect(config!.model).toBe("gpt-4o");
-    expect(config!.apiKey).toBe("sk-test");
   });
 
   it("reports configured with only model set on global project (apiKey optional)", () => {

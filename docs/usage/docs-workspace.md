@@ -29,6 +29,24 @@ An immersive 3-pane docs workspace at `/docs` for creating, editing, and managin
 | **Rename** | Inline rename — triggered from tree context |
 | **Edit** | Switch to Edit/Source mode in the editor |
 
+### Create a Task from a Page
+
+On the selected page, choose **Create task** in the top toolbar. The
+confirmation form is **title-only**: enter a non-empty title and choose
+**Create Task**. The page body and any autosaved editor draft are not copied to
+the task.
+
+Capture is authorized by the selected dashboard project. The page must be
+available to that project through its project link (or be globally available);
+otherwise the capture fails without creating a task. The request sends the
+canonical page ID, and repeated capture of the same page reuses the existing
+task and reference. Task Detail displays the server-derived provenance after
+reload as `available`, `missing`, or `unavailable`; it does not fabricate a
+source URL or link.
+
+The Create task and confirmation controls are labeled and keyboard-usable with
+at least 44px targets, including in the responsive workspace layout.
+
 ### MCP Tools
 
 All 48 documentation tools use the `ingenium_docs_` prefix. See the full reference in [Docs Workspace Reference](../reference/docs-workspace.md).

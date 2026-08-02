@@ -85,7 +85,7 @@ describe("MCPDrawer status contract", () => {
     expect(close.className).toContain("min-h-11");
     expect(connect.className).toContain("min-h-11");
 
-    connect.focus();
+    screen.getByRole("button", { name: "Refresh" }).focus();
     fireEvent.keyDown(document, { key: "Tab" });
     expect(document.activeElement).toBe(close);
     fireEvent.keyDown(document, { key: "Escape" });
@@ -126,7 +126,7 @@ describe("MCPDrawer status contract", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(2);
 
     const connect = screen.getByRole("button", { name: "Connect" });
     fireEvent.touchStart(connect);

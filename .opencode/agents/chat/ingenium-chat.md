@@ -6,6 +6,7 @@ hidden: true
 permission:
   # Built-in OpenCode tools
   read: allow
+  question: deny
   edit: deny
   write: deny
   bash: deny
@@ -148,6 +149,7 @@ permission:
 
   # Skills
   skill:
+    "@ponytail": allow
     "*": deny
 ---
 

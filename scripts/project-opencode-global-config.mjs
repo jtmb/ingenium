@@ -15,6 +15,11 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizePermissions(value) {
+  if (isRecord(value)) return { ...value };
+  return typeof value === "string" ? { "*": value } : {};
+}
+
 /** Remove JSONC comments without changing string literal contents. */
 function stripJsoncComments(input) {
   let output = "";
@@ -106,6 +111,8 @@ function readConfig(configPath) {
     throw error;
   }
 
+  // The descriptor is opened with O_NOFOLLOW so a persistent config cannot
+  // redirect parsing through a symlink between validation and use.
   const parsed = JSON.parse(removeTrailingCommas(stripJsoncComments(readRegularFile(configPath))));
   if (!isRecord(parsed)) throw new Error("Config root must be an object");
   return parsed;
@@ -123,10 +130,14 @@ function writeAtomically(configPath, value) {
   const directory = dirname(configPath);
   const directoryMetadata = statSync(directory);
   if (!directoryMetadata.isDirectory()) throw new Error("Config directory is unavailable");
+  // Write a private, exclusive temporary file and rename only after fsync so
+  // readers never observe partial JSON or follow a caller-controlled temp link.
   const temporaryPath = resolve(directory, `.${basename(configPath)}.${process.pid}.${randomUUID()}.tmp`);
   const content = `${JSON.stringify(value, null, 2)}\n`;
   let descriptor;
   try {
+    // Exclusive creation prevents a pre-existing temporary path from being
+    // reused, while O_NOFOLLOW rejects a symlink at that path.
     descriptor = openSync(
       temporaryPath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
@@ -150,6 +161,21 @@ function writeAtomically(configPath, value) {
  */
 export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   const config = readConfig(configPath);
+  const permission = normalizePermissions(config.permission);
+  permission.question = "deny";
+  config.permission = permission;
+
+  const agent = isRecord(config.agent) ? { ...config.agent } : {};
+  for (const [name, value] of Object.entries(agent)) {
+    const projection = isRecord(value) ? { ...value } : {};
+    const permission = normalizePermissions(isRecord(value) ? projection.permission : value);
+    permission.question = name === "plan" ? "allow" : "deny";
+    if (name !== "plan" && "question" in projection) projection.question = "deny";
+    agent[name] = { ...projection, permission };
+  }
+  if (!agent.plan) agent.plan = { permission: { question: "allow" } };
+  config.agent = agent;
+
   const mcp = isRecord(config.mcp) ? config.mcp : {};
   delete mcp.ponytail;
   const existingIngenium = isRecord(mcp.ingenium) ? mcp.ingenium : {};

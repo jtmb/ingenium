@@ -7,9 +7,11 @@
   },
   "permission": {
     "*": "allow",
+    "question": "deny",
     "websearch": "allow"
   },
   "agent": {
+    "plan": { "permission": { "question": "allow" } },
     "browser-agent": { "model": "deepseek/deepseek-v4-flash" },
     "ingenium-docs": { "model": "openai/gpt-5.6-luna", "variant": "medium" },
     "ingenium-qa": { "model": "openai/gpt-5.6-terra", "variant": "xhigh" },

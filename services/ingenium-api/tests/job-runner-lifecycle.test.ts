@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import type { JobProcessIdentity, JobProcessInspector } from "../lib/job-runner.js";
@@ -20,6 +22,14 @@ const core = vi.hoisted(() => ({
     finishJobRun: vi.fn(),
     getJobRun: vi.fn(() => ({ status: "running" })),
   },
+  jobEventDeliveries: {
+    JOB_EVENT_DELIVERY_LEASE_MS: 30_000,
+    completeJobEventDelivery: vi.fn(),
+    heartbeatJobEventDelivery: vi.fn(() => true),
+    persistJobEventAttemptProcessIdentity: vi.fn(() => true),
+    resolveExpiredJobEventLease: vi.fn(),
+    sanitizeJobEventText: vi.fn((value: string) => value.replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, "$1 [REDACTED]")),
+  },
 }));
 
 vi.mock("ingenium-core", () => core);
@@ -33,10 +43,12 @@ vi.mock("node:child_process", () => ({
 
 import {
   configureJobRunnerRuntimeForTesting,
+  buildJobProcessEnvironment,
   executeJobRun,
   getOwnedDetachedRunDiagnosticForTesting,
   JOB_TERMINATION_GRACE_MS,
   killRunProcess,
+  recoverExpiredEventAttempt,
   resetJobRunnerForTesting,
   runningProcesses,
   stopAllJobRuns,
@@ -132,10 +144,126 @@ afterEach(async () => {
   restoreRuntime = undefined;
   resetJobRunnerForTesting();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
 describe("job-runner process lifecycle", () => {
+  it("records verified event-process identity without retaining the plaintext nonce and treats nonzero exits as transient delivery failures", async () => {
+    const runId = "event-run";
+    const child = fakeChild();
+    const proc = processHarness([identity(101, "leader-start")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({
+      processInspector: proc.inspector,
+      createRunNonce: () => "run-nonce",
+    });
+
+    childHarness.next = child;
+    await executeJobRun(runId, job, job.prompt_template, {
+      deliveryId: "delivery-id", attemptNumber: 1, leaseToken: "a".repeat(32), leaseRevision: 1,
+    });
+    expect(core.jobEventDeliveries.persistJobEventAttemptProcessIdentity).toHaveBeenCalledWith("project-id", expect.objectContaining({
+      processId: 101,
+      processNonce: "run-nonce",
+    }));
+    (child.stdout as EventEmitter).emit("data", Buffer.from("prompt=payload-should-not-persist\n"));
+    closeChild(child, 7, null);
+    expect(core.jobs.appendRunLog).toHaveBeenCalledWith(
+      "project-id", runId, "stdout", "Event job output redacted from durable logs.",
+    );
+    expect(core.jobEventDeliveries.completeJobEventDelivery).toHaveBeenCalledWith("project-id", expect.objectContaining({
+      outcome: "failed",
+      errorCode: "nonzero_exit",
+      errorMessage: expect.not.stringContaining(job.prompt_template),
+    }));
+  });
+
+  it("dead-letters missing spawn evidence and retries only a fully persisted identity proven absent", async () => {
+    const crashedBeforePersist = {
+      projectId: "project-id", deliveryId: "delivery-crash-before-persist", leaseRevision: 1, attemptNumber: 1, runId: "run-crash-before-persist",
+      processId: null, processGroupId: null, processStartTime: null, processExecutable: null, processNonceHash: null,
+    };
+    await recoverExpiredEventAttempt(crashedBeforePersist);
+    expect(core.jobEventDeliveries.resolveExpiredJobEventLease).toHaveBeenLastCalledWith("project-id", expect.objectContaining({
+      resolution: "dead_letter", errorCode: "ambiguous_process_identity",
+    }));
+
+    await recoverExpiredEventAttempt({
+      projectId: "project-id", deliveryId: "delivery-incomplete", leaseRevision: 1, attemptNumber: 1, runId: "run-incomplete",
+      processId: 99999999, processGroupId: null, processStartTime: null, processExecutable: null, processNonceHash: null,
+    });
+    expect(core.jobEventDeliveries.resolveExpiredJobEventLease).toHaveBeenLastCalledWith("project-id", expect.objectContaining({
+      resolution: "dead_letter", errorCode: "ambiguous_process_identity",
+    }));
+
+    restoreRuntime = configureJobRunnerRuntimeForTesting({
+      processInspector: { inspectProcess: () => null, inspectGroup: () => null },
+    });
+    await recoverExpiredEventAttempt({
+      projectId: "project-id", deliveryId: "delivery-proven-absent", leaseRevision: 1, attemptNumber: 1, runId: "run-proven-absent",
+      processId: 99999999, processGroupId: 99999999, processStartTime: "start", processExecutable: "/usr/bin/opencode",
+      processNonceHash: "a".repeat(64),
+    });
+    expect(core.jobEventDeliveries.resolveExpiredJobEventLease).toHaveBeenLastCalledWith("project-id", expect.objectContaining({
+      resolution: "retry", errorCode: "process_absent",
+    }));
+
+    const proc = processHarness([identity(101, "unexpected-start", "other-nonce")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector });
+    await recoverExpiredEventAttempt({
+      projectId: "project-id", deliveryId: "delivery-ambiguous", leaseRevision: 2, attemptNumber: 2, runId: "run-ambiguous",
+      processId: 101, processGroupId: 101, processStartTime: "expected-start", processExecutable: "/usr/bin/opencode",
+      processNonceHash: "a".repeat(64),
+    });
+    expect(core.jobEventDeliveries.resolveExpiredJobEventLease).toHaveBeenLastCalledWith("project-id", expect.objectContaining({
+      resolution: "dead_letter", errorCode: "ambiguous_process_ownership",
+    }));
+  });
+
+  it("terminates and revalidates a verified live process group before retrying", async () => {
+    const proc = processHarness([identity(101, "expected-start", "run-nonce")]);
+    const signalProcessGroup = vi.fn((_groupId: number, signal: NodeJS.Signals) => {
+      if (signal === "SIGTERM") proc.members.clear();
+    });
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, signalProcessGroup });
+
+    await recoverExpiredEventAttempt({
+      projectId: "project-id", deliveryId: "delivery-live", leaseRevision: 1, attemptNumber: 1, runId: "run-live",
+      processId: 101, processGroupId: 101, processStartTime: "expected-start", processExecutable: "/usr/bin/opencode",
+      processNonceHash: createHash("sha256").update("run-nonce", "utf8").digest("hex"),
+    });
+
+    expect(signalProcessGroup).toHaveBeenCalledWith(101, "SIGTERM");
+    expect(core.jobEventDeliveries.resolveExpiredJobEventLease).toHaveBeenLastCalledWith("project-id", expect.objectContaining({
+      resolution: "retry", errorCode: "verified_crash",
+    }));
+  });
+
+  it("starts the CLI with only the allowlisted runtime environment", async () => {
+    vi.stubEnv("INGENIUM_API_TOKEN", "api-secret");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "server-secret");
+    vi.stubEnv("OPENAI_API_KEY", "provider-secret");
+    vi.stubEnv("COOKIE", "cookie-secret");
+    const child = fakeChild();
+    const proc = processHarness([identity(101, "leader-start")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, createRunNonce: () => "run-nonce" });
+
+    childHarness.next = child;
+    await executeJobRun("allowlisted-env", { ...job, agent: "Bearer agent-secret" }, job.prompt_template);
+    const spawnOptions = vi.mocked(spawn).mock.calls.at(-1)?.[2];
+    expect(spawnOptions?.env).toMatchObject({
+      PATH: expect.any(String), HOME: "/home/appuser", USER: expect.any(String), SHELL: expect.any(String),
+      TERM: expect.any(String), LANG: expect.any(String), XDG_CONFIG_HOME: expect.any(String),
+      XDG_DATA_HOME: expect.any(String), XDG_CACHE_HOME: expect.any(String), INGENIUM_JOB_PROJECT_ID: "project-id",
+    });
+    for (const name of ["INGENIUM_API_TOKEN", "OPENCODE_SERVER_PASSWORD", "OPENAI_API_KEY", "COOKIE"]) {
+      expect(spawnOptions?.env).not.toHaveProperty(name);
+    }
+    expect(buildJobProcessEnvironment("project-id", "run-nonce")).not.toHaveProperty("INGENIUM_API_TOKEN");
+    expect(core.logger.info.mock.calls.flat().join(" ")).not.toContain("agent-secret");
+    closeChild(child, 0, null);
+  });
+
   it("revalidates a nonce-marked descendant after leader exit and retains evidence until SIGKILL teardown is verified", async () => {
     const runId = "descendant-run";
     const child = fakeChild();
@@ -195,7 +323,7 @@ describe("job-runner process lifecycle", () => {
     // Simulate the old leader/group disappearing and the same numeric PGID
     // becoming an unrelated live group. It must never receive either signal.
     proc.members.set(101, identity(101, "reused-start", "other-run-nonce", "/usr/bin/unrelated"));
-    expect(killRunProcess(runId)).toBe(true);
+    expect(killRunProcess("project-id", runId)).toBe(true);
     closeChild(child);
 
     await vi.advanceTimersByTimeAsync(JOB_TERMINATION_GRACE_MS);
@@ -223,7 +351,7 @@ describe("job-runner process lifecycle", () => {
     // Establish a descendant identity that must remain immutable through the
     // eventual SIGKILL revalidation.
     proc.members.set(102, identity(102, "first-descendant-start"));
-    expect(killRunProcess(runId)).toBe(true);
+    expect(killRunProcess("project-id", runId)).toBe(true);
     expect(signalProcessGroup).toHaveBeenCalledWith(101, "SIGTERM");
 
     proc.members.delete(101);
@@ -254,7 +382,7 @@ describe("job-runner process lifecycle", () => {
     const stopping = stopAllJobRuns();
     await Promise.resolve();
 
-    expect(core.jobs.cancelJobRun).toHaveBeenCalledWith(runId);
+    expect(core.jobs.cancelJobRun).toHaveBeenCalledWith("project-id", runId);
     expect(runningProcesses.get(runId)).toBe(child);
 
     closeChild(child);

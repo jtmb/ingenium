@@ -111,7 +111,9 @@ function sendContextRagError(res: Response, error: unknown): void {
 }
 
 function contextRagUploadDto(result: contextRag.ContextRagUploadResult) {
-  const { source, upload } = result;
+  const { upload } = result;
+  const source = contextRag.getContextRagSource(upload.project_id, upload.rag_source_id);
+  if (!source) throw new Error("Context RAG source disappeared after ingestion");
   return {
     upload: {
       id: upload.id,
@@ -120,19 +122,15 @@ function contextRagUploadDto(result: contextRag.ContextRagUploadResult) {
       sourceReference: upload.source_reference,
       createdAt: upload.created_at,
     },
-    source: {
-      id: source.id,
-      title: source.title,
-      sourceType: source.source_type,
-      sourceHash: source.source_hash,
-      mimeType: source.mime_type,
-      byteSize: source.byte_size,
-      chunkCount: source.chunk_count,
-      createdAt: source.created_at,
-      updatedAt: source.updated_at,
-    },
+    source,
     deduplicated: result.deduplicated,
   };
+}
+
+function contextRagSourceCreateDto(result: contextRag.ContextRagUploadResult) {
+  const source = contextRag.getContextRagSource(result.upload.project_id, result.upload.rag_source_id);
+  if (!source) throw new Error("Context RAG source disappeared after ingestion");
+  return { ...source, deduplicated: result.deduplicated };
 }
 
 function checkpointForProject(
@@ -143,14 +141,25 @@ function checkpointForProject(
   return contextConversations.getContextCheckpoint(projectId, conversationId, checkpointId) ?? null;
 }
 
-// ── Context RAG ingestion and retrieval ─────────────────────────────────────
-
 contextRouter.post("/uploads", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
     const result = contextRag.ingestContextRagDocument(projectId, req.body ?? {});
     res.status(result.deduplicated ? 200 : 201).json({ data: contextRagUploadDto(result) });
+  } catch (error) {
+    sendContextRagError(res, error);
+  }
+});
+
+// Source-oriented alias: retains the immutable upload lifecycle while exposing
+// only the safe source DTO.
+contextRouter.post("/sources", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const result = contextRag.ingestContextRagDocument(projectId, req.body ?? {});
+    res.status(result.deduplicated ? 200 : 201).json({ data: contextRagSourceCreateDto(result) });
   } catch (error) {
     sendContextRagError(res, error);
   }
@@ -173,6 +182,7 @@ contextRouter.post("/uploads/chunked", (req, res) => {
           expectedHash: result.session.expected_hash,
           expectedBytes: result.session.expected_bytes,
           chunkCount: result.session.chunk_count,
+          sourceReference: result.session.source_reference,
           status: result.session.status,
           createdAt: result.session.created_at,
           completedAt: result.session.completed_at,
@@ -221,7 +231,14 @@ contextRouter.get("/uploads", (req, res) => {
   });
 });
 
-contextRouter.get("/rag/search", (req, res) => {
+contextRouter.get("/sources", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const page = contextRag.listContextRagSources(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0);
+  res.json(page);
+});
+
+function searchContextSources(req: Request, res: Response): void {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
@@ -234,7 +251,54 @@ contextRouter.get("/rag/search", (req, res) => {
   } catch (error) {
     sendContextRagError(res, error);
   }
+}
+
+function searchContextSourceMetadata(req: Request, res: Response): void {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const results = contextRag.searchContextRagResults(
+      projectId,
+      typeof req.query.q === "string" ? req.query.q : "",
+      req.query.limit === undefined ? 20 : Number(req.query.limit),
+    );
+    const seen = new Set<string>();
+    const sources = results.flatMap((hit) => {
+      if (seen.has(hit.source_id)) return [];
+      seen.add(hit.source_id);
+      const source = contextRag.getContextRagSource(projectId, hit.source_id);
+      return source ? [source] : [];
+    });
+    res.json({ data: sources, total: sources.length });
+  } catch (error) {
+    sendContextRagError(res, error);
+  }
+}
+
+contextRouter.get("/sources/search", searchContextSourceMetadata);
+
+contextRouter.get("/sources/summary", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const page = contextRag.listContextRagSources(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0);
+  res.json({
+    ...page,
+    data: page.data.map(({ id, title, provenance, createdAt }) => ({ id, title, provenance, createdAt })),
+  });
 });
+
+contextRouter.get("/sources/:sourceId", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const source = contextRag.getContextRagSource(projectId, req.params.sourceId!);
+  if (!source) {
+    res.status(404).json({ error: { code: "CONTEXT_SOURCE_NOT_FOUND", message: "Context source not found" } });
+    return;
+  }
+  res.json({ data: source });
+});
+
+contextRouter.get("/rag/search", searchContextSources);
 
 contextRouter.post("/rag/ask", async (req, res) => {
   const projectId = requireProject(req, res);
@@ -294,8 +358,6 @@ contextRouter.post("/learning/ingest", (req, res) => {
     sendContextRagError(res, error);
   }
 });
-
-// ── Immutable conversations ────────────────────────────────────────────────
 
 contextRouter.post("/conversations", (req, res) => {
   const projectId = requireProject(req, res);
@@ -523,8 +585,6 @@ contextRouter.get("/conversations/:conversationId/checkpoints/:checkpointId", (r
   }
   res.json({ data: checkpoint });
 });
-
-// ── Legacy mutable context entries ─────────────────────────────────────────
 
 contextRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);

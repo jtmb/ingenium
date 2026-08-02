@@ -1,7 +1,7 @@
 /**
  * Mail Sync Engine — Outlook Cached-Mode background synchronization.
  *
- * One background engine owns all mailbox I/O via a MailProvider with a priority queue:
+ * One background engine owns Gmail mailbox I/O with a priority queue:
  *   P0: Gmail delta poll (cheap historyId check, 30s interval)
  *   P1: boostFolder'd folders (user is viewing)
  *   P2: Full resync (all folders) or INBOX if stale
@@ -21,7 +21,6 @@
 import { emailCache, emailSuggestionQueue, logger, settings, synthesisLlm } from "ingenium-core";
 import { listAccounts, getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
 import { GmailProvider } from "./providers/gmail.js";
-import type { MailProvider } from "./providers/mail-provider.js";
 import { getVoiceSamples, generateSmartReplies } from "./suggest-llm.js";
 import {
   isAuthenticationProviderError,
@@ -100,8 +99,8 @@ interface AccountWorker {
   email: string;
   projectId: string;
   running: boolean;
-  /** The mail provider — GmailProvider (stateless HTTPS, no connection needed). */
-  provider: MailProvider;
+  /** Gmail REST provider (stateless HTTPS, no connection needed). */
+  provider: typeof GmailProvider;
   /** Priority-ordered task queue (lowest priority number = highest priority). */
   taskQueue: EngineTask[];
   /** Per-folder engine state. */
@@ -266,7 +265,7 @@ function isFolderFresh(accountId: string, folder: string): boolean {
  * 🔴 Sequential for...of + await — Lesson 25 (don't overload external LLM).
  * 🔴 AbortSignal at 30s timeout to prevent stuck jobs.
  */
-async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
+async function processSuggestionQueue(): Promise<void> {
   // 1. Check settings
   const pid = getProjectId();
   const repliesEnabled = settings.getSetting(pid, "mail_smart_replies_enabled");
@@ -286,8 +285,7 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
     const job = emailSuggestionQueue.dequeueSuggestionJob();
     if (!job) break;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const timeoutSignal = AbortSignal.timeout(30_000);
 
     try {
       // Check noreply gate (from email_cache)
@@ -318,21 +316,21 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
       }
 
       // Get voice samples from the account
-      const account = getAccount(worker.projectId, job.account_id);
+      const account = getAccount(job.account_id);
       if (!account) {
         logger.warn("sync-engine", `processSuggestionQueue: account ${job.account_id} not found`);
         emailSuggestionQueue.markJobFailed(job.id, "Account not found");
         continue;
       }
 
-      const creds = getCredentials(worker.projectId, job.account_id);
+      const creds = getCredentials(job.account_id);
       if (!creds?.tokens) {
         logger.warn("sync-engine", `processSuggestionQueue: no OAuth tokens for ${job.account_id}`);
         emailSuggestionQueue.markJobFailed(job.id, "No OAuth tokens");
         continue;
       }
 
-      const voiceSamples = await getVoiceSamples(account, creds.tokens, 15, controller.signal);
+      const voiceSamples = await getVoiceSamples(account, creds.tokens, 15, timeoutSignal);
 
       // Generate suggestions via LLM
       const bodySnippet = (body.text ?? body.html ?? "").substring(0, 800);
@@ -349,7 +347,7 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
           apiKey: llmConfig.apiKey,
           allowPrivateNetwork: llmConfig.allowPrivateNetwork,
         },
-        controller.signal,
+        timeoutSignal,
       );
 
       // Cache suggestions if any were generated
@@ -373,8 +371,6 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
         ...providerErrorDiagnostic(safe, "sync"),
       });
       emailSuggestionQueue.markJobFailed(job.id, safe.message);
-    } finally {
-      clearTimeout(timeout);
     }
   }
 }
@@ -404,7 +400,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
   logger.info("sync-engine", `Worker started for ${worker.email}`);
 
   try {
-    const account = getAccount(worker.projectId, worker.accountId);
+    const account = getAccount(worker.accountId);
     if (!account) {
       logger.warn("sync-engine", `Worker for ${worker.accountId}: account not found, stopping`);
       return;
@@ -412,7 +408,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
 
     let creds: ReturnType<typeof getCredentials>;
     try {
-      creds = getCredentials(worker.projectId, worker.accountId);
+      creds = getCredentials(worker.accountId);
     } catch {
       creds = undefined;
     }
@@ -566,7 +562,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       // 🟡 FUTURE OPTIMIZATION: Consider queuing suggestion jobs to an external
       // queue (e.g., Bull/BullMQ, a dedicated worker thread, or a separate
       // microservice) to avoid blocking delta poll entirely.
-      await processSuggestionQueue(worker);
+      await processSuggestionQueue();
 
       // ── Generate maintenance tasks if queue is empty ─────────────────
       if (worker.taskQueue.length === 0) {
@@ -697,13 +693,13 @@ async function executeSyncFolder(
   setFolderState(worker, folder, { state: "syncing-headers", lastError: null });
 
   try {
-    const account = getAccount(worker.projectId, accountId);
+    const account = getAccount(accountId);
     if (!account) {
       logger.warn("sync-engine", `executeSyncFolder: account ${accountId} not found`);
       setFolderState(worker, folder, { state: "error", lastError: "Account not found" });
       return;
     }
-    const creds = getCredentials(worker.projectId, accountId);
+    const creds = getCredentials(accountId);
     if (!creds?.tokens) {
       logger.warn("sync-engine", `executeSyncFolder: no tokens for ${worker.email}`);
       setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
@@ -805,13 +801,13 @@ async function executeBackfillBodies(
   setFolderState(worker, folder, { state: "backfilling-bodies", lastError: null });
 
   try {
-    const account = getAccount(worker.projectId, accountId);
+    const account = getAccount(accountId);
     if (!account) {
       logger.warn("sync-engine", `executeBackfillBodies: account ${accountId} not found`);
       setFolderState(worker, folder, { state: "error", lastError: "Account not found" });
       return;
     }
-    const creds = getCredentials(worker.projectId, accountId);
+    const creds = getCredentials(accountId);
     if (!creds?.tokens) {
       logger.warn("sync-engine", `executeBackfillBodies: no tokens for ${worker.email}`);
       setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
@@ -936,7 +932,7 @@ function sleep(ms: number): Promise<void> {
  * Safe to call repeatedly: an already-running engine reconciles workers for
  * accounts that became available after startup.
  */
-export function startEngine(_projectId: string): void {
+export function startEngine(): void {
   const projectId = getGlobalProjectId();
   if (engineState.projectId && engineState.projectId !== projectId) {
     // Global assignment can change without a process restart. Workers are bound
@@ -950,7 +946,7 @@ export function startEngine(_projectId: string): void {
   }
   engineState.projectId = projectId;
   if (engineState.running) {
-    spawnWorkers(projectId).catch((error: unknown) => {
+    spawnWorkers().catch((error: unknown) => {
       logger.warn("sync-engine", "Worker reconciliation failed", providerErrorDiagnostic(error, "sync"));
     });
     return;
@@ -962,15 +958,15 @@ export function startEngine(_projectId: string): void {
   logger.info("sync-engine", `Starting sync engine for project ${projectId}`);
 
   // Launch workers asynchronously
-  spawnWorkers(projectId).catch((error: unknown) => {
+  spawnWorkers().catch((error: unknown) => {
     logger.warn("sync-engine", "Worker startup failed", providerErrorDiagnostic(error, "sync"));
   });
 }
 
-async function spawnWorkers(_projectId: string): Promise<void> {
+async function spawnWorkers(): Promise<void> {
   const pid = getProjectId();
   engineState.projectId = pid;
-  const accounts = listAccounts(pid);
+  const accounts = listAccounts();
 
   if (accounts.length === 0) {
     logger.info("sync-engine", "No email accounts configured, engine idle");

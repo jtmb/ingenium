@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { api, type OAuthClientSecretOperation, type OAuthClientSecretSetting } from "../../../../lib/api";
 import { resolveGlobalProjectName, useProject } from "../../../../lib/ProjectContext";
 import SettingRow from "../SettingRow";
+import Select from "../../Select";
 
 type SecretField = "gmail" | "outlook";
 
@@ -372,8 +373,9 @@ export default function MailPanel() {
         <div className="px-6 py-4 text-sm text-[var(--color-text-muted)] animate-pulse">Loading sync settings...</div>
       ) : (
         <>
-          <SettingRow label="Check every" description="Mail sync polling interval">
-            <select
+          <SettingRow label="Check every" description="Mail sync polling interval" controlId="mail-sync-interval">
+            <Select
+              id="mail-sync-interval"
               value={String(mailIntervalMin)}
               onChange={(e) => {
                 const min = Number(e.target.value);
@@ -391,7 +393,7 @@ export default function MailPanel() {
               <option value="5">5 minutes</option>
               <option value="15">15 minutes</option>
               <option value="30">30 minutes</option>
-            </select>
+            </Select>
           </SettingRow>
 
           <SettingRow label="Offline window" description="Max email headers to sync per folder (default 500)">
@@ -451,8 +453,9 @@ export default function MailPanel() {
             />
           </SettingRow>
 
-          <SettingRow label="Trigger mode" description="How smart replies are triggered">
-            <select
+          <SettingRow label="Trigger mode" description="How smart replies are triggered" controlId="mail-smart-replies-mode">
+            <Select
+              id="mail-smart-replies-mode"
               value={smartRepliesMode}
               onChange={(e) => {
                 const v = e.target.value;
@@ -467,7 +470,7 @@ export default function MailPanel() {
             >
               <option value="auto">Automatic (on email open)</option>
               <option value="manual">Manual (click to generate)</option>
-            </select>
+            </Select>
           </SettingRow>
 
           <SettingRow label="Precompute replies" description="Pre-generate smart replies in the background so they load instantly when you open an email">

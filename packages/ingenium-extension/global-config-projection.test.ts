@@ -26,6 +26,13 @@ describe("container OpenCode global-config projection", () => {
     writeFileSync(configPath, `{
       // Existing operator configuration is retained.
       "provider": { "example": { "enabled": true } },
+      "permission": "ask",
+      "agent": {
+        "operator-agent": { "model": "operator/model", "question": "allow", "permission": "ask" },
+        "non-plan-agent": { "permission": { "bash": "allow", "question": "allow" } },
+        "ingenium-llm-broker": { "hidden": true, "permission": { "*": "deny", "question": "allow" } },
+        "plan": { "variant": "operator-plan", "permission": "ask" }
+      },
       "mcp": {
         "other": { "command": ["other"] },
         "unrelated-ponytail": { "command": ["unrelated-ponytail"] },
@@ -59,6 +66,8 @@ describe("container OpenCode global-config projection", () => {
     const raw = readFileSync(configPath, "utf8");
     const config = JSON.parse(raw) as {
       provider: { example: { enabled: boolean } };
+      permission: Record<string, string>;
+      agent: Record<string, { permission: Record<string, string>; [key: string]: unknown }>;
       mcp: {
         other: unknown;
         ponytail?: unknown;
@@ -69,6 +78,26 @@ describe("container OpenCode global-config projection", () => {
     };
     expect(raw).not.toContain(inlineToken);
     expect(config.provider).toEqual({ example: { enabled: true } });
+    expect(config.permission).toEqual({ "*": "ask", question: "deny" });
+    expect(config.agent["operator-agent"]).toEqual({
+      model: "operator/model",
+      question: "deny",
+      permission: { "*": "ask", question: "deny" },
+    });
+    expect(config.agent["non-plan-agent"]).toEqual({
+      permission: { bash: "allow", question: "deny" },
+    });
+    expect(config.agent["ingenium-llm-broker"]).toEqual({
+      hidden: true,
+      permission: { "*": "deny", question: "deny" },
+    });
+    expect(config.agent.plan).toEqual({
+      variant: "operator-plan",
+      permission: { "*": "ask", question: "allow" },
+    });
+    for (const [name, projection] of Object.entries(config.agent)) {
+      expect(projection.permission.question).toBe(name === "plan" ? "allow" : "deny");
+    }
     expect(config.mcp.other).toEqual({ command: ["other"] });
     expect(config.mcp["unrelated-ponytail"]).toEqual({ command: ["unrelated-ponytail"] });
     expect(config.mcp.ponytail).toBeUndefined();

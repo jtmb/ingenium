@@ -41,7 +41,7 @@ describe("jobs — CRUD", () => {
       "ingenium-orchestrator",
       "Run the tests please",
       "0 * * * *",
-      "push",
+      "context.conversation.archived",
       60,
     );
 
@@ -50,7 +50,7 @@ describe("jobs — CRUD", () => {
     expect(job.agent).toBe("ingenium-orchestrator");
     expect(job.prompt_template).toBe("Run the tests please");
     expect(job.schedule_cron).toBe("0 * * * *");
-    expect(job.trigger_event).toBe("push");
+    expect(job.trigger_event).toBe("context.conversation.archived");
     expect(job.timeout_minutes).toBe(60);
     expect(job.enabled).toBe(1);
     expect(job.id).toBeDefined();
@@ -72,6 +72,27 @@ describe("jobs — CRUD", () => {
     expect(job.trigger_event).toBeNull();
     expect(job.timeout_minutes).toBe(30); // default
     expect(job.enabled).toBe(1);
+  });
+
+  it("accepts only cataloged trigger events for new jobs", () => {
+    expect(createJob(
+      projectId,
+      "Catalog trigger",
+      undefined,
+      "ingenium-qa",
+      "test",
+      undefined,
+      "context.checkpoint.restored_as_new",
+    ).trigger_event).toBe("context.checkpoint.restored_as_new");
+    expect(() => createJob(
+      projectId,
+      "Unknown trigger",
+      undefined,
+      "ingenium-qa",
+      "test",
+      undefined,
+      "push",
+    )).toThrow(expect.objectContaining({ code: "UNKNOWN_TRIGGER_EVENT" }));
   });
 
   it("lists jobs for a project", () => {
@@ -115,7 +136,7 @@ describe("jobs — CRUD", () => {
   it("deletes a job", () => {
     const job = createJob(projectId, "Delete Me", undefined, "ingenium-qa", "test");
     const deleted = deleteJob(projectId, job.id);
-    expect(deleted).toBe(true);
+    expect(deleted).toEqual({ status: "deleted" });
 
     const found = getJob(projectId, job.id);
     expect(found).toBeUndefined();
@@ -123,7 +144,7 @@ describe("jobs — CRUD", () => {
 
   it("deleting nonexistent job returns false", () => {
     const deleted = deleteJob(projectId, "nonexistent");
-    expect(deleted).toBe(false);
+    expect(deleted).toEqual({ status: "not_found" });
   });
 });
 
@@ -169,12 +190,12 @@ describe("jobs — run lifecycle (queued → running → success)", () => {
 
   it("finishes a job run as success", () => {
     // Get the current running run
-    const runs = listJobRuns(jobId);
+    const runs = listJobRuns(projectId, jobId);
     expect(runs.length).toBeGreaterThanOrEqual(1);
     const runningRun = runs.find(r => r.status === "running");
     expect(runningRun).not.toBeUndefined();
 
-    const finished = finishJobRun(runningRun!.id, "success", 0);
+    const finished = finishJobRun(projectId, runningRun!.id, "success", 0);
     expect(finished).not.toBeUndefined();
     expect(finished!.status).toBe("success");
     expect(finished!.exit_code).toBe(0);
@@ -182,7 +203,7 @@ describe("jobs — run lifecycle (queued → running → success)", () => {
   });
 
   it("finishing nonexistent run returns undefined", () => {
-    const finished = finishJobRun("nonexistent", "success", 0);
+    const finished = finishJobRun(projectId, "nonexistent", "success", 0);
     expect(finished).toBeUndefined();
   });
 
@@ -194,11 +215,11 @@ describe("jobs — run lifecycle (queued → running → success)", () => {
     expect(runObj.status).toBe("running");
 
     // Clean up
-    finishJobRun(runObj.id, "success", 0);
+    finishJobRun(projectId, runObj.id, "success", 0);
   });
 
   it("lists job runs for a job", () => {
-    const runs = listJobRuns(jobId);
+    const runs = listJobRuns(projectId, jobId);
     expect(runs.length).toBeGreaterThanOrEqual(2);
     expect(runs[0].created_at >= runs[1].created_at).toBe(true); // newest first
   });
@@ -223,14 +244,14 @@ describe("jobs — cancel and timeout", () => {
     expect("reason" in run).toBe(false);
     const runObj = run as JobRun;
 
-    const cancelled = cancelJobRun(runObj.id);
+    const cancelled = cancelJobRun(projectId, runObj.id);
     expect(cancelled).not.toBeUndefined();
     expect(cancelled!.status).toBe("cancelled");
     expect(cancelled!.finished_at).not.toBeNull();
   });
 
   it("cancel on nonexistent run returns undefined", () => {
-    const cancelled = cancelJobRun("nonexistent");
+    const cancelled = cancelJobRun(projectId, "nonexistent");
     expect(cancelled).toBeUndefined();
   });
 });
@@ -256,25 +277,25 @@ describe("jobs — run logs (append + tail polling)", () => {
   });
 
   afterAll(() => {
-    finishJobRun(runId, "success", 0);
+    finishJobRun(projectId, runId, "success", 0);
   });
 
   it("appends stdout and stderr logs with auto-increment seq", () => {
-    const log1 = appendRunLog(runId, "stdout", "first line");
+    const log1 = appendRunLog(projectId, runId, "stdout", "first line");
     expect(log1.seq).toBe(1);
     expect(log1.stream).toBe("stdout");
     expect(log1.line).toBe("first line");
 
-    const log2 = appendRunLog(runId, "stderr", "error line");
+    const log2 = appendRunLog(projectId, runId, "stderr", "error line");
     expect(log2.seq).toBe(2);
     expect(log2.stream).toBe("stderr");
 
-    const log3 = appendRunLog(runId, "stdout", "second line");
+    const log3 = appendRunLog(projectId, runId, "stdout", "second line");
     expect(log3.seq).toBe(3);
   });
 
   it("gets all logs for a run", () => {
-    const logs = getRunLogs(runId);
+    const logs = getRunLogs(projectId, runId);
     expect(logs.length).toBe(3);
     expect(logs[0].seq).toBe(1);
     expect(logs[1].seq).toBe(2);
@@ -282,23 +303,23 @@ describe("jobs — run logs (append + tail polling)", () => {
   });
 
   it("tail-polls logs after a given seq", () => {
-    appendRunLog(runId, "stdout", "fourth line");
-    appendRunLog(runId, "stdout", "fifth line");
+    appendRunLog(projectId, runId, "stdout", "fourth line");
+    appendRunLog(projectId, runId, "stdout", "fifth line");
 
     // Poll after seq 2
-    const newLogs = getRunLogs(runId, 2);
+    const newLogs = getRunLogs(projectId, runId, 2);
     expect(newLogs.length).toBe(3);
     expect(newLogs[0].seq).toBe(3);
     expect(newLogs[2].seq).toBe(5);
   });
 
   it("tail-poll with after beyond all seqs returns empty", () => {
-    const newLogs = getRunLogs(runId, 999);
+    const newLogs = getRunLogs(projectId, runId, 999);
     expect(newLogs.length).toBe(0);
   });
 
   it("getRunLogs for nonexistent run returns empty", () => {
-    const logs = getRunLogs("nonexistent");
+    const logs = getRunLogs(projectId, "nonexistent");
     expect(logs.length).toBe(0);
   });
 });

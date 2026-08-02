@@ -107,6 +107,9 @@ describe("Static WAL safety — no checkpointAfterWrite inside execTransaction c
     "packages/ingenium-core/lib/tools/context.ts",
     "packages/ingenium-core/lib/tools/context-snapshot-import.ts",
     "packages/ingenium-core/lib/tools/maintenance-locks.ts",
+    "packages/ingenium-core/lib/tools/coordination.ts",
+    "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+    "packages/ingenium-core/lib/tools/job-event-deliveries.ts",
   ];
 
   for (const relativePath of OWNED_FILES) {

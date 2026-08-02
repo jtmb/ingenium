@@ -5,6 +5,9 @@ OBSERVATIONS_FILE="$REPO_ROOT/.opencode/skills/observations.md"
 SKILLS_DIR="$REPO_ROOT/.opencode/skills"
 ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
 REFERENCE_INDEX_FILE="$REPO_ROOT/docs/reference/index.md"
+ARCHIVE_ROADMAP_FILE="$REPO_ROOT/docs/reference/archive/ROADMAP-2026-07-31-phase-0.md"
+ARCHIVE_CHECKSUM_FILE="$ARCHIVE_ROADMAP_FILE.sha256"
+ARCHIVE_INDEX_FILE="$REPO_ROOT/docs/reference/archive/index.md"
 
 pass() { echo "✓ PASS: $1"; }
 fail() { echo "✗ FAIL: $1"; }
@@ -92,7 +95,32 @@ validate_roadmap_markers() {
         return 1
     fi
 
-    local marker_lines evidence_lines
+    local task_heading_lines marker_lines evidence_lines
+    task_heading_lines=$(awk '
+        /^```/ { in_fence = !in_fence; next }
+        in_fence { next }
+        /^#### [A-Z][A-Z0-9]*-[0-9]{3} — .+$/ {
+            heading = $0
+            sub(/^#### /, "", heading)
+            sub(/ — .*/, "", heading)
+            print heading
+        }
+    ' "$file" || true)
+    if [[ -z "$task_heading_lines" ]]; then
+        fail "ROADMAP.md — no canonical task headings found (expected #### ID — Title)"
+        return 1
+    fi
+
+    declare -A known_ids=()
+    local task
+    while IFS= read -r task; do
+        if [[ -n "${known_ids[$task]+x}" ]]; then
+            fail "ROADMAP.md — duplicate canonical task heading ID: $task"
+            return 1
+        fi
+        known_ids[$task]=1
+    done <<<"$task_heading_lines"
+
     marker_lines=$(awk '
         /^```/ { in_fence = !in_fence; next }
         in_fence { next }
@@ -102,56 +130,57 @@ validate_roadmap_markers() {
         /<!--/ && !in_log { print "__MARKER_OUTSIDE_APPROVED_LOG__"; next }
         in_log && !historical && /<!--/ { print }
     ' "$file" || true)
-    if [[ -z "$marker_lines" ]]; then
-        pass "ROADMAP.md has no work markers yet (valid baseline state)"
-        return 0
-    fi
     if [[ "$marker_lines" == *"__MARKER_OUTSIDE_APPROVED_LOG__"* ]]; then
         fail "ROADMAP.md — work marker is outside an approved marker-log heading"
         return 1
     fi
 
-    local marker_pattern='^<!-- \(work-(started|complete)\) (BUG-[0-9]{3}|MCP-[0-9]{3}|CTX-[0-9]{3}|DOC-[0-9]{3}|USAGE-[0-9]{3}) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ([^[:space:]]+) -->$'
+    local id_pattern='[A-Z][A-Z0-9]*-[0-9]{3}'
+    local marker_pattern="^<!-- \\(work-(started|complete)\\) ($id_pattern) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ([^[:space:]]+) -->$"
     declare -A active_ids=()
     declare -A completed_ids=()
     declare -A evidence_ids=()
-    local line kind task timestamp actor extra
-    while IFS= read -r line; do
-        if [[ ! "$line" =~ $marker_pattern ]]; then
-            fail "ROADMAP.md — malformed work marker: $line"
-            return 1
-        fi
-        kind="(work-${BASH_REMATCH[1]})"
-        task="${BASH_REMATCH[2]}"
-        timestamp="${BASH_REMATCH[3]}"
-        actor="${BASH_REMATCH[4]}"
-        case "$task" in
-            BUG-000|BUG-001|BUG-002|BUG-003|BUG-004|BUG-005|BUG-006|MCP-001|MCP-002|MCP-003|MCP-004|MCP-005|MCP-006|CTX-001|CTX-002|CTX-003|CTX-004|CTX-005|DOC-001|USAGE-001|USAGE-002|USAGE-003|USAGE-004|USAGE-005) ;;
-            *) fail "ROADMAP.md — unknown work marker ID: $task"; return 1 ;;
-        esac
-        if [[ "$kind" != "(work-started)" && "$kind" != "(work-complete)" ]]; then
-            fail "ROADMAP.md — malformed work marker: $line"
-            return 1
-        fi
-        if [[ "$kind" == "(work-started)" ]]; then
-            if [[ -n "${active_ids[$task]+x}" ]]; then
-                fail "ROADMAP.md — task has duplicate active start marker: $task"
+    local evidence_pattern
+    evidence_pattern="^Evidence ($id_pattern):[[:space:]]+.+$"
+    local line kind task timestamp actor
+    if [[ -n "$marker_lines" ]]; then
+        while IFS= read -r line; do
+            if [[ ! "$line" =~ $marker_pattern ]]; then
+                fail "ROADMAP.md — malformed work marker: $line"
                 return 1
             fi
-            if [[ -n "${completed_ids[$task]+x}" ]]; then
-                fail "ROADMAP.md — task restarted after completion: $task"
+            kind="(work-${BASH_REMATCH[1]})"
+            task="${BASH_REMATCH[2]}"
+            timestamp="${BASH_REMATCH[3]}"
+            actor="${BASH_REMATCH[4]}"
+            if [[ -z "${known_ids[$task]+x}" ]]; then
+                fail "ROADMAP.md — unknown work marker ID: $task"
                 return 1
             fi
-            active_ids[$task]=1
-        else
-            if [[ -z "${active_ids[$task]+x}" ]]; then
-                fail "ROADMAP.md — completion marker has no matching active start: $line"
+            if [[ "$kind" != "(work-started)" && "$kind" != "(work-complete)" ]]; then
+                fail "ROADMAP.md — malformed work marker: $line"
                 return 1
             fi
-            unset 'active_ids[$task]'
-            completed_ids[$task]=1
-        fi
-    done <<<"$marker_lines"
+            if [[ "$kind" == "(work-started)" ]]; then
+                if [[ -n "${active_ids[$task]+x}" ]]; then
+                    fail "ROADMAP.md — task has duplicate active start marker: $task"
+                    return 1
+                fi
+                if [[ -n "${completed_ids[$task]+x}" ]]; then
+                    fail "ROADMAP.md — task restarted after completion: $task"
+                    return 1
+                fi
+                active_ids[$task]=1
+            else
+                if [[ -z "${active_ids[$task]+x}" ]]; then
+                    fail "ROADMAP.md — completion marker has no matching active start: $line"
+                    return 1
+                fi
+                unset 'active_ids[$task]'
+                completed_ids[$task]=1
+            fi
+        done <<<"$marker_lines"
+    fi
 
     evidence_lines=$(awk '
         /^```/ { in_fence = !in_fence; next }
@@ -163,15 +192,15 @@ validate_roadmap_markers() {
     ' "$file" || true)
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        if [[ ! "$line" =~ ^Evidence\ ((BUG|MCP|CTX|DOC|USAGE)-[0-9]{3}):[[:space:]]+.+$ ]]; then
+        if [[ ! "$line" =~ $evidence_pattern ]]; then
             fail "ROADMAP.md — malformed implementation evidence: $line"
             return 1
         fi
         task="${BASH_REMATCH[1]}"
-        case "$task" in
-            BUG-000|BUG-001|BUG-002|BUG-003|BUG-004|BUG-005|BUG-006|MCP-001|MCP-002|MCP-003|MCP-004|MCP-005|MCP-006|CTX-001|CTX-002|CTX-003|CTX-004|CTX-005|DOC-001|USAGE-001|USAGE-002|USAGE-003|USAGE-004|USAGE-005) ;;
-            *) fail "ROADMAP.md — unknown evidence ID: $task"; return 1 ;;
-        esac
+        if [[ -z "${known_ids[$task]+x}" ]]; then
+            fail "ROADMAP.md — unknown evidence ID: $task"
+            return 1
+        fi
         evidence_ids[$task]=1
     done <<<"$evidence_lines"
 
@@ -181,7 +210,11 @@ validate_roadmap_markers() {
             return 1
         fi
     done
-    pass "ROADMAP.md work markers are append-only with independent active tasks"
+    if [[ -z "$marker_lines" && -z "$evidence_lines" ]]; then
+        pass "ROADMAP.md has canonical task IDs and no work markers yet (valid baseline state)"
+    else
+        pass "ROADMAP.md work markers are append-only with independent active tasks"
+    fi
 }
 
 test_roadmap_marker_protocol() {
@@ -213,32 +246,94 @@ test_roadmap_index_link() {
     return 1
 }
 
+test_roadmap_archive_contract() {
+    if [[ ! -f "$ARCHIVE_ROADMAP_FILE" ]]; then
+        fail "ROADMAP archive — exact archive path is missing: $ARCHIVE_ROADMAP_FILE"
+        return 1
+    fi
+    if [[ ! -f "$ARCHIVE_CHECKSUM_FILE" ]]; then
+        fail "ROADMAP archive — sidecar checksum is missing: $ARCHIVE_CHECKSUM_FILE"
+        return 1
+    fi
+    if [[ ! -f "$ARCHIVE_INDEX_FILE" ]]; then
+        fail "ROADMAP archive — archive index is missing: $ARCHIVE_INDEX_FILE"
+        return 1
+    fi
+
+    local actual_hash expected_hash
+    actual_hash=$(sha256sum "$ARCHIVE_ROADMAP_FILE" | awk '{ print $1 }')
+    expected_hash=$(awk 'NF { print $1; exit }' "$ARCHIVE_CHECKSUM_FILE")
+    if [[ ! "$expected_hash" =~ ^[[:xdigit:]]{64}$ ]]; then
+        fail "ROADMAP archive — sidecar does not contain a SHA-256 checksum"
+        return 1
+    fi
+    if [[ "${actual_hash,,}" != "${expected_hash,,}" ]]; then
+        fail "ROADMAP archive — sidecar checksum does not match the archive"
+        return 1
+    fi
+    if ! grep -Eq '^[[:xdigit:]]{64}[[:space:]]+(.*/)?ROADMAP-2026-07-31-phase-0\.md$' "$ARCHIVE_CHECKSUM_FILE"; then
+        fail "ROADMAP archive — sidecar does not name the exact archived roadmap"
+        return 1
+    fi
+    if ! grep -Fq '](./ROADMAP-2026-07-31-phase-0.md)' "$ARCHIVE_INDEX_FILE"; then
+        fail "ROADMAP archive — archive index does not link the exact archived roadmap"
+        return 1
+    fi
+    if ! grep -Fq '](./ROADMAP-2026-07-31-phase-0.md.sha256)' "$ARCHIVE_INDEX_FILE"; then
+        fail "ROADMAP archive — archive index does not link the checksum sidecar"
+        return 1
+    fi
+    if ! grep -Fq '](./archive/ROADMAP-2026-07-31-phase-0.md)' "$REFERENCE_INDEX_FILE"; then
+        fail "ROADMAP archive — canonical reference index does not link the exact archive"
+        return 1
+    fi
+    if ! grep -Fq '](./archive/index.md)' "$REFERENCE_INDEX_FILE"; then
+        fail "ROADMAP archive — canonical reference index does not link the archive index"
+        return 1
+    fi
+    pass "ROADMAP archive has the exact path, matching sidecar checksum, and index links"
+}
+
 test_roadmap_marker_parser_cases() {
     local tmp
     tmp=$(mktemp -d)
     trap 'rm -rf "${tmp:-}"' RETURN
-    local valid='<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->
+    local valid='#### BUG-000 — Fixture task
+### Work marker log
+<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->
 <!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->
 Evidence BUG-000: implementation tests passed'
-    printf '### Work marker log\n%s\n' "$valid" >"$tmp/valid.md"
+    printf '%s\n' "$valid" >"$tmp/valid.md"
     if ! validate_roadmap_markers "$tmp/valid.md"; then fail "marker parser rejected valid pair"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent name -->\n' >"$tmp/malformed.md"
+    printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent name -->\n' >"$tmp/malformed.md"
     if validate_roadmap_markers "$tmp/malformed.md" >/dev/null 2>&1; then fail "marker parser accepted malformed marker"; return 1; fi
-    printf '### Work marker log\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/ordering.md"
+    printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/ordering.md"
     if validate_roadmap_markers "$tmp/ordering.md" >/dev/null 2>&1; then fail "marker parser accepted out-of-order markers"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-999 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/unknown.md"
+    printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-started) BUG-999 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/unknown.md"
     if validate_roadmap_markers "$tmp/unknown.md" >/dev/null 2>&1; then fail "marker parser accepted unknown ID"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-003 2026-01-01T00:00:00Z agent-a -->\n<!-- (work-started) BUG-004 2026-01-01T00:00:01Z agent-b -->\n<!-- (work-complete) BUG-004 2026-01-01T01:00:00Z agent-b -->\n<!-- (work-complete) BUG-003 2026-01-01T01:00:01Z agent-a -->\nEvidence BUG-003: implementation tests passed\nEvidence BUG-004: implementation tests passed\n' >"$tmp/parallel.md"
+    printf '#### BUG-003 — Parallel task A\n#### BUG-004 — Parallel task B\n### Work marker log\n<!-- (work-started) BUG-003 2026-01-01T00:00:00Z agent-a -->\n<!-- (work-started) BUG-004 2026-01-01T00:00:01Z agent-b -->\n<!-- (work-complete) BUG-004 2026-01-01T01:00:00Z agent-b -->\n<!-- (work-complete) BUG-003 2026-01-01T01:00:01Z agent-a -->\nEvidence BUG-003: implementation tests passed\nEvidence BUG-004: implementation tests passed\n' >"$tmp/parallel.md"
     if ! validate_roadmap_markers "$tmp/parallel.md"; then fail "marker parser rejected independent parallel starts"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:01Z agent-name -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/duplicate-complete.md"
+    printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:01Z agent-name -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/duplicate-complete.md"
     if validate_roadmap_markers "$tmp/duplicate-complete.md" >/dev/null 2>&1; then fail "marker parser accepted duplicate completion"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\nEvidence BUG-000: implementation tests passed\n### Work marker log (continued)\n<!-- (work-started) BUG-001 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/continued.md"
+    printf '#### BUG-000 — Fixture task\n#### BUG-001 — Continued task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\nEvidence BUG-000: implementation tests passed\n### Work marker log (continued)\n<!-- (work-started) BUG-001 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/continued.md"
     if ! validate_roadmap_markers "$tmp/continued.md"; then fail "marker parser rejected a continued marker log"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Other heading\n<!-- (work-started) BUG-001 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/outside-heading.md"
+    printf '#### BUG-000 — Fixture task\n#### BUG-001 — Outside task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Other heading\n<!-- (work-started) BUG-001 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/outside-heading.md"
     if validate_roadmap_markers "$tmp/outside-heading.md" >/dev/null 2>&1; then fail "marker parser accepted marker outside approved heading"; return 1; fi
-    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Work marker log (continued)\n<!-- (work-started) BUG-000 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/restart.md"
+    printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Work marker log (continued)\n<!-- (work-started) BUG-000 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/restart.md"
     if validate_roadmap_markers "$tmp/restart.md" >/dev/null 2>&1; then fail "marker parser accepted restart after completion"; return 1; fi
-    pass "Marker parser accepts valid/parallel/continued pairs and rejects malformed, ordering, duplicate, restart, and unknown-ID cases"
+    printf '#### DOC-100 — Validator coverage\n### Work marker log\n<!-- (work-started) DOC-100 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) DOC-100 2026-01-01T01:00:00Z agent-name -->\nEvidence DOC-100: validator tests passed\n' >"$tmp/doc-100.md"
+    if ! validate_roadmap_markers "$tmp/doc-100.md"; then fail "marker parser rejected DOC-100"; return 1; fi
+    printf '#### DOC-100 — First title\n#### DOC-100 — Duplicate title\n' >"$tmp/duplicate-heading.md"
+    if validate_roadmap_markers "$tmp/duplicate-heading.md" >/dev/null 2>&1; then fail "marker parser accepted duplicate canonical heading ID"; return 1; fi
+    printf '### Work marker log\n' >"$tmp/no-ids.md"
+    if validate_roadmap_markers "$tmp/no-ids.md" >/dev/null 2>&1; then fail "marker parser accepted a roadmap with no canonical IDs"; return 1; fi
+    printf '#### BUG-000 — Fixture task\n### Work marker log\nEvidence BUG-999: unknown evidence\n' >"$tmp/unknown-evidence.md"
+    if validate_roadmap_markers "$tmp/unknown-evidence.md" >/dev/null 2>&1; then fail "marker parser accepted unknown evidence ID"; return 1; fi
+    mkdir -p "$tmp/archive"
+    printf '#### ARCHIVE-001 — Archived-only task\n' >"$tmp/archive/ROADMAP-2026-07-31-phase-0.md"
+    printf '#### DOC-100 — Current task\n### Work marker log\n<!-- (work-started) ARCHIVE-001 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/archive-only.md"
+    if validate_roadmap_markers "$tmp/archive-only.md" >/dev/null 2>&1; then fail "marker parser accepted ID defined only in the archive"; return 1; fi
+    pass "Marker parser accepts valid/parallel/continued/DOC-100 pairs and rejects malformed, ordering, duplicate, restart, unknown, duplicate-heading, and archive-only cases"
 }
 
 run_all_tests() {
@@ -254,6 +349,7 @@ run_all_tests() {
     test_skills_directory_structure || ((failures++))
     test_roadmap_marker_protocol || ((failures++))
     test_roadmap_index_link || ((failures++))
+    test_roadmap_archive_contract || ((failures++))
     test_roadmap_marker_parser_cases || ((failures++))
 
     echo ""

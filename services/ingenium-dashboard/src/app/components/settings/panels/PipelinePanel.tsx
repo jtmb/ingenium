@@ -11,6 +11,7 @@ import {
   type OpenCodeProvider,
 } from "../../../../lib/opencode";
 import SettingRow from "../SettingRow";
+import Select from "../../Select";
 
 /** Internal type that adds a stable draft ID for React keys and collapse/key-visibility state. */
 type DraftProvider = ManagedProviderConfig & { _draftId?: string };
@@ -535,9 +536,9 @@ export default function PipelinePanel() {
                       </label>
                       <label className="text-xs font-medium text-[var(--color-text-secondary)]">
                         Provider package
-                        <select value={provider.npm} onChange={(event) => updateProvider(index, { npm: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
-                          {PACKAGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label} ({value})</option>)}
-                        </select>
+                         <Select value={provider.npm} onChange={(event) => updateProvider(index, { npm: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                           {PACKAGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label} ({value})</option>)}
+                         </Select>
                       </label>
                     </div>
 
@@ -614,7 +615,7 @@ export default function PipelinePanel() {
           <div className="mt-3 grid gap-4 md:grid-cols-2">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Primary
-              <select value={primaryProviderId} onChange={(event) => {
+              <Select value={primaryProviderId} onChange={(event) => {
                 setPrimaryProviderId(event.target.value);
                 const model = providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? "";
                 setPrimaryModelId(model);
@@ -625,34 +626,34 @@ export default function PipelinePanel() {
               }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
                 {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
-              </select>
-              <select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
+              </Select>
+              <Select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
                 <option value="">Select model</option>
                 {(selectedPrimaryProvider?.models ?? []).filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
-              </select>
+              </Select>
             </label>
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Secondary
-              <select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+              <Select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
                 {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
-              </select>
-              <select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
+              </Select>
+              <Select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
                 <option value="">Select model</option>
                 {(selectedBackupProvider?.models ?? []).filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
-              </select>
+              </Select>
             </label>
           </div>
         </div>
-        <SettingRow label="Synthesis schedule" description="How often Ingenium processes observations">
-          <select value={String(intervalMin)} onChange={(event) => saveInterval(Number(event.target.value))} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+        <SettingRow label="Synthesis schedule" description="How often Ingenium processes observations" controlId="pipeline-schedule">
+          <Select id="pipeline-schedule" value={String(intervalMin)} onChange={(event) => saveInterval(Number(event.target.value))} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="5">5 minutes</option>
             <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
             <option value="60">1 hour</option>
             <option value="240">4 hours</option>
             <option value="0">Disabled</option>
-          </select>
+          </Select>
         </SettingRow>
       </div>
 
@@ -679,23 +680,23 @@ export default function PipelinePanel() {
                 {actionableMethods.length > 1 && (
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                     Login method
-                    <select value={connectMethod?.id ?? connectMethod?.type ?? ""} onChange={(event) => {
+                    <Select value={connectMethod?.id ?? connectMethod?.type ?? ""} onChange={(event) => {
                       const method = actionableMethods.find((candidate) => (candidate.id ?? candidate.type) === event.target.value) ?? null;
                       setConnectMethod(method);
                       setConnectInputs({});
                     }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                       {actionableMethods.map((method, index) => <option key={`${method.id ?? method.type}-${index}`} value={method.id ?? method.type}>{method.label ?? (method.type === "key" ? "API key" : "OAuth")}</option>)}
-                    </select>
+                    </Select>
                   </label>
                 )}
                 {connectMethod?.prompts?.map((prompt) => (
                   <label key={prompt.key} className="block text-xs font-medium text-[var(--color-text-secondary)]">
                     {prompt.message}
                     {prompt.type === "select" ? (
-                      <select value={connectInputs[prompt.key] ?? ""} onChange={(event) => setConnectInputs((current) => ({ ...current, [prompt.key]: event.target.value }))} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                      <Select value={connectInputs[prompt.key] ?? ""} onChange={(event) => setConnectInputs((current) => ({ ...current, [prompt.key]: event.target.value }))} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                         <option value="">Select...</option>
                         {prompt.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                      </select>
+                      </Select>
                     ) : (
                       <input value={connectInputs[prompt.key] ?? ""} onChange={(event) => setConnectInputs((current) => ({ ...current, [prompt.key]: event.target.value }))} placeholder={prompt.placeholder} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]" />
                     )}

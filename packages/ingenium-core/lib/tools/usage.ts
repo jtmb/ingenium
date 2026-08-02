@@ -3,14 +3,35 @@ import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 
 export const USAGE_STATUS_VALUES = ["success", "error", "partial", "unknown"] as const;
 export const USAGE_AVAILABILITY_VALUES = ["known", "partial", "unavailable"] as const;
+export const USAGE_ADVISORY_STATE_VALUES = ["disabled", "unknown", "below", "equal", "above"] as const;
+export const USAGE_ATTENTION_STATUS_VALUES = ["active", "resolved"] as const;
+export const USAGE_ATTENTION_SEVERITY_VALUES = ["info", "warning", "critical"] as const;
+export const USAGE_ATTENTION_FRESHNESS_VALUES = ["disabled", "unknown", "fresh", "stale"] as const;
+export const USAGE_ATTENTION_TRANSITION_VALUES = ["opened", "changed", "resolved", "reopened", "ack"] as const;
+export const USAGE_ATTENTION_PAGE_MAX = 100;
 export const USAGE_EVENT_PAGE_MAX = 200;
 export const USAGE_EXPORT_PAGE_MAX = 10_000;
+export const USAGE_ADVISORY_THRESHOLD_MAX = Number.MAX_SAFE_INTEGER;
 
 export type UsageStatus = typeof USAGE_STATUS_VALUES[number];
 export type UsageAvailability = typeof USAGE_AVAILABILITY_VALUES[number];
+export type UsageAdvisoryState = typeof USAGE_ADVISORY_STATE_VALUES[number];
+export type UsageAttentionStatus = typeof USAGE_ATTENTION_STATUS_VALUES[number];
+export type UsageAttentionSeverity = typeof USAGE_ATTENTION_SEVERITY_VALUES[number];
+export type UsageAttentionFreshness = typeof USAGE_ATTENTION_FRESHNESS_VALUES[number];
+export type UsageAttentionTransition = typeof USAGE_ATTENTION_TRANSITION_VALUES[number];
+export type UsageErrorCode =
+  | "INVALID_USAGE_INPUT"
+  | "INVALID_USAGE_QUERY"
+  | "INVALID_USAGE_THRESHOLD_INPUT"
+  | "PROJECT_NOT_FOUND"
+  | "MAPPING_OWNED_BY_OTHER_PROJECT"
+  | "USAGE_THRESHOLD_REVISION_CONFLICT"
+  | "USAGE_ATTENTION_ITEM_NOT_FOUND"
+  | "USAGE_ATTENTION_REVISION_CONFLICT";
 
 export class UsageError extends Error {
-  constructor(public readonly code: "INVALID_USAGE_INPUT" | "INVALID_USAGE_QUERY" | "PROJECT_NOT_FOUND" | "MAPPING_OWNED_BY_OTHER_PROJECT") {
+  constructor(public readonly code: UsageErrorCode, public readonly currentRevision?: number) {
     super(code);
     this.name = "UsageError";
   }
@@ -124,6 +145,115 @@ export interface UsageSummary {
   };
 }
 
+/** One nullable, advisory-only threshold configuration per project. */
+export interface UsageAdvisoryThresholds {
+  requestCount: number | null;
+  totalTokens: number | null;
+  reportedCostAmount: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  revision: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** PUT replacement input: every threshold key is required and may be null. */
+export interface ReplaceUsageAdvisoryThresholdsInput {
+  expectedRevision: number;
+  requestCount: number | null;
+  totalTokens: number | null;
+  reportedCostAmount: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+}
+
+export interface UsageAdvisoryEvaluationQuery {
+  from?: string;
+  to?: string;
+}
+
+export interface UsageAdvisoryRange {
+  from: string | null;
+  to: string | null;
+}
+
+/** Every metric retains a reported subtotal even when its advisory state is unknown. */
+export interface UsageAdvisoryMetric {
+  observed: number | null;
+  threshold: number | null;
+  availability: UsageAvailability;
+  state: UsageAdvisoryState;
+}
+
+export interface UsageAdvisoryEvaluation {
+  range: UsageAdvisoryRange;
+  generatedAt: string;
+  thresholds: UsageAdvisoryThresholds;
+  metrics: {
+    requestCount: UsageAdvisoryMetric;
+    totalTokens: UsageAdvisoryMetric;
+    reportedCostAmount: UsageAdvisoryMetric;
+    cacheReadTokens: UsageAdvisoryMetric;
+    cacheWriteTokens: UsageAdvisoryMetric;
+  };
+}
+
+export type UsageAttentionMetric =
+  | "request_count"
+  | "total_tokens"
+  | "reported_cost_amount"
+  | "cache_read_tokens"
+  | "cache_write_tokens";
+
+export interface UsageAttentionItem {
+  id: string;
+  condition: string;
+  metric: UsageAttentionMetric;
+  status: UsageAttentionStatus;
+  evaluationState: UsageAdvisoryState;
+  severity: UsageAttentionSeverity;
+  messageCode: string;
+  observed: number | null;
+  threshold: number | null;
+  availability: UsageAvailability;
+  freshness: UsageAttentionFreshness;
+  range: { from: null; to: null };
+  thresholdRevision: number;
+  openedAt: string;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  reopenedAt: string | null;
+  reopenCount: number;
+  lastEvaluatedAt: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UsageAttentionEvent {
+  id: string;
+  itemId: string;
+  transition: UsageAttentionTransition;
+  createdAt: string;
+}
+
+export interface UsageAttentionPage {
+  data: UsageAttentionItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  total: number;
+}
+
+export interface ReconcileUsageAttentionOptions {
+  syncIntervalMs: number;
+}
+
+export interface UsageAttentionReconciliation {
+  evaluatedAt: string;
+  items: UsageAttentionItem[];
+  transitions: UsageAttentionEvent[];
+}
+
 interface UsageAggregateRow {
   request_count: number;
   total_tokens: number | null;
@@ -179,18 +309,18 @@ function requireUtcTimestamp(value: unknown, code: UsageError["code"] = "INVALID
   return new Date(timestamp).toISOString();
 }
 
-function optionalNonNegativeInteger(value: unknown): number | null {
+function optionalNonNegativeInteger(value: unknown, code: UsageErrorCode = "INVALID_USAGE_INPUT"): number | null {
   if (value === null || value === undefined) return null;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new UsageError("INVALID_USAGE_INPUT");
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > USAGE_ADVISORY_THRESHOLD_MAX) {
+    throw new UsageError(code);
   }
   return value;
 }
 
-function optionalNonNegativeNumber(value: unknown): number | null {
+function optionalNonNegativeNumber(value: unknown, code: UsageErrorCode = "INVALID_USAGE_INPUT"): number | null {
   if (value === null || value === undefined) return null;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new UsageError("INVALID_USAGE_INPUT");
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > USAGE_ADVISORY_THRESHOLD_MAX) {
+    throw new UsageError(code);
   }
   return value;
 }
@@ -237,6 +367,145 @@ function normalizeUsageEvent(input: UsageEventInput): UsageEventInput {
 function assertProjectExists(projectId: string): void {
   const project = getDb().prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId);
   if (!project) throw new UsageError("PROJECT_NOT_FOUND");
+}
+
+const ADVISORY_THRESHOLD_FIELDS = [
+  "requestCount",
+  "totalTokens",
+  "reportedCostAmount",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+] as const;
+
+function defaultUsageAdvisoryThresholds(): UsageAdvisoryThresholds {
+  return {
+    requestCount: null,
+    totalTokens: null,
+    reportedCostAmount: null,
+    cacheReadTokens: null,
+    cacheWriteTokens: null,
+    revision: 1,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function readUsageAdvisoryThresholds(row: any): UsageAdvisoryThresholds {
+  return {
+    requestCount: row.request_count,
+    totalTokens: row.total_tokens,
+    reportedCostAmount: row.reported_cost_amount,
+    cacheReadTokens: row.cache_read_tokens,
+    cacheWriteTokens: row.cache_write_tokens,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function existingUsageAdvisoryThresholds(projectId: string): UsageAdvisoryThresholds | null {
+  const row = getDb().prepare(
+    "SELECT * FROM usage_advisory_thresholds WHERE project_id = ?",
+  ).get(projectId);
+  return row ? readUsageAdvisoryThresholds(row) : null;
+}
+
+function normalizeUsageAdvisoryThresholdReplacement(input: ReplaceUsageAdvisoryThresholdsInput): ReplaceUsageAdvisoryThresholdsInput {
+  if (!input || typeof input !== "object" || ADVISORY_THRESHOLD_FIELDS.some((field) => !(field in input))) {
+    throw new UsageError("INVALID_USAGE_THRESHOLD_INPUT");
+  }
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new UsageError("INVALID_USAGE_THRESHOLD_INPUT");
+  }
+  return {
+    expectedRevision: input.expectedRevision,
+    requestCount: optionalNonNegativeInteger(input.requestCount, "INVALID_USAGE_THRESHOLD_INPUT"),
+    totalTokens: optionalNonNegativeInteger(input.totalTokens, "INVALID_USAGE_THRESHOLD_INPUT"),
+    reportedCostAmount: optionalNonNegativeNumber(input.reportedCostAmount, "INVALID_USAGE_THRESHOLD_INPUT"),
+    cacheReadTokens: optionalNonNegativeInteger(input.cacheReadTokens, "INVALID_USAGE_THRESHOLD_INPUT"),
+    cacheWriteTokens: optionalNonNegativeInteger(input.cacheWriteTokens, "INVALID_USAGE_THRESHOLD_INPUT"),
+  };
+}
+
+/** Returns the persisted threshold row or the implicit all-null default without writing. */
+export function getUsageAdvisoryThresholds(projectId: string): UsageAdvisoryThresholds {
+  const normalizedProjectId = requireIdentifier(projectId, "INVALID_USAGE_THRESHOLD_INPUT");
+  assertProjectExists(normalizedProjectId);
+  return existingUsageAdvisoryThresholds(normalizedProjectId) ?? defaultUsageAdvisoryThresholds();
+}
+
+/**
+ * Replaces every threshold field. The all-null implicit default is revision 1;
+ * a successful first replacement therefore returns revision 2.
+ */
+export function replaceUsageAdvisoryThresholds(
+  projectId: string,
+  input: ReplaceUsageAdvisoryThresholdsInput,
+): UsageAdvisoryThresholds {
+  const normalizedProjectId = requireIdentifier(projectId, "INVALID_USAGE_THRESHOLD_INPUT");
+  const replacement = normalizeUsageAdvisoryThresholdReplacement(input);
+  const result = execTransaction(() => {
+    assertProjectExists(normalizedProjectId);
+    const existing = existingUsageAdvisoryThresholds(normalizedProjectId);
+    const currentRevision = existing?.revision ?? 1;
+    if (currentRevision !== replacement.expectedRevision) {
+      throw new UsageError("USAGE_THRESHOLD_REVISION_CONFLICT", currentRevision);
+    }
+    const timestamp = now();
+    if (existing) {
+      const update = getDb().prepare(
+        `UPDATE usage_advisory_thresholds SET
+          request_count = ?, total_tokens = ?, reported_cost_amount = ?,
+          cache_read_tokens = ?, cache_write_tokens = ?, revision = revision + 1, updated_at = ?
+         WHERE project_id = ? AND revision = ?`,
+      ).run(
+        replacement.requestCount,
+        replacement.totalTokens,
+        replacement.reportedCostAmount,
+        replacement.cacheReadTokens,
+        replacement.cacheWriteTokens,
+        timestamp,
+        normalizedProjectId,
+        replacement.expectedRevision,
+      );
+      if (update.changes === 0) {
+        const current = existingUsageAdvisoryThresholds(normalizedProjectId);
+        if (!current) throw new UsageError("PROJECT_NOT_FOUND");
+        throw new UsageError("USAGE_THRESHOLD_REVISION_CONFLICT", current.revision);
+      }
+    } else {
+      getDb().prepare(
+        `INSERT INTO usage_advisory_thresholds (
+          project_id, request_count, total_tokens, reported_cost_amount,
+          cache_read_tokens, cache_write_tokens, revision, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 2, ?, ?)`,
+      ).run(
+        normalizedProjectId,
+        replacement.requestCount,
+        replacement.totalTokens,
+        replacement.reportedCostAmount,
+        replacement.cacheReadTokens,
+        replacement.cacheWriteTokens,
+        timestamp,
+        timestamp,
+      );
+    }
+    const updated = existingUsageAdvisoryThresholds(normalizedProjectId);
+    if (!updated) throw new Error("Usage advisory threshold update failed");
+    return updated;
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+function normalizeUsageAdvisoryRange(query: UsageAdvisoryEvaluationQuery): UsageAdvisoryRange {
+  const { from, to } = query;
+  if (from === undefined && to === undefined) return { from: null, to: null };
+  if (from === undefined || to === undefined) throw new UsageError("INVALID_USAGE_QUERY");
+  const normalizedFrom = requireUtcTimestamp(from, "INVALID_USAGE_QUERY");
+  const normalizedTo = requireUtcTimestamp(to, "INVALID_USAGE_QUERY");
+  if (normalizedFrom >= normalizedTo) throw new UsageError("INVALID_USAGE_QUERY");
+  return { from: normalizedFrom, to: normalizedTo };
 }
 
 function readMapping(row: any): UsageProjectMapping {
@@ -576,6 +845,16 @@ const AGGREGATE_COLUMNS = `
   SUM(CASE WHEN e.cost_status = 'known' THEN 1 ELSE 0 END) AS cost_known_count,
   SUM(CASE WHEN e.cost_status = 'partial' THEN 1 ELSE 0 END) AS cost_partial_count`;
 
+function aggregateUsageMetrics(projectId: string, query?: Required<UsageQuery>): UsageMetrics {
+  const filter = query
+    ? filterSql(projectId, query)
+    : { where: "e.project_id = ?", params: [requireIdentifier(projectId, "INVALID_USAGE_QUERY")] };
+  const totals = getDb().prepare(
+    `SELECT ${AGGREGATE_COLUMNS} FROM usage_events e WHERE ${filter.where}`,
+  ).get(...filter.params) as UsageAggregateRow;
+  return toMetrics(totals);
+}
+
 function rangeDays(from: string, to: string): string[] {
   const start = new Date(from);
   const end = new Date(to);
@@ -593,9 +872,6 @@ export function getUsageSummary(projectId: string, query: UsageQuery): UsageSumm
   assertProjectExists(projectId);
   const filter = filterSql(projectId, normalizedQuery);
   const db = getDb();
-  const totals = db.prepare(
-    `SELECT ${AGGREGATE_COLUMNS} FROM usage_events e WHERE ${filter.where}`,
-  ).get(...filter.params) as UsageAggregateRow;
   const dailyRows = db.prepare(
     `SELECT substr(e.occurred_at, 1, 10) AS day, ${AGGREGATE_COLUMNS}
      FROM usage_events e WHERE ${filter.where}
@@ -637,7 +913,7 @@ export function getUsageSummary(projectId: string, query: UsageQuery): UsageSumm
   };
   return {
     range: { from: normalizedQuery.from, to: normalizedQuery.to },
-    totals: toMetrics(totals),
+    totals: aggregateUsageMetrics(projectId, normalizedQuery),
     daily,
     freshness: {
       latestEventAt: latestEvent.latest_event_at,
@@ -645,6 +921,487 @@ export function getUsageSummary(projectId: string, query: UsageQuery): UsageSumm
       lastSuccessfulSyncAt: latestSync.last_successful_sync_at,
     },
   };
+}
+
+function advisoryMetric(
+  observed: number | null,
+  availability: UsageAvailability,
+  threshold: number | null,
+): UsageAdvisoryMetric {
+  if (threshold === null) return { observed, threshold, availability, state: "disabled" };
+  if (availability !== "known" || observed === null) {
+    return { observed, threshold, availability, state: "unknown" };
+  }
+  return {
+    observed,
+    threshold,
+    availability,
+    state: observed < threshold ? "below" : observed === threshold ? "equal" : "above",
+  };
+}
+
+/**
+ * Evaluates thresholds without mutating configuration, telemetry, sync state, or
+ * request routing. A null range is an explicit all-history aggregate.
+ */
+export function evaluateUsageAdvisoryThresholds(
+  projectId: string,
+  query: UsageAdvisoryEvaluationQuery = {},
+): UsageAdvisoryEvaluation {
+  const normalizedProjectId = requireIdentifier(projectId, "INVALID_USAGE_QUERY");
+  const range = normalizeUsageAdvisoryRange(query);
+  assertProjectExists(normalizedProjectId);
+  const normalizedQuery = range.from === null || range.to === null
+    ? undefined
+    : normalizeQuery({ from: range.from, to: range.to });
+  const totals = aggregateUsageMetrics(normalizedProjectId, normalizedQuery);
+  // Do not call getUsageAdvisoryThresholds here: evaluation must remain read-only.
+  const thresholds = existingUsageAdvisoryThresholds(normalizedProjectId) ?? defaultUsageAdvisoryThresholds();
+  return {
+    range,
+    generatedAt: now(),
+    thresholds,
+    metrics: {
+      requestCount: advisoryMetric(totals.requests, "known", thresholds.requestCount),
+      totalTokens: advisoryMetric(totals.tokens.total.value, totals.tokens.total.availability, thresholds.totalTokens),
+      reportedCostAmount: advisoryMetric(totals.cost.value, totals.cost.availability, thresholds.reportedCostAmount),
+      cacheReadTokens: advisoryMetric(totals.cache.read.value, totals.cache.read.availability, thresholds.cacheReadTokens),
+      cacheWriteTokens: advisoryMetric(totals.cache.write.value, totals.cache.write.availability, thresholds.cacheWriteTokens),
+    },
+  };
+}
+
+interface UsageAttentionDefinition {
+  metric: UsageAttentionMetric;
+  condition: string;
+}
+
+interface UsageAttentionCursor {
+  updatedAt: string;
+  id: string;
+}
+
+const USAGE_ATTENTION_DEFINITIONS: readonly UsageAttentionDefinition[] = [
+  { metric: "request_count", condition: "usage.advisory:v1:all-history:request_count" },
+  { metric: "total_tokens", condition: "usage.advisory:v1:all-history:total_tokens" },
+  { metric: "reported_cost_amount", condition: "usage.advisory:v1:all-history:reported_cost_amount" },
+  { metric: "cache_read_tokens", condition: "usage.advisory:v1:all-history:cache_read_tokens" },
+  { metric: "cache_write_tokens", condition: "usage.advisory:v1:all-history:cache_write_tokens" },
+];
+
+const USAGE_ATTENTION_METADATA: Record<UsageAdvisoryState, {
+  status: UsageAttentionStatus;
+  severity: UsageAttentionSeverity;
+  messageCode: string;
+}> = {
+  disabled: { status: "resolved", severity: "info", messageCode: "USAGE_ADVISORY_DISABLED" },
+  unknown: { status: "active", severity: "info", messageCode: "USAGE_ADVISORY_UNKNOWN" },
+  below: { status: "resolved", severity: "info", messageCode: "USAGE_ADVISORY_BELOW" },
+  equal: { status: "active", severity: "warning", messageCode: "USAGE_ADVISORY_EQUAL" },
+  above: { status: "active", severity: "critical", messageCode: "USAGE_ADVISORY_ABOVE" },
+};
+
+function readUsageAttentionItem(row: any): UsageAttentionItem {
+  return {
+    id: row.id,
+    condition: row.condition,
+    metric: row.metric as UsageAttentionMetric,
+    status: row.status,
+    evaluationState: row.evaluation_state,
+    severity: row.severity,
+    messageCode: row.message_code,
+    observed: row.observed,
+    threshold: row.threshold,
+    availability: row.availability,
+    freshness: row.freshness,
+    range: { from: null, to: null },
+    thresholdRevision: row.threshold_revision,
+    openedAt: row.opened_at,
+    acknowledgedAt: row.acknowledged_at,
+    resolvedAt: row.resolved_at,
+    reopenedAt: row.reopened_at,
+    reopenCount: row.reopen_count,
+    lastEvaluatedAt: row.last_evaluated_at,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function attentionMetric(
+  evaluation: UsageAdvisoryEvaluation,
+  metric: UsageAttentionMetric,
+): UsageAdvisoryMetric {
+  switch (metric) {
+    case "request_count": return evaluation.metrics.requestCount;
+    case "total_tokens": return evaluation.metrics.totalTokens;
+    case "reported_cost_amount": return evaluation.metrics.reportedCostAmount;
+    case "cache_read_tokens": return evaluation.metrics.cacheReadTokens;
+    case "cache_write_tokens": return evaluation.metrics.cacheWriteTokens;
+  }
+}
+
+function requireUsageAttentionSyncInterval(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new UsageError("INVALID_USAGE_INPUT");
+  }
+  return value;
+}
+
+/**
+ * Freshness intentionally uses sync-state success evidence, never usage-event
+ * recency. Every mapped source must have a successful sync; any stale source
+ * makes the all-history advisory stale.
+ */
+function usageAttentionFreshness(
+  projectId: string,
+  syncIntervalMs: number,
+  evaluatedAt: string,
+): UsageAttentionFreshness {
+  if (syncIntervalMs === 0) return "disabled";
+  const sources = getDb().prepare(
+    `SELECT mapping.source_instance, sync.last_successful_sync_at
+     FROM usage_project_mappings mapping
+     LEFT JOIN usage_sync_state sync
+       ON sync.source_instance = mapping.source_instance AND sync.project_id = mapping.ingenium_project_id
+     WHERE mapping.ingenium_project_id = ? AND mapping.status = 'mapped'`,
+  ).all(projectId) as Array<{ source_instance: string; last_successful_sync_at: string | null }>;
+  if (sources.length === 0) return "unknown";
+
+  const evaluatedMs = Date.parse(evaluatedAt);
+  const staleAfterMs = syncIntervalMs > Number.MAX_SAFE_INTEGER / 2
+    ? Number.MAX_SAFE_INTEGER
+    : syncIntervalMs * 2;
+  let stale = false;
+  for (const source of sources) {
+    const successfulAt = source.last_successful_sync_at;
+    const successfulMs = successfulAt === null ? Number.NaN : Date.parse(successfulAt);
+    if (!Number.isFinite(successfulMs)) return "unknown";
+    if (evaluatedMs - successfulMs > staleAfterMs) stale = true;
+  }
+  return stale ? "stale" : "fresh";
+}
+
+function attentionItemForEvaluation(
+  definition: UsageAttentionDefinition,
+  metric: UsageAdvisoryMetric,
+  thresholdRevision: number,
+  freshness: UsageAttentionFreshness,
+  timestamp: string,
+): UsageAttentionItem {
+  const metadata = USAGE_ATTENTION_METADATA[metric.state];
+  return {
+    id: randomUUID(),
+    condition: definition.condition,
+    metric: definition.metric,
+    status: metadata.status,
+    evaluationState: metric.state,
+    severity: metadata.severity,
+    messageCode: metadata.messageCode,
+    observed: metric.observed,
+    threshold: metric.threshold,
+    availability: metric.availability,
+    freshness,
+    range: { from: null, to: null },
+    thresholdRevision,
+    openedAt: timestamp,
+    acknowledgedAt: null,
+    resolvedAt: null,
+    reopenedAt: null,
+    reopenCount: 0,
+    lastEvaluatedAt: timestamp,
+    revision: 1,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function attentionItemWithLifecycle(
+  previous: UsageAttentionItem,
+  evaluated: UsageAttentionItem,
+  timestamp: string,
+): { item: UsageAttentionItem; transition: UsageAttentionTransition | null } {
+  const reopening = previous.status === "resolved" && evaluated.status === "active";
+  const resolving = previous.status === "active" && evaluated.status === "resolved";
+  const materialActiveChange = previous.status === "active" && evaluated.status === "active" && (
+    previous.evaluationState !== evaluated.evaluationState
+    || previous.severity !== evaluated.severity
+    || previous.freshness !== evaluated.freshness
+    || previous.thresholdRevision !== evaluated.thresholdRevision
+  );
+  const transition: UsageAttentionTransition | null = reopening
+    ? "reopened"
+    : resolving
+      ? "resolved"
+      : materialActiveChange
+        ? "changed"
+        : null;
+  return {
+    item: {
+      ...evaluated,
+      id: previous.id,
+      openedAt: previous.openedAt,
+      acknowledgedAt: reopening || materialActiveChange ? null : previous.acknowledgedAt,
+      resolvedAt: evaluated.status === "resolved"
+        ? previous.status === "resolved" ? previous.resolvedAt : timestamp
+        : null,
+      reopenedAt: reopening ? timestamp : previous.reopenedAt,
+      reopenCount: reopening ? previous.reopenCount + 1 : previous.reopenCount,
+      revision: previous.revision + 1,
+      createdAt: previous.createdAt,
+      updatedAt: timestamp,
+    },
+    transition,
+  };
+}
+
+function insertUsageAttentionItem(projectId: string, item: UsageAttentionItem): void {
+  getDb().prepare(
+    `INSERT INTO usage_attention_items (
+      id, project_id, condition, metric, status, evaluation_state, severity, message_code,
+      observed, threshold, availability, freshness, range_from, range_to, threshold_revision,
+      opened_at, acknowledged_at, resolved_at, reopened_at, reopen_count, last_evaluated_at,
+      revision, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    item.id, projectId, item.condition, item.metric, item.status, item.evaluationState, item.severity, item.messageCode,
+    item.observed, item.threshold, item.availability, item.freshness, item.thresholdRevision,
+    item.openedAt, item.acknowledgedAt, item.resolvedAt, item.reopenedAt, item.reopenCount, item.lastEvaluatedAt,
+    item.revision, item.createdAt, item.updatedAt,
+  );
+}
+
+function updateUsageAttentionItem(
+  projectId: string,
+  previousRevision: number,
+  item: UsageAttentionItem,
+): void {
+  const update = getDb().prepare(
+    `UPDATE usage_attention_items SET
+      status = ?, evaluation_state = ?, severity = ?, message_code = ?, observed = ?, threshold = ?,
+      availability = ?, freshness = ?, range_from = NULL, range_to = NULL, threshold_revision = ?,
+      acknowledged_at = ?, resolved_at = ?, reopened_at = ?, reopen_count = ?, last_evaluated_at = ?,
+      revision = ?, updated_at = ?
+     WHERE project_id = ? AND id = ? AND revision = ?`,
+  ).run(
+    item.status, item.evaluationState, item.severity, item.messageCode, item.observed, item.threshold,
+    item.availability, item.freshness, item.thresholdRevision, item.acknowledgedAt, item.resolvedAt,
+    item.reopenedAt, item.reopenCount, item.lastEvaluatedAt, item.revision, item.updatedAt,
+    projectId, item.id, previousRevision,
+  );
+  if (update.changes !== 1) throw new UsageError("USAGE_ATTENTION_REVISION_CONFLICT", previousRevision);
+}
+
+function insertUsageAttentionEvent(
+  projectId: string,
+  transition: UsageAttentionTransition,
+  previous: UsageAttentionItem | null,
+  current: UsageAttentionItem,
+  createdAt: string,
+): UsageAttentionEvent {
+  const id = randomUUID();
+  getDb().prepare(
+    `INSERT INTO usage_attention_events (
+      id, project_id, item_id, transition,
+      prior_status, current_status, prior_evaluation_state, current_evaluation_state,
+      prior_severity, current_severity, prior_message_code, current_message_code,
+      prior_observed, current_observed, prior_threshold, current_threshold,
+      prior_availability, current_availability, prior_freshness, current_freshness,
+      prior_threshold_revision, current_threshold_revision,
+      prior_last_evaluated_at, current_last_evaluated_at,
+      prior_acknowledged_at, current_acknowledged_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id, projectId, current.id, transition,
+    previous?.status ?? null, current.status,
+    previous?.evaluationState ?? null, current.evaluationState,
+    previous?.severity ?? null, current.severity,
+    previous?.messageCode ?? null, current.messageCode,
+    previous?.observed ?? null, current.observed,
+    previous?.threshold ?? null, current.threshold,
+    previous?.availability ?? null, current.availability,
+    previous?.freshness ?? null, current.freshness,
+    previous?.thresholdRevision ?? null, current.thresholdRevision,
+    previous?.lastEvaluatedAt ?? null, current.lastEvaluatedAt,
+    previous?.acknowledgedAt ?? null, current.acknowledgedAt,
+    createdAt,
+  );
+  return { id, itemId: current.id, transition, createdAt };
+}
+
+/** Reconcile the five fixed all-history conditions in one transaction. */
+export function reconcileUsageAttention(
+  projectId: string,
+  options: ReconcileUsageAttentionOptions,
+): UsageAttentionReconciliation {
+  const normalizedProjectId = requireIdentifier(projectId, "INVALID_USAGE_INPUT");
+  const syncIntervalMs = requireUsageAttentionSyncInterval(options?.syncIntervalMs);
+  const result = execTransaction(() => {
+    assertProjectExists(normalizedProjectId);
+    const evaluation = evaluateUsageAdvisoryThresholds(normalizedProjectId);
+    const evaluatedAt = now();
+    const freshness = usageAttentionFreshness(normalizedProjectId, syncIntervalMs, evaluatedAt);
+    const items: UsageAttentionItem[] = [];
+    const transitions: UsageAttentionEvent[] = [];
+
+    for (const definition of USAGE_ATTENTION_DEFINITIONS) {
+      const evaluated = attentionItemForEvaluation(
+        definition,
+        attentionMetric(evaluation, definition.metric),
+        evaluation.thresholds.revision,
+        freshness,
+        evaluatedAt,
+      );
+      const row = getDb().prepare(
+        "SELECT * FROM usage_attention_items WHERE project_id = ? AND condition = ?",
+      ).get(normalizedProjectId, definition.condition);
+      const previous = row ? readUsageAttentionItem(row) : null;
+
+      // Disabled and below conditions are not attention until they have an
+      // existing lifecycle to resolve.
+      if (!previous && evaluated.status === "resolved") continue;
+      if (!previous) {
+        insertUsageAttentionItem(normalizedProjectId, evaluated);
+        transitions.push(insertUsageAttentionEvent(normalizedProjectId, "opened", null, evaluated, evaluatedAt));
+        items.push(evaluated);
+        continue;
+      }
+
+      const reconciled = attentionItemWithLifecycle(previous, evaluated, evaluatedAt);
+      updateUsageAttentionItem(normalizedProjectId, previous.revision, reconciled.item);
+      if (reconciled.transition) {
+        transitions.push(insertUsageAttentionEvent(
+          normalizedProjectId,
+          reconciled.transition,
+          previous,
+          reconciled.item,
+          evaluatedAt,
+        ));
+      }
+      items.push(reconciled.item);
+    }
+    return { evaluatedAt, items, transitions, written: items.length > 0 };
+  });
+  if (result.written) checkpointAfterWrite();
+  return { evaluatedAt: result.evaluatedAt, items: result.items, transitions: result.transitions };
+}
+
+export function getUsageAttentionItem(projectId: string, itemId: string): UsageAttentionItem | null {
+  const row = getDb().prepare(
+    "SELECT * FROM usage_attention_items WHERE project_id = ? AND id = ?",
+  ).get(requireIdentifier(projectId, "INVALID_USAGE_QUERY"), requireIdentifier(itemId, "INVALID_USAGE_QUERY"));
+  return row ? readUsageAttentionItem(row) : null;
+}
+
+function encodeUsageAttentionCursor(item: UsageAttentionItem): string {
+  return Buffer.from(JSON.stringify({ updatedAt: item.updatedAt, id: item.id }), "utf8").toString("base64url");
+}
+
+function decodeUsageAttentionCursor(value: string | undefined): UsageAttentionCursor | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    return {
+      updatedAt: requireUtcTimestamp(parsed?.updatedAt, "INVALID_USAGE_QUERY"),
+      id: requireIdentifier(parsed?.id, "INVALID_USAGE_QUERY"),
+    };
+  } catch (error) {
+    if (error instanceof UsageError) throw error;
+    throw new UsageError("INVALID_USAGE_QUERY");
+  }
+}
+
+export function listUsageAttentionItems(
+  projectId: string,
+  options: { includeResolved?: boolean; limit?: number; cursor?: string } = {},
+): UsageAttentionPage {
+  const normalizedProjectId = requireIdentifier(projectId, "INVALID_USAGE_QUERY");
+  assertProjectExists(normalizedProjectId);
+  const limit = options.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > USAGE_ATTENTION_PAGE_MAX) {
+    throw new UsageError("INVALID_USAGE_QUERY");
+  }
+  const cursor = decodeUsageAttentionCursor(options.cursor);
+  const clauses = ["project_id = ?"];
+  const params: Array<string | number> = [normalizedProjectId];
+  if (!options.includeResolved) clauses.push("status = 'active'");
+  if (cursor) {
+    clauses.push("(updated_at < ? OR (updated_at = ? AND id < ?))");
+    params.push(cursor.updatedAt, cursor.updatedAt, cursor.id);
+  }
+  const where = clauses.join(" AND ");
+  const rows = getDb().prepare(
+    `SELECT * FROM usage_attention_items WHERE ${where}
+     ORDER BY updated_at DESC, id DESC LIMIT ?`,
+  ).all(...params, limit + 1).map(readUsageAttentionItem);
+  const hasMore = rows.length > limit;
+  const data = hasMore ? rows.slice(0, limit) : rows;
+  const countClauses = ["project_id = ?"];
+  if (!options.includeResolved) countClauses.push("status = 'active'");
+  const total = (getDb().prepare(
+    `SELECT COUNT(*) AS count FROM usage_attention_items WHERE ${countClauses.join(" AND ")}`,
+  ).get(normalizedProjectId) as { count: number }).count;
+  return {
+    data,
+    nextCursor: hasMore && data.length > 0 ? encodeUsageAttentionCursor(data[data.length - 1]!) : null,
+    hasMore,
+    total,
+  };
+}
+
+/** Active mapped projects are the scheduler's only automatic evaluation scope. */
+export function listUsageAttentionMappedProjectIds(): string[] {
+  return (getDb().prepare(
+    `SELECT DISTINCT mapping.ingenium_project_id AS project_id
+     FROM usage_project_mappings mapping
+     JOIN projects project ON project.id = mapping.ingenium_project_id
+     WHERE mapping.status = 'mapped'
+       AND mapping.ingenium_project_id IS NOT NULL
+       AND project.archived_at IS NULL
+     ORDER BY mapping.ingenium_project_id ASC`,
+  ).all() as Array<{ project_id: string }>).map((row) => row.project_id);
+}
+
+/** Acknowledge an item with revision CAS; exact retry replays return the prior result. */
+export function acknowledgeUsageAttentionItem(
+  projectId: string,
+  itemId: string,
+  expectedRevision: number,
+): UsageAttentionItem {
+  const normalizedProjectId = requireIdentifier(projectId, "INVALID_USAGE_INPUT");
+  const normalizedItemId = requireIdentifier(itemId, "INVALID_USAGE_INPUT");
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+    throw new UsageError("INVALID_USAGE_INPUT");
+  }
+  const result = execTransaction(() => {
+    assertProjectExists(normalizedProjectId);
+    const row = getDb().prepare(
+      "SELECT * FROM usage_attention_items WHERE project_id = ? AND id = ?",
+    ).get(normalizedProjectId, normalizedItemId);
+    if (!row) throw new UsageError("USAGE_ATTENTION_ITEM_NOT_FOUND");
+    const previous = readUsageAttentionItem(row);
+
+    if (previous.revision !== expectedRevision) {
+      if (previous.acknowledgedAt !== null && previous.revision === expectedRevision + 1) {
+        return { item: previous, written: false };
+      }
+      throw new UsageError("USAGE_ATTENTION_REVISION_CONFLICT", previous.revision);
+    }
+    if (previous.acknowledgedAt !== null) return { item: previous, written: false };
+
+    const acknowledgedAt = now();
+    const acknowledged: UsageAttentionItem = {
+      ...previous,
+      acknowledgedAt,
+      revision: previous.revision + 1,
+      updatedAt: acknowledgedAt,
+    };
+    updateUsageAttentionItem(normalizedProjectId, previous.revision, acknowledged);
+    insertUsageAttentionEvent(normalizedProjectId, "ack", previous, acknowledged, acknowledgedAt);
+    return { item: acknowledged, written: true };
+  });
+  if (result.written) checkpointAfterWrite();
+  return result.item;
 }
 
 export function getUsageBreakdown(projectId: string, query: UsageQuery): UsageBreakdownRow[] {

@@ -1,6 +1,7 @@
 import { logger } from "../logger.js";
 import type { LLMConfig, LLMTextExecutor } from "./synthesis-llm.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
+import { isTrustedJobTriggerEvent } from "./jobs.js";
 
 /** The result shape returned by generateJobConfig. All fields nullable on any error. */
 export interface JobSuggestResult {
@@ -30,7 +31,9 @@ task, derive the following JSON fields for an agent job:
 2. "schedule_cron": A 5-field cron expression for how often the job should run.
    Set to null if the job is event-triggered only or has no recurring schedule.
 
-3. "trigger_event": A short string identifying what event should trigger the job.
+3. "trigger_event": One exact trusted event value when applicable:
+   "context.conversation.archived", "context.conversation.unarchived", or
+   "context.checkpoint.restored_as_new".
    Set to null if the job is schedule-only with no event trigger.
    Set to null if the description doesn't imply an event trigger.
 
@@ -83,7 +86,8 @@ function validateResult(raw: any): JobSuggestResult {
   }
 
   if (typeof raw.trigger_event === "string" && raw.trigger_event.trim().length > 0) {
-    result.trigger_event = raw.trigger_event.trim().slice(0, MAX_TRIGGER_EVENT);
+    const triggerEvent = raw.trigger_event.trim().slice(0, MAX_TRIGGER_EVENT);
+    result.trigger_event = isTrustedJobTriggerEvent(triggerEvent) ? triggerEvent : null;
   }
 
   return result;

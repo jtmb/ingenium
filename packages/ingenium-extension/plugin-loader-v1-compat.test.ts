@@ -88,6 +88,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     resetEnsuredProjects();
     resetProjectCache();
     if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
@@ -232,6 +233,43 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(Object.keys(autoHooks.tool)).toEqual(["auto_observe_now"]);
     expect(Object.keys(observerHooks.tool)).toEqual(["synthesize_observations"]);
     expect(resourceSyncHooks.tool).toBeUndefined();
+  });
+
+  it("keeps API authentication failures from every V1 lifecycle wrapper off stdio", async () => {
+    process.env.INGENIUM_PROJECT = "plugin-loader-v1-failure";
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { detail: "Bearer secret-token http://private.example/stack" } }),
+    } as Response)));
+
+    const [autoWrapper, observerWrapper, resourceWrapper] = await Promise.all([
+      import("./plugins/auto-observer.js"),
+      import("./plugins/observer.js"),
+      import("./plugins/resource-sync.js"),
+    ]);
+    const log = vi.fn().mockRejectedValue(new Error("logger rejected Bearer secret-token"));
+    const input = { worktree: "/safe/plugin-loader-v1-failure", client: { app: { log } } };
+
+    const autoHooks = await applyOpenCode1189V1Server(autoWrapper, wrapperSpecs[0], input) as { event: (input: unknown) => Promise<void> };
+    const observerHooks = await applyOpenCode1189V1Server(observerWrapper, wrapperSpecs[1], input) as { event: (input: unknown) => Promise<void> };
+    const resourceHooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], input) as { event: (input: unknown) => Promise<void> };
+
+    await expect(autoHooks.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
+    await expect(observerHooks.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
+    await expect(resourceHooks.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
+    await Promise.resolve();
+
+    const output = JSON.stringify(log.mock.calls);
+    expect(output).toContain("trigger_extraction: authentication");
+    expect(output).toContain("extension_project_init: authentication");
+    expect(output).not.toContain("secret-token");
+    expect(output).not.toContain("private.example");
+    expect(output).not.toContain("stack");
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
   });
 
   it("publishes the V1 wrapper artifacts through package exports", () => {

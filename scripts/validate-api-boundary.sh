@@ -11,7 +11,7 @@ entrypoint="${repo_root}/scripts/docker-entrypoint.sh"
 run_api="${repo_root}/scripts/run-api.sh"
 healthcheck="${repo_root}/scripts/healthcheck.sh"
 api_probe="${repo_root}/scripts/probe-api.mjs"
-dashboard_runner="${repo_root}/scripts/run-dashboard.mjs"
+dashboard_runner="${repo_root}/scripts/run-dashboard.sh"
 dashboard_proxy="${repo_root}/services/ingenium-dashboard/src/proxy.ts"
 dashboard_token="${repo_root}/services/ingenium-dashboard/src/lib/dashboard-token.ts"
 auth_middleware="${repo_root}/services/ingenium-api/lib/middleware/auth.ts"
@@ -74,7 +74,6 @@ require_literal "$dockerfile" 'scripts/validate-api-boundary.sh'
 require_literal "$dockerfile" 'scripts/api-boundary-proxy.mjs'
 require_literal "$dockerfile" 'scripts/probe-api.mjs'
 require_literal "$dockerfile" 'scripts/run-api-boundary-proxy.sh'
-require_literal "$dockerfile" 'scripts/run-dashboard.mjs'
 require_literal "$dockerfile" 'nginx/proxy-oauth-callback.conf'
 require_literal "$gitignore" '.opencode/.ingenium-api-token'
 require_literal "$dockerignore" '.opencode/.ingenium-api-token'
@@ -87,8 +86,8 @@ require_literal "$run_api" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 require_literal "${repo_root}/scripts/run-dashboard.sh" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 require_literal "$run_api" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "${repo_root}/scripts/run-dashboard.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
-reject_pattern "$dashboard_runner" 'INGENIUM_API_TOKEN'
-require_literal "$dashboard_runner" 'await import("/app/services/ingenium-dashboard/server.js");'
+reject_pattern "$dashboard_runner" 'INGENIUM_API_TOKEN='
+require_literal "$dashboard_runner" 'node /app/services/ingenium-dashboard/server.js'
 require_literal "$dashboard_proxy" 'import { loadDashboardApiToken } from "./lib/dashboard-token";'
 require_literal "$dashboard_proxy" 'return loadDashboardApiToken(environment);'
 require_literal "$dashboard_proxy" 'headers.set("authorization", `Bearer ${token}`);'

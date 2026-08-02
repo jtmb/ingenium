@@ -11,7 +11,7 @@ description: Docker deployment guide — services, ports, volumes, health checks
 
 ## Overview
 
-Ingenium uses **single-container deployment** via Docker Compose. A single container runs **supervisord** managing six processes:
+Ingenium uses **single-container deployment** via Docker Compose. A single container runs **supervisord** managing seven processes:
 
 1. **API boundary** (host-loopback :4097 → private Express :4096)
 2. **Dashboard** (Next.js on :3000)
@@ -19,6 +19,7 @@ Ingenium uses **single-container deployment** via Docker Compose. A single conta
 4. **Nginx gateway** (host :3000 and OAuth callback :1455)
 5. **opencode-web** (on :4098)
 6. **ttyd-opencode** (on :4099)
+7. **code-server** (private on :4100; exposed only through `vscode.localhost:3000`)
 
 ---
 
@@ -100,7 +101,7 @@ latter is the sole DB authority. Missing or malformed bearer headers return
 
 ### 2. Dashboard (Next.js on :3000)
 
-20 primary route-based pages plus the Settings overlay. Compose publishes the
+21 primary route-based pages plus the Settings overlay. Compose publishes the
 local gateway as `3000:3000` so default Windows-to-WSL localhost forwarding
 reaches it. The dashboard fallback accepts forwarded Host headers and does not
 challenge browser traffic with HTTP Basic Auth. It talks to the API layer only
@@ -128,6 +129,37 @@ OpenCode CLI terminal via ttyd. It is a private internal upstream reached throug
 ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace
 ```
 
+### 5. code-server (internal :4100)
+
+code-server is a private VS Code workspace upstream reached through the exact
+local root `http://vscode.localhost:3000/`. Do not publish or access host port
+4100 directly.
+
+The image bakes the official Open VSX
+`sst-dev.opencode@0.0.13` artifact from
+`https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`
+with SHA-256
+`e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`. Startup
+verifies that identity, code-server engine compatibility, and the hash, then
+installs it offline and idempotently as `appuser` into
+`/home/appuser/vscode-data/extensions`. No runtime registry or marketplace
+installation is permitted.
+
+The image also supplies system-theme defaults through a code-free built-in
+`configurationDefaults` contribution: auto detection follows the system and
+uses **Dark Modern**/**Light Modern**. Explicit user or workspace values win;
+startup never rewrites User or workspace settings. The `vscode-data` named
+volume preserves settings and extensions across restart, rebuild, and an
+existing volume; a fresh volume is initialized with the same defaults and
+pinned extension. After upgrading the image, restart the service and revalidate
+the appuser identity, engine compatibility, artifact hash, extension list, and
+volume-preserved settings/extensions before accepting the deployment.
+
+VS Code is preinstalled, but Restricted Mode disables extensions until the user
+explicitly trusts the workspace. Ingenium does not auto-trust it. This is an
+administrator-grade local surface, not a LAN, remote, shared, or untrusted-user
+deployment profile.
+
 > 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks running inside the `ingenium-api` Express process. Do NOT add supervisord `[program:synthesis-engine]` or `[program:email-client]` blocks.
 
 ---
@@ -136,11 +168,12 @@ ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace
 
 | Host Port | Service | Description |
 |-----------|---------|-------------|
-| `3000` | Dashboard + host gateway | WSL-forwardable local `localhost:3000`, `opencode.localhost:3000`, and `cli.localhost:3000` gateway without HTTP Basic Auth |
+| `3000` | Dashboard + host gateway | WSL-forwardable local `localhost:3000`, `opencode.localhost:3000`, `cli.localhost:3000`, and `vscode.localhost:3000` gateway without HTTP Basic Auth |
 | `127.0.0.1:4097` | API boundary | Authenticated host-loopback bearer boundary |
 | internal `4096` | Express API | Private upstream and sole DB authority |
 | internal `4098` | OpenCode Web | Private upstream served through local `opencode.localhost:3000` |
 | internal `4099` | ttyd-opencode | Private upstream served through local `cli.localhost:3000` |
+| internal `4100` | code-server | Private upstream served through local `vscode.localhost:3000`; no public `4100` endpoint |
 
 > 🔴 The browser-facing contract is the unauthenticated local port 3000 gateway. Port 4097 is a separate bearer-authenticated host-loopback MCP boundary; ports 4098 and 4099 are private container upstreams, not direct host endpoints. The gateway never forwards a browser bearer token. Plain HTTP is not an approved LAN/remote deployment profile.
 

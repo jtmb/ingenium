@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 
-// ── Mock the api client before importing handlers ──────────
+// Register the mock before importing handlers so their client dependency is intercepted.
 const mockApi = {
   get: vi.fn(),
   post: vi.fn(),
@@ -24,8 +24,6 @@ vi.mock("../lib/client.js", () => ({
 // Dynamic import so mock is in place before module eval
 const skillTools = await import("../lib/tools/skills.js");
 
-// ── Helpers ────────────────────────────────────────────────
-
 function mockApiSuccess(data: unknown = { ok: true }) {
   return { ok: true, status: 200, data };
 }
@@ -33,8 +31,6 @@ function mockApiSuccess(data: unknown = { ok: true }) {
 function mockApiError(status: number, message: string) {
   return { ok: false, status, data: { error: { message } } };
 }
-
-// ── Tests ──────────────────────────────────────────────────
 
 describe("Skills Governance Tools", () => {
   const PROJECT = "test-project";
@@ -45,8 +41,6 @@ describe("Skills Governance Tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-
-  // ── Archive ────────────────────────────────────────────
 
   describe("ingenium_skill_archive", () => {
     it("POSTs to correct path with encoded name and project", async () => {
@@ -88,8 +82,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Restore ────────────────────────────────────────────
-
   describe("ingenium_skill_restore", () => {
     it("POSTs to correct path with encoded name", async () => {
       mockApi.post.mockResolvedValue(mockApiSuccess({ restored: true }));
@@ -107,8 +99,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── List Archived ──────────────────────────────────────
-
   describe("ingenium_skill_list_archived", () => {
     it("GETs /skills/archived with project param", async () => {
       mockApi.get.mockResolvedValue(mockApiSuccess({ skills: [] }));
@@ -121,8 +111,6 @@ describe("Skills Governance Tools", () => {
       expect(data.skills).toEqual([]);
     });
   });
-
-  // ── Versions ───────────────────────────────────────────
 
   describe("ingenium_skill_versions", () => {
     it("GETs /skills/:name/versions with encoded name", async () => {
@@ -152,8 +140,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Rollback ───────────────────────────────────────────
-
   describe("ingenium_skill_rollback", () => {
     it("POSTs to /skills/:name/rollback with revision in body", async () => {
       mockApi.post.mockResolvedValue(mockApiSuccess({ rolledBack: true, revision: 3 }));
@@ -170,8 +156,6 @@ describe("Skills Governance Tools", () => {
       expect(data.revision).toBe(3);
     });
   });
-
-  // ── Lineage Create ─────────────────────────────────────
 
   describe("ingenium_skill_lineage_create", () => {
     it("POSTs to /skills/lineage with API-contract body fields", async () => {
@@ -212,8 +196,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Lineage List ───────────────────────────────────────
-
   describe("ingenium_skill_lineage_list", () => {
     it("GETs /skills/:name/lineage with encoded name", async () => {
       mockApi.get.mockResolvedValue(mockApiSuccess({ parents: [], children: [] }));
@@ -230,8 +212,6 @@ describe("Skills Governance Tools", () => {
       expect(data.children).toEqual([]);
     });
   });
-
-  // ── Proposal Create ────────────────────────────────────
 
   const UUID_FIXTURE = "00000000-0000-0000-0000-000000000001";
 
@@ -307,8 +287,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Proposal List ──────────────────────────────────────
-
   describe("ingenium_skill_proposal_list", () => {
     it("GETs /skills/proposals with optional status filter", async () => {
       mockApi.get.mockResolvedValue(mockApiSuccess({ proposals: [] }));
@@ -329,8 +307,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Proposal Get ───────────────────────────────────────
-
   describe("ingenium_skill_proposal_get", () => {
     it("GETs /skills/proposals/:id with UUID", async () => {
       mockApi.get.mockResolvedValue(mockApiSuccess({ id: UUID_FIXTURE, status: "draft" }));
@@ -346,8 +322,6 @@ describe("Skills Governance Tools", () => {
       expect(data.id).toBe(UUID_FIXTURE);
     });
   });
-
-  // ── Proposal Submit ────────────────────────────────────
 
   describe("ingenium_skill_proposal_submit", () => {
     it("POSTs to /skills/proposals/:id/submit with UUID", async () => {
@@ -365,8 +339,6 @@ describe("Skills Governance Tools", () => {
       expect(data.status).toBe("pending");
     });
   });
-
-  // ── Proposal Approve ───────────────────────────────────
 
   describe("ingenium_skill_proposal_approve", () => {
     it("POSTs reviewer (required) and reason (optional) in body with UUID", async () => {
@@ -397,8 +369,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Proposal Reject ────────────────────────────────────
-
   describe("ingenium_skill_proposal_reject", () => {
     it("POSTs reviewer (required) and reason (optional) in body with UUID", async () => {
       mockApi.post.mockResolvedValue(mockApiSuccess({ status: "rejected" }));
@@ -416,8 +386,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Proposal Rollback ──────────────────────────────────
-
   describe("ingenium_skill_proposal_rollback", () => {
     it("POSTs reviewer (required) and reason (optional) in body with UUID", async () => {
       mockApi.post.mockResolvedValue(mockApiSuccess({ status: "rolledBack" }));
@@ -434,8 +402,6 @@ describe("Skills Governance Tools", () => {
       expect(data.status).toBe("rolledBack");
     });
   });
-
-  // ── Existing tool fixes ────────────────────────────────
 
   describe("existing tool URI-encoding fixes", () => {
     it("skillDelete uses encodeURIComponent for name and params object for project", async () => {
@@ -470,8 +436,6 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Error propagation ──────────────────────────────────
-
   describe("error propagation", () => {
     it("passes through API error responses intact", async () => {
       mockApi.get.mockResolvedValue(mockApiError(500, "Internal error"));
@@ -491,8 +455,6 @@ describe("Skills Governance Tools", () => {
       expect(data.error.message).toBe("Proposal not found");
     });
   });
-
-  // ── API↔MCP Route/Body/Schema Parity Regression Guard ──
 
   describe("API↔MCP contract parity", () => {
     const UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -583,9 +545,7 @@ describe("Skills Governance Tools", () => {
     });
   });
 
-  // ── Static registration schema inspection (Gap 4 regression guard) ──
-  // Reads the actual mcp-server.ts source to validate schema registrations directly.
-  // Catches reversions to deprecated fields that wrapper tests alone can miss.
+  // Inspect registrations statically because type-erased Zod schemas cannot be invoked.
 
   describe("mcp-server.ts registration schema contract (source inspection)", () => {
     let mcpSource: string;

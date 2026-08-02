@@ -11,15 +11,7 @@ import {
 import { opencode, type OpenCodeSession } from "./opencode";
 import { request } from "./api";
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                          */
-/* ------------------------------------------------------------------ */
-
 const ACTIVE_SESSION_KEY = "opencode-chat-active-session";
-
-/* ------------------------------------------------------------------ */
-/*  Public interface                                                   */
-/* ------------------------------------------------------------------ */
 
 export interface UseOpenCodeSessionsReturn {
   /** All active sessions filtered by searchQuery, sorted by updatedAt desc. */
@@ -36,8 +28,6 @@ export interface UseOpenCodeSessionsReturn {
   searchQuery: string;
   /** Set the search filter (wrapped in startTransition). */
   setSearchQuery: (q: string) => void;
-
-  /* Actions */
 
   /** Create a new session and auto-select it. Returns the new session ID or null on error. */
   create: (title: string) => Promise<string | null>;
@@ -63,10 +53,6 @@ export interface UseOpenCodeSessionsReturn {
   autoCreated: boolean;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-
 function persistActive(id: string | null): void {
   if (typeof window === "undefined") return;
   if (id) {
@@ -86,10 +72,6 @@ function supportsArchive(session: OpenCodeSession): boolean {
   return "archived" in (session.time as Record<string, unknown>);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
-
 /**
  * React hook managing OpenCode session CRUD.
  *
@@ -101,12 +83,11 @@ function supportsArchive(session: OpenCodeSession): boolean {
  * - Archive/unarchive with graceful fallback when API lacks archive support
  */
 export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
-  /* ---- state ---- */
-
   const [allSessions, setAllSessions] = useState<OpenCodeSession[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(() =>
-    readPersistedActive(),
-  );
+  // A persisted ID is untrusted until the current session list confirms it.
+  // Starting without an active session prevents a stale localStorage value from
+  // issuing a messages request before that validation completes.
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, _setSearchQuery] = useState("");
@@ -119,8 +100,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
   const autoCreatedRef = useRef(false);
   const [autoCreated, setAutoCreated] = useState(false);
 
-  /* ---- derived: search filter ---- */
-
   const sessions = useMemo(() => {
     if (!searchQuery.trim()) return allSessions;
     const q = searchQuery.toLowerCase();
@@ -129,8 +108,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
 
   /** Archive is not supported in the V1.18.9 API — always empty. */
   const archivedSessions: OpenCodeSession[] = [];
-
-  /* ---- actions ---- */
 
   const setSearchQuery = useCallback((q: string) => {
     startTransition(() => _setSearchQuery(q));
@@ -186,11 +163,15 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
           if (mountedRef.current) setAutoCreated(false);
         }
       } else {
-        // Auto-select if no active session and sessions exist
+        // Prefer the persisted session only after this response confirms it.
+        // If it was removed elsewhere, select and persist the current fallback.
+        const persistedActive = readPersistedActive();
         setActiveId((prev) => {
-          if (prev && sorted.some((s) => s.id === prev)) return prev;
-          const first = sorted[0];
-          return first ? first.id : null;
+          const preferred = prev ?? persistedActive;
+          if (preferred && sorted.some((s) => s.id === preferred)) return preferred;
+          const fallback = sorted[0]?.id ?? null;
+          if (preferred) persistActive(fallback);
+          return fallback;
         });
       }
     } catch (err: unknown) {
@@ -205,8 +186,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     }
   }, []);
 
-  /* ---- initial load ---- */
-
   useEffect(() => {
     mountedRef.current = true;
     refresh();
@@ -216,8 +195,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       abortRef.current?.abort();
     };
   }, [refresh]);
-
-  /* ---- create ---- */
 
   const create = useCallback(async (title: string): Promise<string | null> => {
     try {
@@ -251,8 +228,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     }
   }, []);
 
-  /* ---- rename (optimistic) ---- */
-
   const rename = useCallback(async (id: string, title: string) => {
     try {
       setError(null);
@@ -278,8 +253,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       setError(message);
     }
   }, []);
-
-  /* ---- remove ---- */
 
   const remove = useCallback(
     async (id: string) => {
@@ -309,14 +282,10 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     [activeId],
   );
 
-  /* ---- select ---- */
-
   const select = useCallback((id: string) => {
     setActiveId(id);
     persistActive(id);
   }, []);
-
-  /* ---- fork ---- */
 
   const fork = useCallback(
     async (id: string, messageId?: string): Promise<string | null> => {
@@ -350,8 +319,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     [],
   );
 
-  /* ---- share ---- */
-
   const share = useCallback(
     async (id: string): Promise<string | null> => {
       try {
@@ -377,8 +344,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     [],
   );
 
-  /* ---- unshare ---- */
-
   const unshare = useCallback(async (id: string) => {
     try {
       setError(null);
@@ -393,8 +358,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       setError(message);
     }
   }, []);
-
-  /* ---- archive / unarchive ---- */
 
   const archive = useCallback(
     async (id: string) => {
@@ -428,8 +391,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     },
     [allSessions],
   );
-
-  /* ---- return ---- */
 
   return {
     sessions,

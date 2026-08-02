@@ -55,6 +55,36 @@ describe("Ingenium API client authentication", () => {
     expect(fetchMock.mock.calls[0]?.[1].body).toEqual(Buffer.from("{}"));
   });
 
+  it("preserves existing DELETE params while sending an optional JSON body", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: async () => ({}),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await import("../lib/client.js");
+    await api.del(
+      "/tasks/task-delete",
+      { project: "delete-project" },
+      { expected_revision: 6, idempotency_key: "delete-replay-1" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://localhost:4097/api/v1/tasks/task-delete?project=delete-project",
+    );
+    expect(fetchMock.mock.calls[0]?.[1].method).toBe("DELETE");
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({
+      expected_revision: 6,
+      idempotency_key: "delete-replay-1",
+    });
+    const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1].headers);
+    expect(requestHeaders.get("Authorization")).toBe("Bearer test-server-token");
+    expect(requestHeaders.get("Idempotency-Key")).toBe("delete-replay-1");
+  });
+
   it("uses the dedicated server-only child-MCP runtime handoff outside the dashboard API namespace", async () => {
     process.env.INGENIUM_API_TOKEN = "test-server-token";
     const fetchMock = vi.fn().mockResolvedValue({
@@ -77,6 +107,32 @@ describe("Ingenium API client authentication", () => {
     const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1].headers);
     expect(requestHeaders.get("Authorization")).toBe("Bearer test-server-token");
     expect(requestHeaders.get(CHILD_MCP_RUNTIME_HANDOFF_HEADER)).toBe("1");
+  });
+
+  it("preserves the attested tool-state envelope behind the bearer boundary", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const payload = {
+      project: "state-project",
+      project_id: "state-project-id",
+      data: { tool_name: "ingenium_skill_list", enabled: true },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payload,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await import("../lib/client.js");
+    await expect(api.getToolState("ingenium_skill_list", "state-project")).resolves.toMatchObject({
+      data: payload.data,
+      payload,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://localhost:4097/api/v1/mcp-tools/ingenium_skill_list/state?project=state-project",
+    );
+    expect(new Headers(fetchMock.mock.calls[0]?.[1].headers).get("Authorization")).toBe("Bearer test-server-token");
   });
 
   it("does not synthesize an Authorization header when the API token is absent", async () => {

@@ -179,6 +179,20 @@ describe("request() — path composition with default API_URL", () => {
     expect(calledUrl).toContain("?project=my-project");
   });
 
+  it("encodes special project names for reads and saves without adding query fields", async () => {
+    const { api } = await getApi();
+
+    await api.skills.list("shared#archived");
+    await api.settings.saveLlmConfig({
+      primary: { provider: "test", model: "test-model" },
+    }, "shared&project=foreign");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/skills?project=shared%23archived");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/v1/settings/llm-config?project=shared%26project%3Dforeign",
+    );
+  });
+
   it("api.health uses request with /health path", async () => {
     const { request } = await getApi();
     delete process.env.NEXT_PUBLIC_API_URL;

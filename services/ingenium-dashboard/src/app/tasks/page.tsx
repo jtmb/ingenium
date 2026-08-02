@@ -14,10 +14,6 @@ import NotificationBell from "./components/NotificationBell";
 import TaskDetail from "./components/TaskDetail";
 import TaskCreateModal from "./components/TaskCreateModal";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
-
 type ViewMode = "board" | "list" | "timeline";
 
 const VIEW_OPTIONS: { mode: ViewMode; label: string }[] = [
@@ -25,10 +21,6 @@ const VIEW_OPTIONS: { mode: ViewMode; label: string }[] = [
   { mode: "list", label: "List" },
   { mode: "timeline", label: "Timeline" },
 ];
-
-/* ------------------------------------------------------------------ */
-/*  Page                                                              */
-/* ------------------------------------------------------------------ */
 
 /**
  * TasksPage — Kanban board with view switcher (Board / List / Timeline).
@@ -65,18 +57,14 @@ function TasksContent() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState("");
 
-  // Create modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Spotlight / detail overlay state
   const [detailTask, setDetailTask] = useState<Task | null>(null);
 
-  // Fetch tasks
   useEffect(() => {
     api.tasks.list(project).then((r) => setTasks(r.data ?? [])).catch(() => {});
   }, [project]);
 
-  // Sync view state to URL
   const switchView = useCallback(
     (mode: ViewMode) => {
       setView(mode);
@@ -98,25 +86,21 @@ function TasksContent() {
     );
   }, [tasks, search]);
 
-  // Handle task selection from spotlight search
   const handleSpotlightSelect = useCallback((task: Task) => {
     setDetailTask(task);
   }, []);
 
-  // Handle notification click (find task and open detail)
   const handleNotificationClick = useCallback((taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (task) setDetailTask(task);
   }, [tasks]);
 
-  // Handle task update from detail overlay
   const handleTaskUpdated = useCallback((updated: Task) => {
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
   }, []);
 
   return (
     <div className="space-y-6 min-w-0">
-      {/* Header + create form */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold">Tasks</h1>
@@ -125,7 +109,6 @@ function TasksContent() {
           </div>
         </div>
 
-        {/* Search bar + Add Task button */}
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
             value={search}
@@ -142,7 +125,6 @@ function TasksContent() {
         </div>
       </div>
 
-      {/* View switcher */}
       <div className="flex gap-1 border-b border-[var(--color-border)]">
         {VIEW_OPTIONS.map(({ mode, label }) => (
           <button
@@ -159,7 +141,6 @@ function TasksContent() {
         ))}
       </div>
 
-      {/* Active view */}
       {view === "board" && (
         <BoardView
           project={project}
@@ -182,10 +163,8 @@ function TasksContent() {
         />
       )}
 
-      {/* Spotlight search (Ctrl+K) */}
       <SpotlightSearch project={project} onTaskSelect={handleSpotlightSelect} />
 
-      {/* Task Create modal */}
       <TaskCreateModal
         isOpen={isModalOpen}
         project={project}
@@ -195,7 +174,6 @@ function TasksContent() {
         }}
       />
 
-      {/* Task detail overlay (from spotlight or notification) */}
       {detailTask && (
         <TaskDetail
           task={detailTask}

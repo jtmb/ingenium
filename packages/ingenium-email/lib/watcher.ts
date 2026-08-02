@@ -56,12 +56,12 @@ export async function startWatcher(
     await stopWatcher(accountId);
   }
 
-  const account = getAccount(projectId, accountId);
+  const account = getAccount(accountId);
   if (!account) {
     throw new ProviderOperationError("PROVIDER_NOT_FOUND", "imap", false);
   }
 
-  const creds = getCredentials(projectId, accountId);
+  const creds = getCredentials(accountId);
   if (!creds) {
     throw new ProviderOperationError("CREDENTIALS_UNAVAILABLE", "imap", false);
   }
@@ -100,6 +100,11 @@ export async function stopWatcher(accountId: string): Promise<void> {
     // Non-fatal: connection may already be closed
   }
   watchers.delete(accountId);
+}
+
+/** Stop every watcher this process owns during API shutdown. */
+export async function stopAllWatchers(): Promise<void> {
+  await Promise.allSettled([...watchers.keys()].map((accountId) => stopWatcher(accountId)));
 }
 
 /** Get watcher status for an account (whether it's running or stopped). */

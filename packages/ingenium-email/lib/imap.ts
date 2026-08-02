@@ -299,47 +299,6 @@ export async function listEmails(
 }
 
 /**
- * Get a single email by UID.
- * Returns null if the UID doesn't exist in the folder (already deleted, moved, or invalid).
- */
-export async function getEmail(
-  accountId: string,
-  folder: string,
-  uid: string | number,
-): Promise<EmailMessage | null> {
-  const client = getConnection(accountId);
-  await client.mailboxOpen(folder);
-
-  const fetched = await client.fetchOne(uid, { envelope: true, uid: true, flags: true, source: true }, { uid: true });
-  if (!fetched) return null;
-
-  const raw = fetched.source?.toString("utf-8") ?? "";
-  const parsed = await parseRawEmail(raw);
-  parsed.uid = String(fetched.uid);
-  parsed.flags = fetched.flags ? [...fetched.flags] : [];
-  parsed.folder = folder;
-  return parsed;
-}
-
-/**
- * Search emails in a folder and return matching UIDs.
- * Uses IMAP SEARCH under the hood (supports text, from, to, subject, date ranges, flags).
- * Returns an empty array on no matches (imapflow returns false for empty results).
- */
-export async function searchEmails(
-  accountId: string,
-  folder: string,
-  query: SearchQuery,
-): Promise<number[]> {
-  const client = getConnection(accountId);
-  await client.mailboxOpen(folder);
-
-  const criteria = buildSearchCriteria(query);
-  const result = await client.search(criteria);
-  return result === false ? [] : result;
-}
-
-/**
  * Move an email from one folder to another (IMAP COPY + STORE \\Deleted + EXPUNGE).
  *
  * The move is not atomic — if the copy succeeds but the delete fails, the message

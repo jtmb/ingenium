@@ -172,9 +172,6 @@ export type Skill = {
   updated_at: string;
 };
 
-/** A learning entry — decisions, patterns, bugs, or preferences. */
-export type Learning = { id: number; entry_type: string; content: string; tags?: string; priority: number; created_at: string };
-
 /** A Kaban-board-style task with column tracking. */
 export type Task = {
   id: string;
@@ -198,6 +195,118 @@ export type Task = {
   created_at: string;
   completed_at?: string;
 };
+
+/** The only client-provided fields accepted when creating a task from a trusted source. */
+export type EmailTaskCaptureInput = {
+  source_type: "email";
+  title: string;
+  account_id: string;
+  folder: string;
+  uid: string;
+};
+
+export type ContextTaskCaptureInput = {
+  source_type: "context";
+  title: string;
+  source_id: string;
+};
+
+export type DocsTaskCaptureInput = {
+  source_type: "docs";
+  title: string;
+  page_id: number;
+};
+
+export type ChatTaskCaptureInput = {
+  source_type: "chat";
+  title: string;
+  session_id: string;
+};
+
+export type TaskCaptureInput = EmailTaskCaptureInput | ContextTaskCaptureInput | DocsTaskCaptureInput | ChatTaskCaptureInput;
+export type EmailTaskCaptureSource = Omit<EmailTaskCaptureInput, "title">;
+export type ContextTaskCaptureSource = Omit<ContextTaskCaptureInput, "title">;
+export type DocsTaskCaptureSource = Omit<DocsTaskCaptureInput, "title">;
+export type ChatTaskCaptureSource = Omit<ChatTaskCaptureInput, "title">;
+export type TaskCaptureSource = EmailTaskCaptureSource | ContextTaskCaptureSource | DocsTaskCaptureSource | ChatTaskCaptureSource;
+
+/** Metadata-only source reference returned with a captured task. */
+export type TaskCaptureReference = {
+  id: string;
+  source_type: "email" | "context" | "docs" | "chat";
+  source_id: string;
+  display_title: string;
+  display_detail: string | null;
+  source_timestamp: string | null;
+  created_at: string;
+  availability: "available";
+};
+
+export type TaskCaptureResult = { task: Task; reference: TaskCaptureReference };
+
+/** Metadata-only source reference for a task detail view. */
+export type TaskSourceReference = {
+  id: string;
+  source_type: "email" | "context" | "docs" | "chat" | "job";
+  source_id: string;
+  display_title: string;
+  display_detail: string | null;
+  source_timestamp: string | null;
+  created_at: string;
+  availability: "available" | "missing" | "unavailable";
+};
+
+/** Safe metadata projection for choosing a context source; source bodies are never included. */
+export type ContextSourceProvenance =
+  | "direct_upload"
+  | "chunked_upload"
+  | "opencode_session"
+  | "learning_snapshot";
+
+export type ContextSourceListItem = {
+  id: string;
+  title: string;
+  provenance: ContextSourceProvenance;
+  createdAt: string;
+};
+
+export type ContextSourceListResponse = {
+  data: ContextSourceListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export function captureTask(input: EmailTaskCaptureInput): Promise<{ data: TaskCaptureResult }>;
+export function captureTask(input: ChatTaskCaptureInput): Promise<{ data: TaskCaptureResult }>;
+export function captureTask(input: ContextTaskCaptureInput, project: string): Promise<{ data: TaskCaptureResult }>;
+export function captureTask(input: DocsTaskCaptureInput, project: string): Promise<{ data: TaskCaptureResult }>;
+export async function captureTask(
+  input: TaskCaptureInput,
+  project?: string,
+): Promise<{ data: TaskCaptureResult }> {
+  const params = new URLSearchParams();
+  if (input.source_type === "context" || input.source_type === "docs") {
+    if (!project) throw new Error(`${input.source_type === "docs" ? "Docs" : "Context"} task capture requires a selected project`);
+    params.set("project", project);
+  }
+  const suffix = params.size > 0 ? `?${params}` : "";
+  return request<{ data: TaskCaptureResult }>(`/tasks/captures${suffix}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Context source listing always requires an explicit project selection. */
+export function listContextSources(
+  project: string,
+  options?: { limit?: number; offset?: number },
+): Promise<ContextSourceListResponse> {
+  const params = new URLSearchParams({ project });
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
+  return request<ContextSourceListResponse>(`/context/sources/summary?${params}`);
+}
 
 /** A single board column definition. */
 export type BoardColumn = { id: string; name: string; wip_limit?: number; order: number };
@@ -251,9 +360,6 @@ export type Agent = {
   created_at: string;
   updated_at: string;
 };
-
-/** An MCP server configuration. */
-export type Server = { id: string; name: string; command: string; running: boolean; enabled: boolean; source?: "opencode" | "ingenium" };
 
 /** A canonical child MCP server definition returned by /mcp-servers. */
 export type ChildMcpDiscoveryStatus = "pending" | "ready" | "failed";
@@ -315,6 +421,73 @@ export interface CategorizedMcpTool {
   tools: Array<{ tool_name: string; enabled: boolean }>;
 }
 
+/** Project-scoped MCP state projection; `project` is API-authoritative when present. */
+export interface McpToolCatalogResponse {
+  data: CategorizedMcpTool[];
+  total: number;
+  project?: string;
+  project_id?: string;
+}
+
+/** Bounded status vocabulary returned by the project-scoped MCP report. */
+export type McpToolReportBoundary = "mcp-stdio" | "opencode-extension";
+export type McpToolReportVisibility = "reachable" | "unreachable" | "unknown" | "not-applicable";
+export type McpToolReportInvocation = "success" | "failed" | "not-run" | "unknown";
+export type McpToolReportFreshness = "fresh" | "stale" | "unknown";
+export type McpToolReportReason =
+  | "PROJECT_IDENTITY_REQUIRED"
+  | "TOOL_DISABLED"
+  | "TOOL_STATE_UNAVAILABLE"
+  | "transport-unavailable"
+  | "list-unavailable"
+  | "not-listed"
+  | "invocation-failed"
+  | "invalid-response"
+  | "unsafe-invocation"
+  | "not-requested";
+
+export interface McpToolReportTool {
+  name: string;
+  category: string;
+  enabled: boolean;
+  boundary: McpToolReportBoundary;
+  visibility: { status: McpToolReportVisibility; reason: McpToolReportReason | null };
+  invocation: { status: McpToolReportInvocation; reason: McpToolReportReason | null };
+}
+
+export interface McpToolReport {
+  schemaVersion: 1;
+  provenance: "fixture" | "live";
+  generatedAt: string;
+  freshness: {
+    status: McpToolReportFreshness;
+    observedAt: string | null;
+    durationMs: number;
+  };
+  catalog: {
+    status: "conformant" | "nonconformant" | "unknown";
+    issues: Array<{ code: string; toolName: string }>;
+  };
+  tools: McpToolReportTool[];
+}
+
+/** The API owns project identity for both catalog state and report data. */
+export interface McpToolReportResponse {
+  project: string;
+  project_id: string;
+  data: McpToolReport;
+  total: number;
+}
+
+export interface McpToolReportFilters {
+  q?: string;
+  category?: string;
+  enabled?: boolean;
+  boundary?: McpToolReportBoundary;
+  visibility?: McpToolReportVisibility;
+  invocation?: McpToolReportInvocation;
+}
+
 /** An observation recorded by the agent during interactions. */
 export type Observation = {
   id: number;
@@ -370,6 +543,25 @@ export type ContextMessage = ContextMessageSummary & { content: string };
 
 export type ContextMessageSearchResult = ContextMessageSummary & { rank: number };
 
+/** A bounded excerpt returned by project-scoped Context RAG search. */
+export type ContextRagCitation = {
+  citationId: string;
+  sourceId: string;
+  title: string;
+  sourceHash: string | null;
+  sourcePath: string | null;
+  sourceType: string;
+  mimeType: string | null;
+  provenance: string;
+  sourceReference: string | null;
+  chunkIndex: number;
+  availability: "available";
+  heading: string | null;
+  snippet: string;
+  score: number;
+  createdAt: string;
+};
+
 export type ContextCheckpoint = {
   id: string;
   project_id: string;
@@ -378,15 +570,6 @@ export type ContextCheckpoint = {
   through_message_id: string;
   message_count: number;
   state_hash: string;
-  metadata: string;
-  created_at: string;
-};
-
-export type ContextCheckpointRagSource = {
-  project_id: string;
-  checkpoint_id: string;
-  rag_source_id: string;
-  ordinal: number;
   metadata: string;
   created_at: string;
 };
@@ -426,7 +609,6 @@ export type PipelineEvent = {
   created_at: string;
 };
 
-/** ========== Email Types ========== */
 
 export type EmailProvider = "gmail" | "outlook" | "yahoo" | "custom";
 
@@ -546,6 +728,50 @@ export type Job = {
   updated_at: string;
 };
 
+/** The only event types that a new job may subscribe to. */
+export const TRUSTED_JOB_EVENT_TYPES = [
+  "context.conversation.archived",
+  "context.conversation.unarchived",
+  "context.checkpoint.restored_as_new",
+] as const;
+
+export type TrustedJobEventType = (typeof TRUSTED_JOB_EVENT_TYPES)[number];
+export type JobEventDeliveryState = "queued" | "leased" | "retry_wait" | "succeeded" | "dead_letter";
+
+/** Metadata-only projection. Payload and schema internals are deliberately omitted. */
+export type TrustedJobEvent = {
+  id: string;
+  event_type: TrustedJobEventType;
+  source_audit_event_id: string;
+  created_at: string;
+};
+
+/** Credential-free delivery projection. Lease ownership and process details are deliberately omitted. */
+export type JobEventDelivery = {
+  id: string;
+  trusted_event_id: string;
+  event_type: TrustedJobEventType;
+  job_id: string;
+  job_name: string;
+  state: JobEventDeliveryState;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  lease_expires_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type JobEventPage<T> = { data: T[]; nextCursor: string | null };
+
+export type JobRunEventDelivery = {
+  delivery_id: string;
+  trusted_event_id: string;
+  attempt_number: number;
+  delivery_state: JobEventDeliveryState;
+};
+
 /** A single execution run of a job. */
 export type JobRun = {
   id: string;
@@ -556,6 +782,7 @@ export type JobRun = {
   finished_at?: string;
   exit_code?: number;
   created_at: string;
+  event_delivery?: JobRunEventDelivery | null;
 };
 
 /** A single log line from a job run. */
@@ -568,7 +795,245 @@ export type JobRunLog = {
   created_at: string;
 };
 
-/** ========== Vault Types ========== */
+type JobTextOptions = { maxBytes?: number; maxLines?: number };
+
+const JOB_TEXT_DEFAULTS = { maxBytes: 512, maxLines: 8 } as const;
+const JOB_SECRET_NAME = "(?:authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|secret|password|passwd|token|credential(?:s)?|[A-Z][A-Z0-9_]*(?:API_KEY|SECRET_ACCESS_KEY|ACCESS_KEY|TOKEN|PASSWORD|CREDENTIAL|AUTHORIZATION|COOKIE))";
+const JOB_BEARER_OR_BASIC = /\b(Bearer|Basic)\s+[^\s,;]+/gi;
+const JOB_KEY_VALUE_SECRET = new RegExp(`(["']?${JOB_SECRET_NAME}["']?\\s*[:=]\\s*)(?:"(?:\\\\.|[^"])*"|'(?:\\\\.|[^'])*'|[^\\s,;}&\\]]+)`, "gi");
+const JOB_URL_SECRET = new RegExp(`([?&]\\s*${JOB_SECRET_NAME}\\s*=)[^&#\\s]*`, "gi");
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  let bytes = 0;
+  let result = "";
+  const encoder = new TextEncoder();
+  for (const character of value) {
+    const nextBytes = encoder.encode(character).byteLength;
+    if (bytes + nextBytes > maxBytes) break;
+    result += character;
+    bytes += nextBytes;
+  }
+  return result;
+}
+
+/** Normalize all user-visible Jobs text before it reaches component state or the DOM. */
+export function sanitizeJobDisplayText(value: unknown, fallback = "Unavailable", options: JobTextOptions = {}): string {
+  const maxBytes = options.maxBytes ?? JOB_TEXT_DEFAULTS.maxBytes;
+  const maxLines = options.maxLines ?? JOB_TEXT_DEFAULTS.maxLines;
+  if (typeof value !== "string" || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || !Number.isSafeInteger(maxLines) || maxLines < 1) return fallback;
+  const redacted = value
+    .split(/\r\n|\r|\n/).slice(0, maxLines).join(" ")
+    .replace(JOB_BEARER_OR_BASIC, "$1 [REDACTED]")
+    .replace(JOB_KEY_VALUE_SECRET, "$1[REDACTED]")
+    .replace(JOB_URL_SECRET, "$1[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9_-]+/gi, "[REDACTED]")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return truncateUtf8(redacted, maxBytes) || fallback;
+}
+
+export function normalizeJobErrorCode(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(value)
+    ? value
+    : "job_event_failure";
+}
+
+function jobRecord(value: unknown, error = "Invalid job response."): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(error);
+  return value as Record<string, unknown>;
+}
+
+function jobId(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+    throw new Error(`Invalid ${field} in job response.`);
+  }
+  return value;
+}
+
+function jobTimestamp(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length > 64) throw new Error(`Invalid ${field} in job response.`);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?Z$/.exec(value);
+  const date = match ? new Date(value) : null;
+  if (!match || !date || Number.isNaN(date.getTime()) || date.getUTCFullYear() !== Number(match[1]) || date.getUTCMonth() + 1 !== Number(match[2]) || date.getUTCDate() !== Number(match[3]) || date.getUTCHours() !== Number(match[4]) || date.getUTCMinutes() !== Number(match[5]) || date.getUTCSeconds() !== Number(match[6])) {
+    throw new Error(`Invalid ${field} in job response.`);
+  }
+  return value;
+}
+
+function nullableJobTimestamp(value: unknown, field: string): string | null {
+  return value === null ? null : jobTimestamp(value, field);
+}
+
+function jobInteger(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`Invalid ${field} in job response.`);
+  }
+  return value;
+}
+
+function jobEventType(value: unknown): TrustedJobEventType {
+  if (typeof value !== "string" || !(TRUSTED_JOB_EVENT_TYPES as readonly string[]).includes(value)) {
+    throw new Error("Invalid event_type in job response.");
+  }
+  return value as TrustedJobEventType;
+}
+
+function jobDeliveryState(value: unknown): JobEventDeliveryState {
+  if (value !== "queued" && value !== "leased" && value !== "retry_wait" && value !== "succeeded" && value !== "dead_letter") {
+    throw new Error("Invalid delivery state in job response.");
+  }
+  return value;
+}
+
+export function normalizeTrustedJobEvent(value: unknown): TrustedJobEvent {
+  const record = jobRecord(value, "Invalid trusted event response.");
+  return {
+    id: jobId(record.id, "trusted event ID"),
+    event_type: jobEventType(record.event_type),
+    source_audit_event_id: jobId(record.source_audit_event_id, "source audit ID"),
+    created_at: jobTimestamp(record.created_at, "trusted event timestamp"),
+  };
+}
+
+export function normalizeJobEventDelivery(value: unknown): JobEventDelivery {
+  const record = jobRecord(value, "Invalid event delivery response.");
+  if (typeof record.job_name !== "string" || !record.job_name.trim() || (record.last_error_code !== null && typeof record.last_error_code !== "string") || (record.last_error_message !== null && typeof record.last_error_message !== "string")) {
+    throw new Error("Invalid event delivery response.");
+  }
+  const jobName = sanitizeJobDisplayText(record.job_name, "Unnamed job", { maxBytes: 256, maxLines: 2 });
+  return {
+    id: jobId(record.id, "delivery ID"),
+    trusted_event_id: jobId(record.trusted_event_id, "trusted event ID"),
+    event_type: jobEventType(record.event_type),
+    job_id: jobId(record.job_id, "job ID"),
+    job_name: jobName,
+    state: jobDeliveryState(record.state),
+    attempt_count: jobInteger(record.attempt_count, "attempt count", 0, 5),
+    next_attempt_at: nullableJobTimestamp(record.next_attempt_at, "next attempt timestamp"),
+    lease_expires_at: nullableJobTimestamp(record.lease_expires_at, "lease expiry timestamp"),
+    last_error_code: record.last_error_code === null ? null : normalizeJobErrorCode(record.last_error_code),
+    last_error_message: record.last_error_message === null
+      ? null
+      : sanitizeJobDisplayText(record.last_error_message, "Event delivery failed.", { maxBytes: 512, maxLines: 8 }),
+    created_at: jobTimestamp(record.created_at, "delivery creation timestamp"),
+    updated_at: jobTimestamp(record.updated_at, "delivery update timestamp"),
+  };
+}
+
+function normalizeJobRunEventDelivery(value: unknown): JobRunEventDelivery {
+  const record = jobRecord(value, "Invalid run delivery metadata.");
+  return {
+    delivery_id: jobId(record.delivery_id, "delivery ID"),
+    trusted_event_id: jobId(record.trusted_event_id, "trusted event ID"),
+    attempt_number: jobInteger(record.attempt_number, "attempt number", 1, 5),
+    delivery_state: jobDeliveryState(record.delivery_state),
+  };
+}
+
+export function normalizeJobRun(value: unknown): JobRun {
+  const record = jobRecord(value, "Invalid job run response.");
+  if (record.status !== "queued" && record.status !== "running" && record.status !== "success" && record.status !== "failed" && record.status !== "timeout" && record.status !== "cancelled") {
+    throw new Error("Invalid run status in job response.");
+  }
+  if (record.trigger !== "manual" && record.trigger !== "cron" && record.trigger !== "event") {
+    throw new Error("Invalid run trigger in job response.");
+  }
+  const startedAt = record.started_at === undefined || record.started_at === null ? undefined : jobTimestamp(record.started_at, "run start timestamp");
+  const finishedAt = record.finished_at === undefined || record.finished_at === null ? undefined : jobTimestamp(record.finished_at, "run finish timestamp");
+  const exitCode = record.exit_code === undefined || record.exit_code === null ? undefined : jobInteger(record.exit_code, "exit code", -1_000_000, 1_000_000);
+  return {
+    id: jobId(record.id, "run ID"),
+    job_id: jobId(record.job_id, "job ID"),
+    status: record.status,
+    trigger: record.trigger,
+    ...(startedAt ? { started_at: startedAt } : {}),
+    ...(finishedAt ? { finished_at: finishedAt } : {}),
+    ...(exitCode !== undefined ? { exit_code: exitCode } : {}),
+    created_at: jobTimestamp(record.created_at, "run creation timestamp"),
+    ...(record.event_delivery === undefined ? {} : { event_delivery: record.event_delivery === null ? null : normalizeJobRunEventDelivery(record.event_delivery) }),
+  };
+}
+
+export function normalizeJobRunLog(value: unknown): JobRunLog {
+  const record = jobRecord(value, "Invalid run log response.");
+  if ((record.stream !== "stdout" && record.stream !== "stderr") || typeof record.line !== "string") throw new Error("Invalid log response.");
+  return {
+    id: jobInteger(record.id, "log ID", 0, Number.MAX_SAFE_INTEGER),
+    run_id: jobId(record.run_id, "run ID"),
+    seq: jobInteger(record.seq, "log sequence", 0, Number.MAX_SAFE_INTEGER),
+    stream: record.stream,
+    line: sanitizeJobDisplayText(record.line, "", { maxBytes: 4_096, maxLines: 16 }),
+    created_at: jobTimestamp(record.created_at, "log timestamp"),
+  };
+}
+
+export function normalizeJobPage<T>(value: unknown, normalizeEntry: (entry: unknown) => T): JobEventPage<T> {
+  const record = jobRecord(value, "Invalid job page response.");
+  if (!Array.isArray(record.data) || (record.nextCursor !== null && (typeof record.nextCursor !== "string" || record.nextCursor.length === 0 || record.nextCursor.length > 512))) {
+    throw new Error("Invalid job page response.");
+  }
+  return { data: record.data.map(normalizeEntry), nextCursor: record.nextCursor };
+}
+
+function normalizeJobCollection<T>(value: unknown, normalizeEntry: (entry: unknown) => T): { data: T[]; total: number } {
+  const record = jobRecord(value, "Invalid job collection response.");
+  if (!Array.isArray(record.data)) throw new Error("Invalid job collection response.");
+  return { data: record.data.map(normalizeEntry), total: record.data.length };
+}
+
+function normalizeJobData<T>(value: unknown, normalize: (data: unknown) => T): { data: T } {
+  const record = jobRecord(value);
+  return { data: normalize(record.data) };
+}
+
+async function jobsRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  try {
+    return await request<T>(path, options);
+  } catch (error: unknown) {
+    const apiError = error instanceof ApiError ? error : null;
+    throw new ApiError(
+      apiError?.status ?? 0,
+      sanitizeJobDisplayText(error instanceof Error ? error.message : undefined, "Job request failed.", { maxBytes: 512, maxLines: 8 }),
+      apiError?.retryAfterSeconds ?? null,
+    );
+  }
+}
+
+async function normalizedJobsRequest<T>(path: string, normalize: (value: unknown) => T, options?: RequestInit): Promise<T> {
+  try {
+    return normalize(await jobsRequest<unknown>(path, options));
+  } catch (error: unknown) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(0, "Invalid job response.", null);
+  }
+}
+
+function isValidDashboardProjectName(project: string): boolean {
+  return project.length > 0
+    && project.length <= 64
+    && project === project.trim()
+    && project !== "."
+    && project !== ".."
+    && !/[\\/\u0000-\u001f\u007f]/.test(project);
+}
+
+function jobsQuery(project: string, options?: { limit?: number; cursor?: string }): URLSearchParams {
+  if (!isValidDashboardProjectName(project)) throw new Error("A validated project is required for job requests.");
+  const params = new URLSearchParams({ project });
+  if (options?.limit !== undefined) {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 100) {
+      throw new Error("Job request limit must be an integer between 1 and 100.");
+    }
+    params.set("limit", String(options.limit));
+  }
+  if (options?.cursor !== undefined) {
+    if (options.cursor.length === 0 || options.cursor.length > 512) throw new Error("Job request cursor is invalid.");
+    params.set("cursor", options.cursor);
+  }
+  return params;
+}
+
 
 export type VaultStatus = "sealed" | "unsealed";
 
@@ -669,6 +1134,7 @@ export interface ChatProviderInfo {
 }
 
 export interface ChatConfigResponse {
+  project: string | null;
   configured: boolean;
   primary: ChatConfigProviderInfo | null;
   backup: ChatConfigProviderInfo | null;
@@ -728,6 +1194,19 @@ function isApiRecord(value: unknown): value is Record<string, unknown> {
 
 function apiString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+/** Preserve only a server-attested project name; never substitute browser state. */
+function normalizeChatConfigProject(value: unknown): string | null {
+  const project = apiString(value);
+  return project.length > 0
+    && project.length <= 64
+    && project === project.trim()
+    && project !== "."
+    && project !== ".."
+    && !/[\\/\u0000-\u001f\u007f]/.test(project)
+    ? project
+    : null;
 }
 
 function apiStringArray(value: unknown): string[] {
@@ -856,6 +1335,7 @@ export function normalizeChatConfigResponse(value: unknown): ChatConfigResponse 
     ? apiProviderSelection(record.defaultSelection)
     : null;
   return {
+    project: normalizeChatConfigProject(record.project),
     configured: record.configured === true,
     primary,
     backup,
@@ -1027,6 +1507,80 @@ export interface UsageEventsPage {
   pagination: { nextCursor: string | null; hasMore: boolean; total: number };
 }
 
+/** Advisory configuration is deliberately separate from raw usage telemetry. */
+export interface UsageAdvisoryThresholds {
+  requestCount: number | null;
+  totalTokens: number | null;
+  reportedCostAmount: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  revision: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface UsageAdvisoryThresholdReplacement {
+  expectedRevision: number;
+  requestCount: number | null;
+  totalTokens: number | null;
+  reportedCostAmount: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+}
+
+export type UsageAdvisoryState = "disabled" | "unknown" | "below" | "equal" | "above";
+export type UsageAttentionStatus = "active" | "resolved";
+export type UsageAttentionSeverity = "info" | "warning" | "critical";
+export type UsageAttentionFreshness = "disabled" | "unknown" | "fresh" | "stale";
+export type UsageAttentionMetric = "request_count" | "total_tokens" | "reported_cost_amount" | "cache_read_tokens" | "cache_write_tokens";
+
+export interface UsageAdvisoryMetric {
+  observed: number | null;
+  threshold: number | null;
+  availability: UsageAvailability;
+  state: UsageAdvisoryState;
+}
+
+export interface UsageAdvisoryEvaluation {
+  range: { from: string; to: string };
+  generatedAt: string;
+  thresholds: UsageAdvisoryThresholds;
+  metrics: {
+    requestCount: UsageAdvisoryMetric;
+    totalTokens: UsageAdvisoryMetric;
+    reportedCostAmount: UsageAdvisoryMetric;
+    cacheReadTokens: UsageAdvisoryMetric;
+    cacheWriteTokens: UsageAdvisoryMetric;
+  };
+}
+
+/** Safe advisory-only attention DTO. No source, provider, payload, prompt, or enforcement fields enter UI state. */
+export interface UsageAttentionItem {
+  id: string;
+  metric: UsageAttentionMetric;
+  status: UsageAttentionStatus;
+  evaluationState: UsageAdvisoryState;
+  severity: UsageAttentionSeverity;
+  observed: number | null;
+  threshold: number | null;
+  availability: UsageAvailability;
+  freshness: UsageAttentionFreshness;
+  thresholdRevision: number;
+  openedAt: string;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  reopenedAt: string | null;
+  reopenCount: number;
+  lastEvaluatedAt: string;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface UsageAttentionPage {
+  data: UsageAttentionItem[];
+  pagination: { nextCursor: string | null; hasMore: boolean; total: number };
+}
+
 export interface UsageQuery {
   from: string;
   to: string;
@@ -1036,19 +1590,199 @@ export interface UsageQuery {
   statuses?: UsageStatus[];
 }
 
+function usageUtcTimestamp(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length > 64) throw new Error(`Invalid ${field} for usage request.`);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?Z$/.exec(value);
+  const date = match ? new Date(value) : null;
+  if (!match || !date || Number.isNaN(date.getTime())
+    || date.getUTCFullYear() !== Number(match[1]) || date.getUTCMonth() + 1 !== Number(match[2])
+    || date.getUTCDate() !== Number(match[3]) || date.getUTCHours() !== Number(match[4])
+    || date.getUTCMinutes() !== Number(match[5]) || date.getUTCSeconds() !== Number(match[6])) {
+    throw new Error(`Invalid ${field} for usage request.`);
+  }
+  return value;
+}
+
+function usageProjectParams(project: string): URLSearchParams {
+  if (!isValidDashboardProjectName(project)) throw new Error("A validated project is required for usage requests.");
+  return new URLSearchParams({ project });
+}
+
+function usageCursor(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (value.length === 0 || value.length > 512) throw new Error("Usage request cursor is invalid.");
+  return value;
+}
+
+function usageLimit(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 100) throw new Error("Usage request limit must be an integer between 1 and 100.");
+  return value;
+}
+
 /** Serialize raw usage filter values without normalizing provider or model IDs. */
 export function usageQueryParams(project: string, query: UsageQuery, extras?: { limit?: number; cursor?: string }): URLSearchParams {
-  const params = new URLSearchParams({ project, from: query.from, to: query.to });
+  const from = usageUtcTimestamp(query.from, "from timestamp");
+  const to = usageUtcTimestamp(query.to, "to timestamp");
+  if (Date.parse(to) <= Date.parse(from)) throw new Error("The usage end timestamp must be after the start timestamp.");
+  const params = usageProjectParams(project);
+  params.set("from", from);
+  params.set("to", to);
   query.providerIds?.forEach((providerId) => params.append("provider", providerId));
   query.modelIds?.forEach((modelId) => params.append("model", modelId));
   query.agentIds?.forEach((agentId) => params.append("agent", agentId));
-  query.statuses?.forEach((status) => params.append("status", status));
-  if (extras?.limit !== undefined) params.set("limit", String(extras.limit));
-  if (extras?.cursor) params.set("cursor", extras.cursor);
+  query.statuses?.forEach((status) => {
+    if (status !== "success" && status !== "error" && status !== "partial" && status !== "unknown") {
+      throw new Error("Usage request status is invalid.");
+    }
+    params.append("status", status);
+  });
+  const limit = usageLimit(extras?.limit);
+  const cursor = usageCursor(extras?.cursor);
+  if (limit !== undefined) params.set("limit", String(limit));
+  if (cursor !== undefined) params.set("cursor", cursor);
   return params;
 }
 
-/** ========== Docs Types (re-exported from canonical docs-types.ts) ========== */
+function usageRecord(value: unknown, error = "Invalid usage advisory response."): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(error);
+  return value as Record<string, unknown>;
+}
+
+function usageId(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) throw new Error(`Invalid ${field} in usage advisory response.`);
+  return value;
+}
+
+function usageInteger(value: unknown, field: string, minimum = 0): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum) throw new Error(`Invalid ${field} in usage advisory response.`);
+  return value;
+}
+
+function usageFiniteNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`Invalid ${field} in usage advisory response.`);
+  return value;
+}
+
+function usageNullableNumber(value: unknown, field: string): number | null {
+  return value === null ? null : usageFiniteNumber(value, field);
+}
+
+function usageNullableInteger(value: unknown, field: string): number | null {
+  return value === null ? null : usageInteger(value, field);
+}
+
+function usageEnum<T extends string>(value: unknown, values: readonly T[], field: string): T {
+  if (typeof value !== "string" || !values.includes(value as T)) throw new Error(`Invalid ${field} in usage advisory response.`);
+  return value as T;
+}
+
+function usageNullableTimestamp(value: unknown, field: string): string | null {
+  return value === null ? null : usageUtcTimestamp(value, field);
+}
+
+export function normalizeUsageAdvisoryThresholds(value: unknown): UsageAdvisoryThresholds {
+  const record = usageRecord(value);
+  return {
+    requestCount: usageNullableInteger(record.requestCount, "request count threshold"),
+    totalTokens: usageNullableInteger(record.totalTokens, "total tokens threshold"),
+    reportedCostAmount: usageNullableNumber(record.reportedCostAmount, "reported cost amount threshold"),
+    cacheReadTokens: usageNullableInteger(record.cacheReadTokens, "cache read threshold"),
+    cacheWriteTokens: usageNullableInteger(record.cacheWriteTokens, "cache write threshold"),
+    revision: usageInteger(record.revision, "threshold revision", 1),
+    createdAt: usageNullableTimestamp(record.createdAt, "threshold creation timestamp"),
+    updatedAt: usageNullableTimestamp(record.updatedAt, "threshold update timestamp"),
+  };
+}
+
+function normalizeUsageAdvisoryMetric(value: unknown, integer: boolean): UsageAdvisoryMetric {
+  const record = usageRecord(value);
+  return {
+    observed: integer ? usageNullableInteger(record.observed, "advisory observed value") : usageNullableNumber(record.observed, "advisory observed value"),
+    threshold: integer ? usageNullableInteger(record.threshold, "advisory threshold") : usageNullableNumber(record.threshold, "advisory threshold"),
+    availability: usageEnum(record.availability, ["known", "partial", "unavailable"] as const, "advisory availability"),
+    state: usageEnum(record.state, ["disabled", "unknown", "below", "equal", "above"] as const, "advisory state"),
+  };
+}
+
+export function normalizeUsageAdvisoryEvaluation(value: unknown): UsageAdvisoryEvaluation {
+  const record = usageRecord(value);
+  const range = usageRecord(record.range);
+  const metrics = usageRecord(record.metrics);
+  return {
+    range: {
+      from: usageUtcTimestamp(range.from, "advisory range start"),
+      to: usageUtcTimestamp(range.to, "advisory range end"),
+    },
+    generatedAt: usageUtcTimestamp(record.generatedAt, "advisory generated timestamp"),
+    thresholds: normalizeUsageAdvisoryThresholds(record.thresholds),
+    metrics: {
+      requestCount: normalizeUsageAdvisoryMetric(metrics.requestCount, true),
+      totalTokens: normalizeUsageAdvisoryMetric(metrics.totalTokens, true),
+      reportedCostAmount: normalizeUsageAdvisoryMetric(metrics.reportedCostAmount, false),
+      cacheReadTokens: normalizeUsageAdvisoryMetric(metrics.cacheReadTokens, true),
+      cacheWriteTokens: normalizeUsageAdvisoryMetric(metrics.cacheWriteTokens, true),
+    },
+  };
+}
+
+export function normalizeUsageAttentionItem(value: unknown): UsageAttentionItem {
+  const record = usageRecord(value);
+  const metric = usageEnum(record.metric, ["request_count", "total_tokens", "reported_cost_amount", "cache_read_tokens", "cache_write_tokens"] as const, "attention metric");
+  const integer = metric !== "reported_cost_amount";
+  return {
+    id: usageId(record.id, "attention ID"),
+    metric,
+    status: usageEnum(record.status, ["active", "resolved"] as const, "attention status"),
+    evaluationState: usageEnum(record.evaluationState, ["disabled", "unknown", "below", "equal", "above"] as const, "attention state"),
+    severity: usageEnum(record.severity, ["info", "warning", "critical"] as const, "attention severity"),
+    observed: integer ? usageNullableInteger(record.observed, "attention observed value") : usageNullableNumber(record.observed, "attention observed value"),
+    threshold: integer ? usageNullableInteger(record.threshold, "attention threshold") : usageNullableNumber(record.threshold, "attention threshold"),
+    availability: usageEnum(record.availability, ["known", "partial", "unavailable"] as const, "attention availability"),
+    freshness: usageEnum(record.freshness, ["disabled", "unknown", "fresh", "stale"] as const, "attention freshness"),
+    thresholdRevision: usageInteger(record.thresholdRevision, "attention threshold revision", 1),
+    openedAt: usageUtcTimestamp(record.openedAt, "attention opened timestamp"),
+    acknowledgedAt: usageNullableTimestamp(record.acknowledgedAt, "attention acknowledgement timestamp"),
+    resolvedAt: usageNullableTimestamp(record.resolvedAt, "attention resolution timestamp"),
+    reopenedAt: usageNullableTimestamp(record.reopenedAt, "attention reopen timestamp"),
+    reopenCount: usageInteger(record.reopenCount, "attention reopen count"),
+    lastEvaluatedAt: usageUtcTimestamp(record.lastEvaluatedAt, "attention evaluation timestamp"),
+    revision: usageInteger(record.revision, "attention revision", 1),
+    updatedAt: usageUtcTimestamp(record.updatedAt, "attention update timestamp"),
+  };
+}
+
+export function normalizeUsageAttentionPage(value: unknown): UsageAttentionPage {
+  const record = usageRecord(value);
+  const pagination = usageRecord(record.pagination);
+  if (!Array.isArray(record.data)) throw new Error("Invalid usage attention response.");
+  const nextCursor = pagination.nextCursor;
+  if (nextCursor !== null && (typeof nextCursor !== "string" || nextCursor.length === 0 || nextCursor.length > 512)) {
+    throw new Error("Invalid usage attention response.");
+  }
+  return {
+    data: record.data.map(normalizeUsageAttentionItem),
+    pagination: {
+      nextCursor,
+      hasMore: typeof pagination.hasMore === "boolean" ? pagination.hasMore : (() => { throw new Error("Invalid usage attention response."); })(),
+      total: usageInteger(pagination.total, "attention total"),
+    },
+  };
+}
+
+function normalizeUsageData<T>(value: unknown, normalize: (data: unknown) => T): { data: T } {
+  return { data: normalize(usageRecord(value).data) };
+}
+
+async function normalizedUsageRequest<T>(path: string, normalize: (value: unknown) => T, options?: RequestInit): Promise<T> {
+  try {
+    return normalize(await request<unknown>(path, options));
+  } catch (error: unknown) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(0, "Invalid usage advisory response.", null);
+  }
+}
+
 
 export type {
   DocSpace,
@@ -1076,9 +1810,8 @@ export type {
  * Methods that accept user-controlled path segments (names, IDs) use `encodeURIComponent`
  * to prevent path-traversal injection.
  *
- * The client exposes 15 resource groups: projects, skills, learnings, tasks, plugins,
- * agents, servers, observations, personality, synthesis, pipeline, emails, settings,
- * configs, logs, mcpTools, jobs, docs, and home (dashboard summary).
+ * The client exposes the dashboard's supported resource groups and their typed
+ * HTTP operations.
  */
 export const api = {
   projects: {
@@ -1095,72 +1828,50 @@ export const api = {
     purgeOne: (name: string) => request<null>(`/projects/${encodeURIComponent(name)}/purge`, { method: "DELETE" }),
   },
   skills: {
-    list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${project}`),
-    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Skill }>(`/skills/${name}?project=${project}`),
+    list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${encodeURIComponent(project)}`),
+    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Skill }>(`/skills/${name}?project=${encodeURIComponent(project)}`),
     create: (name: string, description: string, content: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Skill }>(`/skills?project=${project}`, { method: "POST", body: JSON.stringify({ name, description, content }) }),
+      request<{ data: Skill }>(`/skills?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify({ name, description, content }) }),
     update: (name: string, content: string, extra?: { tags?: string; always_apply?: number; files?: string }, project = DEFAULT_PROJECT) =>
-      request<{ data: Skill }>(`/skills/${encodeURIComponent(name)}?project=${project}`, { 
+      request<{ data: Skill }>(`/skills/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
         method: "PATCH", 
         body: JSON.stringify({ content, ...(extra || {}) })
       }),
     // Governance
     proposals: {
       list: (project = DEFAULT_PROJECT, status?: string) => 
-        request<{ data: any[] }>(`/skills/proposals?project=${project}${status ? `&status=${status}` : ''}`),
+        request<{ data: any[] }>(`/skills/proposals?project=${encodeURIComponent(project)}${status ? `&status=${status}` : ''}`),
       get: (proposalId: string, project = DEFAULT_PROJECT) => 
-        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}?project=${project}`),
-      create: (body: any, project = DEFAULT_PROJECT) =>
-        request<{ data: any }>(`/skills/proposals?project=${project}`, { method: 'POST', body: JSON.stringify(body) }),
-      submit: (proposalId: string, project = DEFAULT_PROJECT) =>
-        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/submit?project=${project}`, { method: 'POST' }),
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}?project=${encodeURIComponent(project)}`),
       approve: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
-        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/approve?project=${project}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/approve?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
       reject: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
-        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/reject?project=${project}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/reject?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
       rollback: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
-        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/rollback?project=${project}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/rollback?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
     },
-    versions: {
-      list: (name: string, project = DEFAULT_PROJECT) =>
-        request<{ data: any[] }>(`/skills/${encodeURIComponent(name)}/versions?project=${project}`),
-    },
-    archived: {
-      list: (project = DEFAULT_PROJECT) =>
-        request<{ data: any[] }>(`/skills/archived?project=${project}`),
-      restore: (name: string, project = DEFAULT_PROJECT) =>
-        request<{ data: any }>(`/skills/${encodeURIComponent(name)}/restore?project=${project}`, { method: 'POST' }),
-    },
-  },
-  learnings: {
-    list: (project = DEFAULT_PROJECT) => request<{ data: Learning[] }>(`/learnings?project=${project}`),
-    create: (entry_type: string, content: string, tags?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Learning }>(`/learnings?project=${project}`, { method: "POST", body: JSON.stringify({ entry_type, content, tags }) }),
   },
   tasks: {
-    list: (project = DEFAULT_PROJECT) => request<{ data: Task[] }>(`/tasks?project=${project}`),
+    list: (project = DEFAULT_PROJECT) => request<{ data: Task[] }>(`/tasks?project=${encodeURIComponent(project)}`),
     create: (title: string, project = DEFAULT_PROJECT, fields?: Partial<Task>) =>
-      request<{ data: Task }>(`/tasks?project=${project}`, { method: "POST", body: JSON.stringify({ title, ...fields }) }),
+      request<{ data: Task }>(`/tasks?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify({ title, ...fields }) }),
+    capture: captureTask,
     move: (id: string, column_id: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify({ column_id }) }),
+      request<{ data: Task }>(`/tasks/${id}?project=${encodeURIComponent(project)}`, { method: "PATCH", body: JSON.stringify({ column_id }) }),
     update: (id: string, fields: Partial<Task>, project = DEFAULT_PROJECT) =>
-      request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify(fields) }),
+      request<{ data: Task }>(`/tasks/${id}?project=${encodeURIComponent(project)}`, { method: "PATCH", body: JSON.stringify(fields) }),
     delete: (id: string, project = DEFAULT_PROJECT) =>
-      request(`/tasks/${id}?project=${project}`, { method: "DELETE" }),
-    complete: (id: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify({ column_id: "done" }) }),
+      request(`/tasks/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     search: (query: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Task[] }>(`/tasks/search?project=${project}&q=${encodeURIComponent(query)}`),
+      request<{ data: Task[] }>(`/tasks/search?project=${encodeURIComponent(project)}&q=${encodeURIComponent(query)}`),
     comments: (taskId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskComment[] }>(`/tasks/${taskId}/comments?project=${project}`),
+      request<{ data: TaskComment[] }>(`/tasks/${taskId}/comments?project=${encodeURIComponent(project)}`),
     addComment: (taskId: string, body: string, author = "user", parentCommentId?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${project}`, { method: "POST", body: JSON.stringify({ author, body, parent_comment_id: parentCommentId }) }),
+      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify({ author, body, parent_comment_id: parentCommentId }) }),
     reactToComment: (taskId: string, commentId: string, reaction: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskComment }>(`/tasks/${taskId}/comments/${commentId}/react?project=${project}`, { method: "POST", body: JSON.stringify({ reaction }) }),
+      request<{ data: TaskComment }>(`/tasks/${taskId}/comments/${commentId}/react?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify({ reaction }) }),
     boardConfig: (project = DEFAULT_PROJECT) =>
-      request<{ data: BoardConfig }>(`/tasks/board-config?project=${project}`),
-    updateBoardConfig: (data: BoardConfig, project = DEFAULT_PROJECT) =>
-      request<{ data: BoardConfig }>(`/tasks/board-config?project=${project}`, { method: "PUT", body: JSON.stringify(data) }),
+      request<{ data: BoardConfig }>(`/tasks/board-config?project=${encodeURIComponent(project)}`),
     notifications: (recipient?: string, unread?: boolean, project = DEFAULT_PROJECT) => {
       const params = new URLSearchParams({ project });
       if (recipient) params.set("recipient", recipient);
@@ -1168,60 +1879,61 @@ export const api = {
       return request<{ data: TaskNotification[] }>(`/tasks/notifications?${params}`);
     },
     readNotification: (notificationId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskNotification }>(`/tasks/notifications/${notificationId}/read?project=${project}`, { method: "POST" }),
+      request<{ data: TaskNotification }>(`/tasks/notifications/${notificationId}/read?project=${encodeURIComponent(project)}`, { method: "POST" }),
     activity: (taskId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskActivity[] }>(`/tasks/${taskId}/activity?project=${project}`),
+      request<{ data: TaskActivity[] }>(`/tasks/${taskId}/activity?project=${encodeURIComponent(project)}`),
+    references: {
+      list: (taskId: string, project: string) =>
+        request<{ data: TaskSourceReference[] }>(
+          `/tasks/${encodeURIComponent(taskId)}/references?project=${encodeURIComponent(project)}`,
+        ),
+    },
     links: (taskId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskLink[] }>(`/tasks/${taskId}/links?project=${project}`),
+      request<{ data: TaskLink[] }>(`/tasks/${taskId}/links?project=${encodeURIComponent(project)}`),
     addLink: (taskId: string, data: { linked_task_id: string; link_type: string }, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskLink }>(`/tasks/${taskId}/links?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
+      request<{ data: TaskLink }>(`/tasks/${taskId}/links?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify(data) }),
     removeLink: (taskId: string, linkId: string, project = DEFAULT_PROJECT) =>
-      request(`/tasks/${taskId}/links/${linkId}?project=${project}`, { method: "DELETE" }),
+      request(`/tasks/${taskId}/links/${linkId}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     bulkUpdate: (data: { task_ids: string[]; column_id?: string; assigned_to?: string; priority?: string }, project = DEFAULT_PROJECT) =>
-      request<{ data: { updated: number } }>(`/tasks/bulk?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
+      request<{ data: { updated: number } }>(`/tasks/bulk?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify(data) }),
   },
   plugins: {
-    list: (project = DEFAULT_PROJECT) => request<{ data: Plugin[] }>(`/plugins?project=${project}`),
-    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Plugin }>(`/plugins/${name}?project=${project}`),
+    list: (project = DEFAULT_PROJECT) => request<{ data: Plugin[] }>(`/plugins?project=${encodeURIComponent(project)}`),
+    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Plugin }>(`/plugins/${name}?project=${encodeURIComponent(project)}`),
     create: (name: string, file_path: string, source_content?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Plugin }>(`/plugins?project=${project}`, {
+      request<{ data: Plugin }>(`/plugins?project=${encodeURIComponent(project)}`, {
         method: "POST", body: JSON.stringify({ name, file_path, source_content }),
       }),
     update: (name: string, data: { file_path?: string; source_content?: string }, project = DEFAULT_PROJECT) =>
-      request<{ data: Plugin }>(`/plugins/${name}?project=${project}`, {
+      request<{ data: Plugin }>(`/plugins/${name}?project=${encodeURIComponent(project)}`, {
         method: "PUT", body: JSON.stringify(data),
       }),
     delete: (name: string, project = DEFAULT_PROJECT) =>
-      request(`/plugins/${name}?project=${project}`, { method: "DELETE" }),
+      request(`/plugins/${name}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     enable: (name: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Plugin }>(`/plugins/${name}/enable?project=${project}`, { method: "POST" }),
+      request<{ data: Plugin }>(`/plugins/${name}/enable?project=${encodeURIComponent(project)}`, { method: "POST" }),
     disable: (name: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Plugin }>(`/plugins/${name}/disable?project=${project}`, { method: "POST" }),
+      request<{ data: Plugin }>(`/plugins/${name}/disable?project=${encodeURIComponent(project)}`, { method: "POST" }),
     getSource: (name: string, project = DEFAULT_PROJECT) =>
-      request<{ data: { source: string } }>(`/plugins/${encodeURIComponent(name)}/source?project=${project}`),
+      request<{ data: { source: string } }>(`/plugins/${encodeURIComponent(name)}/source?project=${encodeURIComponent(project)}`),
   },
   agents: {
     list: (project = DEFAULT_PROJECT, category?: string) => {
-      const url = category ? `/agents?project=${project}&category=${encodeURIComponent(category)}` : `/agents?project=${project}`;
+      const url = category ? `/agents?project=${encodeURIComponent(project)}&category=${encodeURIComponent(category)}` : `/agents?project=${encodeURIComponent(project)}`;
       return request<{ data: Agent[]; total?: number }>(url);
     },
     get: (name: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${project}`),
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`),
     create: (data: { name: string; content: string; description?: string; category?: string; mode?: string; model?: string }, project = DEFAULT_PROJECT) =>
-      request<{ data: Agent }>(`/agents?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
+      request<{ data: Agent }>(`/agents?project=${encodeURIComponent(project)}`, { method: "POST", body: JSON.stringify(data) }),
     update: (name: string, data: { description?: string; category?: string; mode?: string; model?: string; content?: string }, project = DEFAULT_PROJECT) =>
-      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${project}`, { method: "PUT", body: JSON.stringify(data) }),
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (name: string, project = DEFAULT_PROJECT) =>
-      request(`/agents/${encodeURIComponent(name)}?project=${project}`, { method: "DELETE" }),
+      request(`/agents/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     enable: (name: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/enable?project=${project}`, { method: "POST" }),
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/enable?project=${encodeURIComponent(project)}`, { method: "POST" }),
     disable: (name: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/disable?project=${project}`, { method: "POST" }),
-  },
-  servers: {
-    list: (project = DEFAULT_PROJECT) => request<{ data: Server[]; is_global: boolean }>(`/servers?project=${project}`),
-    create: (name: string, command: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Server }>(`/servers?project=${project}`, { method: "POST", body: JSON.stringify({ name, command }) }),
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/disable?project=${encodeURIComponent(project)}`, { method: "POST" }),
   },
   /** Canonical child MCP definitions and persisted discovery metadata. */
   mcpServers: {
@@ -1249,11 +1961,9 @@ export const api = {
       return request<{ data: Observation[]; total: number }>(`/observations?${params}`);
     },
     get: (id: number, project = DEFAULT_PROJECT) =>
-      request<{ data: Observation }>(`/observations/${id}?project=${project}`),
-    create: (observationType: string, content: string, importance?: number, source?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Observation }>(`/observations?project=${project}`, { method: "POST", body: JSON.stringify({ observation_type: observationType, content, importance, source }) }),
+      request<{ data: Observation }>(`/observations/${id}?project=${encodeURIComponent(project)}`),
     stats: (project = DEFAULT_PROJECT) =>
-      request<{ data: { total: number; pending: number } }>(`/observations/stats?project=${project}`),
+      request<{ data: { total: number; pending: number } }>(`/observations/stats?project=${encodeURIComponent(project)}`),
   },
   personality: {
     list: (project = DEFAULT_PROJECT, traitType?: string) => {
@@ -1261,16 +1971,8 @@ export const api = {
       if (traitType) params.set("trait_type", traitType);
       return request<{ data: PersonalityTrait[]; total: number }>(`/personality?${params}`);
     },
-    profile: (project = DEFAULT_PROJECT) =>
-      request<{ data: any }>(`/personality/profile?project=${project}`),
     dismiss: (id: number, project = DEFAULT_PROJECT) =>
-      request<{ data: { id: number } }>(`/personality/${id}/dismiss?project=${project}`, { method: "POST" }),
-  },
-  synthesis: {
-    run: (project = DEFAULT_PROJECT) =>
-      request<{ data: any }>(`/synthesis/run?project=${project}`, { method: "POST" }),
-    status: (project = DEFAULT_PROJECT) =>
-      request<{ data: any }>(`/synthesis/status?project=${project}`),
+      request<{ data: { id: number } }>(`/personality/${id}/dismiss?project=${encodeURIComponent(project)}`, { method: "POST" }),
   },
   pipeline: {
     events: (project = DEFAULT_PROJECT, options?: { source?: string; type?: string; limit?: number }) => {
@@ -1280,15 +1982,19 @@ export const api = {
       if (options?.limit) params.set("limit", String(options.limit));
       return request<{ data: any[]; total: number }>(`/pipeline/events?${params}`);
     },
-    timeline: (project = DEFAULT_PROJECT, options?: { source?: string; limit?: number }) => {
-      const params = new URLSearchParams({ project });
-      if (options?.source) params.set("source", options.source);
-      if (options?.limit) params.set("limit", String(options.limit));
-      return request<{ data: any[]; total: number }>(`/pipeline/timeline?${params}`);
-    },
   },
   /** Immutable, project-scoped conversation memory. */
   context: {
+    sources: {
+      list: listContextSources,
+    },
+    rag: {
+      /** Search current project context sources; snippets are intentionally bounded by the caller. */
+      search: (query: string, project: string, limit = 5) => {
+        const params = new URLSearchParams({ project, q: query, limit: String(limit) });
+        return request<{ data: ContextRagCitation[]; total: number }>(`/context/rag/search?${params}`);
+      },
+    },
     conversations: {
       list: (project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) => {
         const params = new URLSearchParams({ project });
@@ -1354,29 +2060,29 @@ export const api = {
   emails: {
     accounts: {
       list: (project = DEFAULT_PROJECT) =>
-        request<{ data: EmailAccount[] }>(`/emails/accounts?project=${project}`),
+        request<{ data: EmailAccount[] }>(`/emails/accounts?project=${encodeURIComponent(project)}`),
       create: (data: {
         email: string; name: string; provider: EmailProvider; authType: AuthType;
         imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number;
         password?: string;
       }, project = DEFAULT_PROJECT) =>
-        request<{ data: EmailAccount }>(`/emails/accounts?project=${project}`, {
+        request<{ data: EmailAccount }>(`/emails/accounts?project=${encodeURIComponent(project)}`, {
           method: "POST", body: JSON.stringify(data),
         }),
       delete: (id: string, project = DEFAULT_PROJECT) =>
-        request(`/emails/accounts/${id}?project=${project}`, { method: "DELETE" }),
+        request(`/emails/accounts/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
       test: (data: {
         email: string; provider: EmailProvider; authType: AuthType;
         imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number;
         password?: string;
       }, project = DEFAULT_PROJECT) =>
-        request<{ data: { success: boolean; message: string } }>(`/emails/accounts/test?project=${project}`, {
+        request<{ data: { success: boolean; message: string } }>(`/emails/accounts/test?project=${encodeURIComponent(project)}`, {
           method: "POST", body: JSON.stringify(data),
         }),
       oauthUrl: (provider: string, project = DEFAULT_PROJECT) =>
-        request<{ data: { url: string } }>(`/emails/accounts/oauth/url?project=${project}&provider=${provider}`),
+        request<{ data: { url: string } }>(`/emails/accounts/oauth/url?project=${encodeURIComponent(project)}&provider=${provider}`),
       oauthCallback: (provider: string, code: string, redirectUri: string, project = DEFAULT_PROJECT) =>
-        request<{ data: EmailAccount }>(`/emails/accounts/oauth?project=${project}`, {
+        request<{ data: EmailAccount }>(`/emails/accounts/oauth?project=${encodeURIComponent(project)}`, {
           method: "POST", body: JSON.stringify({ provider, code, redirectUri }),
         }),
     },
@@ -1401,26 +2107,26 @@ export const api = {
       to: string; cc?: string; bcc?: string; subject: string; body: string;
       accountId?: string;
     }, project = DEFAULT_PROJECT) =>
-      request<{ data: { success: boolean } }>(`/emails/send?project=${project}`, {
+      request<{ data: { success: boolean } }>(`/emails/send?project=${encodeURIComponent(project)}`, {
         method: "POST", body: JSON.stringify(data),
       }),
     draft: (data: {
       to?: string; cc?: string; bcc?: string; subject?: string; body?: string;
       accountId?: string;
     }, project = DEFAULT_PROJECT) =>
-      request<{ data: { uid: number } }>(`/emails/draft?project=${project}`, {
+      request<{ data: { uid: number } }>(`/emails/draft?project=${encodeURIComponent(project)}`, {
         method: "POST", body: JSON.stringify(data),
       }),
     move: (uid: number, folder: string, accountId?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: { success: boolean } }>(`/emails/${uid}/move?project=${project}`, {
+      request<{ data: { success: boolean } }>(`/emails/${uid}/move?project=${encodeURIComponent(project)}`, {
         method: "POST", body: JSON.stringify({ folder, account_id: accountId }),
       }),
     setFlags: (uid: number, flags: string[], accountId?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: { success: boolean } }>(`/emails/${uid}/flags?project=${project}`, {
+      request<{ data: { success: boolean } }>(`/emails/${uid}/flags?project=${encodeURIComponent(project)}`, {
         method: "PATCH", body: JSON.stringify({ flags, account_id: accountId }),
       }),
     delete: (uid: number, accountId?: string, project = DEFAULT_PROJECT) =>
-      request(`/emails/${uid}?project=${project}`, {
+      request(`/emails/${uid}?project=${encodeURIComponent(project)}`, {
         method: "DELETE", body: JSON.stringify({ account_id: accountId }),
       }),
     folders: (accountId?: string, project = DEFAULT_PROJECT) => {
@@ -1441,7 +2147,7 @@ export const api = {
     },
   },
   settings: {
-    get: (key: string, project = DEFAULT_PROJECT) => request<{ data: SettingResponse }>(`/settings?project=${project}&key=${key}`),
+    get: (key: string, project = DEFAULT_PROJECT) => request<{ data: SettingResponse }>(`/settings?project=${encodeURIComponent(project)}&key=${key}`),
     /**
      * Save an ordinary setting or an explicit protected-secret operation.
      *
@@ -1450,7 +2156,7 @@ export const api = {
      * apply its canonical vault semantics.
      */
     set: (key: string, valueOrOperation: string | OAuthClientSecretOperation, project = DEFAULT_PROJECT) =>
-      request<{ data: SettingResponse | OAuthClientSecretSetting }>(`/settings?project=${project}`, {
+      request<{ data: SettingResponse | OAuthClientSecretSetting }>(`/settings?project=${encodeURIComponent(project)}`, {
         method: "POST",
         body: JSON.stringify(
           typeof valueOrOperation === "string"
@@ -1460,7 +2166,7 @@ export const api = {
       }),
 
     testLlm: (endpoint: string, model: string, apiKey: string, project = DEFAULT_PROJECT) =>
-      request<{ data: { ok: boolean; status?: number; message?: string } }>(`/settings/test-llm?project=${project}`, {
+      request<{ data: { ok: boolean; status?: number; message?: string } }>(`/settings/test-llm?project=${encodeURIComponent(project)}`, {
         method: "POST", body: JSON.stringify({ endpoint, model, apiKey }),
       }).then((r) => r.data),
 
@@ -1471,16 +2177,16 @@ export const api = {
      */
     saveLlmConfig: (config: LlmConfigBody, project = DEFAULT_PROJECT) =>
       request<{ data: { saved: boolean } }>(
-        `/settings/llm-config?project=${project}`,
+        `/settings/llm-config?project=${encodeURIComponent(project)}`,
         { method: "POST", body: JSON.stringify(config) },
       ),
 
     /** Sanitized Settings config — exposes only provider metadata and key presence. */
     getLlmConfig: (project = DEFAULT_PROJECT) =>
-      request<{ data: LlmConfigResponse }>(`/settings/llm-config?project=${project}`),
+      request<{ data: LlmConfigResponse }>(`/settings/llm-config?project=${encodeURIComponent(project)}`),
 
     getProviderConfigs: async (project = DEFAULT_PROJECT) => {
-      const response = await request<{ data: unknown }>(`/settings/provider-configs?project=${project}`);
+      const response = await request<{ data: unknown }>(`/settings/provider-configs?project=${encodeURIComponent(project)}`);
       return { data: normalizeManagedProviderConfigResponse(response.data) };
     },
 
@@ -1490,7 +2196,7 @@ export const api = {
       synthesis?: { primary: { providerId: string; modelId: string }; secondary: { providerId: string; modelId: string } },
     ) => {
       const response = await request<{ data: unknown }>(
-        `/settings/provider-configs?project=${project}`,
+        `/settings/provider-configs?project=${encodeURIComponent(project)}`,
         { method: "PUT", body: JSON.stringify({ providers, synthesis }) },
       );
       const data = isApiRecord(response.data) ? response.data : {};
@@ -1504,15 +2210,15 @@ export const api = {
       };
     },
 
-    /** Sanitized Chat config — returns the configured providers/agents for the Chat page without exposing API keys. */
-    chatConfig: async (project = DEFAULT_PROJECT) => {
-      const response = await request<{ data: unknown }>(`/opencode/chat-config?project=${project}`);
+    /** Sanitized, server-global Chat config — no caller project selection is accepted. */
+    chatConfig: async () => {
+      const response = await request<{ data: unknown }>("/opencode/chat-config");
       return { data: normalizeChatConfigResponse(response.data) };
     },
 
     /** Persist an exact, server-validated global Chat provider/model selection. */
     saveChatSelection: (selection: { providerId: string; modelId: string }) =>
-      request<{ data: { providerId: string; modelId: string } }>("/opencode/chat-selection", {
+      request<{ data: { project: string; providerId: string; modelId: string } }>("/opencode/chat-selection", {
         method: "PUT",
         body: JSON.stringify(selection),
       }),
@@ -1534,7 +2240,17 @@ export const api = {
   },
   mcpTools: {
     list: (project = DEFAULT_PROJECT, includeCategories = false) =>
-      request<{ data: CategorizedMcpTool[]; total: number }>(`/mcp-tools?project=${encodeURIComponent(project)}&include_categories=${includeCategories}`),
+      request<McpToolCatalogResponse>(`/mcp-tools?project=${encodeURIComponent(project)}&include_categories=${includeCategories}`),
+    report: (project = DEFAULT_PROJECT, filters: McpToolReportFilters = {}) => {
+      const params = new URLSearchParams({ project });
+      if (filters.q) params.set("q", filters.q);
+      if (filters.category) params.set("category", filters.category);
+      if (filters.enabled !== undefined) params.set("enabled", String(filters.enabled));
+      if (filters.boundary) params.set("boundary", filters.boundary);
+      if (filters.visibility) params.set("visibility", filters.visibility);
+      if (filters.invocation) params.set("invocation", filters.invocation);
+      return request<McpToolReportResponse>(`/mcp-tools/report?${params.toString()}`);
+    },
     toggle: (name: string, enabled: boolean, project = DEFAULT_PROJECT) =>
       request<{ data: McpToolState }>(`/mcp-tools/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
         method: "PUT", body: JSON.stringify({ enabled }),
@@ -1545,20 +2261,20 @@ export const api = {
       }),
   },
   jobs: {
-    list: (project = DEFAULT_PROJECT) =>
-      request<{ data: Job[]; total: number }>(`/jobs?project=${encodeURIComponent(project)}`),
-    get: (jobId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?project=${encodeURIComponent(project)}`),
+    list: (project: string) =>
+      request<{ data: Job[]; total: number }>(`/jobs?${jobsQuery(project)}`),
+    get: (jobId: string, project: string) =>
+      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`),
     create: (data: {
       name: string;
       description?: string;
       agent: string;
       prompt_template: string;
       schedule_cron?: string;
-      trigger_event?: string;
+      trigger_event?: TrustedJobEventType | null;
       timeout_minutes?: number;
-    }, project = DEFAULT_PROJECT) =>
-      request<{ data: Job }>(`/jobs?project=${encodeURIComponent(project)}`, {
+    }, project: string) =>
+      request<{ data: Job }>(`/jobs?${jobsQuery(project)}`, {
         method: "POST", body: JSON.stringify(data),
       }),
     update: (jobId: string, data: Partial<{
@@ -1567,32 +2283,53 @@ export const api = {
       agent: string;
       prompt_template: string;
       schedule_cron: string;
-      trigger_event: string;
+      trigger_event: TrustedJobEventType | null;
       enabled: boolean;
       timeout_minutes: number;
-    }>, project = DEFAULT_PROJECT) =>
-      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?project=${encodeURIComponent(project)}`, {
+    }>, project: string) =>
+      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, {
         method: "PATCH", body: JSON.stringify(data),
       }),
-    delete: (jobId: string, project = DEFAULT_PROJECT) =>
-      request(`/jobs/${encodeURIComponent(jobId)}?project=${encodeURIComponent(project)}`, {
+    delete: (jobId: string, project: string) =>
+      request(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, {
         method: "DELETE",
       }),
-    run: (jobId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: JobRun }>(`/jobs/${encodeURIComponent(jobId)}/run?project=${encodeURIComponent(project)}`, {
-        method: "POST",
-      }),
-    runs: (jobId: string, project = DEFAULT_PROJECT, limit = 50) =>
-      request<{ data: JobRun[]; total: number }>(`/jobs/${encodeURIComponent(jobId)}/runs?project=${encodeURIComponent(project)}&limit=${limit}`),
-    runLogs: (runId: string, afterSeq?: number, project = DEFAULT_PROJECT) => {
-      const params = new URLSearchParams({ project: encodeURIComponent(project) });
+    run: (jobId: string, project: string) =>
+      normalizedJobsRequest(
+        `/jobs/${encodeURIComponent(jobId)}/run?${jobsQuery(project)}`,
+        (value) => normalizeJobData(value, normalizeJobRun),
+        { method: "POST" },
+      ),
+    runs: (jobId: string, project: string, limit = 50) =>
+      normalizedJobsRequest(
+        `/jobs/${encodeURIComponent(jobId)}/runs?${jobsQuery(project, { limit })}`,
+        (value) => normalizeJobCollection(value, normalizeJobRun),
+      ),
+    runLogs: (runId: string, afterSeq: number | undefined, project: string) => {
+      const params = jobsQuery(project);
       if (afterSeq !== undefined) params.set("after", String(afterSeq));
-      return request<{ data: JobRunLog[]; total: number }>(`/jobs/runs/${encodeURIComponent(runId)}/logs?${params}`);
+      return normalizedJobsRequest(
+        `/jobs/runs/${encodeURIComponent(runId)}/logs?${params}`,
+        (value) => normalizeJobCollection(value, normalizeJobRunLog),
+      );
     },
-    cancelRun: (runId: string, project = DEFAULT_PROJECT) =>
-      request<{ data: JobRun }>(`/jobs/runs/${encodeURIComponent(runId)}/cancel?project=${encodeURIComponent(project)}`, {
-        method: "POST",
-      }),
+    cancelRun: (runId: string, project: string) =>
+      normalizedJobsRequest(
+        `/jobs/runs/${encodeURIComponent(runId)}/cancel?${jobsQuery(project)}`,
+        (value) => normalizeJobData(value, normalizeJobRun),
+        { method: "POST" },
+      ),
+    eventDeliveries: (project: string, options: { limit?: number; cursor?: string } = {}) =>
+      normalizedJobsRequest(`/jobs/event-deliveries?${jobsQuery(project, options)}`, (value) => normalizeJobPage(value, normalizeJobEventDelivery)),
+    eventDelivery: (deliveryId: string, project: string) =>
+      normalizedJobsRequest(`/jobs/event-deliveries/${encodeURIComponent(deliveryId)}?${jobsQuery(project)}`, (value) => normalizeJobData(value, normalizeJobEventDelivery)),
+    trustedEvents: (project: string, options: { limit?: number; cursor?: string } = {}) =>
+      normalizedJobsRequest(`/jobs/events?${jobsQuery(project, options)}`, (value) => normalizeJobPage(value, normalizeTrustedJobEvent)),
+    suggest: (description: string, project: string) =>
+      request<{ data: { prompt_template: string | null; schedule_cron: string | null; trigger_event: string | null; configured: boolean } }>(
+        `/jobs/suggest?${jobsQuery(project)}`,
+        { method: "POST", body: JSON.stringify({ description }) },
+      ),
   },
   docs: {
     /** Spaces — top-level doc containers. */
@@ -1952,6 +2689,71 @@ export const api = {
       request<UsageEventsPage>(`/usage/events?${usageQueryParams(project, query, options)}`),
     exportUrl: (query: UsageQuery, project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) =>
       `${getApiBase()}/usage/export?${usageQueryParams(project, query, options)}`,
+    thresholds: {
+      get: (project = DEFAULT_PROJECT) =>
+        normalizedUsageRequest(
+          `/usage/thresholds?${usageProjectParams(project)}`,
+          (value) => normalizeUsageData(value, normalizeUsageAdvisoryThresholds),
+        ),
+      replace: (replacement: UsageAdvisoryThresholdReplacement, project = DEFAULT_PROJECT) => {
+        const body = {
+          expected_revision: usageInteger(replacement.expectedRevision, "threshold revision", 1),
+          request_count: replacement.requestCount === null ? null : usageInteger(replacement.requestCount, "request count threshold"),
+          total_tokens: replacement.totalTokens === null ? null : usageInteger(replacement.totalTokens, "total tokens threshold"),
+          reported_cost_amount: replacement.reportedCostAmount === null ? null : usageFiniteNumber(replacement.reportedCostAmount, "reported cost amount threshold"),
+          cache_read_tokens: replacement.cacheReadTokens === null ? null : usageInteger(replacement.cacheReadTokens, "cache read threshold"),
+          cache_write_tokens: replacement.cacheWriteTokens === null ? null : usageInteger(replacement.cacheWriteTokens, "cache write threshold"),
+        };
+        return normalizedUsageRequest(
+          `/usage/thresholds?${usageProjectParams(project)}`,
+          (value) => normalizeUsageData(value, normalizeUsageAdvisoryThresholds),
+          { method: "PUT", body: JSON.stringify(body) },
+        );
+      },
+      evaluate: (range: Pick<UsageQuery, "from" | "to">, project = DEFAULT_PROJECT) => {
+        const params = usageProjectParams(project);
+        params.set("from", usageUtcTimestamp(range.from, "advisory range start"));
+        params.set("to", usageUtcTimestamp(range.to, "advisory range end"));
+        if (Date.parse(range.to) <= Date.parse(range.from)) throw new Error("The advisory range end must be after the start.");
+        return normalizedUsageRequest(
+          `/usage/thresholds/evaluate?${params}`,
+          (value) => normalizeUsageData(value, normalizeUsageAdvisoryEvaluation),
+        );
+      },
+    },
+    attention: {
+      list: (options: { includeResolved?: boolean; limit?: number; cursor?: string } = {}, project = DEFAULT_PROJECT) => {
+        const params = usageProjectParams(project);
+        if (options.includeResolved !== undefined) {
+          if (typeof options.includeResolved !== "boolean") throw new Error("Usage attention includeResolved is invalid.");
+          params.set("include_resolved", String(options.includeResolved));
+        }
+        const limit = usageLimit(options.limit);
+        const cursor = usageCursor(options.cursor);
+        if (limit !== undefined) params.set("limit", String(limit));
+        if (cursor !== undefined) params.set("cursor", cursor);
+        return normalizedUsageRequest(`/usage/attention?${params}`, normalizeUsageAttentionPage);
+      },
+      // This endpoint rejects any payload. Do not add an empty JSON body here.
+      evaluate: (project = DEFAULT_PROJECT) =>
+        normalizedUsageRequest(
+          `/usage/attention/evaluate?${usageProjectParams(project)}`,
+          (value) => {
+            const data = usageRecord(usageRecord(value).data);
+            return { evaluatedAt: usageUtcTimestamp(data.evaluatedAt, "attention evaluation timestamp") };
+          },
+          { method: "POST" },
+        ),
+      acknowledge: (id: string, expectedRevision: number, project = DEFAULT_PROJECT) =>
+        normalizedUsageRequest(
+          `/usage/attention/${encodeURIComponent(usageId(id, "attention ID"))}/acknowledge?${usageProjectParams(project)}`,
+          (value) => normalizeUsageData(value, normalizeUsageAttentionItem),
+          {
+            method: "POST",
+            body: JSON.stringify({ expected_revision: usageInteger(expectedRevision, "attention revision", 1) }),
+          },
+        ),
+    },
   },
   backups: {
     /** GET /backups — list all backups */

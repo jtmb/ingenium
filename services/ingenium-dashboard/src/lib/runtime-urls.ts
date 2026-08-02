@@ -32,11 +32,40 @@ export type OpenCodeAvailability =
 export const OPENCODE_WEB_GATEWAY_URL = "http://opencode.localhost:3000/";
 export const OPENCODE_CLI_GATEWAY_URL = "http://cli.localhost:3000/";
 
+/**
+ * VS Code is a fixed local-only administrative surface, not a configurable
+ * OpenCode-style deployment target. Keep the trailing slash for iframe and
+ * direct-link parity with the dedicated gateway root.
+ */
+export const VSCODE_GATEWAY_URL = "http://vscode.localhost:3000/";
+export type VSCodeAvailability = "available" | "unavailable";
+
 const OPENCODE_WEB_PORT = 4098;
 const OPENCODE_CLI_PORT = 4099;
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+}
+
+/**
+ * VS Code may only be embedded by the two canonical dashboard origins. The
+ * gateway canonicalizes IPv6 loopback to localhost before the app loads; do
+ * not accept it here as a second embedding authority.
+ */
+export function getVSCodeAvailability(): VSCodeAvailability {
+  if (typeof window === "undefined") return "unavailable";
+
+  return (
+    window.location.origin === "http://localhost:3000"
+    || window.location.origin === "http://127.0.0.1:3000"
+  )
+    ? "available"
+    : "unavailable";
+}
+
+/** The exact trusted VS Code root, or null when the dashboard origin is unsupported. */
+export function getVSCodeUrl(): string | null {
+  return getVSCodeAvailability() === "available" ? VSCODE_GATEWAY_URL : null;
 }
 
 function configuredValue(mode: OpenCodeMode): string {

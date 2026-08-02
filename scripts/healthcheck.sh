@@ -1,6 +1,6 @@
 #!/bin/sh
 # Composite container health: every supervised process, the private dashboard
-# and OpenCode listener, and ttyd through its only supported health identity.
+# and OpenCode/code-server listeners, and ttyd through its only supported health identity.
 set -eu
 
 # Docker health commands can inherit the image's original environment even
@@ -52,7 +52,8 @@ require_gateway_status() {
   host="$2"
   path="$3"
   expected="$4"
-  actual="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: $host" "http://127.0.0.1:3000${path}" || true)"
+  port="${5:-3000}"
+  actual="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: $host" "http://127.0.0.1:${port}${path}" || true)"
   if [ "$actual" != "$expected" ]; then
     echo "ERROR: unexpected gateway status for $name: expected $expected, got ${actual:-000}"
     exit 1
@@ -69,6 +70,16 @@ require_ttyd_gateway_health() {
   fi
 }
 
+require_vscode_gateway_csp() {
+  expected_csp="Content-Security-Policy: frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000"
+  headers="$(curl --fail --silent --show-error --max-time 5 --dump-header - --output /dev/null --header "Host: vscode.localhost" "http://127.0.0.1:3000/?folder=/workspace")"
+
+  if ! printf '%s\n' "$headers" | tr -d '\r' | grep -F -q "$expected_csp"; then
+    echo "ERROR: VS Code gateway health check is missing the exact worker-safe frame policy"
+    exit 1
+  fi
+}
+
 require_cli_root_ok() {
   actual="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: cli.localhost" --header "X-Ingenium-Authenticated-User: attacker-controlled" http://127.0.0.1:3000/ || true)"
   if [ "$actual" != "200" ]; then
@@ -77,16 +88,22 @@ require_cli_root_ok() {
   fi
 }
 
-for program in ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway opencode-web ttyd-opencode; do
+for program in ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway opencode-web ttyd-opencode vscode; do
   require_running "$program"
 done
 
 require_api_ok
 require_http_ok "dashboard" "http://127.0.0.1:3001/"
 require_http_ok "OpenCode Web" "http://127.0.0.1:4098/"
+require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
 require_gateway_status "dashboard gateway" "localhost" "/tasks" "200"
 require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/" "200"
 require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/projects" "200"
 require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
+# code-server redirects its root to the mounted workspace selector. Verify both
+# the root gateway behavior and the final workbench document.
+require_gateway_status "VS Code gateway root" "vscode.localhost" "/" "302"
+require_gateway_status "VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"
+require_vscode_gateway_csp
 require_ttyd_gateway_health
 require_cli_root_ok

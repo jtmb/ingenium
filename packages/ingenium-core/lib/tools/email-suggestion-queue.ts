@@ -1,8 +1,8 @@
 /**
  * Email suggestion queue — persistent job queue for smart-reply generation.
  *
- * Jobs are enqueued by the sync engine's delta poll handler for genuinely NEW
- * messages (not label changes). Workers dequeue, generate suggestions via LLM,
+ * Jobs are enqueued for genuinely new messages (not label changes). Workers
+ * dequeue, generate suggestions via LLM,
  * and cache the results. Failed jobs are retried with exponential backoff.
  *
  * 🔴 All mutations use execTransaction() with checkpointAfterWrite() outside the txn.
@@ -144,15 +144,4 @@ export function markJobFailed(jobId: number, error: string): void {
     ).run(attempts, delaySec, error, jobId);
   });
   checkpointAfterWrite();
-}
-
-/**
- * Return the count of pending jobs (next_attempt_at <= now).
- */
-export function countPendingJobs(): number {
-  const db = getDb(dbPath());
-  const row = db.prepare(
-    "SELECT COUNT(*) as count FROM email_suggestion_queue WHERE next_attempt_at <= datetime('now')",
-  ).get() as { count: number };
-  return row.count;
 }

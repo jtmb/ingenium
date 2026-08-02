@@ -7,6 +7,7 @@ import { api, Observation } from "../../lib/api";
 import { buildProjectNavigationHref } from "../../lib/project-navigation";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import Select from "../components/Select";
 
 function typeColors(type: string): string {
   const hues: Record<string, string> = {
@@ -83,14 +84,14 @@ export default function ObservationsPage() {
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
-        <select aria-label="Filter observations by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
+        <Select wrapperClassName="w-full min-w-0 sm:w-auto" aria-label="Filter observations by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
           <option value="processed">Processed</option>
           <option value="skipped">Skipped</option>
           <option value="failed">Failed</option>
-        </select>
-        <select aria-label="Filter observations by type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
+        </Select>
+        <Select wrapperClassName="w-full min-w-0 sm:w-auto" aria-label="Filter observations by type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
           <option value="">All types</option>
           <option value="correction">Correction</option>
           <option value="preference">Preference</option>
@@ -102,7 +103,7 @@ export default function ObservationsPage() {
           <option value="workflow">Workflow</option>
           <option value="error">Error</option>
           <option value="goal">Goal</option>
-        </select>
+        </Select>
       </div>
 
       <div className="space-y-2">

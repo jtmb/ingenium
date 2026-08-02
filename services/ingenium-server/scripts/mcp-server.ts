@@ -10,22 +10,35 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { apiRequestHeaders, config } from "../config/index.js";
-import { api } from "../lib/client.js";
 import { logger } from "../lib/logger.js";
-import { McpToolVisibilityController, type ToolVisibilityApi } from "../lib/tool-visibility.js";
+import {
+  installToolVisibilityProjection,
+  McpToolVisibilityController,
+  type ToolVisibilityApi,
+} from "../lib/tool-visibility.js";
+import {
+  getProjectStateAttestation,
+  ProjectStateAttestor,
+  stateGatedHandler,
+  TOOL_STATE_GATE_CODES,
+  toolStateError,
+} from "../lib/tool-state-gate.js";
 import {
   ChildMcpGateway,
+  childMcpGatewayApi,
   resolveChildMcpProjectIdentity,
   type ChildMcpToolHost,
 } from "../lib/child-mcp-gateway.js";
+import { isMcpReportMode } from "../lib/mcp-report-mode.js";
 
-// Import MCP tool handlers
 import * as skillTools from "../lib/tools/skills.js";
 import * as taskTools from "../lib/tools/tasks.js";
+import * as coordinationTools from "../lib/tools/coordination.js";
 import * as contextTools from "../lib/tools/context.js";
 import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
+import { mcpReportGet } from "../lib/tools/mcp-report.js";
 import { settingGet, settingSet, settingTestLlm } from "../lib/tools/settings.js";
 import * as commandTools from "../lib/tools/commands.js";
 import * as agentTools from "../lib/tools/agents.js";
@@ -47,7 +60,8 @@ import * as providerTools from "../lib/tools/providers.js";
 import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
 
-// ── Tool State Check Wrapper ──────────────────────────────
+const projectStateAttestor = new ProjectStateAttestor();
+
 /**
  * Checks whether a tool is enabled for the given project via the API. A state
  * lookup failure is not authorization to execute: this boundary must fail
@@ -62,9 +76,11 @@ async function checkToolEnabled(
       headers: apiRequestHeaders(),
     });
     if (!res.ok) return "unavailable";
-    const data = await res.json();
-    if (typeof data?.data?.enabled !== "boolean") return "unavailable";
-    return data.data.enabled ? "enabled" : "disabled";
+    const response = await res.json();
+    const data = response?.data ?? response;
+    if (!projectStateAttestor.attest(project, response)
+      || typeof data?.enabled !== "boolean") return "unavailable";
+    return data.enabled ? "enabled" : "disabled";
   } catch {
     return "unavailable";
   }
@@ -80,27 +96,27 @@ function wrapHandler(
   toolName: string,
   handler: (args: any) => Promise<any>,
 ) {
-  return async (args: any) => {
-    const project = resolveChildMcpProjectIdentity(args?.project);
-    if (!project) {
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({
-          error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required." }
-        }) }]
-      };
-    }
-    const state = await checkToolEnabled(toolName, project);
-    if (state !== "enabled") {
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({
-          error: state === "disabled"
-            ? { code: "TOOL_DISABLED", message: "This tool is disabled for the project." }
-            : { code: "TOOL_STATE_UNAVAILABLE", message: "The tool state could not be verified." }
-        }) }]
-      };
-    }
-    return handler(args);
-  };
+  return stateGatedHandler(
+    toolName,
+    (args) => resolveChildMcpProjectIdentity(args?.project),
+    checkToolEnabled,
+    handler,
+  );
+}
+
+/** Catalog-global tools are toggled by the launcher project without exposing it in their schema. */
+function wrapLauncherScopedHandler(
+  toolName: string,
+  launcherProject: string | null,
+  handler: (args: any) => Promise<any>,
+) {
+  return stateGatedHandler(
+    toolName,
+    () => launcherProject,
+    checkToolEnabled,
+    handler,
+    "A valid launcher project identity is required.",
+  );
 }
 
 /** A filesystem-backed import may only act in the launcher-bound project. */
@@ -112,11 +128,7 @@ function wrapLauncherBoundHandler(
   const stateChecked = wrapHandler(toolName, handler);
   return async (args: any) => {
     if (!launcherProject || args?.project !== launcherProject) {
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({
-          error: { code: "PROJECT_IDENTITY_REQUIRED", message: "The requested project does not match the launcher binding." },
-        }) }],
-      };
+      return toolStateError(TOOL_STATE_GATE_CODES.project, "The requested project does not match the launcher binding.");
     }
     return stateChecked(args);
   };
@@ -136,17 +148,24 @@ interface CategorizedToolState {
 
 const toolVisibilityApi: ToolVisibilityApi = {
   async listToolStates(project) {
-    const response = await api.get("/mcp-tools", { project, include_categories: "true" });
-    if (!response.ok || !Array.isArray(response.data)) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
+    const response = await fetch(`${config.apiUrl}/mcp-tools?project=${encodeURIComponent(project)}&include_categories=true`, {
+      headers: apiRequestHeaders(),
+    });
+    if (!response.ok) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
+    const payload = await response.json();
+    const data = payload?.data ?? payload;
+    const attestation = getProjectStateAttestation(payload, project);
+    if (!attestation
+      || !Array.isArray(data)) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
     const states = new Map<string, boolean>();
-    for (const category of response.data as CategorizedToolState[]) {
+    for (const category of data as CategorizedToolState[]) {
       for (const tool of category.tools ?? []) {
         if (typeof tool.tool_name === "string" && typeof tool.enabled === "boolean") {
           states.set(tool.tool_name, tool.enabled);
         }
       }
     }
-    return states;
+    return { states, attestation };
   },
 };
 
@@ -160,7 +179,17 @@ const projectParam = z.string().min(1).max(64).refine(
   (value) => resolveChildMcpProjectIdentity(value) !== null,
   "A valid project identity is required",
 );
+const jobVaultItemIdsParam = z.array(z.string().uuid()).max(16).refine(
+  (itemIds) => new Set(itemIds).size === itemIds.length,
+  "vault_item_ids must be unique",
+);
+const jobUpdateFieldsParam = z.record(z.unknown()).superRefine((fields, context) => {
+  if (!("vault_item_ids" in fields)) return;
+  const result = jobVaultItemIdsParam.safeParse(fields.vault_item_ids);
+  if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "vault_item_ids must be an array of up to 16 unique UUIDs" });
+});
 const launcherProject = resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT);
+const mcpReportMode = isMcpReportMode(process.env.INGENIUM_MCP_REPORT_MODE);
 
 const server = new McpServer(
   { name: config.mcpName, version: config.mcpVersion },
@@ -171,6 +200,8 @@ const toolVisibility = new McpToolVisibilityController(
   server,
   launcherProject,
   toolVisibilityApi,
+  undefined,
+  projectStateAttestor,
 );
 const originalRegisterTool = server.registerTool.bind(server);
 server.registerTool = ((name: string, toolConfig: Parameters<typeof server.registerTool>[1], handler: Parameters<typeof server.registerTool>[2]) => {
@@ -180,12 +211,14 @@ server.registerTool = ((name: string, toolConfig: Parameters<typeof server.regis
 }) as typeof server.registerTool;
 
 const childToolHost = server as unknown as ChildMcpToolHost;
-const childGateway = new ChildMcpGateway(
+const childGateway = mcpReportMode ? null : new ChildMcpGateway(
   childToolHost,
   launcherProject,
+  childMcpGatewayApi,
+  undefined,
+  undefined,
+  projectStateAttestor,
 );
-
-// ── Settings ─────────────────────────────────────────────
 
 server.registerTool(
   "setting_get",
@@ -204,8 +237,6 @@ server.registerTool(
   { description: "Test the configured synthesis LLM connection.", inputSchema: { project: projectParam } },
   wrapHandler(C("setting_test_llm"), async ({ project }) => settingTestLlm(project)),
 );
-
-// ── Skills ──────────────────────────────────────────────
 
 server.registerTool(
   "skill_list",
@@ -305,8 +336,6 @@ server.registerTool(
   },
   wrapHandler(C("skill_sync_all_preview"), async ({ project }) => skillTools.skillSyncAllPreview(project)),
 );
-
-// ── Skills Governance (14) ─────────────────────────────────
 
 server.registerTool(
   "skill_archive",
@@ -479,8 +508,6 @@ server.registerTool(
     skillTools.skillProposalRollback(project, proposalId, reviewer, reason)),
 );
 
-// ── Observations ──────────────────────────────────────────
-
 server.registerTool(
   "observe",
   {
@@ -564,8 +591,6 @@ server.registerTool(
   wrapHandler(C("observation_delete_by_source"), async ({ project, source, confirm }) => observationTools.observationDeleteBySource(project, source, confirm)),
 );
 
-// ── Personality ───────────────────────────────────────────
-
 server.registerTool(
   "personality",
   {
@@ -627,8 +652,6 @@ server.registerTool(
   wrapHandler(C("personality_traits_delete_all"), async ({ project, confirm }) => personalityTools.personalityTraitsDeleteAll(project, confirm)),
 );
 
-// ── Synthesis ─────────────────────────────────────────────
-
 server.registerTool(
   "synthesis_run",
   {
@@ -656,8 +679,6 @@ server.registerTool(
   wrapHandler(C("synthesis_cross_project"), async ({ project }) => synthesisCrossProject(project)),
 );
 
-// ── Extraction ──────────────────────────────────────────
-
 server.registerTool(
   "extraction_run",
   {
@@ -667,7 +688,57 @@ server.registerTool(
   wrapHandler(C("extraction_run"), async ({ project }) => extractionRun(project)),
 );
 
-// ── Tasks ───────────────────────────────────────────────
+const taskRevisionParam = z.number().int().nonnegative();
+const taskIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const taskOwnerParam = z.string().min(1).max(256).refine(
+  (value) => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value),
+  "Owner must be a bounded nonempty string without control characters",
+);
+const taskWorktreeParam = z.string().min(1).max(512).refine(
+  (value) => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value),
+  "Worktree must be a bounded nonempty string without control characters",
+);
+const taskReservationTokenParam = z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/);
+const taskExpectedRevisionsParam = z.record(z.string().min(1).max(128), taskRevisionParam).refine(
+  (value) => Object.keys(value).length <= 128,
+  "At most 128 expected revisions may be supplied",
+);
+
+const coordinationOpaqueIdParam = z.string().min(1).max(512).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const coordinationRevisionParam = z.number().int().nonnegative();
+const coordinationPositiveParam = z.number().int().positive();
+const coordinationTokenParam = z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/);
+const coordinationTtlParam = z.number().int().min(1_000).max(300_000);
+const coordinationKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const coordinationPathParam = z.string().min(1).max(1_024).refine(
+  (value) => value === value.trim()
+    && !value.startsWith("/")
+    && !value.startsWith("~")
+    && !/^[A-Za-z]:\//.test(value)
+    && !value.includes("\\")
+    && !/[\u0000-\u001f\u007f*?[\]{}!]/.test(value)
+    && value.split("/").every((segment) => segment.length > 0
+      && segment !== "."
+      && segment !== ".."
+      && segment !== ".git"
+      && !segment.startsWith("@")),
+  "A safe relative coordination path is required",
+);
+const coordinationClaimParam = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("path"), path: coordinationPathParam }).strict(),
+  z.object({ kind: z.literal("tree"), path: coordinationPathParam }).strict(),
+  z.object({ kind: z.literal("reserved"), name: z.enum(["@build", "@repository"]) }).strict(),
+]);
+const coordinationClaimInputParam = z.object({
+  claim: coordinationClaimParam,
+  baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+}).strict();
+const coordinationClaimBatchParam = z.array(coordinationClaimInputParam).min(1).max(128);
+const coordinationClaimIdsParam = z.array(z.string().uuid()).min(1).max(128).refine(
+  (ids) => new Set(ids).size === ids.length,
+  "Claim IDs must be unique",
+);
+const coordinationSnapshotParam = z.record(z.unknown());
 
 server.registerTool(
   "task_create",
@@ -678,10 +749,11 @@ server.registerTool(
       title: z.string(),
       description: z.string().optional(),
       assigned_to: z.string().optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
     },
   },
-    wrapHandler(C("task_create"), async ({ project, title, description, assigned_to }) =>
-    taskTools.taskCreate(project, title, description, assigned_to)),
+    wrapHandler(C("task_create"), async ({ project, title, description, assigned_to, idempotency_key }) =>
+    taskTools.taskCreate(project, title, description, assigned_to, idempotency_key)),
 );
 
 server.registerTool(
@@ -697,15 +769,31 @@ server.registerTool(
   "task_move",
   {
     description: "Move a task to a different column.",
-    inputSchema: { project: projectParam, task_id: z.string(), column_id: z.string() },
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      column_id: z.string(),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
+    },
   },
-  wrapHandler(C("task_move"), async ({ project, task_id, column_id }) => taskTools.taskMove(project, task_id, column_id)),
+  wrapHandler(C("task_move"), async ({ project, task_id, column_id, expected_revision, idempotency_key }) =>
+    taskTools.taskMove(project, task_id, column_id, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
   "task_complete",
-  { description: "Mark a task as completed.", inputSchema: { project: projectParam, task_id: z.string() } },
-  wrapHandler(C("task_complete"), async ({ project, task_id }) => taskTools.taskComplete(project, task_id)),
+  {
+    description: "Mark a task as completed.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("task_complete"), async ({ project, task_id, expected_revision, idempotency_key }) =>
+    taskTools.taskComplete(project, task_id, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
@@ -722,16 +810,63 @@ server.registerTool(
       project: projectParam,
       task_id: z.string(),
       fields: z.record(z.unknown()),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
     },
   },
-  wrapHandler(C("task_update"), async ({ project, task_id, fields }) =>
-    taskTools.taskUpdate(project, task_id, fields)),
+  wrapHandler(C("task_update"), async ({ project, task_id, fields, expected_revision, idempotency_key }) =>
+    taskTools.taskUpdate(project, task_id, fields, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
   "task_delete",
-  { description: "Delete a task by ID.", inputSchema: { project: projectParam, task_id: z.string() } },
-  wrapHandler(C("task_delete"), async ({ project, task_id }) => taskTools.taskDelete(project, task_id)),
+  {
+    description: "Delete a task by ID.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("task_delete"), async ({ project, task_id, expected_revision, idempotency_key }) =>
+    taskTools.taskDelete(project, task_id, expected_revision, idempotency_key)),
+);
+
+server.registerTool(
+  "task_reserve",
+  {
+    description: "Reserve a task for a cooperative owner and worktree.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      owner: taskOwnerParam,
+      worktree: taskWorktreeParam,
+      reservation_token: taskReservationTokenParam,
+      expected_revision: taskRevisionParam,
+      idempotency_key: taskIdempotencyKeyParam,
+    },
+  },
+  wrapHandler(C("task_reserve"), async ({ project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key }) =>
+    taskTools.taskReserve(project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key)),
+);
+
+server.registerTool(
+  "task_release",
+  {
+    description: "Release a task reservation for its cooperative owner and worktree.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      owner: taskOwnerParam,
+      worktree: taskWorktreeParam,
+      reservation_token: taskReservationTokenParam,
+      expected_revision: taskRevisionParam,
+      idempotency_key: taskIdempotencyKeyParam,
+    },
+  },
+  wrapHandler(C("task_release"), async ({ project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key }) =>
+    taskTools.taskRelease(project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
@@ -915,12 +1050,97 @@ server.registerTool(
       project: projectParam,
       task_ids: z.array(z.string()),
       fields: z.record(z.unknown()),
+      expected_revision: taskRevisionParam.optional(),
+      expected_revisions: taskExpectedRevisionsParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
     },
   },
-  wrapHandler(C("task_bulk_update"), async ({ project, task_ids, fields }) => taskTools.taskBulkUpdate(project, task_ids, fields)),
+  wrapHandler(C("task_bulk_update"), async ({ project, task_ids, fields, expected_revision, expected_revisions, idempotency_key }) =>
+    taskTools.taskBulkUpdate(project, task_ids, fields, expected_revision, expected_revisions, idempotency_key)),
 );
 
-// ── Plans ─────────────────────────────────────────────
+server.registerTool(
+  "coordination_status",
+  {
+    description: "Read the durable coordination status for an exact session identity.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+    },
+  },
+  wrapHandler(C("coordination_status"), async ({ project, worktree_id, session_id, incarnation }) =>
+    coordinationTools.coordinationStatus(project, worktree_id, session_id, incarnation)),
+);
+
+server.registerTool(
+  "coordination_update",
+  {
+    description: "Update a coordination session with an exact registry operation.",
+    inputSchema: {
+      project: projectParam,
+      operation: z.enum(["register", "recover", "update", "heartbeat", "close", "takeover"]),
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam.optional(),
+      fence: coordinationPositiveParam.optional(),
+      ownership_token: coordinationTokenParam.optional(),
+      next_ownership_token: coordinationTokenParam.optional(),
+      ttl_ms: coordinationTtlParam.optional(),
+      idempotency_key: coordinationKeyParam,
+      snapshot: coordinationSnapshotParam.optional(),
+      snapshot_revision: coordinationRevisionParam.optional(),
+      current_task_id: coordinationOpaqueIdParam.nullable().optional(),
+      current_task_revision: coordinationRevisionParam.nullable().optional(),
+      context_conversation_id: z.string().uuid().nullable().optional(),
+      context_revision: coordinationRevisionParam.nullable().optional(),
+    },
+  },
+  wrapHandler(C("coordination_update"), async ({ project, operation, ...input }) =>
+    coordinationTools.coordinationUpdate(project, operation, input)),
+);
+
+server.registerTool(
+  "coordination_claim",
+  {
+    description: "Claim non-overlapping coordination paths for an active session.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      claims: coordinationClaimBatchParam,
+      idempotency_key: coordinationKeyParam,
+    },
+  },
+  wrapHandler(C("coordination_claim"), async ({ project, ...input }) =>
+    coordinationTools.coordinationClaim(project, input)),
+);
+
+server.registerTool(
+  "coordination_release",
+  {
+    description: "Release owned coordination claims for an active session.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      claim_ids: coordinationClaimIdsParam,
+      idempotency_key: coordinationKeyParam,
+    },
+  },
+  wrapHandler(C("coordination_release"), async ({ project, ...input }) =>
+    coordinationTools.coordinationRelease(project, input)),
+);
 
 server.registerTool(
   "plan_save",
@@ -1158,24 +1378,22 @@ server.registerTool(
   )),
 );
 
-// ── Projects ────────────────────────────────────────────
-
 server.registerTool(
   "project_list",
   { description: "List all projects known to the Ingenium API.", inputSchema: {} },
-  wrapHandler(C("project_list"), async () => projectTools.projectList()),
+  wrapLauncherScopedHandler(C("project_list"), launcherProject, async () => projectTools.projectList()),
 );
 
 server.registerTool(
   "project_init",
   { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string(), isGlobal: z.boolean().optional() } },
-  wrapHandler(C("project_init"), async ({ name, isGlobal }) => projectTools.projectInit(name, isGlobal)),
+  wrapLauncherScopedHandler(C("project_init"), launcherProject, async ({ name, isGlobal }) => projectTools.projectInit(name, isGlobal)),
 );
 
 server.registerTool(
   "project_delete",
   { description: "Delete a project by name.", inputSchema: { name: z.string() } },
-  wrapHandler(C("project_delete"), async ({ name }) => projectTools.projectDelete(name)),
+  wrapLauncherScopedHandler(C("project_delete"), launcherProject, async ({ name }) => projectTools.projectDelete(name)),
 );
 
 server.registerTool(
@@ -1214,16 +1432,14 @@ server.registerTool(
 server.registerTool(
   "project_detail",
   { description: "Get detailed info about a project by name.", inputSchema: { name: z.string() } },
-  wrapHandler(C("project_detail"), async ({ name }) => projectTools.projectDetail(name)),
+  wrapLauncherScopedHandler(C("project_detail"), launcherProject, async ({ name }) => projectTools.projectDetail(name)),
 );
 
 server.registerTool(
   "project_migrate_workspace",
   { description: "DB-only migration of the historical invalid /workspace project into global-default. Use dryRun first; never accesses filesystem /workspace.", inputSchema: { dryRun: z.boolean().optional() } },
-  wrapHandler(C("project_migrate_workspace"), async ({ dryRun }) => projectTools.projectMigrateWorkspace(dryRun)),
+  wrapLauncherScopedHandler(C("project_migrate_workspace"), launcherProject, async ({ dryRun }) => projectTools.projectMigrateWorkspace(dryRun)),
 );
-
-// ── Plugins ─────────────────────────────────────────────
 
 server.registerTool(
   "plugin_list",
@@ -1279,8 +1495,6 @@ server.registerTool(
   wrapHandler(C("plugin_source"), async ({ project, name }) => pluginTools.pluginSource(project, name)),
 );
 
-// ── Commands ─────────────────────────────────────────────
-
 server.registerTool(
   "command_list",
   { description: "List all commands for a project.", inputSchema: { project: projectParam } },
@@ -1317,8 +1531,6 @@ server.registerTool(
   wrapHandler(C("command_delete"), async ({ project, name }) => commandTools.commandDelete(project, name)),
 );
 
-// ── Config ───────────────────────────────────────────────
-
 server.registerTool(
   "config_get",
   {
@@ -1345,8 +1557,6 @@ server.registerTool(
   },
   wrapHandler(C("config_sync"), async ({ project, type }: { project: string; type: string }) => configTools.configSync(project, type)),
 );
-
-// ── Servers ─────────────────────────────────────────────
 
 server.registerTool(
   "server_list",
@@ -1398,7 +1608,23 @@ server.registerTool(
   wrapHandler(C("server_sync_all"), async ({ project, servers }) => serverTools.serverSyncAll(project, servers)),
 );
 
-// ── Agents ──────────────────────────────────────────────
+const mcpReportFilters = {
+  q: z.string().regex(/^[\x20-\x7e]{1,128}$/).optional(),
+  category: z.string().regex(/^[\x20-\x7e]{1,128}$/).optional(),
+  enabled: z.boolean().optional(),
+  boundary: z.enum(["mcp-stdio", "opencode-extension"]).optional(),
+  visibility: z.enum(["reachable", "unreachable", "unknown", "not-applicable"]).optional(),
+  invocation: z.enum(["success", "failed", "not-run", "unknown"]).optional(),
+};
+
+server.registerTool(
+  "mcp_report_get",
+  {
+    description: "Get the bounded MCP usefulness report for a project.",
+    inputSchema: { project: projectParam, ...mcpReportFilters },
+  },
+  wrapHandler(C("mcp_report_get"), async ({ project, ...filters }) => mcpReportGet(project, filters)),
+);
 
 server.registerTool(
   "agent_list",
@@ -1454,8 +1680,6 @@ server.registerTool(
   wrapHandler(C("agent_sync"), async ({ project, name }) => agentTools.agentSync(project, name)),
 );
 
-// ── Logs ──────────────────────────────────────────────
-
 server.registerTool(
   "logs_list",
   {
@@ -1481,8 +1705,6 @@ server.registerTool(
   wrapHandler(C("logs_sources"), async ({ project }) =>
     logTools.logsSources(project)),
 );
-
-// ── Email ──────────────────────────────────────────────
 
 server.registerTool(
   "email_list",
@@ -1748,8 +1970,6 @@ server.registerTool(
     emailTools.emailAttachmentGet(project, account, uid, attachmentId, folder, outputPath)),
 );
 
-// ── Jobs ──────────────────────────────────────────────
-
 server.registerTool(
   "job_list",
   { description: "List all jobs for a project.", inputSchema: { project: projectParam } },
@@ -1759,7 +1979,7 @@ server.registerTool(
 server.registerTool(
   "job_create",
   {
-    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    description: "Create a new job with optional schedule, trigger event, timeout, and metadata-only vault_item_ids authorization.",
     inputSchema: {
       project: projectParam,
       name: z.string(),
@@ -1769,20 +1989,21 @@ server.registerTool(
       schedule_cron: z.string().optional(),
       trigger_event: z.string().optional(),
       timeout_minutes: z.number().optional(),
+      vault_item_ids: jobVaultItemIdsParam.optional(),
     },
   },
-    wrapHandler(C("job_create"), async ({ project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes }) =>
-    jobTools.jobCreate(project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes)),
+    wrapHandler(C("job_create"), async ({ project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes, vault_item_ids }) =>
+    jobTools.jobCreate(project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes, vault_item_ids)),
 );
 
 server.registerTool(
   "job_update",
   {
-    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes, vault_item_ids). Omit vault_item_ids to preserve references; [] revokes all.",
     inputSchema: {
       project: projectParam,
       job_id: z.string(),
-      fields: z.record(z.unknown()),
+      fields: jobUpdateFieldsParam,
     },
   },
   wrapHandler(C("job_update"), async ({ project, job_id, fields }) =>
@@ -1837,8 +2058,6 @@ server.registerTool(
   wrapHandler(C("job_suggest"), async ({ project, description }) => jobTools.jobSuggest(project, description)),
 );
 
-// ── Pipeline ───────────────────────────────────────────
-
 server.registerTool(
   "pipeline_events",
   {
@@ -1890,8 +2109,6 @@ server.registerTool(
     pipelineTools.pipelineEventLog(args.project, args.eventType, args.eventSource, args.title, args.description, args.data as object | undefined, args.parentEventId, args.sessionId, args.importance)),
 );
 
-// ── Status ─────────────────────────────────────────────
-
 server.registerTool(
   "service_status",
   { description: "Get overall service health — supervisord process states + application health.", inputSchema: { project: projectParam } },
@@ -1928,15 +2145,11 @@ server.registerTool(
     statusTools.serviceProcessLogs(project, name, offset, limit)),
 );
 
-// ── Health ─────────────────────────────────────────────
-
 server.registerTool(
   "health_check",
-  { description: "API health check — returns status and uptime.", inputSchema: { project: projectParam } },
-  wrapHandler(C("health_check"), async () => healthCheck()),
+  { description: "API health check — returns status and uptime.", inputSchema: {} },
+  wrapLauncherScopedHandler(C("health_check"), launcherProject, async () => healthCheck()),
 );
-
-// ── OpenCode ───────────────────────────────────────────
 
 server.registerTool(
   "opencode_messages",
@@ -1946,8 +2159,6 @@ server.registerTool(
   },
   wrapHandler(C("opencode_messages"), async ({ project, limit, offset }) => opencodeMessages(project, limit, offset)),
 );
-
-// ── Dashboard ──────────────────────────────────────────
 
 server.registerTool(
   "dashboard_summary",
@@ -1968,8 +2179,6 @@ server.registerTool(
     return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
   }),
 );
-
-// ── Documentation ───────────────────────────────────────
 
 server.registerTool(
   "docs_list_spaces",
@@ -2325,8 +2534,6 @@ server.registerTool(
   wrapHandler(C("docs_get_stats"), async ({ project }) => docsTools.docsGetStats(project)),
 );
 
-// ── RAG (Retrieval-Augmented Generation) ─────────────────
-
 server.registerTool(
   "docs_search_semantic",
   {
@@ -2399,8 +2606,6 @@ server.registerTool(
   wrapHandler(C("docs_rag_stats"), async ({ project }) => ragTools.ragStats(project)),
 );
 
-// ── Providers ──────────────────────────────────────────
-
 server.registerTool(
   "provider_list",
   { description: "List all available LLM providers from OpenCode", inputSchema: { project: projectParam } },
@@ -2433,8 +2638,6 @@ server.registerTool(
   { description: "Get provider connection status (keys redacted)", inputSchema: { project: projectParam } },
   wrapHandler(C("provider_status"), async ({ project }) => providerTools.providerStatus(project)),
 );
-
-// ── Vault ──────────────────────────────────────────────
 
 server.registerTool(
   "vault_status",
@@ -2529,8 +2732,6 @@ server.registerTool(
   },
   wrapHandler(C("vault_audit_list"), async ({ project }) => vaultTools.vaultAuditList(project)),
 );
-
-// ── Backups (10) ────────────────────────────────────────
 
 server.registerTool(
   "backup_create",
@@ -2630,8 +2831,7 @@ server.registerTool(
 // Child tools have their own registration/reconciliation path. Do not route
 // those dynamic registrations through the built-in visibility controller.
 server.registerTool = originalRegisterTool;
-
-// ── Start ───────────────────────────────────────────────
+installToolVisibilityProjection(server, toolVisibility);
 
 /**
  * Connects the MCP server via stdio transport.
@@ -2642,9 +2842,10 @@ server.registerTool = originalRegisterTool;
  */
 async function main() {
   const transport = new StdioServerTransport();
-  await toolVisibility.start();
+  await toolVisibility.prepare();
   await server.connect(transport);
-  await childGateway.start();
+  await toolVisibility.start();
+  if (childGateway) await childGateway.start();
   logger.info("ingenium-server MCP transport started on stdio");
 }
 
@@ -2655,7 +2856,7 @@ async function shutdown(exitCode: number, reason: "SIGTERM" | "SIGINT" | "fatal"
   shuttingDown = true;
   logger.info({ reason }, "MCP server shutting down");
   await toolVisibility.stop();
-  await childGateway.shutdown();
+  if (childGateway) await childGateway.shutdown();
   process.exit(exitCode);
 }
 

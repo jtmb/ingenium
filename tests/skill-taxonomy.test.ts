@@ -1,7 +1,7 @@
 /**
  * Skill Taxonomy Validation Tests
  *
- * Validates the Phase 3 taxonomy consolidation (36 → 10 canonical skills) by checking:
+ * Validates the canonical taxonomy and its preserved source mappings by checking:
  *   - Canonical SKILL.md count (10)
  *   - MIGRATED-TO.md marker count (28)
  *   - source-index.md preserved source count (28)
@@ -16,8 +16,6 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, basename } from "node:path";
 
-// ── Constants ────────────────────────────────────────────────────────────
-
 const PROJECT_ROOT = resolve(import.meta.dirname, "..");
 const SKILLS_DIR = resolve(PROJECT_ROOT, ".opencode", "skills");
 
@@ -25,8 +23,6 @@ const EXPECTED_CANONICAL = 10;
 const EXPECTED_MIGRATED = 28;
 const EXPECTED_SOURCES = 28;
 const CONSOLIDATION_MAP_VERSION = "1.0.0";
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 /** Recursively find files matching a name under a root directory. */
 function findFiles(root: string, fileName: string): string[] {
@@ -91,18 +87,13 @@ function getMigratedTargetName(filePath: string): string | null {
   return match ? match[1] : null;
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// Tests
-// ══════════════════════════════════════════════════════════════════════════
-
 describe("Canonical SKILL.md files", () => {
   let canonicalFiles: string[];
 
   beforeAll(() => {
-    // Collect SKILL.md files in top-level skill directories (exclude references/ subdirs)
     const allSkillMd = findFiles(SKILLS_DIR, "SKILL.md");
     canonicalFiles = allSkillMd.filter(f => !f.includes("/references/"));
-    // Sort for deterministic ordering
+    // Stable ordering keeps failures reproducible across filesystems.
     canonicalFiles.sort();
   });
 
@@ -164,7 +155,6 @@ describe("MIGRATED-TO.md markers", () => {
     migratedFiles = findFiles(SKILLS_DIR, "MIGRATED-TO.md");
     migratedFiles.sort();
 
-    // Build canonical name set from SKILL.md frontmatter
     const canonicalFiles = findFiles(SKILLS_DIR, "SKILL.md").filter(
       f => !f.includes("/references/")
     );
@@ -238,7 +228,6 @@ describe("source-index.md preserved sources", () => {
     );
 
     for (const file of sourceFiles) {
-      // path structure: .../skills/<canonical>/references/sources/<source>/source-index.md
       const parts = file.split("/");
       const skillsIdx = parts.indexOf("skills");
       expect(skillsIdx).toBeGreaterThan(-1);
@@ -249,11 +238,9 @@ describe("source-index.md preserved sources", () => {
         `${file}: canonical parent "${canonicalDir}" is not a valid skill directory`
       ).toBe(true);
 
-      // Verify the path structure is correct
       expect(parts[skillsIdx + 2]).toBe("references");
       expect(parts[skillsIdx + 3]).toBe("sources");
 
-      // Source name should exist as a MIGRATED-TO.md directory
       const sourceName = parts[skillsIdx + 4];
       const migratedPath = resolve(
         SKILLS_DIR, sourceName, "MIGRATED-TO.md"

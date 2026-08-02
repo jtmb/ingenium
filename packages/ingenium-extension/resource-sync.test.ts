@@ -8,6 +8,7 @@ import {
   resetIncrementalSyncThrottle,
   resetProjectCache,
   syncAgents,
+  syncSkills,
   syncCommands,
   syncConfig,
   syncPlugins,
@@ -20,6 +21,7 @@ let worktree = "";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   resetIncrementalSyncThrottle();
   resetProjectCache();
   resetEnsuredProjects();
@@ -357,6 +359,24 @@ describe("agent resource sync", () => {
 });
 
 describe("incremental resource sync recovery", () => {
+  it("keeps lower-level sync diagnostics off stdio without a lifecycle reporter", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-lifecycle-"));
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")));
+
+    const result = await syncSkills(worktree, "project", {
+      version: 1,
+      project: "project",
+      lastFullSync: "",
+      resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} },
+    }, { isInitialSync: true });
+
+    expect(result.errors).toBe(1);
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
   it("does not consume the idle throttle when an incremental reconciliation fails", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-idle-"));
     const originalProject = process.env.INGENIUM_PROJECT;

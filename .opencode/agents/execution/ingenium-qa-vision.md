@@ -4,6 +4,7 @@ description: "Visual QA-only agent. Collects passive Playwright evidence for dec
 mode: subagent
 permission:
   read: allow
+  question: deny
   edit: deny
   write: deny
   bash: deny
@@ -65,6 +66,7 @@ permission:
     "@devops-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
+    "@ponytail": allow
     "*": deny
 ---
 

@@ -8,11 +8,10 @@ import FileTree from "../components/FileTree";
 import MarkdownViewer from "../components/MarkdownViewer";
 import Overlay from "../components/Overlay";
 import ProposalReviewOverlay, { EnrichedObservation as EnrichedObs } from "../components/proposals/ProposalReviewOverlay";
+import Select from "../components/Select";
 
-/** Active tab selection for the skills page. */
 type SkillsTab = "active" | "proposals" | "consolidated";
 
-/** DTO shape returned by the API for governance proposals (camelCase via proposalToDto). */
 type ProposalDto = {
   id: string;
   projectId: string;
@@ -44,7 +43,6 @@ type ProposalDto = {
   rolledBackAt: string | null;
 };
 
-/** Consolidated sources from Phase 3 taxonomy migration (28 legacy → 10 canonical). */
 const CONSOLIDATED_SOURCES: { legacy: string; canonical: string }[] = [
   { legacy: "api-aggregation-patterns", canonical: "development-conventions" },
   { legacy: "ingenium-ops", canonical: "development-conventions" },
@@ -76,7 +74,6 @@ const CONSOLIDATED_SOURCES: { legacy: string; canonical: string }[] = [
   { legacy: "local-persistence", canonical: "skill-maintenance" },
 ];
 
-/** Map proposal status → badge hue. */
 function proposalStatusHue(status: string): string {
   switch (status) {
     case "draft": return "gray";
@@ -88,7 +85,6 @@ function proposalStatusHue(status: string): string {
   }
 }
 
-/** Map proposal type → badge hue. */
 function proposalTypeHue(type: string): string {
   switch (type) {
     case "create": return "emerald";
@@ -99,18 +95,9 @@ function proposalTypeHue(type: string): string {
   }
 }
 
-/**
- * SkillsPage — Skills browser with governance support.
- *
- * Three tabs:
- *   Active — existing card grid with search/sort/upload and the overlay editor
- *   Proposals — governance proposal list with approve/reject/rollback actions
- *   Consolidated Sources — Phase 3 legacy-to-canonical mapping (28 entries)
- */
 export default function SkillsPage() {
   const project = useProject();
 
-  // ── Active tab state ─────────────────────────────────────────────
   const [skills, setSkills] = useState<Skill[]>([]);
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<"alpha" | "newest">("alpha");
@@ -123,7 +110,6 @@ export default function SkillsPage() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // ── Tab & proposal state ─────────────────────────────────────────
   const [tab, setTab] = useState<SkillsTab>("active");
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
   const [proposalsLoading, setProposalsLoading] = useState(false);
@@ -136,12 +122,10 @@ export default function SkillsPage() {
   const [currentSkillContent, setCurrentSkillContent] = useState<string | null>(null);
   const [enrichedObservations, setEnrichedObservations] = useState<EnrichedObs[]>([]);
 
-  // ── Load skills ──────────────────────────────────────────────────
   useEffect(() => {
     api.skills.list(project).then((r) => setSkills(r.data)).catch(() => {});
   }, [project]);
 
-  // ── Load proposals ───────────────────────────────────────────────
   const loadProposals = useCallback(() => {
     setProposalsLoading(true);
     setProposalsError(null);
@@ -155,7 +139,6 @@ export default function SkillsPage() {
     if (tab === "proposals") loadProposals();
   }, [tab, loadProposals]);
 
-  // ── Fetch skill detail for overlay ───────────────────────────────
   const fetchSkill = async (name: string) => {
     try {
       const r = await api.skills.get(name, project);
@@ -199,7 +182,6 @@ export default function SkillsPage() {
     setSaving(false);
   };
 
-  // ── Upload ───────────────────────────────────────────────────────
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -224,7 +206,6 @@ export default function SkillsPage() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  // ── Proposal detail overlay ─────────────────────────────────────
   const openProposal = async (proposal: ProposalDto) => {
     setSelectedProposal(proposal);
     setDetailLoading(true);
@@ -232,15 +213,12 @@ export default function SkillsPage() {
     setCurrentSkillContent(null);
     setEnrichedObservations([]);
     try {
-      // Fetch enriched proposal detail (includes observations and current skill)
       const r = await api.skills.proposals.get(proposal.id, project);
       const detail = r.data as any;
       setProposalDetail(detail);
-      // Extract enriched observations if available
       if (Array.isArray(detail.observations)) {
         setEnrichedObservations(detail.observations as EnrichedObs[]);
       }
-      // Use currentSkill from enriched response if available, otherwise fetch
       if (detail.currentSkill?.content) {
         setCurrentSkillContent(detail.currentSkill.content);
       } else if (proposal.targetName) {
@@ -302,7 +280,6 @@ export default function SkillsPage() {
     setActionLoading(false);
   };
 
-  // ── Filtered skills ─────────────────────────────────────────────
   const filtered = [...skills]
     .sort((a, b) => {
       if (sortMode === "newest") return new Date(b.created_at || "").getTime() - new Date(a.created_at || "").getTime();
@@ -313,7 +290,6 @@ export default function SkillsPage() {
   const isMarkdown = selectedFile.endsWith(".md") || selectedFile === "SKILL.md";
   const lang = selectedFile.split(".").pop() || "";
 
-  // ── Render helpers ───────────────────────────────────────────────
   const renderProposalBadge = (type: string) => (
     <span className={`${BADGE_BASE} ${badgeTones(proposalTypeHue(type))}`}>{type}</span>
   );
@@ -326,7 +302,6 @@ export default function SkillsPage() {
     <div className="space-y-8" data-testid="skills-page">
       <h1 className="text-3xl font-bold">Skills ({skills.length})</h1>
 
-      {/* ── Tab bar ──────────────────────────────────────────────── */}
       <div className="flex gap-1 border-b border-[var(--color-border)]" data-testid="skills-tabs">
         {([
           ["active", "Active"],
@@ -348,36 +323,33 @@ export default function SkillsPage() {
         ))}
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════
-          ACTIVE TAB — existing skills grid
-          ══════════════════════════════════════════════════════════════ */}
       {tab === "active" && (
         <>
-          {/* Search + Upload */}
-          <div className="flex gap-2 items-stretch">
+          <div className="flex flex-col gap-2 items-stretch sm:flex-row">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search skills..."
-              className="border border-[var(--color-border)] p-2 rounded text-sm flex-1 h-10"
+              className="border border-[var(--color-border)] p-2 rounded text-sm min-w-0 w-full sm:flex-1 h-10"
               data-testid="skills-search"
             />
             <label htmlFor="skills-sort" className="sr-only">Sort skills</label>
-            <select
+            <Select
+              wrapperClassName="w-full sm:w-auto shrink-0 h-10"
               id="skills-sort"
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as any)}
-              className="border border-[var(--color-border)] rounded p-2 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer h-10"
+              className="border border-[var(--color-border)] rounded p-2 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer w-full sm:w-auto shrink-0 h-10"
               data-testid="skills-sort"
             >
               <option value="alpha">Alphabetical</option>
               <option value="newest">Newest first</option>
-            </select>
+            </Select>
             <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" data-testid="skills-upload-input" />
             <button
               onClick={() => fileRef.current?.click()}
               disabled={uploadStatus === "uploading"}
-              className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 h-10"
+              className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto shrink-0 h-10"
               data-testid="skills-upload-btn"
             >
               {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
@@ -386,7 +358,6 @@ export default function SkillsPage() {
             {uploadStatus === "error" && <span className="text-sm text-[var(--color-error-text)]" data-testid="upload-error">Invalid file. Use a .md with name: and description: frontmatter.</span>}
           </div>
 
-          {/* Card grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-testid="skills-grid">
             {filtered.length === 0 && (
               <p className="col-span-3 text-center py-12 text-[var(--color-text-muted)]">
@@ -409,7 +380,6 @@ export default function SkillsPage() {
             ))}
           </div>
 
-          {/* Viewport-bounded skill detail overlay */}
           {selectedSkill && (
             <Overlay
               isOpen
@@ -470,12 +440,8 @@ export default function SkillsPage() {
         </>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════
-          PROPOSALS TAB
-          ══════════════════════════════════════════════════════════════ */}
       {tab === "proposals" && (
         <>
-          {/* Proposals loading/error/empty */}
           {proposalsLoading && (
             <p className="text-center py-12 text-[var(--color-text-muted)]" data-testid="proposals-loading">Loading proposals...</p>
           )}
@@ -490,7 +456,6 @@ export default function SkillsPage() {
             </p>
           )}
 
-          {/* Proposal cards */}
           {!proposalsLoading && !proposalsError && proposals.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="proposals-grid">
               {proposals.map((p) => (
@@ -522,7 +487,6 @@ export default function SkillsPage() {
             </div>
           )}
 
-          {/* ── Proposal detail overlay (redesigned) ─────────────────── */}
           <ProposalReviewOverlay
             isOpen={selectedProposal !== null}
             onClose={closeProposal}
@@ -542,9 +506,6 @@ export default function SkillsPage() {
         </>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════
-          CONSOLIDATED SOURCES TAB
-          ══════════════════════════════════════════════════════════════ */}
       {tab === "consolidated" && (
         <>
           <p className="text-sm text-[var(--color-text-muted)]">
@@ -556,12 +517,10 @@ export default function SkillsPage() {
           </p>
 
           <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded overflow-hidden" data-testid="consolidated-list">
-            {/* Table header */}
             <div className="grid grid-cols-2 px-4 py-2.5 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wide">
               <span>Legacy Skill</span>
               <span>Canonical Target</span>
             </div>
-            {/* Table rows */}
             {CONSOLIDATED_SOURCES.map(({ legacy, canonical }) => (
               <div
                 key={legacy}
@@ -575,7 +534,7 @@ export default function SkillsPage() {
           </div>
 
           <p className="text-xs text-[var(--color-text-muted)]">
-            Source: <em>docs/reference/skill-taxonomy-migration.md</em> — Phase 3 consolidation map with SHA-256 provenance hashes.
+            Source: <em>docs/reference/skill-taxonomy.md</em> — Phase 3 consolidation map with SHA-256 provenance hashes.
           </p>
         </>
       )}

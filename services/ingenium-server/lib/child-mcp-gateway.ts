@@ -9,6 +9,13 @@ import { z } from "zod";
 import { api } from "./client.js";
 import { logger } from "./logger.js";
 import {
+  getProjectStateAttestation,
+  ProjectStateAttestor,
+  toolStateError,
+  type ProjectStateAttestation,
+  type ToolState,
+} from "./tool-state-gate.js";
+import {
   ChildMcpRuntimeError,
   ChildMcpRuntimeManager,
   type ChildMcpTool,
@@ -48,7 +55,10 @@ export interface ChildMcpGatewayApi {
     unavailableCount: number;
   }>;
   recordDiscovery(project: string, server: string, report: ChildMcpDiscoveryReport): Promise<boolean>;
-  toolEnabled(project: string, toolName: string): Promise<"enabled" | "disabled" | "unavailable">;
+  toolEnabled(project: string, toolName: string): Promise<{
+    state: ToolState;
+    attestation: ProjectStateAttestation | null;
+  }>;
 }
 
 export interface ChildMcpToolRegistration {
@@ -100,7 +110,9 @@ function isRuntimeDefinition(value: unknown): value is ChildMcpRuntimeDefinition
 export const childMcpGatewayApi: ChildMcpGatewayApi = {
   async listRuntimeDefinitions(project) {
     const response = await api.getTrustedChildMcpRuntime(project);
-    if (!response.ok || !isRecord(response.data)) throw new Error("CHILD_MCP_RUNTIME_UNAVAILABLE");
+    if (!response.ok || !isRecord(response.data)) {
+      throw new Error("CHILD_MCP_RUNTIME_UNAVAILABLE");
+    }
     const definitions = Array.isArray(response.data.definitions)
       ? response.data.definitions.filter(isRuntimeDefinition)
       : [];
@@ -119,16 +131,14 @@ export const childMcpGatewayApi: ChildMcpGatewayApi = {
 
   async toolEnabled(project, toolName) {
     try {
-      const response = await api.get(
-        `/mcp-tools/${encodeURIComponent(toolName)}/state`,
-        { project },
-      );
-      if (!response.ok || !isRecord(response.data) || typeof response.data.enabled !== "boolean") {
-        return "unavailable";
+      const response = await api.getToolState(toolName, project);
+      const attestation = getProjectStateAttestation(response.payload, project);
+      if (!response.ok || !attestation || !isRecord(response.data) || typeof response.data.enabled !== "boolean") {
+        return { state: "unavailable", attestation: null };
       }
-      return response.data.enabled ? "enabled" : "disabled";
+      return { state: response.data.enabled ? "enabled" : "disabled", attestation };
     } catch {
-      return "unavailable";
+      return { state: "unavailable", attestation: null };
     }
   },
 };
@@ -178,9 +188,7 @@ function toolsSignature(tools: ChildMcpTool[]): string {
 }
 
 function safeError(code: string, message: string) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify({ error: { code, message } }) }],
-  };
+  return toolStateError(code, message);
 }
 
 function runtimeErrorResponse(error: unknown) {
@@ -232,6 +240,7 @@ export class ChildMcpGateway {
     private readonly apiClient: ChildMcpGatewayApi = childMcpGatewayApi,
     manager?: ChildMcpRuntimeManager,
     private readonly reconcileIntervalMs = CHILD_MCP_RECONCILE_INTERVAL_MS,
+    private readonly projectStateAttestor = new ProjectStateAttestor(),
   ) {
     this.manager = manager ?? new ChildMcpRuntimeManager();
   }
@@ -393,8 +402,9 @@ export class ChildMcpGateway {
     let changed = false;
     const visible: ChildMcpTool[] = [];
     for (const tool of discovered) {
-      const state = await this.apiClient.toolEnabled(this.project!, canonicalToolName(definition.name, tool.name));
-      if (state === "enabled") visible.push(tool);
+      const response = await this.apiClient.toolEnabled(this.project!, canonicalToolName(definition.name, tool.name));
+      if (this.projectStateAttestor.attest(this.project!, response.attestation)
+        && response.state === "enabled") visible.push(tool);
     }
     const desired = new Map(visible.map((tool) => [canonicalToolName(definition.name, tool.name), tool]));
     for (const [name, tool] of this.tools) {
@@ -464,11 +474,14 @@ export class ChildMcpGateway {
     if (!this.project || args.project !== this.project) {
       return safeError("PROJECT_IDENTITY_REQUIRED", "A valid explicit project identity is required for this child MCP tool.");
     }
-    const state = await this.apiClient.toolEnabled(this.project, canonicalName);
-    if (state === "disabled") {
+    const response = await this.apiClient.toolEnabled(this.project, canonicalName);
+    if (!this.projectStateAttestor.attest(this.project, response.attestation)) {
+      return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool state could not be verified.");
+    }
+    if (response.state === "disabled") {
       return safeError("TOOL_DISABLED", "This child MCP tool is disabled for the project.");
     }
-    if (state !== "enabled") {
+    if (response.state !== "enabled") {
       return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool state could not be verified.");
     }
     // A caller may retain an old tools/call payload while reconciliation is

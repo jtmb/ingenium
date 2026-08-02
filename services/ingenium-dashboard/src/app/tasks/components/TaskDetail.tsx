@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, useId } from "react";
-import { api, Task, TaskComment, TaskActivity, TaskLink, Agent, BoardConfig, CustomFieldDef } from "../../../lib/api";
+import { api, Task, TaskComment, TaskActivity, TaskLink, TaskSourceReference, Agent, BoardConfig, CustomFieldDef } from "../../../lib/api";
+import { formatRelativeTime } from "../../../lib/time";
 import Overlay from "../../components/Overlay";
 import MarkdownViewer from "../../components/MarkdownViewer";
+import Select from "../../components/Select";
+import { Listbox, ListboxOption, useListboxNavigation } from "../../components/Combobox";
+import { useDismissableLayer } from "../../components/Dropdown";
 
 type TaskDetailProps = {
   task: Task;
@@ -69,20 +73,6 @@ function TimePieChart({ spent, remaining, estimate }: { spent: number; remaining
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function relativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diff = Math.max(0, now - then);
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
 
 /** Map activity action strings to emoji for the activity sidebar. */
 function activityIcon(action: string | undefined | null): string {
@@ -196,6 +186,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const [agents, setAgents] = useState<Agent[]>([]);
   const [mentionAnchor, setMentionAnchor] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionContainerRef = useRef<HTMLDivElement>(null);
 
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [newComment, setNewComment] = useState("");
@@ -205,12 +196,21 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const [activity, setActivity] = useState<TaskActivity[]>([]);
   const [showActivity, setShowActivity] = useState(true);
 
+  const [sourceReferenceState, setSourceReferenceState] = useState<{
+    taskId: string;
+    references: TaskSourceReference[];
+  }>({ taskId: task.id, references: [] });
   const [links, setLinks] = useState<TaskLink[]>([]);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [depSearch, setDepSearch] = useState("");
   const [depSearchOpen, setDepSearchOpen] = useState(false);
   const [depSearchResults, setDepSearchResults] = useState<Task[]>([]);
+  const [depSearchIndex, setDepSearchIndex] = useState(0);
+  const [depSearchLoading, setDepSearchLoading] = useState(false);
+  const [depSearchError, setDepSearchError] = useState<string | null>(null);
   const [depType, setDepType] = useState<"blocks" | "blocked_by">("blocks");
+  const depSearchContainerRef = useRef<HTMLDivElement>(null);
+  const depSearchInputRef = useRef<HTMLInputElement>(null);
 
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
   // The DB stores custom_fields as JSON.stringify'd text and returns it unparsed.
@@ -224,6 +224,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   const [dispatching, setDispatching] = useState(false);
   const [dispatchMsg, setDispatchMsg] = useState("");
+  const sourceReferences = sourceReferenceState.taskId === task.id ? sourceReferenceState.references : [];
 
   // Sync local state when the task prop changes (e.g., navigating between tasks via task dependency links).
   useEffect(() => {
@@ -246,12 +247,17 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   // Load all ancillary data when the task changes.
   useEffect(() => {
+    let active = true;
     api.tasks.comments(task.id, project).then((r) => setComments(r.data ?? [])).catch(() => {});
     api.tasks.activity(task.id, project).then((r) => setActivity(r.data ?? [])).catch(() => {});
     api.tasks.links(task.id, project).then((r) => setLinks(r.data ?? [])).catch(() => {});
+    api.tasks.references.list(task.id, project)
+      .then((r) => { if (active) setSourceReferenceState({ taskId: task.id, references: r.data ?? [] }); })
+      .catch(() => { if (active) setSourceReferenceState({ taskId: task.id, references: [] }); });
     api.agents.list(project).then((r) => setAgents(r.data ?? [])).catch(() => {});
     api.tasks.list(project).then((r) => setAllTasks(r.data ?? [])).catch(() => {});
     api.tasks.boardConfig(project).then((r) => setBoardConfig(r.data ?? null)).catch(() => {});
+    return () => { active = false; };
   }, [task.id, project]);
 
   /**
@@ -322,22 +328,26 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [description]);
 
-  const handleMentionKey = useCallback((e: React.KeyboardEvent) => {
-    if (!showMentions) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setMentionIndex((i) => Math.min(i + 1, filteredAgents.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setMentionIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" || e.key === "Tab") {
-      e.preventDefault();
-      const agent = filteredAgents[mentionIndex];
+  const mentionNavigation = useListboxNavigation({
+    id: `${formId}-mentions`,
+    items: showMentions ? filteredAgents : [],
+    activeIndex: mentionIndex,
+    onActiveIndexChange: setMentionIndex,
+    onSelect: (index) => {
+      const agent = filteredAgents[index];
       if (agent) insertMention(agent.name);
-    } else if (e.key === "Escape") {
-      setShowMentions(false);
-    }
-  }, [showMentions, filteredAgents, mentionIndex, insertMention]);
+    },
+    onClose: () => setShowMentions(false),
+    selectKeys: ["Enter", "Tab"],
+    inputRole: "textbox",
+  });
+
+  useDismissableLayer({
+    open: showMentions,
+    onClose: () => setShowMentions(false),
+    containerRef: mentionContainerRef,
+    restoreFocusRef: textareaRef,
+  });
 
   /**
    * Persist all editable fields to the API. The custom_fields object is sent
@@ -468,15 +478,21 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   const handleDepSearch = useCallback(async (q: string) => {
     setDepSearch(q);
+    setDepSearchError(null);
     if (!q.trim()) {
       setDepSearchResults([]);
+      setDepSearchLoading(false);
       return;
     }
+    setDepSearchLoading(true);
     try {
       const r = await api.tasks.search(q, project);
       setDepSearchResults((r.data ?? []).filter((t) => t.id !== task.id));
     } catch {
       setDepSearchResults([]);
+      setDepSearchError("Unable to search tasks");
+    } finally {
+      setDepSearchLoading(false);
     }
   }, [task.id, project]);
 
@@ -487,10 +503,30 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
       setDepSearch("");
       setDepSearchOpen(false);
       setDepSearchResults([]);
+      setDepSearchIndex(0);
     } catch {
       // ignore
     }
   }, [task.id, depType, project]);
+
+  const dependencyNavigation = useListboxNavigation({
+    id: fieldIds.dependencySearch,
+    items: depSearchResults,
+    activeIndex: depSearchIndex,
+    onActiveIndexChange: setDepSearchIndex,
+    onSelect: (index) => {
+      const dependency = depSearchResults[index];
+      if (dependency) handleAddDep(dependency.id);
+    },
+    onClose: () => setDepSearchOpen(false),
+  });
+
+  useDismissableLayer({
+    open: depSearchOpen,
+    onClose: () => setDepSearchOpen(false),
+    containerRef: depSearchContainerRef,
+    restoreFocusRef: depSearchInputRef,
+  });
 
   const handleRemoveLink = useCallback(async (linkId: string) => {
     try {
@@ -531,9 +567,9 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   // --- Render ---
   return (
     <Overlay isOpen={true} onClose={onClose} title={task.title} subtitle={`Created ${new Date(task.created_at).toLocaleString()}`}>
-      <div className="flex h-full gap-0">
+      <div data-testid="task-detail-layout" className="flex h-full min-h-0 min-w-0 flex-col gap-0 lg:flex-row">
         {/* Main content area */}
-        <div className="flex-1 overflow-y-auto pr-4 space-y-6">
+        <div data-testid="task-detail-main" className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto pr-0 lg:pr-4">
           {/* Editable fields grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
@@ -543,10 +579,10 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             </div>
             <div>
               <label htmlFor={fieldIds.status} className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-              <select id={fieldIds.status} value={columnId} onChange={(e) => setColumnId(e.target.value)}
+               <Select id={fieldIds.status} value={columnId} onChange={(e) => setColumnId(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 {COLUMN_OPTIONS.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
-              </select>
+               </Select>
             </div>
             <div>
               <label htmlFor={fieldIds.assignee} className="block text-xs font-medium text-gray-500 mb-1">Assignee</label>
@@ -555,11 +591,11 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             </div>
             <div>
               <label htmlFor={fieldIds.priority} className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
-              <select id={fieldIds.priority} value={priority} onChange={(e) => setPriority(e.target.value)}
+               <Select id={fieldIds.priority} value={priority} onChange={(e) => setPriority(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="">—</option>
                 {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
-              </select>
+               </Select>
             </div>
             <div>
               <label htmlFor={fieldIds.dueDate} className="block text-xs font-medium text-gray-500 mb-1">Due Date</label>
@@ -568,13 +604,13 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             </div>
             <div>
               <label htmlFor={fieldIds.issueType} className="block text-xs font-medium text-gray-500 mb-1">Issue Type</label>
-              <select id={fieldIds.issueType} value={issueType} onChange={(e) => setIssueType(e.target.value)}
+               <Select id={fieldIds.issueType} value={issueType} onChange={(e) => setIssueType(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="epic">Epic</option>
                 <option value="story">Story</option>
                 <option value="task">Task</option>
                 <option value="subtask">Subtask</option>
-              </select>
+               </Select>
             </div>
           </div>
 
@@ -689,11 +725,11 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "single_select" && (
-                        <select id={customFieldId} value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                         <Select id={customFieldId} value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                           <option value="">—</option>
                           {(def.options ?? []).map((o) => (<option key={o} value={o}>{o}</option>))}
-                        </select>
+                         </Select>
                       )}
                       {def.type === "url" && (
                         <input id={customFieldId} type="url" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
@@ -726,22 +762,30 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
               </div>
             </div>
             {descMode === "edit" ? (
-              <div className="relative">
+              <div className="relative" ref={mentionContainerRef}>
                 <textarea id={fieldIds.description} ref={textareaRef} value={description}
                   onChange={(e) => handleDescChange(e.target.value)}
-                  onKeyDown={handleMentionKey}
+                  {...mentionNavigation.inputProps}
+                  role="textbox"
+                  aria-haspopup="listbox"
                   className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[120px] font-mono"
                   placeholder="Task description... Supports **bold**, *italic*, `code`, ```blocks```, - [ ] checklists, @mentions" />
                 {showMentions && filteredAgents.length > 0 && (
-                  <div className="absolute z-10 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg max-h-40 overflow-y-auto w-48 text-[var(--color-text-primary)]"
+                  <Listbox id={mentionNavigation.listboxId} aria-label="Agent mentions" className="absolute z-10 w-48 max-h-40 p-0 text-[var(--color-text-primary)]"
                     style={{ top: mentionAnchor.top, left: mentionAnchor.left }}>
                     {filteredAgents.map((a, i) => (
-                      <button key={a.name} onClick={() => insertMention(a.name)}
-                        className={`w-full text-left px-2 py-1 text-sm hover:bg-[var(--color-surface-hover)] ${i === mentionIndex ? "bg-[var(--color-selection-bg)]" : ""}`}>
+                      <ListboxOption
+                        key={a.name}
+                        {...mentionNavigation.getOptionProps(i)}
+                        active={i === mentionIndex}
+                        onMouseEnter={() => setMentionIndex(i)}
+                        onClick={() => insertMention(a.name)}
+                        className="rounded-none px-2 py-1 text-sm"
+                      >
                         {a.name}
-                      </button>
+                      </ListboxOption>
                     ))}
-                  </div>
+                  </Listbox>
                 )}
               </div>
             ) : (
@@ -819,31 +863,76 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             {/* Add dependency */}
             <div className="mt-2 flex gap-2">
               <label className="sr-only" htmlFor={fieldIds.dependencyType}>Dependency type</label>
-              <select id={fieldIds.dependencyType} value={depType} onChange={(e) => setDepType(e.target.value as "blocks" | "blocked_by")}
+               <Select id={fieldIds.dependencyType} value={depType} onChange={(e) => setDepType(e.target.value as "blocks" | "blocked_by")}
                 className="border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="blocks">Blocks</option>
                 <option value="blocked_by">Blocked by</option>
-              </select>
-              <div className="relative flex-1">
+               </Select>
+              <div className="relative flex-1" ref={depSearchContainerRef}>
                 <label className="sr-only" htmlFor={fieldIds.dependencySearch}>Search tasks to link</label>
-                <input id={fieldIds.dependencySearch} value={depSearch} onChange={(e) => { handleDepSearch(e.target.value); setDepSearchOpen(true); }}
+                <input id={fieldIds.dependencySearch} ref={depSearchInputRef} value={depSearch} onChange={(e) => { handleDepSearch(e.target.value); setDepSearchOpen(true); }}
                   onFocus={() => setDepSearchOpen(true)}
+                  {...dependencyNavigation.inputProps}
+                  aria-expanded={depSearchOpen}
+                  role="combobox"
+                  aria-controls={dependencyNavigation.listboxId}
+                  aria-activedescendant={dependencyNavigation.activeDescendant}
                   placeholder="Search tasks to link..."
                   className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-xs" />
-                {depSearchOpen && depSearchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 z-10 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg max-h-32 overflow-y-auto mt-0.5 text-[var(--color-text-primary)]">
-                    {depSearchResults.map((t) => (
-                      <button key={t.id} onClick={() => handleAddDep(t.id)}
-                        className="w-full text-left px-2 py-1 text-xs hover:bg-blue-50 border-b border-[var(--color-border-muted)]">
-                        <span className="font-medium">{t.title}</span>
-                        <span className="text-gray-400 ml-1">{t.column_id}</span>
-                      </button>
+                {depSearchOpen && (depSearchLoading || depSearchError || depSearchResults.length > 0) && (
+                  <Listbox id={dependencyNavigation.listboxId} aria-label="Dependency search results" className="absolute left-0 right-0 top-full z-10 mt-0.5 max-h-32 p-0 text-[var(--color-text-primary)]">
+                    {depSearchLoading && <div className="px-2 py-2 text-xs text-[var(--color-text-muted)]" role="status">Searching tasks…</div>}
+                    {depSearchError && <div className="px-2 py-2 text-xs text-[var(--color-error-text)]" role="alert">{depSearchError}</div>}
+                    {!depSearchLoading && !depSearchError && depSearchResults.length === 0 && depSearch.trim() && (
+                      <div className="px-2 py-2 text-xs text-[var(--color-text-muted)]">No matching tasks</div>
+                    )}
+                    {!depSearchLoading && depSearchResults.map((t, index) => (
+                      <ListboxOption
+                        key={t.id}
+                        {...dependencyNavigation.getOptionProps(index)}
+                        active={index === depSearchIndex}
+                        onMouseEnter={() => setDepSearchIndex(index)}
+                        onClick={() => handleAddDep(t.id)}
+                        className="rounded-none px-2 py-1 text-xs"
+                      >
+                        <span className="min-w-0 truncate font-medium">{t.title}</span>
+                        <span className="ml-1 shrink-0 text-[var(--color-text-muted)]">{t.column_id}</span>
+                      </ListboxOption>
                     ))}
-                  </div>
+                  </Listbox>
                 )}
               </div>
             </div>
           </div>
+
+          <section data-testid="task-detail-source-references" className="min-w-0" aria-labelledby={`${formId}-source-references`}>
+            <h3 id={`${formId}-source-references`} className="mb-2 text-sm font-semibold text-[var(--color-text-primary)]">Source references</h3>
+            {sourceReferences.length === 0 ? (
+              <p className="text-xs text-[var(--color-text-muted)]">No source references.</p>
+            ) : (
+              <ul className="min-w-0 space-y-2" aria-label="Source references">
+                {sourceReferences.map((reference) => (
+                  <li key={reference.id} className="min-w-0 rounded border border-[var(--color-border)] p-2 text-sm">
+                    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <span className="min-w-0 break-words font-medium text-[var(--color-text-primary)]">{reference.display_title}</span>
+                      <span className="max-w-full break-words text-xs text-[var(--color-text-muted)]">Type: {reference.source_type}</span>
+                    </div>
+                    {reference.display_detail && <p className="mt-1 break-words text-xs text-[var(--color-text-secondary)]">{reference.display_detail}</p>}
+                    <time dateTime={reference.source_timestamp ?? undefined} className="mt-1 block break-words text-xs text-[var(--color-text-muted)]">
+                      Timestamp: {reference.source_timestamp ?? "Not recorded"}
+                    </time>
+                    {reference.availability === "available" ? (
+                      <p className="mt-1 break-words text-xs text-[var(--color-success-text)]">Available</p>
+                    ) : reference.availability === "missing" ? (
+                      <p className="mt-1 break-words text-xs text-[var(--color-error-text)]">This source is no longer available. Update the task details if you need replacement context.</p>
+                    ) : (
+                      <p className="mt-1 break-words text-xs text-[var(--color-warning-text)]">Source availability could not be checked. Try again later.</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           {/* Comments section */}
           <div>
@@ -856,7 +945,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                       <span className="text-xs font-medium text-gray-600">{c.author ?? "Anonymous"}</span>
                       <div className="flex items-center gap-1">
                         {c.edited_at && <span className="text-[10px] text-gray-400 bg-gray-200 rounded px-1">edited</span>}
-                        <span className="text-xs text-gray-400">{relativeTime(c.created_at)}</span>
+                        <span className="text-xs text-gray-400">{formatRelativeTime(c.created_at)}</span>
                       </div>
                     </div>
                     <div className="text-gray-700">
@@ -890,7 +979,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                         <span className="text-xs font-medium text-gray-600">{reply.author ?? "Anonymous"}</span>
                         <div className="flex items-center gap-1">
                           {reply.edited_at && <span className="text-[10px] text-gray-400 bg-gray-200 rounded px-1">edited</span>}
-                          <span className="text-xs text-gray-400">{relativeTime(reply.created_at)}</span>
+                          <span className="text-xs text-gray-400">{formatRelativeTime(reply.created_at)}</span>
                         </div>
                       </div>
                       <div className="text-gray-700"><MarkdownViewer content={reply.body} isMarkdown /></div>
@@ -928,7 +1017,12 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
         </div>
 
         {/* Activity sidebar (collapsible) */}
-        <div className={`border-l border-[var(--color-border)] flex flex-col transition-all duration-200 ${showActivity ? "w-64 pl-4" : "w-0 overflow-hidden"}`}>
+        <div
+          data-testid="task-detail-activity"
+          className={`flex shrink-0 flex-col transition-all duration-200 lg:border-l lg:border-[var(--color-border)] ${showActivity
+            ? "mt-4 w-full border-t border-[var(--color-border)] pt-4 lg:mt-0 lg:w-64 lg:border-t-0 lg:pl-4 lg:pt-0"
+            : "w-0 overflow-hidden"}`}
+        >
           <button onClick={() => setShowActivity(!showActivity)}
             className="text-xs text-gray-400 hover:text-gray-600 mb-2 shrink-0 text-left">
             {showActivity ? "◀ Hide" : "▶"}
@@ -944,7 +1038,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                       <span className="shrink-0 mt-0.5">{activityIcon(action)}</span>
                       <div className="min-w-0">
                         <p className="text-gray-600 break-words">{activityDescription(a)}</p>
-                        <span className="text-gray-400">{relativeTime(a.created_at)}</span>
+                        <span className="text-gray-400">{formatRelativeTime(a.created_at)}</span>
                       </div>
                     </div>
                   );

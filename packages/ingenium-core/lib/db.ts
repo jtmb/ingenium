@@ -113,6 +113,54 @@ interface ContextSnapshotImportMigrationState {
   missing: string[];
 }
 
+interface ContextRagSessionMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface TaskSourceReferencesMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface TaskCoordinationMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface CoordinationRegistryMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface TrustedJobEventsMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface JobEventDeliveriesMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface UsageAttentionMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface JobVaultReferencesMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -482,6 +530,635 @@ function inspectContextSnapshotImportMigration(db: Database.Database): ContextSn
   for (const [table, referencedTable, fromColumns] of requiredForeignKeys) {
     if (hasCompositeForeignKey(db, table, referencedTable, fromColumns)) continue;
     missing.push(`${table} → ${referencedTable} composite foreign key`);
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** Probe CTX-100's session column and immutable RAG guards as one unit. */
+function inspectContextRagSessionMigration(db: Database.Database): ContextRagSessionMigrationState {
+  const requiredTriggers = [
+    "rag_sources_context_upload_immutable_update",
+    "rag_sources_context_upload_immutable_delete",
+    "rag_chunks_context_upload_immutable_insert",
+    "rag_chunks_context_upload_immutable_update",
+    "rag_chunks_context_upload_immutable_delete",
+  ];
+  const missing: string[] = [];
+  const sourceReferenceColumn = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('context_rag_upload_sessions') WHERE name = 'source_reference'",
+  ).get() as { count: number }).count > 0;
+  let any = sourceReferenceColumn;
+  if (!sourceReferenceColumn) missing.push("source_reference column");
+  for (const trigger of requiredTriggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** Probe TASK-100's table, scope boundary, uniqueness, and append-only guard as one unit. */
+function inspectTaskSourceReferencesMigration(db: Database.Database): TaskSourceReferencesMigrationState {
+  const table = "task_source_references";
+  const indexes = ["idx_tasks_project_id_id", "idx_task_source_references_task"];
+  const trigger = "task_source_references_immutable_update";
+  const tableExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { count: number }).count > 0;
+  const missing: string[] = [];
+  let any = tableExists;
+
+  if (!tableExists) {
+    missing.push(`${table} table`);
+  } else {
+    const columns = [
+      "id", "project_id", "task_id", "source_type", "source_id", "display_title",
+      "display_detail", "source_timestamp", "created_at",
+    ];
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    const requiredFragments = [
+      "source_type IN ('email', 'context', 'docs', 'chat', 'job')",
+      "length(source_id) BETWEEN 1 AND 512",
+      "length(display_title) BETWEEN 1 AND 256",
+      "UNIQUE(project_id, task_id, source_type, source_id)",
+      "FOREIGN KEY(project_id, task_id) REFERENCES tasks(project_id, id) ON DELETE CASCADE",
+    ];
+    if (!tableSql?.sql || !requiredFragments.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+    if (!hasCompositeForeignKey(db, table, "tasks", ["project_id", "task_id"])) {
+      missing.push(`${table} → tasks composite foreign key`);
+    }
+    const foreignKeys = db.prepare(`PRAGMA foreign_key_list('${table}')`).all() as Array<{ table: string }>;
+    if (foreignKeys.some((foreignKey) => foreignKey.table !== "tasks")) {
+      missing.push(`${table} has unsupported source foreign key`);
+    }
+  }
+
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  const triggerExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+  ).get(trigger) as { count: number }).count > 0;
+  any ||= triggerExists;
+  if (!triggerExists) missing.push(`${trigger} trigger`);
+
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** Probe COORD-100's additive task coordination boundary as an inseparable unit. */
+function inspectTaskCoordinationMigration(db: Database.Database): TaskCoordinationMigrationState {
+  const taskColumns = ["revision", "reservation_state", "reservation_owner", "reservation_worktree"];
+  const receiptTable = "task_mutation_receipts";
+  const receiptColumns = [
+    "id", "project_id", "task_id", "operation", "idempotency_key", "request_hash", "result_json", "created_at",
+  ];
+  const triggers = [
+    "tasks_reservation_consistency_insert",
+    "tasks_reservation_consistency_update",
+    "task_mutation_receipts_immutable_update",
+  ];
+  const index = "idx_task_mutation_receipts_project_task_created";
+  const missing: string[] = [];
+  const taskSql = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",
+  ).get() as { sql?: string } | undefined;
+  const existingTaskColumns = db.prepare("PRAGMA table_info('tasks')").all() as Array<{ name: string }>;
+  const hasTaskColumns = taskColumns.every((column) => existingTaskColumns.some((candidate) => candidate.name === column));
+  let any = taskColumns.some((column) => existingTaskColumns.some((candidate) => candidate.name === column))
+    || triggers.some((trigger) => (
+    (db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(trigger) as { count: number }).count > 0
+  ));
+  if (!hasTaskColumns) missing.push("tasks coordination columns");
+  if (!taskSql?.sql || ![
+    "CHECK(revision >= 0)",
+    "reservation_state IN ('available', 'reserved', 'quarantined')",
+  ].every((fragment) => taskSql.sql!.includes(fragment))) {
+    missing.push("tasks coordination constraints");
+  }
+
+  const receiptExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(receiptTable) as { count: number }).count > 0;
+  any ||= receiptExists;
+  if (!receiptExists) {
+    missing.push(`${receiptTable} table`);
+  } else {
+    if (!hasContextConversationColumns(db, receiptTable, receiptColumns)) {
+      missing.push(`${receiptTable} required columns`);
+    }
+    const receiptSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(receiptTable) as { sql?: string } | undefined;
+    const requiredFragments = [
+      "length(operation) BETWEEN 1 AND 64",
+      "length(idempotency_key) BETWEEN 1 AND 128",
+      "length(request_hash) = 64",
+      "json_valid(result_json)",
+      "length(CAST(result_json AS BLOB)) <= 16384",
+      "UNIQUE(project_id, idempotency_key)",
+    ];
+    if (!receiptSql?.sql || !requiredFragments.every((fragment) => receiptSql.sql!.includes(fragment))) {
+      missing.push(`${receiptTable} constraints`);
+    }
+  }
+  const indexExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+  ).get(index) as { count: number }).count > 0;
+  any ||= indexExists;
+  if (!indexExists) missing.push(`${index} index`);
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+function inspectTaskReservationTokenMigration(db: Database.Database): TaskCoordinationMigrationState {
+  const tokenColumnExists = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('tasks') WHERE name = 'reservation_token_hash'",
+  ).get() as { count: number }).count > 0;
+  const triggerNames = ["tasks_reservation_consistency_insert", "tasks_reservation_consistency_update"];
+  const tokenAwareTriggers = triggerNames.every((name) => {
+    const trigger = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(name) as { sql?: string } | undefined;
+    return trigger?.sql?.includes("reservation_token_hash") ?? false;
+  });
+  const deleteTriggerExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'task_mutation_receipts_immutable_delete'",
+  ).get() as { count: number }).count > 0;
+  const missing = [
+    ...(tokenColumnExists ? [] : ["tasks reservation_token_hash column"]),
+    ...(tokenAwareTriggers ? [] : ["token-aware reservation consistency triggers"]),
+    ...(deleteTriggerExists ? ["removal of task_mutation_receipts_immutable_delete trigger"] : []),
+  ];
+  return { any: tokenColumnExists || tokenAwareTriggers || deleteTriggerExists, complete: missing.length === 0, missing };
+}
+
+function normalizedImmutableUpdateTriggerSql(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\r\n]*/g, " ")
+    .replace(/[\[\]`]/g, "")
+    .replace(/"([A-Za-z_][A-Za-z0-9_]*)"/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function hasCoordinationReceiptImmutableUpdateTrigger(db: Database.Database): boolean {
+  const trigger = db.prepare(
+    "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+  ).get("coordination_mutation_receipts_immutable_update") as { tbl_name?: string; sql?: string } | undefined;
+  if (trigger?.tbl_name !== "coordination_mutation_receipts" || typeof trigger.sql !== "string") return false;
+  const normalized = normalizedImmutableUpdateTriggerSql(trigger.sql);
+  return /^create trigger(?: if not exists)? coordination_mutation_receipts_immutable_update before update on coordination_mutation_receipts begin select raise\(abort, '(?:''|[^'])*'\); end;?$/.test(normalized);
+}
+
+/** Probe COORD-101's registry as one unit; partial leases are never safe to resume. */
+function inspectCoordinationRegistryMigration(db: Database.Database): CoordinationRegistryMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    coordination_worktrees: ["project_id", "worktree_id", "next_fence", "created_at", "updated_at"],
+    coordination_sessions: [
+      "id", "project_id", "worktree_id", "session_id", "incarnation", "ownership_token_hash",
+      "revision", "fence", "state", "heartbeat_at", "expires_at", "snapshot_json", "snapshot_revision",
+      "current_task_id", "current_task_revision", "context_conversation_id", "context_revision", "created_at", "updated_at",
+    ],
+    coordination_claims: [
+      "id", "project_id", "coordination_session_id", "worktree_id", "incarnation", "fence", "kind", "value",
+      "baseline_sha256", "state", "created_at", "updated_at", "released_at",
+    ],
+    coordination_mutation_receipts: ["id", "project_id", "operation", "idempotency_key", "request_hash", "result_json", "created_at"],
+  };
+  const requiredSql: Record<string, string[]> = {
+    coordination_worktrees: [
+      "CHECK(next_fence >= 1)",
+      "PRIMARY KEY(project_id, worktree_id)",
+      "FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE",
+    ],
+    coordination_sessions: [
+      "CHECK(incarnation >= 1)",
+      "length(ownership_token_hash) = 64",
+      "CHECK(revision >= 0)",
+      "CHECK(fence >= 1)",
+      "state IN ('active', 'quarantined', 'closed')",
+      "json_type(snapshot_json) = 'object'",
+      "length(CAST(snapshot_json AS BLOB)) <= 16384",
+      "UNIQUE(project_id, id)",
+      "UNIQUE(project_id, worktree_id, session_id, incarnation)",
+    ],
+    coordination_claims: [
+      "CHECK(incarnation >= 1)",
+      "CHECK(fence >= 1)",
+      "length(baseline_sha256) = 64",
+      "state IN ('active', 'released', 'dirty', 'quarantined', 'collision')",
+      "UNIQUE(project_id, id)",
+    ],
+    coordination_mutation_receipts: [
+      "length(operation) BETWEEN 1 AND 64",
+      "length(idempotency_key) BETWEEN 1 AND 128",
+      "length(request_hash) = 64",
+      "json_valid(result_json)",
+      "length(CAST(result_json AS BLOB)) <= 16384",
+      "UNIQUE(project_id, idempotency_key)",
+      "FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE",
+    ],
+  };
+  const indexes = [
+    "idx_coordination_sessions_identity",
+    "idx_coordination_sessions_active_expiry",
+    "idx_coordination_claims_active_worktree",
+    "idx_coordination_claims_session",
+    "idx_coordination_mutation_receipts_project_created",
+  ];
+  const updateTrigger = "coordination_mutation_receipts_immutable_update";
+  const deleteTrigger = "coordination_mutation_receipts_immutable_delete";
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || !requiredSql[table]!.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+  }
+
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  const hasUpdateTrigger = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+  ).get(updateTrigger) as { count: number }).count > 0;
+  const hasDeleteTrigger = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+  ).get(deleteTrigger) as { count: number }).count > 0;
+  any ||= hasUpdateTrigger || hasDeleteTrigger;
+  if (!hasUpdateTrigger) missing.push(`${updateTrigger} trigger`);
+  else if (!hasCoordinationReceiptImmutableUpdateTrigger(db)) missing.push(`${updateTrigger} immutable trigger semantics`);
+  if (hasDeleteTrigger) missing.push(`removal of ${deleteTrigger} trigger`);
+
+  const foreignKeys: Array<[string, string, string[]]> = [
+    ["coordination_sessions", "projects", ["project_id"]],
+    ["coordination_sessions", "coordination_worktrees", ["project_id", "worktree_id"]],
+    ["coordination_sessions", "tasks", ["project_id", "current_task_id"]],
+    ["coordination_sessions", "context_conversations", ["project_id", "context_conversation_id"]],
+    ["coordination_claims", "projects", ["project_id"]],
+    ["coordination_claims", "coordination_sessions", ["project_id", "coordination_session_id"]],
+    ["coordination_claims", "coordination_worktrees", ["project_id", "worktree_id"]],
+    ["coordination_mutation_receipts", "projects", ["project_id"]],
+  ];
+  for (const [table, referencedTable, fromColumns] of foreignKeys) {
+    if (hasCompositeForeignKey(db, table, referencedTable, fromColumns)) continue;
+    missing.push(`${table} → ${referencedTable} foreign key`);
+  }
+
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** Probe JOB-100 as one append-only boundary; a partial event catalog is unsafe. */
+function inspectTrustedJobEventsMigration(db: Database.Database): TrustedJobEventsMigrationState {
+  const table = "trusted_job_events";
+  const columns = [
+    "id", "project_id", "event_type", "schema_version", "producer",
+    "source_audit_event_id", "dedupe_key", "payload", "created_at",
+  ];
+  const requiredTableSql = [
+    "schema_version INTEGER NOT NULL CHECK(schema_version = 1)",
+    "producer TEXT NOT NULL CHECK(producer = 'context.maintenance')",
+    "context.conversation.archived",
+    "context.conversation.unarchived",
+    "context.checkpoint.restored_as_new",
+    "length(CAST(payload AS BLOB)) <= 2048",
+    "UNIQUE(project_id, event_type, dedupe_key)",
+    "UNIQUE(project_id, source_audit_event_id)",
+  ];
+  const triggerTables: Record<string, string> = {
+    trusted_job_events_payload_contract: table,
+    trusted_job_events_context_provenance: table,
+    trusted_job_events_immutable_update: table,
+    trusted_job_events_immutable_delete: table,
+    jobs_trigger_event_catalog_insert: "jobs",
+    jobs_trigger_event_catalog_update: "jobs",
+  };
+  const missing: string[] = [];
+  const tableExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { count: number }).count > 0;
+  let any = tableExists;
+  if (!tableExists) {
+    missing.push(`${table} table`);
+  } else {
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || !requiredTableSql.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+    if (!hasCompositeForeignKey(db, table, "projects", ["project_id"])) {
+      missing.push(`${table} → projects foreign key`);
+    }
+    if (!hasCompositeForeignKey(db, table, "context_checkpoint_audit_events", ["project_id", "source_audit_event_id"])) {
+      missing.push(`${table} → context_checkpoint_audit_events foreign key`);
+    }
+  }
+
+  const indexExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_trusted_job_events_project_created'",
+  ).get() as { count: number }).count > 0;
+  any ||= indexExists;
+  if (!indexExists) missing.push("idx_trusted_job_events_project_created index");
+
+  for (const [trigger, expectedTable] of Object.entries(triggerTables)) {
+    const row = db.prepare(
+      "SELECT tbl_name FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { tbl_name?: string } | undefined;
+    any ||= row !== undefined;
+    if (row?.tbl_name !== expectedTable) missing.push(`${trigger} trigger`);
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** JOB-101's queue is an all-or-nothing safety boundary: do not resume a partial lease schema. */
+function inspectJobEventDeliveriesMigration(db: Database.Database): JobEventDeliveriesMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    job_event_dispatches: ["project_id", "trusted_event_id", "snapshotted_at"],
+    job_event_deliveries: [
+      "id", "project_id", "trusted_event_id", "job_id", "state", "attempt_count", "next_attempt_at",
+      "lease_revision", "lease_expires_at", "lease_owner_hash", "last_error_code", "last_error_message",
+      "created_at", "updated_at",
+    ],
+    job_event_attempts: [
+      "id", "project_id", "delivery_id", "attempt_number", "run_id", "process_id", "process_group_id",
+      "process_start_time", "process_executable", "process_nonce_hash", "created_at", "updated_at",
+    ],
+  };
+  const indexes = [
+    "idx_jobs_project_id_id", "idx_job_runs_project_id_id", "idx_job_event_dispatches_project_snapshot",
+    "idx_job_event_deliveries_claim", "idx_job_event_deliveries_expiry", "idx_job_event_deliveries_project_updated",
+    "idx_job_event_attempts_delivery",
+  ];
+  const triggers = [
+    "job_runs_project_scope_insert",
+    "job_runs_project_scope_update",
+    "job_event_dispatches_immutable_update",
+    "job_event_dispatches_immutable_delete",
+    "job_event_attempts_run_matches_delivery",
+    "job_event_attempts_immutable_linkage_update",
+  ];
+  const missing: string[] = [];
+  let any = false;
+
+  const runProjectColumn = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('job_runs') WHERE name = 'project_id'",
+  ).get() as { count: number }).count > 0;
+  any ||= runProjectColumn;
+  if (!runProjectColumn) missing.push("job_runs.project_id column");
+
+  const jobDeletedAtColumn = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('jobs') WHERE name = 'deleted_at'",
+  ).get() as { count: number }).count > 0;
+  any ||= jobDeletedAtColumn;
+  if (!jobDeletedAtColumn) missing.push("jobs.deleted_at column");
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  if (!hasCompositeForeignKey(db, "job_event_deliveries", "trusted_job_events", ["project_id", "trusted_event_id"])) {
+    missing.push("job_event_deliveries → trusted_job_events foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_event_deliveries", "jobs", ["project_id", "job_id"])) {
+    missing.push("job_event_deliveries → jobs foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_event_attempts", "job_event_deliveries", ["project_id", "delivery_id"])) {
+    missing.push("job_event_attempts → job_event_deliveries foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_event_attempts", "job_runs", ["project_id", "run_id"])) {
+    missing.push("job_event_attempts → job_runs foreign key");
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** USAGE-101 is an all-or-nothing lifecycle ledger; partial guards are unsafe. */
+function inspectUsageAttentionMigration(db: Database.Database): UsageAttentionMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    usage_attention_items: [
+      "id", "project_id", "condition", "metric", "status", "evaluation_state", "severity", "message_code",
+      "observed", "threshold", "availability", "freshness", "range_from", "range_to", "threshold_revision",
+      "opened_at", "acknowledged_at", "resolved_at", "reopened_at", "reopen_count", "last_evaluated_at",
+      "revision", "created_at", "updated_at",
+    ],
+    usage_attention_events: [
+      "id", "project_id", "item_id", "transition", "prior_status", "current_status",
+      "prior_evaluation_state", "current_evaluation_state", "prior_severity", "current_severity",
+      "prior_message_code", "current_message_code", "prior_observed", "current_observed",
+      "prior_threshold", "current_threshold", "prior_availability", "current_availability",
+      "prior_freshness", "current_freshness", "prior_threshold_revision", "current_threshold_revision",
+      "prior_last_evaluated_at", "current_last_evaluated_at", "prior_acknowledged_at",
+      "current_acknowledged_at", "created_at",
+    ],
+  };
+  const requiredSql: Record<string, string[]> = {
+    usage_attention_items: [
+      "usage.advisory:v1:all-history:request_count",
+      "UNIQUE(project_id, condition)",
+      "status IN ('active', 'resolved')",
+      "evaluation_state IN ('disabled', 'unknown', 'below', 'equal', 'above')",
+      "severity IN ('info', 'warning', 'critical')",
+      "freshness IN ('disabled', 'unknown', 'fresh', 'stale')",
+      "CHECK(range_from IS NULL AND range_to IS NULL)",
+      "FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE RESTRICT",
+    ],
+    usage_attention_events: [
+      "transition IN ('opened', 'changed', 'resolved', 'reopened', 'ack')",
+      "FOREIGN KEY(project_id, item_id) REFERENCES usage_attention_items(project_id, id) ON DELETE RESTRICT",
+    ],
+  };
+  const indexes = [
+    "idx_usage_attention_items_project_status_updated",
+    "idx_usage_attention_events_project_item_created",
+  ];
+  const triggers = [
+    "usage_attention_items_identity_immutable_update",
+    "usage_attention_items_monotonic_update",
+    "usage_attention_events_immutable_update",
+    "usage_attention_events_immutable_delete",
+  ];
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || !requiredSql[table]!.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  if (!hasCompositeForeignKey(db, "usage_attention_events", "usage_attention_items", ["project_id", "item_id"])) {
+    missing.push("usage_attention_events → usage_attention_items composite foreign key");
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** VAULT-100 references are a metadata-only authorization boundary. */
+function inspectJobVaultReferencesMigration(db: Database.Database): JobVaultReferencesMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    job_vault_references: [
+      "project_id", "job_id", "item_id", "authorized_at", "authorized_item_version", "status",
+    ],
+    job_vault_reference_audit: [
+      "id", "project_id", "job_id", "item_id", "authorized_item_version", "action", "actor", "created_at",
+    ],
+  };
+  const requiredSql: Record<string, string[]> = {
+    job_vault_references: [
+      "PRIMARY KEY(project_id, job_id, item_id)",
+      "status IN ('authorized', 'revoked')",
+      "FOREIGN KEY(project_id, job_id) REFERENCES jobs(project_id, id) ON DELETE RESTRICT",
+      "FOREIGN KEY(project_id, item_id) REFERENCES vault_items(project_id, id) ON DELETE RESTRICT",
+    ],
+    job_vault_reference_audit: [
+      "length(id) = 36",
+      "action IN ('authorized', 'revoked')",
+      "actor = 'authenticated_api'",
+      "FOREIGN KEY(project_id, job_id) REFERENCES jobs(project_id, id) ON DELETE RESTRICT",
+      "FOREIGN KEY(project_id, item_id) REFERENCES vault_items(project_id, id) ON DELETE RESTRICT",
+    ],
+  };
+  const indexes = [
+    "idx_vault_items_project_id_id",
+    "idx_job_vault_references_project_job_status",
+    "idx_job_vault_references_project_item",
+    "idx_job_vault_reference_audit_project_job_created",
+  ];
+  const triggers = [
+    "job_vault_references_active_item_insert",
+    "job_vault_references_active_item_update",
+    "job_vault_references_max_authorized_insert",
+    "job_vault_references_max_authorized_update",
+    "job_vault_references_identity_immutable_update",
+    "job_vault_reference_audit_immutable_update",
+    "job_vault_reference_audit_immutable_delete",
+  ];
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || !requiredSql[table]!.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_references", "jobs", ["project_id", "job_id"])) {
+    missing.push("job_vault_references → jobs composite foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_references", "vault_items", ["project_id", "item_id"])) {
+    missing.push("job_vault_references → vault_items composite foreign key");
   }
   return { any, complete: missing.length === 0, missing };
 }
@@ -1353,6 +2030,24 @@ function runMigrations(db: Database.Database): void {
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
     }
+    for (const file of [
+      "068_usage_telemetry.sql",
+      "069_context_conversation_snapshot_imports.sql",
+      "070_drop_legacy_rag_embeddings.sql",
+      "071_context_rag_session_source_reference.sql",
+      "072_task_source_references.sql",
+      "073_task_coordination.sql",
+      "074_task_reservation_tokens.sql",
+        "075_coordination_registry.sql",
+        "076_trusted_job_events.sql",
+        "077_job_event_deliveries.sql",
+        "078_usage_advisory_thresholds.sql",
+        "079_usage_attention_items.sql",
+        "080_job_vault_references.sql",
+    ]) {
+      db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
+      logger.info("db", `Applied migration ${file}`);
+    }
     // Verify and rebuild skills_fts after all migrations (including 024 + 041)
     verifyAndRebuildSkillsFts(db);
   } else {
@@ -2197,6 +2892,153 @@ function runMigrations(db: Database.Database): void {
     logger.info("db", "Applied migration 069_context_conversation_snapshot_imports.sql");
   }
 
+  // Migration 070: retire the unused deterministic embedding store. Canonical
+  // source/chunk ingestion and FTS retrieval remain intact.
+  const ragEmbeddingsCheck = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'rag_embeddings'",
+  ).get() as { count: number };
+  if (ragEmbeddingsCheck.count > 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "070_drop_legacy_rag_embeddings.sql"), "utf-8"));
+    logger.info("db", "Applied migration 070_drop_legacy_rag_embeddings.sql");
+  }
+
+  // Migration 071: the source-reference column and every immutable source/chunk
+  // guard must arrive together; repair would weaken the append-only boundary.
+  const contextRagSessionMigration = inspectContextRagSessionMigration(db);
+  if (contextRagSessionMigration.any && !contextRagSessionMigration.complete) {
+    throw new Error(
+      "Migration 071 is in a PARTIAL state. Missing required components: "
+      + contextRagSessionMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!contextRagSessionMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "071_context_rag_session_source_reference.sql"), "utf-8"));
+    logger.info("db", "Applied migration 071_context_rag_session_source_reference.sql");
+  }
+
+  // Migration 072: task source references must retain their composite task
+  // scope, duplicate identity guard, and immutable display snapshot together.
+  const taskSourceReferencesMigration = inspectTaskSourceReferencesMigration(db);
+  if (taskSourceReferencesMigration.any && !taskSourceReferencesMigration.complete) {
+    throw new Error(
+      "Migration 072 is in a PARTIAL state. Missing required components: "
+      + taskSourceReferencesMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!taskSourceReferencesMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "072_task_source_references.sql"), "utf-8"));
+    logger.info("db", "Applied migration 072_task_source_references.sql");
+  }
+
+  // Migration 073: revision/CAS, immutable idempotency receipts, and managed
+  // reservation state must be complete together. A partial state cannot safely
+  // enforce task coordination, so fail closed instead of attempting repair.
+  const taskCoordinationMigration = inspectTaskCoordinationMigration(db);
+  if (taskCoordinationMigration.any && !taskCoordinationMigration.complete) {
+    throw new Error(
+      "Migration 073 is in a PARTIAL state. Missing required components: "
+      + taskCoordinationMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!taskCoordinationMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "073_task_coordination.sql"), "utf-8"));
+    logger.info("db", "Applied migration 073_task_coordination.sql");
+  }
+
+  const taskReservationTokenMigration = inspectTaskReservationTokenMigration(db);
+  if (!taskReservationTokenMigration.complete) {
+    const tokenColumnExists = !taskReservationTokenMigration.missing.includes("tasks reservation_token_hash column");
+    if (tokenColumnExists) {
+      throw new Error(
+        "Migration 074 is in a PARTIAL state. Missing required components: "
+        + taskReservationTokenMigration.missing.join(", ")
+        + ". Restore the migration's complete schema before retrying.",
+      );
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "074_task_reservation_tokens.sql"), "utf-8"));
+    logger.info("db", "Applied migration 074_task_reservation_tokens.sql");
+  }
+
+  // Migration 075: durable fences, hashed ownership, retained claims, and
+  // immutable receipts are inseparable. Any partial registry is unsafe to rerun.
+  const coordinationRegistryMigration = inspectCoordinationRegistryMigration(db);
+  if (coordinationRegistryMigration.any && !coordinationRegistryMigration.complete) {
+    throw new Error(
+      "Migration 075 is in a PARTIAL state. Missing required components: "
+      + coordinationRegistryMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!coordinationRegistryMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "075_coordination_registry.sql"), "utf-8"));
+    logger.info("db", "Applied migration 075_coordination_registry.sql");
+  }
+
+  // Migration 076 is additive: legacy arbitrary job trigger_event strings
+  // remain readable, while SQL triggers constrain only new/changed values.
+  const trustedJobEventsMigration = inspectTrustedJobEventsMigration(db);
+  if (trustedJobEventsMigration.any && !trustedJobEventsMigration.complete) {
+    throw new Error(
+      "Migration 076 is in a PARTIAL state. Missing required components: "
+      + trustedJobEventsMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!trustedJobEventsMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "076_trusted_job_events.sql"), "utf-8"));
+    logger.info("db", "Applied migration 076_trusted_job_events.sql");
+  }
+
+  const jobEventDeliveriesMigration = inspectJobEventDeliveriesMigration(db);
+  if (jobEventDeliveriesMigration.any && !jobEventDeliveriesMigration.complete) {
+    throw new Error(
+      "Migration 077 is in a PARTIAL state. Missing required components: "
+      + jobEventDeliveriesMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!jobEventDeliveriesMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "077_job_event_deliveries.sql"), "utf-8"));
+    logger.info("db", "Applied migration 077_job_event_deliveries.sql");
+  }
+
+  const usageAdvisoryThresholdsCheck = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'usage_advisory_thresholds'",
+  ).get() as { count: number };
+  if (usageAdvisoryThresholdsCheck.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "078_usage_advisory_thresholds.sql"), "utf-8"));
+    logger.info("db", "Applied migration 078_usage_advisory_thresholds.sql");
+  }
+
+  const usageAttentionMigration = inspectUsageAttentionMigration(db);
+  if (usageAttentionMigration.any && !usageAttentionMigration.complete) {
+    throw new Error(
+      "Migration 079 is in a PARTIAL state. Missing required components: "
+      + usageAttentionMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!usageAttentionMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "079_usage_attention_items.sql"), "utf-8"));
+    logger.info("db", "Applied migration 079_usage_attention_items.sql");
+  }
+
+  const jobVaultReferencesMigration = inspectJobVaultReferencesMigration(db);
+  if (jobVaultReferencesMigration.any && !jobVaultReferencesMigration.complete) {
+    throw new Error(
+      "Migration 080 is in a PARTIAL state. Missing required components: "
+      + jobVaultReferencesMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!jobVaultReferencesMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "080_job_vault_references.sql"), "utf-8"));
+    logger.info("db", "Applied migration 080_job_vault_references.sql");
+  }
+
   enforceReservedBrokerInvariant(db);
 }
 
@@ -2331,11 +3173,6 @@ function sleep(ms: number): void {
  * could inject FTS5 syntax (e.g., `foo OR bar`) that changes query semantics.
  * The double-quote wrapping forces the entire input to be treated as a single
  * literal term that must match verbatim.
- *
- * FIXME: Only `"` is escaped. `'` is safe in FTS5 (it has no special meaning),
- * but if the input contains non-ASCII whitespace or control characters, the
- * FTS5 tokenizer may behave unexpectedly. A future improvement could strip
- * non-printable characters as well.
  */
 export function sanitizeFts5Query(input: string): string {
   if (!input || input.trim().length === 0) return "";

@@ -41,6 +41,43 @@ describe("canonical child MCP API client", () => {
     );
   });
 
+  it("preserves the API-authoritative project on the tool-state response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      data: [],
+      total: 0,
+      project: "authoritative-project",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.mcpTools.list("requested-project", true)).resolves.toMatchObject({
+      project: "authoritative-project",
+      data: [],
+      total: 0,
+    });
+  });
+
+  it("requests the project-scoped bounded MCP report with only explicit filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      project: "authoritative-project",
+      project_id: "project-id",
+      total: 0,
+      data: { tools: [] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.mcpTools.report("dashboard project", {
+      enabled: true,
+      boundary: "mcp-stdio",
+      visibility: "unknown",
+      invocation: "not-run",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/mcp-tools/report?project=dashboard+project&enabled=true&boundary=mcp-stdio&visibility=unknown&invocation=not-run",
+      expect.anything(),
+    );
+  });
+
   it("targets canonical discovery metadata and removal endpoints", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ data: [], total: 0 }))

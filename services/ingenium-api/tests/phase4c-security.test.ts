@@ -131,7 +131,7 @@ describe("Phase 4C startup ordering", () => {
     const startup = source.slice(source.indexOf("setTimeout(() => {"));
     const continuity = startup.indexOf("dependencies.establishContinuity()");
     const migration = startup.indexOf("dependencies.migrateEmailAccounts()");
-    const engine = startup.indexOf("dependencies.startEngine(dependencies.getGlobalProjectId())");
+    const engine = startup.indexOf("dependencies.startEngine()");
 
     expect(continuity).toBeGreaterThanOrEqual(0);
     expect(migration).toBeGreaterThan(continuity);

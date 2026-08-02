@@ -7,7 +7,6 @@ import { resolve, extname, basename, sep } from "node:path";
 import { realpathSync } from "node:fs";
 import { requireProject } from "../helpers.js";
 
-// ── DTO Mapper Layer ─────────────────────────────────────────────────────────
 // Converts snake_case core types → camelCase wire format.
 // Never leak raw DB rows to clients. All routes use these mappers before responding.
 // Every mapper accepts `any` from the DB layer and returns a shaped object — this
@@ -136,8 +135,6 @@ function mapStats(s: any) {
   return s; // already camelCase-adjacent: StatCounts has no underscores
 }
 
-// ── Error Mapper ──────────────────────────────────────────────────────────────
-
 function mapDocsError(err: docs.DocsError): { status: number; code: string } {
   const mapping: Record<docs.DocsErrorCode, { status: number; code: string }> = {
     CONTENT_TOO_LONG: { status: 413, code: "PAYLOAD_TOO_LARGE" },
@@ -158,8 +155,6 @@ function mapDocsError(err: docs.DocsError): { status: number; code: string } {
   };
   return mapping[err.code] || { status: 500, code: "INTERNAL_ERROR" };
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseIntParam(val: string | undefined, label: string, res: any): number | null {
   if (!val) {
@@ -190,8 +185,6 @@ function nowISO(): string {
   return new Date().toISOString();
 }
 
-// ── Router ────────────────────────────────────────────────────────────────────
-
 /**
  * Documentation/wiki routes. This is the largest route file in the API (~90 routes).
  *
@@ -211,9 +204,6 @@ function nowISO(): string {
  */
 export const router = Router();
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// STATIC ROUTES (registered before dynamic :id routes)
-// ═══════════════════════════════════════════════════════════════════════════════
 
 // POST /repository/sync?project=... — repository-authoritative Markdown manifest
 // The API receives content only as an authenticated manifest and never resolves

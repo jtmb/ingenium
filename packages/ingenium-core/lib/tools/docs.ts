@@ -1014,11 +1014,6 @@ export function getAttachment(attId: number): DocAttachment | undefined {
   return db.prepare("SELECT * FROM docs_attachments WHERE id = ?").get(attId) as DocAttachment | undefined;
 }
 
-/** Look up attachments by owning page (alias for listAttachments). */
-export function getAttachmentsByPage(pageId: number): DocAttachment[] {
-  return listAttachments(pageId);
-}
-
 /**
  * Save or update an attachment record.
  * Uses ON CONFLICT DO UPDATE (not INSERT OR REPLACE) so FK-referenced child

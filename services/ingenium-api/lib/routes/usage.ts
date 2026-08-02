@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { usage } from "ingenium-core";
 import { requireProject } from "../helpers.js";
-import { getOpenCodeUsageSourceInstance, syncUsageFromOpenCode } from "../usage-sync.js";
+import { getOpenCodeUsageSourceInstance, getUsageSyncInterval, syncUsageFromOpenCode } from "../usage-sync.js";
 
 const MAX_RANGE_MS = 366 * 86_400_000;
 
@@ -15,17 +15,29 @@ function sendUsageError(res: Response, error: unknown): void {
   const statusByCode: Record<usage.UsageError["code"], number> = {
     INVALID_USAGE_INPUT: 422,
     INVALID_USAGE_QUERY: 422,
+    INVALID_USAGE_THRESHOLD_INPUT: 422,
     PROJECT_NOT_FOUND: 404,
     MAPPING_OWNED_BY_OTHER_PROJECT: 409,
+    USAGE_THRESHOLD_REVISION_CONFLICT: 409,
+    USAGE_ATTENTION_ITEM_NOT_FOUND: 404,
+    USAGE_ATTENTION_REVISION_CONFLICT: 409,
   };
   const messageByCode: Record<usage.UsageError["code"], string> = {
     INVALID_USAGE_INPUT: "Invalid usage metadata.",
     INVALID_USAGE_QUERY: "Usage filters, range, or pagination are invalid.",
+    INVALID_USAGE_THRESHOLD_INPUT: "Usage advisory thresholds are invalid.",
     PROJECT_NOT_FOUND: "Project not found.",
     MAPPING_OWNED_BY_OTHER_PROJECT: "This OpenCode project is already mapped to another Ingenium project.",
+    USAGE_THRESHOLD_REVISION_CONFLICT: "Usage advisory thresholds were changed by another request.",
+    USAGE_ATTENTION_ITEM_NOT_FOUND: "Usage attention item not found.",
+    USAGE_ATTENTION_REVISION_CONFLICT: "Usage attention item was changed by another request.",
   };
   res.status(statusByCode[error.code]).json({
-    error: { code: error.code, message: messageByCode[error.code] },
+    error: {
+      code: error.code,
+      message: messageByCode[error.code],
+      ...(error.currentRevision === undefined ? {} : { currentRevision: error.currentRevision }),
+    },
   });
 }
 
@@ -53,6 +65,43 @@ function usageQuery(req: Request): usage.UsageQuery {
     modelIds: queryStrings(req.query.model),
     agentIds: queryStrings(req.query.agent),
     statuses: queryStrings(req.query.status) as usage.UsageStatus[],
+  };
+}
+
+function usageAdvisoryQuery(req: Request): usage.UsageAdvisoryEvaluationQuery {
+  const { from, to } = req.query;
+  if (from === undefined && to === undefined) return {};
+  if (typeof from !== "string" || typeof to !== "string") throw new usage.UsageError("INVALID_USAGE_QUERY");
+  const rangeStart = Date.parse(from);
+  const rangeEnd = Date.parse(to);
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart || rangeEnd - rangeStart > MAX_RANGE_MS) {
+    throw new usage.UsageError("INVALID_USAGE_QUERY");
+  }
+  return { from, to };
+}
+
+function thresholdReplacement(req: Request): usage.ReplaceUsageAdvisoryThresholdsInput {
+  const body = req.body;
+  const keys = [
+    "expected_revision",
+    "request_count",
+    "total_tokens",
+    "reported_cost_amount",
+    "cache_read_tokens",
+    "cache_write_tokens",
+  ];
+  if (!body || typeof body !== "object" || Array.isArray(body)
+    || keys.some((key) => !Object.prototype.hasOwnProperty.call(body, key))
+    || Object.keys(body).some((key) => !keys.includes(key))) {
+    throw new usage.UsageError("INVALID_USAGE_THRESHOLD_INPUT");
+  }
+  return {
+    expectedRevision: body.expected_revision,
+    requestCount: body.request_count,
+    totalTokens: body.total_tokens,
+    reportedCostAmount: body.reported_cost_amount,
+    cacheReadTokens: body.cache_read_tokens,
+    cacheWriteTokens: body.cache_write_tokens,
   };
 }
 
@@ -102,6 +151,95 @@ function mappingDto(mapping: usage.UsageProjectMapping) {
   };
 }
 
+function thresholdsDto(thresholds: usage.UsageAdvisoryThresholds) {
+  return {
+    requestCount: thresholds.requestCount,
+    totalTokens: thresholds.totalTokens,
+    reportedCostAmount: thresholds.reportedCostAmount,
+    cacheReadTokens: thresholds.cacheReadTokens,
+    cacheWriteTokens: thresholds.cacheWriteTokens,
+    revision: thresholds.revision,
+    createdAt: thresholds.createdAt,
+    updatedAt: thresholds.updatedAt,
+  };
+}
+
+function advisoryEvaluationDto(evaluation: usage.UsageAdvisoryEvaluation) {
+  return {
+    range: evaluation.range,
+    generatedAt: evaluation.generatedAt,
+    thresholds: thresholdsDto(evaluation.thresholds),
+    metrics: evaluation.metrics,
+  };
+}
+
+function attentionDto(item: usage.UsageAttentionItem) {
+  return {
+    id: item.id,
+    condition: item.condition,
+    metric: item.metric,
+    status: item.status,
+    evaluationState: item.evaluationState,
+    severity: item.severity,
+    messageCode: item.messageCode,
+    observed: item.observed,
+    threshold: item.threshold,
+    availability: item.availability,
+    freshness: item.freshness,
+    range: item.range,
+    thresholdRevision: item.thresholdRevision,
+    openedAt: item.openedAt,
+    acknowledgedAt: item.acknowledgedAt,
+    resolvedAt: item.resolvedAt,
+    reopenedAt: item.reopenedAt,
+    reopenCount: item.reopenCount,
+    lastEvaluatedAt: item.lastEvaluatedAt,
+    revision: item.revision,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function attentionListOptions(req: Request): { includeResolved: boolean; limit: number; cursor?: string } {
+  const includeResolved = req.query.include_resolved;
+  if (includeResolved !== undefined && includeResolved !== "true" && includeResolved !== "false") {
+    throw new usage.UsageError("INVALID_USAGE_QUERY");
+  }
+  if (req.query.cursor !== undefined && typeof req.query.cursor !== "string") {
+    throw new usage.UsageError("INVALID_USAGE_QUERY");
+  }
+  return {
+    includeResolved: includeResolved === "true",
+    limit: integerQuery(req.query.limit, 50, usage.USAGE_ATTENTION_PAGE_MAX),
+    cursor: req.query.cursor as string | undefined,
+  };
+}
+
+function requireAttentionEvaluateRequest(req: Request): void {
+  // express.json() normalizes an absent body to `{}` in some configurations.
+  // Accept only that transport artifact when the request has no payload bytes.
+  const bodyAbsent = req.body === undefined || (
+    req.body !== null
+    && typeof req.body === "object"
+    && !Array.isArray(req.body)
+    && Object.keys(req.body).length === 0
+    && (req.get("content-length") === undefined || req.get("content-length") === "0")
+  );
+  if (!bodyAbsent || Object.keys(req.query).some((key) => key !== "project")) {
+    throw new usage.UsageError("INVALID_USAGE_QUERY");
+  }
+}
+
+function attentionAcknowledgement(req: Request): number {
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)
+    || Object.keys(body).length !== 1
+    || !Object.prototype.hasOwnProperty.call(body, "expected_revision")) {
+    throw new usage.UsageError("INVALID_USAGE_INPUT");
+  }
+  return body.expected_revision;
+}
+
 function csvCell(value: string | number | null): string {
   const text = value === null ? "" : String(value);
   const spreadsheetSafe = /^[=+\-@]/.test(text) ? `'${text}` : text;
@@ -113,6 +251,82 @@ usageRouter.get("/summary", (req, res) => {
   if (!projectId) return;
   try {
     res.json({ data: usage.getUsageSummary(projectId, usageQuery(req)) });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
+
+usageRouter.get("/thresholds", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    res.json({ data: thresholdsDto(usage.getUsageAdvisoryThresholds(projectId)) });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
+
+// PUT replaces all five fields; PATCH is intentionally not exposed to avoid merge ambiguity.
+usageRouter.put("/thresholds", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const thresholds = usage.replaceUsageAdvisoryThresholds(projectId, thresholdReplacement(req));
+    res.json({ data: thresholdsDto(thresholds) });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
+
+usageRouter.get("/thresholds/evaluate", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    res.json({ data: advisoryEvaluationDto(usage.evaluateUsageAdvisoryThresholds(projectId, usageAdvisoryQuery(req))) });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
+
+usageRouter.get("/attention", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const page = usage.listUsageAttentionItems(projectId, attentionListOptions(req));
+    res.json({
+      data: page.data.map(attentionDto),
+      pagination: { nextCursor: page.nextCursor, hasMore: page.hasMore, total: page.total },
+    });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
+
+usageRouter.post("/attention/evaluate", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    requireAttentionEvaluateRequest(req);
+    const reconciliation = usage.reconcileUsageAttention(projectId, {
+      syncIntervalMs: getUsageSyncInterval(),
+    });
+    res.json({
+      data: {
+        evaluatedAt: reconciliation.evaluatedAt,
+        items: reconciliation.items.map(attentionDto),
+      },
+    });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
+
+usageRouter.post("/attention/:id/acknowledge", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const item = usage.acknowledgeUsageAttentionItem(projectId, req.params.id, attentionAcknowledgement(req));
+    res.json({ data: attentionDto(item) });
   } catch (error) {
     sendUsageError(res, error);
   }

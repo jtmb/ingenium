@@ -17,6 +17,28 @@ export interface McpServerView {
   error?: string;
 }
 
+const MAX_PROJECT_NAME_LENGTH = 64;
+const PROJECT_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
+/** Match the API project-name boundary before putting a project in a link. */
+export function isSafeProjectName(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_PROJECT_NAME_LENGTH
+    && value === value.trim()
+    && value !== "."
+    && value !== ".."
+    && !/[\\/]/.test(value)
+    && !PROJECT_CONTROL_CHARACTER.test(value);
+}
+
+/** Build the project-scoped MCP management link only for a validated name. */
+export function getMcpServersHref(project: unknown): string | null {
+  return isSafeProjectName(project)
+    ? `/mcp-servers?project=${encodeURIComponent(project)}`
+    : null;
+}
+
 const STATUS_ERRORS: Partial<Record<McpStatus, string>> = {
   failed: "MCP server failed to connect.",
   needs_auth: "MCP server requires authentication. Configure its credentials and reconnect.",

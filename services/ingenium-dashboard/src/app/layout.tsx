@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { cookies } from "next/headers";
+import Script from "next/script";
 import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
@@ -34,8 +35,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const htmlClass = themeCookie === "dark" ? "dark" : "";
 
   return (
-    <html lang="en" className={`${htmlClass} h-full`} suppressHydrationWarning>
+    <html lang="en" className={`${htmlClass} h-full`} data-nav-compact="false" suppressHydrationWarning>
       <head>
+        <Script src="/navigation-prepaint.js" strategy="beforeInteractive" />
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var m=document.cookie.match(/(?:^|;\\s*)theme=([^;]*)/);var c=m?m[1]:null;if(c==='dark')document.documentElement.classList.add('dark');else if(!c){var t=localStorage.getItem('theme')||'system';if(t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}document.documentElement.style.colorScheme=document.documentElement.classList.contains('dark')?'dark':'light'}catch(e){}})()`,
@@ -47,7 +49,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <Suspense fallback={null}>
             <ProjectProvider>
               <NavigationProvider>
-                <nav className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
+                <nav data-nav-background="topbar" className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
                   <NavigationTrigger />
                   <a href="/" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</a>
                   <div className="ml-auto flex items-center gap-3">
@@ -56,9 +58,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   </div>
                 </nav>
 
-                <div className="flex flex-1 min-h-0">
+                <div className="flex flex-1 min-h-0 min-w-0">
                   <Navigation />
-                  <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
+                  <div data-nav-background="content" className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
                     <div className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)]">
                       <MainContainer>
                         <Suspense>{children}</Suspense>

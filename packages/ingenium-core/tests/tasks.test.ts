@@ -7,7 +7,6 @@ import {
   createTask,
   listTasks,
   moveTask,
-  completeTask,
   getNextTask,
   getTask,
   updateTask,
@@ -81,14 +80,14 @@ describe("tasks — CRUD", () => {
 
   it("moves a task between columns", () => {
     const task = createTask(projectId, "Movable task");
-    const moved = moveTask(task.id, "in_progress");
+    const moved = moveTask(projectId, task.id, "in_progress");
     expect(moved).not.toBeUndefined();
     expect(moved!.column_id).toBe("in_progress");
   });
 
-  it("completes a task and sets completed_at", () => {
+  it("moves a task to done and sets completed_at", () => {
     const task = createTask(projectId, "Completable task");
-    const done = completeTask(task.id);
+    const done = moveTask(projectId, task.id, "done", "test-actor");
     expect(done).not.toBeUndefined();
     expect(done!.column_id).toBe("done");
     expect(done!.completed_at).not.toBeNull();
@@ -123,14 +122,14 @@ describe("tasks — CRUD", () => {
 
     const deleted = deleteTask(projectId, task.id);
     expect(deleted).toBe(true);
-    expect(getTask(task.id)).toBeUndefined();
+    expect(getTask(projectId, task.id)).toBeUndefined();
     // Comments should be cascade-deleted
     expect(getComments(projectId, task.id).length).toBe(0);
   });
 
   it("getTask returns task by id", () => {
     const task = createTask(projectId, "Get me");
-    const found = getTask(task.id);
+    const found = getTask(projectId, task.id);
     expect(found).not.toBeUndefined();
     expect(found!.id).toBe(task.id);
   });
@@ -205,7 +204,7 @@ describe("tasks — comments and threading", () => {
 
   it("edits a comment", () => {
     const comment = addComment(projectId, taskId, "user1", "Original text");
-    const edited = editComment(projectId, comment.id, "Edited text");
+    const edited = editComment(projectId, taskId, comment.id, "Edited text");
     expect(edited).not.toBeUndefined();
     expect(edited!.body).toBe("Edited text");
     expect(edited!.edited_at).not.toBeNull();
@@ -213,13 +212,13 @@ describe("tasks — comments and threading", () => {
 
   it("reacts to a comment", () => {
     const comment = addComment(projectId, taskId, "user1", "React to me");
-    const reacted = reactComment(projectId, comment.id, "👍");
+    const reacted = reactComment(projectId, taskId, comment.id, "👍");
     expect(reacted).not.toBeUndefined();
     const reactions = JSON.parse(reacted!.reactions);
     expect(reactions["👍"]).toBe(1);
 
     // React again - should increment
-    const reacted2 = reactComment(projectId, comment.id, "👍");
+    const reacted2 = reactComment(projectId, taskId, comment.id, "👍");
     const reactions2 = JSON.parse(reacted2!.reactions);
     expect(reactions2["👍"]).toBe(2);
   });
@@ -275,9 +274,9 @@ describe("tasks — board config", () => {
     const t1 = createTask(projectId, "WIP test A");
     const t2 = createTask(projectId, "WIP test B");
     const t3 = createTask(projectId, "WIP test C");
-    moveTask(t1.id, "in_progress");
-    moveTask(t2.id, "in_progress");
-    moveTask(t3.id, "in_progress");
+    moveTask(projectId, t1.id, "in_progress");
+    moveTask(projectId, t2.id, "in_progress");
+    moveTask(projectId, t3.id, "in_progress");
 
     const result = validateWipLimit(projectId, "in_progress");
     // count may include tasks from prior tests; we verify breach detection works
@@ -371,7 +370,7 @@ describe("tasks — links", () => {
     const t2 = createTask(projectId, "Unlink 2");
     const link = linkTasks(projectId, t1.id, t2.id, "relates_to");
 
-    const deleted = unlinkTasks(projectId, link.id);
+    const deleted = unlinkTasks(projectId, t1.id, link.id);
     expect(deleted).toBe(true);
 
     const remaining = getTaskLinks(projectId, t1.id);
@@ -390,7 +389,7 @@ describe("tasks — activity", () => {
 
   it("logs activity on move", () => {
     const task = createTask(projectId, "Move activity task");
-    moveTask(task.id, "in_progress", "test-actor");
+    moveTask(projectId, task.id, "in_progress", "test-actor");
     const activity = getTaskActivity(projectId, task.id);
     const moves = activity.filter((a) => a.event_type === "moved");
     expect(moves.length).toBeGreaterThanOrEqual(1);

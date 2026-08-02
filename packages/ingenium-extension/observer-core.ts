@@ -16,6 +16,10 @@ const OBSERVER_API_REQUEST_TIMEOUT_MS = 10_000;
 
 /** Stable, credential-free diagnostics emitted by observer lifecycle hooks. */
 export type ObserverRequestFailure = "authentication" | "not_found" | "locked" | "timeout" | "request_failed";
+export type ObserverFailureReporter = (
+  operation: "pipeline_event_rejected" | "import_observations" | "trigger_synthesis",
+  reason: ObserverRequestFailure,
+) => void;
 
 class ObserverApiRequestError extends Error {
   constructor(readonly failure: ObserverRequestFailure) {
@@ -79,6 +83,7 @@ export async function logPipelineEvent(
   description?: string,
   data?: any,
   sessionId?: string,
+  onFailure?: ObserverFailureReporter,
 ): Promise<void> {
   try {
     const project = await ensureExtensionProject(worktree, API_BASE);
@@ -95,9 +100,13 @@ export async function logPipelineEvent(
       }),
     });
   } catch (error) {
-    // Non-fatal — observability should never block pipeline, but never drop it silently.
-    // Do not include API response text here: it can contain upstream diagnostics or credentials.
-    process.stderr.write(`${JSON.stringify({ event: "pipeline_event_rejected", reason: classifyObserverFailure(error), eventType, eventSource })}\n`);
+    // Non-fatal — observability should never block pipeline. The reporter receives
+    // only the stable category; it must not receive API text, URLs, or credentials.
+    try {
+      onFailure?.("pipeline_event_rejected", classifyObserverFailure(error));
+    } catch {
+      // A rejected logger must not turn observability into a lifecycle failure.
+    }
   }
 }
 
@@ -108,7 +117,10 @@ export async function logPipelineEvent(
  * On the next session start, this imports any that don't have the [IMPORTED] marker.
  * The file format: YYYY-MM-DD | type | content | importance | source
  */
-export async function importObservationsFromFile(worktree: string): Promise<{ imported: number; skipped: number }> {
+export async function importObservationsFromFile(
+  worktree: string,
+  onFailure?: ObserverFailureReporter,
+): Promise<{ imported: number; skipped: number }> {
   const project = await ensureExtensionProject(worktree, API_BASE);
   const pathModule = require("path");
   const fs = require("fs");
@@ -175,6 +187,8 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
       worktree,
       `${skipped} skipped`,
       { imported, skipped },
+      undefined,
+      onFailure,
     );
   }
 
@@ -185,7 +199,11 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
  * Trigger the synthesis pipeline via the API.
  * The API processes pending observations into personality traits and skill updates.
  */
-export async function triggerSynthesis(worktree: string, sessionId?: string): Promise<{
+export async function triggerSynthesis(
+  worktree: string,
+  sessionId?: string,
+  onFailure?: ObserverFailureReporter,
+): Promise<{
   triggered: boolean;
   message: string;
   failure?: ObserverRequestFailure;
@@ -199,6 +217,8 @@ export async function triggerSynthesis(worktree: string, sessionId?: string): Pr
       worktree,
       "",
       {},
+      undefined,
+      onFailure,
     );
 
     const params = new URLSearchParams({ project });

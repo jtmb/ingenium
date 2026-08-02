@@ -4,6 +4,7 @@ description: "Documentation and skill management agent. Updates directly affecte
 mode: subagent
 permission:
   read: allow
+  question: deny
   edit:
     "*": allow
     "next-steps-plan/**": deny
@@ -58,6 +59,7 @@ permission:
     "@mcp-tooling": allow
     "@skill-maintenance": allow
     "@documentation": allow
+    "@ponytail": allow
     "*": deny
 ---
 

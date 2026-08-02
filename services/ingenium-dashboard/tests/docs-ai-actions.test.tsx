@@ -20,7 +20,7 @@ describe("Docs AI actions", () => {
     render(<AIActions fullContent="Docs content" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Summarize" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -41,7 +41,7 @@ describe("Docs AI actions", () => {
     render(<AIActions selectedText="Selected words" fullContent="Full document" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Rewrite" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Rewrite" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -59,7 +59,7 @@ describe("Docs AI actions", () => {
     render(<AIActions fullContent="Docs content" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Summarize" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -77,7 +77,7 @@ describe("Docs AI actions", () => {
     render(<AIActions fullContent={content} pageTitle="Architecture" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Summarize" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -94,7 +94,7 @@ describe("Docs AI actions", () => {
     render(<AIActions fullContent="Docs content" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Summarize" }));
 
     expect(await screen.findByText(/Documentation AI is temporarily unavailable/i)).toBeTruthy();
     expect(screen.queryByText("Internal Server Error")).toBeNull();
@@ -107,7 +107,7 @@ describe("Docs AI actions", () => {
     render(<AIActions fullContent={" \n"} pageTitle="Release notes" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    const outline = screen.getByRole("button", { name: "Outline" });
+     const outline = screen.getByRole("menuitem", { name: "Outline" });
     expect((outline as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(outline);
 
@@ -122,7 +122,7 @@ describe("Docs AI actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     for (const label of ["Continue", "Summarize", "Fix grammar", "Professional", "Casual", "Technical"]) {
-      const button = screen.getByRole("button", { name: label });
+       const button = screen.getByRole("menuitem", { name: label });
       expect((button as HTMLButtonElement).disabled).toBe(true);
       expect(button.getAttribute("title")).toMatch(/non-whitespace content/i);
     }
@@ -132,7 +132,7 @@ describe("Docs AI actions", () => {
     render(<AIActions selectedText={" \n"} fullContent="Full document" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    const rewrite = screen.getByRole("button", { name: "Rewrite" });
+     const rewrite = screen.getByRole("menuitem", { name: "Rewrite" });
 
     expect((rewrite as HTMLButtonElement).disabled).toBe(true);
     expect(rewrite.getAttribute("title")).toMatch(/non-whitespace text/i);
@@ -153,7 +153,7 @@ describe("Docs AI actions", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Rewrite" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Rewrite" }));
     await screen.findByText("Rewritten words");
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
@@ -177,7 +177,7 @@ describe("Docs AI actions", () => {
     const view = render(<AIActions fullContent="Original content" pageTitle="Docs" onApply={onApply} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+     fireEvent.click(screen.getByRole("menuitem", { name: "Summarize" }));
 
     // The editor changes while the request is pending.
     view.rerender(<AIActions fullContent="Original content with user edits" pageTitle="Docs" onApply={onApply} />);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
@@ -189,6 +189,19 @@ describe("dashboard authenticated API proxy", () => {
     }
   });
 
+  it("fails closed for unsafe and symlinked protected token files", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-dashboard-api-token-"));
+    temporaryDirectories.push(directory);
+    const tokenFile = join(directory, "api-token");
+    const linkedTokenFile = join(directory, "linked-token");
+    writeFileSync(tokenFile, `${TEST_TOKEN}\n`, { mode: 0o644 });
+    symlinkSync(tokenFile, linkedTokenFile);
+
+    expect(getDashboardApiToken({ INGENIUM_API_TOKEN_FILE: tokenFile })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_API_TOKEN_FILE: `${tokenFile}\u0000secret` })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_API_TOKEN_FILE: linkedTokenFile })).toBeNull();
+  });
+
   it("fails closed when the dashboard server token is missing", async () => {
     delete process.env.INGENIUM_API_TOKEN;
     delete process.env.INGENIUM_API_TOKEN_FILE;
@@ -223,6 +236,16 @@ describe("dashboard authenticated API proxy", () => {
     expect(response.headers.get("x-middleware-request-authorization")).toBe(`Bearer ${TEST_TOKEN}`);
     expect(response.headers.get("x-middleware-request-authorization")).not.toContain("browser-controlled-token");
     expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
+  it("does not expose the protected token in the proxy response", async () => {
+    configureProtectedToken();
+
+    const response = proxy(new NextRequest("http://dashboard.test/api/v1/health"));
+
+    expect(response.status).not.toBe(DASHBOARD_API_PROXY_ERROR_STATUS);
+    expect(response.headers.get("authorization")).toBeNull();
+    await expect(response.text()).resolves.not.toContain(TEST_TOKEN);
   });
 
   it.each([

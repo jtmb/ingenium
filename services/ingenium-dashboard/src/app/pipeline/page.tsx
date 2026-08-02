@@ -6,8 +6,8 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, type PipelineEvent } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import { formatRelativeTime } from "@/lib/time";
 
-// ── Color maps ───────────────────────────────────────────────────────────
 const SOURCE_DOT: Record<string, string> = {
   agent: "bg-amber-500",
   plugin: "bg-[var(--color-accent)]",
@@ -66,22 +66,10 @@ const EVENT_TYPE_LABEL: Record<string, string> = {
   plugin_error: "Plugin error",
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────
 // 60-second window for collapsing consecutive observation_created events
 // into a single timeline entry with a "+N" badge. Prevents the timeline
 // from being dominated by rapid-fire observations during busy sessions.
 const WINDOW_MS = 60_000;
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const sec = Math.abs(Math.floor(diff / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hrs = Math.floor(min / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 function fmtAbs(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -95,7 +83,6 @@ function parseData(raw: any): any {
   return raw;
 }
 
-// ── Display item types ───────────────────────────────────────────────────
 interface CollapsedGroup {
   events: PipelineEvent[];
   windowKey: string;
@@ -107,10 +94,7 @@ type DisplayItem =
   | { kind: "single"; event: PipelineEvent }
   | { kind: "collapsed"; group: CollapsedGroup };
 
-// ── Filter mode ──────────────────────────────────────────────────────────
 type FilterMode = "all" | "agent" | "plugin" | "synthesis" | "trait";
-
-// ── Page ─────────────────────────────────────────────────────────────────
 
 /**
  * PipelinePage — Git-workflow-style timeline of pipeline events.
@@ -139,7 +123,6 @@ export default function PipelinePage() {
   const [nextRun, setNextRun] = useState("");
   const [intervalMs, setIntervalMs] = useState(900000);
 
-  // Fetch synthesis interval for countdown
   useEffect(() => {
     api.settings.get("synthesis_interval_ms", "global-default").then((r) => {
       const ms = parseInt(r.data?.value, 10);
@@ -147,7 +130,6 @@ export default function PipelinePage() {
     }).catch(() => {});
   }, []);
 
-  // Countdown to next synthesis run
   useEffect(() => {
     if (intervalMs <= 0) { setNextRun("disabled"); return; }
     const tick = () => {
@@ -165,7 +147,6 @@ export default function PipelinePage() {
     return () => clearInterval(id);
   }, [events, intervalMs]);
 
-  // ── Fetch ────────────────────────────────────────────────────────────
   const fetchEvents = useCallback(() => {
     const sourceParam =
       filterMode === "agent" || filterMode === "plugin" || filterMode === "synthesis"
@@ -190,7 +171,6 @@ export default function PipelinePage() {
     fetchEvents();
   }, [fetchEvents]);
 
-  // ── Polling ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (paused) {
       if (intervalRef.current) {
@@ -205,7 +185,6 @@ export default function PipelinePage() {
     };
   }, [paused, fetchEvents]);
 
-  // ── Derived state ────────────────────────────────────────────────────
   const stats = useMemo(
     () => ({
       total: events.length,
@@ -223,7 +202,6 @@ export default function PipelinePage() {
     [events],
   );
 
-  // Build parent → children map for nested rendering
   const childMap = useMemo(() => {
     const map = new Map<number, PipelineEvent[]>();
     for (const e of events) {
@@ -236,7 +214,6 @@ export default function PipelinePage() {
     return map;
   }, [events]);
 
-  // Collapse observation_created events in 60‑second windows
   const displayItems: DisplayItem[] = useMemo(() => {
     const items: DisplayItem[] = [];
     let i = 0;
@@ -275,7 +252,6 @@ export default function PipelinePage() {
     return items;
   }, [events]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -288,7 +264,6 @@ export default function PipelinePage() {
   const dotColor = (source: string): string => SOURCE_DOT[source] ?? "bg-gray-400";
   const lineColor = (source: string): string => SOURCE_LINE[source] ?? "bg-gray-300";
 
-  // ── Filter pills ─────────────────────────────────────────────────────
   const FILTERS: { label: string; mode: FilterMode }[] = [
     { label: "All", mode: "all" },
     { label: "Agent", mode: "agent" },
@@ -297,10 +272,8 @@ export default function PipelinePage() {
     { label: "Trait", mode: "trait" },
   ];
 
-  // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* ── Header + stats ──────────────────────────────────────────── */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Pipeline Activity</h1>
@@ -329,7 +302,6 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* ── Filter pills + pause ────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         {FILTERS.map((f) => (
           <button
@@ -357,7 +329,6 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      {/* ── Timeline ─────────────────────────────────────────────────── */}
       {events.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No pipeline events yet. Events are logged automatically during agent interactions.
@@ -366,7 +337,6 @@ export default function PipelinePage() {
 
       {events.length > 0 && (
         <div className="relative">
-          {/* Continuous vertical timeline line */}
           <div className="absolute left-[36px] top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
 
           <div className="space-y-0">
@@ -397,7 +367,6 @@ export default function PipelinePage() {
                         setSelected({ kind: "batch", events: group.events, label: `${group.events.length} observations` })
                       }
                     >
-                      {/* Expanded sub-list */}
                       {isExpanded && (
                         <div className="mt-2 border-l-2 border-dashed border-gray-300 dark:border-gray-600 ml-5 pl-4 space-y-2">
                           {group.events.map((obs) => (
@@ -410,7 +379,7 @@ export default function PipelinePage() {
                                 <span className={`${BADGE_BASE} border ${SOURCE_BADGE[obs.event_source] ?? badgeTones("muted")}`}>
                                   {SOURCE_LABEL[obs.event_source] ?? obs.event_source}
                                 </span>
-                                <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(obs.created_at)}</span>
+                                <span className="text-xs text-[var(--color-text-muted)]">{formatRelativeTime(obs.created_at)}</span>
                                 {obs.importance != null && (
                                   <span className="text-xs text-[var(--color-text-muted)]">imp: {obs.importance}</span>
                                 )}
@@ -425,7 +394,6 @@ export default function PipelinePage() {
                       )}
                     </EventRow>
 
-                    {/* Render children of each observation in the group when expanded */}
                     {isExpanded &&
                       group.events.map((obs) => {
                         const children = childMap.get(obs.id);
@@ -455,7 +423,6 @@ export default function PipelinePage() {
                 );
               }
 
-              // ── Single event ─────────────────────────────────────
               const evt = item.event;
               const children = childMap.get(evt.id);
 
@@ -475,7 +442,6 @@ export default function PipelinePage() {
                     onClickDetail={() => setSelected(evt)}
                   />
 
-                  {/* Children (e.g. trait_created under synthesis_completed) */}
                   {children && (
                     <div className="ml-10 pl-6 border-l-2 border-dashed border-gray-300 dark:border-gray-600 space-y-0">
                       {children.map((child) => (
@@ -503,7 +469,6 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {/* ── Detail Overlay ──────────────────────────────────────────── */}
       <Overlay
         isOpen={selected !== null}
         onClose={() => setSelected(null)}
@@ -602,7 +567,6 @@ export default function PipelinePage() {
             )}
             {selected.data != null && (
               <div>
-                {/* synthesis_completed — rich structured view */}
                 {selected.event_type === "synthesis_completed" && (
                   <div className="space-y-3">
                     {(() => {
@@ -652,7 +616,6 @@ export default function PipelinePage() {
                   </div>
                 )}
 
-                {/* trait_created with skill_name */}
                 {selected.event_type === "trait_created" && (() => {
                   const d = parseData(selected.data);
                   return d?.skill_name ? (
@@ -672,7 +635,6 @@ export default function PipelinePage() {
                   ) : null;
                 })()}
 
-                {/* trait_created with trait_type (not skill) */}
                 {selected.event_type === "trait_created" && (() => {
                   const d = parseData(selected.data);
                   return d?.trait_type && !d?.skill_name ? (
@@ -695,7 +657,6 @@ export default function PipelinePage() {
                   ) : null;
                 })()}
 
-                {/* trait_updated — same structured view as trait_created */}
                 {selected.event_type === "trait_updated" && (() => {
                   const d = parseData(selected.data);
                   return d?.trait_type ? (
@@ -718,7 +679,6 @@ export default function PipelinePage() {
                   ) : null;
                 })()}
 
-                {/* Fallback — raw JSON for unknown or empty data shapes */}
                 {selected.event_type !== "synthesis_completed" &&
                   selected.event_type !== "trait_created" &&
                   selected.event_type !== "trait_updated" &&
@@ -742,7 +702,6 @@ export default function PipelinePage() {
   );
 }
 
-// ── EventRow sub‑component ──────────────────────────────────────────────
 function EventRow({
   source,
   icon,
@@ -783,11 +742,8 @@ function EventRow({
   return (
     <div>
       <div className="flex">
-        {/* ── Timeline gutter ────────────────────────────────────── */}
         <div className="w-[72px] shrink-0 flex flex-col items-center relative">
-          {/* Upper connector line segment */}
           <div className={`w-0.5 flex-1 ${lineColor}`} />
-          {/* Dot / icon */}
           <div
              className={`shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-[var(--color-border)] ${
               isChild ? "w-2 h-2" : "w-3 h-3"
@@ -805,11 +761,9 @@ function EventRow({
               </span>
             )}
           </div>
-          {/* Lower connector line segment */}
           <div className={`w-0.5 flex-1 ${isLast ? "bg-transparent" : lineColor}`} />
         </div>
 
-        {/* ── Event card ─────────────────────────────────────────── */}
         <div
           className={`flex-1 pb-3 ${isChild ? "pb-2" : ""} min-w-0`}
         >
@@ -819,7 +773,6 @@ function EventRow({
             } ${onClickDetail ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
             onClick={onClickDetail}
           >
-            {/* Badge row */}
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
                 className={`${BADGE_BASE} border ${SOURCE_BADGE[source] ?? badgeTones("muted")}`}
@@ -835,7 +788,7 @@ function EventRow({
                 </button>
               )}
               <span className="text-xs text-[var(--color-text-muted)] flex-1 text-right" title={fmtAbs(timestamp)}>
-                {formatRelative(timestamp)}
+                {formatRelativeTime(timestamp)}
               </span>
               {sessionId && !countBadge && (
                 <span className="text-xs text-[var(--color-text-muted)] font-mono">
@@ -843,7 +796,6 @@ function EventRow({
                 </span>
               )}
             </div>
-            {/* Title + description */}
             <p className={`font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>
               {title}
             </p>
@@ -855,7 +807,6 @@ function EventRow({
           </div>
         </div>
       </div>
-      {/* Render children of this row (e.g. expanded observations) */}
       {children}
     </div>
   );

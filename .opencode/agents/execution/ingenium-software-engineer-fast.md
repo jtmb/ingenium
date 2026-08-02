@@ -4,6 +4,7 @@ description: "Budget-tier implementation agent. Use for standard, low-risk codin
 mode: subagent
 permission:
   read: allow
+  question: deny
   edit:
     "*": allow
     "next-steps-plan/**": deny
@@ -29,6 +30,7 @@ permission:
     "@local-models": allow
     "@skill-maintenance": allow
     "@database-conventions": allow
+    "@ponytail": allow
     "*": deny
 ---
 

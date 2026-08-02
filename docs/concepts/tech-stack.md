@@ -9,12 +9,12 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Language**: TypeScript (strict mode, strictNullChecks)
 - **Package Manager**: npm workspaces (monorepo)
 - **API**: Express.js on private container port 4096 behind the authenticated host-loopback boundary on 4097, JSON body limit 2MB (`express.json({ limit: "2mb" })`), helmet + CORS middleware
-- **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search
-- **MCP**: @modelcontextprotocol/sdk for stdio transport (268 built-in catalog tools across 28 baseline categories; 266 registered by the server and 2 by the extension, with project-scoped child tools added dynamically)
+- **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search; see [Database Migrations Reference](../develop/database.md) for the migration inventory and maintenance procedures
+- **MCP**: @modelcontextprotocol/sdk for stdio transport (275 built-in catalog tools across 29 baseline categories; 273 registered by stdio and 2 by the extension, with project-scoped child tools added dynamically)
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Docs RAG system for cross-session context
-- **Container**: Docker multi-stage build (glibc-based `node:22-slim`), supervisord (6 processes: API, API boundary, Dashboard, gateway, opencode-web, and ttyd-opencode)
+- **Container**: Docker multi-stage build (glibc-based `node:22-slim`), supervisord (7 processes: API, API boundary, Dashboard, gateway, opencode-web, ttyd-opencode, and private code-server)
 - **Packages**: `ingenium-core` (shared lib), `ingenium-extension` (client-side OpenCode — MCP server, observer plugin, skill-sync plugin, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
 - **Testing**: Vitest, Playwright
 - **Linting**: ESLint, TypeScript compiler
@@ -24,31 +24,6 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 
 - **Dashboard**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Email Client**: imapflow (IMAP async client), nodemailer (SMTP), mailparser (MIME parsing), google-auth-library (Google OAuth2), @azure/msal-node (Microsoft OAuth2)
-
-## Database Migrations
-
-Ingenium currently has 68 numbered migrations (`001`–`068`):
-
-- `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
-- `029`–`040`: documentation workspace schema and integrity repair
-- `041`–`045`: skill maintenance locks, immutable versions, lineage, governance proposals, and pipeline event types
-- `046`–`048`: encrypted vault, database backups, and initial Docs RAG schema
-- `049`: workspace project migration — `project_migration_manifests` table for the DB-only `/workspace` → `global-default` migration audit trail
-- `050`–`051`: Phase 3 context/RAG metadata and post-gate retirement of the verified-empty legacy RAG import schema
-- `052`: agent category normalization and CHECK constraint (`primary`, `execution`, `research`, `security`, `chat`)
-- `053`: active-global-project integrity and protected settings storage
-- `054`: persisted agent frontmatter metadata (`hidden`) for lifecycle-safe agent disk sync
-- `055`: reserved LLM broker direct-deletion protection
-- `056`: reserved LLM broker direct-rename protection
-- `057`: reserved LLM broker enabled-state backfill and immutable direct-SQL/REPLACE protection
-- `058`: connection-independent reserved broker canonical-template and REPLACE collision protection
-- `059`–`060`: repository-authoritative Docs and resource synchronization state
-- `061`: canonical global ownership backfill for legacy backup records and restore jobs
-- `062`–`064`: child MCP definition/category persistence and immutable conversation/checkpoint foundations
-- `065`: context RAG ingestion, checkpoint source freezing, and immutable citation snapshots
-- `066`: context checkpoint maintenance authorization and append-only audit governance
-- `067`: transactional forward-only repair for recoverable legacy/partial 063 context schemas before 065/066 probes
-- `068`: provider-neutral, metadata-only usage events (including nullable agent attribution and numeric reasoning-token metadata), explicit OpenCode project mappings/quarantine, and per-project sync cursors
 
 ## OpenCode runtime and package contract
 
@@ -69,8 +44,6 @@ Generated `dist/` directories and TypeScript `*.tsbuildinfo` files are build
 products and remain untracked. The core and server packages expose only their
 runtime distribution and README, and `prepack` regenerates `dist/` before a
 package is packed.
-
-The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.
 
 ## Ponytail OpenCode integration
 

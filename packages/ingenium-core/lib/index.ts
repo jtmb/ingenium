@@ -3,6 +3,8 @@ export * as skills from "./tools/skills.js";
 export * as skillGovernance from "./tools/skill-governance.js";
 export { getSkillsBase, getPluginsBase, getCommandsBase } from "./tools/paths.js";
 export * as tasks from "./tools/tasks.js";
+export * as taskClaims from "./tools/task-claims.js";
+export * as coordination from "./tools/coordination.js";
 export * as context from "./tools/context.js";
 export * as contextConversations from "./tools/context-conversations.js";
 export * as contextRag from "./tools/context-rag.js";
@@ -30,8 +32,13 @@ export type {
   OpenCodeMessagesFailure,
 } from "./tools/extraction.js";
 export * as jobs from "./tools/jobs.js";
+export * as jobEventDeliveries from "./tools/job-event-deliveries.js";
 export * as jobSuggestLlm from "./tools/job-suggest-llm.js";
+export * as trustedJobEvents from "./tools/trusted-job-events.js";
 export * as mcpToolStates from "./tools/mcp-tool-states.js";
+export * as mcpToolConformance from "./tools/mcp-tool-conformance.js";
+export * as mcpUsefulnessEvidence from "./tools/mcp-usefulness-evidence.js";
+export * as mcpUsefulnessReport from "./tools/mcp-usefulness-report.js";
 export * as emailCache from "./tools/email-cache.js";
 export * as emailSuggestionQueue from "./tools/email-suggestion-queue.js";
 export * as usage from "./tools/usage.js";

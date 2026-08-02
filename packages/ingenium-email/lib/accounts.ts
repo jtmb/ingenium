@@ -9,6 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import * as core from "ingenium-core";
+import { checkpointAfterWrite, execTransaction } from "ingenium-core";
 import type { EmailAccount, OAuthToken, EmailFolder } from "./types.js";
 import { connectAccount, listFolders } from "./imap.js";
 import {
@@ -69,29 +70,6 @@ export class EmailEncryptionContinuityError extends Error {
 
 type Db = ReturnType<typeof core.getDb>;
 
-function isTransactionalDb(db: Db): db is Db & { transaction: <T>(fn: () => T) => () => T } {
-  return typeof (db as unknown as { transaction?: unknown }).transaction === "function";
-}
-
-function optionalCoreExport<T>(name: string): T | undefined {
-  // Vitest's strict module mocks throw when an absent named export is read.
-  // Check ownership first so legacy focused tests can exercise the fallback.
-  if (!Object.prototype.hasOwnProperty.call(core, name)) return undefined;
-  return Reflect.get(core, name) as T | undefined;
-}
-
-/** Compatibility fallback keeps isolated legacy mocks functional; production uses execTransaction. */
-function runTransaction<T>(fn: () => T): T {
-  const execute = optionalCoreExport<<R>(operation: () => R) => R>("execTransaction");
-  if (execute) return execute(fn);
-  const db = core.getDb();
-  return isTransactionalDb(db) ? db.transaction(fn)() : fn();
-}
-
-function checkpointAfterCommit(): void {
-  optionalCoreExport<() => void>("checkpointAfterWrite")?.();
-}
-
 function settingsKey(accountId: string): string {
   return `${SETTINGS_PREFIX}${accountId}`;
 }
@@ -101,18 +79,11 @@ function oauthKey(accountId: string): string {
 }
 
 function readSetting(db: Db, projectId: string, key: string): string | undefined {
-  if (!isTransactionalDb(db)) {
-    return core.settings.getSetting(projectId, key) ?? undefined;
-  }
   return (db.prepare("SELECT value FROM settings WHERE project_id = ? AND key = ?")
     .get(projectId, key) as { value: string } | undefined)?.value;
 }
 
 function writeSetting(db: Db, projectId: string, key: string, value: string): void {
-  if (!isTransactionalDb(db)) {
-    core.settings.setSetting(projectId, key, value);
-    return;
-  }
   db.prepare(
     `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
      ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
@@ -375,7 +346,7 @@ function buildStoredAccount(account: Omit<EmailAccount, "id" | "connected">, id 
 }
 
 /** List all global email accounts, ignoring malformed rows rather than crashing mail startup. */
-export function listAccounts(_projectId: string): EmailAccount[] {
+export function listAccounts(): EmailAccount[] {
   const db = core.getDb();
   const projectId = resolveGlobalProjectId(db);
   const rows = db.prepare(
@@ -390,7 +361,7 @@ export function listAccounts(_projectId: string): EmailAccount[] {
   });
 }
 
-export function getAccount(_projectId: string, accountId: string): EmailAccount | undefined {
+export function getAccount(accountId: string): EmailAccount | undefined {
   const db = core.getDb();
   const projectId = resolveGlobalProjectId(db);
   const raw = readSetting(db, projectId, settingsKey(accountId));
@@ -403,29 +374,25 @@ export function getAccount(_projectId: string, accountId: string): EmailAccount 
 }
 
 /** Persist non-secret account metadata atomically. */
-export function addAccount(
-  _projectId: string,
-  account: Omit<EmailAccount, "id" | "connected">,
-): EmailAccount {
+export function addAccount(account: Omit<EmailAccount, "id" | "connected">): EmailAccount {
   const stored = buildStoredAccount(account);
-  const result = runTransaction(() => {
+  const result = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     writeSetting(db, projectId, settingsKey(stored.id), JSON.stringify(stored));
     return storedToAccount(stored);
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
   return result;
 }
 
 /** Create manual account metadata and encrypted credentials in one transaction. */
 export function createAccountWithCredentials(
-  _projectId: string,
   account: Omit<EmailAccount, "id" | "connected">,
   credentials: { imapPass?: string; smtpPass?: string },
 ): EmailAccount {
   const stored = buildStoredAccount(account);
-  const result = runTransaction(() => {
+  const result = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const guard = assertWritableEncryption(db, projectId, false);
@@ -437,19 +404,18 @@ export function createAccountWithCredentials(
     }
     return storedToAccount(stored);
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
   resetAuthCircuit(stored.email);
   return result;
 }
 
 /** Create an OAuth account and encrypted token record in one transaction. */
 export function createOAuthAccountWithTokens(
-  _projectId: string,
   account: Omit<EmailAccount, "id" | "connected">,
   tokens: OAuthToken,
 ): EmailAccount {
   const stored = buildStoredAccount(account);
-  const result = runTransaction(() => {
+  const result = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const guard = assertWritableEncryption(db, projectId, false);
@@ -460,13 +426,13 @@ export function createOAuthAccountWithTokens(
     }
     return storedToAccount(stored);
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
   resetAuthCircuit(stored.email);
   return result;
 }
 
-export function removeAccount(_projectId: string, accountId: string): void {
-  const removedEmail = runTransaction(() => {
+export function removeAccount(accountId: string): void {
+  const removedEmail = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const raw = readSetting(db, projectId, settingsKey(accountId));
@@ -478,18 +444,17 @@ export function removeAccount(_projectId: string, accountId: string): void {
     return stored.email;
   });
   if (removedEmail) {
-    checkpointAfterCommit();
+    checkpointAfterWrite();
     resetAuthCircuit(removedEmail);
   }
 }
 
 /** Replace encrypted manual credentials atomically without touching account metadata. */
 export function storeCredentials(
-  _projectId: string,
   accountId: string,
   credentials: { imapPass?: string; smtpPass?: string; tokens?: OAuthToken },
 ): void {
-  const accountEmail = runTransaction(() => {
+  const accountEmail = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const raw = readSetting(db, projectId, settingsKey(accountId));
@@ -509,13 +474,13 @@ export function storeCredentials(
     }
     return stored.email;
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
   resetAuthCircuit(accountEmail);
 }
 
 /** Store encrypted OAuth tokens atomically after checking the account still exists. */
-export function storeOAuthTokens(_projectId: string, accountId: string, tokens: OAuthToken): void {
-  const accountEmail = runTransaction(() => {
+export function storeOAuthTokens(accountId: string, tokens: OAuthToken): void {
+  const accountEmail = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const raw = readSetting(db, projectId, settingsKey(accountId));
@@ -532,13 +497,12 @@ export function storeOAuthTokens(_projectId: string, accountId: string, tokens: 
     }
     return stored.email;
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
   resetAuthCircuit(accountEmail);
 }
 
 /** Retrieve credentials only when the persisted key-continuity guard is ready. */
 export function getCredentials(
-  _projectId: string,
   accountId: string,
 ): { password?: string; tokens?: OAuthToken } | undefined {
   const db = core.getDb();
@@ -582,8 +546,8 @@ export async function testConnection(
   }
 }
 
-export function setAccountConnected(_projectId: string, accountId: string, connected: boolean): void {
-  const accountEmail = runTransaction(() => {
+export function setAccountConnected(accountId: string, connected: boolean): void {
+  const accountEmail = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const raw = readSetting(db, projectId, settingsKey(accountId));
@@ -595,13 +559,13 @@ export function setAccountConnected(_projectId: string, accountId: string, conne
     writeSetting(db, projectId, settingsKey(accountId), JSON.stringify(stored));
     return stored.email;
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
   if (connected) resetAuthCircuit(accountEmail);
 }
 
 /** Update non-secret metadata while preserving encrypted fields byte-for-byte. */
-export function storeAccount(_projectId: string, account: EmailAccount): void {
-  runTransaction(() => {
+export function storeAccount(account: EmailAccount): void {
+  execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const raw = readSetting(db, projectId, settingsKey(account.id));
@@ -614,7 +578,7 @@ export function storeAccount(_projectId: string, account: EmailAccount): void {
     stored.name = account.name;
     writeSetting(db, projectId, settingsKey(account.id), JSON.stringify(stored));
   });
-  checkpointAfterCommit();
+  checkpointAfterWrite();
 }
 
 /**
@@ -624,7 +588,7 @@ export function storeAccount(_projectId: string, account: EmailAccount): void {
  */
 export function establishEmailEncryptionKeyContinuity(): EmailEncryptionDiagnostics {
   let didPersist = false;
-  const diagnostics = runTransaction(() => {
+  const diagnostics = execTransaction(() => {
     const db = core.getDb();
     const projectId = resolveGlobalProjectId(db);
     const status = currentEncryptionStatus(db, projectId);
@@ -663,7 +627,7 @@ export function establishEmailEncryptionKeyContinuity(): EmailEncryptionDiagnost
     didPersist = true;
     return { status: "ready" as const, globalProjectId: projectId };
   });
-  if (didPersist) checkpointAfterCommit();
+  if (didPersist) checkpointAfterWrite();
   return diagnostics;
 }
 

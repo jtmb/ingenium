@@ -9,13 +9,11 @@ import path from "path";
 /** Handles /api/v1/skills — CRUD, governance (archive/restore/versions/lineage/proposals), locks, and sync. */
 export const skillsRouter = Router();
 
-// ── Constants ────────────────────────────────────────────────────────────────
 const LOCK_RESOURCE = "skills";
 const LOCK_TTL_MIN_MS = 1_000;
 const LOCK_TTL_MAX_MS = 300_000; // 5 minutes
 const LOCK_TTL_DEFAULT_MS = 30_000; // 30 seconds
 
-// ── DTO helpers ──────────────────────────────────────────────────────────────
 //
 // Skill rows (list / get / create / update / archive / restore / rollback / sync)
 //   → raw DB row spread: preserves all columns including new revision/archived_at
@@ -36,7 +34,7 @@ function safeJsonParse<T>(raw: string | undefined | null, defaultValue: T): T {
 /** Return the raw DB row unchanged so every column (including FTS rank) is preserved.
  *  Dashboard + resource-sync depend on snake_case keys and file_tree as a JSON string. */
 function skillToDto(s: Skill): Record<string, unknown> {
-  return { ...(s as Record<string, unknown>) };
+  return { ...(s as unknown as Record<string, unknown>) };
 }
 
 /** Convert a raw DB skill version row to a camelCase DTO. */
@@ -178,8 +176,6 @@ function governanceErrorPayload(err: skillGovernance.GovernanceError) {
   return { error: { code: err.code, message: err.message } };
 }
 
-// ── Read routes (no lock required) ──────────────────────────────────────────
-
 skillsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -199,7 +195,7 @@ skillsRouter.get("/search", (req, res) => {
   res.json({ data: results.map(skillToDto), total: results.length });
 });
 
-// ── Governance read routes (static — before :name routes) ────────────────────
+// Register static governance routes before `:name` so parameter matching cannot capture them.
 
 /** GET /archived — list archived (soft-deleted) skills for the project. */
 skillsRouter.get("/archived", (req, res) => {
@@ -495,7 +491,7 @@ skillsRouter.post("/lineage", (req, res) => {
   }
 });
 
-// ── Lock endpoints (MUST be before parameterized :name routes) ──────────────
+// Register lock endpoints before `:name` so parameter matching cannot capture them.
 
 /**
  * Sanitize a lock DB row to a camelCase DTO with no owner_token exposure.
@@ -688,7 +684,7 @@ skillsRouter.post("/locks/release", (req, res) => {
   res.json({ data: { released: true } });
 });
 
-// ── Parameterized :name routes (after lock routes to avoid path capture) ─────
+// `:name` routes follow static routes to avoid capturing their paths.
 
 /**
  * Router-level guard: validate every :name parameter.
@@ -715,8 +711,6 @@ skillsRouter.get("/:name", (req, res) => {
   }
   res.json({ data: skillToDto(s) });
 });
-
-// ── Lock gate middleware for mutation routes ────────────────────────────────
 
 /**
  * Check whether the request holds a valid lock token for the skills resource.
@@ -747,8 +741,6 @@ function checkSkillLock(req: any, res: any, projectId: string): boolean {
   });
   return false;
 }
-
-// ── Mutation routes (lock-gated) ────────────────────────────────────────────
 
 skillsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
@@ -833,8 +825,6 @@ skillsRouter.post("/:name/sync", (req, res) => {
   if (!s) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Skill '${req.params.name}' not found on disk` } }); return; }
   res.json({ data: skillToDto(s) });
 });
-
-// ── Governance mutation routes on :name (lock-gated) ─────────────────────────
 
 /** POST /:name/archive — archive (soft-delete) a skill via governance. */
 skillsRouter.post("/:name/archive", (req, res) => {

@@ -4,6 +4,7 @@ description: "Security review agent. Performs a bounded current-diff and relevan
 mode: subagent
 permission:
   read: allow
+  question: deny
   edit: deny
   write: deny
   bash: allow
@@ -51,6 +52,7 @@ permission:
     "@security-audit": allow
     "@local-models": allow
     "@database-conventions": allow
+    "@ponytail": allow
     "*": deny
 ---
 

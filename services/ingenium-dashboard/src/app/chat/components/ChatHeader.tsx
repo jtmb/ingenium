@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Select from "../../components/Select";
 
 interface Provider {
   id: string;
@@ -48,6 +49,10 @@ interface ChatHeaderProps {
   disabled?: boolean;
   /** The selected provider has no valid model yet; provider recovery stays available. */
   modelDisabled?: boolean;
+  /** Open the task capture flow for the active conversation. */
+  onCreateTask?: () => void;
+  /** Disable task capture until the active session has been validated and loaded. */
+  createTaskDisabled?: boolean;
 }
 
 /**
@@ -82,6 +87,8 @@ export default function ChatHeader({
   permissionCount = 0,
   disabled = false,
   modelDisabled = false,
+  onCreateTask,
+  createTaskDisabled = false,
 }: ChatHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(sessionTitle);
@@ -116,7 +123,7 @@ export default function ChatHeader({
 
   return (
     <>
-      <header className="flex items-center gap-2 px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0 min-h-[48px]">
+      <header className="flex min-w-0 items-center gap-2 px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0 min-h-[48px]">
       {/* Mobile hamburger — hidden from keyboard focus on desktop */}
       <button
         type="button"
@@ -175,76 +182,105 @@ export default function ChatHeader({
       {/* Selectors */}
       <div className="hidden sm:flex items-center gap-2">
         {/* Provider */}
-        <select
-          value={providerId}
-          onChange={(e) => onProviderChange(e.target.value)}
-          disabled={disabled}
-          className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-          aria-label="Select provider"
-          data-testid="chat-header-provider"
-        >
-          {providers.length === 0 && <option value="">No providers available</option>}
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}{p.source === "builtin" ? " (Free)" : ""}
-            </option>
-          ))}
-        </select>
+        <Select
+            wrapperClassName="shrink-0"
+            value={providerId}
+            onChange={(e) => onProviderChange(e.target.value)}
+            disabled={disabled}
+            className="shrink-0 border border-[var(--color-border)] rounded-md text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Select provider"
+            data-testid="chat-header-provider"
+          >
+            {providers.length === 0 && <option value="">No providers available</option>}
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}{p.source === "builtin" ? " (Free)" : ""}
+              </option>
+            ))}
+          </Select>
 
         {/* Model */}
-        <select
-          value={modelId}
-          onChange={(e) => onModelChange(e.target.value)}
-          disabled={disabled || modelDisabled}
-          className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[160px] disabled:opacity-40 disabled:cursor-not-allowed"
-          aria-label="Select model"
-          data-testid="chat-header-model"
-        >
-          {availableModels.length === 0 && <option value="">No models available</option>}
-          {availableModels.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <Select
+            wrapperClassName="shrink-0 max-w-[160px]"
+            value={modelId}
+            onChange={(e) => onModelChange(e.target.value)}
+            disabled={disabled || modelDisabled}
+            className="w-full shrink-0 max-w-[160px] border border-[var(--color-border)] rounded-md text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Select model"
+            data-testid="chat-header-model"
+          >
+            {availableModels.length === 0 && <option value="">No models available</option>}
+            {availableModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </Select>
 
         {/* Variant selector — shown when model has variants */}
         {hasVariants && (
-          <select
-            value={variant ?? variantKeys[0]}
-            onChange={(e) => onVariantChange?.(e.target.value)}
-            className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5"
-            aria-label="Select variant"
-            data-testid="chat-header-variant"
-          >
-            {variantKeys.map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
+          <Select
+              wrapperClassName="shrink-0"
+              value={variant ?? variantKeys[0]}
+              onChange={(e) => onVariantChange?.(e.target.value)}
+              disabled={disabled}
+              className="shrink-0 border border-[var(--color-border)] rounded-md text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Select variant"
+              data-testid="chat-header-variant"
+            >
+              {variantKeys.map((key) => (
+                <option key={key} value={key}>
+                  {key}
+                </option>
+              ))}
+            </Select>
         )}
 
         {/* Agent */}
-        <select
-          value={agentName}
-          onChange={(e) => onAgentChange(e.target.value)}
-          disabled={disabled}
-          className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[150px] disabled:opacity-40 disabled:cursor-not-allowed"
-          aria-label="Select agent"
-          data-testid="chat-header-agent"
-        >
-          {agents.length === 0 && <option value="">No agents available</option>}
-          {agents.map((a) => (
-            <option key={a.name} value={a.name}>
-              {a.label}
-            </option>
-          ))}
-        </select>
+        <Select
+            wrapperClassName="shrink-0 max-w-[150px]"
+            value={agentName}
+            onChange={(e) => onAgentChange(e.target.value)}
+            disabled={disabled}
+            className="w-full shrink-0 max-w-[150px] border border-[var(--color-border)] rounded-md text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Select agent"
+            data-testid="chat-header-agent"
+          >
+            {agents.length === 0 && <option value="">No agents available</option>}
+            {agents.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.label}
+              </option>
+            ))}
+          </Select>
       </div>
 
       {/* Action buttons */}
       <div className="flex items-center gap-1 shrink-0">
+        {/* Create task from the active conversation */}
+        <button
+          type="button"
+          onClick={onCreateTask}
+          disabled={!onCreateTask || createTaskDisabled || isBusy}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Create task from conversation"
+          title="Create task from conversation"
+          data-testid="chat-header-create-task"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" d="M8 3.33v9.34M3.33 8h9.34" />
+            <rect x="2.33" y="2.33" width="11.34" height="11.34" rx="2" />
+          </svg>
+        </button>
+
         {/* MCP servers */}
         {onMcpOpen && (
           <button
@@ -466,72 +502,77 @@ export default function ChatHeader({
     {/* Mobile provider/model/agent selectors — horizontal scroll below header */}
     <div data-testid="chat-header-mobile-selectors" className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] min-w-0">
       {/* Provider */}
-      <select
-        value={providerId}
-        onChange={(e) => onProviderChange(e.target.value)}
-        disabled={disabled}
-        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[120px] disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Select provider"
-        data-testid="chat-header-mobile-provider"
-      >
-        {providers.length === 0 && <option value="">No providers available</option>}
-        {providers.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label}{p.source === "builtin" ? " (Free)" : ""}
-          </option>
-        ))}
-      </select>
+      <Select
+        wrapperClassName="shrink-0 max-w-[120px]"
+          value={providerId}
+          onChange={(e) => onProviderChange(e.target.value)}
+          disabled={disabled}
+          className="w-full shrink-0 max-w-[120px] border border-[var(--color-border)] rounded-md text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Select provider"
+          data-testid="chat-header-mobile-provider"
+        >
+          {providers.length === 0 && <option value="">No providers available</option>}
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}{p.source === "builtin" ? " (Free)" : ""}
+            </option>
+          ))}
+        </Select>
 
       {/* Model */}
-      <select
-        value={modelId}
-        onChange={(e) => onModelChange(e.target.value)}
-        disabled={disabled || modelDisabled}
-        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[100px] disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Select model"
-        data-testid="chat-header-mobile-model"
-      >
-        {availableModels.length === 0 && <option value="">No models available</option>}
-        {availableModels.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.label}
-          </option>
-        ))}
-      </select>
+      <Select
+        wrapperClassName="shrink-0 max-w-[100px]"
+          value={modelId}
+          onChange={(e) => onModelChange(e.target.value)}
+          disabled={disabled || modelDisabled}
+          className="w-full shrink-0 max-w-[100px] border border-[var(--color-border)] rounded-md text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Select model"
+          data-testid="chat-header-mobile-model"
+        >
+          {availableModels.length === 0 && <option value="">No models available</option>}
+          {availableModels.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </Select>
 
       {/* Variant selector — shown when model has variants */}
       {hasVariants && (
-        <select
-          value={variant ?? variantKeys[0]}
-          onChange={(e) => onVariantChange?.(e.target.value)}
-          className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[90px] disabled:opacity-40 disabled:cursor-not-allowed"
-          aria-label="Select variant"
-          data-testid="chat-header-mobile-variant"
-        >
-          {variantKeys.map((key) => (
-            <option key={key} value={key}>
-              {key}
-            </option>
-          ))}
-        </select>
+        <Select
+          wrapperClassName="shrink-0 max-w-[90px]"
+            value={variant ?? variantKeys[0]}
+            onChange={(e) => onVariantChange?.(e.target.value)}
+            disabled={disabled}
+            className="w-full shrink-0 max-w-[90px] border border-[var(--color-border)] rounded-md text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Select variant"
+            data-testid="chat-header-mobile-variant"
+          >
+            {variantKeys.map((key) => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </Select>
       )}
 
       {/* Agent */}
-      <select
-        value={agentName}
-        onChange={(e) => onAgentChange(e.target.value)}
-        disabled={disabled}
-        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[110px] disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Select agent"
-        data-testid="chat-header-mobile-agent"
-      >
-        {agents.length === 0 && <option value="">No agents available</option>}
-        {agents.map((a) => (
-          <option key={a.name} value={a.name}>
-            {a.label}
-          </option>
-        ))}
-      </select>
+      <Select
+        wrapperClassName="shrink-0 max-w-[110px]"
+          value={agentName}
+          onChange={(e) => onAgentChange(e.target.value)}
+          disabled={disabled}
+          className="w-full shrink-0 max-w-[110px] border border-[var(--color-border)] rounded-md text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Select agent"
+          data-testid="chat-header-mobile-agent"
+        >
+          {agents.length === 0 && <option value="">No agents available</option>}
+          {agents.map((a) => (
+            <option key={a.name} value={a.name}>
+              {a.label}
+            </option>
+          ))}
+        </Select>
     </div>
   </>);
 }

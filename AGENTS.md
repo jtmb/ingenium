@@ -101,7 +101,7 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 243 tools. HTTP to API. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 269 tools. HTTP to API. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend (20 primary routes + Settings overlay). HTTP to API. Zero DB access.
 ```
 
@@ -115,17 +115,17 @@ services/
 
 | Agent | Type | Mode | Skills Allowed |
 |-------|------|------|----------------|
-| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` |
-| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | — |
-| **ingenium-explore** | Subagent | Research and exploration | `local-models` |
-| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models` |
-| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling` |
-| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
-| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
-| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
-| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow` |
+| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions`, `ponytail` |
+| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | `ponytail` |
+| **ingenium-explore** | Subagent | Research and exploration | `local-models`, `ponytail` |
+| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models`, `ponytail` |
+| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `ponytail` |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions`, `ponytail` |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions`, `ponytail` |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions`, `ponytail` |
+| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation`, `ponytail` |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions`, `ponytail` |
+| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow`, `ponytail` |
 | **ingenium-llm-broker** | Subagent | System-internal LLM broker (`enabled: true`, `hidden: true`), immutable, wildcard-denied with no tool allowances | — |
 
 > Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. Archived profiles at `.opencode/archive/agents/`.
@@ -174,7 +174,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus t
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/mcp-servers` | MCP servers + Tool Manager (245 catalog tools, 28 categories, search, category filter) |
+| `/mcp-servers` | MCP servers + Tool Manager (271 catalog tools, 28 categories, search, category filter) |
 | `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
@@ -213,7 +213,7 @@ All project names pass through `isValidProjectName()` (also defined as `isSafeNa
 
 > 🔴 **Never defaults to `global-default` in code.** The resolver explicitly throws if it cannot determine a valid project name, preventing cross-project data pollution. The Docker entrypoint sets `INGENIUM_PROJECT=global-default` explicitly for the container's session.
 
-**Key rule**: Use `global-default` for shared resources from within the container. For external sessions, `INGENIUM_PROJECT` in the MCP server config determines the target. See [docs/VARIABLES.md](docs/VARIABLES.md).
+**Key rule**: Use `global-default` for shared resources from within the container. For external sessions, `INGENIUM_PROJECT` in the MCP server config determines the target. See [docs/develop/variables.md](docs/develop/variables.md).
 
 #### Safe Purge (Child Row Protection)
 
@@ -244,7 +244,7 @@ The orchestrator follows a **behavioral** concurrency policy for parallel subage
 
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates.
 
-Only Plan mode may use interactive decision questions. Orchestration never invokes the `question` tool. Return `ESCALATE_USER` in the normal response only when a required external credential or access remains unavailable after the attempted configured path; a destructive or irreversible operation lacks authorization; a mutually exclusive product decision is required; the user requirement is genuinely ambiguous; or bounded diagnosis cannot establish a reproducible root cause.
+OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. Return `ESCALATE_USER` in the normal response only when a required external credential or access remains unavailable after the attempted configured path; a destructive or irreversible operation lacks authorization; a mutually exclusive product decision is required; the user requirement is genuinely ambiguous; or bounded diagnosis cannot establish a reproducible root cause.
 
 QA and security each report scope-classified findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a writer fixes an in-scope reviewer blocker, run only the minimum targeted regression for that root cause. Do not rerun QA or security unless the source change in that review boundary requires the reviewer’s originally declared check; never create a recursive reviewer handoff.
 
@@ -319,9 +319,9 @@ UI work receives one changed-route visual gate after the final UI change for the
 
 All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). See [mcp-tooling skill](../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
 
-### Restart Required for New Agent Profiles
+### Restart Required for Agent Profile and Configuration Changes
 
-Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the auto-discovered agent becomes invocable by `@` mention.
+Adding or changing an agent profile (`.opencode/agents/*.md`) or OpenCode configuration requires restarting OpenCode before the change is loaded. Current sessions retain their previously loaded profile/configuration until they restart.
 
 After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result means stop and reconfigure the visual-QA path; it is not a pass.
 
@@ -587,7 +587,7 @@ For quick reference, here are the non-negotiable rules from above:
 
 ## Environment Variables
 
-**Canonical reference**: [docs/VARIABLES.md](docs/VARIABLES.md) — lists all variables with defaults, consumers, and descriptions. CI enforces that every `process.env` reference has a doc entry.
+**Canonical reference**: [docs/develop/variables.md](docs/develop/variables.md) — lists all variables with defaults, consumers, and descriptions. CI enforces that every `process.env` reference has a doc entry.
 
 ---
 

@@ -70,6 +70,7 @@ export interface CreateContextRagUploadSessionInput {
   priority?: number;
   tags?: string[];
   metadata?: ContextMetadata;
+  sourceReference?: string;
   idempotencyKey?: string;
 }
 
@@ -89,6 +90,25 @@ export interface ContextRagUploadResult {
   deduplicated: boolean;
 }
 
+/** Public context-source metadata; document and chunk bodies are never included. */
+export interface ContextRagSource {
+  id: string;
+  uploadId: string;
+  title: string;
+  sourceType: string;
+  sourceHash: string | null;
+  mimeType: string | null;
+  byteSize: number | null;
+  chunkCount: number;
+  provenance: ContextRagProvenance;
+  sourceReference: string | null;
+  priority: number;
+  tags: string[];
+  metadata: ContextMetadata;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ContextRagUploadSession {
   id: string;
   project_id: string;
@@ -100,6 +120,7 @@ export interface ContextRagUploadSession {
   priority: number;
   tags: string;
   metadata: string;
+  source_reference: string | null;
   status: "pending" | "completed" | "deduplicated";
   rag_source_id: string | null;
   created_at: string;
@@ -114,6 +135,8 @@ export interface ContextRagUploadSessionResult {
 }
 
 export interface ContextRagCitation {
+  /** Exact persisted rag_chunks.id, stable while this immutable source is available. */
+  citationId: string;
   sourceId: string;
   title: string;
   sourceHash: string | null;
@@ -123,6 +146,7 @@ export interface ContextRagCitation {
   provenance: string;
   sourceReference: string | null;
   chunkIndex: number;
+  availability: "available";
   heading: string | null;
   snippet: string;
   score: number;
@@ -207,9 +231,60 @@ function normalizeTags(value: unknown): string[] {
   return tags;
 }
 
+const UNSAFE_CONTEXT_SOURCE_METADATA_KEY_WORDS = new Set([
+  "path",
+  "paths",
+  "file",
+  "files",
+  "credential",
+  "credentials",
+  "secret",
+  "secrets",
+  "token",
+  "tokens",
+  "password",
+  "passwords",
+  "auth",
+  "authorization",
+]);
+
+const LIKELY_CONTEXT_SOURCE_SECRET_PATTERNS = [
+  /-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----/,
+  /\b(?:sk[-_]|rk_)[A-Za-z0-9_-]{20,}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{30,}\b/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/,
+  /\b(?:api[_-]?(?:key|token)|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_+\/=.-]{24,}/i,
+];
+
+function hasLikelyContextSourceSecret(value: string): boolean {
+  return LIKELY_CONTEXT_SOURCE_SECRET_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function isUnsafeContextSourceMetadataKey(key: string): boolean {
+  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const normalized = words.join("");
+  return words.some((word) => UNSAFE_CONTEXT_SOURCE_METADATA_KEY_WORDS.has(word))
+    || normalized.includes("apikey");
+}
+
+function hasUnsafeContextSourceMetadata(value: unknown): boolean {
+  if (typeof value === "string") return hasLikelyContextSourceSecret(value);
+  if (Array.isArray(value)) return value.some(hasUnsafeContextSourceMetadata);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
+    isUnsafeContextSourceMetadataKey(key) || hasUnsafeContextSourceMetadata(child)
+  ));
+}
+
 function normalizeMetadata(value: unknown): ContextMetadata {
   const metadata = value === undefined ? {} : value;
   if (!isBoundedContextMetadata(metadata)
+    || hasUnsafeContextSourceMetadata(metadata)
     || Buffer.byteLength(JSON.stringify(metadata), "utf8") > CONTEXT_METADATA_MAX_BYTES) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
@@ -244,7 +319,24 @@ function normalizeSourceReference(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0 || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
+  const parts = value.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/).map((part) => part.toLowerCase()).filter(Boolean);
+  if (/[\\/]/.test(value)
+    || parts.some((part) => UNSAFE_CONTEXT_SOURCE_METADATA_KEY_WORDS.has(part) || part === "apikey" || part === "bearer")
+    || parts.some((part, index) => part === "api" && parts[index + 1] === "key")
+    || hasLikelyContextSourceSecret(value)) {
+    throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
+  }
   return value;
+}
+
+function rejectPathBearingUploadInput(value: Record<string, unknown>): void {
+  for (const key of Object.keys(value)) {
+    const normalized = key.replace(/[_-]/g, "").toLowerCase();
+    if (normalized === "file" || normalized.includes("path") || normalized === "sourcefile") {
+      throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
+    }
+  }
 }
 
 function normalizeDocument(input: unknown, maxBytes: number): NormalizedDocument {
@@ -252,6 +344,7 @@ function normalizeDocument(input: unknown, maxBytes: number): NormalizedDocument
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
   const value = input as Record<string, unknown>;
+  rejectPathBearingUploadInput(value);
   if (typeof value.content !== "string" || value.content.trim().length === 0) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
@@ -298,6 +391,7 @@ function parseSession(row: unknown): ContextRagUploadSession {
     || typeof value.expected_bytes !== "number" || typeof value.chunk_count !== "number"
     || typeof value.mime_type !== "string" || typeof value.priority !== "number"
     || typeof value.tags !== "string" || typeof value.metadata !== "string"
+    || (value.source_reference !== null && typeof value.source_reference !== "string")
     || typeof value.status !== "string" || typeof value.created_at !== "string") {
     throw new Error("Invalid persisted context RAG upload session");
   }
@@ -315,6 +409,7 @@ function parseSession(row: unknown): ContextRagUploadSession {
     priority: value.priority,
     tags: value.tags,
     metadata: value.metadata,
+    source_reference: value.source_reference === null ? null : String(value.source_reference),
     status: value.status as ContextRagUploadSession["status"],
     rag_source_id: value.rag_source_id === null ? null : String(value.rag_source_id),
     created_at: value.created_at,
@@ -330,6 +425,97 @@ function parseJsonObject(value: string): ContextMetadata {
     // The persisted row is validated below without surfacing its data.
   }
   throw new Error("Invalid persisted context RAG metadata");
+}
+
+function parseStoredContextMetadata(value: unknown): ContextMetadata {
+  if (typeof value !== "string") throw new Error("Invalid persisted context RAG source metadata");
+  try {
+    const parsed = JSON.parse(value) as { contextMetadata?: unknown };
+    if (isBoundedContextMetadata(parsed.contextMetadata)
+      && !hasUnsafeContextSourceMetadata(parsed.contextMetadata)) return parsed.contextMetadata;
+  } catch {
+    // Persisted source metadata is validated below without exposing it.
+  }
+  throw new Error("Invalid persisted context RAG source metadata");
+}
+
+function parseContextRagSource(row: unknown): ContextRagSource {
+  const value = row as Record<string, unknown>;
+  if (typeof value.source_id !== "string" || typeof value.upload_id !== "string"
+    || typeof value.title !== "string" || typeof value.source_type !== "string"
+    || typeof value.chunk_count !== "number" || typeof value.provenance !== "string"
+    || typeof value.priority !== "number" || typeof value.tags !== "string"
+    || typeof value.created_at !== "string" || typeof value.updated_at !== "string"
+    || (value.source_hash !== null && typeof value.source_hash !== "string")
+    || (value.mime_type !== null && typeof value.mime_type !== "string")
+    || (value.byte_size !== null && typeof value.byte_size !== "number")
+    || (value.source_reference !== null && typeof value.source_reference !== "string")) {
+    throw new Error("Invalid persisted context RAG source");
+  }
+  if (![
+    "direct_upload", "chunked_upload", "opencode_session", "learning_snapshot",
+  ].includes(value.provenance)) throw new Error("Invalid persisted context RAG source provenance");
+  const tags = normalizeTags(JSON.parse(value.tags));
+  const metadata = parseStoredContextMetadata(value.metadata);
+  return {
+    id: value.source_id,
+    uploadId: value.upload_id,
+    title: value.title,
+    sourceType: value.source_type,
+    sourceHash: value.source_hash,
+    mimeType: value.mime_type,
+    byteSize: value.byte_size,
+    chunkCount: value.chunk_count,
+    provenance: value.provenance as ContextRagProvenance,
+    sourceReference: value.source_reference,
+    priority: value.priority,
+    tags,
+    metadata,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
+  };
+}
+
+const contextRagSourceSelect = `
+  SELECT source.id AS source_id, upload.id AS upload_id, source.title,
+         source.source_type, source.source_hash, source.mime_type,
+         source.byte_size, source.chunk_count, source.metadata,
+         source.created_at, source.updated_at, upload.provenance,
+         upload.source_reference,
+         (SELECT chunk.priority FROM rag_chunks chunk
+          WHERE chunk.source_id = source.id ORDER BY chunk.chunk_index ASC LIMIT 1) AS priority,
+         (SELECT chunk.tags FROM rag_chunks chunk
+          WHERE chunk.source_id = source.id ORDER BY chunk.chunk_index ASC LIMIT 1) AS tags
+  FROM context_rag_uploads upload
+  JOIN rag_sources source
+    ON source.project_id = upload.project_id AND source.id = upload.rag_source_id`;
+
+/** Retrieve one project-owned context source without exposing document bodies. */
+export function getContextRagSource(projectId: string, sourceId: string): ContextRagSource | undefined {
+  const row = getDb(dbPath()).prepare(
+    `${contextRagSourceSelect} WHERE upload.project_id = ? AND source.id = ?`,
+  ).get(projectId, sourceId);
+  return row ? parseContextRagSource(row) : undefined;
+}
+
+/** List project-owned context source metadata without exposing document bodies. */
+export function listContextRagSources(
+  projectId: string,
+  limit = 20,
+  offset = 0,
+): { data: ContextRagSource[]; total: number; limit: number; offset: number } {
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 20;
+  const safeOffset = Number.isFinite(offset) ? Math.max(Math.trunc(offset), 0) : 0;
+  const db = getDb(dbPath());
+  const total = (db.prepare(
+    "SELECT count(*) AS total FROM context_rag_uploads WHERE project_id = ?",
+  ).get(projectId) as { total: number }).total;
+  const data = db.prepare(
+    `${contextRagSourceSelect}
+     WHERE upload.project_id = ?
+     ORDER BY upload.created_at DESC, upload.id DESC LIMIT ? OFFSET ?`,
+  ).all(projectId, safeLimit, safeOffset).map(parseContextRagSource);
+  return { data, total, limit: safeLimit, offset: safeOffset };
 }
 
 function getUploadByHash(db: Db, projectId: string, contentHash: string): ContextRagUpload | undefined {
@@ -438,6 +624,7 @@ function normalizeSessionInput(input: unknown): {
   priority: number;
   tags: string[];
   metadata: ContextMetadata;
+  sourceReference: string | null;
   idempotencyKey: string | null;
   requestHash: string;
 } {
@@ -445,6 +632,7 @@ function normalizeSessionInput(input: unknown): {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
   const value = input as Record<string, unknown>;
+  rejectPathBearingUploadInput(value);
   if (typeof value.expectedHash !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedHash)
     || !Number.isInteger(value.expectedBytes) || (value.expectedBytes as number) < 1
     || (value.expectedBytes as number) > CONTEXT_RAG_CHUNK_UPLOAD_MAX_BYTES
@@ -466,6 +654,7 @@ function normalizeSessionInput(input: unknown): {
     priority: normalizePriority(value.priority),
     tags: normalizeTags(value.tags),
     metadata: normalizeMetadata(value.metadata),
+    sourceReference: normalizeSourceReference(value.sourceReference),
     idempotencyKey,
   };
   return {
@@ -479,6 +668,7 @@ function normalizeSessionInput(input: unknown): {
       priority: normalized.priority,
       tags: normalized.tags,
       metadata: normalized.metadata,
+      sourceReference: normalized.sourceReference,
     }),
   };
 }
@@ -528,12 +718,12 @@ export function createContextRagUploadSession(
     db.prepare(
       `INSERT INTO context_rag_upload_sessions
        (id, project_id, title, expected_hash, expected_bytes, chunk_count, mime_type,
-        priority, tags, metadata, request_hash, idempotency_key, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+         priority, tags, metadata, source_reference, request_hash, idempotency_key, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
     ).run(
       id, projectId, value.title, value.expectedHash, value.expectedBytes, value.chunkCount,
       value.mimeType, value.priority, JSON.stringify(value.tags), JSON.stringify(value.metadata),
-      value.requestHash, value.idempotencyKey, createdAt,
+      value.sourceReference, value.requestHash, value.idempotencyKey, createdAt,
     );
     return {
       session: parseSession(db.prepare(
@@ -555,7 +745,11 @@ export function appendContextRagUploadChunk(
   uploadId: string,
   input: { ordinal: number; content: string },
 ): { session: ContextRagUploadSession; idempotent: boolean } {
-  if (!input || !Number.isInteger(input.ordinal) || input.ordinal < 0 || input.ordinal >= CONTEXT_RAG_CHUNK_MAX_COUNT
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
+  }
+  rejectPathBearingUploadInput(input as Record<string, unknown>);
+  if (!Number.isInteger(input.ordinal) || input.ordinal < 0 || input.ordinal >= CONTEXT_RAG_CHUNK_MAX_COUNT
     || typeof input.content !== "string" || input.content.length === 0) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
@@ -597,7 +791,7 @@ export function appendContextRagUploadChunk(
   return { session: result.session, idempotent: result.idempotent };
 }
 
-/** Finalize a chunked upload: source, chunks, embeddings, and state commit together. */
+/** Finalize a chunked upload: source, chunks, and state commit together. */
 export function completeContextRagUpload(
   projectId: string,
   uploadId: string,
@@ -654,7 +848,7 @@ export function completeContextRagUpload(
       priority: session.priority,
       tags: normalizeTags(JSON.parse(session.tags)),
       metadata: parseJsonObject(session.metadata),
-      sourceReference: null,
+      sourceReference: session.source_reference,
     };
     const created = insertUploadAndSourceInTransaction(
       db, projectId, document, "chunked_upload", uploadId, completedAt,
@@ -679,8 +873,8 @@ export function listContextRagUploads(
   limit = 20,
   offset = 0,
 ): { data: ContextRagUploadResult[]; total: number; limit: number; offset: number } {
-  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
-  const safeOffset = Math.max(Math.trunc(offset), 0);
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 20;
+  const safeOffset = Number.isFinite(offset) ? Math.max(Math.trunc(offset), 0) : 0;
   const db = getDb(dbPath());
   const total = (db.prepare(
     "SELECT count(*) AS total FROM context_rag_uploads WHERE project_id = ?",
@@ -749,9 +943,10 @@ function citationsFromResults(
       provenance: string;
       source_reference: string | null;
       created_at: string;
-    } | undefined;
+     } | undefined;
     const metadata = snapshot ?? sourceMetadata(db, projectId, result.source_id);
     return {
+      citationId: result.id,
       sourceId: result.source_id,
       title: snapshot?.title ?? result.source_name,
       sourceHash: metadata.source_hash,
@@ -761,6 +956,7 @@ function citationsFromResults(
       provenance: metadata.provenance,
       sourceReference: metadata.source_reference,
       chunkIndex: result.chunk_index,
+      availability: "available",
       heading: result.heading_path,
       snippet: result.snippet,
       score: -result.rank,
@@ -785,7 +981,7 @@ function boundedRelevanceSearch(
   const terms = [...new Set((query.match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])
     .map((term) => term.toLowerCase())
     .filter((term) => !new Set(["what", "when", "where", "which", "does", "that", "this", "with", "from", "have", "need", "about", "please", "would", "could"]).has(term)))]
-    .sort((left, right) => right.length - left.length)
+    .sort((left, right) => right.length - left.length || (left < right ? -1 : left > right ? 1 : 0))
     .slice(0, 8);
   const results: RagSearchResult[] = [];
   const seen = new Set<string>();
@@ -807,21 +1003,30 @@ function normalizeSearchLimit(limit: number): number {
   return limit;
 }
 
-/** Search only the current project's context-upload corpus; global RAG is never consulted. */
+/** Search only the current project's context-upload chunks; global RAG is never consulted. */
+export function searchContextRagResults(
+  projectId: string,
+  query: string,
+  limit = 20,
+): RagSearchResult[] {
+  if (typeof query !== "string" || query.trim().length === 0 || query.length > 512) {
+    throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
+  }
+  const safeLimit = normalizeSearchLimit(limit);
+  return boundedRelevanceSearch(
+    query,
+    safeLimit,
+    (candidate, candidateLimit) => searchContextUploadChunks(projectId, candidate, candidateLimit),
+  );
+}
+
+/** Search current context sources with the legacy citation response shape. */
 export function searchContextRag(
   projectId: string,
   query: string,
   limit = 20,
 ): { results: RagSearchResult[]; citations: ContextRagCitation[] } {
-  if (typeof query !== "string" || query.trim().length === 0 || query.length > 512) {
-    throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
-  }
-  const safeLimit = normalizeSearchLimit(limit);
-  const results = boundedRelevanceSearch(
-    query,
-    safeLimit,
-    (candidate, candidateLimit) => searchContextUploadChunks(projectId, candidate, candidateLimit),
-  );
+  const results = searchContextRagResults(projectId, query, limit);
   return { results, citations: citationsFromResults(projectId, results) };
 }
 

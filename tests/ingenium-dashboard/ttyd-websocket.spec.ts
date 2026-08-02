@@ -1,4 +1,5 @@
-import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test } from "./external-suite-navigation-governor";
+import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 const dashboardOrigin = new URL(process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000").origin;
 const cliOrigin = new URL(process.env.INGENIUM_E2E_OPENCODE_CLI_URL ?? "http://cli.localhost:3000").origin;

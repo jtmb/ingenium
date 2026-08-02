@@ -103,7 +103,7 @@ describe("Phase 4C email encryption continuity", () => {
       status: "ready",
       globalProjectId: fixture!.globalId,
     });
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toMatchObject({
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toMatchObject({
       password: "phase4c-imap-password",
       tokens: {
         accessToken: "phase4c-access-token",
@@ -117,8 +117,8 @@ describe("Phase 4C email encryption continuity", () => {
     const corrupt = "not-a-valid-encrypted-credential";
     writeAccount(corrupt);
 
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toBeUndefined();
-    expect(JSON.stringify(fixture!.accounts.getCredentials("ignored-project", "phase4c-account") ?? {}))
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toBeUndefined();
+    expect(JSON.stringify(fixture!.accounts.getCredentials("phase4c-account") ?? {}))
       .not.toContain(corrupt);
   });
 
@@ -126,8 +126,8 @@ describe("Phase 4C email encryption continuity", () => {
     markKeyReady();
     writeAccount("legacy-plaintext-password");
 
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toBeUndefined();
-    expect(JSON.stringify(fixture!.accounts.getCredentials("ignored-project", "phase4c-account") ?? {}))
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toBeUndefined();
+    expect(JSON.stringify(fixture!.accounts.getCredentials("phase4c-account") ?? {}))
       .not.toContain("legacy-plaintext-password");
   });
 
@@ -138,8 +138,8 @@ describe("Phase 4C email encryption continuity", () => {
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = WRONG_KEY;
 
     expect(fixture!.accounts.getEmailEncryptionDiagnostics()).toMatchObject({ status: "mismatch" });
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toBeUndefined();
-    expect(JSON.stringify(fixture!.accounts.getCredentials("ignored-project", "phase4c-account") ?? {}))
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toBeUndefined();
+    expect(JSON.stringify(fixture!.accounts.getCredentials("phase4c-account") ?? {}))
       .not.toContain(ciphertext);
   });
 

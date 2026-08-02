@@ -3,6 +3,7 @@
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
 import { opencode, type OpenCodePart, type FilePart, type ToolPart, type OpenCodePromptParams } from "./opencode";
 import { getApiBase } from "./api";
+import type { ChatGrounding } from "./chat-grounding";
 import type {
   QuestionItem as ChatQuestionItem,
   QuestionOption,
@@ -15,11 +16,9 @@ export interface SendOptions {
   variant?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  /** Local-only display/retry metadata; never forwarded to OpenCode. */
+  grounding?: ChatGrounding;
 }
-
-/* ------------------------------------------------------------------ */
-/*  State & types                                                     */
-/* ------------------------------------------------------------------ */
 
 export interface ChatMessage {
   id: string;
@@ -28,6 +27,8 @@ export interface ChatMessage {
   parts: OpenCodePart[];
   reasoning?: string;  // separate reasoning content from thinking parts
   model?: { providerID: string; modelID: string };  // from message.updated info
+  /** Per-send project context metadata, retained only in the active UI state. */
+  grounding?: ChatGrounding;
   timestamp: number;
   isStreaming?: boolean;
 }
@@ -114,10 +115,6 @@ interface ChatState {
   activeAssistantMessageId?: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Permission types                                                  */
-/* ------------------------------------------------------------------ */
-
 /** A pending permission request from the OpenCode API. */
 export interface PermissionRequest {
   id: string;
@@ -131,10 +128,6 @@ interface PermissionState {
   requests: PermissionRequest[];
   replied: Set<string>;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Reducer actions                                                   */
-/* ------------------------------------------------------------------ */
 
 type ChatAction =
   | { type: "LOAD_MESSAGES"; messages: ChatMessage[] }
@@ -162,10 +155,6 @@ type ChatAction =
   | { type: "REMOVE_LAST_USER" }
   | { type: "FINALIZE_STREAMING" }
   | { type: "CLEAR" };
-
-/* ------------------------------------------------------------------ */
-/*  Reducer                                                           */
-/* ------------------------------------------------------------------ */
 
 /** Build a stable key for accumulator lookups. */
 function partKey(messageID: string, partID: string): string {
@@ -259,7 +248,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
         if (matchingUserIndex >= 0) {
           // Replace the optimistic timestamp ID with authoritative metadata.
-          reconciled[matchingUserIndex] = message;
+          reconciled[matchingUserIndex] = {
+            ...message,
+            ...(reconciled[matchingUserIndex]!.grounding
+              ? { grounding: reconciled[matchingUserIndex]!.grounding }
+              : {}),
+          };
         } else {
           reconciled.push(message);
         }
@@ -514,19 +508,11 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  SSE event types (verified v1.18.9 contract)                       */
-/* ------------------------------------------------------------------ */
-
 interface SSEEnvelope {
   id?: string;
   type: string;
   properties: Record<string, unknown>;
 }
-
-/* ------------------------------------------------------------------ */
-/*  ChatMessage normalization helpers                                 */
-/* ------------------------------------------------------------------ */
 
 function normalizePart(raw: OpenCodeApiMessage["parts"][number]): OpenCodePart {
   const base: Partial<OpenCodePart> = {
@@ -580,10 +566,6 @@ function normalizeMessage(raw: OpenCodeApiMessage): ChatMessage {
 function normalizeMessages(rawMessages: OpenCodeApiMessage[]): ChatMessage[] {
   return rawMessages.map(normalizeMessage);
 }
-
-/* ------------------------------------------------------------------ */
-/*  SSE connection state machine (fetch + ReadableStream)             */
-/* ------------------------------------------------------------------ */
 
 const API_URL = getApiBase();
 
@@ -682,10 +664,6 @@ function yieldSSEEventRender(): Promise<void> {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
-
 /**
  * React hook managing chat state with SSE streaming via fetch + ReadableStream.
  *
@@ -709,7 +687,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     partTypes: {},
   });
 
-  /* ---- Refs for SSE lifecycle ---- */
   const sseAbortRef = useRef<AbortController | null>(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -726,17 +703,14 @@ export function useOpenCodeChat(sessionId: string | null) {
   // Store last send options for retry
   const lastSendOptionsRef = useRef<SendOptions | undefined>(undefined);
 
-  /* ---- Question polling state ---- */
   const questionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /* ---- Permission state ---- */
   const [permissionState, setPermissionState] = useState<PermissionState>({
     requests: [],
     replied: new Set(),
   });
   const permissionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /* ---- Load messages on sessionId change ---- */
   useEffect(() => {
     // Track the active session for SSE filter
     activeSessionRef.current = sessionId;
@@ -776,7 +750,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  /* ---- SSE connect with fetch + ReadableStream ---- */
   const connectSSE = useCallback((sid: string) => {
     // Abort any existing connection
     if (sseAbortRef.current) {
@@ -919,7 +892,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     };
   }, []);
 
-  /* ---- Dispatch SSE events to reducer ---- */
   function dispatchSSEEvent(evt: SSEEnvelope, sid: string): void {
     if (activeSessionRef.current !== sid) return;
 
@@ -1142,7 +1114,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     }
   }
 
-  /* ---- Connect SSE when streaming starts ---- */
   useEffect(() => {
     if (!state.isStreaming || !sessionId) {
       return undefined;
@@ -1161,7 +1132,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     };
   }, [state.isStreaming, sessionId, connectSSE]);
 
-  /* ---- Cleanup on unmount ---- */
   useEffect(() => {
     return () => {
       if (sseAbortRef.current) {
@@ -1183,7 +1153,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     };
   }, []);
 
-  /* ---- Permission polling ---- */
   const refreshPermissions = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -1302,13 +1271,12 @@ export function useOpenCodeChat(sessionId: string | null) {
     (p) => !permissionState.replied.has(p.id),
   );
 
-  /* ---- Actions ---- */
 
   /** Send a message with optional model/agent/variant/system/tools overrides. */
   const send = useCallback(
     async (
       parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }>,
-      options?: { model?: { providerID: string; modelID: string }; agent?: string; variant?: string; system?: string; tools?: Record<string, boolean> },
+      options?: SendOptions,
     ): Promise<boolean> => {
       if (!sessionId) {
         dispatch({
@@ -1355,6 +1323,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         content,
         parts: userParts,
         timestamp: Date.now(),
+        ...(options?.grounding ? { grounding: options.grounding } : {}),
       };
       dispatch({ type: "ADD_USER_MESSAGE", message: userMsg });
       // Clear any pending questions — the user is sending a new prompt
@@ -1540,10 +1509,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     resume,
   };
 }
-
-/* ------------------------------------------------------------------ */
-/*  Test exports                                                      */
-/* ------------------------------------------------------------------ */
 
 /**
  * Runtime test export — the internal chatReducer is only exposed when

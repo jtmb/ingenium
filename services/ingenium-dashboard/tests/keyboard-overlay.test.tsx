@@ -18,7 +18,6 @@ import Overlay from "../src/app/components/Overlay";
  * Focus changes happen programmatically via .focus() calls in the component.
  */
 
-// ── Helper: wait for the next microtask / setTimeout(0) flush ───────────────
 
 /**
  * Flushes any pending setTimeout(fn, 0) and pending effects.
@@ -31,16 +30,12 @@ function flushTimers(): Promise<void> {
   });
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
-
 describe("Overlay — A11Y-001 keyboard focus contract", () => {
   afterEach(() => {
     cleanup();
     document.body.innerHTML = "";
     document.body.style.overflow = "";
   });
-
-  // ── Escape key ──────────────────────────────────────────────────────────────
 
   it("calls onClose when Escape is pressed", () => {
     const onClose = vi.fn();
@@ -79,8 +74,6 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  // ── Focus on open ───────────────────────────────────────────────────────────
-
   it("moves focus to the close button when the overlay opens", async () => {
     const onClose = vi.fn();
     render(
@@ -114,8 +107,6 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     const closeBtn = screen.getByLabelText("Close");
     expect(document.activeElement).toBe(closeBtn);
   });
-
-  // ── Focus restore on close ──────────────────────────────────────────────────
 
   it("restores focus to the trigger element when the overlay closes", async () => {
     const onClose = vi.fn();
@@ -187,7 +178,6 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  // ── Focus trap — Tab boundary behavior ───────────────────────────────────────
   //
   // The focus trap only intervenes at the boundaries:
   //   - Tab on the LAST element → cycle to FIRST
@@ -247,6 +237,47 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(document.activeElement).toBe(btn2);
   });
 
+  it("wraps around disabled, non-focusable, and hidden controls", async () => {
+    render(
+      <Overlay isOpen onClose={vi.fn()} title="Test">
+        <button type="button" data-testid="cancel">
+          Cancel
+        </button>
+        <button type="button" data-testid="create" disabled>
+          Create
+        </button>
+        <input data-testid="disabled-input" disabled />
+        <select data-testid="disabled-select" disabled>
+          <option>Disabled</option>
+        </select>
+        <textarea data-testid="disabled-textarea" disabled />
+        <button type="button" data-testid="aria-disabled" aria-disabled="true">
+          Aria disabled
+        </button>
+        <a href="/ignored" data-testid="tabindex-disabled" tabIndex={-1}>
+          Tabindex disabled
+        </a>
+        <div hidden>
+          <button type="button" data-testid="hidden-control">
+            Hidden
+          </button>
+        </div>
+      </Overlay>,
+    );
+
+    await flushTimers();
+
+    const closeBtn = screen.getByLabelText("Close");
+    const cancelBtn = screen.getByTestId("cancel");
+    expect(document.activeElement).toBe(closeBtn);
+
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(cancelBtn);
+
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: false });
+    expect(document.activeElement).toBe(closeBtn);
+  });
+
   it("does NOT cycle on Tab from a middle element (browser handles it)", async () => {
     const onClose = vi.fn();
     render(
@@ -296,8 +327,6 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Close"));
   });
 
-  // ── Focus trap — non-Tab keys are unaffected ────────────────────────────────
-
   it("does not intercept non-Tab non-Escape keys", () => {
     const onClose = vi.fn();
     render(
@@ -314,8 +343,6 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
 
     expect(onClose).not.toHaveBeenCalled();
   });
-
-  // ── Body scroll lock ────────────────────────────────────────────────────────
 
   it("locks body scroll when overlay is open", () => {
     const onClose = vi.fn();
@@ -344,8 +371,6 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
 
     expect(document.body.style.overflow).toBe("");
   });
-
-  // ── Render / portal ─────────────────────────────────────────────────────────
 
   it("renders nothing to the DOM when closed", () => {
     const onClose = vi.fn();

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useId } from "react";
 import { api, Task, BoardColumn } from "../../../lib/api";
 import Overlay from "../../components/Overlay";
+import Select from "../../components/Select";
 
 type TaskCreateModalProps = {
   isOpen: boolean;
@@ -120,9 +121,7 @@ export default function TaskCreateModal({
 
       let finalTask = created.data;
 
-      // DP#32 — The API creates tasks in "todo" by default. If the user selected
-      // a different status, move the task to that column before returning it to
-      // the caller. This avoids an extra server-side endpoint for "create in column X".
+      // The API creates tasks in todo, so move this result to honor the selected column.
       if (status !== "todo") {
         await api.tasks.move(created.data.id, status, project);
         finalTask = { ...created.data, column_id: status };
@@ -195,7 +194,7 @@ export default function TaskCreateModal({
             <label htmlFor={fieldIds.status} className="block text-xs font-medium text-gray-500 mb-1">
               Status
             </label>
-            <select
+            <Select
               id={fieldIds.status}
               value={status}
               onChange={(e) => setStatus(e.target.value)}
@@ -206,7 +205,7 @@ export default function TaskCreateModal({
                   {c.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* Assignee */}
@@ -228,7 +227,7 @@ export default function TaskCreateModal({
             <label htmlFor={fieldIds.priority} className="block text-xs font-medium text-gray-500 mb-1">
               Priority
             </label>
-            <select
+            <Select
               id={fieldIds.priority}
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
@@ -239,7 +238,7 @@ export default function TaskCreateModal({
                   {p.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* Due Date */}
@@ -261,7 +260,7 @@ export default function TaskCreateModal({
             <label htmlFor={fieldIds.issueType} className="block text-xs font-medium text-gray-500 mb-1">
               Issue Type
             </label>
-            <select
+            <Select
               id={fieldIds.issueType}
               value={issueType}
               onChange={(e) => setIssueType(e.target.value)}
@@ -271,7 +270,7 @@ export default function TaskCreateModal({
               <option value="story">Story</option>
               <option value="task">Task</option>
               <option value="subtask">Subtask</option>
-            </select>
+            </Select>
           </div>
 
           {/* Estimate */}

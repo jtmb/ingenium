@@ -221,7 +221,7 @@ function fetchJobs(projectId: string): {
 
     for (const job of enabledJobs) {
       try {
-        const runs = jobs.listJobRuns(job.id, 1);
+        const runs = jobs.listJobRuns(projectId, job.id, 1);
         if (runs.length > 0 && runs[0]!.status === "failed") {
           failedRecently.push({
             id: job.id,
@@ -256,7 +256,7 @@ async function fetchMail(): Promise<{
 
     let accountCount = 0;
     try {
-      accountCount = engineModule.listAccounts(engineModule.getGlobalProjectId()).length;
+      accountCount = engineModule.listAccounts().length;
     } catch (err: any) {
       logger.error("dashboard", `Failed to list email accounts: ${err.message}`);
       unavailable.push("mail.accounts");
@@ -657,7 +657,15 @@ async function fetchHealth(): Promise<{
 
       // Parse individual process structs
       const structRegex = /<struct>(.*?)<\/struct>/gs;
-      const processNames = ["ingenium-api", "ingenium-dashboard", "opencode-web", "ttyd-opencode"];
+      const processNames = [
+        "ingenium-api",
+        "ingenium-api-boundary",
+        "ingenium-dashboard",
+        "ingenium-gateway",
+        "opencode-web",
+        "ttyd-opencode",
+        "vscode",
+      ];
       const foundProcesses: Map<string, { statename: string; startSecs: number }> = new Map();
 
       let match: RegExpExecArray | null;
@@ -677,9 +685,12 @@ async function fetchHealth(): Promise<{
       const now = Math.floor(Date.now() / 1000);
       const displayNames: Record<string, string> = {
         "ingenium-api": "API",
+        "ingenium-api-boundary": "API Boundary",
         "ingenium-dashboard": "Dashboard",
+        "ingenium-gateway": "Gateway",
         "opencode-web": "OpenCode",
         "ttyd-opencode": "OpenCode CLI",
+        vscode: "VS Code",
       };
 
       for (const name of processNames) {

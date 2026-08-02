@@ -7,13 +7,13 @@
  *   GET    /sources/:id          — Get source detail with chunk_count
  *   DELETE /sources/:id          — Delete source + cascade chunks
  *   POST   /sources/:id/ingest   — Ingest/re-ingest content
- *   GET    /search               — Hybrid full-text search
+ *   GET    /search               — Full-text search
  *   POST   /ask                  — Natural-language Q&A (context → brokerExecute)
  *   GET    /stats                — RAG statistics
  *   POST   /export               — Export all RAG sources as JSON
  */
 
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { getDb, execTransaction, checkpointAfterWrite, logger, projects, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
@@ -44,8 +44,17 @@ function normalizeSourceType(format?: string): "text" | "file" | "url" {
  * Re-ingest: deletes all existing chunks for a source, re-chunks the content,
  * and re-inserts. Returns the new chunk count.
  */
-function reingestSource(sourceId: string, content: string): number {
-  return rag.replaceSourceContent(sourceId, content);
+function reingestSource(sourceId: string, content: string, sourceType?: "text" | "file" | "url"): number {
+  return rag.replaceSourceContent(sourceId, content, sourceType ? { sourceType } : {});
+}
+
+function sendImmutableSourceError(res: Response): void {
+  res.status(409).json({
+    error: {
+      code: "RAG_SOURCE_IMMUTABLE",
+      message: "Immutable Context sources cannot be changed through generic RAG routes",
+    },
+  });
 }
 
 ragRouter.post("/ingest", (req, res) => {
@@ -190,7 +199,20 @@ ragRouter.delete("/sources/:id", (req, res) => {
     return;
   }
 
-  rag.deleteSource(req.params.id!);
+  if (rag.isSourceImmutable(req.params.id!)) {
+    sendImmutableSourceError(res);
+    return;
+  }
+
+  try {
+    rag.deleteSource(req.params.id!);
+  } catch (error) {
+    if (error instanceof rag.RagSourceImmutableError) {
+      sendImmutableSourceError(res);
+      return;
+    }
+    throw error;
+  }
 
   logger.info(SOURCE, `Deleted RAG source ${req.params.id!}`, { projectId });
   res.status(204).send();
@@ -214,6 +236,11 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
     return;
   }
 
+  if (rag.isSourceImmutable(source.id)) {
+    sendImmutableSourceError(res);
+    return;
+  }
+
   const { text, format } = req.body ?? {};
 
   if (typeof text !== "string" || !text.trim()) {
@@ -221,19 +248,16 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
     return;
   }
 
-  // Update source_type if format was provided
-  if (format) {
-    const sourceType = normalizeSourceType(format);
-    db.prepare(
-      "UPDATE rag_sources SET source_type = ?, byte_size = ?, updated_at = datetime('now') WHERE id = ?",
-    ).run(sourceType, text.length, source.id);
-  } else {
-    db.prepare(
-      "UPDATE rag_sources SET byte_size = ?, updated_at = datetime('now') WHERE id = ?",
-    ).run(text.length, source.id);
+  let chunkCount: number;
+  try {
+    chunkCount = reingestSource(source.id, text, format ? normalizeSourceType(format) : undefined);
+  } catch (error) {
+    if (error instanceof rag.RagSourceImmutableError) {
+      sendImmutableSourceError(res);
+      return;
+    }
+    throw error;
   }
-
-  const chunkCount = reingestSource(source.id, text);
 
   logger.info(SOURCE, `Re-ingested source ${source.id}`, { chunkCount, projectId });
 
@@ -252,7 +276,7 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /search — Hybrid full-text search
+// GET /search — Full-text search
 // ---------------------------------------------------------------------------
 
 ragRouter.get("/search", (req, res) => {
@@ -395,19 +419,10 @@ ragRouter.get("/stats", (req, res) => {
      WHERE s.project_id = ?`,
   ).get(projectId) as { c: number }).c;
 
-  const embeddingCount = (db.prepare(
-    `SELECT count(*) as c FROM rag_embeddings e
-     JOIN rag_chunks c ON c.id = e.chunk_id
-     JOIN rag_sources s ON s.id = c.source_id
-     WHERE s.project_id = ?`,
-  ).get(projectId) as { c: number }).c;
-
   res.json({
     data: {
       total_sources: sourceCount,
       total_chunks: chunkCount,
-      total_embeddings: embeddingCount,
-      vector_capability: { available: true, provider: "deterministic-n-gram", semantic: false },
     },
   });
 });

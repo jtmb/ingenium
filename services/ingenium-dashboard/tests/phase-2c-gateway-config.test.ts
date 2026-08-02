@@ -104,7 +104,7 @@ describe("Phase 2C — build-time gateway configuration", () => {
     const frameSrc = csp.split("; ").find((directive) => directive.startsWith("frame-src "));
 
     expect(frameSrc).toBe(
-      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 " +
+      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000 " +
       "https://web.example.test",
     );
     expect(frameSrc).not.toContain(":4098");

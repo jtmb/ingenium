@@ -56,12 +56,67 @@ const eventsFixture = {
   pagination: { nextCursor: null, hasMore: false, total: 1 },
 };
 
+const thresholdsFixture = {
+  requestCount: 2,
+  totalTokens: 30,
+  reportedCostAmount: 1,
+  cacheReadTokens: null,
+  cacheWriteTokens: null,
+  revision: 1,
+  createdAt: "2026-04-02T10:00:00.000Z",
+  updatedAt: "2026-04-02T10:00:00.000Z",
+};
+
+const advisoryFixture = {
+  range: summaryFixture.range,
+  generatedAt: "2026-04-02T10:00:00.000Z",
+  thresholds: thresholdsFixture,
+  metrics: {
+    requestCount: { observed: 2, threshold: 2, availability: "known", state: "equal" },
+    totalTokens: { observed: 30, threshold: 30, availability: "known", state: "equal" },
+    reportedCostAmount: { observed: 0.42, threshold: 1, availability: "partial", state: "unknown" },
+    cacheReadTokens: { observed: null, threshold: null, availability: "unavailable", state: "disabled" },
+    cacheWriteTokens: { observed: null, threshold: null, availability: "unavailable", state: "disabled" },
+  },
+};
+
 async function mockUsageData(page: Page, requests: URL[] = [], options: { truncatedExport?: boolean } = {}): Promise<void> {
   await page.route("**/api/v1/usage/**", async (route) => {
     const url = new URL(route.request().url());
     requests.push(url);
     if (url.pathname.endsWith("/summary")) {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: summaryFixture }) });
+      return;
+    }
+    if (url.pathname.endsWith("/thresholds/evaluate")) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: advisoryFixture }) });
+      return;
+    }
+    if (url.pathname.endsWith("/thresholds")) {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: {
+          requestCount: body.request_count,
+          totalTokens: body.total_tokens,
+          reportedCostAmount: body.reported_cost_amount,
+          cacheReadTokens: body.cache_read_tokens,
+          cacheWriteTokens: body.cache_write_tokens,
+          revision: body.expected_revision + 1,
+          createdAt: thresholdsFixture.createdAt,
+          updatedAt: thresholdsFixture.updatedAt,
+        } }) });
+      } else {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: thresholdsFixture }) });
+      }
+      return;
+    }
+    if (url.pathname.endsWith("/attention/evaluate")) {
+      expect(route.request().postData()).toBeNull();
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: { evaluatedAt: "2026-04-02T10:00:00.000Z", items: [] } }) });
+      return;
+    }
+    if (url.pathname.endsWith("/attention")) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: [], pagination: { nextCursor: null, hasMore: false, total: 0 } }) });
       return;
     }
     if (url.pathname.endsWith("/breakdown")) {
@@ -173,6 +228,41 @@ test.describe("Usage dashboard", () => {
       url.pathname.endsWith("/export") && url.searchParams.get("cursor") === "fixture-next-cursor",
     )).toBe(true);
     await expect(page.getByRole("button", { name: "Download next CSV page" })).toHaveCount(0);
+  });
+
+  test("keeps advisory configuration safe, selected-range, and all-history actions deterministic", async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    await mockUsageData(page);
+    await page.goto("/usage", { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByRole("heading", { name: "Usage advisories" })).toBeVisible();
+    await expect(page.getByText(/Advisory only; no enforcement\. Selected evaluation/)).toBeVisible();
+    await expect(page.getByText("Partial — reported subtotal")).toBeVisible();
+    await expect(page.getByText("Unknown — insufficient reported data to compare", { exact: true })).toBeVisible();
+    await expect(page.getByText("Attention is fixed to All history.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Resolve" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Reopen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
+
+    await page.getByTestId("usage-advisory-panel").getByRole("textbox", { name: "Requests" }).fill("3");
+    const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/v1/usage/thresholds" && request.method() === "PUT");
+    await page.getByRole("button", { name: "Save thresholds" }).press("Enter");
+    expect((await saveRequest).postDataJSON()).toEqual({
+      expected_revision: 1,
+      request_count: 3,
+      total_tokens: 30,
+      reported_cost_amount: 1,
+      cache_read_tokens: null,
+      cache_write_tokens: null,
+    });
+
+    const evaluateRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/v1/usage/attention/evaluate");
+    await page.getByRole("button", { name: "Evaluate attention now" }).click();
+    expect((await evaluateRequest).postData()).toBeNull();
+    await expect.poll(() => consoleErrors).toEqual([]);
   });
 
   test("keeps the loading state visible while the summary request is pending", async ({ page }) => {

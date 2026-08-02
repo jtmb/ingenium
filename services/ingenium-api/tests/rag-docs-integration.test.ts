@@ -48,7 +48,7 @@ describe("Docs RAG integration", () => {
     expect((await response.json()).data[0]).toEqual(expect.objectContaining({ source_title: "Indexed Page", source_path: "docs-page:1" }));
   });
 
-  it("returns the indexed Docs page through hybrid search", async () => {
+  it("returns the indexed Docs page through full-text search", async () => {
     const response = await fetch(`${baseUrl}/api/v1/rag/search?project=${projectName}&q=lighthouse`);
     expect(response.status).toBe(200);
     const body = await response.json();

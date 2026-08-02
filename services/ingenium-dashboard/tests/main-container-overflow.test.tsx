@@ -95,6 +95,22 @@ describe("MainContainer — immersive route overflow (UX-002)", () => {
     expect(main!.className).toContain("p-0");
   });
 
+  it("applies the immersive min-height and min-width bounds on /vscode", () => {
+    pathnameRef.current = "/vscode";
+
+    const { container } = render(
+      <MainContainer>
+        <div>VS Code workspace</div>
+      </MainContainer>,
+    );
+
+    const main = container.querySelector("main");
+    expect(main?.className).toContain("h-full");
+    expect(main?.className).toContain("min-h-0");
+    expect(main?.className).toContain("min-w-0");
+    expect(main?.className).toContain("p-0");
+  });
+
   it("applies min-w-0 on /docs immersive route", () => {
     pathnameRef.current = "/docs";
 

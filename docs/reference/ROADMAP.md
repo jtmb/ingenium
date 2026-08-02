@@ -1,547 +1,1130 @@
 ---
-title: Phase 0 Roadmap Baseline
-description: Execution-ready contracts for the approved bug, MCP, context, and documentation roadmap.
+title: Ingenium Product Roadmap
+description: Repository-authoritative, execution-ready contracts for the Phase 0 product roadmap.
 ---
 
-# Phase 0 Roadmap Baseline
+# Ingenium Product Roadmap
 
-This is the repository-authoritative execution baseline. It defines stable task
-IDs and contracts; it does not implement any task. This uppercase file is the
-only canonical roadmap path. The former lowercase path is intentionally absent;
-do not recreate it or maintain a second copy. A terminal `PASS` or final
-completion claim is prohibited while any `(work-started)` marker remains active;
-the active marker must first receive its matching completion marker, evidence,
-and TodoWrite/roadmap reconciliation. Active markers block terminal completion only; they do not block autonomous resumption of unfinished work. Execution may
-resume from the recorded marker state and continue until the task is completed
-or a permitted `ESCALATE_USER` condition is proven.
+This file is the repository authority for roadmap scope, task identity, execution
+contracts, dependencies, verification, and live markers. Repository Markdown is
+canonical; the Docs Workspace is a projection and is not mutated by this roadmap.
+The archived predecessor is [ROADMAP-2026-07-31-phase-0.md](./archive/ROADMAP-2026-07-31-phase-0.md).
 
-## Operating rules
+## Operating model
 
-- Execute independent tasks concurrently when approved. The roadmap defines
-  identity, not live task state.
-- TodoWrite is the live execution checklist. Work markers below are an
-  append-only audit trail and must never be used as a replacement for TodoWrite,
-  comments, commits, or implementation status.
-- Keep marker writes serialized and append-only, and keep them separate from
-  TodoWrite. Independent tasks may each have an active `(work-started)` marker;
-  a completion must close its own active task.
-- For this Phase 0C execution plan, use a stricter cap of four active agents;
-  this is below the repository policy of six active agents and three concurrent
-  writers.
-- Respect the orchestration ceiling of six active agents and three concurrent
-  writers; conflicting writers are serialized by exclusive territory.
-- No task may expand into product cleanup, unrelated documentation, or a Docs
-  Workspace mutation.
+Execution is synchronous: at most **6 active agents**, comprising at most **3
+permission-derived writers** and at most **3 nonwriters**. Writers have exclusive
+territories; territory overlap is zero. Independent work runs in barrier subwaves:
+all tasks in a subwave finish and verify before dependent tasks start. The
+open-roadmap rule applies: while a roadmap task or TodoWrite item is open, the
+orchestrator immediately dispatches the next declared phase and does not end the turn with a progress or completion response. Only `PASS`, `ESCALATE_USER`, an
+explicit `STOP`, or an explicit `CANCELLED` ends execution.
 
-## Marker protocol
+Safe defaults are mandatory: grounding is off; task references are metadata-only;
+events come from a trusted catalog; MCP verification is fixture-first; usage
+budgets are advisory; vault access is opt-in and never auto-unseals; restore starts
+with an operator command; default gates use no real credentials.
 
-Only exact markers appended under an approved marker-log heading are valid.
-`Historical work marker log` retains immutable legacy markers; `Work marker
-log` and `Work marker log (continued)` are the live append-only sections:
+### Marker protocol
+
+Only these exact HTML comments, appended under the live heading, are valid:
 
 ```text
-<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->
-<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->
+<!-- (work-started) TASK-ID 2026-07-31T00:00:00Z actor-name -->
+<!-- (work-complete) TASK-ID 2026-07-31T00:00:01Z actor-name -->
+Evidence TASK-ID: non-empty implementation or verification evidence.
 ```
 
-Rules:
+IDs must be defined below; timestamps are UTC ISO-8601 seconds; actors contain no
+whitespace. Markers are append-only and separate from TodoWrite. A task may start
+once while inactive and complete once only after its start; starts may be concurrent
+within a subwave. Unknown, malformed, duplicate, out-of-order, outside-heading,
+or evidence-free markers fail validation. Do not add a work-started marker for
+DOC-100 until the DOC baseline tests pass.
 
-1. Append; never edit, reorder, or delete an existing marker. Historical
-   markers remain retained and are not reopened as live work.
-2. IDs must be defined in this document, timestamps must be UTC ISO-8601
-   seconds, and the actor must contain no whitespace.
-3. Starts and completions need not alternate globally. A task may not start
-   twice while active or restart after completion, and a completion must close
-   its own active ID exactly once. A completion for an unstarted/already-
-   completed task, a marker outside an approved heading, malformed text, or an
-   unknown ID fails validation.
-4. Every completed task must have non-empty implementation evidence in the
-   log (`Evidence TASK-ID: ...`).
-5. TodoWrite remains separate and authoritative for execution checklists.
+### Contract field template
 
-### Historical work marker log
+Every contract below explicitly contains: `IN_SCOPE`, `OUT_OF_SCOPE`, `Owner`,
+`Dependencies`, `Acceptance`, `STOP_CONDITION`, `Escalation`, `Verification owner`,
+`Deployment owner`, `Rollback/safety`, `Tests`, `Docs`, `Exclusive writer territory`,
+`Phase/counts`, `Verification plan`, `Causal remediation rule`, and `Finding
+classification`. `PASS` requires every acceptance and applicable gate. Escalation
+is limited to unavailable required access/credentials, unauthorized destructive
+action, a genuine product decision or ambiguity, or bounded diagnosis that cannot
+reproduce a root cause.
 
-These retained markers are historical audit data and are not reopened as live
-work.
-<!-- (work-started) BUG-000 2026-07-27T18:36:47Z ingenium-docs -->
-<!-- (work-complete) BUG-000 2026-07-27T18:36:48Z ingenium-docs -->
-<!-- (work-started) BUG-001 2026-07-27T18:36:49Z ingenium-docs -->
-<!-- (work-complete) BUG-001 2026-07-27T18:36:50Z ingenium-docs -->
-<!-- (work-started) BUG-002 2026-07-27T18:36:51Z ingenium-docs -->
-<!-- (work-complete) BUG-002 2026-07-27T18:36:52Z ingenium-docs -->
-### Work marker log
-The marker log below is the current append-only execution state; active markers
-are unfinished work, not a baseline declaration. No final completion may be
-reported until every active marker is closed and reconciled.
-<!-- (work-started) BUG-000 2026-07-27T19:22:30Z ingenium-docs -->
-<!-- (work-complete) BUG-000 2026-07-27T19:22:31Z ingenium-docs -->
-Evidence BUG-000: Phase 1 writer verification — `services/ingenium-api/tests/docs-ai-security.test.ts`, `services/ingenium-dashboard/tests/docs-ai-actions.test.ts`, `tests/ingenium-dashboard/docs-ai.spec.ts`.
-<!-- (work-started) BUG-001 2026-07-27T19:22:32Z ingenium-docs -->
-<!-- (work-complete) BUG-001 2026-07-27T19:22:33Z ingenium-docs -->
-Evidence BUG-001: Phase 1 writer verification — `services/ingenium-api/tests/mcp-status-contract.test.ts`, `services/ingenium-api/tests/mcp-launcher.test.ts`, `packages/ingenium-extension/mcp-launcher.test.ts`.
-<!-- (work-started) BUG-002 2026-07-27T19:22:34Z ingenium-docs -->
-<!-- (work-complete) BUG-002 2026-07-27T19:22:35Z ingenium-docs -->
-Evidence BUG-002: QA PASS and Phase 1 writer verification — `services/ingenium-api/tests/learning-ownership.test.ts`, `packages/ingenium-core/tests/extraction.test.ts`, `packages/ingenium-core/tests/synthesis.test.ts`.
-<!-- (work-started) BUG-003 2026-07-27T19:39:05Z ingenium-docs -->
-<!-- (work-started) BUG-004 2026-07-27T19:39:07Z ingenium-docs -->
-<!-- (work-started) BUG-005 2026-07-27T19:39:09Z ingenium-docs -->
-<!-- (work-started) BUG-006 2026-07-27T20:00:00Z ingenium-dashboard -->
-<!-- (work-started) MCP-001 2026-07-27T20:00:01Z ingenium-mcp -->
-<!-- (work-started) CTX-001 2026-07-27T20:00:02Z ingenium-core-immutable-conversation-checkpoint -->
+## Phase dependency graph and allocations
 
-## Gates and definitions
+```text
+P0 DOC-100
+  -> P1 BUG-100, MCP-100, CTX-100, CHAT-100, TASK-100, JOB-100, USAGE-100, VAULT-100, RESTORE-100
+  -> P2 MCP-101..103, CTX-101, TASK-101..102, JOB-101, USAGE-101, VAULT-101, RESTORE-101
+  -> P3 JOB-102, MCP-104..105, USAGE-102, VAULT-102, RESTORE-102
+  -> P4 MCP-106
+  -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106
+  -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
+  -> P5 UI-102 -> CHAT-101
+  -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
+  -> P6 REL-100
+  -> P7 DOC-101
+```
 
-### Required gates
+The C0-C6 coordination lane is an implementation-gated barrier chain;
+`REL-100` also depends on `COORD-106`, `UI-102`, `CHAT-101`, and `VSCODE-102`.
 
-- **Test:** add focused automated coverage, run it, and run the relevant
-  repository checks. Mocks do not prove an integration path; use the real
-  configured service when available.
-- **Documentation:** update affected canonical repository Markdown, verify links
-  and commands, and do not mutate Docs Workspace unless explicitly requested.
-- **Visual:** for UI work, reproduce the exact user path at 1440x900 and
-  390x844, with accessibility, console/network, and run-scoped screenshot
-  evidence under `tests/artifacts/visual-qa/<run-id>/`.
+Each phase is a barrier. Standard allocation is **3 writers / 3 nonwriters**:
+writers are `@ingenium-docs` (docs territory), `@ingenium-software-engineer-fast`
+(one declared implementation territory), and
+`@ingenium-software-engineer-premium` (one declared integration/deployment
+territory); nonwriters are `@ingenium-qa`, `@ingenium-security-auditor`, and
+`@ingenium-explore`. If fewer territories exist, unused slots remain empty; never
+exceed 3 writers or 3 nonwriters. QA/security report once per declared boundary and
+never dispatch follow-up work.
 
-### Contract fields
+## Execution contracts
 
-Every task below explicitly declares **IN_SCOPE**, **OUT_OF_SCOPE**, **Owner**,
-**Acceptance**, **STOP_CONDITION**, **Escalation**, **Verification owner**,
-**Deployment owner**, **Rollback/safety**, **Tests**, and **Docs**. `PASS` means all listed acceptance
-criteria and applicable gates pass. `ESCALATE_USER` is reserved for unavailable
-required access/credentials, unauthorized destructive action, an unresolved
-product choice or genuine ambiguity, or bounded diagnosis without a reproducible
-root cause.
-For any runtime-impacting task, terminal completion additionally requires a
-named authorized writer deployment owner with Docker/Compose permission and
-evidence of rebuilding/restarting the current merged source plus health-checking
-actual routes.
+#### DOC-100 — Roadmap baseline and archive
 
-## Task contracts
+- **IN_SCOPE:** Archive the former roadmap byte-for-byte, create this canonical roadmap, archive index and hash sidecar, and update the reference index links.
+- **OUT_OF_SCOPE:** Source, tests, Docs Workspace, indexes unrelated to Reference, and work-started markers before baseline tests.
+- **Owner:** `@ingenium-docs`.
+- **Dependencies:** None.
+- **Acceptance:** Archive `cmp` and SHA-256 match; one canonical roadmap exists; every task has the complete field set; live marker log is empty; required links resolve.
+- **STOP_CONDITION:** `PASS` after DOC baseline checks; otherwise continue in scope; explicit user `STOP`/`CANCELLED` is terminal.
+- **Escalation:** Only an unavailable required check or genuine ambiguity in the expected canonical row.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** N/A; documentation-only.
+- **Rollback/safety:** Preserve unrelated dirty changes; use apply-patch move semantics; never mutate Docs Workspace.
+- **Tests:** Archive `cmp`/hash, Markdown structure, links, and `git diff --check`.
+- **Docs:** `docs/reference/ROADMAP.md`, `docs/reference/archive/index.md`, `docs/reference/index.md` only.
+- **Exclusive writer territory:** `docs/reference/ROADMAP.md`, `docs/reference/archive/`, `docs/reference/index.md`.
+- **Phase/counts:** P0; 1 writer / 0 nonwriters; no overlapping writer.
+- **Verification plan:** Run each named check once after the write; inspect status to confirm unrelated paths are untouched.
+- **Causal remediation rule:** Fix only a reproducible in-scope documentation root cause, then rerun its affected check.
+- **Finding classification:** In-scope defects are `BLOCKING`; unrelated drift is `FOLLOW_UP`; context is `INFORMATIONAL`.
 
-### Bugs first
+#### BUG-100 — Extension plugin diagnostics isolation
 
-#### BUG-000 — Docs AI request path
+- **IN_SCOPE:** Prevent registered Ingenium extension plugin lifecycle and API failures from writing diagnostics to stdout/stderr or appearing in Chat/OpenCode interaction output; keep hooks non-fatal; route bounded credential-free warnings through the OpenCode app logger when available; add failure-path tests for every registered extension plugin and wrapper.
+- **OUT_OF_SCOPE:** Hiding manual tool-result errors, changing MCP transport preflight diagnostics, redesigning self-learning behavior, changing providers, or suppressing operator logs outside plugin runtime hooks.
+- **Owner:** Extension/plugin writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** API-down, authentication, timeout, and logger-failure fixtures produce no stdout/stderr or Chat-visible diagnostic text; plugin hooks resolve safely; approved warnings contain no response body, URL, token, prompt, or stack; `auto-observer`, `observer`, `resource-sync`, and their registered wrappers have deterministic load and lifecycle regression coverage; deployed OpenCode remains clean during session-created/idle failure paths.
+- **STOP_CONDITION:** `PASS` after extension tests, package build, deployed OpenCode failure-path smoke, and marker reconciliation; otherwise continue or permitted escalation.
+- **Escalation:** Only unavailable configured OpenCode/deployment access or a genuine product decision about retaining a user-visible plugin failure.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` only if the deployed interaction surface changes visually.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for rebuilt extension/container acceptance.
+- **Rollback/safety:** Never print secrets or upstream error text; preserve non-fatal hooks and manual tool failures; revert only plugin diagnostic routing and tests.
+- **Tests:** Registered-wrapper load tests; lifecycle API-down/auth/timeout/logger-failure tests; stdout/stderr spies; extension full suite/typecheck/build; deployed session-created/idle Chat/OpenCode console and output smoke.
+- **Docs:** This roadmap entry only unless operator-visible logging semantics require a directly affected canonical reference.
+- **Exclusive writer territory:** `packages/ingenium-extension` plugin runtime/wrappers/tests and the smallest provider-free deployed acceptance fixture.
+- **Phase/counts:** P1 urgent insertion; up to 2 writers / 2 nonwriters; serialize deployment after implementation.
+- **Verification plan:** Reproduce the exact stderr JSON fixture, remove the earliest plugin stream write, exercise every registered wrapper with API and logger failures, build/package, deploy, trigger session-created/idle, and inspect output/console/logs.
+- **Causal remediation rule:** Remove or reroute the first plugin-owned protocol-stream write; do not mask the rendered symptom downstream in Chat.
+- **Finding classification:** Any plugin diagnostic reaching stdout/stderr or Chat is `BLOCKING`; unrelated operator logging is `FOLLOW_UP`; safe app-log evidence is `INFORMATIONAL`.
 
-- **IN_SCOPE:** Trace dashboard Docs AI action through API auth, prompt/tool handling, RAG response, citations, and rendering; repair the reproducible defect.
-- **OUT_OF_SCOPE:** New AI features, auth weakening, secret exposure, unrelated editor work, and Docs Workspace writes.
-- **Owner:** Docs/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A real authenticated request returns a grounded rendered answer; unauthorized, malformed, oversized, and dependency-failure paths are bounded and actionable; no prompt, token, or stack trace leaks.
-- **STOP_CONDITION:** `PASS` after exact user-path API and dashboard checks; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope or use `ESCALATE_USER` only under the rule above.
-- **Escalation:** Escalate only if configured provider access is unavailable after the documented path, or the root cause cannot be reproduced after bounded diagnosis.
-- **Verification owner:** `@ingenium-qa`; exact Docs AI action, fresh source, API response, rendered citation, console/network review.
-- **Rollback/safety:** Preserve auth and content-size guards; revert only the task-owned diff if integration fails; never log secrets.
-- **Tests:** API security/broker tests, dashboard Docs AI tests, real configured-provider smoke test, Playwright desktop/mobile exact path.
-- **Docs:** `docs/reference/docs-workspace.md`, `docs/develop/api.md` if behavior changes; link-check affected references.
+#### MCP-100 — Tool toggle semantics
 
-#### BUG-001 — MCP transport and discovery
+- **IN_SCOPE:** Define and implement fail-closed enabled/disabled semantics from catalog through API, MCP discovery, invocation, and Tool Manager.
+- **OUT_OF_SCOPE:** Renaming the catalog, new providers, auth redesign, or unrelated UI.
+- **Owner:** MCP/API writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** Disabled tools are absent from visible discovery and direct execution fails safely; re-enable restores both; built-in exceptions remain explicit.
+- **STOP_CONDITION:** `PASS` after fixture and deployed checks; otherwise continue or permitted escalation.
+- **Escalation:** Product choice about aliases or unavailable deployment access only.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Fail closed on unknown state; preserve project isolation; revert only task-owned state filtering.
+- **Tests:** Catalog/API/MCP fixture tests and real safe-tool toggle smoke; no real credentials.
+- **Docs:** `docs/reference/mcp-tools.md` only if user-visible semantics change.
+- **Exclusive writer territory:** MCP catalog/state/API/server paths and their focused tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; territory isolated from dashboard writer.
+- **Verification plan:** Compare catalog, discovery, invocation, and UI state at each toggle, then health-check deployment.
+- **Causal remediation rule:** Trace the first divergent state producer and fix that shared boundary, not downstream symptoms.
+- **Finding classification:** Acceptance failures are `BLOCKING`; unrelated catalog drift is `FOLLOW_UP`; observations are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Diagnose real MCP transport/config, project identity, bearer boundary, discovery, safe invocation, and failure messaging.
-- **OUT_OF_SCOPE:** New product tools, provider implementation, unrelated auth redesign, and client-only workarounds.
-- **Owner:** MCP/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A clean client connects, lists tools, and invokes one safe read tool; invalid auth, unavailable server, and malformed requests fail clearly without infinite retries or leaks.
-- **STOP_CONDITION:** `PASS` only after a real client smoke test; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope or use permitted `ESCALATE_USER` only for unavailable configured access or unresolved root cause.
-- **Escalation:** Do not blame a dependency until the exact payload is tested in isolation; escalate only after bounded producer-side diagnosis.
-- **Verification owner:** `@ingenium-qa`; MCP client → API boundary → server discovery → safe tool invocation.
-- **Rollback/safety:** Fail closed on identity/auth errors; retain bearer boundaries; revert transport changes without deleting registered tools.
-- **Tests:** Real MCP/API smoke test, invalid-auth and unknown-tool tests, config/project-isolation checks, logs review.
-- **Docs:** `docs/reference/mcp-tools.md`, `docs/develop/api.md`, and relevant configuration guidance.
+#### MCP-101 — Current-catalog conformance harness
 
-#### BUG-002 — External learning namespace and freshness
+- **IN_SCOPE:** Build a fixture-first harness that compares the complete current catalog, names, categories, registration, and toggle projection across boundaries.
+- **OUT_OF_SCOPE:** Adding tools, changing approved extension exceptions, live provider credentials, or broad refactors.
+- **Owner:** MCP/core writer.
+- **Dependencies:** MCP-100.
+- **Acceptance:** Harness detects missing, duplicate, unknown-category, stale, and wrongly toggled entries and passes against the current catalog.
+- **STOP_CONDITION:** `PASS` after deterministic fixture and current-catalog runs.
+- **Escalation:** Only an unresolved canonical catalog decision or unreproducible mismatch.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** N/A unless the harness is runtime-packaged; then premium owns deployment.
+- **Rollback/safety:** Read-only fixtures; never rewrite the catalog during a conformance run.
+- **Tests:** Complete catalog parity, malformed fixture, duplicate ID, and category tests.
+- **Docs:** `docs/reference/mcp-tools.md` if catalog contract wording changes.
+- **Exclusive writer territory:** MCP conformance harness and catalog tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with dashboard files.
+- **Verification plan:** Run fixture cases, then compare a source-derived current catalog and record deterministic failures.
+- **Causal remediation rule:** Repair the source registration or projection named by the first mismatch and rerun the smallest failing case.
+- **Finding classification:** Harness acceptance defects are `BLOCKING`; unrelated tool drift is `FOLLOW_UP`; coverage notes are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Verify external project resolution, observation ingestion, extraction, synthesis, current-input freshness, and cross-project isolation.
-- **OUT_OF_SCOPE:** New learning algorithms, unrelated skill redesign, historical data cleanup, or changing the global project model.
-- **Owner:** Learning/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A fresh external event lands in the intended project, yields a quality-checked observation/trait or explainable no-op, and never appears in another project; latest timestamps are newer than the test window.
-- **STOP_CONDITION:** `PASS` on fresh end-to-end evidence; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope or escalate only for unavailable required LLM access or unreproducible root cause.
-- **Escalation:** Counts alone are not evidence; inspect a current sample and trace its namespace before classifying a failure.
-- **Verification owner:** `@ingenium-qa`; real API/database pipeline run plus freshness, provenance, deduplication, and quality spot-check.
-- **Rollback/safety:** Preserve project isolation and provenance; use isolated test data; roll back only extraction/synthesis changes that fail the evidence.
-- **Tests:** Real ingestion/extraction/synthesis test, multi-project isolation, timestamp and output-quality assertions.
-- **Docs:** `docs/concepts/self-learning.md` and project identity references.
+#### MCP-102 — OpenCode/chat live visibility
 
-#### BUG-003 — Backups and restore safety
+- **IN_SCOPE:** Make enabled-tool state observable in live OpenCode and Chat tool visibility without weakening auth or project boundaries.
+- **OUT_OF_SCOPE:** Chat redesign, provider routing, tool renaming, or hidden aliases.
+- **Owner:** MCP/dashboard writer.
+- **Dependencies:** MCP-100, MCP-101.
+- **Acceptance:** Live OpenCode and Chat reflect toggle changes on refresh/reconnect and reject disabled direct calls with actionable errors.
+- **STOP_CONDITION:** `PASS` after deployed live-path checks and exact viewport checks where UI changes.
+- **Escalation:** Unavailable configured OpenCode access or genuine visibility contract ambiguity.
+- **Verification owner:** `@ingenium-qa`; visual owner is `@ingenium-qa-vision` when applicable.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve bearer boundaries and fail closed on stale visibility.
+- **Tests:** Live fixture OpenCode/Chat discovery and direct-call tests; Playwright only for changed UI.
+- **Docs:** `docs/usage/index.md` if live visibility becomes user-facing.
+- **Exclusive writer territory:** OpenCode/chat visibility adapters and focused tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with catalog harness.
+- **Verification plan:** Toggle, reconnect, inspect visible tools, invoke safe tool, inspect console/network, and health-check.
+- **Causal remediation rule:** Fix the earliest stale-cache or projection boundary proven by the live trace.
+- **Finding classification:** Broken live semantics are `BLOCKING`; unrelated chat polish is `FOLLOW_UP`; logs are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Exercise create, list, metadata, validated download, preview, restore job status, and failure paths. Backups are owned by the canonical active global project; migration 061 and the startup backfill move legacy per-project ownership into that namespace, while restore remains limited to resources the supported restore implementation actually includes.
-- **OUT_OF_SCOPE:** Inventing restore semantics beyond the current per-project behavior and the explicitly planned global-ownership migration, unsupported data restoration, destructive purge, or backup format redesign.
-- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Canonical global backup ownership is documented and tested, including external URL context and legacy-record migration; a backup is created, listed, downloaded only to a validated destination, and previewed; restore requires explicit confirmation, reports terminal status, and does not claim or apply unsupported destructive scope.
-- **STOP_CONDITION:** `PASS` only with an isolated real restore; `STOP`/`CANCELLED` only on an explicit user request; unsupported scope uses the stated escalation/acceptance path, including destructive authorization or missing storage access.
-- **Escalation:** Never imply global ownership or restore coverage beyond source-verified implementation; stop before destructive execution when scope is ambiguous.
-- **Verification owner:** `@ingenium-qa`; isolated real data create/download/preview/restore and failure-path run.
-- **Rollback/safety:** Keep source data and backup immutable; restore to an isolated fixture first; retain failed job evidence and use the supported rollback procedure.
-- **Tests:** Backup integration tests, path-traversal/confirmation tests, archive integrity, preview-vs-execution assertions, dashboard exact workflow.
-- **Docs:** `docs/operations/backups.md` if present, otherwise `docs/operations/index.md`, `docs/reference/mcp-tools.md`, and `docs/reference/index.md` links.
+#### MCP-103 — Usefulness report
 
-#### BUG-004 — Settings persistence and deep links
+- **IN_SCOPE:** Define a report of tool visibility, successful safe invocation, failure reasons, freshness, and fixture/live provenance.
+- **OUT_OF_SCOPE:** Billing, provider scoring, user surveillance, or unverified usefulness claims.
+- **Owner:** MCP/API writer.
+- **Dependencies:** MCP-101, MCP-102.
+- **Acceptance:** Report distinguishes catalog conformance, reachable visibility, invocation outcome, unknown, and not-run; no secrets or prompt content.
+- **STOP_CONDITION:** `PASS` after fixture and configured live report generation.
+- **Escalation:** Only an unresolved usefulness definition or unavailable required live boundary.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** N/A unless exposed by a runtime route; premium then owns deployment.
+- **Rollback/safety:** Read-only, bounded, project-scoped report.
+- **Tests:** Fixture matrix, empty/error, redaction, freshness, and deterministic export tests.
+- **Docs:** `docs/reference/mcp-tools.md` if report fields are public.
+- **Exclusive writer territory:** MCP usefulness report and tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; isolated report territory.
+- **Verification plan:** Generate report from fixtures, then one configured live run and compare provenance fields.
+- **Causal remediation rule:** Correct the producing metric or evidence label, never mask missing evidence as success.
+- **Finding classification:** Wrong report status is `BLOCKING`; broader analytics are `FOLLOW_UP`; extra diagnostics are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Trace settings load/edit/save/sync, project scope, validation, and `?settings=<tab>` navigation.
-- **OUT_OF_SCOPE:** New settings categories, provider redesign, unrelated dashboard styling, and source configuration policy changes.
-- **Owner:** Dashboard/API writer; verification owner: `@ingenium-qa-vision` for visual and `@ingenium-qa` for behavior.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Every tab loads canonical values; valid changes survive reload and sync; invalid input is clear; deep links open the requested tab without wrong-project data.
-- **STOP_CONDITION:** `PASS` after desktop/mobile exact paths; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope and escalate only for required unavailable access or unresolved ambiguity.
-- **Escalation:** Trace trigger, state setter, and rendered consumer through every early-return branch before escalation.
-- **Verification owner:** `@ingenium-qa`; API/dashboard tests and exact deep-link/save/reload path; visual owner supplies screenshots and console/network evidence.
-- **Rollback/safety:** Preserve existing settings on invalid writes; use project-scoped fixtures; revert only settings route/client changes.
-- **Tests:** API persistence, validation, sync, dashboard tab/deep-link tests, Playwright desktop/mobile.
-- **Docs:** `docs/HOW-TO/settings.md`, `docs/configure/index.md`, and `docs/reference/index.md` as needed.
+#### CTX-100 — Context source workspace
 
-#### BUG-005 — Vault first-run, lock state, and rate limiting
+- **IN_SCOPE:** Establish a project-scoped context source workspace with bounded text/Markdown ingestion, provenance, tags, priority, and safe metadata.
+- **OUT_OF_SCOPE:** Transcript export, automatic grounding, cross-project sharing, or destructive compaction.
+- **Owner:** Core/API writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** Source create/list/search/upload rejects unsafe paths and oversized/unsupported input, preserves provenance, and isolates projects.
+- **STOP_CONDITION:** `PASS` after real isolated API source workflow.
+- **Escalation:** Storage access or ambiguous ownership only.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Use disposable sources; preserve source IDs; grounding remains off by default.
+- **Tests:** Upload limits/types, metadata, isolation, CRUD, and API integration tests.
+- **Docs:** `docs/concepts/architecture.md`, `docs/reference/mcp-tools.md` when directly affected.
+- **Exclusive writer territory:** Core/API context source implementation and tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; no overlap with task capture.
+- **Verification plan:** Upload fixture, inspect source metadata, search, reject boundary cases, and verify project isolation.
+- **Causal remediation rule:** Fix the first source/provenance boundary that loses identity or safety metadata.
+- **Finding classification:** Data loss or cross-project exposure is `BLOCKING`; format expansion is `FOLLOW_UP`; metrics are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Validate first-run sealed/uninitialized behavior, unseal/seal, item CRUD, password generation, metadata-only reads, audit records, and HTTP 429/rate-limit handling.
-- **OUT_OF_SCOPE:** Replacing encryption, weakening lock state, exposing secret values, or unrelated provider throttling.
-- **Owner:** Security/API writer; verification owner: `@ingenium-security-auditor` and `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** First run gives actionable initialization guidance; sealed vault denies secret access; authorized unseal enables CRUD; list/get omit values; audit has no secret material; 429 responses are bounded, explicit, and do not spin.
-- **STOP_CONDITION:** `PASS` after isolated real vault and rate-limit paths; `STOP`/`CANCELLED` only on an explicit user request; unsafe/destructive ambiguity uses authorization escalation, and unavailable passphrase/access uses the permitted escalation path.
-- **Escalation:** Treat any secret exposure or unexplained 429 loop as blocking; inspect the real response path rather than relying on mocks.
-- **Verification owner:** `@ingenium-qa`; security owner reviews current diff and audit output.
-- **Rollback/safety:** Use disposable vault data and test passphrases; never print secrets; seal before cleanup; preserve audit evidence.
-- **Tests:** Real isolated vault integration/security tests, first-run/429 tests, metadata and audit assertions, dashboard exact path.
-- **Docs:** `docs/security/index.md`, vault operations guidance, and `docs/reference/mcp-tools.md`.
+#### CHAT-100 — Explicit grounded chat
 
-#### BUG-006 — Chat initial paint flash
+- **IN_SCOPE:** Add an explicit, opt-in grounded-chat path that shows whether context was used and cites selected sources.
+- **OUT_OF_SCOPE:** Always-on grounding, hidden prompt injection, transcript export, or provider-specific behavior.
+- **Owner:** Dashboard/API writer.
+- **Dependencies:** CTX-100.
+- **Acceptance:** Default chat is ungrounded; explicit grounding retrieves bounded relevant sources, labels source use, and answers safely when none apply.
+- **STOP_CONDITION:** `PASS` after fixture-first API/UI workflow and visual checks if changed.
+- **Escalation:** Product ambiguity over the explicit opt-in control or unavailable configured provider.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision` for UI.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Grounding off by default; never expose hidden source content or secrets.
+- **Tests:** Ungrounded/grounded/no-result, citation, project isolation, console/network, and viewport tests.
+- **Docs:** `docs/usage/index.md` and `docs/concepts/architecture.md` if behavior is user-visible.
+- **Exclusive writer territory:** Chat route/components and grounded-chat API adapter.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; isolated from context storage.
+- **Verification plan:** Compare identical prompts with grounding off/on, inspect citations and bounded retrieval, then deployed route health.
+- **Causal remediation rule:** Fix the first grounding flag, retrieval, or rendering mismatch proven in the request trace.
+- **Finding classification:** Default grounding or citation failure is `BLOCKING`; unrelated chat UX is `FOLLOW_UP`; provider variance is `INFORMATIONAL`.
 
-- **IN_SCOPE:** Reproduce the reported OS-preference and storage-state cold load, then fix the earliest responsible theme/render boundary for Chat and OpenCode surfaces.
-- **OUT_OF_SCOPE:** Redesigning Chat/OpenCode, hiding content, or unrelated global styling.
-- **Owner:** Dashboard writer; verification owner: `@ingenium-qa-vision`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Under the exact cold-load condition there is no visible flash; Chat preserves messages, hydrates correctly, and shows no console errors at both viewports.
-- **STOP_CONDITION:** `PASS` after paint/DOM evidence; `STOP`/`CANCELLED` only on an explicit user request; unrelated visual findings remain follow-up, and escalate only if the exact environment cannot be reproduced after bounded diagnosis.
-- **Escalation:** Recreate OS preference, localStorage, cookie, resolution, and browser conditions; instrument paint/DOM channels, not screenshots alone.
-- **Verification owner:** `@ingenium-qa-vision`; Playwright exact-condition desktop/mobile check with screenshots and cleanup confirmation.
-- **Rollback/safety:** Preserve first-party content and accessibility; revert only theme/bootstrap changes if hydration regresses.
-- **Tests:** Paint/DOM regression, Chat/OpenCode smoke, console/network checks, visual artifacts.
-- **Docs:** `docs/usage/chat.md` and `docs/usage/dashboard.md` only if user-visible behavior changes.
+#### CTX-101 — Reproducible citations
 
-### MCP improvements
+- **IN_SCOPE:** Define stable source/chunk citation IDs, retrieval evidence, ordering, and reproducible citation rendering for grounded responses.
+- **OUT_OF_SCOPE:** New embeddings, full reindex, always-on grounding, or unsupported source formats.
+- **Owner:** Core/API writer.
+- **Dependencies:** CTX-100, CHAT-100.
+- **Acceptance:** Same fixture and query yields bounded deterministic citation identifiers and source attribution; missing/deleted sources are explicit.
+- **STOP_CONDITION:** `PASS` after reproducibility and deletion-edge tests.
+- **Escalation:** Only an unresolved canonical ordering or source identity decision.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve provenance; never fabricate citations or reveal restricted content.
+- **Tests:** Ranking tie, repeated query, missing source, limit, permission, and API response tests.
+- **Docs:** `docs/concepts/architecture.md` and `docs/reference/mcp-tools.md` if citation fields are public.
+- **Exclusive writer territory:** RAG citation identity/serialization and focused tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with Chat UI.
+- **Verification plan:** Run identical fixture queries twice, compare IDs/order/evidence, then exercise missing-source behavior.
+- **Causal remediation rule:** Repair the unstable source/chunk identity producer, not the display-only formatter.
+- **Finding classification:** Non-reproducible or false citations are `BLOCKING`; ranking improvements are `FOLLOW_UP`; trace detail is `INFORMATIONAL`.
 
-#### MCP-001 — Canonical names, catalog, categories, and toggles
+#### TASK-100 — Source-reference contract
 
-- **IN_SCOPE:** Preserve the built-in catalog's existing extension-tool exceptions. Dynamically imported child tools must use exactly one lowercase `ingenium_<server>_<tool>` name, with the child-server namespace exactly once, across registration, API exposure, dashboard catalog/category display, per-tool toggles, and docs.
-- **OUT_OF_SCOPE:** Renaming unrelated public APIs, adding tools, or preserving duplicate-prefix aliases as authority.
-- **Owner:** MCP/core writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Built-in catalog entries retain their existing approved extension-tool exceptions; every dynamically imported child tool has exactly one lowercase `ingenium_<server>_<tool>` name; category and enabled/disabled state agree across discovery, dashboard, and docs; duplicate-prefix, unknown-category, and missing-registration checks fail deterministically.
-- **STOP_CONDITION:** `PASS` after real discovery and catalog UI checks; `STOP`/`CANCELLED` only on an explicit user request; unrelated tools remain follow-up, and escalate only for an incompatible product naming choice.
-- **Escalation:** Verify source registration, API projection, dashboard rendering, and docs independently before assigning blame.
-- **Verification owner:** `@ingenium-qa`; catalog tests plus real MCP discovery and dashboard category/toggle path.
-- **Rollback/safety:** Preserve backward compatibility only as explicitly non-canonical aliases; never expose secrets or silently disable tools.
-- **Tests:** Catalog/unit tests, unknown/duplicate ID cases, real discovery smoke, dashboard toggle/category tests.
-- **Docs:** `docs/reference/mcp-tools.md`, `docs/reference/index.md`, and MCP configuration guidance.
+- **IN_SCOPE:** Define metadata-only task references to email, context, docs, chat, and jobs with project scope, source type, immutable source ID, and display metadata.
+- **OUT_OF_SCOPE:** Copying source bodies, attachments, secrets, automatic task creation, or cross-project references.
+- **Owner:** Core/API writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** References validate trusted source types and IDs, remain metadata-only and project-scoped, and render missing sources safely.
+- **STOP_CONDITION:** `PASS` after schema and API contract tests.
+- **Escalation:** Only a product choice about source identity or authorization.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** No source-body duplication; reject unknown/foreign IDs.
+- **Tests:** Schema, authorization, project isolation, missing source, and serialization tests.
+- **Docs:** `docs/reference/mcp-tools.md` and task guidance if public.
+- **Exclusive writer territory:** Task reference schema/core/API and tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; isolated from capture UI.
+- **Verification plan:** Create references for each trusted source type, inspect metadata only, and reject foreign/unknown IDs.
+- **Causal remediation rule:** Fix the shared reference validation boundary that permits the first unsafe payload.
+- **Finding classification:** Body leakage or cross-project reference is `BLOCKING`; additional source types are `FOLLOW_UP`; metadata detail is `INFORMATIONAL`.
 
-#### MCP-002 — Observable MCP lifecycle
+#### TASK-101 — Mail/Context capture
 
-- **IN_SCOPE:** Bounded startup, health, reconnect, actionable error state, and logs at the transport boundary.
-- **OUT_OF_SCOPE:** New transport protocols, infinite retry policies, or unrelated service supervision.
-- **Owner:** MCP/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Real healthy, disconnect, and recovery states are visible; retries are bounded; logs name the failing boundary and the service remains stable.
-- **STOP_CONDITION:** `PASS` after disconnect/reconnect evidence; `STOP`/`CANCELLED` only on an explicit user request; external failures outside the contract remain follow-up, and escalate only after a reproducible root cause is unavailable.
-- **Escalation:** Check own payload/config and the real service before blaming the dependency; monitor sustained stability when timers/watchers change.
-- **Verification owner:** `@ingenium-qa`; real disconnect/reconnect test and bounded health/log observation.
-- **Rollback/safety:** Do not bypass auth or turn failures into false healthy states; revert lifecycle changes without killing healthy connections.
-- **Tests:** Lifecycle integration test, bounded retry assertions, health/log checks.
-- **Docs:** MCP operations and troubleshooting references.
+- **IN_SCOPE:** Capture email and context source references into tasks through explicit user actions, preserving metadata-only semantics.
+- **OUT_OF_SCOPE:** Auto-triage task creation, copying message/document bodies, attachment ingestion, or mail sending.
+- **Owner:** Mail/context writer.
+- **Dependencies:** TASK-100, CTX-100.
+- **Acceptance:** Explicit capture creates a task reference with stable source metadata, duplicate capture is controlled, and unauthorized/foreign capture fails safely.
+- **STOP_CONDITION:** `PASS` after real fixture capture workflow.
+- **Escalation:** Missing configured mail access or ambiguous user confirmation.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Metadata-only; no destructive mail operation; fixture accounts only.
+- **Tests:** Mail/context capture, idempotency, authorization, duplicate, and missing-source tests.
+- **Docs:** `docs/usage/index.md` and task reference docs if user-visible.
+- **Exclusive writer territory:** Mail/context capture actions and focused tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with Chat/Docs capture.
+- **Verification plan:** Capture disposable fixtures, inspect task refs, repeat action, and verify no content/secret persistence.
+- **Causal remediation rule:** Fix the first source-to-reference mapping defect, not duplicate UI symptoms.
+- **Finding classification:** Unsafe or missing capture is `BLOCKING`; auto-capture ideas are `FOLLOW_UP`; provenance fields are `INFORMATIONAL`.
 
-#### MCP-003 — Project identity propagation
+#### TASK-102 — Chat/Docs capture
 
-- **IN_SCOPE:** Named external sessions, explicit `global-default` ownership for shared resources, and fail-closed unresolved/invalid identity for every MCP call.
-- **OUT_OF_SCOPE:** Renaming projects, migrating historical data, or changing the two-project architecture.
-- **Owner:** Extension/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Multi-project calls remain isolated; shared resources target the explicit global project; invalid identity never silently falls back.
-- **STOP_CONDITION:** `PASS` after real multi-project isolation; `STOP`/`CANCELLED` only on an explicit user request; historical data outside the task remains follow-up, and escalate only for an unavoidable architecture choice.
-- **Escalation:** Read resolver, entrypoint, environment, and architecture sources before deciding ownership.
-- **Verification owner:** `@ingenium-qa`; real extension/API/MCP isolation run.
-- **Rollback/safety:** Preserve existing project data; use disposable projects; reject unsafe names before writes.
-- **Tests:** Resolver, API isolation, MCP project propagation, invalid-name tests.
-- **Docs:** `docs/concepts/architecture.md`, project identity sections in `AGENTS.md`, and `docs/VARIABLES.md` where applicable.
+- **IN_SCOPE:** Capture explicit Chat and Docs references into tasks with metadata-only source IDs and visible provenance.
+- **OUT_OF_SCOPE:** Automatic capture, transcript/body duplication, Docs Workspace mutation, or editor redesign.
+- **Owner:** Dashboard/docs writer.
+- **Dependencies:** TASK-100, CHAT-100, CTX-100.
+- **Acceptance:** Explicit capture creates correct project-scoped references for Chat and Docs; source content is not copied; missing sources are actionable.
+- **STOP_CONDITION:** `PASS` after fixture UI/API path and visual check if changed.
+- **Escalation:** Only unavailable configured UI route or product ambiguity about confirmation.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision` for UI.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** No automatic capture; preserve source and task data on failed writes.
+- **Tests:** Chat/Docs capture, project isolation, missing source, duplicate, accessibility, and viewport tests.
+- **Docs:** `docs/usage/index.md` and directly affected reference docs.
+- **Exclusive writer territory:** Chat/Docs capture controls and tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with Mail/context capture.
+- **Verification plan:** Capture each fixture, inspect metadata-only response, reload, and verify reference display.
+- **Causal remediation rule:** Fix the shared capture request/response contract where the first mismatch occurs.
+- **Finding classification:** Body leakage or wrong source is `BLOCKING`; unrelated UI polish is `FOLLOW_UP`; accessibility notes are `INFORMATIONAL` unless acceptance fails.
 
-#### MCP-004 — Input validation and safe error envelopes
+#### JOB-100 — Durable trusted event model
 
-- **IN_SCOPE:** Consistent validation, documented error envelopes, dependency-unavailable handling, and secret/stack-trace redaction without changing successful semantics.
-- **OUT_OF_SCOPE:** New business operations, schema redesign unrelated to MCP boundaries, or client-side-only validation.
-- **Owner:** API/MCP writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Invalid input is rejected at the live boundary with the documented shape; dependency failures are bounded/actionable; raw secrets and internal stacks never cross it.
-- **STOP_CONDITION:** `PASS` after real safe-tool and failure calls; `STOP`/`CANCELLED` only on an explicit user request; unrelated schema debt remains follow-up, and escalate only for incompatible external contract decisions.
-- **Escalation:** Confirm the schema is actually invoked in the live request path and test the exact malformed payload.
-- **Verification owner:** `@ingenium-qa`; route/tool tests plus real safe-tool call.
-- **Rollback/safety:** Preserve successful responses and fail closed; do not swallow diagnostic logs needed for support.
-- **Tests:** Boundary validation/error tests, redaction tests, real dependency failure smoke.
+- **IN_SCOPE:** Define durable, project-scoped trusted event catalog, payload schema, provenance, dedupe key, and retention/audit semantics.
+- **OUT_OF_SCOPE:** Arbitrary user events, unauthenticated webhooks, secret payloads, or scheduler redesign.
+- **Owner:** Core/API writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** Only cataloged event types validate; payloads are bounded/redacted; events persist durably with idempotency and audit provenance.
+- **STOP_CONDITION:** `PASS` after schema, migration, and integration tests.
+- **Escalation:** Only an unresolved event contract or migration authorization issue.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Additive migration; preserve unknown historical records; never persist secrets.
+- **Tests:** Catalog allowlist, payload bounds, dedupe, authorization, redaction, and restart durability tests.
+- **Docs:** `docs/develop/api.md` and `docs/reference/mcp-tools.md` if exposed.
+- **Exclusive writer territory:** Event schema/core/API migration and tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; isolated from dispatcher.
+- **Verification plan:** Insert each approved fixture, reject unknown/oversized payloads, restart, and verify durable audit state.
+- **Causal remediation rule:** Repair the first validation or persistence boundary that accepts unsafe/untrusted data.
+- **Finding classification:** Untrusted event acceptance or loss is `BLOCKING`; new event ideas are `FOLLOW_UP`; audit enrichment is `INFORMATIONAL`.
+
+#### JOB-101 — Exact-match dispatcher and idempotent queue
+
+- **IN_SCOPE:** Dispatch trusted catalog events to exact-match jobs with bounded queueing, idempotency, retry state, and failure visibility.
+- **OUT_OF_SCOPE:** Fuzzy matching, arbitrary code execution, infinite retries, or credential acquisition.
+- **Owner:** API/jobs writer.
+- **Dependencies:** JOB-100.
+- **Acceptance:** Exact event/job matches enqueue once, retries are bounded and durable, nonmatches do not run, and failures are inspectable.
+- **STOP_CONDITION:** `PASS` after restart and duplicate-event fixtures.
+- **Escalation:** Only an unresolved retry/idempotency product choice or unavailable scheduler access.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** No arbitrary event execution; dead-letter failed jobs; retain audit evidence.
+- **Tests:** Exact-match, duplicate, concurrent, restart, timeout, retry-bound, and dead-letter tests.
+- **Docs:** `docs/operations/index.md` and API reference if route behavior changes.
+- **Exclusive writer territory:** Scheduler/dispatcher/queue and focused tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with event schema.
+- **Verification plan:** Emit fixture events, inspect queue/run IDs, restart mid-run, repeat events, and verify one effective execution.
+- **Causal remediation rule:** Fix the first event-key, queue, or lease race proven by the durable trace.
+- **Finding classification:** Duplicate or unauthorized execution is `BLOCKING`; retry tuning is `FOLLOW_UP`; telemetry is `INFORMATIONAL`.
+
+#### JOB-102 — Jobs UI
+
+- **IN_SCOPE:** Show trusted events, queued/running/completed/failed jobs, retries, and safe operator actions in the existing Jobs UI.
+- **OUT_OF_SCOPE:** Arbitrary job editing, secret payload display, new scheduler policy, or unrelated dashboard redesign.
+- **Owner:** Dashboard writer.
+- **Dependencies:** JOB-101.
+- **Acceptance:** UI accurately reflects durable state, redacts payloads, explains failures, and supports only authorized bounded actions.
+- **STOP_CONDITION:** `PASS` after deployed route and visual checks.
+- **Escalation:** Unavailable deployment/browser access or unresolved action authorization.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** No secret rendering; preserve existing jobs and fail closed on actions.
+- **Tests:** API/UI state matrix, polling/reload, action authorization, accessibility, console/network, and viewport tests.
+- **Docs:** `docs/operations/index.md` if operator workflow changes.
+- **Exclusive writer territory:** Jobs dashboard route/components and tests.
+- **Phase/counts:** P3; 3 writers / 3 nonwriters; isolated UI territory.
+- **Verification plan:** Exercise each durable state, reload/poll, invoke safe action, inspect redaction, and health-check route.
+- **Causal remediation rule:** Fix the first API-to-UI state mapping defect rather than adding display fallbacks.
+- **Finding classification:** Misrepresented or unsafe job state is `BLOCKING`; unrelated dashboard polish is `FOLLOW_UP`; extra telemetry is `INFORMATIONAL`.
+
+#### USAGE-100 — Advisory thresholds
+
+- **IN_SCOPE:** Define provider-neutral, project-scoped advisory budgets/thresholds for requests, tokens, cost, and cache fields when reported.
+- **OUT_OF_SCOPE:** Billing enforcement, provider credentials, automatic throttling, or inferred cost/cache values.
+- **Owner:** Core/API writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** Thresholds are advisory, distinguish unknown from zero, preserve reported numeric counters, and never block a request by default.
+- **STOP_CONDITION:** `PASS` after model/API fixture tests.
+- **Escalation:** Only a product decision about threshold units or missing-value wording.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** No enforcement or billing inference; project isolation and safe defaults.
+- **Tests:** Threshold evaluation, unknown/zero, UTC, project isolation, and redaction tests.
+- **Docs:** `docs/concepts/architecture.md` and `docs/usage/usage.md` if directly affected.
+- **Exclusive writer territory:** Usage budget model/API and tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; isolated from usage UI.
+- **Verification plan:** Feed provider-neutral fixtures at below/equal/above/unknown thresholds and verify advisory outputs only.
+- **Causal remediation rule:** Fix the first normalization or comparison defect; never convert unknown to zero.
+- **Finding classification:** Blocking behavior or false billing claim is `BLOCKING`; richer budgets are `FOLLOW_UP`; omitted telemetry is `INFORMATIONAL`.
+
+#### USAGE-101 — Evaluation and attention dedupe
+
+- **IN_SCOPE:** Evaluate advisory thresholds, create deduplicated attention items with freshness and evidence, and preserve unknown semantics.
+- **OUT_OF_SCOPE:** Notifications to external systems, automatic throttling, provider billing, or repeated alert spam.
+- **Owner:** API/core writer.
+- **Dependencies:** USAGE-100.
+- **Acceptance:** Same condition produces one active attention item, changes resolve/reopen deterministically, and stale/unknown data is labeled.
+- **STOP_CONDITION:** `PASS` after event/restart/dedupe fixtures.
+- **Escalation:** Only unresolved dedupe lifecycle choice or unavailable required scheduler access.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Advisory only; retain evidence; no secret payloads.
+- **Tests:** Dedupe, resolve/reopen, stale, unknown, concurrent evaluation, and restart tests.
+- **Docs:** `docs/usage/usage.md` if attention semantics are user-facing.
+- **Exclusive writer territory:** Usage evaluator/attention persistence and tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; isolated from usage UI.
+- **Verification plan:** Evaluate repeated and changed fixtures, restart, inspect evidence and active count, and verify no duplicate attention rows.
+- **Causal remediation rule:** Fix the stable condition key or state transition causing duplicate/missing attention.
+- **Finding classification:** Alert spam or missed active condition is `BLOCKING`; delivery channels are `FOLLOW_UP`; evidence metadata is `INFORMATIONAL`.
+
+#### USAGE-102 — Usage UI
+
+- **IN_SCOPE:** Add usage/attention presentation with totals, tokens, reported cache states, advisory thresholds, freshness, unknown values, and export where supported.
+- **OUT_OF_SCOPE:** Billing controls, fake data, provider branding, credentials, or unrelated navigation redesign.
+- **Owner:** Dashboard writer.
+- **Dependencies:** USAGE-101.
+- **Acceptance:** UI labels advisory results, unknown/not-reported values, UTC freshness, loading/empty/error states, and deduplicated attention.
+- **STOP_CONDITION:** `PASS` after deployed route and 1440x900/390x844 visual gate.
+- **Escalation:** Product choice on unknown wording or unavailable browser/deployment access.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Never fabricate usage or expose credentials; preserve navigation.
+- **Tests:** Component/API/Playwright states, accessibility, console/network, screenshots, and health checks.
+- **Docs:** `docs/usage/usage.md`, `docs/usage/index.md`, and reference links if route is added.
+- **Exclusive writer territory:** Usage route/components and focused tests.
+- **Phase/counts:** P3; 3 writers / 3 nonwriters; isolated from attention evaluator.
+- **Verification plan:** Render fixture states, filter UTC range, inspect unknown/advisory labels, export if present, then deployed route check.
+- **Causal remediation rule:** Fix the first API field-to-label mapping defect proven by network and DOM evidence.
+- **Finding classification:** False values or unsafe disclosure is `BLOCKING`; visual polish is `FOLLOW_UP`; extra chart detail is `INFORMATIONAL`.
+
+#### VAULT-100 — Job vault-reference contract
+
+- **IN_SCOPE:** Define opt-in metadata-only job references to vault items, authorization, audit identity, and no-secret payload rules.
+- **OUT_OF_SCOPE:** Auto-unseal, secret retrieval in UI, plaintext persistence, or credential rotation.
+- **Owner:** Security/core writer.
+- **Dependencies:** JOB-100, DOC-100.
+- **Acceptance:** Jobs may reference an authorized vault item by stable ID without storing its value; default path is no vault access and audit is complete.
+- **STOP_CONDITION:** `PASS` after sealed/unsealed fixture contract tests.
+- **Escalation:** Authorization or destructive secret-operation ambiguity only.
+- **Verification owner:** `@ingenium-security-auditor` and `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Vault opt-in; never auto-unseal; never log or persist secret values.
+- **Tests:** Sealed, missing, unauthorized, authorized metadata, audit, and project isolation tests; no real credentials.
+- **Docs:** `docs/security/index.md` and job/vault reference docs if public.
+- **Exclusive writer territory:** Vault/job reference contract and tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; security territory isolated.
+- **Verification plan:** Exercise sealed default and disposable authorized reference, inspect audit/redaction, and seal afterward.
+- **Causal remediation rule:** Fix the first secret boundary that exposes or authorizes an unsafe value.
+- **Finding classification:** Secret exposure or auto-unseal is `BLOCKING`; rotation features are `FOLLOW_UP`; audit detail is `INFORMATIONAL`.
+
+#### VAULT-101 — Bounded runner injection
+
+- **IN_SCOPE:** Inject authorized vault references into bounded job runners only after explicit opt-in, with lifetime, redaction, and failure controls.
+- **OUT_OF_SCOPE:** Global environment injection, auto-unseal, arbitrary commands, secret caching, or real credentials in default gates.
+- **Owner:** Security/jobs writer.
+- **Dependencies:** VAULT-100, JOB-101.
+- **Acceptance:** Authorized disposable fixture receives only the requested secret at runtime, is bounded and redacted, and sealed/expired access fails closed.
+- **STOP_CONDITION:** `PASS` after isolated runner tests and security review.
+- **Escalation:** Missing vault authorization or unresolved secret lifetime choice.
+- **Verification owner:** `@ingenium-security-auditor` and `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** No auto-unseal; wipe transient material; fixture-only default gates.
+- **Tests:** Authorization, TTL, sealed, timeout, crash cleanup, redaction, and no-real-credential tests.
+- **Docs:** `docs/security/index.md` and operations guidance.
+- **Exclusive writer territory:** Runner injection and security tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with vault UI.
+- **Verification plan:** Run bounded disposable job, inspect process/log/audit surfaces, expire/seal, and prove no residue.
+- **Causal remediation rule:** Fix the first injection, lifetime, or redaction boundary proven by the test trace.
+- **Finding classification:** Secret leak or unbounded execution is `BLOCKING`; provider integrations are `FOLLOW_UP`; audit telemetry is `INFORMATIONAL`.
+
+#### VAULT-102 — Vault UI and audit
+
+- **IN_SCOPE:** Show vault-reference status, opt-in authorization, bounded job use, and secret-free audit records in existing UI.
+- **OUT_OF_SCOPE:** Secret value display, auto-unseal, credential setup, or unrelated security redesign.
+- **Owner:** Dashboard/security writer.
+- **Dependencies:** VAULT-101.
+- **Acceptance:** UI never renders values, shows sealed/authorized/denied states, and audit identifies actor/job/action without secrets.
+- **STOP_CONDITION:** `PASS` after deployed exact workflow and visual/security checks.
+- **Escalation:** Authorization ambiguity or unavailable browser/deployment access.
+- **Verification owner:** `@ingenium-security-auditor`, `@ingenium-qa`, and `@ingenium-qa-vision` for UI.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Sealed default, no automatic unlock, fixture-only tests, preserve audit evidence.
+- **Tests:** UI/API state matrix, audit redaction, accessibility, console/network, viewport, and no-real-credential tests.
+- **Docs:** `docs/security/index.md` and `docs/operations/index.md` if operator behavior changes.
+- **Exclusive writer territory:** Vault UI/audit presentation and tests.
+- **Phase/counts:** P3; 3 writers / 3 nonwriters; isolated UI territory.
+- **Verification plan:** Exercise sealed/denied/authorized fixture states, inspect DOM/network/audit, and verify value absence.
+- **Causal remediation rule:** Fix the first secret-bearing response or rendering boundary, not a masking symptom.
+- **Finding classification:** Any secret exposure is `BLOCKING`; visual refinements are `FOLLOW_UP`; audit context is `INFORMATIONAL`.
+
+#### RESTORE-100 — Restore state machine
+
+- **IN_SCOPE:** Define explicit operator-command-first restore states, authorization, preview, confirmation, progress, failure, rollback, and audit transitions.
+- **OUT_OF_SCOPE:** Automatic restore, destructive purge, unsupported resource restoration, or hidden confirmation.
+- **Owner:** Core/API writer.
+- **Dependencies:** DOC-100.
+- **Acceptance:** Valid transitions are durable and auditable; restore requires explicit authorization and preserves source data; invalid transitions fail closed.
+- **STOP_CONDITION:** `PASS` after isolated state-machine and restore-preview tests.
+- **Escalation:** Destructive authorization or unsupported restore scope ambiguity.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Operator command first; immutable source backup; explicit confirmation; preserve failed evidence.
+- **Tests:** State transition, replay/idempotency, preview-vs-run, authorization, failure, and rollback tests.
+- **Docs:** `docs/operations/index.md` and backup reference docs.
+- **Exclusive writer territory:** Restore state model/core/API and tests.
+- **Phase/counts:** P1; 3 writers / 3 nonwriters; isolated from executor.
+- **Verification plan:** Walk every allowed and rejected transition with disposable backup and inspect audit/revision state.
+- **Causal remediation rule:** Fix the first invalid transition or authorization boundary, never bypass it in the UI.
+- **Finding classification:** Unsafe/destructive transition is `BLOCKING`; unsupported resource types are `FOLLOW_UP`; transition logs are `INFORMATIONAL`.
+
+#### RESTORE-101 — Supervisor maintenance executor
+
+- **IN_SCOPE:** Run authorized restore maintenance through supervisor-controlled bounded execution with status, timeout, cleanup, and health checks.
+- **OUT_OF_SCOPE:** Automatic restore triggers, raw process spawning from UI, unbounded commands, or unsupported backup formats.
+- **Owner:** DevOps/API writer.
+- **Dependencies:** RESTORE-100, JOB-101.
+- **Acceptance:** Operator command starts one bounded executor, status survives restart, timeout/failure is visible, and service remains healthy or safely degraded.
+- **STOP_CONDITION:** `PASS` after deployed Compose execution and health checks.
+- **Escalation:** Unavailable deployment access or unreproducible executor failure after bounded diagnosis.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Supervisor ownership, no shell interpolation of untrusted values, source backup preserved, operator confirmation required.
+- **Tests:** Executor command, timeout, restart, cleanup, authorization, logs, health, and containment tests.
+- **Docs:** `docs/operations/index.md` and deployment guidance.
+- **Exclusive writer territory:** Supervisor/API maintenance executor and tests.
+- **Phase/counts:** P2; 3 writers / 3 nonwriters; no overlap with restore state model.
+- **Verification plan:** Preview then authorized disposable restore, observe supervisor/status/health, force bounded failure, and inspect retained evidence.
+- **Causal remediation rule:** Fix the first command construction, supervision, timeout, or status persistence root cause.
+- **Finding classification:** Unbounded/destructive execution or false health is `BLOCKING`; additional formats are `FOLLOW_UP`; logs are `INFORMATIONAL`.
+
+#### RESTORE-102 — Operator workflow
+
+- **IN_SCOPE:** Provide a clear preview→authorize→run→monitor→verify workflow in the existing operations UI/API.
+- **OUT_OF_SCOPE:** Automatic restore, hidden confirmation, direct secret input, or unsupported resource promises.
+- **Owner:** Dashboard/operations writer.
+- **Dependencies:** RESTORE-101.
+- **Acceptance:** Operator sees exact scope, confirmation, progress, terminal outcome, rollback guidance, and audit link; UI prevents unsafe defaults.
+- **STOP_CONDITION:** `PASS` after deployed desktop/mobile workflow and accessibility checks.
+- **Escalation:** Destructive product decision or unavailable browser/deployment access.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Operator-command-first, explicit confirmation, preserve source and failed evidence.
+- **Tests:** Playwright preview/confirm/cancel/failure/reload, API authorization, accessibility, console/network, screenshots.
+- **Docs:** `docs/operations/index.md` and backup/restore reference docs.
+- **Exclusive writer territory:** Restore operator UI and tests.
+- **Phase/counts:** P3; 3 writers / 3 nonwriters; isolated workflow territory.
+- **Verification plan:** Run disposable preview and authorized execution, inspect every state, reload, and verify audit/health.
+- **Causal remediation rule:** Fix the first state or authorization mismatch shown by API and DOM evidence.
+- **Finding classification:** Unsafe workflow or misleading scope is `BLOCKING`; visual polish is `FOLLOW_UP`; operator hints are `INFORMATIONAL`.
+
+#### MCP-104 — Report API
+
+- **IN_SCOPE:** Expose project-scoped MCP usefulness report API with bounded filters, provenance, freshness, and safe error envelopes.
+- **OUT_OF_SCOPE:** New catalog semantics, secrets, unbounded export, or provider billing.
+- **Owner:** API/MCP writer.
+- **Dependencies:** MCP-103.
+- **Acceptance:** Authorized callers receive deterministic fixture/live report fields and unauthorized, invalid, and oversized requests fail safely.
+- **STOP_CONDITION:** `PASS` after API contract and configured smoke tests.
+- **Escalation:** Unresolved public response contract or unavailable configured service.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Read-only, bounded, redacted, project-isolated.
+- **Tests:** API schema, auth, filters, empty/error, size, freshness, and fixture tests.
 - **Docs:** `docs/develop/api.md` and `docs/reference/mcp-tools.md`.
+- **Exclusive writer territory:** Report API route/tool and tests.
+- **Phase/counts:** P3; 3 writers / 3 nonwriters; no overlap with inspector UI.
+- **Verification plan:** Call valid and invalid fixture requests, compare provenance, and health-check deployed route.
+- **Causal remediation rule:** Fix the first route validation or report serialization defect.
+- **Finding classification:** Unsafe or nondeterministic API is `BLOCKING`; extra filters are `FOLLOW_UP`; diagnostics are `INFORMATIONAL`.
 
-#### MCP-005 — Operator reference and dynamic child gateway
+#### MCP-105 — Existing Tool Manager inspector UI
 
-- **IN_SCOPE:** Document and verify discovery/auth/project troubleshooting plus dynamic child MCP server registration, gateway routing, Playwright/browser reachability, catalog categories, and enable/disable toggles.
-- **OUT_OF_SCOPE:** Implementing child servers or Playwright features not supported by source, and Docs Workspace mutation.
-- **Owner:** MCP/docs writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** An operator can register/list a supported child server, observe its running state, discover dynamically imported tools named with lowercase `ingenium_<server>_<tool>`, filter categories, toggle supported tools, and diagnose three common failures using real configured services; built-in extension-tool exceptions remain intact; Playwright reaches the supported gateway path.
-- **STOP_CONDITION:** `PASS` only for source-supported gateway behavior; `STOP`/`CANCELLED` only on an explicit user request; unsupported child capability follows the stated scope boundary, and missing external child access is escalated.
-- **Escalation:** Do not document an endpoint or tool as supported without source and real-path evidence; use a bounded diagnosis for gateway failures.
-- **Verification owner:** `@ingenium-qa`; real child gateway/discovery and Playwright smoke, plus dashboard catalog/category/toggle path.
-- **Rollback/safety:** Register only disposable/test child definitions; avoid real credentials; remove only task-owned registrations after verification.
-- **Tests:** Server sync/list/update tests, real child discovery, Playwright browser smoke, catalog UI checks.
-- **Docs:** `docs/reference/mcp-tools.md`, `docs/reference/docs-workspace.md` only for relevant gateway references, and `docs/usage/index.md`.
+- **IN_SCOPE:** Add report inspection to the existing Tool Manager without creating a parallel tool-management surface.
+- **OUT_OF_SCOPE:** New dashboard shell, catalog redesign, or secret/prompt display.
+- **Owner:** Dashboard writer.
+- **Dependencies:** MCP-104.
+- **Acceptance:** Existing Tool Manager shows report freshness, fixture/live provenance, per-tool outcomes, and empty/error states accurately.
+- **STOP_CONDITION:** `PASS` after deployed route and visual gate.
+- **Escalation:** Unavailable browser/deployment access or unresolved existing-surface placement choice.
+- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve existing toggles; no secret/prompt rendering; fail closed on stale report.
+- **Tests:** Component/API/Playwright, accessibility, console/network, 1440x900 and 390x844 screenshots.
+- **Docs:** `docs/reference/mcp-tools.md` if inspector is documented.
+- **Exclusive writer territory:** Existing Tool Manager inspector components and tests.
+- **Phase/counts:** P3; 3 writers / 3 nonwriters; no overlap with report API.
+- **Verification plan:** Render fixture, live, stale, empty, and error states in the existing manager, then check deployment.
+- **Causal remediation rule:** Fix the first API-to-inspector mapping defect, not stale-state cosmetics.
+- **Finding classification:** Misleading report or exposed content is `BLOCKING`; shell redesign is `FOLLOW_UP`; layout notes are `INFORMATIONAL`.
 
-### Context and learning
+#### MCP-106 — Usefulness review
 
-#### CTX-001 — Canonical context entries
+- **IN_SCOPE:** Review MCP report/API/inspector usefulness against current catalog and representative fixture/live tasks and record evidence.
+- **OUT_OF_SCOPE:** Implementing new tools, changing scores without evidence, provider credentials, or broad UX review.
+- **Owner:** `@ingenium-qa`.
+- **Dependencies:** MCP-103, MCP-104, MCP-105.
+- **Acceptance:** Review distinguishes useful, reachable, not-run, unknown, and failed; representative outcomes have reproducible evidence and no secrets.
+- **STOP_CONDITION:** `PASS` after one bounded review and recorded evidence.
+- **Escalation:** Only genuine usefulness definition ambiguity or unavailable required live access.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for the reviewed deployed build.
+- **Rollback/safety:** Read-only review; no catalog mutation; fixture-first and no real credentials.
+- **Tests:** Re-run report/API/inspector contract checks and representative fixture matrix.
+- **Docs:** Update `docs/reference/mcp-tools.md` only for directly verified behavior.
+- **Exclusive writer territory:** Review evidence artifact only; no implementation territory overlap.
+- **Phase/counts:** P4; 1 writer / 3 nonwriters; writer slot reserved for evidence, no source overlap.
+- **Verification plan:** Review current catalog, run fixtures, inspect deployed inspector, classify evidence, and publish bounded findings.
+- **Causal remediation rule:** Any blocker names the observed producer and is fixed only in a later declared contract; do not patch review output.
+- **Finding classification:** In-scope acceptance failure is `BLOCKING`; out-of-scope usefulness ideas are `FOLLOW_UP`; evidence context is `INFORMATIONAL`.
 
-- **IN_SCOPE:** Ownership, schema, tags, priority, project isolation, and CRUD for `/context` entries.
-- **OUT_OF_SCOPE:** Replacing TodoWrite, transcript export, or cross-project sharing.
-- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Create/list/search/update/delete are documented and real-tested; entries remain project-isolated; `/context` supports upload of a bounded text/Markdown document with safe metadata and clear failure handling.
-- **STOP_CONDITION:** `PASS` after real API upload/CRUD; `STOP`/`CANCELLED` only on an explicit user request; unsupported formats follow the stated scope boundary, and escalate only for required storage access or ambiguous ownership.
-- **Escalation:** Verify the actual context owner and upload route before changing schema or namespace.
-- **Verification owner:** `@ingenium-qa`; real API CRUD, upload, size/type rejection, and isolation.
-- **Rollback/safety:** Preserve provenance and source metadata; reject unsafe paths and oversized uploads; delete only disposable fixtures.
-- **Tests:** Context API integration, upload validation, isolation, and metadata tests.
-- **Docs:** `docs/reference/mcp-tools.md`, `docs/concepts/architecture.md`, and `docs/reference/docs-workspace.md` only where context/RAG is described.
+#### COORD-100 — Cooperative multi-session guarantee
 
-#### CTX-002 — Retrieval, checkpoints, and version browsing
+- **IN_SCOPE:** Define the guarantee for managed agents sharing one project and canonical worktree; enforce project ownership for every task read/mutation; add task revision/CAS, request-hash idempotency, and atomic reserve/release semantics; specify exact relative file/tree/reserved claim grammar for downstream coordination.
+- **OUT_OF_SCOPE:** Absolute prevention of manual editor or external-process writes, dashboard UI, transcript sharing, or historical audit.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** MCP-106, TASK-102.
+- **Acceptance:** Every task lookup and mutation rejects foreign-project IDs; stale revisions and conflicting reservations fail deterministically; idempotent retries return the original result and reject changed payloads; the same-project/canonical-worktree managed-agent boundary and exact claims (`path`, `tree`, `@build`, `@repository`) are defined with no globs, absolute paths, traversal, `.git/**`, secrets, or ambiguous prefixes; manual/external writes are explicitly not promised.
+- **STOP_CONDITION:** `PASS` after task core/API/MCP fixtures and review against COORD-101..106; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only genuine guarantee/ownership ambiguity or unavailable required source access.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for task-boundary route acceptance.
+- **Rollback/safety:** Use additive task concurrency state, preserve existing tasks, enforce project isolation, and reject unsafe claim syntax rather than broadening it.
+- **Tests:** Core/API/MCP cross-project negatives, stale revision, idempotent replay/hash mismatch, concurrent reservation/release, grammar, and canonical-worktree contract fixtures.
+- **Docs:** This roadmap entry only until shipped behavior directly affects canonical operational documentation.
+- **Exclusive writer territory:** Task core/API/MCP ownership and concurrency paths, their migration/tests, and coordination contract fixtures; no overlap with existing feature territories.
+- **Phase/counts:** C0; 3 writers / 3 nonwriters; fast owns MCP/fixtures, premium owns task core/API boundaries, and docs owns directly affected contracts.
+- **Verification plan:** Exercise foreign-project IDs, stale/concurrent updates, replayed requests, and reservations first; then validate each guarantee against COORD-101..106 and reject any promise covering manual or external writes.
+- **Causal remediation rule:** Fix the earliest task ownership, revision, idempotency, reservation, or claim-grammar boundary; do not add downstream exceptions.
+- **Finding classification:** Cross-project task access, lost updates, duplicate reservations, or a missing guarantee boundary is `BLOCKING`; broader coordination features are `FOLLOW_UP`; clarified terminology is `INFORMATIONAL`.
 
-- **IN_SCOPE:** Bounded relevance/search, batch loading, requested-ID ordering, missing-entry handling, explicit checkpoints, and browsing prior context versions.
-- **OUT_OF_SCOPE:** Automatic destructive compaction, unbounded retrieval, or replacing document version history.
-- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Representative queries return relevant bounded results; batch retrieval preserves requested order; checkpoints record recoverable state; version browsing shows history and safe restore/rollback semantics.
-- **STOP_CONDITION:** `PASS` after real retrieval/checkpoint/version paths; `STOP`/`CANCELLED` only on an explicit user request; unsupported version operations follow the stated scope boundary, and escalate only for an explicit irreversible product choice.
-- **Escalation:** Quality-check returned entries and provenance, not just row counts; trace missing IDs and ordering from producer to response.
-- **Verification owner:** `@ingenium-qa`; real retrieval quality spot-check, checkpoint create/read, and version browse/restore fixture.
-- **Rollback/safety:** Checkpoints and versions are append-only; restore requires explicit authorization and preserves the current version.
-- **Tests:** Search relevance, batch ordering, missing IDs, checkpoint, version browse/restore tests.
-- **Docs:** `docs/concepts/architecture.md`, `docs/reference/mcp-tools.md`, and `docs/reference/docs-workspace.md` for RAG/version boundaries.
+#### COORD-101 — Coordination registry and core primitives
 
-#### CTX-003 — RAG ingestion and current learning
+- **IN_SCOPE:** Add project-scoped coordination storage and core operations for `project_id`, opaque `worktree_id`, `session_id`, incarnation, hashed ownership token, revision/CAS, request-hash idempotency, monotonic fence, heartbeat/TTL, exact file/tree/coarse claims, baseline hashes, dirty/quarantined/collision state, bounded snapshots, and optional `current_task_id`/`context_conversation_id` plus revision.
+- **OUT_OF_SCOPE:** UI, plugin event wiring, manual/external write prevention, raw transcript/reasoning storage, and cross-project claims.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** COORD-100.
+- **Acceptance:** Register/recover/update/heartbeat/claim/release/close primitives enforce project/worktree/session/incarnation isolation; path-segment overlap is atomic, batch reservation rolls back wholly, no globs are accepted, snapshots are bounded, and `checkpointAfterWrite()` is outside transactions.
+- **STOP_CONDITION:** `PASS` after migration/core concurrency and failure fixtures; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only migration authorization, unavailable required database access, or unreproducible bounded concurrency failure.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Additive migration with project isolation, hashed tokens, quarantine on uncertain writes, and retained failure evidence.
+- **Tests:** Migration/foreign-key, CAS, idempotency, fence monotonicity, TTL/expiry, path-prefix overlap, atomic batch rollback, hash/state, bounded snapshot, and WAL-lock fixtures.
+- **Docs:** This roadmap entry; directly affected database/API references only after implementation ships.
+- **Exclusive writer territory:** `packages/ingenium-core` coordination migration/tools/tests; no overlapping core writer.
+- **Phase/counts:** C1; 3 writers / 3 nonwriters; fast owns fixtures, premium owns migration/core, docs owns roadmap maintenance.
+- **Verification plan:** Run isolated database fixtures for each state transition, concurrent overlap, rollback, expiry, and transaction/checkpoint path once.
+- **Causal remediation rule:** Fix the first transaction, identity, or overlap-check root cause at the core boundary and rerun only its failing fixture.
+- **Finding classification:** Cross-project access, non-atomic claims, token leakage, or WAL locking is `BLOCKING`; richer state is `FOLLOW_UP`; telemetry is `INFORMATIONAL`.
 
-- **IN_SCOPE:** Connect uploaded/context documents and external observations to durable RAG sources/traits; verify current timestamps, deduplication, provenance, and useful output.
-- **OUT_OF_SCOPE:** New embedding providers, wholesale reindexing, or treating counts as quality.
-- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A fresh upload is ingested into RAG, searchable, and answerable with source attribution; current learning input is timestamp-verified and sample output is correct/useful or an explainable no-op.
-- **STOP_CONDITION:** `PASS` after real upload→RAG→ask and pipeline evidence; `STOP`/`CANCELLED` only on an explicit user request; unsupported format/provider follows the stated scope boundary, and escalate only for unavailable configured provider access.
-- **Escalation:** Log and inspect zero-output reasons, latest timestamps, and a representative result before declaring success.
-- **Verification owner:** `@ingenium-qa`; real RAG ingestion/search/ask and learning pipeline quality check.
-- **Rollback/safety:** Use isolated sources; retain source IDs and provenance; remove only fixture data through supported deletion.
-- **Tests:** RAG ingest/search/ask, upload format/size, freshness/deduplication/quality tests.
-- **Docs:** `docs/reference/docs-workspace.md`, `docs/concepts/architecture.md`, and `docs/concepts/self-learning.md`.
+#### COORD-102 — Coordination API and MCP surface
 
-#### CTX-004 — Safe maintenance and auditability
+- **IN_SCOPE:** Expose register/recover/update/heartbeat/snapshot/batch-claim/release/close and authorized-takeover operations with exact HTTP methods, status/error envelopes, idempotency keys/request hashes, expected revisions, and four redacted MCP tools: `ingenium_coordination_status`, `ingenium_coordination_update`, `ingenium_coordination_claim`, and `ingenium_coordination_release`.
+- **OUT_OF_SCOPE:** Plugin enforcement, dashboard UI, raw paths/tokens in responses, arbitrary takeover, and cross-project access.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** COORD-101.
+- **Acceptance:** Document exact endpoints, methods, validation errors, conflict/expiry/unavailable statuses, CAS/idempotency behavior, authorized takeover evidence, project/worktree isolation, and redaction of paths, ownership tokens, prompts, and credentials.
+- **STOP_CONDITION:** `PASS` after API/MCP contract, auth, and idempotency fixtures; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unresolved public HTTP/error/tool contract ambiguity or unavailable configured API access.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Fail closed on auth, stale revision, unknown project, expired lease, or unavailable API; never return bearer/token material.
+- **Tests:** Method/status/error matrix, auth/isolation, CAS, retries, duplicate request hashes, takeover authorization, redaction, and four-tool schema fixtures.
+- **Docs:** This roadmap and `docs/develop/api.md`/`docs/reference/mcp-tools.md` only when the shipped public surface is verified.
+- **Exclusive writer territory:** `services/ingenium-api` coordination routes and `services/ingenium-server` MCP adapters/tests.
+- **Phase/counts:** C2; 3 writers / 3 nonwriters; fast owns MCP adapters, premium owns API, docs owns roadmap only.
+- **Verification plan:** Exercise every declared response class with disposable project/worktree/session fixtures, then inspect redaction and isolation once.
+- **Causal remediation rule:** Fix the earliest API-to-core identity, status, or serialization mismatch; do not soften client errors.
+- **Finding classification:** Unauthorized access, leaked token/path, wrong status, or non-idempotent mutation is `BLOCKING`; optional filters are `FOLLOW_UP`; bounded audit fields are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Identify stale/conflicting/invalid context, preserve provenance, require explicit authorization for destructive action, and report auditable outcomes.
-- **OUT_OF_SCOPE:** Silent purge, automatic policy invention, and unrelated database cleanup.
-- **Owner:** Core/API writer; verification owner: `@ingenium-security-auditor`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Candidates are previewable; non-destructive remediation is safe; destructive action requires explicit authorization; audit records identify what changed without secrets.
-- **STOP_CONDITION:** `PASS` after isolated maintenance run; `STOP`/`CANCELLED` only on an explicit user request; unsupported destructive behavior requires the stated authorization escalation.
-- **Escalation:** Preserve evidence and stop on any ambiguity about scope or irreversible effect.
-- **Verification owner:** Security auditor with QA regression of the safe path.
-- **Rollback/safety:** Snapshot/fixture first; preserve versions and provenance; use supported rollback or restore, never direct deletion.
-- **Tests:** Candidate preview, authorization, audit, no-secret, and rollback tests.
-- **Docs:** Operations/context maintenance guidance and `docs/security/index.md` if security behavior changes.
+#### COORD-103 — Session coordinator plugin awareness
 
-#### CTX-005 — End-to-end context use
+- **IN_SCOPE:** Add a V1 `session-coordinator` wrapper using actual OpenCode event shapes under `event.properties`; lazily register, reconcile SDK state at startup, serialize per-session events, maintain a bounded 30-second heartbeat, dispose/expire sessions, and inject status/todos/diff/current-task/context-revision snapshots through `experimental.chat.system.transform` on the next turn. Sanitize peer text against prompt injection and exclude transcripts, reasoning, payloads, and credentials. Include package/config projections and restart requirement; deployment is later.
+- **OUT_OF_SCOPE:** Write enforcement, dashboard UI, transcript mirroring, raw prompt sharing, and deployment execution.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** COORD-102.
+- **Acceptance:** Lifecycle and transform fixtures use `event.properties`; snapshots are bounded, sanitized, fresh on the next turn, contain only operational peer state, and project to package plus project/global config with an explicit restart requirement.
+- **STOP_CONDITION:** `PASS` after extension lifecycle/typecheck/package and fixture checks; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable configured OpenCode SDK/runtime access or genuine event-shape ambiguity after source inspection.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for a later rebuilt deployment.
+- **Rollback/safety:** Hooks remain non-fatal for reads, never inject untrusted peer instructions, and never log sensitive payloads.
+- **Tests:** Actual `event.properties`, lazy registration, startup reconciliation, per-session serialization, bounded heartbeat, dispose/expiry, transform freshness, injection sanitization, redaction, config projection, restart, and API failure fixtures.
+- **Docs:** This roadmap and directly affected plugin/config references after implementation; no Docs Workspace writes.
+- **Exclusive writer territory:** `packages/ingenium-extension` coordinator wrapper/plugin and focused tests.
+- **Phase/counts:** C3; 3 writers / 3 nonwriters; fast owns extension, premium owns integration fixtures, docs owns roadmap only.
+- **Verification plan:** Run lifecycle and transform fixtures once, verify next-turn freshness and redaction, then confirm restart-required projection without deploying.
+- **Causal remediation rule:** Fix the first event-shape, serialization, freshness, or sanitization boundary; never patch rendered prompt text alone.
+- **Finding classification:** Sensitive sharing, stale/missing peer state, wrong event shape, or unsafe injection is `BLOCKING`; UI/status embellishment is `FOLLOW_UP`; bounded operational detail is `INFORMATIONAL`.
 
-- **IN_SCOPE:** Capture a user preference, consolidate it, retrieve it in a relevant later request, omit it when irrelevant, and expose each transition.
-- **OUT_OF_SCOPE:** Unrelated personality redesign, transcript export, or automatic Docs Workspace writes.
-- **Owner:** Learning/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A fresh preference survives capture→consolidation→retrieval with provenance and is not injected into an irrelevant request; transitions are observable and current.
-- **STOP_CONDITION:** `PASS` after real end-to-end workflow; `STOP`/`CANCELLED` only on an explicit user request; unrelated historical traits remain follow-up, and escalate only for unavailable configured LLM access.
-- **Escalation:** Test the exact user sequence and inspect output quality, freshness, and relevance rather than counts.
-- **Verification owner:** `@ingenium-qa`; real workflow test with quality spot-check and logs.
-- **Rollback/safety:** Use disposable preference data; do not mutate real personality traits without authorization; retain provenance.
-- **Tests:** End-to-end capture/retrieve/relevance tests, current timestamp and quality assertions.
-- **Docs:** `docs/concepts/self-learning.md`, `docs/concepts/architecture.md`, and context reference links.
+#### COORD-104 — Managed write enforcement
 
-### Documentation
+- **IN_SCOPE:** Enforce claims in `tool.execute.before/after` for exact `edit`, `write`, `apply_patch`, `create`, `delete`, and `rename` paths; atomically acquire claims, validate fence/lease and dirty hashes, record actual post-write footprint, quarantine unexpected writes, fail closed when API is unavailable, and deny mutating Bash to writers except fixed wrappers under `@build`/`@repository` claims.
+- **OUT_OF_SCOPE:** Manual VS Code/external writes, read-only Bash, formatter/generator expansion, dashboard UI, and guarantees outside managed OpenCode mutations in an accepted session epoch.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** COORD-103.
+- **Acceptance:** Every supported mutation is checked before execution, multi-path patches reserve atomically, overlap/fence/lease/dirty failures prevent writes, after-hooks record actual footprint, unexpected writes quarantine, API outage blocks mutation, and the guarantee is limited to managed OpenCode writes and accepted session epoch.
+- **STOP_CONDITION:** `PASS` after extension enforcement and two-session conflict fixtures; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable configured OpenCode hook access or an unreproducible enforcement race after bounded diagnosis.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Fail closed before mutation, quarantine rather than silently accept drift, and preserve pre/post hashes and fence evidence.
+- **Tests:** Each mutation verb, multi-path patch, overlap, stale fence, expired lease, dirty baseline, unexpected footprint, API outage, fixed-wrapper allowlist, and read-only Bash fixtures.
+- **Docs:** This roadmap; security/operations wording only when shipped behavior is verified.
+- **Exclusive writer territory:** Extension tool hooks, Bash permission wrappers, enforcement adapters, and tests.
+- **Phase/counts:** C4; 3 writers / 3 nonwriters; premium owns enforcement, fast owns parsers/fixtures, docs owns roadmap only.
+- **Verification plan:** Attempt every in-scope write under owned, peer, stale, expired, dirty, unexpected, and API-down states; prove no mutation before the failing hook returns.
+- **Causal remediation rule:** Repair the earliest pre-execution claim/fence decision or post-write footprint observer; never rely on after-the-fact cleanup.
+- **Finding classification:** A bypassable managed write, unsafe Bash mutation, or API-outage write is `BLOCKING`; manual/external drift is `FOLLOW_UP` under the stated guarantee; evidence is `INFORMATIONAL`.
 
-#### DOC-001 — Canonical roadmap and documentation operating model
+#### COORD-105 — Resource-sync and repository serialization
 
-- **IN_SCOPE:** Maintain this single `ROADMAP.md`, stable IDs, complete contracts, dependencies, serialized append-only markers, repository authority, and link/index checks.
-- **OUT_OF_SCOPE:** Implementing BUG/MCP/CTX behavior, product source changes, Docs Workspace mutation, or unrelated whitespace.
-- **Owner:** `@ingenium-docs`; verification owner: `@ingenium-qa`.
-- **Deployment owner:** N/A — documentation-only task; no runtime deployment acceptance.
-- **Acceptance:** `docs/reference/index.md` links only to `./ROADMAP.md`; lowercase duplicate is absent; every task has all contract fields; marker parser accepts valid pairs and independent concurrent starts, requires per-task implementation evidence, and rejects malformed, out-of-order, duplicate, and unknown-ID fixtures; markers remain separate from TodoWrite.
-- **STOP_CONDITION:** `PASS` after focused validation, Markdown link checks, and `git diff --check`; `STOP`/`CANCELLED` only on an explicit user request; unrelated findings remain follow-up, and escalate only for a required product decision or unavailable check dependency.
-- **Escalation:** Do not regenerate unrelated docs; report any link target that cannot be verified from the repository.
-- **Verification owner:** `@ingenium-qa`; run append-only marker cases, link validation, and diff checks.
-- **Rollback/safety:** Case-only migration must leave exactly one tracked canonical path; preserve historical content only when authoritative; use explicit file paths and never mutate Docs Workspace.
-- **Tests:** `tests/test-append-only-files.sh` plus valid-pair, parallel-start, malformed, ordering, duplicate-completion, unknown-ID, duplicate-path, and index-link checks.
-- **Docs:** This file, `docs/reference/index.md`, and the focused append-only test only.
+- **IN_SCOPE:** Serialize `@resource-sync`/`@repository` operations as scan → API apply → manifest save; renew and verify fence before saving, serialize concurrent `session.created` across processes, prevent stale manifest deletion, and use coarse claims for repository/git/build mutations.
+- **OUT_OF_SCOPE:** Manual/external filesystem control, arbitrary generators/formatters, full Git workflow redesign, dashboard UI, and deployment execution.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** COORD-104.
+- **Acceptance:** Concurrent syncs cannot delete newer manifests or save under stale fences; scan/apply/save is ordered and recoverable; repository/git/build mutations require the declared coarse claim and project/worktree isolation.
+- **STOP_CONDITION:** `PASS` after multi-process sync, stale-fence, crash, and coarse-claim fixtures; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable process-isolation/runtime access or unreproducible manifest race after bounded diagnosis.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Never delete a manifest without current fence ownership; retain stale/crash evidence and fail closed on API outage.
+- **Tests:** Concurrent `session.created`, scan/apply/save ordering, renewal-before-save, stale deletion prevention, crash/restart recovery, repository/git/build coarse claims, and project isolation.
+- **Docs:** This roadmap and resource-sync/repository operational references only after shipped behavior is verified.
+- **Exclusive writer territory:** `packages/ingenium-extension/resource-sync.ts`, repository/build wrappers, and focused tests.
+- **Phase/counts:** C5; 3 writers / 3 nonwriters; fast owns sync, premium owns process/deployment fixtures, docs owns roadmap only.
+- **Verification plan:** Run two process fixtures through concurrent sync and coarse mutations, force stale/crash/API-down states, and inspect manifests, fences, and retained evidence once.
+- **Causal remediation rule:** Fix the first scan/apply/save ordering, fence renewal, or stale-delete decision proven by the manifest trace.
+- **Finding classification:** Stale deletion, fence bypass, cross-project mutation, or unsafe API-down behavior is `BLOCKING`; broader Git automation is `FOLLOW_UP`; retained evidence is `INFORMATIONAL`.
 
-## Work boundaries
+#### COORD-106 — Multi-window acceptance and rollout
 
-Phase 0 establishes contracts only. Future execution must declare exact files,
-route/agent ownership, acceptance evidence, and rollback before writing. Any
-marker pair is appended only after the corresponding TodoWrite task and tests
-are complete.
-### Work marker log (continued)
-<!-- (work-started) MCP-002 2026-07-27T22:41:35Z ingenium-docs -->
-<!-- (work-started) MCP-003 2026-07-27T22:41:36Z ingenium-docs -->
-<!-- (work-started) MCP-004 2026-07-27T22:41:37Z ingenium-docs -->
-<!-- (work-started) MCP-005 2026-07-27T22:41:38Z ingenium-docs -->
-<!-- (work-started) CTX-002 2026-07-27T22:41:39Z ingenium-docs -->
-<!-- (work-started) CTX-003 2026-07-27T22:41:40Z ingenium-docs -->
-<!-- (work-started) CTX-004 2026-07-27T22:41:41Z ingenium-docs -->
-<!-- (work-started) CTX-005 2026-07-27T22:41:42Z ingenium-docs -->
-<!-- (work-started) DOC-001 2026-07-27T22:41:43Z ingenium-docs -->
-<!-- (work-complete) CTX-004 2026-07-28T01:59:11Z ingenium-software-engineer-premium -->
-Evidence CTX-004: Core/API/MCP checkpoint governance with migration 066, focused core/API/server tests, typechecks, and DB-isolation enforcement.
+- **IN_SCOPE:** Accept and roll out coordination with three real OpenCode 1.18.9 windows in one project and canonical checkout: independent claimed files may proceed concurrently, overlap is blocked before write, peer task/context state is visible next turn, crash/expiry quarantines dirty state, API outage blocks writes, resource sync is safe, project/config projection and restart are verified, sensitive sharing is absent, and logs/visual evidence are collected if UI changes. Document optional separate-worktree stronger isolation as a future mode, not a V1 requirement.
+- **OUT_OF_SCOPE:** Separate-worktree implementation, dashboard UI, transcript/reasoning sharing, manual/external write prevention, real credentials, and acceptance without deployed evidence.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** COORD-105.
+- **Acceptance:** All three-window, conflict, peer-freshness, crash/expiry, quarantine, outage, sync, restart/config, redaction, deployment, cleanup, and regression gates pass; separate-worktree mode is future scope and not used to claim V1 success.
+- **STOP_CONDITION:** `PASS` only after deployed three-window evidence, targeted QA/security checks, cleanup, and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required OpenCode/deployment access, unauthorized destructive cleanup, genuine product ambiguity, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` only if coordination UI changes.
+- **Security owner:** `@ingenium-security-auditor`.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Deploy behind fail-closed gates, preserve dirty/quarantined evidence, clean only owned fixtures, and never use real credentials.
+- **Tests:** Three-window OpenCode 1.18.9 acceptance, independent/overlap claims, next-turn peer snapshot, crash/TTL/quarantine, API outage, resource-sync race, isolation, redaction/prompt-injection, restart/config, logs/console, visual checks if UI, and cleanup/health checks.
+- **Docs:** This roadmap; update only directly affected canonical operational/security references after verified rollout.
+- **Exclusive writer territory:** Deployment/acceptance fixtures, rollout configuration, and coordination evidence; no overlap with implementation source after C5.
+- **Phase/counts:** C6; 1 writer / 3 nonwriters for acceptance, with premium deployment, QA acceptance, security review, and explore evidence; serialize remediation in a new declared wave.
+- **Verification plan:** Deploy the merged build, run the three-window matrix once, inspect API/plugin logs and console/network, run security redaction checks, clean up, and rerun only the causal targeted check for any fixed blocker.
+- **Causal remediation rule:** Name the first failing coordination boundary, remediate only that root cause, redeploy, and rerun the smallest proving acceptance check.
+- **Finding classification:** A failed V1 guarantee, sensitive leak, write bypass, unsafe outage path, or unclean deployment is `BLOCKING`; separate-worktree mode and dashboard/audit enhancements are `FOLLOW_UP`; operational traces are `INFORMATIONAL`.
 
-## Appended roadmap contracts
+#### UI-100 — Shared native Select primitive
 
-The contracts below are appended additions. Existing contracts and marker
-records are immutable. Usage work is provider-agnostic: no task requires a
-provider-specific credential, account, or live billing access.
+- **IN_SCOPE:** Create one accessible shared native `<select>` primitive for dashboard forms, with the repository's required hover/cursor styling, label/id association, disabled/loading/error states, keyboard behavior, and a testable API; inventory every current native-select consumer for the migration lane.
+- **OUT_OF_SCOPE:** Migrating the 52 existing selects, replacing custom menus/comboboxes, changing product choices, redesigning the dashboard shell, or adding a third-party select library.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** DOC-100.
+- **Acceptance:** The primitive renders a real native select, exposes an accessible name, preserves native keyboard semantics, has deterministic empty/disabled/error behavior, passes focused component/accessibility tests, and records the exact 52-select inventory for UI-101.
+- **STOP_CONDITION:** `PASS` after focused primitive/inventory tests and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required test/deployment access, a genuine product decision about native semantics, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for the dashboard build/runtime smoke.
+- **Rollback/safety:** Additive shared primitive only; preserve existing consumers until migration is verified; do not alter unrelated dirty files or use real credentials.
+- **Tests:** Primitive unit/component tests, accessible-name and keyboard tests, 52-consumer inventory/static check, dashboard typecheck/build, and `git diff --check`.
+- **Docs:** This roadmap only; no other canonical documentation is directly affected by the primitive baseline.
+- **Exclusive writer territory:** Shared dashboard Select primitive, its focused tests, and the UI-101 inventory artifact; no overlap with VSCode runtime or route files.
+- **Phase/counts:** P5 UI lane start; 3 writers / 3 nonwriters; fast owns primitive, premium owns deployment/runtime smoke, docs owns roadmap only; zero overlapping writer territory.
+- **Verification plan:** Implement the smallest primitive, run its focused tests and inventory check once, run dashboard typecheck/build, then inspect the diff and retain failure output; fix only a reproducible in-scope root cause and rerun the affected check.
+- **Causal remediation rule:** Fix the earliest primitive contract, labeling, or inventory producer proven by the failing test; do not patch each consumer symptom.
+- **Finding classification:** Missing native/accessibility semantics or an incorrect inventory is `BLOCKING`; unrelated UI drift is `FOLLOW_UP`; test or inventory provenance is `INFORMATIONAL`.
 
-### MCP improvements (continued)
+#### UI-101 — Native select migration and accessible names
 
-#### MCP-006 — Tool control visibility and fail-closed execution
+- **IN_SCOPE:** Migrate all 52 inventoried native selects to UI-100, add or correct accessible names and associations, preserve values/validation/form submission, and remove duplicate local native-select styling where migration proves it redundant.
+- **OUT_OF_SCOPE:** Custom menu/combobox migration, unrelated form redesign, changing option sets or product behavior, adding visual polish beyond the shared primitive, or touching `/vscode`.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** UI-100.
+- **Acceptance:** All 52 identified native selects use UI-100; every select has a programmatic accessible name; existing form behavior and keyboard operation remain intact; focused component/accessibility/static checks pass with no unowned select left behind.
+- **STOP_CONDITION:** `PASS` after the 52-select migration checks, dashboard checks, and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required test/deployment access, a genuine product decision about changed form semantics, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed-route visual gate.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve each existing option/value/validation contract; revert only UI-101 consumer edits if the shared primitive fails; no broad formatting churn.
+- **Tests:** Static count and consumer-ownership check for all 52 selects, focused component/accessibility tests, dashboard typecheck/build, Playwright form/keyboard checks, console/network checks, and 1440x900/390x844 screenshots.
+- **Docs:** This roadmap only unless a shipped user-facing form policy is directly changed.
+- **Exclusive writer territory:** Dashboard files containing the 52 native selects and their focused tests; no overlap with UI-100 primitive internals after the dependency barrier or VSCode files.
+- **Phase/counts:** P5 UI lane; 3 writers / 3 nonwriters; fast owns migration, premium owns deployment, docs owns roadmap only; serialized after UI-100.
+- **Verification plan:** Enumerate source consumers, migrate all 52, run static/count and focused tests once, deploy the merged dashboard, inspect changed routes at both viewports and browser console/network, and rerun only the smallest check for any fixed root cause.
+- **Causal remediation rule:** Fix the first consumer-to-primitive mapping or accessible-name source proven by DOM and source evidence, not an individual visual symptom.
+- **Finding classification:** An unmigrated select, missing accessible name, or broken form/keyboard behavior is `BLOCKING`; unrelated styling drift is `FOLLOW_UP`; layout observations are `INFORMATIONAL`.
 
-- **IN_SCOPE:** Make disabling a built-in or dynamically registered tool in `/mcp-servers` remove it from the agent/OpenCode visible-tools list and make direct execution fail closed; re-enabling restores visibility and execution. Cover the real UI, API, MCP, deployment, visual, and Windows browser paths.
-- **OUT_OF_SCOPE:** Renaming tools, changing catalog semantics, adding new tool providers, weakening authorization, or unrelated dashboard redesign.
-- **Owner:** MCP/API/dashboard writer; verification owner: `@ingenium-qa` and `@ingenium-qa-vision` for the visual gate.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A real built-in and a real dynamic tool can each be disabled from `/mcp-servers`; neither appears in the agent/OpenCode visible-tools list and direct MCP/API execution fails closed with a safe, deterministic error. Re-enabling restores both visibility and successful execution. The same behavior is proven after deployment and from a Windows browser against the supported localhost/WSL gateway, with no provider-specific credential requirement.
-- **STOP_CONDITION:** `PASS` only after deployed API/MCP/UI and Windows browser evidence, exact desktop/mobile visual evidence, and reconciliation of the active marker; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
-- **Escalation:** Escalate only for an authorization decision, unavailable required Windows/browser or deployment access after the configured path, genuine product ambiguity, or a bounded diagnosis that cannot reproduce a root cause; do not escalate for missing provider credentials because none are required.
-- **Verification owner:** `@ingenium-qa`; real dashboard toggle → API state → MCP/OpenCode discovery → direct invocation, deployed health/route checks, and Windows browser acceptance. `@ingenium-qa-vision` owns 1440x900 and 390x844 screenshots, accessibility, console/network, and cleanup evidence.
-- **Rollback/safety:** Fail closed on stale or unknown tool state; preserve built-in exceptions and project isolation; use disposable child-server/tool fixtures; revert only task-owned state/filtering changes and never delete registered production tools.
-- **Tests:** Focused API state/authorization tests; real MCP discovery and direct-execution tests for built-in and dynamic tools; dashboard interaction tests; deployed Docker/Compose rebuild/restart plus health and route checks; Playwright desktop/mobile visual gate; Windows browser localhost/WSL acceptance with console/network review. No provider-specific credentials or live provider billing account.
-- **Docs:** `docs/reference/mcp-tools.md`, `docs/configure/mcp-servers.md`, `docs/usage/dashboard.md`, and affected `docs/reference/index.md` links only if the supported user path changes; verify commands and links.
-- **Changed files:** MCP tool-state/API/server/dashboard implementation and focused test files identified by the source trace; the canonical docs listed above only when directly affected.
+#### UI-102 — Custom menu/combobox pattern migration
 
-### Usage and provider-agnostic telemetry
+- **IN_SCOPE:** Define and migrate in-scope custom menu/combobox controls to one accessible pattern with explicit roles/states, focus management, keyboard/typeahead behavior, outside-click handling, disabled/loading/error states, and native-select parity where applicable.
+- **OUT_OF_SCOPE:** Replacing controls that are not menu/combobox patterns, adding a component library, changing option semantics, broad dashboard navigation redesign, or VSCode route work.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** UI-101.
+- **Acceptance:** Every inventoried custom menu/combobox uses the approved pattern; accessible names, expanded/selected/active states, focus return, Escape/Arrow/Home/End/typeahead behavior, and pointer behavior pass focused and browser checks; no duplicate custom pattern remains in scope.
+- **STOP_CONDITION:** `PASS` after focused accessibility/component tests, deployed changed-route checks, visual gates, and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable browser/deployment access, a genuine product decision about interaction semantics, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed-route and passive desktop/mobile visual gates.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve selected values and server contracts; keep a single reversible migration boundary; do not weaken keyboard/accessibility behavior or alter unrelated controls.
+- **Tests:** Pattern unit/component and accessibility tests, keyboard/focus/typeahead/outside-click tests, route Playwright tests, console/network checks, and 1440x900/390x844 screenshots with browser cleanup.
+- **Docs:** This roadmap only unless verified shipped interaction policy requires a directly affected canonical guide.
+- **Exclusive writer territory:** Dashboard custom menu/combobox components and their focused tests; no overlap with VSCode runtime/route files.
+- **Phase/counts:** P5 UI lane; 3 writers / 3 nonwriters; fast owns pattern migration, premium owns deployment, docs owns roadmap only; serialized after UI-101.
+- **Verification plan:** Inventory custom controls, migrate one shared pattern boundary, run focused keyboard/accessibility tests once, deploy and inspect changed routes at both viewports, then rerun only the proving check for each reproducible in-scope fix.
+- **Causal remediation rule:** Fix the earliest role/state/focus producer proven by the accessibility tree and event trace; do not hide a pattern defect with CSS or click-only fallbacks.
+- **Finding classification:** Broken keyboard/focus semantics, inaccessible naming, or incorrect selection is `BLOCKING`; unrelated visual polish is `FOLLOW_UP`; compatible browser variance is `INFORMATIONAL`.
 
-#### USAGE-001 — Provider-agnostic usage event model and collection
+#### CHAT-101 — Explicit Context project with separate global authority
 
-- **IN_SCOPE:** Define and collect a provider-neutral usage event model for requests, model/provider identity, tokens, cost, cache read/write, timestamps, status, and unknown values; capture usage from all supported provider response shapes without requiring provider-specific credentials.
-- **OUT_OF_SCOPE:** Provider billing integrations, credential management, changing provider routing, invoice reconciliation, or retroactive invention of unavailable token/cost/cache values.
-- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Real configured request paths persist normalized events without leaking prompts, API tokens, credentials, or secrets. Numeric usage-token counters are required for reported request, input, output, and reasoning-token usage; absent counters remain explicitly unknown. Total cost, cache use/read/write state, provider, model, status, and UTC freshness are represented when reported. Cache state distinguishes reported use, read, write, known-zero, and unknown; it does not infer provider hit-rate or miss. No provider-specific credential or account is required.
-- **STOP_CONDITION:** `PASS` after focused model/collection tests, real provider-neutral fixture ingestion, deployed health checks, and active-marker reconciliation; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
-- **Escalation:** Escalate only for an unresolved data-contract choice, unavailable required deployment access, or an unreproducible root cause after bounded diagnosis; missing provider credentials are not an escalation condition.
-- **Verification owner:** `@ingenium-qa`; inspect current persisted samples, UTC timestamps, redaction, deduplication, and unknown-value semantics across success, error, streaming, and cache-omitted responses.
-- **Rollback/safety:** Append-only or safely upsert usage records with project isolation; never infer billable cost; preserve raw-provider boundaries without storing secrets; roll back only task-owned schema/collector changes using isolated fixtures.
-- **Tests:** Unit and integration tests for each normalized field, provider-neutral response fixtures, malformed/partial/streaming responses, reported cache use/read/write, known-zero, and unknown cases, redaction, UTC freshness, and project isolation; deployed Docker/Compose health check. No provider-specific credentials.
-- **Docs:** `docs/concepts/architecture.md`, `docs/develop/api.md`, and `docs/reference/index.md` only for directly affected usage-data behavior; verify links and commands.
-- **Changed files:** Usage schema/collector and focused core/API tests, plus the canonical docs listed above only when directly affected.
+- **IN_SCOPE:** Add an explicit, selectable Context project control on `/chat`, persist and display the selected Context project for the request/session, and keep global tools authority separate and clearly identified from project-scoped Context retrieval and mutations.
+- **OUT_OF_SCOPE:** Always-on grounding, changing global tool authorization, cross-project data sharing, transcript export, provider redesign, Docs Workspace mutation, or unrelated Chat redesign.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** UI-102, CHAT-100, CTX-101.
+- **Acceptance:** `/chat` offers an accessible explicit project selector; selected Context project is visible, selectable, request-bound, and isolated; global tools remain under their independent authority and are not silently redirected to the Context project; defaults and no-selection behavior are safe and documented in the UI; fixture/API/UI checks pass.
+- **STOP_CONDITION:** `PASS` after fixture-first API/UI tests, deployed Chat checks, visual/accessibility gates, and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable configured Chat/deployment access, a genuine product decision about project-selection defaults, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns Chat visual/accessibility checks; `@ingenium-security-auditor` verifies project/global authority separation.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Context remains explicit and project-scoped; global tools retain current authority; fail closed on missing/foreign projects; never expose hidden source content or secrets.
+- **Tests:** Component/API project-selection, request-attestation and foreign-project rejection, global-tool-authority separation, no-selection/refresh/reload, accessibility, keyboard, console/network, 1440x900/390x844 visual, and fixture E2E tests.
+- **Docs:** This roadmap only unless the verified shipped Context project workflow directly changes `docs/usage/chat.md` or architecture wording.
+- **Exclusive writer territory:** `/chat` project-selector components, Chat request/session adapters, and focused tests; no overlap with VSCode or shared Select files after prior barriers.
+- **Phase/counts:** P5 Chat continuation; 3 writers / 3 nonwriters; fast owns Chat implementation, premium owns deployment, docs owns roadmap only; starts after UI-102.
+- **Verification plan:** Select a disposable Context project, send fixture requests with and without selection, inspect network/request authority and rendered state, reject foreign/global confusion, run visual/security checks once, and rerun only the causal targeted check after an in-scope fix.
+- **Causal remediation rule:** Fix the first project-identity or authority-routing mismatch proven by request trace and API response; never compensate with client-only labels.
+- **Finding classification:** Cross-project access, silent authority mixing, or unusable selection is `BLOCKING`; unrelated Chat polish is `FOLLOW_UP`; provenance and telemetry are `INFORMATIONAL`.
 
-#### USAGE-002 — Usage API aggregation and export
+#### VSCODE-100 — Pinned code-server runtime and gateway foundation
 
-- **IN_SCOPE:** Provide project-scoped API aggregation for totals, daily UTC series, provider/model breakdowns, filters, freshness, and export of the normalized usage data, preserving unknown cost/cache values.
-- **OUT_OF_SCOPE:** Billing calculations, provider-specific dashboards, invoice export formats, credential flows, or unrelated analytics and reporting.
-- **Owner:** API/core writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Real API calls return total cost, request count, required numeric token totals, input/output tokens, cache use/read/write state when reported, daily charts data, provider/model breakdown, UTC filter boundaries, freshness metadata, and export output. Cache state distinguishes reported use, read, write, known-zero, and unknown; it does not infer provider hit-rate or miss. Unknown cost/cache remains distinguishable from zero; invalid filters and unauthorized projects fail safely. No provider-specific credential is required, and no credential or API token leaks.
-- **STOP_CONDITION:** `PASS` after real API aggregation/export tests, deployed route/health checks, and source-verified examples; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
-- **Escalation:** Escalate only for a genuine aggregation/export contract decision, unavailable deployment access, or an unreproduced root cause after bounded diagnosis; provider credentials are explicitly out of the required path.
-- **Verification owner:** `@ingenium-qa`; verify real project isolation, inclusive/exclusive UTC ranges, empty periods, unknown fields, pagination/size bounds, deterministic export, and safe error envelopes.
-- **Rollback/safety:** Bound query/export size, authorize project scope, redact secrets, and avoid destructive migration; roll back only task-owned routes/query code if deployed checks fail.
-- **Tests:** API integration and contract tests for totals, daily series, filters, provider/model grouping, freshness, unknown cost/cache, export, authorization, range limits, empty results, and deployed Docker/Compose route checks. No provider-specific credentials.
-- **Docs:** `docs/develop/api.md`, `docs/reference/mcp-tools.md` only if an MCP export tool is exposed, and `docs/reference/index.md` only if a new canonical link is required.
-- **Changed files:** Usage API/aggregation/export implementation and focused API tests, plus directly affected canonical docs listed above.
+- **IN_SCOPE:** Add the pinned code-server 4.131.0 amd64 runtime with SHA-256 `f6316f0b14ef5c12ed6e67e0154dd02ccf5e66112064687d7e93c51763105361`, same Ingenium container/appuser, private code-server `127.0.0.1:4100` listener, Nginx container listener `3002`, public iframe/gateway origin `http://vscode.localhost:3002`, loopback-only Compose host publication `127.0.0.1:3002:3002`, and keep dashboard/OpenCode on port `3000`; also provide `/workspace` mount, auth-none local profile matching OpenCode Web, Open VSX/user-managed extensions, full terminal, dedicated `vscode-data` volume, status/health foundation, and explicit administrator-grade/no-LAN trust caveat.
+- **OUT_OF_SCOPE:** `/vscode` dashboard route/iframe implementation, remote/LAN exposure, multi-user authorization, extension marketplace proxying, arbitrary code-server versions, or changing OpenCode gateway behavior.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** DOC-100.
+- **Acceptance:** Build/runtime provenance verifies the exact version/architecture/hash; code-server runs as appuser in the existing Ingenium container; code-server is bound only to private `127.0.0.1:4100`; Nginx listens on container port `3002`; Compose publishes exactly `127.0.0.1:3002:3002` and never a LAN-facing `3002`; the trusted public iframe/gateway origin is exactly `http://vscode.localhost:3002`, while dashboard/OpenCode remain on `3000`; `/workspace` resolves; `vscode-data` persists; status/health reports process and gateway state; local auth-none/full-terminal/Open VSX behavior and administrator-grade/no-LAN caveat are explicit; WebSocket upgrades accept the exact trusted `Origin: http://vscode.localhost:3002` and reject hostile or missing `Origin`; no credentials are used in default gates.
+- **STOP_CONDITION:** `PASS` after provenance, Docker/gateway/status, persistence, health, and security checks plus marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required image/network/deployment access, unauthorized destructive volume cleanup, a genuine trust/auth product decision, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` owns boundary/provenance review.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Pin and verify before execution; bind loopback only; preserve existing OpenCode and volumes; stop/remove only owned fixtures; rollback removes the VSCode runtime/gateway additions without deleting `vscode-data` unless explicitly authorized.
+- **Tests:** SHA/architecture/provenance checks, container/appuser/process checks, private `127.0.0.1:4100` bind and no-LAN probes, exact Compose publication check for `127.0.0.1:3002:3002`, Nginx container-listener check for `3002`, dashboard/OpenCode `3000` regression check, exact `http://vscode.localhost:3002` gateway/CSP/header checks, WebSocket checks accepting only the exact trusted `Origin` and rejecting hostile and missing `Origin`, `/workspace` and `vscode-data` persistence, status/health, terminal/Open VSX fixture checks, no-real-credential security checks, and cleanup.
+- **Docs:** This roadmap only until runtime behavior is shipped and source-verified; then only directly affected canonical operations/security references.
+- **Exclusive writer territory:** Docker/runtime scripts, Supervisor/service status, gateway configuration, and VSCode volume/runtime tests; no overlap with dashboard route files.
+- **Phase/counts:** P5 VSCode lane start; 3 writers / 3 nonwriters; premium owns runtime/deployment, fast owns dashboard implementation territory reserved for VSCODE-101, docs owns roadmap only; zero overlap.
+- **Verification plan:** Build the pinned image, inspect hash/user/listeners/mounts, start the owned deployment, exercise root/health/status/persistence/security fixtures once, preserve logs, and fix/rerun only the named causal check for reproducible in-scope failures.
+- **Causal remediation rule:** Fix the first provenance, bind, process-user, gateway, volume, or health producer proven by deployment evidence; never mask a private-boundary failure in the dashboard.
+- **Finding classification:** Wrong/unpinned artifact, LAN exposure, unsafe auth, data loss, or false health is `BLOCKING`; nonrequired extension integrations are `FOLLOW_UP`; deployment telemetry is `INFORMATIONAL`.
 
-#### USAGE-003 — `/usage` dashboard
+#### VSCODE-101 — `/vscode` route, iframe, CSP, navigation, and standalone mode
 
-- **IN_SCOPE:** Add a dashboard `/usage` view consuming the usage API with total cost, requests, tokens, input/output/cache read/write when reported, daily charts, provider/model breakdown, filters, UTC/freshness display, export, loading/empty/error states, and graceful unknown cost/cache presentation.
-- **OUT_OF_SCOPE:** Provider-specific branding or billing controls, credential setup, invoice management, unrelated dashboard navigation redesign, or fake values for omitted telemetry.
-- **Owner:** Dashboard writer; verification owner: `@ingenium-qa` and `@ingenium-qa-vision` for visual acceptance.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A real `/usage` route renders current API data and clearly labels total cost, requests, required numeric tokens, input/output, cache use/read/write state when available, daily charts, provider/model breakdown, filters, UTC range, freshness, and export. Cache state distinguishes reported use, read, write, known-zero, and unknown rather than inferring provider hit-rate or miss. Missing cost/cache is shown as unknown/not reported rather than zero; loading, empty, API failure, and export states are actionable. No provider-specific credential is required, and no credential or API token leaks.
-- **STOP_CONDITION:** `PASS` after deployed route acceptance, exact desktop/mobile visual gate, accessibility/console/network review, and run-scoped screenshots; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
-- **Escalation:** Escalate only for an unresolved product choice about unknown-data wording, unavailable deployment/browser access, or an unreproduced root cause after bounded diagnosis; do not require provider credentials.
-- **Verification owner:** `@ingenium-qa` owns API-to-UI behavior and export; `@ingenium-qa-vision` owns 1440x900 and 390x844 layout, chart readability, accessibility, console/network, and browser cleanup.
-- **Rollback/safety:** Do not fabricate telemetry or expose secrets; preserve existing navigation and project scope; revert only task-owned route/components/API client changes.
-- **Tests:** Dashboard unit/component and real API integration tests; Playwright `/usage` filters/export/empty/error/unknown-data paths; Docker/Compose rebuild/restart and actual route health check; visual screenshots under `tests/artifacts/visual-qa/<run-id>/`. No provider-specific credentials.
-- **Docs:** `docs/usage/index.md`, `docs/usage/dashboard.md`, and `docs/reference/index.md` only when the new route is directly documented; verify links and commands.
-- **Changed files:** Dashboard `/usage` route/components/API client and focused tests, plus directly affected usage docs and index links.
+- **IN_SCOPE:** Add the `/vscode` dashboard route and navigation entry, trusted separate-origin unsandboxed iframe to the exact public `http://vscode.localhost:3000/` root, minimal clipboard permission, CSP/frame policy, loading/error/unavailable states, and standalone/new-tab fallback; retain dashboard/OpenCode on the established `3000` virtual-host gateway.
+- **OUT_OF_SCOPE:** Runtime installation/gateway foundation, code-server feature customization, remote/LAN access, sandboxing the trusted separate-origin iframe, arbitrary permissions, or unrelated navigation redesign.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** VSCODE-100, UI-102.
+- **Acceptance:** `/vscode` is reachable from navigation and direct URL; iframe targets exactly `http://vscode.localhost:3000/`, is unsandboxed only because it is trusted separate-origin, requests only minimal clipboard permission, CSP/frame headers and WebSocket trusted `Origin` are exact, hostile and missing WebSocket `Origin` requests are rejected, loading/error/unavailable states are explicit, standalone/new-tab fallback works, dashboard/OpenCode remain on the established `3000` virtual-host gateway, and existing routes remain healthy.
+- **STOP_CONDITION:** `PASS` after deployed route, iframe/CSP/navigation, accessibility, console/network, visual, and marker checks; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable configured browser/deployment access, a genuine origin/trust product decision, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns changed-route and passive desktop/mobile visual gates; `@ingenium-security-auditor` owns CSP/permission review.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Keep OpenCode roots unchanged; allow only the dedicated expected origin and minimal clipboard permission; fail closed when origin/runtime is unavailable; remove only route/navigation/iframe changes on rollback.
+- **Tests:** Route/navigation and standalone component tests, exact `http://vscode.localhost:3000/` iframe-origin/CSP/permissions/header tests, WebSocket exact-trusted-Origin acceptance plus hostile/missing-Origin rejection, dashboard/OpenCode `3000` regression, loading/error/unavailable states, accessibility/keyboard, console/network, deployed health, 1440x900/390x844 screenshots, and browser cleanup.
+- **Docs:** This roadmap only unless the verified route requires a directly affected canonical usage/operations reference.
+- **Exclusive writer territory:** Dashboard `/vscode` route, navigation entry, iframe/status components, and focused tests; no overlap with runtime/gateway files or `/chat` after dependency barriers.
+- **Phase/counts:** P5 VSCode lane; 3 writers / 3 nonwriters; fast owns route, premium owns deployment, docs owns roadmap only; serialized after VSCODE-100.
+- **Verification plan:** Deploy the foundation, open `/vscode` direct and through navigation, inspect iframe origin/CSP/permissions and all failure states, run accessibility/console/network and both viewport visual checks once, then rerun only the smallest check proving each causal fix.
+- **Causal remediation rule:** Fix the earliest URL/origin/CSP/navigation state producer proven by browser and network evidence; do not hide a gateway failure with a permanent fallback.
+- **Finding classification:** Wrong origin, unsafe permission/CSP, broken route, or misleading runtime state is `BLOCKING`; unrelated navigation polish is `FOLLOW_UP`; browser compatibility notes are `INFORMATIONAL`.
 
-#### USAGE-004 — Cross-provider and cache-state accuracy
+#### VSCODE-102 — VSCode deployment, persistence, security, and acceptance
 
-- **IN_SCOPE:** Validate normalization and aggregation across provider-neutral fixtures representing different provider response shapes, model names, token counters, cache read/write reports, omitted fields, retries, errors, and streaming completion.
-- **OUT_OF_SCOPE:** Acquiring provider credentials, testing live provider billing, redefining provider contracts, or estimating cost/cache data that the provider did not report.
-- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** Cross-provider fixture runs produce identical canonical semantics for equivalent usage, count requests exactly once across retries/stream completion, preserve required numeric token counters, and distinguish reported cache use/read/write, known-zero, and unknown without inferring provider hit-rate or miss. Provider/model breakdown and UTC daily totals remain correct without double counting. No provider-specific credential is required, and no credential or API token leaks.
-- **STOP_CONDITION:** `PASS` after focused cross-provider accuracy tests, deployed smoke/health checks, and evidence review; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
-- **Escalation:** Escalate only for a mutually exclusive canonical interpretation, unavailable deployment access, or an unreproduced defect after bounded diagnosis; never escalate solely because a provider omits a field.
-- **Verification owner:** `@ingenium-qa`; compare fixture inputs with persisted events, aggregate totals, export rows, and `/usage` API responses, including unknown and retry cases.
-- **Rollback/safety:** Keep unknown values unknown, avoid billing inference, isolate fixtures, and roll back only task-owned normalization/deduplication changes.
-- **Tests:** Table-driven provider-neutral unit/integration tests, streaming/retry/error/cache-state accuracy tests, UTC boundary tests, export/API regression, deployed Docker/Compose checks, and dashboard contract smoke. No provider-specific credentials or live billing access.
-- **Docs:** `docs/concepts/architecture.md`, `docs/develop/api.md`, and `docs/usage/dashboard.md` only for directly affected semantics; verify links and commands.
-- **Changed files:** Usage normalization, deduplication, aggregation, and focused cross-provider tests, plus directly affected canonical docs.
+- **IN_SCOPE:** Prove the merged VSCode runtime and `/vscode` route in deployment with the exact public iframe/gateway origin `http://vscode.localhost:3000/` on the established port-`3000` virtual-host gateway, private code-server `127.0.0.1:4100`, dashboard/OpenCode on `3000`, persistence, security, administrator-grade/no-LAN trust caveat, E2E, visual, accessibility, console/network, cleanup, and rollback acceptance; assign and execute premium deployment/runtime ownership with fast dashboard implementation, QA, security, vision, and docs gates as declared.
+- **OUT_OF_SCOPE:** New VSCode features, remote/LAN enablement, multi-user auth, extension curation, unrelated dashboard routes, Docs Workspace mutation, real credentials, or changing prior task contracts.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** VSCODE-101.
+- **Acceptance:** A rebuilt current source passes exact code-server provenance, same-container/appuser, private code-server `127.0.0.1:4100`, established port-`3000` virtual-host gateway, no host `3002` or public `4100` exposure, exact public origin `http://vscode.localhost:3000/`, dashboard/OpenCode `3000` preservation, private-loopback/no-LAN, dedicated-root/CSP/permission, exact trusted WebSocket `Origin` acceptance with hostile/missing `Origin` rejection, `/workspace`, `vscode-data` restart persistence, auth-none local profile, full-terminal/Open VSX, status/health, security redaction, E2E, accessibility, 1440x900/390x844 visual, cleanup, and rollback checks; the administrator-grade/no-LAN caveat is visible and not weakened.
+- **STOP_CONDITION:** `PASS` only after deployed E2E/visual/security evidence and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required deployment/browser access, unauthorized destructive cleanup, a genuine trust/auth product decision, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa` owns one declared E2E acceptance pass; `@ingenium-security-auditor` owns one bounded security pass; `@ingenium-qa-vision` owns one changed-route visual gate and one passive desktop/mobile sweep.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Rebuild/restart only the current merged source, preserve `vscode-data` and retained failure evidence, clean only manifest-owned resources, never expose LAN or real credentials, and rollback the VSCode wave without touching OpenCode or unrelated dirty changes.
+- **Tests:** Exact artifact/provenance, Docker/Supervisor/appuser, private `127.0.0.1:4100`, established port-`3000` virtual-host gateway, no host `3002` or public `4100` exposure, exact `http://vscode.localhost:3000/` route/iframe/gateway/CSP/headers, dashboard/OpenCode `3000` regression, WebSocket exact-trusted-Origin acceptance plus hostile/missing-Origin rejection, route/standalone, persistence/restart, health/status, terminal/Open VSX, security/no-LAN/redaction, fixture E2E, accessibility, console/network, 1440x900/390x844 screenshots, strict containment, cleanup, and targeted rollback checks.
+- **Docs:** This roadmap only until acceptance proves a directly affected canonical operational/security document; no Docs Workspace writes or broad regeneration.
+- **Exclusive writer territory:** VSCode deployment fixtures, acceptance configuration, rollback evidence, and release evidence; no overlap with implementation source after VSCODE-101.
+- **Phase/counts:** P5 VSCode acceptance; 1 writer / 3 nonwriters; premium deployment, QA E2E, security review, and QA vision visual gate; fast/docs territories closed for this acceptance wave.
+- **Verification plan:** Rebuild and restart the merged source, run each declared gate once in dependency order, inspect runtime/browser evidence and cleanup, remediate only reproducible in-scope roots, then rerun the minimum proving regression and reconcile markers.
+- **Causal remediation rule:** Name the first failing runtime, security, route, persistence, or acceptance boundary; fix that root cause only, redeploy, and rerun its smallest proving check rather than broad retries.
+- **Finding classification:** Failed deployment acceptance, LAN exposure, unsafe CSP/permission, persistence loss, secret leak, or unclean teardown is `BLOCKING`; feature enhancements are `FOLLOW_UP`; retained logs/screenshots are `INFORMATIONAL`.
 
-#### USAGE-005 — Usage end-to-end, documentation, and visual acceptance
+#### REL-100 — Full acceptance
 
-- **IN_SCOPE:** Close the provider-agnostic usage path from request collection through API aggregation/export and `/usage` dashboard acceptance, including docs, deployment, visual QA, and browser acceptance.
-- **OUT_OF_SCOPE:** New provider integrations, credentials, billing reconciliation, unrelated dashboard pages, and changes to previously accepted roadmap contracts.
-- **Owner:** Usage integration writer; verification owner: `@ingenium-qa` and `@ingenium-qa-vision`.
-- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
-- **Acceptance:** A fresh provider-neutral fixture produces a UTC-fresh usage record visible through totals, requests, required numeric tokens, input/output, reported cache use/read/write, known-zero, and unknown states, daily charts, provider/model breakdown, filters, export, and graceful unknown cost/cache states. Documentation matches the supported path. Rebuilt/restarted deployment passes actual route/health checks; desktop/mobile visual evidence and Windows browser acceptance cover the route without provider-specific credentials.
-- **STOP_CONDITION:** `PASS` only after E2E, docs/link, deployment, visual, accessibility, console/network, cleanup, and Windows browser evidence are complete; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
-- **Escalation:** Escalate only for unavailable required deployment/Windows browser access, an unresolved product decision, or a bounded diagnosis without a reproducible root cause; provider-specific credentials are not required and cannot be used as a prerequisite.
-- **Verification owner:** `@ingenium-qa` owns the real fixture→API→dashboard/export path and deployed acceptance; `@ingenium-qa-vision` owns 1440x900/390x844 screenshots, accessibility, console/network, and cleanup.
-- **Rollback/safety:** Use disposable usage fixtures, preserve project isolation and redaction, never claim unsupported cost/cache precision, and revert only task-owned usage integration changes.
-- **Tests:** Full targeted E2E with provider-neutral fixtures, API/export assertions, `/usage` browser tests, docs/link and command checks, Docker/Compose rebuild/restart and health checks, visual QA artifacts under `tests/artifacts/visual-qa/<run-id>/`, and Windows localhost/WSL browser acceptance. No provider-specific credentials.
-- **Docs:** `docs/usage/index.md`, `docs/usage/dashboard.md`, `docs/develop/api.md`, `docs/concepts/architecture.md`, and `docs/reference/index.md` only where directly affected; no Docs Workspace mutation.
-- **Changed files:** Usage integration, E2E/visual test files, and directly affected canonical docs listed above; do not regenerate unrelated indexes.
+- **IN_SCOPE:** Run the declared roadmap acceptance across contracts, barriers, safety defaults, deployment, accessibility, links, markers, and repository diff.
+- **OUT_OF_SCOPE:** New feature work, unrelated cleanup, Docs Workspace writes, and real credentials in default gates.
+- **Owner:** Release/QA owner.
+- **Dependencies:** MCP-106, JOB-102, USAGE-102, VAULT-102, RESTORE-102, CTX-101, TASK-102, COORD-106, UI-102, CHAT-101, VSCODE-102.
+- **Acceptance:** All scoped contracts pass with evidence; no active markers; clean targeted diff; safe defaults and operator boundaries remain true.
+- **STOP_CONDITION:** `PASS` only after full evidence and reconciliation; explicit user `STOP`/`CANCELLED` remains terminal.
+- **Escalation:** Only the permitted five escalation conditions after bounded diagnosis.
+- **Verification owner:** `@ingenium-qa`, with security and visual owners for their declared gates.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve source data, credentials, and unrelated dirty changes; revert only task-owned release wave.
+- **Tests:** Targeted contract suites, deployed health/routes, fixture-first gates, visual/accessibility, links, marker parser, and diff check.
+- **Docs:** Verify all directly affected canonical docs; no broad regeneration.
+- **Exclusive writer territory:** Release evidence and no source overlap.
+- **Phase/counts:** P5; 1 writer / 3 nonwriters; barrier after all implementation waves.
+- **Verification plan:** Execute checks once in dependency order, remediate reproducible in-scope roots, rerun only affected checks, reconcile markers/TodoWrite.
+- **Causal remediation rule:** Every fix names the current reproducible root cause and proves it with the minimum targeted regression.
+- **Finding classification:** Failed acceptance is `BLOCKING`; unrelated drift is `FOLLOW_UP`; evidence context is `INFORMATIONAL`.
 
-### Work marker log (continued)
+#### DOC-101 — Final documentation
 
-<!-- (work-started) MCP-006 2026-07-28T02:57:10Z ingenium-docs -->
-<!-- (work-started) USAGE-001 2026-07-28T02:57:11Z ingenium-docs -->
-<!-- (work-started) USAGE-002 2026-07-28T03:29:19Z ingenium-docs -->
-<!-- (work-started) USAGE-003 2026-07-28T03:29:20Z ingenium-docs -->
-<!-- (work-started) USAGE-004 2026-07-28T03:29:21Z ingenium-docs -->
-<!-- (work-started) USAGE-005 2026-07-28T03:29:22Z ingenium-docs -->
-<!-- (work-complete) BUG-003 2026-07-28T12:10:00Z ingenium-docs -->
-Evidence BUG-003: Backup core/API tests (`packages/ingenium-core/tests/backups.test.ts`, `services/ingenium-api/tests/backups-api.test.ts`), backup directory hardening in commit `6743616`, preserved Docker volumes, and deployed image HEAD `730b9669`.
-<!-- (work-complete) BUG-004 2026-07-28T12:10:01Z ingenium-docs -->
-Evidence BUG-004: Settings/provider persistence and deep-link coverage in `tests/ingenium-dashboard/settings-providers.spec.ts` and commit `685ca9d`, with desktop/mobile visual artifacts in `tests/artifacts/visual-qa/run-20260728-roadmap-usage-final/`.
-<!-- (work-complete) BUG-005 2026-07-28T12:10:02Z ingenium-docs -->
-Evidence BUG-005: Vault CRUD/crypto/rate-limit coverage in `packages/ingenium-core/tests/vault*.test.ts`, `services/ingenium-api/tests/vault-api.test.ts`, and the repository security-boundary checks recorded in the session.
-<!-- (work-complete) BUG-006 2026-07-28T12:10:03Z ingenium-docs -->
-Evidence BUG-006: Chat theme/paint regression coverage in `tests/ingenium-dashboard/theme-flash.spec.ts` and `tests/ingenium-dashboard/chat-states.spec.ts`, commit `685ca9d`, and final desktop/mobile artifacts under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
-<!-- (work-complete) MCP-001 2026-07-28T12:10:04Z ingenium-docs -->
-Evidence MCP-001: Catalog parity and child-tool naming/state coverage in `services/ingenium-server/tests/tool-visibility.test.ts`, `services/ingenium-core/tests/mcp-tools/catalog-parity.test.ts`, and the catalog implementation committed in `cdc5678`.
-<!-- (work-complete) MCP-002 2026-07-28T12:10:05Z ingenium-docs -->
-Evidence MCP-002: Child gateway lifecycle/runtime coverage in `services/ingenium-server/tests/child-mcp-runtime.test.ts`, `services/ingenium-server/tests/child-mcp-gateway.test.ts`, and gateway implementation commit `36deb4a`, with deployed health evidence at `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/status-six-processes.png`.
-<!-- (work-complete) MCP-003 2026-07-28T12:10:06Z ingenium-docs -->
-Evidence MCP-003: Project resolver/identity implementation and isolation coverage in `packages/ingenium-extension/project-resolver.ts`, `docs/concepts/architecture.md`, and the global-agent/security-boundary acceptance recorded for commit `7a5eb2c`.
-<!-- (work-complete) MCP-004 2026-07-28T12:10:07Z ingenium-docs -->
-Evidence MCP-004: Safe MCP/API error and launcher coverage in `services/ingenium-api/tests/mcp-status-contract.test.ts`, `services/ingenium-api/tests/mcp-launcher.test.ts`, and `packages/ingenium-extension/mcp-launcher.test.ts`; QA/security PASS is recorded for commit `7a5eb2c`.
-<!-- (work-complete) MCP-005 2026-07-28T12:10:08Z ingenium-docs -->
-Evidence MCP-005: Dynamic child gateway implementation and tests in commit `36deb4a`, catalog/operator documentation in the repository, and deployed Windows/gateway visual evidence including `mcp-tool-catalog.png` under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
-<!-- (work-complete) MCP-006 2026-07-28T12:10:09Z ingenium-docs -->
-Evidence MCP-006: Fail-closed tool visibility implementation and focused API/server/dashboard tests in commit `cdc5678`, deployed image HEAD `730b9669`, and final Windows desktop/mobile evidence with zero console errors and listed API responses 200 under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
-<!-- (work-complete) CTX-001 2026-07-28T12:10:10Z ingenium-docs -->
-Evidence CTX-001: Canonical context CRUD/API/server coverage in `packages/ingenium-core/tests/context-conversations.test.ts`, `services/ingenium-api/tests/context-conversations-api.test.ts`, and the context route implementation; final context desktop/mobile artifacts are under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
-<!-- (work-complete) CTX-002 2026-07-28T12:10:11Z ingenium-docs -->
-Evidence CTX-002: Checkpoint/version governance implementation and focused tests in commit `d725d49`, including migration 066 and core/API/server coverage; preserved volumes and deployed acceptance were recorded in the session.
-<!-- (work-complete) CTX-003 2026-07-28T12:10:12Z ingenium-docs -->
-Evidence CTX-003: RAG ingestion/search/ask coverage in `packages/ingenium-core/tests/context-rag*.test.ts` and `services/ingenium-api/tests/context-rag-api.test.ts`, commit `cedb7c7`, plus live Docs AI/RAG Ask and extraction-synthesis acceptance.
-<!-- (work-complete) CTX-005 2026-07-28T12:10:13Z ingenium-docs -->
-Evidence CTX-005: End-to-end capture/retrieval integration in `services/ingenium-api/tests/context-e2e.test.ts` and commit `7c4640e`, with current session evidence of 88 observations and 37 traits and final context/observations visual artifacts.
-<!-- (work-complete) DOC-001 2026-07-28T12:10:14Z ingenium-docs -->
-Evidence DOC-001: This canonical `docs/reference/ROADMAP.md`, repository-authoritative documentation model, marker protocol, and `docs/reference/index.md` link were inspected; `tests/test-append-only-files.sh` is the declared validation.
-<!-- (work-complete) USAGE-001 2026-07-28T12:10:15Z ingenium-docs -->
-Evidence USAGE-001: Provider-neutral schema/collector implementation and focused tests in commits `cedb7c7` and `85dbc85`, with `services/ingenium-api/tests/usage-sync.test.ts` and session evidence of fresh normalized telemetry without provider-specific credentials.
-<!-- (work-complete) USAGE-002 2026-07-28T12:10:16Z ingenium-docs -->
-Evidence USAGE-002: Usage aggregation/export API implementation and tests in commit `85dbc85`, `services/ingenium-api/tests/usage-api.test.ts`, and usage route/network evidence under `tests/artifacts/visual-qa/run-20260728-roadmap-usage-final/`.
-<!-- (work-complete) USAGE-003 2026-07-28T12:10:17Z ingenium-docs -->
-Evidence USAGE-003: `/usage` dashboard implementation and focused browser/component tests in commit `e942e91`, with desktop/mobile screenshots and route evidence under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
-<!-- (work-complete) USAGE-004 2026-07-28T12:10:18Z ingenium-docs -->
-Evidence USAGE-004: Provider-neutral normalization and cache-state tests in `packages/ingenium-core/tests/usage.test.ts` and `services/ingenium-api/tests/usage-sync.test.ts`, with final usage acceptance and API-200 network evidence in both recorded visual runs.
-<!-- (work-complete) USAGE-005 2026-07-28T12:10:19Z ingenium-docs -->
-Evidence USAGE-005: End-to-end usage implementation commits `cedb7c7`, `85dbc85`, and `e942e91`; deployed image HEAD `730b9669`; prior usage visual evidence under `tests/artifacts/visual-qa/run-20260728-roadmap-usage-final/`; final Windows desktop/mobile evidence under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
+- **IN_SCOPE:** Update only directly affected canonical repository Markdown with verified behavior, commands, links, safety defaults, and operator workflows.
+- **OUT_OF_SCOPE:** Docs Workspace mutation, broad index regeneration, speculative docs, and unrelated cleanup.
+- **Owner:** `@ingenium-docs`.
+- **Dependencies:** REL-100.
+- **Acceptance:** Canonical docs match shipped behavior; links/commands/policy wording pass targeted checks; archive remains immutable and indexed.
+- **STOP_CONDITION:** `PASS` after targeted docs verification and final marker reconciliation.
+- **Escalation:** Only an unverified source behavior, unavailable check dependency, or genuine documentation ambiguity.
+- **Verification owner:** `@ingenium-qa` for the declared docs checks.
+- **Deployment owner:** N/A; documentation-only unless a runtime route is being verified by REL-100.
+- **Rollback/safety:** Change only named directly affected docs; preserve archive bytes and unrelated dirty changes.
+- **Tests:** Markdown structure, links, commands, archive hash/cmp, and `git diff --check`.
+- **Docs:** Only the directly affected canonical files identified by REL-100; never Docs Workspace.
+- **Exclusive writer territory:** Named `docs/**/*.md` files only; no overlap with implementation writers.
+- **Phase/counts:** P6; 1 writer / 0 nonwriters; final documentation barrier.
+- **Verification plan:** Read source-verified behavior, patch targeted sections, run affected checks once, and verify no unrelated docs changed.
+- **Causal remediation rule:** Fix the named documentation root cause and rerun only its affected check; do not paper over source defects.
+- **Finding classification:** Incorrect in-scope canonical content is `BLOCKING`; unrelated drift is `FOLLOW_UP`; context is `INFORMATIONAL`.
+
+## Live marker log
+
+The baseline is intentionally empty. The orchestrator appends exact markers only
+after DOC-100 baseline tests pass; TodoWrite remains the live checklist.
+### Work marker log
+<!-- (work-started) DOC-100 2026-07-31T13:49:23Z ingenium-docs -->
+<!-- (work-complete) DOC-100 2026-07-31T13:57:33Z ingenium-docs -->
+Evidence DOC-100: archived byte/hash preservation verified; 28 canonical contracts verified; dynamic marker parser verified; agent-policy validation verified; append-only checks verified; archive checksum verified.
+<!-- (work-started) MCP-100 2026-07-31T13:59:06Z ingenium-docs -->
+<!-- (work-complete) MCP-100 2026-07-31T14:32:16Z ingenium-docs -->
+Evidence MCP-100: catalog defaults and unknown-state fail-closed behavior verified; project-isolated atomic/idempotent API state verified; immediate invocation and extension execution gates verified; Tool Manager project mismatch and safe error states verified; focused core/API/server/extension/dashboard suites and typechecks passed; deployed real transport changed from 266 visible tools to 265 while `health_check` was disabled, returned `TOOL_DISABLED` on direct invocation, restored visibility and invocation after re-enable, and retained six healthy supervised processes.
+<!-- (work-started) MCP-101 2026-07-31T14:32:57Z ingenium-docs -->
+<!-- (work-complete) MCP-101 2026-07-31T14:58:12Z ingenium-docs -->
+Evidence MCP-101: pure read-only conformance fixtures detect malformed, duplicate, missing, stale, category, projection, explicit-state, and toggle faults; the current source-derived inventory passes at 266 server plus 2 extension tools; TypeScript AST registration parity and exact extension-plugin contracts pass; targeted core/server/extension suites and typechecks pass; the test-only extension artifact is excluded from package output; no runtime deployment is applicable.
+<!-- (work-started) MCP-102 2026-07-31T14:58:21Z ingenium-docs -->
+<!-- (work-started) BUG-100 2026-07-31T15:24:18Z ingenium-docs -->
+<!-- (work-complete) BUG-100 2026-07-31T16:01:53Z ingenium-docs -->
+Evidence BUG-100: observer and resource-sync protocol-stream diagnostics were replaced with bounded non-fatal OpenCode app logging; all three configured Ingenium V1 wrappers now have API/auth/timeout/logger-failure lifecycle coverage; 56 targeted and 118 full extension tests, typecheck, package build, and 266-tool transport parity passed; deployed OpenCode 1.18.9 failure smoke produced zero stdout/stderr, contained logger rejection, emitted only allowlisted warnings, showed zero leaked legacy JSON events in post-restart logs, and retained six healthy services.
+<!-- (work-complete) MCP-102 2026-07-31T16:51:44Z ingenium-docs -->
+Evidence MCP-102: pre-handshake authoritative reconciliation, exact project-name/immutable-ID attestation, retained-call gating, child state envelopes, and one-change notifications passed focused server/API checks; Chat refresh/freshness/global ownership and bounded exact-code recovery passed 44 component tests; provider-free live transport proved 266 visible tools, disabled-tool removal plus `TOOL_DISABLED`, reconnect behavior, and re-enable restoration; deployed OpenCode 1.18.9 and six services remained healthy; desktop/mobile drawer evidence, 200 MCP requests, zero console errors, and browser cleanup are recorded under `tests/artifacts/visual-qa/run-20260731-mcp102/`.
+<!-- (work-started) MCP-103 2026-07-31T16:52:08Z ingenium-docs -->
+<!-- (work-complete) MCP-103 2026-07-31T18:03:21Z ingenium-docs -->
+Evidence MCP-103: pure core conformance/usefulness engines emit deterministic score-free fixture/live reports with global catalog/freshness and per-tool boundary/visibility/invocation states; full 268-tool output is 46,598 bytes within the 64 KiB bound; malformed results map to `invalid-response`; nine collector, fifteen core contract, 716 full core, typecheck, redaction, path/mode, configured health-only invocation, and owned-process cleanup checks passed; configured live evidence is stored at `tests/artifacts/test-runs/run-20260731-mcp103-live/mcp-usefulness-report.json`; no runtime route exists, so deployment is not applicable until MCP-104.
+<!-- (work-started) MCP-104 2026-07-31T18:03:28Z ingenium-docs -->
+<!-- (work-complete) MCP-104 2026-07-31T19:18:35Z ingenium-docs -->
+Evidence MCP-104: core evidence mapping and the `ingenium_mcp_report_get` catalog contract pass at 269 tools; the API uses a fixed packaged launcher, matching protected worktree token, exact probe mode, per-project UUID single-flight/cache, two-process cap, health-only invocation, fixed filters/errors, and 64 KiB response bound; focused core/API/server/extension suites and typechecks passed; deployed live report returned 269 enriched tools in 56,713 bytes with project attestation, fresh health success, isolated toggle enrichment, route/tool parity, no sensitive content, no child/vault/probe orphan, and six healthy services.
+<!-- (work-started) MCP-105 2026-07-31T19:18:44Z ingenium-docs -->
+<!-- (work-complete) MCP-105 2026-07-31T19:49:09Z ingenium-docs -->
+Evidence MCP-105: existing Tool Manager now renders the project-authoritative live report with provenance, freshness, catalog, current toggle, visibility, invocation, extension-boundary, loading/empty/error/retry states and no raw content; 540 dashboard tests, focused QA/security, typecheck/build/lint passed; deployed report and route returned 200 with 269 tools and toggles restored; desktop/mobile evidence shows Live/Fresh, zero console errors and no viewport overflow under `tests/artifacts/visual-qa/run-20260731-mcp105/`.
+<!-- (work-started) MCP-106 2026-07-31T19:49:09Z ingenium-docs -->
+<!-- (work-complete) MCP-106 2026-07-31T20:30:17Z ingenium-docs -->
+Evidence MCP-106: bounded review verified the 269-tool catalog, live project-attested report API, gated MCP report tool, deployed Tool Manager inspector, health success, reachable/not-run unsafe tools, extension not-applicable states, disabled `TOOL_DISABLED` fixtures, honest unknown conformance, redaction, and desktop/mobile evidence; focused core/API/server/dashboard suites passed after stale generated catalog artifacts were removed, restoring reproducible 269-tool parity.
+<!-- (work-started) CTX-100 2026-07-31T20:30:36Z ingenium-docs -->
+<!-- (work-complete) CTX-100 2026-07-31T21:32:39Z ingenium-docs -->
+Evidence CTX-100: implemented bounded project-scoped direct/chunked context source create/list/get/search with metadata-only DTOs, preserved provenance/tags/priority/safe metadata/source references, path and credential rejection, finite pagination, immutable source/chunk guards, and fail-closed migration-071 inspection. Focused core/API tests and typechecks, the full 726-test core suite, bounded QA/security checks, canonical docs, Docker rebuild, six-process health, live migration inspection, bearer enforcement, isolated create/list/get/search, 404 isolation, 422 boundary rejection, and no-body/path/secret response checks passed.
+<!-- (work-started) CHAT-100 2026-07-31T21:32:39Z ingenium-docs -->
+<!-- (work-complete) CHAT-100 2026-07-31T22:56:07Z ingenium-docs -->
+Evidence CHAT-100: added an accessible per-send project-context control defaulting off, explicit selected-project retrieval, bounded/deduplicated excerpts inside injection-resistant untrusted delimiters, preserved system instructions and retry metadata, metadata-only use/no-match disclosure, fixed send acceptance semantics, and safe fixed search errors. Focused dashboard/API/core tests, typecheck, lint, build, provider-independent fixture E2E, strict containment, bounded QA/security, canonical docs, Docker rebuild and six-process health passed. Non-sensitive visual evidence at 1440x900 and 390x844 plus a 20-route desktop/mobile sweep passed under `tests/artifacts/visual-qa/run-20260731-chat100/`; no real provider send was required.
+<!-- (work-started) CTX-101 2026-07-31T22:56:07Z ingenium-docs -->
+<!-- (work-complete) CTX-101 2026-08-01T00:10:00Z ingenium-docs -->
+Evidence CTX-101: reused immutable persisted chunk UUIDs as citation IDs, added availability/source-hash/chunk-index evidence, total ordering across all RAG searches and fallback terms, stable generic-RAG 409 mutation conflicts, and exact metadata-only Chat rendering. Repeated current/checkpoint/tie/limit/isolation tests, core/API/dashboard type and build checks, fixture E2E, bounded QA/security, canonical docs, Docker rebuild, live persisted-ID/repeatability/foreign/mutation acceptance, and citation screenshots at both viewports passed. The reconciled 20-route desktop/mobile sweep, `/opencode` fixture-health regression, and strict containment passed under `tests/artifacts/visual-qa/run-20260731-ctx101/`.
+<!-- (work-started) TASK-100 2026-08-01T00:10:00Z ingenium-docs -->
+<!-- (work-complete) TASK-100 2026-08-01T01:27:14Z ingenium-docs -->
+Evidence TASK-100: added fail-closed migration 072 and a dedicated immutable metadata-only reference contract for email, context, docs, chat, and jobs with canonical identities, server-derived safe display snapshots, scoped idempotent create/list/delete, current availability, neutral missing/foreign errors, usage-mapped OpenCode authorization, and fixed path-segment handling. Focused core/API and 731-test core suites, typechecks, bounded QA/security, canonical API/task docs, Docker rebuild, six-process health, migration/FK checks, live Context/Docs/Job attach/list/duplicate/delete/isolation workflow, fixture-backed Email/Chat policies, and deployed non-redirecting dot-path probes passed.
+<!-- (work-started) TASK-101 2026-08-01T01:27:14Z ingenium-docs -->
+<!-- (work-complete) TASK-101 2026-08-01T03:37:24Z ingenium-docs -->
+Evidence TASK-101: added strict atomic email/context capture into one todo task plus immutable reference, deterministic duplicate reuse, no-orphan failures, global email authority with unchanged loaded folder, project-scoped Context source summaries, shared title-only modal, explicit Mail/Context actions, and responsive mobile Mail list/reader navigation. Focused core/API/dashboard tests and typechecks, bounded QA/security, Docker rebuild and health, disposable Context API workflow, fully mocked Mail browser workflow, canonical usage docs, sanitized desktop/mobile changed-route evidence, content-free 20-route sweep, and strict containment passed under `tests/artifacts/visual-qa/run-20260801-task101/`.
+<!-- (work-started) TASK-102 2026-08-01T03:37:24Z ingenium-docs -->
+<!-- (work-complete) TASK-102 2026-08-01T05:53:52Z ingenium-docs -->
+Evidence TASK-102: extended strict atomic capture to Docs and server-verified Chat sessions, retained fixed transcript-free Chat metadata, added explicit accessible Chat/Docs controls, duplicate/no-orphan semantics, and reload-visible Task Detail provenance with available/missing/unavailable states. Focused core/API/dashboard tests and typechecks, bounded QA/security, combined production fixture UI→API capture with no provider send/content leakage, Overlay focus-trap/restoration regressions, responsive Task Detail, Docker rebuild/health, live disposable Docs lifecycle, canonical docs, 13 sanitized element captures, content-free 20-route desktop/mobile sweep, and strict containment passed under `tests/artifacts/visual-qa/run-20260801-task102/`.
+<!-- (work-started) COORD-100 2026-08-01T05:53:52Z ingenium-docs -->
+<!-- (work-complete) COORD-100 2026-08-01T07:42:45Z ingenium-docs -->
+Evidence COORD-100: additive migration 073 and transactional migration 074 added partial-state guards and quarantined legacy reservations that cannot prove token possession; project-scoped task reads/mutations now provide revision/CAS, request-hash idempotency, hashed caller-held reservation tokens, and reserve/release. Typed `path`/`tree`/`@build`/`@repository` claims define the managed-agent same-project/canonical-worktree boundary, excluding manual and external writes. Focused Core 10/10, API 4/4, server adapter/registration 5/5, catalog 6/6, relevant typechecks, bounded QA/security PASS with history scan 0, canonical docs, Docker rebuild, six Supervisor processes, API/gateway health, applied migrations, deployed 269-stdio/271-total catalog, health tool, and scoped reserve/GET-404 smoke passed. No visual gate applied because no UI changed.
+<!-- (work-started) COORD-101 2026-08-01T07:44:01Z ingenium-docs -->
+<!-- (work-complete) COORD-101 2026-08-01T08:57:05Z ingenium-docs -->
+Evidence COORD-101: migration 075 provides a four-table guarded coordination registry with project/worktree/session/incarnation isolation, hash-only caller-held tokens, CAS revisions, request-hash idempotency, durable monotonic fences, TTL heartbeats without resurrection, atomic exact claims with baselines and active/released/dirty/quarantined/collision states, bounded credential-free snapshots, project-composite task/context pointers, retained close history, and WAL-safe post-transaction checkpoints. Focused 44-test initial matrix, hardened coordination 20/20, full Core 766 pass, and typecheck passed; QA PASS; security blockers were remediated and targeted security PASS with history scan 0. Canonical docs, Docker rebuild, six processes, health, migration, live tables/indexes/trigger/FKs, foreign_key_check, temporary lifecycle, and no-token-log checks passed. Synthesis was triggered; 10 skills remained unchanged. No visual gate applied because this was Core-only.
+<!-- (work-started) COORD-102 2026-08-01T10:27:39Z ingenium-docs -->
+<!-- (work-complete) COORD-102 2026-08-01T11:23:59Z ingenium-docs -->
+Evidence COORD-102: `tests/artifacts/test-runs/run-20260801-coord102/manifest.json` records the nine authenticated project-scoped coordination routes, API-authorized takeover evidence, redacted status and error projections, and four MCP tools with the 275 total / 273 stdio / 29 category catalog counts. Focused tests, typechecks, and the full suite passed aside from a known unrelated API failure; remediated QA/security checks passed with history scan 0, no-db-leaks passed, canonical docs passed, Docker rebuild with six processes and health checks passed, live route/tool smokes passed, synthesis and sync completed, and no visual gate was applicable.
+<!-- (work-started) UI-100 2026-08-01T18:34:27Z ingenium-docs -->
+<!-- (work-started) VSCODE-100 2026-08-01T18:34:27Z ingenium-docs -->
+<!-- (work-complete) UI-100 2026-08-01T19:02:01Z ingenium-docs -->
+Evidence UI-100: shared native Select source; 9/9 tests; exact 52 inventory; dashboard typecheck/build; QA targeted PASS; no changed runtime surface because no consumer migrated, so visual/deployment gates apply at UI-101.
+<!-- (work-started) UI-101 2026-08-01T19:02:01Z ingenium-docs -->
+<!-- (work-complete) UI-101 2026-08-01T21:07:06Z ingenium-docs -->
+Evidence UI-101: 52 shared Selects across 19 files; accessible names; 589 tests/source checks; QA PASS; typecheck/build/lint; deployed seven-process smoke; visual/full-site evidence under `tests/artifacts/visual-qa/run-20260801-ui101-selects/`; Docs mobile remediation and final PASS.
+<!-- (work-complete) VSCODE-100 2026-08-01T21:07:06Z ingenium-docs -->
+Evidence VSCODE-100: pinned code-server 4.131.0/hash, choice-A `127.0.0.1:3002`→container `3002`→private `4100`, hostile Origin rejection, QA/security PASS, seven-process deployment, code-server CSP/WS/health/appuser/OpenVSX/`vscode-data` persistence evidence under `tests/artifacts/test-runs/run-20260801-ui101-vscode100/`.
+<!-- (work-started) UI-102 2026-08-01T21:07:06Z ingenium-docs -->
+<!-- (work-complete) UI-102 2026-08-01T22:36:38Z ingenium-docs -->
+Evidence UI-102: shared Dropdown/Combobox patterns; all 10 controls; 601 tests/source checks; QA remediation; deployed seven-process evidence under `tests/artifacts/test-runs/run-20260801-ui102-dropdowns/`; passive/full-site visual evidence and active interaction PASS under `tests/artifacts/visual-qa/run-20260801-ui102-dropdowns/`; mobile PageTree fix/recheck.
+<!-- (work-started) CHAT-101 2026-08-01T22:36:38Z ingenium-docs -->
+<!-- (work-complete) CHAT-101 2026-08-02T00:44:13Z ingenium-docs -->
+Evidence CHAT-101: `/chat` Context project selector, explicit `?project=` and
+validated active-project resolution, fail-closed invalid/stored selection with
+user recovery, request-bound default-off composer Context, API-time archived
+race rejection, separate server-global Chat tools/config authority, encoded
+queries, and source-content log exclusion documented in `docs/usage/chat.md`
+and `docs/develop/api.md`; focused dashboard33/API61 reviewer pass, security
+targeted8 plus encoding check, deployed seven-process/routes/code-server
+regression, and the Chat visual artifact
+`tests/artifacts/visual-qa/run-20260801-chat101/interaction.json`; deploy
+acceptance is recorded in
+`tests/artifacts/test-runs/run-20260801-chat101-deploy/acceptance.md`.
+<!-- (work-started) VSCODE-101 2026-08-02T00:54:31Z ingenium-docs -->
+
+**User-decision marker — superseding active VSCODE-101 (2026-08-01):** The separate browser publication at `127.0.0.1:3002` is superseded because WSL2 Windows browsers cannot reach WSL-loopback Docker binds. Reuse the established OpenCode same-port virtual-host architecture with the exact browser origin `http://vscode.localhost:3000/`, private code-server at `127.0.0.1:4100`, Host/Origin/CSP isolation, and no LAN or remote support. Prior VSCODE-100/101 evidence remains historical; `3002` acceptance is not current.
+<!-- (work-complete) VSCODE-101 2026-08-02T05:38:24Z ingenium-docs -->
+Evidence VSCODE-101: dashboard627, security CSP PASS, fresh seven-process deployment, live Docker 1/1, browser interaction, visual artifacts, and `tests/artifacts/test-runs/run-20260801-chat101-deploy/acceptance.md`; the superseded `3002` publication/origin remains historical and is not current acceptance.
+<!-- (work-started) VSCODE-102 2026-08-02T05:38:25Z ingenium-docs -->
+<!-- (work-complete) VSCODE-102 2026-08-02T09:20:01Z ingenium-docs -->
+Evidence VSCODE-102: exact public origin `http://vscode.localhost:3000/` verified with no host `3002` or public `4100`; private code-server `4100` and seven supervised processes verified; security CSP, worker, and static-chunk boundaries verified; fresh deployment acceptance recorded in `tests/artifacts/test-runs/run-20260801-vscode102/acceptance.md`; browser/visual evidence recorded under `tests/artifacts/visual-qa/run-20260801-vscode102/`; persistence marker restart/remove/volume-preserve behavior verified; `npm test`, typecheck, lint, and build passed; fixture E2E `105/105` with strict containment, Docker `30/30`, and route parity `61/61` passed. Artifact, append-only, and agent gates from the prior full phase remain pending the final post-marker rerun and are not claimed here. Known follow-ups: Windows elevated firewall-rule behavior is unverified although the default inbound block remains; pinned optional VSDA404; upstream activity labels/external Copilot metadata; pre-existing broken docs link.
+<!-- (work-started) JOB-100 2026-08-02T09:34:56Z ingenium-docs -->
+
+**JOB-100 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** Conservative v1 trusted catalog is limited to the existing immutable Context maintenance producers: `context.conversation.archived`, `context.conversation.unarchived`, and `context.checkpoint.restored_as_new`. Payloads contain content-free identifiers and revisions only. Provenance uses the immutable Context audit source ID; deduplication is by project + event type + source audit ID; retention is indefinite and append-only until an explicit authorized project lifecycle action. Unknown historical jobs are preserved, but every new or changed `trigger_event` must be cataloged. Dispatch and scheduler work is deferred to JOB-101.
+
+Rationale: source inspection found no existing job event producer or canonical event catalog; the existing job `trigger_event` field is generic. This conservative boundary reuses immutable Context audit evidence without widening v1 to arbitrary events or scheduler behavior.
+<!-- (work-complete) JOB-100 2026-08-02T10:28:35Z ingenium-docs -->
+Evidence JOB-100: migration076, QA54+API3, Core780, security direct SQL recheck7, deployment run-20260802-job100 migration/catalog/hash/reversible API/API restart/7 services.
+Finding JOB-100: FOLLOW_UP (out of scope): run API project-scoping security review; not a blocker for JOB-100.
+<!-- (work-started) JOB-101 2026-08-02T10:34:27Z ingenium-docs -->
+Evidence JOB-101: decision/work-started scope is exact-match same-project enabled jobs; snapshot every existing undispatched migration076 event once; unique delivery per project+event+job; exactly-once enqueue with bounded at-least-once execution after verified teardown; max five attempts at 30/60/120/300/600 seconds; hash-only lease token with CAS; ambiguous live processes dead-letter rather than duplicate; no payload prompt interpolation; no manual replay; indefinite sanitized audit; and close-run/log project-scoping follow-up.
+<!-- (work-complete) JOB-101 2026-08-02T12:01:49Z ingenium-docs -->
+Evidence JOB-101: migration077; Core791/API751/server403 source evidence; focused QA; security10+11/direct; deployment run-20260802-job101 with preserved hashes, 24 runtime tests, and 7 processes; full2783, typecheck/lint0/build, fixture105, strict/db/append/artifact checks passed. Exact-match same-project fanout, one existing-backlog snapshot, exactly-once delivery creation with bounded at-least-once execution, five attempts with fixed backoffs, hash-only lease/process proof, ambiguous-identity no-duplicate handling, allowlisted child environment and redacted logs, active-delete 409, project-scoped run/log/cancel, bounded event/delivery GETs, and no payload prompt interpolation/manual replay are complete. No unresolved blocker.
+<!-- (work-started) JOB-102 2026-08-02T12:11:02Z ingenium-docs -->
+
+**JOB-102 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** With JOB-101 complete, the existing `/jobs` route gains Jobs, Event queue, and Trusted events views. Use an exact static-catalog Select while preserving legacy values; cursor pagination uses load-more with client filters explicitly labeled as loaded results. Event and delivery state is read-only: do not display payloads, process details, or lease owners. Existing **Run Now** remains a fresh manual run, not replay. Provide no event/dead-letter/retry mutations, show active delete `409` responses, and use mobile cards with desktop tables. Acceptance includes the deployed visual and full-site gates.
+
+<!-- (work-complete) JOB-102 2026-08-02T13:51:30Z ingenium-docs -->
+Evidence JOB-102: Canonical Jobs documentation records the `/jobs` Jobs, Event queue, and Trusted events views; loaded-results client filters, cursor load-more, and polling; the exact trusted-event Select with legacy preservation; metadata-only read-only behavior with no payloads or replay; fresh manual Run Now semantics; bounded retries/dead-letter behavior; active-delivery delete `409`; and responsive/accessibility states. Verification evidence: dashboard634, focused16, full fixture118, QA/security rechecks, fresh deploy7 with route/API checks, active interaction JSON, visual run `run-20260802-job102/full-site`, strict/artifact/append checks, and diff/link/format review. The optional `/vscode` 404 is informational only and is not a JOB-102 blocker.
+<!-- (work-started) USAGE-100 2026-08-02T13:59:14Z ingenium-docs -->
+
+**USAGE-100 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** The current contract is advisory thresholds over the existing migration068 ledger, with no producer or ledger expansion. Thresholds are project-scoped and nullable for requests, total tokens, provider-reported numeric cost (no currency or inference), cache read, and cache write. Evaluation uses a caller-selected explicit UTC `from`/`to` range, or the existing all-history summary when omitted; thresholds have no implicit day or month. States are `disabled`, `unknown`, `below`, `equal`, and `above`; `unknown` never becomes zero. Results are advisory only and never block, throttle, or route. Implementation scope is migration078 plus API/Core, with no MCP; UI is deferred to USAGE-102 and attention to USAGE-101.
+<!-- (work-complete) USAGE-100 2026-08-02T14:54:17Z ingenium-docs -->
+Evidence USAGE-100: Core797/API755 source evidence; QA/probe fix; security14; deployment run-20260802-usage100 with migration, hashes, temporary acceptance, API restart, and seven-process verification. Scheduler `usage_sync_state` cursor behavior is informational; events, mappings, and thresholds remain unchanged. Full gates passed: typecheck, build, lint (0), fixture118, strict containment, database isolation, append-only, and artifact checks; dashboard634 passed after canonical reservation recovery. Targeted link, Markdown format, append-only, and diff checks passed.
+Finding USAGE-100: FOLLOW_UP (Core-only coverage): archived-project and range-bound edge cases are recorded in Core evidence; retain as follow-up if a separately required deployed/API matrix is needed. No in-scope blocker remains.
+<!-- (work-started) USAGE-101 2026-08-02T15:04:46Z ingenium-docs -->
+
+**USAGE-101 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** Migration079 is dedicated to the usage attention/items transition audit. Use one stable all-history key for each of the five metrics. Active states are `unknown` (informational), `equal` (warning), and `above` (critical); `below` and `disabled` resolve. Repeated unchanged refreshes emit no event; material changes emit an event and clear acknowledgement. A resolved condition reopens the same row. Acknowledgement uses CAS and never resolves an item. Freshness is `disabled`, `unknown`, `fresh`, or `stale`, based on the sync interval and successful-sync evidence. Scope is API list/evaluate/ack only, with no MCP, enforcement, channels, ranges, or UI.
+<!-- (work-complete) USAGE-101 2026-08-02T19:00:00Z ingenium-docs -->
+Evidence USAGE-101: Core802/API762; QA15+11 and security concurrency/direct-SQL review; deployment run `run-20260802-usage101` covering migration/schema/hashes, isolated lifecycle, API restart 7, and scheduler/API behavior; final type/lint (0)/build, fixture118, strict containment, database-isolation, append-only, and artifact checks passed. Migration079 attention is advisory and API-only: five stable all-history condition keys, unknown/equal/above active severities, below/disabled resolution, same-row reopen, CAS acknowledgement, freshness from successful mapped-source sync evidence, and no enforcement, ranges, channels, or MCP surface. Canonical link/format/append/diff checks passed. Agent validation is reported separately after this dependency-graph reconciliation.
+#### VSCODE-103 — System theme and pinned OpenCode extension
+
+- **IN_SCOPE:** Set code-server system color-scheme defaults for fresh and existing `vscode-data` volumes; bake the official Open VSX `sst-dev.opencode@0.0.13` VSIX with SHA-256 `e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`; validate build identity and engine compatibility; install the pinned extension offline and idempotently as `appuser` into persisted extensions; preserve user settings and existing extensions; verify deployment, dark/light system-theme behavior, pinned extension behavior, and visual acceptance.
+- **OUT_OF_SCOPE:** Disabling workspace trust, running extension commands, provider authentication, marketplace network access at runtime, unrelated VS Code customization, or extension auto-update redesign.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** VSCODE-102.
+- **Acceptance:** Fresh and existing `vscode-data` volumes both receive the system color-scheme defaults and the pinned extension without losing user settings or existing extensions; restart and offline operation remain successful; the extension list reports exactly `sst-dev.opencode` at version `0.0.13`; explicit user theme values remain unchanged; system dark and light changes are followed when no explicit user value overrides them; build identity, VSIX SHA-256, and code-server engine compatibility are verified; installation is offline, `appuser`-owned, persisted, and idempotent; visual acceptance covers dark/light themes and the extension; evidence contains no content or secrets; all 7 services remain healthy.
+- **STOP_CONDITION:** `PASS` only after fresh/existing-volume, restart/offline, provenance, persistence, security, deployment, dark/light visual, extension, seven-service, and marker checks pass; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required deployment/browser/build access, unauthorized destructive volume cleanup, a genuine product decision or ambiguity, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa` owns the declared deployment and acceptance pass; `@ingenium-security-auditor` owns the bounded provenance, offline, ownership, and no-content/secrets review; `@ingenium-qa-vision` owns the dark/light and extension visual gate.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Verify the baked VSIX before installation; preserve `vscode-data`, user settings, and pre-existing extensions; install only as `appuser` into the persisted extension directory; stop/remove only owned fixtures; rollback removes the pinned extension/theme additions without deleting the volume or altering unrelated VSCode/OpenCode state.
+- **Tests:** Build identity and code-server engine checks; exact VSIX SHA-256 and extension manifest/version checks; offline install and no-marketplace-network checks; fresh-volume and existing-volume preservation checks; appuser ownership, idempotence, persisted extension-directory, restart, and offline checks; explicit theme-value preservation and system dark/light follow checks; exact extension-list check; content/secrets redaction checks; seven-service health/deployment checks; 1440x900 and 390x844 dark/light/extension visual, accessibility, console/network, and browser-cleanup checks.
+- **Docs:** This roadmap only until verified behavior directly affects a canonical operational or security document; no Docs Workspace writes or broad regeneration.
+- **Exclusive writer territory:** Code-server theme defaults, baked VSIX/provenance, persisted appuser extension installation, and VSCODE-103 deployment/acceptance fixtures; no overlap with dashboard route or unrelated VS Code customization files.
+- **Phase/counts:** P5 VSCode continuation; 1 writer / 3 nonwriters; premium owns implementation and deployment, QA owns acceptance, security owns provenance/boundary review, and QA vision owns visual acceptance; serialized after VSCODE-102.
+- **Verification plan:** Rebuild the current merged source, inspect build identity/engine/VSIX provenance, run fresh and existing volume fixtures, restart and exercise offline behavior, verify theme and extension state without collecting content or secrets, run the seven-service deployment and dark/light visual gates once, then fix and rerun only the smallest check proving each reproducible in-scope root cause before reconciling markers.
+- **Causal remediation rule:** Fix the earliest proven build, engine, install ownership, persistence, theme precedence, offline, network, or visual-state producer; never mask extension/version or user-setting loss with a post-install rewrite.
+- **Finding classification:** Wrong artifact/hash/version, engine incompatibility, marketplace runtime dependency, non-idempotent or non-appuser install, user-setting/extension loss, theme-precedence regression, content/secrets exposure, unhealthy service, or failed in-scope visual acceptance is `BLOCKING`; unrelated VS Code customization or auto-update behavior is `FOLLOW_UP`; deployment and visual evidence are `INFORMATIONAL`.
+
+<!-- (work-started) VSCODE-103 2026-08-02T16:10:25Z ingenium-docs -->
+<!-- (work-complete) VSCODE-103 2026-08-02T18:58:51Z ingenium-docs -->
+Evidence VSCODE-103: canonical run `tests/artifacts/test-runs/run-20260802-vscode103/` and visual path `tests/artifacts/visual-qa/run-20260802-vscode103/`; code-free built-in `configurationDefaults` verified for automatic system detection with Dark Modern/Light Modern and explicit user/workspace precedence; official Open VSX `sst-dev.opencode@0.0.13` URL/SHA verified; image-baked offline appuser install, fresh/existing `vscode-data` persistence, restart/upgrade identity-engine-hash revalidation, no runtime registry install, Restricted Mode/user-trust boundary, QA/security review, Docker specification, and all 7 supervisord services verified.
+<!-- (work-started) USAGE-102 2026-08-02T19:22:31Z ingenium-docs -->
+
+**USAGE-102 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** With USAGE-101 complete, extend the existing `/usage` route only: add an advisory threshold editor with selected UTC evaluation, and all-history attention cards/list with exact-five metrics. Retain draft values and require reload on CAS conflict; provide active/resolved filtering plus acknowledge, evaluate, and load-more actions, including event load-more. Use explicit unknown/not-reported/partial wording; do not add currency, enforcement, or provider branding. A project switch resets all usage state. No settings or navigation change; acceptance includes desktop/mobile changed-route and full-site visual gates. Scope is implementation plus the declared gates only; no completion marker, other docs/tasks, or Docs Workspace work.
+
+#### UI-103 — Dockable side navigation and hover scrollbar
+
+- **IN_SCOPE:** Add the burger immediately before the logo; support a persisted desktop full `224px` ↔ compact `56px` icon rail state applied before paint; retain the existing full drawer on mobile only; preserve the current theme, links, groups, and active states; add a hover-only stable scrollbar with no idle gutter; provide accessible names and native `title` text in the icon rail; implement focus trap/restoration, unique IDs, unmounted closed-drawer behavior, Escape, backdrop dismissal, route-close behavior, and reduced-motion handling; verify desktop, mobile, and full-site gates.
+- **OUT_OF_SCOPE:** Route, group, or content redesign; global scrollbar changes; YouTube styling; hiding navigation entirely.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** UI-102 (complete).
+- **Acceptance:** Burger placement is immediately before the logo; desktop full/compact navigation persists and is applied without a hydration or first-paint flash; mobile retains only the existing full drawer behavior; current theme, links, groups, and active states remain intact; idle scrollbars are not visible, hover reveals the thumb, and scrollbar width is stable with no layout shift or overflow; keyboard, touch, and wheel interactions work; rail controls have accessible names and native titles; focus trapping/restoration, unique IDs, closed-drawer unmounting, Escape, backdrop dismissal, route close, reduced motion, deployment, changed-route visual, and full-site desktop/mobile gates pass.
+- **STOP_CONDITION:** `PASS` after focused interaction/accessibility tests, deployed dashboard acceptance, desktop/mobile visual gates, full-site gates, and marker reconciliation; otherwise continue in scope or permitted escalation.
+- **Escalation:** Only unavailable required browser/deployment access, a genuine product decision or ambiguity in navigation interaction semantics, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed-route and passive full-site desktop/mobile visual gates.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Preserve the current navigation model and mobile drawer; keep persistence fail-safe and hydration-safe; change only dashboard navigation/scrollbar behavior and focused tests; do not alter global scrollbar styles, unrelated routes, or other dirty files.
+- **Tests:** Navigation component/accessibility tests; persistence/pre-paint and hydration tests; focus trap/restoration, unique-ID, unmount, Escape, backdrop, route-close, reduced-motion, keyboard/touch/wheel, scrollbar-hover/stability, overflow, console/network, deployment health, changed-route 1440x900/390x844 screenshots, and passive full-site desktop/mobile checks with browser cleanup.
+- **Docs:** This roadmap only; no other canonical documentation or Docs Workspace work.
+- **Exclusive writer territory:** Dashboard navigation components, navigation scrollbar styles/utilities, and focused UI-103 tests; no overlap with VSCode, Chat, usage, or shared control files.
+- **Phase/counts:** P5 UI continuation; 3 writers / 3 nonwriters; fast owns navigation implementation, premium owns deployment, docs owns roadmap only; serialized after UI-102.
+- **Verification plan:** Inspect the existing navigation and drawer contracts, implement the smallest shared desktop/mobile boundary, run focused interaction/accessibility and persistence/hydration checks once, deploy the merged dashboard, inspect changed routes at both viewports and the passive full-site sweep, then fix only reproducible in-scope roots and rerun the smallest proving check before reconciling markers.
+- **Causal remediation rule:** Fix the earliest navigation state, persistence/hydration, focus lifecycle, route-close, scrollbar geometry, or responsive boundary proven by source, DOM, and event evidence; do not mask it with page-specific CSS or click-only fallbacks.
+- **Finding classification:** Broken navigation interaction, accessibility/focus behavior, persistence/hydration, layout/overflow, scrollbar stability, deployment, or in-scope visual acceptance is `BLOCKING`; route/group/content redesign, global scrollbar changes, YouTube styling, or unrelated UI drift is `FOLLOW_UP`; browser variance and retained evidence are `INFORMATIONAL`.
+
+<!-- (work-started) UI-103 2026-08-02T20:42:39Z ingenium-docs -->
+
+**UI-103 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** With UI-102 complete, keep mobile navigation as the existing full drawer and add only the desktop dockable full/compact rail. The burger sits immediately before the logo; the compact rail preserves current links, groups, active states, theme, accessible names, and native titles. Persist the desktop state before paint without hydration drift. Closed mobile drawers unmount, trap and restore focus, use unique IDs, close on Escape/backdrop/route, and honor reduced motion. The scrollbar is stable and invisible at rest, revealing its thumb on hover without global scrollbar changes or layout shift. Acceptance includes keyboard/touch/wheel, deployment, changed-route, and passive full-site desktop/mobile gates; no other docs or Docs Workspace work.
+<!-- (work-complete) UI-103 2026-08-02T21:30:00Z ingenium-docs -->
+Evidence UI-103: burger immediately before the logo; desktop 224px↔56px persisted icon rail applied before paint; mobile modal drawer with focus trap/restoration, inert background, unique IDs, Escape/backdrop/route close, viewport resize cleanup, and reduced-motion behavior; hover-only stable scrollbar with no overflow or layout shift. Deployment evidence `tests/artifacts/test-runs/run-20260802-ui103/`; active interaction/final proof and desktop/mobile visual/full-site evidence under `tests/artifacts/visual-qa/run-20260802-ui103/`; dashboard655, fixture120, QA/security review, and strict containment verification recorded.
+<!-- (work-complete) USAGE-102 2026-08-02T21:31:00Z ingenium-docs -->
+Evidence USAGE-102: `/usage` thresholds editor with CAS revision handling and retained drafts; selected inclusive-from/exclusive-to UTC advisory evaluation; active/resolved attention filtering with acknowledge, evaluate, and paging; event paging; explicit unknown/zero/partial/freshness wording; no currency inference or enforcement; project reset behavior. Deployment evidence `tests/artifacts/test-runs/run-20260802-usage102/`; active interaction and desktop/mobile visual/full-site evidence under `tests/artifacts/visual-qa/run-20260802-usage102/`; dashboard655, fixture120, and security review recorded.
+<!-- (work-started) VAULT-100 2026-08-02T23:02:18Z ingenium-docs -->
+
+**VAULT-100 decision/work-started marker (2026-08-02 UTC; `ingenium-docs`):** IN_SCOPE is migration080 normalized `job_vault_references` plus immutable authorize/revoke audit; optional bounded `vault_item_ids` on job create/PATCH/MCP create; omitted preserves/no reference by default, while empty revokes; same-project active items use a fail-closed generic error; sealed and unsealed responses expose metadata only (IDs/status/version/timestamps); actor is `authenticated_api`; stable IDs follow item revisions. Dependencies DOC-100 and JOB-100 are complete. No reveal, decrypt, unseal, runner injection, or UI. OUT_OF_SCOPE is completion, other docs/tasks/Docs Workspace, and crypto/AAD/backups/rotation.

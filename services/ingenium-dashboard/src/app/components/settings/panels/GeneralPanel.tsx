@@ -4,6 +4,7 @@ import { api } from "../../../../lib/api";
 import { useGlobalProject } from "../../../../lib/ProjectContext";
 import { useTheme } from "../../ThemeProvider";
 import SettingRow from "../SettingRow";
+import Select from "../../Select";
 
 /**
  * General settings panel — theme selection and archive retention config.
@@ -67,8 +68,9 @@ export default function GeneralPanel() {
 
   return (
     <div>
-      <SettingRow label="Theme" description="Select light, dark, or system theme">
-        <select
+      <SettingRow label="Theme" description="Select light, dark, or system theme" controlId="general-theme">
+        <Select
+          id="general-theme"
           value={theme}
           onChange={(e) => setTheme(e.target.value as "system" | "light" | "dark")}
           className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
@@ -76,7 +78,7 @@ export default function GeneralPanel() {
           <option value="system">System</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
-        </select>
+        </Select>
       </SettingRow>
 
       <SettingRow label="Archive retention" description="Days before archived projects are purged (1–365)">

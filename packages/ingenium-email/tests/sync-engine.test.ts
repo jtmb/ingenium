@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const accounts: Array<{ id: string; email: string; authType: "oauth2" | "app_password" }> = [];
-const getAccount = vi.fn((_projectId: string, accountId: string) =>
+const getAccount = vi.fn((accountId: string) =>
   accounts.find((account) => account.id === accountId),
 );
 
@@ -31,23 +31,23 @@ describe("sync engine reconciliation", () => {
   it("launches a worker for an account added after the engine starts", async () => {
     const { startEngine } = await import("../lib/sync-engine.js");
 
-    startEngine("global-project");
+    startEngine();
     await Promise.resolve();
     expect(getAccount).not.toHaveBeenCalled();
 
     accounts.push({ id: "oauth-account", email: "user@example.com", authType: "oauth2" });
-    startEngine("global-project");
+    startEngine();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(getAccount).toHaveBeenCalledWith("global-project", "oauth-account");
+    expect(getAccount).toHaveBeenCalledWith("oauth-account");
   });
 
   it("keeps an app-password account visible with a recoverable credential error", async () => {
     const { startEngine, getEngineStatus } = await import("../lib/sync-engine.js");
     accounts.push({ id: "manual-account", email: "manual@example.com", authType: "app_password" });
 
-    startEngine("global-project");
+    startEngine();
     await Promise.resolve();
     await Promise.resolve();
 

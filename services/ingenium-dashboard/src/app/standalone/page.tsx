@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import WorkspaceControl from "../components/WorkspaceControl";
 import type { WorkspaceControlProps } from "../components/WorkspaceControl";
 import OpenCodeFrame from "../components/OpenCodeFrame";
+import VSCodeFrame from "../components/VSCodeFrame";
 import { api, type DocSpace } from "@/lib/api";
 import { buildStandaloneDocsHandoffUrl } from "../docs/docs-navigation";
 
@@ -49,7 +50,6 @@ function StandaloneContent() {
   const searchParams = useSearchParams();
   const page = searchParams.get("page") as WorkspaceControlProps["pageId"] | null;
 
-  // Extract state params (any param except "page" and "standalone")
   const stateParams: Record<string, string> = {};
   searchParams.forEach((value, key) => {
     if (key !== "page" && key !== "standalone") {
@@ -57,8 +57,7 @@ function StandaloneContent() {
     }
   });
 
-  // ── Invalid or missing page ──────────────────────────────────────────
-  if (!page || !["opencode", "mail", "docs", "chat"].includes(page)) {
+  if (!page || !["opencode", "vscode", "mail", "docs", "chat"].includes(page)) {
     return (
       <div className="fixed inset-0 z-50 bg-[var(--color-surface)] flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -77,13 +76,11 @@ function StandaloneContent() {
     );
   }
 
-  // ── Page title ───────────────────────────────────────────────────────
   const pageTitle =
-    page === "opencode" ? "OpenCode" : page === "mail" ? "Mail" : page === "chat" ? "Chat" : "Docs";
+    page === "opencode" ? "OpenCode" : page === "vscode" ? "VS Code" : page === "mail" ? "Mail" : page === "chat" ? "Chat" : "Docs";
 
   return (
     <div className="fixed inset-0 z-50 bg-[var(--color-surface)] flex flex-col">
-      {/* Minimal top bar */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border)] shrink-0 bg-[var(--color-surface)]">
         <div className="flex items-center gap-3">
           <a href="/" className="font-bold text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
@@ -98,9 +95,9 @@ function StandaloneContent() {
         />
       </header>
 
-      {/* Page content */}
       <div className="flex-1 min-h-0">
         {page === "opencode" && <StandaloneOpenCode />}
+        {page === "vscode" && <StandaloneVSCode />}
         {page === "chat" && <StandaloneChat />}
         {page === "mail" && <StandaloneMail />}
         {page === "docs" && <StandaloneDocs standaloneSearchParams={searchParams} />}
@@ -109,7 +106,14 @@ function StandaloneContent() {
   );
 }
 
-// ── Standalone sub-components ────────────────────────────────────────────
+/** Standalone VS Code reuses the same fixed-origin frame and status boundary. */
+function StandaloneVSCode() {
+  return (
+    <div className="relative h-full min-h-0 min-w-0">
+      <VSCodeFrame />
+    </div>
+  );
+}
 
 /**
  * Standalone OpenCode view — two iframes (Web/CLI) with mode toggle.
@@ -139,7 +143,6 @@ function StandaloneOpenCode() {
     <div className="relative w-full h-full">
       <OpenCodeFrame mode={mode} cliMounted={cliMounted} />
 
-      {/* Mode toggle — simplified standalone version */}
       <div
         className="fixed right-0 top-1/2 -translate-y-1/2 z-10 bg-[var(--color-surface)]/90 backdrop-blur-sm border border-[var(--color-border)] rounded-l-lg p-1 flex flex-col gap-0.5 shadow-lg"
         style={{ transition: "transform 0.15s ease" }}
@@ -311,14 +314,12 @@ function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pi
     fetchSpaces();
   }, [fetchSpaces]);
 
-  // Focus name input when create form opens
   useEffect(() => {
     if (showCreate && nameInputRef.current) {
       nameInputRef.current.focus();
     }
   }, [showCreate]);
 
-  // ── Space selection — navigate to /docs workspace ──────────────────────
   const handleSelect = useCallback(
     (spaceId: number) => {
       router.push(buildStandaloneDocsHandoffUrl(standaloneSearchParams, spaceId));
@@ -326,7 +327,6 @@ function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pi
     [router, standaloneSearchParams],
   );
 
-  // ── Create space ───────────────────────────────────────────────────────
   const handleCreate = useCallback(async () => {
     const name = newName.trim();
     if (!name) return;
@@ -354,7 +354,6 @@ function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pi
     setCreateError(null);
   }, []);
 
-  // ── Loading state ──────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -369,7 +368,6 @@ function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pi
     );
   }
 
-  // ── Error state ────────────────────────────────────────────────────────
   if (error) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -391,7 +389,6 @@ function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pi
     );
   }
 
-  // ── Empty state (no spaces exist) ──────────────────────────────────────
   if (spaces.length === 0 && !showCreate) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -418,13 +415,10 @@ function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pi
     );
   }
 
-  // ── Data state — list + create form ────────────────────────────────────
   return (
     <div className="h-full flex flex-col">
-      {/* Scrollable space list */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+          <div className="flex items-center justify-between mb-5">
           <div>
             <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
               Documentation Spaces

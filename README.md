@@ -250,7 +250,7 @@ The MCP stdio server is not a supervisord process — it is bundled in the `@ing
 | MCP Tools Reference | [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) |
 | Database Migrations Reference | [docs/reference/database-migrations.md](docs/reference/database-migrations.md) |
 | Docs Workspace Reference | [docs/reference/docs-workspace.md](docs/reference/docs-workspace.md) |
-| Extension Architecture | [packages/ingenium-extension/ARCHITECTURE.md](packages/ingenium-extension/ARCHITECTURE.md) |
+| Extension Architecture | [docs/concepts/architecture.md](docs/concepts/architecture.md#resource-sync-engine) |
 | Dashboard Styling Guide | [services/ingenium-dashboard/STYLING-GUIDE.md](services/ingenium-dashboard/STYLING-GUIDE.md) |
 | Agent Protocol | [AGENTS.md](AGENTS.md) |
 

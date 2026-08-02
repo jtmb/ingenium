@@ -31,6 +31,34 @@ describe("chat fixture lifecycle", () => {
     }
   });
 
+  it("returns the OpenCode global health contract", async () => {
+    const server = await startChatFixtureServer(0);
+    try {
+      const port = listeningPort(server);
+      const response = await fetch(`http://127.0.0.1:${port}/global/health`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ healthy: true, version: "1.18.9" });
+    } finally {
+      await closeChatFixtureServer(server);
+    }
+  });
+
+  it("returns the deployed 404 contract for messages from an unknown session", async () => {
+    const server = await startChatFixtureServer(0);
+    try {
+      const port = listeningPort(server);
+      const response = await fetch(`http://127.0.0.1:${port}/session/missing-session/message`);
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "Not found", code: "NOT_FOUND" },
+      });
+    } finally {
+      await closeChatFixtureServer(server);
+    }
+  });
+
   it("destroys active SSE sockets without waiting for the stream delays", async () => {
     const server = await startChatFixtureServer(0);
     const port = listeningPort(server);

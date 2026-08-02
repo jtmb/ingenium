@@ -7,6 +7,7 @@ import {
   type ChildMcpRuntimeDefinitionResponse,
   type ChildMcpToolHost,
 } from "../lib/child-mcp-gateway.js";
+import type { ProjectStateAttestation } from "../lib/tool-state-gate.js";
 import { ChildMcpRuntimeManager } from "../lib/proxy.js";
 
 const fixture = new URL("./fixtures/child-mcp-server.mjs", import.meta.url).pathname;
@@ -53,6 +54,10 @@ function createHost() {
 
 function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
   let toolState: "enabled" | "disabled" | "unavailable" = "enabled";
+  let attestation: ProjectStateAttestation = {
+    project: "child-gateway-project",
+    project_id: "child-gateway-project-id",
+  };
   const reports: ChildMcpDiscoveryReport[] = [];
   const checkedTools: string[] = [];
   const api: ChildMcpGatewayApi = {
@@ -65,7 +70,7 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
     },
     async toolEnabled(_project, toolName) {
       checkedTools.push(toolName);
-      return toolState;
+      return { state: toolState, attestation };
     },
   };
   return {
@@ -73,6 +78,7 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
     reports,
     checkedTools,
     setToolState: (next: typeof toolState) => { toolState = next; },
+    setAttestation: (next: ProjectStateAttestation) => { attestation = next; },
   };
 }
 
@@ -121,6 +127,7 @@ describe("ChildMcpGateway", () => {
       arguments: { value: "must-not-forward" },
     });
     expect(disabled).toEqual({
+      isError: true,
       content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_DISABLED", message: "This child MCP tool is disabled for the project." } }) }],
     });
 
@@ -138,6 +145,7 @@ describe("ChildMcpGateway", () => {
       project: "child-gateway-project",
       arguments: { value: "must-not-forward-from-old-generation" },
     })).resolves.toEqual({
+      isError: true,
       content: [{ type: "text", text: JSON.stringify({ error: { code: "CHILD_MCP_UNAVAILABLE", message: "The child MCP server is unavailable." } }) }],
     });
 
@@ -146,6 +154,7 @@ describe("ChildMcpGateway", () => {
       arguments: { value: "must-not-forward" },
     });
     expect(wrongProject).toEqual({
+      isError: true,
       content: [{ type: "text", text: JSON.stringify({ error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required for this child MCP tool." } }) }],
     });
 
@@ -157,6 +166,7 @@ describe("ChildMcpGateway", () => {
       project: "child-gateway-project",
       arguments: { value: "must-not-forward-after-remove" },
     })).resolves.toEqual({
+      isError: true,
       content: [{ type: "text", text: JSON.stringify({ error: { code: "CHILD_MCP_UNAVAILABLE", message: "The child MCP server is unavailable." } }) }],
     });
     expect(host.sendToolListChanged).toHaveBeenCalledTimes(4);
@@ -178,6 +188,7 @@ describe("ChildMcpGateway", () => {
       arguments: { value: "must-not-forward" },
     });
     expect(unavailable).toEqual({
+      isError: true,
       content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_STATE_UNAVAILABLE", message: "The child MCP tool state could not be verified." } }) }],
     });
     await gateway.refresh();
@@ -186,6 +197,32 @@ describe("ChildMcpGateway", () => {
     expect(resolveChildMcpProjectIdentity(undefined)).toBeNull();
     expect(resolveChildMcpProjectIdentity("../unsafe")).toBeNull();
     expect(resolveChildMcpProjectIdentity("child-gateway-project")).toBe("child-gateway-project");
+  });
+
+  it("rejects a changed child-state attestation before a retained tool call can cross projects", async () => {
+    const { host, tools } = createHost();
+    const api = createApi([runtimeDefinition()]);
+    const manager = createManager();
+    const gateway = new ChildMcpGateway(host, "child-gateway-project", api.api, manager);
+    gateways.push(gateway);
+
+    await gateway.start();
+    const retainedHandler = tools.get("fixture_echo")!.handler;
+    api.setAttestation({
+      project: "child-gateway-project",
+      project_id: "other-project-id",
+    });
+
+    await expect(retainedHandler({
+      project: "child-gateway-project",
+      arguments: { value: "must-not-forward" },
+    })).resolves.toEqual({
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_STATE_UNAVAILABLE", message: "The child MCP tool state could not be verified." } }) }],
+    });
+
+    await gateway.refresh();
+    expect(tools.has("fixture_echo")).toBe(false);
   });
 
   it("reconciles definitions added and removed after the parent transport starts without a restart", async () => {

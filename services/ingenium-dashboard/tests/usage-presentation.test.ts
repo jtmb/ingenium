@@ -4,8 +4,11 @@ import {
   formatCostWithAvailability,
   freshnessState,
   formatUsageMetric,
+  advisoryObservedLabel,
+  attentionFreshnessLabel,
   usageAvailabilityLabel,
   utcInputValueToIso,
+  validateUsageThresholdDraft,
   validateUsageFilters,
 } from "../src/app/usage/components/usage-presentation";
 
@@ -57,5 +60,37 @@ describe("usage presentation helpers", () => {
   it("creates a 30-day draft range", () => {
     const draft = defaultUsageFilterDraft(new Date("2026-04-30T12:00:00.000Z"));
     expect(draft).toMatchObject({ from: "2026-03-31T12:00", to: "2026-04-30T12:00", providerId: "", modelId: "", agentId: "", status: "" });
+  });
+
+  it("keeps advisory known-zero, partial subtotal, not-reported, unknown, and freshness states distinct", () => {
+    expect(advisoryObservedLabel({ observed: 0, threshold: 1, availability: "known", state: "below" })).toBe("0");
+    expect(advisoryObservedLabel({ observed: 2, threshold: 1, availability: "partial", state: "unknown" })).toContain("Partial — reported subtotal");
+    expect(advisoryObservedLabel({ observed: null, threshold: 1, availability: "unavailable", state: "unknown" })).toBe("Not reported");
+    expect(advisoryObservedLabel({ observed: 2, threshold: 1, availability: "known", state: "unknown" })).toContain("Unknown — insufficient reported data to compare");
+    expect(attentionFreshnessLabel("unknown")).toBe("Freshness unknown");
+    expect(attentionFreshnessLabel("disabled")).toBe("Freshness disabled");
+  });
+
+  it("validates all five advisory fields without treating blank disabled fields as zero", () => {
+    const valid = validateUsageThresholdDraft({
+      requestCount: "0",
+      totalTokens: "12",
+      reportedCostAmount: "0.42",
+      cacheReadTokens: "",
+      cacheWriteTokens: "9",
+    }, 3);
+    expect(valid).toEqual({
+      ok: true,
+      replacement: {
+        expectedRevision: 3,
+        requestCount: 0,
+        totalTokens: 12,
+        reportedCostAmount: 0.42,
+        cacheReadTokens: null,
+        cacheWriteTokens: 9,
+      },
+    });
+    expect(validateUsageThresholdDraft({ requestCount: "1.2", totalTokens: "", reportedCostAmount: "", cacheReadTokens: "", cacheWriteTokens: "" }, 3)).toMatchObject({ ok: false });
+    expect(validateUsageThresholdDraft({ requestCount: "", totalTokens: "", reportedCostAmount: "Infinity", cacheReadTokens: "", cacheWriteTokens: "" }, 3)).toMatchObject({ ok: false });
   });
 });

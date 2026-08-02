@@ -29,8 +29,12 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const MIN_TIMEOUT_MS = 50;
 const MAX_TIMEOUT_MS = 5 * 60_000;
 const PROCESS_GROUP_KILL_GRACE_MS = 250;
+// Session IDs stay single safe CLI arguments while retaining OpenCode's
+// punctuation; the allowlist excludes path separators and control bytes.
 const SESSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+// Limit output to one JSON filename so it stays under the prepared upload path.
 const OUTPUT_BASENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+// Control bytes are unsafe in process arguments and filesystem names.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 
 class ExportError extends Error {
@@ -264,9 +268,13 @@ function runExport(worktree, session, descriptor, timeoutMs) {
     try {
       child = spawn("opencode", ["export", session], {
         cwd: worktree,
+        // POSIX descendants share a group so timeout cleanup reaches helpers;
+        // Windows falls back to terminating the direct child.
         detached: process.platform !== "win32",
+        // Keep session arguments literal and stream stdout to the validated file.
         shell: false,
         stdio: ["ignore", descriptor, "pipe"],
+        // This non-interactive helper must not open a console window on Windows.
         windowsHide: true,
       });
     } catch {
@@ -287,6 +295,8 @@ function runExport(worktree, session, descriptor, timeoutMs) {
     };
     const timeout = setTimeout(() => {
       timedOut = true;
+      // Stop the group first, then force-kill after a short grace period so a
+      // stuck exporter or descendant cannot keep writing after the timeout.
       terminateProcessGroup(child, "SIGTERM");
       forceKillTimer = setTimeout(() => terminateProcessGroup(child, "SIGKILL"), PROCESS_GROUP_KILL_GRACE_MS);
     }, timeoutMs);

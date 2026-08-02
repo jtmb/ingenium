@@ -444,6 +444,16 @@ export function redactHeaders(headers: Record<string, string>): Record<string, s
   return out;
 }
 
+const INVALID_PATH_SEGMENT = "__invalid_opencode_path_segment__";
+
+/** Encode an upstream dynamic path component without changing query encoding. */
+function pathSegment(value: string): string {
+  if (value === "" || value === "." || value === "..") {
+    return INVALID_PATH_SEGMENT;
+  }
+  return encodeURIComponent(value);
+}
+
 /**
  * Central request dispatcher. Builds the full URL, injects auth, handles
  * error normalization, and returns a typed result.
@@ -681,14 +691,14 @@ export const opencodeClient = {
     id: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${id}`, { query: { directory } }),
+    request<SessionInfo>(`/session/${pathSegment(id)}`, { query: { directory } }),
 
   updateSession: (
     id: string,
     body: UpdateSessionBody,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${id}`, {
+    request<SessionInfo>(`/session/${pathSegment(id)}`, {
       method: "PATCH",
       body,
       query: { directory },
@@ -698,7 +708,7 @@ export const opencodeClient = {
     id: string,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${id}`, {
+    request<boolean>(`/session/${pathSegment(id)}`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -716,7 +726,7 @@ export const opencodeClient = {
     before?: string,
     directory?: string,
   ): Promise<OpenCodeResult<MessageEnvelope[]>> =>
-    request<MessageEnvelope[]>(`/session/${sessionId}/message`, {
+    request<MessageEnvelope[]>(`/session/${pathSegment(sessionId)}/message`, {
       query: { limit, before, directory },
     }),
 
@@ -725,7 +735,7 @@ export const opencodeClient = {
     messageId: string,
     directory?: string,
   ): Promise<OpenCodeResult<MessageEnvelope>> =>
-    request<MessageEnvelope>(`/session/${sessionId}/message/${messageId}`, {
+    request<MessageEnvelope>(`/session/${pathSegment(sessionId)}/message/${pathSegment(messageId)}`, {
       query: { directory },
     }),
 
@@ -734,7 +744,7 @@ export const opencodeClient = {
     body: SendPromptBody,
     directory?: string,
   ): Promise<OpenCodeResult<MessageEnvelope>> =>
-    request<MessageEnvelope>(`/session/${sessionId}/message`, {
+    request<MessageEnvelope>(`/session/${pathSegment(sessionId)}/message`, {
       method: "POST",
       body,
       query: { directory },
@@ -745,7 +755,7 @@ export const opencodeClient = {
     messageId: string,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${sessionId}/message/${messageId}`, {
+    request<boolean>(`/session/${pathSegment(sessionId)}/message/${pathSegment(messageId)}`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -756,7 +766,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${sessionId}/abort`, {
+    request<boolean>(`/session/${pathSegment(sessionId)}/abort`, {
       method: "POST",
       query: { directory },
     }),
@@ -766,7 +776,7 @@ export const opencodeClient = {
     messageId?: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/fork`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/fork`, {
       method: "POST",
       body: messageId ? ({ messageID: messageId } satisfies ForkBody) : undefined,
       query: { directory },
@@ -776,7 +786,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/share`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/share`, {
       method: "POST",
       query: { directory },
     }),
@@ -785,7 +795,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/share`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/share`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -795,7 +805,7 @@ export const opencodeClient = {
     body?: SummarizeBody,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${sessionId}/summarize`, {
+    request<boolean>(`/session/${pathSegment(sessionId)}/summarize`, {
       method: "POST",
       body,
       query: { directory },
@@ -806,7 +816,7 @@ export const opencodeClient = {
     body: RevertBody,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/revert`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/revert`, {
       method: "POST",
       body,
       query: { directory },
@@ -816,7 +826,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/unrevert`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/unrevert`, {
       method: "POST",
       body: {},
       query: { directory },
@@ -826,7 +836,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo[]>> =>
-    request<SessionInfo[]>(`/session/${sessionId}/children`, {
+    request<SessionInfo[]>(`/session/${pathSegment(sessionId)}/children`, {
       query: { directory },
     }),
 
@@ -835,7 +845,7 @@ export const opencodeClient = {
     messageId?: string,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${sessionId}/diff`, {
+    request<unknown>(`/session/${pathSegment(sessionId)}/diff`, {
       query: { messageID: messageId, directory },
     }),
 
@@ -844,7 +854,7 @@ export const opencodeClient = {
     body: CommandBody,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${sessionId}/command`, {
+    request<unknown>(`/session/${pathSegment(sessionId)}/command`, {
       method: "POST",
       body,
       query: { directory },
@@ -854,7 +864,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/init`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/init`, {
       method: "POST",
       body: {},
       query: { directory },
@@ -876,7 +886,7 @@ export const opencodeClient = {
     }),
 
   connectIntegrationKey: (integrationID: string, key: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/${encodeURIComponent(integrationID)}/connect/key`, {
+    request<string>(`/api/integration/${pathSegment(integrationID)}/connect/key`, {
       method: "POST",
       body: { key },
     }),
@@ -886,22 +896,22 @@ export const opencodeClient = {
     methodID: string,
     inputs: Record<string, string>,
   ): Promise<OpenCodeResult<V2Response<IntegrationAttempt>>> =>
-    request<V2Response<IntegrationAttempt>>(`/api/integration/${encodeURIComponent(integrationID)}/connect/oauth`, {
+    request<V2Response<IntegrationAttempt>>(`/api/integration/${pathSegment(integrationID)}/connect/oauth`, {
       method: "POST",
       body: { methodID, inputs },
     }),
 
   getIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<V2Response<{ status: string; message?: string }>>> =>
-    request<V2Response<{ status: string; message?: string }>>(`/api/integration/attempt/${encodeURIComponent(attemptID)}`),
+    request<V2Response<{ status: string; message?: string }>>(`/api/integration/attempt/${pathSegment(attemptID)}`),
 
   completeIntegrationAttempt: (attemptID: string, code?: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/attempt/${encodeURIComponent(attemptID)}/complete`, {
+    request<string>(`/api/integration/attempt/${pathSegment(attemptID)}/complete`, {
       method: "POST",
       body: code ? { code } : {},
     }),
 
   cancelIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/attempt/${encodeURIComponent(attemptID)}`, { method: "DELETE" }),
+    request<string>(`/api/integration/attempt/${pathSegment(attemptID)}`, { method: "DELETE" }),
 
   /* ── Auth ── */
 
@@ -910,7 +920,7 @@ export const opencodeClient = {
     body: AuthRequestBody,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/auth/${providerID}`, {
+    request<unknown>(`/auth/${pathSegment(providerID)}`, {
       method: "POST",
       body,
       query: { directory },
@@ -920,7 +930,7 @@ export const opencodeClient = {
     providerID: string,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/auth/${providerID}`, {
+    request<unknown>(`/auth/${pathSegment(providerID)}`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -960,13 +970,13 @@ export const opencodeClient = {
     }),
 
   connectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/mcp/${encodeURIComponent(name)}/connect`, {
+    request<unknown>(`/mcp/${pathSegment(name)}/connect`, {
       method: "POST",
       sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
 
   disconnectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/mcp/${encodeURIComponent(name)}/disconnect`, {
+    request<unknown>(`/mcp/${pathSegment(name)}/disconnect`, {
       method: "POST",
       sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
@@ -991,7 +1001,7 @@ export const opencodeClient = {
     body: PermissionReplyBody,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${sessionId}/permissions/${permissionId}`, {
+    request<unknown>(`/session/${pathSegment(sessionId)}/permissions/${pathSegment(permissionId)}`, {
       method: "POST",
       body,
       query: { directory },

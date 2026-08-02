@@ -16,6 +16,11 @@ const MAX_MESSAGE_PAGES_PER_SESSION = 5;
 const MESSAGE_PAGE_SIZE = 200;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
+export function getUsageSyncInterval(): number {
+  const parsed = Number.parseInt(process.env.USAGE_SYNC_INTERVAL_MS ?? "300000", 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 300_000;
+}
+
 interface SyncSession {
   session: SessionInfo;
   sessionId: string;

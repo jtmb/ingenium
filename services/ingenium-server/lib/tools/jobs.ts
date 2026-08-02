@@ -21,12 +21,14 @@ export async function jobCreate(
   schedule_cron?: string,
   trigger_event?: string,
   timeout_minutes?: number,
+  vault_item_ids?: string[],
 ) {
   const body: Record<string, unknown> = { name, agent, prompt_template };
   if (description) body.description = description;
   if (schedule_cron) body.schedule_cron = schedule_cron;
   if (trigger_event) body.trigger_event = trigger_event;
   if (timeout_minutes !== undefined) body.timeout_minutes = timeout_minutes;
+  if (vault_item_ids !== undefined) body.vault_item_ids = vault_item_ids;
   const res = await api.post("/jobs", body, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }

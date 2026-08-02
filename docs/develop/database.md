@@ -11,7 +11,9 @@ This document is the canonical reference for all SQLite database migrations in t
 
 Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` files. They are applied conditionally by `runMigrations()` in `db.ts` — each checks for an existing table/column/signature before running. Migrations are idempotent and run on every API startup.
 
-**Dockerfile note:** The Dockerfile runtime stage does not copy `data/migrations/`. New migration `.sql` files must be manually placed (bind-mounted or copied) into the container for incremental DBs.
+**Dockerfile note:** The built image copies `packages/ingenium-core/data/migrations/`
+into `/app/packages/ingenium-core/data/migrations/`, so incremental startup can
+read packaged migrations; no manual bind or copy is required for the built image.
 
 ## Canonical deployed database path
 
@@ -84,7 +86,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–068)
+### Feature Migrations (045–080)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -111,6 +113,125 @@ another Compose project volume.
 | 066 | `066_context_checkpoint_governance.sql` | Creates short-lived, one-time project-scoped maintenance authorizations plus append-only archive/unarchive/restore-as-new audit records. Archive state is derived from events; checkpoints are never deleted. |
 | 067 | `067_context_migration_repair.sql` | Repairs recoverable legacy or partial 063 shapes before 065/066 are evaluated. The runner projects rows into canonical staging tables in one transaction, restores indexes/FTS/triggers/foreign keys, validates integrity, and records only a content-free schema hash plus row counts in `context_migration_repairs`. |
 | 068 | `068_usage_telemetry.sql` | Creates metadata-only provider-neutral usage events, explicit OpenCode-to-Ingenium project mappings (including unmapped quarantine), and per-project composite usage sync state. Events preserve raw provider/model IDs, nullable assistant-agent attribution, and numeric reasoning-token metadata. They have a replay-safe `(source_instance, source_part_id)` key and contain no message text, reasoning content, tool payload, credential, or raw payload columns. |
+| 078 | `078_usage_advisory_thresholds.sql` | Creates one restrictive-FK, project-scoped advisory threshold row with nullable request, total-token, provider-reported-cost, and cache-token thresholds plus CAS revision and UTC audit timestamps. SQL checks reject negative, non-numeric, non-finite, and unsafe values. Thresholds contain no provider, currency, price, or time-window data and do not enforce usage routing or execution. There is no public delete operation: setting every threshold to `null` retains the row and its audit/revision history. |
+| 079 | `079_usage_attention_items.sql` | Creates project-scoped, all-history usage attention lifecycle items and immutable transition events. The five fixed condition keys cover request count, total tokens, provider-reported cost, cache-read tokens, and cache-write tokens. Rows retain only bounded advisory metadata, fixed message codes, CAS revisions, UTC lifecycle timestamps, and a fixed `NULL` all-history range; they contain no provider, source, payload, free-text, or JSON fields. |
+| 080 | `080_job_vault_references.sql` | Creates metadata-only job-to-vault authorization references and immutable authorization/revocation audit rows. References are project-scoped composite keys, target only active same-project vault items, are capped at 16 authorized items per job, and remain available as provenance when a job or vault item is soft-deleted. |
+
+Migration 078 adds `usage_advisory_thresholds`, keyed one-to-one by
+`project_id` with `ON DELETE RESTRICT`. Its five nullable fields are
+`request_count`, `total_tokens`, `reported_cost_amount`, `cache_read_tokens`,
+and `cache_write_tokens`; `revision`, `created_at`, and `updated_at` provide
+optimistic CAS and UTC audit evidence. A replacement must match the current
+revision and increments it; setting all fields to `NULL` disables comparison
+without deleting history. The table contains no currency, provider, pricing,
+period, credential, or enforcement fields.
+
+Core evaluation reads existing usage aggregates without writing threshold,
+event, mapping, or `usage_sync_state` rows. It accepts either both UTC `from`
+and `to` bounds (inclusive/exclusive, at most 366 days) or neither for explicit
+all-history evaluation. Known zero, partial subtotal, and unavailable subtotal
+remain distinct; only known values can compare as below/equal/above.
+
+Migration 079 reconciles the existing explicit all-history evaluation into one
+stable condition per metric. `unknown` is active/info, `equal` is
+active/warning, and `above` is active/critical; `disabled` and `below` resolve
+an existing item and do not create a new one. Reconciliation never changes the
+usage ledger, thresholds, project mappings, or sync state. Numeric drift within
+the same active evaluation state does not create a transition event, while an
+evaluation/severity/freshness-class or threshold-revision change does. Acknowledge
+uses item revision CAS; replays are idempotent, active changes clear an
+acknowledgement, resolving preserves it, and reopening clears it and increments
+the reopen count.
+
+The API scheduler invokes this reconciliation for every mapped project on the
+`USAGE_SYNC_INTERVAL_MS` cadence (five minutes by default), after the bounded
+metadata-only usage collector. Failed or no-new-data cycles still evaluate
+freshness; `USAGE_SYNC_INTERVAL_MS=0` disables both scheduled usage sync and
+attention evaluation. The public surface is the bearer-authenticated,
+project-scoped REST list/evaluate/ack contract; migration 079 adds no MCP
+surface and no request-execution enforcement.
+
+Attention freshness is source-backed rather than event-backed: an interval of
+zero disables scheduled usage sync and attention evaluation; otherwise every
+mapped source for the project must have `usage_sync_state.last_successful_sync_at`.
+Missing successful evidence makes freshness `unknown`; any source older than
+twice the configured interval makes it `stale`; only when every mapped source
+is within that bound is it `fresh`. A no-new or failed usage-sync cycle still
+runs this reconciliation for active mapped projects, so stale state advances
+without inferring successful sync from usage-event recency.
+
+### Coordination Migrations (073–075)
+
+| # | File | Purpose |
+|---|------|---------|
+| 073 | `073_task_coordination.sql` | Adds project-scoped task revision/CAS state, available/reserved/quarantined reservation state with owner/worktree consistency triggers, and immutable request-hash idempotency receipts. Existing tasks remain compatible at revision 0 and `available`. |
+| 074 | `074_task_reservation_tokens.sql` | Adds the reservation-token hash column and transactionally quarantines legacy non-available reservations because they cannot prove possession of a caller-held token; replaces the reservation consistency triggers accordingly. |
+| 075 | `075_coordination_registry.sql` | Adds durable project/worktree/session/incarnation coordination registries, monotonic worktree fences, hash-only ownership tokens, revision/CAS receipts, exact atomic claims with optional baselines and retained states, bounded snapshots, project-composite task/context pointers, and immutable receipt-update protection. |
+
+### Trusted Job Event Migration (076)
+
+| # | File | Purpose |
+|---|------|---------|
+| 076 | `076_trusted_job_events.sql` | Creates durable, project-scoped, append-only trusted job events for the three Context maintenance audit producers. Payloads are content-free, bounded JSON tied by FK and trigger to their immutable source audit row. Existing arbitrary `jobs.trigger_event` values are preserved; SQL triggers constrain only new job rows and actual trigger changes to the trusted catalog or `NULL`. |
+
+Migration 076's exact v1 catalog is `context.conversation.archived`,
+`context.conversation.unarchived`, and `context.checkpoint.restored_as_new`.
+Archive/unarchive payloads contain only `conversationId`, `expectedRevision`,
+and `archiveSequence`; restore payloads contain only source conversation,
+source checkpoint, target conversation, and expected revision identifiers.
+`source_audit_event_id` is an immutable Context audit FK and the project-local
+dedupe identity. Payload and provenance triggers reject unknown, oversized, or
+forged direct-SQL inserts. Trusted event rows cannot be updated or deleted and
+have indefinite retention until an explicit authorized project lifecycle
+action. No user append endpoint exists. JOB-101 snapshots each event once,
+including zero-match snapshots, and fans out only to enabled same-project jobs
+with an exact `trigger_event` match. Delivery state is bounded to five attempts
+with 30/60/120/300/600-second backoffs; leases store only an owner hash and CAS
+revision. Attempt provenance stores only process identity needed for proof
+(PID/PGID, start time, executable, and a nonce hash). An incomplete or
+ambiguous identity is dead-lettered rather than duplicated.
+
+### Job Event Delivery Migration (077)
+
+| # | File | Purpose |
+|---|------|---------|
+| 077 | `077_job_event_deliveries.sql` | Adds the durable, project-scoped trusted-event snapshot marker, exact-match delivery queue, hash-only leases, and per-attempt process provenance. Existing jobs, runs, and logs are preserved; legacy runs are backfilled with their owning project. Deleting a job disables and hides it while preserving FK-backed delivery history, with unfinished deliveries terminally dead-lettered. |
+
+Migration 077 snapshots each trusted event once, including zero-match snapshots,
+then fans it out only to enabled jobs in the same project whose `trigger_event`
+exactly matches the event type. It uses a unique project/event/job delivery key,
+five-attempt bounded retry states, and a hash-only lease owner. Event attempt
+provenance stores only PID/PGID, start time, executable, and a SHA-256 process
+nonce hash; it never stores a payload, prompt, environment, or plaintext token.
+Incomplete 077 schemas fail closed at startup rather than resuming an ambiguous
+lease or duplicating execution.
+
+### Job Vault Reference Migration (080)
+
+Migration 080 stores `job_vault_references` as a normalized `(project_id,
+job_id, item_id)` authorization record. Runtime and SQL triggers limit each job
+to 16 authorized vault items and reject missing, foreign-project, or soft-deleted
+items. The reference DTO is metadata-only: item ID, authorization timestamp,
+authorized item version, and availability. It never joins encrypted vault
+material or user-controlled vault metadata.
+
+`job_vault_reference_audit` is append-only UUID provenance for only
+`authorized` and `revoked` transitions. It stores the fixed
+`authenticated_api` actor plus project/job/item/version/timestamp fields; it
+has no free-text, JSON, item-name, or ciphertext columns. Vault deletion remains
+a source-aligned soft delete, so references and audit evidence are retained and
+the reference is reported unavailable rather than cascaded away.
+
+Migration 074 is a transactional legacy quarantine, not a token recovery path:
+reservation tokens are caller-held opaque values, and only their SHA-256 hashes
+are persisted. The coordination boundary does not promise protection from manual
+editor or external-process writes.
+
+Migration 075 is guarded as none/all/partial: when no coordination components
+exist, the migration runs transactionally; when the complete schema exists, it
+is skipped; any partial schema fails closed with no repair or partial startup.
+Its transaction begins with `BEGIN IMMEDIATE` and commits only after all tables,
+indexes, foreign keys, checks, and the immutable receipt trigger are created.
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 

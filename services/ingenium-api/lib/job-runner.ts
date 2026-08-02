@@ -1,11 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { readFileSync, readdirSync, readlinkSync } from "node:fs";
-import { jobs, logger } from "ingenium-core";
-
-// ============================================================================
-// Concurrency cap
-// ============================================================================
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { jobEventDeliveries, jobs, logger } from "ingenium-core";
 
 let activeRunCount = 0;
 
@@ -31,6 +27,8 @@ export const JOB_GROUP_RECOVERY_INTERVAL_MS = 1_000;
 
 /** In-memory map of runId → ChildProcess for cancellation and status tracking. */
 const runningProcesses = new Map<string, ChildProcess>();
+const runProjects = new Map<string, string>();
+const eventRunContexts = new Map<string, EventExecutionContext>();
 const forceKillTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const closePromises = new Map<string, Promise<void>>();
 const terminationCompletions = new Map<string, Promise<void>>();
@@ -41,6 +39,33 @@ const groupRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // Windows does not expose the same portable process-group signal semantics.
 const supportsOwnedProcessGroups = process.platform !== "win32";
 const RUN_NONCE_ENV = "INGENIUM_JOB_RUN_NONCE";
+const JOB_CHILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/**
+ * Deliberately do not inherit the API process environment. It carries boundary
+ * credentials and provider secrets that an agent process must never receive.
+ */
+export function buildJobProcessEnvironment(projectId: string, runNonce: string): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH || JOB_CHILD_PATH,
+    HOME: "/home/appuser",
+    USER: process.env.USER || "appuser",
+    SHELL: process.env.SHELL || "/bin/sh",
+    TERM: process.env.TERM || "dumb",
+    LANG: process.env.LANG || "C.UTF-8",
+    ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
+    ...(process.env.LC_CTYPE ? { LC_CTYPE: process.env.LC_CTYPE } : {}),
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || "/home/appuser/.config",
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME || "/home/appuser/.local/share",
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || "/home/appuser/.cache",
+    INGENIUM_JOB_PROJECT_ID: projectId,
+    [RUN_NONCE_ENV]: runNonce,
+  };
+}
+
+function safeJobLogText(value: unknown, maxBytes = 256): string {
+  return jobEventDeliveries.sanitizeJobEventText(typeof value === "string" ? value : "unknown", maxBytes);
+}
 
 /** Immutable identity data captured from procfs for an owned process. */
 export interface JobProcessIdentity {
@@ -71,6 +96,13 @@ interface JobRunnerRuntime {
   processInspector: JobProcessInspector;
   createRunNonce: () => string;
   signalProcessGroup: (processGroupId: number, signal: NodeJS.Signals) => void;
+}
+
+interface EventExecutionContext {
+  deliveryId: string;
+  attemptNumber: number;
+  leaseToken: string;
+  leaseRevision: number;
 }
 
 interface ProcessTrackingEvent {
@@ -239,6 +271,8 @@ export function resetJobRunnerForTesting(): void {
   for (const timer of groupRecoveryTimers.values()) clearTimeout(timer);
   activeRunCount = 0;
   runningProcesses.clear();
+  runProjects.clear();
+  eventRunContexts.clear();
   forceKillTimers.clear();
   closePromises.clear();
   terminationCompletions.clear();
@@ -504,31 +538,42 @@ export async function executeJobRun(
   runId: string,
   job: { id: string; agent: string; prompt_template: string; timeout_minutes: number; project_id: string },
   _prompt: string,
+  eventContext?: EventExecutionContext,
 ): Promise<void> {
-  // Interpolate any tokens in the prompt template (simple: just use as-is for now)
   const prompt = job.prompt_template;
 
-  // Check concurrency
   if (activeRunCount >= MAX_CONCURRENT_RUNS) {
     logger.warn("job-runner", `Concurrency limit reached (${MAX_CONCURRENT_RUNS}). Run ${runId} will be queued.`);
-    jobs.finishJobRun(runId, "failed", -1);
-    jobs.appendRunLog(runId, "stderr", `Concurrency limit reached: ${MAX_CONCURRENT_RUNS} runs already active.`);
+    if (eventContext) {
+      jobEventDeliveries.completeJobEventDelivery(job.project_id, {
+        ...eventContext,
+        runId,
+        outcome: "failed",
+        exitCode: -1,
+        errorCode: "concurrency_limit",
+        errorMessage: `Concurrency limit reached: ${MAX_CONCURRENT_RUNS} runs already active.`,
+      });
+    } else {
+      jobs.finishJobRun(job.project_id, runId, "failed", -1);
+    }
+    jobs.appendRunLog(job.project_id, runId, "stderr", `Concurrency limit reached: ${MAX_CONCURRENT_RUNS} runs already active.`);
     return;
   }
 
   activeRunCount++;
-  logger.info("job-runner", `Starting run ${runId} for job ${job.id} (agent: ${job.agent}, active: ${activeRunCount}/${MAX_CONCURRENT_RUNS})`);
+  logger.info("job-runner", `Starting run ${runId} for job ${job.id} (agent: ${safeJobLogText(job.agent, 128)}, active: ${activeRunCount}/${MAX_CONCURRENT_RUNS})`);
 
   // Update run status to running (it should already be 'running' from startJobRun,
   // but we re-affirm in case of any race)
-  const run = jobs.getJobRun(runId);
+  const run = jobs.getJobRun(job.project_id, runId);
   if (!run) {
     logger.error("job-runner", `Run ${runId} not found in DB — aborting.`);
     activeRunCount--;
     return;
   }
   if (run.status !== "running") {
-    jobs.finishJobRun(runId, "running" as any, null);
+    activeRunCount--;
+    return;
   }
 
   // Default 30-minute timeout prevents runaway agents from consuming resources indefinitely.
@@ -539,26 +584,26 @@ export async function executeJobRun(
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-  // Build opencode command args.
-  // opencode run "<prompt>" --agent <agent_name> --auto
   const args = ["run", prompt, "--agent", job.agent, "--auto"];
   const runNonce = jobRunnerRuntime.createRunNonce();
 
   // Prompts are user-authored and can contain credentials. Do not log the CLI
   // arguments or rendered template, even at debug level.
-  logger.info("job-runner", `Starting OpenCode process for run ${runId} (agent: ${job.agent})`);
+  logger.info("job-runner", `Starting OpenCode process for run ${runId} (agent: ${safeJobLogText(job.agent, 128)})`);
 
   // cwd: "/workspace" matches the Docker bind mount so the agent sees the host's repos.
   // HOME is set explicitly because the Docker container's appuser may not inherit the
   // expected home directory through the spawn() environment merge.
   const proc = spawn("opencode", args, {
     cwd: "/workspace",
-    env: { ...process.env, HOME: "/home/appuser", [RUN_NONCE_ENV]: runNonce },
+    env: buildJobProcessEnvironment(job.project_id, runNonce),
     stdio: ["ignore", "pipe", "pipe"],
     detached: supportsOwnedProcessGroups,
   });
 
   runningProcesses.set(runId, proc);
+  runProjects.set(runId, job.project_id);
+  if (eventContext) eventRunContexts.set(runId, eventContext);
   if (supportsOwnedProcessGroups && typeof proc.pid === "number" && proc.pid > 0) {
     trackDetachedProcess(runId, proc.pid, runNonce);
   }
@@ -568,6 +613,76 @@ export async function executeJobRun(
   }));
   let finalized = false;
   let activeSlotReleased = false;
+  let eventHeartbeat: ReturnType<typeof setInterval> | null = null;
+
+  const completeEvent = (
+    outcome: "success" | "failed" | "timeout" | "cancelled",
+    exitCode: number | null,
+    errorCode?: string,
+    errorMessage?: string,
+  ) => {
+    if (!eventContext) return;
+    jobEventDeliveries.completeJobEventDelivery(job.project_id, {
+      ...eventContext,
+      runId,
+      outcome,
+      exitCode,
+      errorCode,
+      errorMessage,
+    });
+  };
+
+  // Trusted event payloads are intentionally never interpolated into prompts.
+  // Do not turn a downstream agent echo into a durable payload/prompt leak.
+  const appendOutputLog = (stream: "stdout" | "stderr", line: string) => {
+    jobs.appendRunLog(
+      job.project_id,
+      runId,
+      stream,
+      eventContext ? "Event job output redacted from durable logs." : line,
+    );
+  };
+
+  if (eventContext) {
+    eventHeartbeat = setInterval(() => {
+      const renewed = jobEventDeliveries.heartbeatJobEventDelivery(
+        job.project_id,
+        eventContext.deliveryId,
+        eventContext.leaseToken,
+        eventContext.leaseRevision,
+      );
+      if (!renewed) {
+        logger.warn("job-runner", `Event lease heartbeat lost for run ${runId}`);
+        void terminateProcess(runId, proc);
+      }
+    }, Math.floor(jobEventDeliveries.JOB_EVENT_DELIVERY_LEASE_MS / 3));
+    eventHeartbeat.unref?.();
+  }
+
+  if (eventContext) {
+    const identity = supportsOwnedProcessGroups && typeof proc.pid === "number"
+      ? jobRunnerRuntime.processInspector.inspectProcess(proc.pid)
+      : null;
+    const tracking = getOwnedDetachedRunDiagnosticForTesting(runId);
+    const persisted = identity
+      && identity.processId === proc.pid
+      && identity.processGroupId === proc.pid
+      && identity.runNonce === runNonce
+      && tracking?.events.some((event) => event.event === "identity-captured")
+      && jobEventDeliveries.persistJobEventAttemptProcessIdentity(job.project_id, {
+        ...eventContext,
+        runId,
+        processId: identity.processId,
+        processGroupId: identity.processGroupId,
+        processStartTime: identity.startTime,
+        processExecutable: identity.executable,
+        processNonce: runNonce,
+      });
+    if (!persisted) {
+      completeEvent("failed", -1, "provenance_conflict", "Spawned process identity could not be verified.");
+      void terminateProcess(runId, proc);
+    }
+  }
 
   const releaseActiveSlot = () => {
     if (activeSlotReleased) return;
@@ -579,6 +694,9 @@ export async function executeJobRun(
     if (finalized) return false;
     finalized = true;
     runningProcesses.delete(runId);
+    runProjects.delete(runId);
+    eventRunContexts.delete(runId);
+    if (eventHeartbeat) clearInterval(eventHeartbeat);
 
     // A terminating POSIX group can contain descendants after its leader has
     // closed. Keep its concurrency slot until the bounded SIGKILL attempt has
@@ -600,12 +718,19 @@ export async function executeJobRun(
     if (finalized) return;
     timedOut = true;
     logger.warn("job-runner", `Run ${runId} timed out after ${timeoutMs}ms — killing process.`);
-    terminateProcess(runId, proc);
-    jobs.finishJobRun(runId, "timeout", -1);
-    jobs.appendRunLog(runId, "stderr", `Job timed out after ${timeoutMinutes} minutes.`);
+    const termination = terminateProcess(runId, proc);
+    jobs.appendRunLog(job.project_id, runId, "stderr", `Job timed out after ${timeoutMinutes} minutes.`);
+    if (eventContext) {
+      void termination.then(() => {
+        const ambiguous = ownedDetachedRuns.has(runId);
+        completeEvent("timeout", -1, ambiguous ? "ambiguous_process_ownership" : "timeout",
+          ambiguous ? "Timed-out process ownership could not be revalidated." : "Job timed out.");
+      });
+    } else {
+      jobs.finishJobRun(job.project_id, runId, "timeout", -1);
+    }
   }, timeoutMs);
 
-  // Collect stdout — split by newlines
   let stdoutBuffer = "";
   proc.stdout?.on("data", (chunk: Buffer) => {
     stdoutBuffer += chunk.toString("utf-8");
@@ -614,12 +739,11 @@ export async function executeJobRun(
     stdoutBuffer = lines.pop() ?? "";
     for (const line of lines) {
       if (line.length > 0) {
-        jobs.appendRunLog(runId, "stdout", line);
+        appendOutputLog("stdout", line);
       }
     }
   });
 
-  // Collect stderr — split by newlines
   let stderrBuffer = "";
   proc.stderr?.on("data", (chunk: Buffer) => {
     stderrBuffer += chunk.toString("utf-8");
@@ -627,7 +751,7 @@ export async function executeJobRun(
     stderrBuffer = lines.pop() ?? "";
     for (const line of lines) {
       if (line.length > 0) {
-        jobs.appendRunLog(runId, "stderr", line);
+        appendOutputLog("stderr", line);
       }
     }
   });
@@ -635,10 +759,10 @@ export async function executeJobRun(
   proc.on("close", (code) => {
     // Flush any remaining buffer content (last partial line from stream data)
     if (stdoutBuffer.length > 0) {
-      jobs.appendRunLog(runId, "stdout", stdoutBuffer);
+      appendOutputLog("stdout", stdoutBuffer);
     }
     if (stderrBuffer.length > 0) {
-      jobs.appendRunLog(runId, "stderr", stderrBuffer);
+      appendOutputLog("stderr", stderrBuffer);
     }
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -648,7 +772,13 @@ export async function executeJobRun(
       const exitCode = code ?? -1;
       const status = exitCode === 0 ? "success" : "failed";
       logger.info("job-runner", `Run ${runId} finished: status=${status}, exitCode=${exitCode}`);
-      jobs.finishJobRun(runId, status, exitCode);
+      if (eventContext) {
+        completeEvent(exitCode === 0 ? "success" : "failed", exitCode,
+          exitCode === 0 ? undefined : "nonzero_exit",
+          exitCode === 0 ? undefined : "Job process exited with a non-zero status.");
+      } else {
+        jobs.finishJobRun(job.project_id, runId, status, exitCode);
+      }
     }
 
     finalize();
@@ -662,15 +792,16 @@ export async function executeJobRun(
     // A launched child can report an operational error while still emitting a
     // later close event. Keep it tracked so termination escalation remains live.
     if (proc.pid !== undefined) {
-      logger.warn("job-runner", `Run ${runId} process error while awaiting close`, { name: err.name });
+      logger.warn("job-runner", `Run ${runId} process error while awaiting close`, { name: safeJobLogText(err.name, 64) });
       return;
     }
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    logger.error("job-runner", `Run ${runId} failed to start`, { name: err.name });
-    jobs.finishJobRun(runId, "failed", -1);
-    jobs.appendRunLog(runId, "stderr", "Unable to start the OpenCode process.");
+    logger.error("job-runner", `Run ${runId} failed to start`, { name: safeJobLogText(err.name, 64) });
+    if (eventContext) completeEvent("failed", -1, "process_failure", "Unable to start the OpenCode process.");
+    else jobs.finishJobRun(job.project_id, runId, "failed", -1);
+    jobs.appendRunLog(job.project_id, runId, "stderr", "Unable to start the OpenCode process.");
 
     finalize();
     closePromises.delete(runId);
@@ -682,7 +813,8 @@ export async function executeJobRun(
  * Try to kill a running job run by its runId.
  * Returns true if the process was found and termination was initiated.
  */
-export function killRunProcess(runId: string): boolean {
+export function killRunProcess(projectId: string, runId: string): boolean {
+  if (runProjects.get(runId) !== projectId) return false;
   const proc = runningProcesses.get(runId);
   if (!proc || !isProcessRunning(proc)) return false;
 
@@ -700,18 +832,104 @@ export async function stopAllJobRuns(): Promise<void> {
   const pending = [...runningProcesses.entries()];
   if (pending.length === 0) return;
 
-  const completions: Promise<void>[] = [];
+  const completions: Array<Promise<{ runId: string; projectId: string; eventContext?: EventExecutionContext }>> = [];
   for (const [runId, proc] of pending) {
+    const projectId = runProjects.get(runId);
+    if (!projectId) continue;
+    const eventContext = eventRunContexts.get(runId);
     try {
-      jobs.cancelJobRun(runId);
-      jobs.appendRunLog(runId, "stderr", "Job cancelled because the API is shutting down.");
+      if (!eventContext) jobs.cancelJobRun(projectId, runId);
+      jobs.appendRunLog(projectId, runId, "stderr", "Job cancelled because the API is shutting down.");
     } catch {
       logger.warn("job-runner", `Could not persist shutdown state for run ${runId}`);
     }
-    completions.push(terminateProcess(runId, proc));
+    completions.push(terminateProcess(runId, proc).then(() => ({ runId, projectId, eventContext })));
   }
 
-  await Promise.allSettled(completions);
+  const settled = await Promise.allSettled(completions);
+  for (const result of settled) {
+    if (result.status !== "fulfilled" || !result.value.eventContext) continue;
+    const { runId, projectId, eventContext } = result.value;
+    const ambiguous = ownedDetachedRuns.has(runId);
+    jobEventDeliveries.completeJobEventDelivery(projectId, {
+      ...eventContext,
+      runId,
+      outcome: "cancelled",
+      exitCode: -1,
+      errorCode: ambiguous ? "ambiguous_process_ownership" : "api_shutdown",
+      errorMessage: ambiguous
+        ? "Shutdown could not verify event-process teardown."
+        : "Job cancelled because the API is shutting down.",
+    });
+  }
+}
+
+function hashNonce(value: string | undefined): string | null {
+  return value ? createHash("sha256").update(value, "utf8").digest("hex") : null;
+}
+
+async function waitForVerifiedGroupTeardown(processGroupId: number, attempts = 5): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const group = jobRunnerRuntime.processInspector.inspectGroup(processGroupId);
+    if (group?.members.length === 0) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, JOB_GROUP_RECOVERY_INTERVAL_MS));
+  }
+  return false;
+}
+
+/**
+ * Reconcile a lease left by a prior API process. No event is retried until the
+ * durable procfs identity proves absence or a verified owned group is torn down.
+ */
+export async function recoverExpiredEventAttempt(lease: jobEventDeliveries.ExpiredJobEventLease): Promise<void> {
+  const resolve = (resolution: "retry" | "dead_letter", errorCode: string, errorMessage: string) => {
+    jobEventDeliveries.resolveExpiredJobEventLease(lease.projectId, {
+      deliveryId: lease.deliveryId,
+      leaseRevision: lease.leaseRevision,
+      attemptNumber: lease.attemptNumber,
+      runId: lease.runId,
+      resolution,
+      errorCode,
+      errorMessage,
+    });
+  };
+  if (lease.processId === null || lease.processGroupId === null || !lease.processStartTime
+    || !lease.processExecutable || !lease.processNonceHash) {
+    resolve("dead_letter", "ambiguous_process_identity", "Lease expired without complete process identity evidence.");
+    return;
+  }
+  const identity = jobRunnerRuntime.processInspector.inspectProcess(lease.processId);
+  if (!identity) {
+    if (process.platform === "linux" && !existsSync(`/proc/${lease.processId}`)) {
+      resolve("retry", "process_absent", "Verified process is absent after lease expiry.");
+    } else {
+      resolve("dead_letter", "ambiguous_process_ownership", "Process identity could not be revalidated after lease expiry.");
+    }
+    return;
+  }
+  if (identity.processGroupId !== lease.processGroupId || identity.startTime !== lease.processStartTime
+    || identity.executable !== lease.processExecutable || hashNonce(identity.runNonce) !== lease.processNonceHash) {
+    resolve("dead_letter", "ambiguous_process_ownership", "A surviving process did not match the persisted event identity.");
+    return;
+  }
+  const group = jobRunnerRuntime.processInspector.inspectGroup(lease.processGroupId);
+  if (!group
+    || !group.members.some((member) => matchesIdentity(member, identity))
+    || group.members.some((member) => hashNonce(member.runNonce) !== lease.processNonceHash)) {
+    resolve("dead_letter", "ambiguous_process_ownership", "A surviving process group could not be proven owned.");
+    return;
+  }
+  try {
+    jobRunnerRuntime.signalProcessGroup(lease.processGroupId, "SIGTERM");
+  } catch {
+    resolve("dead_letter", "ambiguous_process_ownership", "Owned process-group teardown could not be started.");
+    return;
+  }
+  if (await waitForVerifiedGroupTeardown(lease.processGroupId)) {
+    resolve("retry", "verified_crash", "Verified prior event process was terminated before retry.");
+  } else {
+    resolve("dead_letter", "ambiguous_process_ownership", "Owned process group remained after teardown grace period.");
+  }
 }
 
 export { runningProcesses };

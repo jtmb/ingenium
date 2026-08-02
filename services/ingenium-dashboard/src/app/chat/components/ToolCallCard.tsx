@@ -1,6 +1,22 @@
 "use client";
 
+import Link from "next/link";
+import { getMcpServersHref } from "./mcp-status";
+
 export type ToolState = "pending" | "running" | "completed" | "failed" | "retry";
+
+const TOOL_DISABLED_MESSAGE = "This tool is disabled for the project.";
+const TOOL_STATE_UNAVAILABLE_MESSAGE = "The tool state could not be verified.";
+const PROJECT_IDENTITY_REQUIRED_MESSAGE = "This tool requires a valid project identity.";
+const TOOL_UNKNOWN_FAILURE_MESSAGE = "Tool execution failed.";
+
+const MCP_TOOL_ERROR_CODES = [
+  "TOOL_DISABLED",
+  "TOOL_STATE_UNAVAILABLE",
+  "PROJECT_IDENTITY_REQUIRED",
+] as const;
+
+type McpToolErrorCode = (typeof MCP_TOOL_ERROR_CODES)[number];
 
 interface ToolCallCardProps {
   toolName: string;
@@ -15,6 +31,8 @@ interface ToolCallCardProps {
   onWebSearchOpen?: () => void;
   /** Whether this tool is the activity drawer's current selection. */
   isActivityOpen?: boolean;
+  /** Validated global project used to build MCP management guidance. */
+  mcpProject?: string | null;
 }
 
 export type WebSearchSiteLabel = "Visited" | "Results" | "Sites";
@@ -47,6 +65,70 @@ export function getToolLabel(name: string): string {
     default:
       return name || "Tool call";
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isMcpToolErrorCode(value: unknown): value is McpToolErrorCode {
+  return typeof value === "string"
+    && (MCP_TOOL_ERROR_CODES as readonly string[]).includes(value);
+}
+
+/** Read only the exact, fixed MCP error envelope emitted by the tool gateway. */
+function readMcpErrorEnvelope(value: unknown): McpToolErrorCode | undefined {
+  if (!isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype || Object.keys(value).some((key) => key !== "error")) return undefined;
+  const error = value.error;
+  if (!isRecord(error)) return undefined;
+  if (Object.keys(error).some((key) => key !== "code" && key !== "message")) return undefined;
+  if ("message" in error && typeof error.message !== "string") return undefined;
+  return isMcpToolErrorCode(error.code) ? error.code : undefined;
+}
+
+function readJsonErrorText(value: unknown): McpToolErrorCode | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 8_192) return undefined;
+  try {
+    return readMcpErrorEnvelope(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Accept either the direct gateway envelope or its bounded MCP text result.
+ * Arbitrary provider objects and text are deliberately ignored.
+ */
+function readMcpOutputError(value: unknown): McpToolErrorCode | undefined {
+  const direct = readMcpErrorEnvelope(value) ?? readJsonErrorText(value);
+  if (direct) return direct;
+  if (!isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype || value.isError !== true || !Array.isArray(value.content) || value.content.length !== 1 || Object.keys(value).some((key) => key !== "isError" && key !== "content")) {
+    return undefined;
+  }
+  const content = value.content[0];
+  if (!isRecord(content) || content.type !== "text" || Object.keys(content).some((key) => key !== "type" && key !== "text")) {
+    return undefined;
+  }
+  return readJsonErrorText(content.text);
+}
+
+/** Return only exact state codes or a tightly validated MCP output code. */
+export function getSafeToolErrorCode(error?: unknown, output?: unknown): McpToolErrorCode | undefined {
+  if (isMcpToolErrorCode(error)) return error;
+  return readMcpOutputError(output);
+}
+
+/** Map execution failures to fixed browser-safe messages; never render provider details. */
+export function getSafeToolErrorMessage(error?: unknown, output?: unknown): string {
+  switch (getSafeToolErrorCode(error, output)) {
+    case "TOOL_DISABLED":
+      return TOOL_DISABLED_MESSAGE;
+    case "TOOL_STATE_UNAVAILABLE":
+      return TOOL_STATE_UNAVAILABLE_MESSAGE;
+    case "PROJECT_IDENTITY_REQUIRED":
+      return PROJECT_IDENTITY_REQUIRED_MESSAGE;
+  }
+  return TOOL_UNKNOWN_FAILURE_MESSAGE;
 }
 
 /** Convert an input value to text without exposing the full tool payload. */
@@ -372,13 +454,22 @@ export function extractWebSearchSites(
  */
 export default function ToolCallCard({
   toolName,
+  state,
   input,
+  output,
+  error,
   onWebSearchOpen,
   isActivityOpen = false,
+  mcpProject,
 }: ToolCallCardProps) {
   const displayName = getToolLabel(toolName);
   const summary = getInputSummary(toolName, input);
   const webSearch = isWebSearchTool(toolName);
+  const safeErrorCode = getSafeToolErrorCode(error, output);
+  const safeError = state === "failed" || state === "retry" || error !== undefined || safeErrorCode
+    ? getSafeToolErrorMessage(error, output)
+    : null;
+  const mcpServersHref = safeErrorCode ? getMcpServersHref(mcpProject) : null;
 
   const trace = (
     <>
@@ -467,6 +558,26 @@ export default function ToolCallCard({
         </button>
       ) : (
         trace
+      )}
+
+      {safeError && (
+        <>
+          <span
+            className="min-w-0 truncate text-[var(--color-error-text)]"
+            data-testid="chat-tool-error"
+            role="status"
+          >
+            {safeError}
+          </span>
+          {mcpServersHref && (
+            <Link
+              href={mcpServersHref}
+              className="shrink-0 text-[var(--color-text-link)] underline hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+            >
+              MCP Servers
+            </Link>
+          )}
+        </>
       )}
 
     </div>

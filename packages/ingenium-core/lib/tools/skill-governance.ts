@@ -76,6 +76,7 @@ function validateQualityScore(score: number | undefined, label: string): void {
 // Lineage
 // =========================================================================
 
+// Bound graph traversal to prevent corrupt or adversarial lineage data from causing unbounded work.
 const MAX_LINEAGE_DEPTH = 100;
 
 function hashSkillContent(content: string): string { return createHash("sha256").update(content).digest("hex"); }
@@ -86,7 +87,7 @@ function wouldCreateLineageCycle(db: ReturnType<typeof getDb>, sourceProjectId: 
   if (!src) return false;
   const visited = new Set([src.id]); const q = [src.id]; let depth = 0;
   while (q.length) {
-    if (++depth > MAX_LINEAGE_DEPTH) return true; // Treat exceeding depth as potential cycle — reject
+    if (++depth > MAX_LINEAGE_DEPTH) return true;
     const cur = q.shift()!;
     for (const a of db.prepare("SELECT source_project_id,source_name FROM skill_lineage WHERE target_skill_id=?").all(cur) as any[]) {
       const as = db.prepare("SELECT id FROM skills WHERE project_id=? AND name=?").get(a.source_project_id, a.source_name) as { id: string } | undefined;
@@ -114,14 +115,11 @@ export function createLineage(projectId: string, sourceProjectId: string, source
 export function listLineage(projectId: string): SkillLineage[] {
   return (getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare("SELECT * FROM skill_lineage WHERE project_id=? ORDER BY created_at DESC").all(projectId) as SkillLineage[]);
 }
-export function listLineageByTarget(targetSkillId: string): SkillLineage[] {
-  return (getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare("SELECT * FROM skill_lineage WHERE target_skill_id=? ORDER BY created_at DESC").all(targetSkillId) as SkillLineage[]);
-}
 export function resolveLineage(targetSkillId: string, projectId?: string): SkillLineage[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const visited = new Set<string>(); const result: SkillLineage[] = []; const q = [targetSkillId]; let depth = 0;
   while (q.length) {
-    if (++depth > MAX_LINEAGE_DEPTH) break; // Guard against unbounded traversal
+    if (++depth > MAX_LINEAGE_DEPTH) break;
     const c = q.shift()!; if (visited.has(c)) break; visited.add(c);
     for (const r of (projectId ? db.prepare("SELECT * FROM skill_lineage WHERE project_id=? AND target_skill_id=? ORDER BY created_at DESC").all(projectId, c) : db.prepare("SELECT * FROM skill_lineage WHERE target_skill_id=? ORDER BY created_at DESC").all(c)) as SkillLineage[]) {
       result.push(r); const s = db.prepare("SELECT id FROM skills WHERE project_id=? AND name=?").get(r.source_project_id, r.source_name) as { id: string } | undefined;

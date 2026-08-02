@@ -6,7 +6,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ALL_TABS, tabForPathname } from "./tabs";
 import type { SettingsTab, SettingsTabId } from "./tabs";
 import SettingsSidebar from "./SettingsSidebar";
-import { GeneralPanel, MailPanel, PipelinePanel, ConfigPanel } from "./panels";
+import Select from "../Select";
+import GeneralPanel from "./panels/GeneralPanel";
+import MailPanel from "./panels/MailPanel";
+import PipelinePanel from "./panels/PipelinePanel";
+import ConfigPanel from "./panels/ConfigPanel";
 import type { ComponentType } from "react";
 import RouteLinkedPanel from "./RouteLinkedPanel";
 import PanelErrorBoundary from "./PanelErrorBoundary";
@@ -250,16 +254,17 @@ export default function SettingsOverlay() {
           </div>
 
           {/* Mobile tab selector — visible only below md breakpoint */}
-          <select
+          <Select
+            wrapperClassName="md:hidden mx-6 mt-3"
             value={activeTab.id}
             onChange={(e) => selectTab(e.target.value)}
-            className="md:hidden mx-6 mt-3 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+            className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             aria-label="Settings category"
           >
             {ALL_TABS.map(tab => (
               <option key={tab.id} value={tab.id}>{tab.label}</option>
             ))}
-          </select>
+          </Select>
 
           <div className="flex-1 overflow-y-auto">
             {/* Mount only the active panel. Inactive settings must not start

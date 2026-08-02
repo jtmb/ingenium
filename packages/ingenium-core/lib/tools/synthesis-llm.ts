@@ -285,9 +285,6 @@ export async function callSynthesisLLM(
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown error");
       logger.warn("synthesis-llm", "LLM synthesis API returned error", { status: response.status, error: errText.substring(0, 200) });
-      // HACK: The fallback prompt is nearly identical to the primary except
-      // the system message is reworded. Both paths should use a shared format.
-      // Try parsing as non-JSON response format
       const fallbackResponse = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
         headers,
@@ -457,16 +454,6 @@ export function resolveLLMConfig(projectId?: string): LLMConfig | null {
 export function isLLMSynthesisConfigured(projectId: string): boolean {
   const config = resolveLLMConfig(projectId);
   return config ? !!config.model : false;
-}
-
-/**
- * Get the configured LLM synthesis settings.
- * Falls back: global → project → env vars.
- */
-export function getLLMSynthesisConfig(projectId: string): { model: string; apiKey?: string } | null {
-  const config = resolveLLMConfig(projectId);
-  if (!config || !config.model) return null;
-  return { model: config.model, apiKey: config.apiKey };
 }
 
 /**

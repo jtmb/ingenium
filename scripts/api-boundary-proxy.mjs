@@ -35,6 +35,8 @@ if (!Number.isInteger(upstreamPort) || upstreamPort < 1 || upstreamPort > 65535)
 }
 
 const hopByHopHeaders = new Set([
+  // These headers describe the current connection and must not cross the new
+  // proxy hop; authorization is also replaced with the validated upstream token.
   "authorization",
   "proxy-authorization",
   "connection",
@@ -120,6 +122,8 @@ server.listen(proxyPort, "0.0.0.0", () => {
 });
 
 function shutdown() {
+  // Finish active requests when possible, but leave a bounded escape hatch for
+  // Supervisor if a client or upstream never closes its connection.
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
 }

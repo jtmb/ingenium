@@ -27,7 +27,7 @@ attempt=1
 while [ "$attempt" -le "$attempts" ]; do
   if node /app/scripts/probe-api.mjs; then
     echo "Authenticated API readiness passed before OpenCode start after ${attempt} attempt(s)"
-    exec opencode web --port 4098 --hostname 127.0.0.1
+    exec opencode serve --port 4098 --hostname 127.0.0.1
   fi
   if [ "$attempt" -lt "$attempts" ]; then
     sleep 1

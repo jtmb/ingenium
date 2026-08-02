@@ -42,6 +42,8 @@ function hasConfiguredOpenCodeOrigins() {
   );
 }
 
+const VSCODE_GATEWAY_ORIGIN = "http://vscode.localhost:3000";
+
 // Production bundles and builds with explicit public origins are gateway
 // builds. Only an unconfigured non-production build may advertise the private
 // direct listeners in its frame policy. Resolve this when headers are requested
@@ -115,7 +117,7 @@ const nextConfig = {
               "connect-src 'self' http://localhost:" + apiPort + "; " +
               "frame-src 'self'" +
               (gatewayMode ? "" : " http://localhost:4098 http://localhost:4099") +
-              " http://opencode.localhost:3000 http://cli.localhost:3000" +
+               " http://opencode.localhost:3000 http://cli.localhost:3000 " + VSCODE_GATEWAY_ORIGIN +
               (configuredFrameOrigins.length > 0 ? ` ${[...new Set(configuredFrameOrigins)].join(" ")}` : "") +
               "; " +
               "frame-ancestors 'self'; " +

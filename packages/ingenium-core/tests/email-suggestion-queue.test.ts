@@ -8,7 +8,6 @@
  *   4. MarkFailed: attempts progression 1→5 + delay correctness
  *   5. MarkFailed: max attempts (5) → row deleted
  *   6. Dequeue with future next_attempt_at → not returned
- *   7. countPendingJobs accuracy
  *
  * Uses real SQLite (Pattern 2) — no mocks.
  */
@@ -26,7 +25,6 @@ import {
   dequeueSuggestionJob,
   markJobComplete,
   markJobFailed,
-  countPendingJobs,
 } from "../lib/tools/email-suggestion-queue.js";
 
 let tempDir: string;
@@ -101,8 +99,6 @@ describe("enqueueSuggestionJob", () => {
     const next = dequeueSuggestionJob();
     expect(next).toBeUndefined();
 
-    // 6. Pending count should be 0
-    expect(countPendingJobs()).toBe(0);
   });
 
   it("enqueue duplicate → ON CONFLICT DO NOTHING (returns false)", () => {
@@ -247,42 +243,5 @@ describe("dequeueSuggestionJob with future next_attempt_at", () => {
     const next = dequeueSuggestionJob();
     expect(next).toBeUndefined();
 
-    // countPendingJobs should also be 0 (it filters by next_attempt_at <= now)
-    expect(countPendingJobs()).toBe(0);
-  });
-});
-
-describe("countPendingJobs", () => {
-  const accountId = "test-account-cnt";
-  const folder = "INBOX";
-
-  it("returns accurate count of ready jobs", () => {
-    // Enqueue 3 jobs
-    for (let i = 0; i < 3; i++) {
-      const uid = `esq-cnt-${i}`;
-      upsertEmailCache(accountId, folder, [makeEntry(uid)]);
-      enqueueSuggestionJob(accountId, folder, uid);
-    }
-
-    // Should have 3 pending
-    expect(countPendingJobs()).toBe(3);
-
-    // Dequeue and complete one
-    const job1 = dequeueSuggestionJob();
-    expect(job1).not.toBeUndefined();
-    markJobComplete(job1!.id);
-    expect(countPendingJobs()).toBe(2);
-
-    // Fail another — it disappears from "pending" (next_attempt_at in future)
-    const job2 = dequeueSuggestionJob();
-    expect(job2).not.toBeUndefined();
-    markJobFailed(job2!.id, "count test");
-    expect(countPendingJobs()).toBe(1); // only job3 remains ready
-
-    // Complete the last one
-    const job3 = dequeueSuggestionJob();
-    expect(job3).not.toBeUndefined();
-    markJobComplete(job3!.id);
-    expect(countPendingJobs()).toBe(0);
   });
 });

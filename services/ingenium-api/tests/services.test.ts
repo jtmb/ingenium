@@ -23,7 +23,15 @@ let baseUrl: string;
 const nativeFetch = globalThis.fetch;
 
 function supervisorResponse(): string {
-  return ["ingenium-api", "ingenium-dashboard", "opencode-web", "ttyd-opencode"]
+  return [
+    "ingenium-api",
+    "ingenium-api-boundary",
+    "ingenium-dashboard",
+    "ingenium-gateway",
+    "opencode-web",
+    "ttyd-opencode",
+    "vscode",
+  ]
     .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>RUNNING</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`)
     .join("");
 }
@@ -84,6 +92,17 @@ afterAll(async () => {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("GET /api/v1/services/status — applications", () => {
+  it("reports all seven required supervised processes, including VS Code", async () => {
+    const res = await fetch(`${baseUrl}/api/v1/services/status`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.data.services).toHaveLength(7);
+    expect(body.data.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "VS Code", state: "running", port: 4100 }),
+    ]));
+  });
+
   it("returns all 4 applications in the response", async () => {
     const res = await fetch(`${baseUrl}/api/v1/services/status`);
     expect(res.status).toBe(200);
@@ -183,11 +202,11 @@ describe("GET /api/v1/services/status — applications", () => {
     tasks.createTask(globalProjectId, "Task 1");
     tasks.createTask(globalProjectId, "Task 2");
     const inProgress = tasks.createTask(globalProjectId, "In Progress");
-    tasks.moveTask(inProgress.id, "in_progress");
+    tasks.moveTask(globalProjectId, inProgress.id, "in_progress");
     const review = tasks.createTask(globalProjectId, "Review");
-    tasks.moveTask(review.id, "review");
+    tasks.moveTask(globalProjectId, review.id, "review");
     const done = tasks.createTask(globalProjectId, "Done");
-    tasks.moveTask(done.id, "done");
+    tasks.moveTask(globalProjectId, done.id, "done");
 
     const res = await fetch(`${baseUrl}/api/v1/services/status`);
     expect(res.status).toBe(200);

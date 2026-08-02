@@ -95,10 +95,60 @@ truncated.
 | GET | `/api/v1/usage/mappings` | List this Ingenium project's explicit OpenCode project mappings. |
 | PUT | `/api/v1/usage/mappings` | Create or confirm an explicit mapping with `{ "opencodeProjectId": "…" }`. A source mapping owned by another project returns `409`; there is no global fallback. |
 | POST | `/api/v1/usage/sync` | Run a bounded manual metadata-only usage sync for this project's explicit mappings. |
+| GET | `/api/v1/usage/thresholds` | Read this project's nullable advisory thresholds. |
+| PUT | `/api/v1/usage/thresholds` | CAS-replace all five threshold fields; requires `expected_revision`. |
+| GET | `/api/v1/usage/thresholds/evaluate` | Read-only evaluation over caller-selected UTC `from`/`to`, or all history when both are omitted. |
+| GET | `/api/v1/usage/attention` | Cursor-page active attention items by default (maximum 100); `include_resolved=true` includes resolved items. |
+| POST | `/api/v1/usage/attention/evaluate` | Reconcile the five fixed all-history attention conditions. The request has no payload or range options. |
+| POST | `/api/v1/usage/attention/:id/acknowledge` | CAS-acknowledge an item with `{ "expected_revision": number }`. A stale revision returns `409 USAGE_ATTENTION_REVISION_CONFLICT`; an exact retry is safe. |
 
 The scheduler runs the same bounded collector every five minutes by default.
 Unmapped OpenCode projects are quarantined without usage-event insertion until a
 project owner creates an explicit mapping.
+
+#### Advisory thresholds (USAGE-100)
+
+Thresholds are one project-scoped, nullable configuration row over the existing
+usage aggregates. `PUT` replaces request count, total tokens,
+provider-reported cost amount, cache-read tokens, and cache-write tokens as a
+single CAS-protected update; clients must send `expected_revision`. A stale
+revision returns `409 USAGE_THRESHOLD_REVISION_CONFLICT`. The all-null default
+is revision 1, and there is no delete route.
+
+`GET /thresholds/evaluate` is read-only. With both `from` and `to`, it evaluates
+an inclusive-start/exclusive-end UTC ISO range; with neither, it evaluates all
+history. Partial input, inverted ranges, non-UTC timestamps, and ranges over
+366 days are rejected. Each metric returns `observed`, `threshold`,
+`availability`, and one of `disabled`, `unknown`, `below`, `equal`, or `above`.
+
+#### Usage attention (USAGE-101)
+
+Attention is advisory and project-scoped. Reconciliation always evaluates the
+five stable all-history conditions, not a caller-selected range. `unknown`,
+`equal`, and `above` create or retain active items with `info`, `warning`, and
+`critical` severity respectively; `disabled` and `below` resolve an existing
+item. Each condition has at most one item per project. Transition events are
+immutable and occur only for opening, resolution, reopening, acknowledgement,
+or material active changes to evaluation state, severity, freshness, or
+threshold revision.
+
+Attention reconciliation is also run by the API scheduler for each mapped
+project after the bounded usage-sync cycle, using `USAGE_SYNC_INTERVAL_MS`
+(five minutes by default). A failed or no-new-data cycle still reconciles
+freshness; setting the interval to `0` disables both scheduled usage sync and
+attention evaluation. Attention freshness is based only on mapped-source successful-sync evidence:
+missing evidence is `unknown`, any source older than twice the configured sync
+interval is `stale`, and an interval of zero is `disabled`. Attention responses
+omit provider IDs, source identifiers, raw telemetry payloads, and credentials.
+Known zero remains known; partial or unavailable subtotals remain unknown for
+comparison. Cost is the provider-reported numeric amount only—no currency,
+pricing, or billing inference is performed. Evaluation does not mutate
+thresholds, usage events, mappings, sync cursors, or request execution.
+
+These routes use the normal bearer authentication and `?project=<name>`
+ownership check. Missing projects return `404`; foreign project data is not
+returned. The result is advisory only and never blocks, throttles, or routes a
+request. No MCP endpoint is defined for this contract.
 
 Collection is provider-agnostic: every supported OpenCode provider contributes
 through the same assistant `step-finish` metadata path, while raw provider and
@@ -212,11 +262,155 @@ All email routes are prefixed with `/api/v1/emails`. All email data is global (p
 | POST | `/watch/stop` | Stop IMAP IDLE watcher |
 | GET | `/watch/status` | Get watcher status for an account |
 
-### Jobs
+### Jobs (JOB-100/JOB-101)
+
+JOB-100 defines the v1 trusted-event boundary and JOB-101 provides exact-match dispatch.
+The exact catalog is:
+
+- `context.conversation.archived`
+- `context.conversation.unarchived`
+- `context.checkpoint.restored_as_new`
+
+Trusted events are project-scoped, content-free, schema version `1`, and produced
+only by `context.maintenance`. Archive/unarchive payloads contain exactly
+`conversationId`, `expectedRevision`, and `archiveSequence`; restore payloads
+contain exactly `sourceConversationId`, `sourceCheckpointId`,
+`targetConversationId`, and `expectedRevision`. Each event is tied to its
+immutable Context audit row by `source_audit_event_id`; the dedupe key is the
+same source audit ID within the project. Rows are append-only and retained
+indefinitely unless an explicit authorized project lifecycle action applies.
+Payloads are bounded and contain no message, content, title, secret, token, or
+credential data.
+
+SQL constraints and API validation reject unknown catalog values, including
+direct SQL attempts. Existing historical `jobs.trigger_event` values are
+preserved; new job rows and trigger changes accept only a catalog value or
+`NULL`. The v1 event store has no user-facing append endpoint: events are
+created only from the trusted Context maintenance provenance path. JOB-101
+snapshots each event once, including zero-match snapshots, and creates one
+durable delivery for each enabled same-project job whose `trigger_event`
+exactly matches the event type. Enqueue is exactly-once; execution is bounded
+at-least-once with five attempts and 30/60/120/300/600-second backoffs. Leases
+persist only a SHA-256 owner hash and use CAS revisions. An ambiguous process
+identity is dead-lettered rather than duplicated. Job deletion returns `409`
+while a delivery is active, then disables/hides the job while retaining its
+delivery and attempt evidence. Payloads and prompts are never exposed or
+interpolated, and no manual replay endpoint exists.
+
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/api/v1/jobs` | List all jobs |
 | POST | `/api/v1/jobs/suggest` | Derive job config from description |
+| GET | `/api/v1/jobs/events?project=<name>&limit=&cursor=` | Bounded project-scoped trusted-event metadata |
+| GET | `/api/v1/jobs/event-deliveries?project=<name>&limit=&cursor=` | Bounded project-scoped delivery metadata |
+| GET | `/api/v1/jobs/event-deliveries/:deliveryId?project=<name>` | Get one project-scoped delivery |
+| POST | `/api/v1/jobs/runs/:runId/cancel?project=<name>` | Cancel a project-owned run |
+| GET | `/api/v1/jobs/runs/:runId/logs?project=<name>&after=` | Read project-owned run logs with redaction |
+
+### Task coordination (COORD-100)
+
+Task coordination is a cooperative boundary for managed agents operating in the
+same project and canonical worktree. It does not prevent or promise protection
+against manual editor or external-process writes; those are explicitly outside
+this guarantee. Task reads and mutations are project-scoped, and mutation
+requests support an expected revision (CAS) plus an idempotency key whose
+request hash makes matching retries replay the original result and changed
+replays fail.
+
+Managed reservation routes require `owner`, `worktree`, `reservation_token`,
+`expected_revision`, and `idempotency_key`. The caller holds a 32–512 character
+URL-safe opaque token (`[A-Za-z0-9_-]`); the server stores only its SHA-256 hash
+and never returns the token or hash.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/tasks/:id/reserve?project=<name>` | Atomically reserve an available task for the supplied owner/worktree and caller-held token. |
+| POST | `/api/v1/tasks/:id/release?project=<name>` | Atomically release the reservation when owner, worktree, token, and expected revision match. |
+
+Both routes return the task in `data` and use `422 INVALID_TASK_MUTATION_INPUT`,
+`404 TASK_NOT_FOUND`, or `409` for `REVISION_CONFLICT`,
+`IDEMPOTENCY_KEY_REUSED`, `RESERVATION_CONFLICT`, `RESERVATION_NOT_HELD`,
+`RESERVATION_OWNER_MISMATCH`, and `RESERVATION_QUARANTINED` as applicable.
+
+### Task source references
+
+### Coordination registry (COORD-102)
+
+The project-scoped coordination transport exposes nine routes. Every route uses
+`?project=<name>`; mutation bodies use snake_case fields and an
+`Idempotency-Key` header or matching `idempotency_key` body field. The raw
+ownership token is caller-held and is never returned.
+
+| Method | Endpoint | Required body/query fields | Purpose |
+|--------|----------|-----------------------------|---------|
+| POST | `/api/v1/coordination/register?project=<name>` | `worktree_id`, `session_id`, `incarnation`, `ownership_token`, `ttl_ms`, `idempotency_key` | Register an active session and allocate its fence. |
+| POST | `/api/v1/coordination/recover?project=<name>` | Lease fields plus `next_ownership_token`, `ttl_ms` | Prove the prior lease, rotate ownership, and advance the fence. |
+| PATCH | `/api/v1/coordination/update?project=<name>` | Lease fields plus `snapshot`, `snapshot_revision`, task/context pointer pairs | Update the bounded snapshot and exact project-owned pointers. |
+| POST | `/api/v1/coordination/heartbeat?project=<name>` | Lease fields plus `ttl_ms` | Extend an unexpired active lease. |
+| GET | `/api/v1/coordination/snapshot?project=<name>&worktree_id=…&session_id=…&incarnation=…` | Query identity | Read redacted session and claim status. |
+| POST | `/api/v1/coordination/claims/batch?project=<name>` | Lease fields plus `claims[]` with optional `baseline_sha256` | Atomically claim a non-overlapping batch. |
+| POST | `/api/v1/coordination/claims/release?project=<name>` | Lease fields plus `claim_ids` | Atomically release owned claims. |
+| POST | `/api/v1/coordination/close?project=<name>` | Lease fields | Close the session and release active claims while retaining evidence. |
+| POST | `/api/v1/coordination/takeover?project=<name>` | `worktree_id`, `session_id`, `incarnation`, `expected_revision`, `fence`, `next_ownership_token`, `ttl_ms`, `idempotency_key` | Perform an API-authorized takeover without accepting the old token; returns a non-secret `takeoverEvidenceId`. |
+
+Lease fields are `worktree_id`, `session_id`, `incarnation`,
+`expected_revision`, `fence`, and `ownership_token`. Snapshot pointers are
+`current_task_id`/`current_task_revision` and
+`context_conversation_id`/`context_revision`. Successful mutations return
+`data.session`; claim mutations also return `claimIds`. Status returns
+`data.session`, redacted claim records (`id`, `kind`, `state`, timestamps),
+`claimCount`, and `claimsTruncated`; claim values, baselines, and token
+material are not returned.
+
+Validation errors return `422 INVALID_COORDINATION_INPUT`; missing projects,
+sessions, claims, or pointers return `404`; conflicts return `409` with typed
+codes including `SESSION_IDENTITY_CONFLICT`, `SESSION_CLOSED`,
+`SESSION_NOT_ACTIVE`, `SESSION_EXPIRED`, `REVISION_CONFLICT`, `FENCE_CONFLICT`,
+`OWNERSHIP_TOKEN_MISMATCH`, `IDEMPOTENCY_KEY_REUSED`, `CLAIM_CONFLICT`,
+`CLAIM_NOT_OWNED`, and `POINTER_REVISION_CONFLICT`. Integrity failures return
+`500 COORDINATION_INTEGRITY_ERROR`. A revision conflict may include
+`currentRevision`; error messages do not disclose token material.
+
+The four MCP tools map to these operations: `ingenium_coordination_status`
+reads `GET /snapshot`; `ingenium_coordination_update` dispatches `register`,
+`recover`, `update`, `heartbeat`, `close`, or `takeover`; and
+`ingenium_coordination_claim` and `ingenium_coordination_release` dispatch
+`POST /claims/batch` and `POST /claims/release`. The MCP adapter projects only
+allowlisted redacted fields, converts malformed API data to
+`COORDINATION_INVALID_RESPONSE`, and converts transport failures to
+`COORDINATION_UNAVAILABLE`; it does not expose raw upstream errors or tokens.
+
+Task references attach a task to one trusted source using a server-derived,
+metadata-only snapshot. The five supported `source_type` values are `email`,
+`chat`, `context`, `job`, and `docs`. The create body is strictly
+`{ "source_type": "…", "source_id": "…" }`; clients must treat `source_id`
+as a canonical opaque identifier and should rely on future capture adapters
+instead of constructing or decoding IDs themselves. No source body, attachment,
+secret, or other source content is accepted or returned.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/tasks/:taskId/references?project=<name>` | Create a trusted task reference. Returns `201` for a new reference and `200` for the same task/source duplicate. |
+| GET | `/api/v1/tasks/:taskId/references?project=<name>` | List references and their immutable display snapshot plus current `availability`. |
+| DELETE | `/api/v1/tasks/:taskId/references?project=<name>&reference_id=<referenceId>` | Delete a reference; the member form `/references/:referenceId` is also supported. |
+
+Canonical source IDs are opaque to clients: email and chat use canonical
+base64url identities; context and job use UUIDs; docs uses a canonical positive
+page ID. The server resolves and validates ownership before creating a
+reference. Email and chat are global-project sources; context and jobs are
+project-scoped; docs are global unless explicitly linked to a project.
+
+The saved `display_title`, `display_detail`, and `source_timestamp` are an
+immutable display snapshot. They do not expose source content. Reads report one
+of `available`, `missing`, or `unavailable`: a deleted, archived, unlinked, or
+otherwise unresolvable source is reported as missing without disclosing source
+details; a temporary upstream failure is unavailable. Unknown or foreign task
+references use the neutral `404 TASK_REFERENCE_NOT_FOUND`; malformed input uses
+neutral `422 VALIDATION_ERROR`; a temporarily unavailable chat source uses
+neutral `503 TASK_REFERENCE_UNAVAILABLE`.
+
+Task reference routes are REST-only in this contract. No MCP task-reference
+tools are defined here.
 
 ### Settings — LLM Config
 
@@ -296,20 +490,55 @@ Input validation: `content` required, `priority` must be integer 0–10 (default
 
 #### Context RAG uploads and retrieval
 
-These routes are project-scoped under `/api/v1/context`.
+These source routes are project-scoped under `/api/v1/context`; foreign-project
+sources are not returned. CTX-100's source list/get/search contract is
+metadata-only: it never returns document bodies, chunk excerpts, or source
+paths.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/uploads` | Ingest one bounded direct document. Accepts `{ title, content, mimeType?, priority?, tags?, metadata? }`; allowed MIME types are `text/plain`, `text/markdown`, `application/json`, and `application/x-ndjson`; maximum UTF-8 size is 1 MiB. Returns `200` for a project-local SHA-256 duplicate and `201` for a new source. |
+| POST | `/sources` | Create one project-owned direct source. Accepts `{ title, content, mimeType?, priority?, tags?, metadata?, sourceReference? }`; maximum UTF-8 size is 1 MiB. `/uploads` is an equivalent compatibility alias. Returns `200` for a project-local SHA-256 duplicate and `201` for a new source. |
 | POST | `/uploads/chunked` | Start a bounded upload with `{ title, expectedHash, expectedBytes, chunkCount, mimeType?, priority?, tags?, metadata? }`. The total limit is 2 MiB, with at most 32 chunks. Supports `Idempotency-Key`. |
 | POST | `/uploads/:uploadId/chunks` | Add one immutable `{ ordinal, content }` chunk (≤64 KiB). An identical retry is `200`; a conflicting ordinal is `409`. |
 | POST | `/uploads/:uploadId/complete` | Verify contiguous chunk order, byte count, and SHA-256, then atomically index and publish the source. Incomplete uploads remain unsearchable. |
-| GET | `/uploads` | List context-upload source metadata and provenance without returning document bodies. |
-| GET | `/rag/search?q=` | Search only the current project's context-upload corpus and return provenance citations/snippets; no global fallback. |
+| GET | `/sources` | List project-owned source metadata, paginated by `limit`/`offset` (maximum 100). |
+| GET | `/sources/:sourceId` | Get one project-owned source metadata record; foreign or unknown sources return `404 CONTEXT_SOURCE_NOT_FOUND`. |
+| GET | `/sources/search?q=` | Search project-owned sources and return unique metadata records only; no body excerpts, chunk fields, or source paths. |
+
 | POST | `/rag/ask` | Ask against only the current project's context-upload corpus. Returns an answer plus source-hash/provenance citations. |
 | GET | `/learning/current` | Retrieve bounded project-local observations/traits with latest input and trait timestamps. |
 | POST | `/learning/ingest` | Explicitly snapshot current learning into a RAG source, or return `{ noOp: true, reason: "NO_CURRENT_LEARNING" }`. |
 | GET | `/conversations/:conversationId/checkpoints/:checkpointId/rag/search?q=` | Search only the immutable RAG source set cited by that checkpoint and return historical citations. |
+
+Context RAG search citations are metadata-only evidence for immutable chunks.
+`citationId` equals the persisted `rag_chunks.id` UUID; `sourceId`, `sourceHash`,
+and `chunkIndex` identify the source, its SHA-256 content hash, and the chunk
+position. `availability` is currently always `"available"`. Results use a
+deterministic total order: priority descending, BM25 rank ascending, source
+`updated_at` descending, source ID ascending, chunk index ascending, then chunk
+ID ascending. Repeating a search returns the same citation IDs and order while
+the immutable source remains available. Foreign-project or missing sources are
+treated as neutral absence: they are not returned and their existence is not
+disclosed.
+
+Published Context sources and chunks cannot be changed through generic RAG
+routes. Re-ingest and delete attempts return `409 RAG_SOURCE_IMMUTABLE`.
+
+Direct and chunked uploads allow only `text/plain`, `text/markdown`,
+`application/json`, and `application/x-ndjson` (`text/plain` default). Priority
+is an integer 0–10 (default 5). Tags are deduplicated and sorted, limited to 64
+tags of 1–64 characters and 4 KiB serialized. Metadata must be a bounded JSON
+object (≤16 KiB; bounded depth, nodes, keys, and string values) and must not
+contain path, credential, secret, token, password, authorization, or API-key
+keys/values. `sourceReference` is optional, opaque, path-free, free of control
+characters and secret-like values, and ≤256 characters. Upload input rejects
+`file`, `filePath`, `sourceFile`, and path-bearing fields.
+
+Published context sources and chunks are immutable: database guards reject
+source/chunk update or delete and chunk reassignment. CTX-100 does not turn on
+default chat grounding; grounding/default behavior belongs to CHAT-100. The
+existing `/rag/search` and `/rag/ask` content/citation behavior is outside this
+metadata-only source contract.
 
 #### Context-native OpenCode snapshot transport
 
@@ -391,7 +620,7 @@ All routes prefixed with `/api/v1/rag`.
 | POST | `/sources/:id/ingest` | Ingest/re-ingest content into an existing source |
 | GET | `/search?q=` | BM25 FTS5 full-text search across RAG chunks with snippet generation |
 | POST | `/ask` | Natural-language Q&A with LLM-grounded answers and citations. Returns `{ answer, citations: [{ id, title, path, heading, snippet, kind, score }] }`. Broker-executed via `executeSynthesisBroker()`. |
-| GET | `/stats` | RAG index statistics (sources, chunks, embeddings, `vector_capability`) |
+| GET | `/stats` | RAG index statistics (`total_sources`, `total_chunks`) |
 | POST | `/export` | Export all RAG sources as JSON |
 
 ### Repository Documentation Sync
@@ -458,7 +687,7 @@ onboarding or apply run has occurred.
 
 **Indexing pipeline**: Two auto-indexing paths: (1) Canonical repo Markdown files via `POST /rag/ingest` walks `INGENIUM_DOCS_ROOT/docs/**/*.md` with symlink escape protection and SHA-256 hash idempotency. (2) Docs Workspace pages are indexed at lifecycle boundaries — publish, update (if published), archive, restore — as `docs-page:{id}` sources. Manual ingestion via `POST /rag/sources` and `POST /rag/sources/:id/ingest` is also available.
 
-**Search**: The `/search` and `/ask` routes use `searchChunks()` (BM25 FTS5 full-text search). The `hybridSearch()` function (70% BM25 + 30% n-gram cosine similarity) also exists in `rag.ts` but is not currently wired to API routes. The embedding is a deterministic FNV-1a character-trigram hash (`ingenium-ngram-v1`, 384-dim) — NOT a true semantic embedding. The stats endpoint reports `{ vector_capability: { available: true, provider: "deterministic-n-gram", semantic: false } }`.
+**Search**: The `/search` and `/ask` routes use `searchChunks()` for BM25 FTS5 full-text search across retained RAG source chunks. Migration 070 removed the legacy embedding table; no vector or hybrid retrieval feature is exposed.
 
 **Citations**: The `POST /ask` endpoint builds unique citations per source (deduplicated by source ID). Each citation includes `id`, `title`, `path` (source_path or docs-page slug), `heading`, `snippet` (BM25 snippet with `<mark>` highlights), `kind` (source_type: `file`, `text`, `url`), and `score` (negative BM25 rank). The broker prompt includes `"Answer with citations like [1], [2]."` to encourage citation-grounded responses. The Docs workspace Dashboard renders `[N]` markers as superscript links with title tooltips and a Sources list below.
 
@@ -501,6 +730,31 @@ allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allow
 | GET | `/builtin-providers` | Runtime OpenCode Zen free model discovery — queries OpenCode runtime provider catalog, filters to only free models. |
 | GET | `/chat-config` | Sanitized merged provider catalog for the Chat page (managed + builtin); selection defaults are server-owned and catalog-gated. |
 | PUT | `/chat-selection` | Authenticated global Chat selection; validates an exact provider/model pair against the active server catalog before persistence. |
+
+### MCP Tool Report
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/mcp-tools/report?project=<name>` | Return a bounded, project-scoped MCP usefulness report. Optional filters are `q`, `category`, `enabled`, `boundary`, `visibility`, and `invocation`. |
+
+The report response is an envelope with `project`, `project_id`, `data`, and
+`total`. `data` is the evidence-only report: it includes global provenance,
+freshness, catalog status, and per-tool `boundary`, `visibility`, and
+`invocation` evidence. The API enriches each tool with its current catalog
+`category` and effective project `enabled` state before applying filters.
+
+The live collector uses a fixed, server-owned packaged MCP launcher in an
+ephemeral probe. It lists the tools and invokes only the provider-free
+`health_check`; the probe closes the child before returning. Probe mode uses
+`INGENIUM_MCP_REPORT_MODE=1`, so the child starts without the child MCP
+gateway. Runtime probing cannot certify source registration or catalog parity;
+when that evidence is unavailable, `data.catalog.status` is `unknown`.
+
+Reports are capped at 64 KiB, cached per project for 30 seconds, and returned
+with `Cache-Control: private, no-store` plus `Vary: Authorization`. Invalid or
+oversized queries use fixed errors: `422 INVALID_MCP_REPORT_QUERY` and `413
+MCP_REPORT_QUERY_TOO_LARGE`. Collection or size failures use `503
+MCP_REPORT_UNAVAILABLE`; concurrent collection may use `503 MCP_REPORT_BUSY`.
 
 ## OpenCode Proxy Routes
 
@@ -550,6 +804,26 @@ itself remains private and bearer-protected. SSE routes stream
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | File upload for chat attachments (multipart, validated MIME allowlist) |
 | GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in OpenCode 1.18.9) |
+
+### Chat Context project authority
+
+Chat's top **Context project** selector supplies the validated project query to
+the project-scoped context search route:
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/context/rag/search?project=<name>&q=<query>&limit=<n>` | Search only the selected project's context-upload chunks and return citation metadata. |
+
+The dashboard encodes query parameters with `URLSearchParams`. The API's
+`requireProject` check resolves the project on every request and rejects missing,
+unknown, archived, or otherwise invalid projects; an archive race therefore
+fails closed at request time rather than falling back to a different namespace.
+The Chat composer does not call this route unless **Use project context** is
+enabled, and the request carries the selected project for that turn. Context
+retrieval and Chat tools are separate authorities: `/chat-config`, Chat model
+selection, MCP/tool state, and Chat mutations resolve the sole active global
+project and ignore a caller's Context project. Context search logs neither the
+query's source contents nor returned excerpts.
 
 ### Chat prompt response lifecycle
 

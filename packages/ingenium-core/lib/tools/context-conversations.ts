@@ -1,6 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb, sanitizeFts5Query } from "../db.js";
 import {
+  appendTrustedJobEventInTransaction,
+  trustedJobEventFromContextAuditEvent,
+} from "./trusted-job-events.js";
+import {
   AppendContextMessageInputSchema,
   AuthorizeContextMaintenanceInputSchema,
   ContextCheckpointAuditEventSchema,
@@ -386,11 +390,13 @@ function insertCheckpointAuditEvent(
     input.targetConversationId, input.expectedRevision, input.checkpointStateHash,
     input.authorizationId, input.archiveSequence, input.createdAt,
   );
-  return readCheckpointAuditEvent(db.prepare(
+  const event = readCheckpointAuditEvent(db.prepare(
     `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
             expected_revision, checkpoint_state_hash, archive_sequence, created_at
      FROM context_checkpoint_audit_events WHERE project_id = ? AND id = ?`,
   ).get(input.projectId, id));
+  appendTrustedJobEventInTransaction(db, input.projectId, trustedJobEventFromContextAuditEvent(event));
+  return event;
 }
 
 function currentRevision(db: Db, projectId: string, conversationId: string): number {

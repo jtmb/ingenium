@@ -31,7 +31,7 @@ const layoutSkill = {
   updated_at: "2026-07-28T00:00:00.000Z",
 };
 
-async function mockSkillsDetail(page: Page): Promise<void> {
+async function mockProjectContext(page: Page): Promise<void> {
   await page.route((url) => url.pathname === "/api/v1/projects", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -45,6 +45,10 @@ async function mockSkillsDetail(page: Page): Promise<void> {
       }],
     }),
   }));
+}
+
+async function mockSkillsDetail(page: Page): Promise<void> {
+  await mockProjectContext(page);
   await page.route(
     (url) => url.pathname === "/api/v1/skills" && url.searchParams.has("project"),
     (route) => route.fulfill({
@@ -78,14 +82,18 @@ async function openLayoutSkill(page: Page) {
  * contracts intentionally do not appear here.
  */
 test.describe("Ingenium Dashboard", () => {
-  test("home page exposes current navigation links", async ({ page }) => {
+  test("home page keeps the desktop navigation links available in both rail densities", async ({ page }) => {
+    await mockProjectContext(page);
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "Ingenium", exact: true })).toBeVisible();
-    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    const rail = page.locator("#nav-sidebar");
+    const nav = page.getByRole("navigation", { name: "Desktop navigation" });
+    await expect(rail).toHaveCSS("width", "224px");
     for (const name of [
       "Chat",
       "OpenCode",
+      "VS Code",
       "Mail",
       "Tasks",
       "Docs",
@@ -109,6 +117,54 @@ test.describe("Ingenium Dashboard", () => {
       await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
     }
     await expect(nav.getByRole("link", { name: "Learnings", exact: true })).toHaveCount(0);
+
+    await nav.getByRole("button", { name: "Workspace", exact: true }).click();
+    const workspaceGroup = page.locator("#desktop-nav-group-workspace");
+    await expect(workspaceGroup).toHaveAttribute("aria-hidden", "true");
+    await expect(workspaceGroup).toHaveAttribute("inert", "");
+    await expect(nav.getByRole("link", { name: "Chat", exact: true })).toHaveCount(0);
+    await nav.getByRole("button", { name: "Workspace", exact: true }).click();
+
+    await page.getByRole("button", { name: "Collapse navigation" }).click();
+    await expect(rail).toHaveCSS("width", "56px");
+    await expect(page.getByRole("button", { name: "Expand navigation" })).toHaveAttribute("aria-expanded", "false");
+    for (const name of ["Chat", "VS Code", "Tasks", "Skills", "MCP Servers", "Secrets"]) {
+      const link = nav.getByRole("link", { name, exact: true });
+      await expect(link).toHaveAttribute("aria-label", name);
+      await expect(link).toHaveAttribute("title", name);
+    }
+  });
+
+  test("mobile navigation drawer is mounted only while open", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockProjectContext(page);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+
+    await expect(page.locator("#nav-sidebar")).toBeHidden();
+    const trigger = page.getByRole("button", { name: "Open navigation menu" });
+    await trigger.click();
+
+    const drawer = page.getByRole("dialog", { name: "Ingenium" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(await page.locator("body").evaluate((element) => (element as HTMLElement).style.overflow)).toBe("hidden");
+    await expect(drawer.getByRole("link", { name: "Tasks", exact: true })).toBeVisible();
+    await expect(page.locator('[data-nav-background="topbar"]')).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator('[data-nav-background="content"]')).toHaveAttribute("aria-hidden", "true");
+
+    await page.setViewportSize({ width: 1024, height: 844 });
+    await expect(drawer).not.toBeAttached();
+    expect(await page.locator("body").evaluate((element) => (element as HTMLElement).style.overflow)).toBe("");
+    await expect(page.locator('[data-nav-background="topbar"]')).not.toHaveAttribute("aria-hidden");
+    await expect(page.locator('[data-nav-background="content"]')).not.toHaveAttribute("aria-hidden");
+    await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await trigger.click();
+    await expect(drawer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(drawer).not.toBeAttached();
+    await expect(trigger).toBeFocused();
   });
 
   test("projects page creates a project", async ({ page }) => {
@@ -128,6 +184,26 @@ test.describe("Ingenium Dashboard", () => {
 
     await expect(page.getByRole("heading", { name: /^Skills \(/ })).toBeVisible();
     await expect(page.getByPlaceholder("Search skills...", { exact: true })).toBeVisible();
+  });
+
+  test("skills controls stay within the viewport on mobile", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockSkillsDetail(page);
+    await page.goto("/skills", { waitUntil: "domcontentloaded" });
+
+    const geometry = await page.getByTestId("skills-search").evaluate((searchElement) => {
+      const controls = searchElement.parentElement!;
+      const upload = controls.querySelector<HTMLElement>("[data-testid='skills-upload-btn']")!;
+      return {
+        controls: controls.getBoundingClientRect().toJSON(),
+        upload: upload.getBoundingClientRect().toJSON(),
+        pageOverflows: document.documentElement.scrollWidth > window.innerWidth,
+      };
+    });
+
+    expect(geometry.pageOverflows).toBe(false);
+    expect(geometry.upload.left).toBeGreaterThanOrEqual(geometry.controls.left);
+    expect(geometry.upload.right).toBeLessThanOrEqual(geometry.controls.right);
   });
 
   test("skills card opens by keyboard and restores focus after Escape", async ({ page }) => {
@@ -230,6 +306,11 @@ test.describe("Ingenium Dashboard", () => {
   });
 
   test("context page uses the current immutable conversation workspace", async ({ page }) => {
+    await page.route("**/api/v1/context/sources**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: [], total: 0, limit: 20, offset: 0 }),
+    }));
     await page.route("**/api/v1/context/conversations**", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -239,7 +320,9 @@ test.describe("Ingenium Dashboard", () => {
     await page.goto("/context");
 
     await expect(page.getByRole("heading", { name: "Context", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Context sources", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Conversation index", exact: true })).toBeVisible();
+    await expect(page.getByTestId("context-sources-empty")).toBeVisible();
     await expect(page.getByTestId("context-empty")).toBeVisible();
     await expect(page.getByText(/immutable conversation memory/)).toBeVisible();
   });

@@ -159,4 +159,4 @@ service or bridge, and no current-session/OpenCode-session import tool.
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
-- Use the OpenCode interface to interact with the built-in 268-tool Ingenium MCP catalog across 28 baseline categories (266 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 275-tool Ingenium MCP catalog across 29 baseline categories (273 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

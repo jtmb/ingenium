@@ -1,9 +1,31 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { mcpToolStates } from "ingenium-core";
+import {
+  buildMcpUsefulnessReport,
+  createMcpUsefulnessCollector,
+  enrichMcpUsefulnessReport,
+  type McpUsefulnessCatalogEntry,
+  type McpUsefulnessCollectionError,
+  type McpUsefulnessReportCollector,
+} from "../mcp-usefulness-collector.js";
 import { requireProject } from "../helpers.js";
 
 /** Handles /api/v1/mcp-tools — tool catalog queries and per-project enable/disable state. */
-export const mcpToolsRouter = Router();
+export interface McpToolsRouterOptions {
+  usefulnessCollector?: McpUsefulnessReportCollector;
+}
+
+const REPORT_MAX_BYTES = 64 * 1024;
+const REPORT_QUERY_KEYS = new Set(["project", "q", "category", "enabled", "boundary", "visibility", "invocation"]);
+
+interface ReportFilters {
+  q?: string;
+  category?: string;
+  enabled?: boolean;
+  boundary?: "mcp-stdio" | "opencode-extension";
+  visibility?: "reachable" | "unreachable" | "unknown" | "not-applicable";
+  invocation?: "success" | "failed" | "not-run" | "unknown";
+}
 
 /**
  * Returns true if the tool name exists in the catalog.
@@ -22,10 +44,102 @@ function getKnownCategories(projectId?: string): Set<string> {
   return new Set(categoryMap.keys());
 }
 
-// NOTE: Catalog sub-routes (/catalog, /catalog/:name) MUST be registered before
-// the /:name wildcard to avoid Express route capture.
+function reportError(res: Response, status: 413 | 422, code: string): void {
+  res.status(status).json({ error: { code, message: "The MCP report query is invalid." } });
+}
 
-mcpToolsRouter.get("/catalog", (req, res) => {
+function queryString(value: unknown, maximumLength: number): { value?: string; tooLarge?: boolean; invalid?: boolean } {
+  if (value === undefined) return {};
+  if (typeof value !== "string" || !/^[\x20-\x7e]*$/.test(value)) return { invalid: true };
+  if (value.length > maximumLength) return { tooLarge: true };
+  return { value };
+}
+
+function parseReportFilters(query: Record<string, unknown>): { filters?: ReportFilters; status?: 413 | 422 } {
+  if (Object.keys(query).some((key) => !REPORT_QUERY_KEYS.has(key))) return { status: 422 };
+
+  const q = queryString(query.q, 128);
+  const category = queryString(query.category, 128);
+  if (q.tooLarge || category.tooLarge) return { status: 413 };
+  if (q.invalid || category.invalid || q.value === "" || category.value === "") return { status: 422 };
+
+  const enabled = query.enabled;
+  if (enabled !== undefined && enabled !== "true" && enabled !== "false") return { status: 422 };
+  const boundary = query.boundary;
+  if (boundary !== undefined && boundary !== "mcp-stdio" && boundary !== "opencode-extension") return { status: 422 };
+  const visibility = query.visibility;
+  if (visibility !== undefined && visibility !== "reachable" && visibility !== "unreachable"
+    && visibility !== "unknown" && visibility !== "not-applicable") return { status: 422 };
+  const invocation = query.invocation;
+  if (invocation !== undefined && invocation !== "success" && invocation !== "failed"
+    && invocation !== "not-run" && invocation !== "unknown") return { status: 422 };
+
+  return {
+    filters: {
+      ...(q.value === undefined ? {} : { q: q.value.toLowerCase() }),
+      ...(category.value === undefined ? {} : { category: category.value }),
+      ...(enabled === undefined ? {} : { enabled: enabled === "true" }),
+      ...(boundary === undefined ? {} : { boundary }),
+      ...(visibility === undefined ? {} : { visibility }),
+      ...(invocation === undefined ? {} : { invocation }),
+    },
+  };
+}
+
+function effectiveTools(projectId: string): McpUsefulnessCatalogEntry[] {
+  const catalog = Array.from(mcpToolStates.getAllTools(projectId).values());
+  const stateEntries = mcpToolStates.listToolStatesWithDefaults(projectId);
+  const states = new Map(stateEntries.map(({ tool_name, enabled }) => [tool_name, enabled]));
+  const catalogNames = new Set(catalog.map(({ name }) => name));
+  if (catalog.length !== catalogNames.size || stateEntries.length !== catalog.length || states.size !== catalog.length
+    || stateEntries.some(({ tool_name }) => !catalogNames.has(tool_name))) {
+    throw new Error("MCP_REPORT_STATE_MISMATCH");
+  }
+  return catalog.map((tool) => {
+    const enabled = states.get(tool.name);
+    if (enabled === undefined) throw new Error("MCP_REPORT_STATE_MISMATCH");
+    return { ...tool, enabled };
+  });
+}
+
+function isBusy(error: unknown): error is McpUsefulnessCollectionError {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "MCP_REPORT_BUSY";
+}
+
+function reportUnavailable(res: Response, busy = false): void {
+  res.status(503).json({
+    error: {
+      code: busy ? "MCP_REPORT_BUSY" : "MCP_REPORT_UNAVAILABLE",
+      message: busy ? "The MCP report is busy." : "The MCP report is unavailable.",
+    },
+  });
+}
+
+function filterReportTools<T extends {
+  name: string;
+  category: string;
+  enabled: boolean;
+  boundary: string;
+  visibility: { status: string };
+  invocation: { status: string };
+}>(tools: readonly T[], filters: ReportFilters): T[] {
+  return tools.filter((tool) => (
+    (filters.q === undefined || tool.name.includes(filters.q))
+    && (filters.category === undefined || tool.category === filters.category)
+    && (filters.enabled === undefined || tool.enabled === filters.enabled)
+    && (filters.boundary === undefined || tool.boundary === filters.boundary)
+    && (filters.visibility === undefined || tool.visibility.status === filters.visibility)
+    && (filters.invocation === undefined || tool.invocation.status === filters.invocation)
+  ));
+}
+
+export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Router {
+  const router = Router();
+  const usefulnessCollector = options.usefulnessCollector ?? createMcpUsefulnessCollector();
+
+  // NOTE: Catalog sub-routes and /report MUST be registered before the /:name wildcard.
+
+  router.get("/catalog", (req, res) => {
   const projectId = req.query.project === undefined ? undefined : requireProject(req, res) ?? undefined;
   if (req.query.project !== undefined && !projectId) return;
   const catalog = mcpToolStates.getAllTools(projectId);
@@ -34,9 +148,9 @@ mcpToolsRouter.get("/catalog", (req, res) => {
     data: entries,
     total: entries.length,
   });
-});
+  });
 
-mcpToolsRouter.get("/catalog/:name", (req, res) => {
+  router.get("/catalog/:name", (req, res) => {
   const projectId = req.query.project === undefined ? undefined : requireProject(req, res) ?? undefined;
   if (req.query.project !== undefined && !projectId) return;
   const catalog = mcpToolStates.getAllTools(projectId);
@@ -48,27 +162,59 @@ mcpToolsRouter.get("/catalog/:name", (req, res) => {
     return;
   }
   res.json({ data: entry });
-});
+  });
+
+  router.get("/report", async (req, res) => {
+    res.set("Cache-Control", "private, no-store");
+    res.vary("Authorization");
+    const projectId = requireProject(req, res);
+    if (!projectId) return;
+    const parsed = parseReportFilters(req.query as Record<string, unknown>);
+    if (!parsed.filters) {
+      reportError(res, parsed.status!, parsed.status === 413 ? "MCP_REPORT_QUERY_TOO_LARGE" : "INVALID_MCP_REPORT_QUERY");
+      return;
+    }
+
+    try {
+      const observation = await usefulnessCollector.collect({ project: req.query.project as string, projectId });
+      const tools = effectiveTools(projectId);
+      const report = enrichMcpUsefulnessReport(
+        buildMcpUsefulnessReport(observation, tools, usefulnessCollector.provenance, usefulnessCollector.freshnessDurationMs),
+        tools,
+      );
+      const data = { ...report, tools: filterReportTools(report.tools, parsed.filters) };
+      const body = { project: req.query.project as string, project_id: projectId, data, total: data.tools.length };
+      if (Buffer.byteLength(JSON.stringify(body), "utf8") > REPORT_MAX_BYTES) {
+        reportUnavailable(res);
+        return;
+      }
+      res.json(body);
+    } catch (error) {
+      reportUnavailable(res, isBusy(error));
+    }
+  });
 
 // GET /api/v1/mcp-tools — list all tools with enabled/disabled state for a project.
 //   ?include_categories=true — returns categorized groups instead of flat list.
-mcpToolsRouter.get("/", (req, res) => {
+  router.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const project = req.query.project as string;
 
   const includeCategories = req.query.include_categories === "true";
   if (includeCategories) {
     const tools = mcpToolStates.listCategorizedTools(projectId);
-    res.json({ data: tools, total: tools.reduce((s, g) => s + g.total_count, 0) });
+    res.json({ project, project_id: projectId, data: tools, total: tools.reduce((s, g) => s + g.total_count, 0) });
   } else {
     const tools = mcpToolStates.listToolStatesWithDefaults(projectId);
-    res.json({ data: tools, total: tools.length });
+    res.json({ project, project_id: projectId, data: tools, total: tools.length });
   }
-});
+  });
 
-mcpToolsRouter.get("/:name/state", (req, res) => {
+  router.get("/:name/state", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const project = req.query.project as string;
 
   const toolName = req.params.name!;
 
@@ -79,15 +225,16 @@ mcpToolsRouter.get("/:name/state", (req, res) => {
     return;
   }
 
-  // Returns default-enabled (true) if no explicit state row exists for this tool
+  // Returns the catalog default if no explicit state row exists for this tool.
   const enabled = mcpToolStates.getToolState(projectId, toolName);
-  res.json({ data: { tool_name: toolName, enabled } });
-});
+  res.json({ project, project_id: projectId, data: { tool_name: toolName, enabled } });
+  });
 
 // NOTE: /category/:category must be registered before /:name so "category" is not captured as :name
-mcpToolsRouter.put("/category/:category", (req, res) => {
+  router.put("/category/:category", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const project = req.query.project as string;
 
   const category = req.params.category!;
   const { enabled } = req.body;
@@ -105,12 +252,13 @@ mcpToolsRouter.put("/category/:category", (req, res) => {
   }
 
   const changed = mcpToolStates.setCategoryState(projectId, category, enabled);
-  res.json({ data: { category, enabled, tools_changed: changed } });
-});
+  res.json({ project, project_id: projectId, data: { category, enabled, tools_changed: changed } });
+  });
 
-mcpToolsRouter.put("/:name", (req, res) => {
+  router.put("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const project = req.query.project as string;
 
   const toolName = req.params.name!;
   const { enabled } = req.body;
@@ -127,5 +275,10 @@ mcpToolsRouter.put("/:name", (req, res) => {
   }
 
   const state = mcpToolStates.setToolState(projectId, toolName, enabled);
-  res.json({ data: state });
-});
+  res.json({ project, project_id: projectId, data: state });
+  });
+
+  return router;
+}
+
+export const mcpToolsRouter = createMcpToolsRouter();

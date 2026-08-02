@@ -1,9 +1,9 @@
 ---
-title: Environment Variables
-description: Per-service quick-reference for all environment variables used across the Ingenium monorepo.
+title: Environment Variables — Canonical Reference
+description: Canonical reference for all environment variables used across the Ingenium monorepo.
 ---
 
-# Environment Variables — Quick Reference
+# Environment Variables — Canonical Reference
 
 All environment variables used across the Ingenium monorepo. Any new variable added to the codebase MUST be documented in the same commit.
 
@@ -15,11 +15,18 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 |----------|---------|---------|-------------|
 | `INGENIUM_CORE_DB_PATH` | `/app/.ingenium/data` in Docker; host fallback resolves to `.ingenium/data` | `db.ts`, all tool modules | Canonical SQLite database path; do not create a sibling `data.db` |
 | `INGENIUM_HOME` | `~/.ingenium` | `tools/projects.ts` | Base directory for project data storage |
+| `INGENIUM_DOCS_ROOT` | _(none — required for repo indexing)_ | `tools/rag.ts` | Repository root for canonical docs indexing. `indexConfiguredDocs()` walks `{root}/docs/**/*.md`, skips symlinks, and rejects paths escaping the root. Used by `POST /api/v1/rag/ingest`. |
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands |
 | `INGENIUM_PROJECT` | _(none — required to override worktree)_ | extension plugins | **Extension session override.** When set, takes priority over worktree-derived project name. Required when the worktree path is `/workspace` (container mount) — see architecture docs. Never defaults to `global-default` in code; the Docker entrypoint sets this explicitly. |
 | `INGENIUM_WORKTREE` | current working directory | extension launcher and `ingenium-init-project` | Explicit worktree root for protected token-file lookup and project derivation. The container launcher explicitly sets `/workspace`; external sessions should omit it or set their own worktree and retain the normal project-isolation precedence. |
+
+## Extension (`packages/ingenium-extension`)
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `OBSERVER_CHECK_INTERVAL` | `0` | `observer.ts` | Session idle check interval; `0` disables observer checks. |
 
 ## API (`services/ingenium-api`)
 
@@ -77,6 +84,12 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 > Multer file uploads for `/api/v1/opencode/upload` are stored at `/tmp/ingenium-chat-uploads/`.
 
+## Test suites
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `INGENIUM_E2E_PROJECT` | _(none)_ | `tests/ingenium-dashboard/docker-active-project.ts` | Optional external Docker-suite project. It must be an existing active project returned by the deployment's same-origin project-list preflight. When unset, the Docker suite requires exactly one active global project. The suite never creates or deletes a project. |
+
 ## Backups
 
 | Variable | Default | Used By | Description |
@@ -94,5 +107,3 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 5. **CI enforces** this document exists and has an entry for every `process.env` call.
 
 ---
-
-*Comprehensive reference: [Reference/Variables](../reference/variables.md)*

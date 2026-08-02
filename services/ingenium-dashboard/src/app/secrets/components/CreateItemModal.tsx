@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api, VaultFolder, VaultItemType } from "../../../lib/api";
+import Select from "../../components/Select";
 
 interface CreateItemModalProps {
   isOpen: boolean;
@@ -113,10 +114,11 @@ export default function CreateItemModal({
 
           {/* Type */}
           <div>
-            <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+            <label htmlFor="vault-item-type" className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
               Type
             </label>
-            <select
+            <Select
+              id="vault-item-type"
               value={type}
               onChange={(e) => setType(e.target.value as VaultItemType)}
               className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm mt-1 bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-gray-50 cursor-pointer"
@@ -126,7 +128,7 @@ export default function CreateItemModal({
                   {t.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* Value */}
@@ -154,10 +156,11 @@ export default function CreateItemModal({
 
           {/* Folder */}
           <div>
-            <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+            <label htmlFor="vault-item-folder" className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
               Folder
             </label>
-            <select
+            <Select
+              id="vault-item-folder"
               value={folderId}
               onChange={(e) => setFolderId(e.target.value)}
               className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm mt-1 bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-gray-50 cursor-pointer"
@@ -168,7 +171,7 @@ export default function CreateItemModal({
                   {f.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* Tags */}

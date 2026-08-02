@@ -321,7 +321,7 @@ describe("suite containment audit", () => {
   });
 
   it("classifies retained legacy evidence as informational and never as missing telemetry", async () => {
-    const legacyDirectory = join(getTestRunArtifactRoot(process.cwd()), `legacy-phase-5aa-${randomUUID()}`);
+    const legacyDirectory = join(getTestRunArtifactRoot(process.cwd()), `legacy-manual-capture-${randomUUID()}`);
     mkdirSync(legacyDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(join(legacyDirectory, "evidence.txt"), "retained legacy evidence\n");
     try {
@@ -411,7 +411,7 @@ describe("suite containment audit", () => {
     }
   });
 
-  it("does not let a raw expected-port exemption mask an unverified listener", async () => {
+  it("keeps the strict fixture audit fail-closed for active unowned declared ports", async () => {
     const previousExpectedPorts = process.env.INGENIUM_AUDIT_EXPECT_PORTS;
     process.env.INGENIUM_AUDIT_EXPECT_PORTS = "3000";
     try {
@@ -424,14 +424,20 @@ describe("suite containment audit", () => {
           hostPorts: [3000, 4097, 1455],
           reason: "rogue listener has no verified Compose owner",
         },
-        portProbe: async (port) => port === 3000,
+        portProbe: async (port) => port === 3000 || port === 4999,
       });
 
       expect(report.ports.find(({ port }) => port === 3000)).toMatchObject({
         listening: true,
         ownership: "unverified",
       });
-      expect(strictFailures(report).some((failure) => failure.includes("listening ports: 3000"))).toBe(true);
+      expect(report.ports.find(({ port }) => port === 4999)).toMatchObject({
+        listening: true,
+        ownership: "unowned",
+      });
+      const failures = strictFailures(report);
+      expect(failures.some((failure) => failure.includes("listening ports:") && failure.includes("3000"))).toBe(true);
+      expect(failures.some((failure) => failure.includes("listening ports:") && failure.includes("4999"))).toBe(true);
     } finally {
       if (previousExpectedPorts === undefined) delete process.env.INGENIUM_AUDIT_EXPECT_PORTS;
       else process.env.INGENIUM_AUDIT_EXPECT_PORTS = previousExpectedPorts;

@@ -4,6 +4,7 @@ description: "Browser automation agent — navigates websites, extracts data, fi
 mode: subagent
 permission:
   read: allow
+  question: deny
   edit:
     "*": allow
     "next-steps-plan/**": deny
@@ -19,6 +20,7 @@ permission:
   skill:
     "@mcp-tooling": allow
     "@engineering-workflow": allow
+    "@ponytail": allow
     "*": deny
 ---
 

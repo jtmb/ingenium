@@ -3,32 +3,9 @@
  * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports backup CRUD, download streaming, restore preview/start/status, and schedule management.
  */
-import { createWriteStream, promises as fs } from "node:fs";
-import path from "node:path";
-import { pipeline } from "node:stream/promises";
 import { api } from "../client.js";
 import { apiRequestHeaders, config } from "../../config/index.js";
-
-/** Validated workspace-bounded path for backup downloads. */
-const WORKSPACE_ROOT = "/workspace";
-const HOME_ROOT = process.env.HOME ?? "/home/appuser";
-const FORBIDDEN_PREFIXES = ["/etc", "/root", "/proc", "/sys", "/dev", "/tmp"];
-
-function validateSafePath(outputPath: string): string {
-  const resolved = path.resolve(outputPath);
-  const isInWorkspace = resolved === WORKSPACE_ROOT || resolved.startsWith(WORKSPACE_ROOT + "/");
-  const isInHome = resolved === HOME_ROOT || resolved.startsWith(HOME_ROOT + "/");
-  if (!isInWorkspace && !isInHome) {
-    throw new Error(
-      `Path "${outputPath}" resolves to "${resolved}" — must be within ${WORKSPACE_ROOT} or ${HOME_ROOT}`,
-    );
-  }
-  const forbidden = FORBIDDEN_PREFIXES.find((p) => resolved === p || resolved.startsWith(p + "/"));
-  if (forbidden) {
-    throw new Error(`Path "${outputPath}" resolves to a forbidden location (${forbidden})`);
-  }
-  return resolved;
-}
+import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
 
 /** Create a new backup with an optional type (e.g. "full", "skills", "config"). */
 export async function backupCreate(project: string, type?: string) {
@@ -63,13 +40,11 @@ export async function backupDownload(project: string, backupId: string, outputPa
   // 🔴 Validate outputPath before making any network call
   let safePath: string;
   try {
-    safePath = validateSafePath(outputPath);
-  } catch (err: any) {
-    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${err.message}` }) }] };
+    safePath = resolveSafeDownloadPath(outputPath);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Invalid path";
+    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${message}` }) }] };
   }
-
-  // Ensure the parent directory exists
-  await fs.mkdir(path.dirname(safePath), { recursive: true });
 
   // Build the API URL and perform a raw fetch for binary response
   const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
@@ -81,19 +56,8 @@ export async function backupDownload(project: string, backupId: string, outputPa
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };
   }
 
-  const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
-
-  // Stream to file — NEVER buffer the full binary in memory
-  if (!response.body) {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.writeFile(safePath, buffer);
-  } else {
-    const fileStream = createWriteStream(safePath);
-    await pipeline(response.body, fileStream);
-  }
-
-  const stat = await fs.stat(safePath);
-  return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size: stat.size }) }] };
+  const { mimeType, size } = await streamDownloadResponse(response, safePath);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size }) }] };
 }
 
 /** Delete a backup by ID. */

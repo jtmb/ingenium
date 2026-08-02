@@ -6,6 +6,12 @@ const mocks = vi.hoisted(() => ({
   summary: vi.fn(),
   breakdown: vi.fn(),
   events: vi.fn(),
+  thresholdsGet: vi.fn(),
+  thresholdsReplace: vi.fn(),
+  thresholdsEvaluate: vi.fn(),
+  attentionList: vi.fn(),
+  attentionEvaluate: vi.fn(),
+  attentionAcknowledge: vi.fn(),
   exportUrl: vi.fn((_query, _project, options?: { cursor?: string }) => options?.cursor
     ? `/api/v1/usage/export?project=usage-project&cursor=${encodeURIComponent(options.cursor)}`
     : "/api/v1/usage/export?project=usage-project"),
@@ -14,7 +20,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "usage-project" }));
 vi.mock("../src/lib/api", () => ({
-  api: { usage: { summary: mocks.summary, breakdown: mocks.breakdown, events: mocks.events, exportUrl: mocks.exportUrl } },
+  ApiError: class ApiError extends Error { constructor(public status: number, message: string, public retryAfterSeconds: number | null) { super(message); } },
+  api: { usage: {
+    summary: mocks.summary,
+    breakdown: mocks.breakdown,
+    events: mocks.events,
+    exportUrl: mocks.exportUrl,
+    thresholds: { get: mocks.thresholdsGet, replace: mocks.thresholdsReplace, evaluate: mocks.thresholdsEvaluate },
+    attention: { list: mocks.attentionList, evaluate: mocks.attentionEvaluate, acknowledge: mocks.attentionAcknowledge },
+  } },
   dashboardFetch: mocks.dashboardFetch,
 }));
 
@@ -80,10 +94,40 @@ const events: UsageEventsPage = {
   pagination: { nextCursor: null, hasMore: false, total: 1 },
 };
 
+const thresholds = {
+  requestCount: null,
+  totalTokens: null,
+  reportedCostAmount: null,
+  cacheReadTokens: null,
+  cacheWriteTokens: null,
+  revision: 1,
+  createdAt: "2026-04-02T10:00:00.000Z",
+  updatedAt: "2026-04-02T10:00:00.000Z",
+};
+
+const evaluation = {
+  range: { from: "2026-04-01T00:00:00.000Z", to: "2026-04-03T00:00:00.000Z" },
+  generatedAt: "2026-04-02T10:00:00.000Z",
+  thresholds,
+  metrics: {
+    requestCount: { observed: 2, threshold: null, availability: "known" as const, state: "disabled" as const },
+    totalTokens: { observed: 30, threshold: null, availability: "known" as const, state: "disabled" as const },
+    reportedCostAmount: { observed: 0.42, threshold: null, availability: "partial" as const, state: "disabled" as const },
+    cacheReadTokens: { observed: null, threshold: null, availability: "unavailable" as const, state: "disabled" as const },
+    cacheWriteTokens: { observed: null, threshold: null, availability: "unavailable" as const, state: "disabled" as const },
+  },
+};
+
 beforeEach(() => {
   mocks.summary.mockReset().mockResolvedValue({ data: summary() });
   mocks.breakdown.mockReset().mockResolvedValue({ data: breakdown });
   mocks.events.mockReset().mockResolvedValue(events);
+  mocks.thresholdsGet.mockReset().mockResolvedValue({ data: thresholds });
+  mocks.thresholdsReplace.mockReset().mockResolvedValue({ data: { ...thresholds, revision: 2 } });
+  mocks.thresholdsEvaluate.mockReset().mockResolvedValue({ data: evaluation });
+  mocks.attentionList.mockReset().mockResolvedValue({ data: [], pagination: { nextCursor: null, hasMore: false, total: 0 } });
+  mocks.attentionEvaluate.mockReset().mockResolvedValue({ evaluatedAt: "2026-04-02T10:00:00.000Z" });
+  mocks.attentionAcknowledge.mockReset();
   mocks.exportUrl.mockClear();
   mocks.dashboardFetch.mockReset();
 });
@@ -248,5 +292,72 @@ describe("UsagePage", () => {
     expect(mocks.exportUrl).toHaveBeenLastCalledWith(expect.anything(), "usage-project", { cursor: "next-page-cursor" });
     expect(screen.queryByRole("button", { name: "Download next CSV page" })).toBeNull();
     click.mockRestore();
+  });
+
+  it("saves a full advisory replacement and refreshes only the selected-range evaluation", async () => {
+    render(<UsagePage />);
+    await screen.findByRole("heading", { name: "Usage analytics" });
+    await screen.findByRole("heading", { name: "Usage advisories" });
+
+    fireEvent.change(screen.getByLabelText("Requests"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Reported cost amount"), { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save thresholds" }));
+
+    await waitFor(() => expect(mocks.thresholdsReplace).toHaveBeenCalledWith({
+      expectedRevision: 1,
+      requestCount: 7,
+      totalTokens: null,
+      reportedCostAmount: 0.5,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+    }, "usage-project"));
+    expect(mocks.thresholdsEvaluate).toHaveBeenLastCalledWith(expect.objectContaining({
+      from: expect.any(String),
+      to: expect.any(String),
+    }), "usage-project");
+    expect(mocks.attentionList).toHaveBeenCalledTimes(1);
+  });
+
+  it("acknowledges all-history attention with CAS and retains event rows while paging", async () => {
+    const activeAttention = {
+      id: "attention-1",
+      metric: "request_count" as const,
+      status: "active" as const,
+      evaluationState: "above" as const,
+      severity: "critical" as const,
+      observed: 3,
+      threshold: 2,
+      availability: "known" as const,
+      freshness: "fresh" as const,
+      thresholdRevision: 1,
+      openedAt: "2026-04-02T10:00:00.000Z",
+      acknowledgedAt: null,
+      resolvedAt: null,
+      reopenedAt: null,
+      reopenCount: 0,
+      lastEvaluatedAt: "2026-04-02T10:00:00.000Z",
+      revision: 3,
+      updatedAt: "2026-04-02T10:00:00.000Z",
+    };
+    mocks.attentionList.mockResolvedValue({ data: [activeAttention], pagination: { nextCursor: null, hasMore: false, total: 1 } });
+    mocks.attentionAcknowledge.mockResolvedValue({ data: { ...activeAttention, acknowledgedAt: "2026-04-02T10:02:00.000Z", revision: 4 } });
+    mocks.events.mockResolvedValueOnce({
+      data: events.data,
+      pagination: { nextCursor: "events-page-two", hasMore: true, total: 2 },
+    }).mockResolvedValueOnce({
+      data: [{ ...events.data[0], id: "evt-2", modelId: "Model/Page-two" }],
+      pagination: { nextCursor: null, hasMore: false, total: 2 },
+    });
+
+    render(<UsagePage />);
+    await screen.findByText("Above threshold — advisory/no enforcement");
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(mocks.attentionAcknowledge).toHaveBeenCalledWith("attention-1", 3, "usage-project"));
+    expect(screen.queryByRole("button", { name: "Resolve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load more events" }));
+    await waitFor(() => expect(mocks.events).toHaveBeenLastCalledWith(expect.anything(), "usage-project", { limit: 100, cursor: "events-page-two" }));
+    expect(screen.getByTestId("usage-events-table").textContent).toContain("Model/Page-two");
   });
 });

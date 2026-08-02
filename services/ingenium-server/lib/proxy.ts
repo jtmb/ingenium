@@ -886,39 +886,3 @@ export class ChildMcpRuntimeManager {
     };
   }
 }
-
-const defaultRuntime = new ChildMcpRuntimeManager();
-
-/** Process-wide runtime used by the MCP server shutdown handler. */
-export function registerServer(definition: ChildMcpRuntimeDefinition): void {
-  defaultRuntime.registerServer(definition);
-}
-
-export function startServer(name: string): Promise<ChildMcpRuntimeStatus> {
-  return defaultRuntime.startServer(name);
-}
-
-export function reconnectServer(name: string): Promise<ChildMcpRuntimeStatus> {
-  return defaultRuntime.reconnectServer(name);
-}
-
-export function listServerTools(name: string): Promise<ChildMcpTool[]> {
-  return defaultRuntime.listTools(name);
-}
-
-export function callServerTool(name: string, toolName: string, arguments_?: unknown): Promise<ChildMcpToolCallResult> {
-  return defaultRuntime.callTool(name, toolName, arguments_);
-}
-
-export function healthServer(name: string): Promise<ChildMcpRuntimeStatus> {
-  return defaultRuntime.healthServer(name);
-}
-
-export function stopServer(name: string): Promise<void> {
-  return defaultRuntime.stopServer(name);
-}
-
-/** Stop all live child processes before the parent exits. */
-export function stopAll(): Promise<void> {
-  return defaultRuntime.stopAll();
-}

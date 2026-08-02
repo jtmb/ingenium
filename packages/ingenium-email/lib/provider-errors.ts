@@ -77,6 +77,8 @@ function classify(error: unknown): ProviderErrorCode {
 
   const message = rawMessage(error);
   const status = statusFrom(error);
+  // First-match ordering keeps specific OAuth and credential errors from being
+  // shadowed by broader status or text matches.
   if (message.includes("oauth state") || message.includes("csrf")) return "OAUTH_STATE_INVALID";
   if ((message.includes("unsupported") || /not\s+(?:\w+\s+)?supported/.test(message))
     && message.includes("oauth")) return "OAUTH_UNSUPPORTED";
@@ -135,16 +137,6 @@ export function sanitizeProviderError(
   }
   const code = classify(error);
   return new ProviderOperationError(code, operation, isRetryable(code));
-}
-
-/**
- * Strict redactor for callers that would otherwise be tempted to log raw text.
- * Returning a constant instead of a partially-redacted string avoids accidental
- * disclosure through an unrecognized provider header, URL query parameter, or
- * canary value.
- */
-export function redactProviderDiagnostic(_value: unknown): string {
-  return "provider diagnostic redacted";
 }
 
 /** Return structured diagnostics that are explicitly safe for logs and telemetry. */

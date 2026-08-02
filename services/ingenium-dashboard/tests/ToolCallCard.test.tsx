@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import React from "react";
 import ToolCallCard, {
   extractWebSearchSites,
+  getSafeToolErrorMessage,
 } from "../src/app/chat/components/ToolCallCard";
 
 describe("ToolCallCard", () => {
@@ -65,6 +66,58 @@ describe("ToolCallCard", () => {
     expect(screen.queryByText("Failed", { exact: true })).toBeNull();
     expect(screen.queryByText("Permission denied", { exact: true })).toBeNull();
     expect(screen.getByTestId("chat-tool-call").querySelector("button")).toBeNull();
+  });
+
+  it.each([
+    ["TOOL_DISABLED", "This tool is disabled for the project."],
+    ["TOOL_STATE_UNAVAILABLE", "The tool state could not be verified."],
+    ["PROJECT_IDENTITY_REQUIRED", "This tool requires a valid project identity."],
+    ["private provider diagnostic", "Tool execution failed."],
+  ])("renders a fixed safe message for %s", (error, message) => {
+    render(
+      React.createElement(ToolCallCard, {
+        toolName: "mcp_custom_tool",
+        state: "failed",
+        error,
+      }),
+    );
+
+    expect(screen.getByTestId("chat-tool-error").textContent).toBe(message);
+    expect(screen.queryByText(error, { exact: true })).toBeNull();
+  });
+
+  it("normalizes unknown tool errors without exposing their contents", () => {
+    expect(getSafeToolErrorMessage("Bearer secret-token upstream failure")).toBe("Tool execution failed.");
+    expect(getSafeToolErrorMessage()).toBe("Tool execution failed.");
+  });
+
+  it("reads only an exact MCP JSON error envelope from output", () => {
+    expect(getSafeToolErrorMessage(undefined, JSON.stringify({
+      error: { code: "TOOL_DISABLED", message: "private detail" },
+    }))).toBe("This tool is disabled for the project.");
+    expect(getSafeToolErrorMessage(undefined, JSON.stringify({
+      error: { code: "TOOL_DISABLED_EXTRA", message: "private detail" },
+    }))).toBe("Tool execution failed.");
+    expect(getSafeToolErrorMessage(undefined, {
+      isError: true,
+      content: [{
+        type: "text",
+        text: JSON.stringify({ error: { code: "PROJECT_IDENTITY_REQUIRED" } }),
+      }],
+    })).toBe("This tool requires a valid project identity.");
+  });
+
+  it("never creates an MCP link from an unsafe project name", () => {
+    render(
+      React.createElement(ToolCallCard, {
+        toolName: "mcp_custom_tool",
+        state: "failed",
+        error: "TOOL_DISABLED",
+        mcpProject: "global/default",
+      }),
+    );
+
+    expect(screen.queryByRole("link", { name: /MCP Servers/ })).toBeNull();
   });
 
   it("preserves the argument summary without an expandable body", () => {

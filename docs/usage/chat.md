@@ -7,6 +7,31 @@ description: Complete guide to the Ingenium Chat interface — provider/model se
 
 Ingenium Chat is a standalone conversational AI interface that uses OpenCode's native chat API. It lives on the Dashboard at `/chat`, separated from the `/opencode` page which embeds OpenCode Web/CLI iframes.
 
+Chat-owned tools use the API's authoritative active global project. The Chat
+page resolves that project rather than trusting the selected dashboard project;
+if no sole active global project can be resolved, Chat does not run its tool
+configuration.
+
+## Context project selector
+
+On `/chat`, the top navigation **Context project** selector chooses the project
+used by optional project-context retrieval. A selection is represented explicitly
+as `?project=<name>` in the URL and is persisted for the next visit. The API
+validates the URL or stored value against the current, non-archived project list
+before mounting the Chat shell; an invalid, missing, or archived selection never
+falls back to another project. URL query values are encoded with
+`URLSearchParams`.
+
+If the URL or stored selection is no longer valid, Chat fails closed with
+**Project context unavailable** and mounts no project-scoped Chat content. Use
+**Clear project selection and use server default** to remove the invalid URL and
+stored values and retry resolution against the sole active global project.
+
+This selector is separate from Chat's server-owned authority. The banner
+**Chat tools run through global project** identifies the project used by Chat
+tools, provider/model configuration, and other global Chat mutations. Changing
+the Context project does not redirect those tools.
+
 ## Quick Start
 
 ```bash
@@ -73,6 +98,20 @@ The left sidebar lists all chat sessions. Sessions are loaded from OpenCode via 
 
 On screens narrower than 1280px, the sidebar auto-collapses. On mobile (<768px), the sidebar becomes an overlay drawer triggered by a hamburger button in the header.
 
+### Create a Task from Chat
+
+With a loaded, idle conversation selected, choose **Create task** (the plus
+button in the Chat header). The confirmation form asks for a **title only**;
+it does not copy the transcript, session title, or other Chat content into the
+task. Chat capture belongs to the active global Ingenium project; the server
+also verifies the OpenCode source instance, upstream project, and mapped global
+project. Unmapped, mismatched, or unavailable sessions cannot be captured.
+
+The stored reference uses fixed metadata (`OpenCode chat`), not the upstream
+session title or transcript. Repeating the same capture reuses the existing
+task and reference. The controls are labeled, keyboard-usable, and at least
+44px; the header control remains available in the mobile layout.
+
 ## Composer
 
 The composer bar sits at the bottom of the chat area with a `rounded-2xl` border.
@@ -85,6 +124,35 @@ The composer bar sits at the bottom of the chat area with a `rounded-2xl` border
 | **Instructions** | Toggle (gear icon) opens a system prompt textarea above the composer. |
 | **Attachments** | Paperclip button opens a file picker (max 5 files, 10MB each). Also supports drag-and-drop. Text files show code-block previews; images show inline thumbnails; binary files show download links. |
 | **Send/Stop** | Arrow icon to send (text required); square icon to stop generation (when streaming). |
+
+### Optional Project Context
+
+The **Use project context** checkbox is an explicit per-send control and is off
+by default. After an accepted send, it resets to off. The selected project is
+validated before Chat mounts and is the authority for this optional Context
+search; Chat tools and provider/model selection remain owned by the active
+global project.
+
+The request binds the validated Context project to that send. Retrieval is sent
+only when the checkbox is enabled; a failed search leaves the prompt unsent so
+the user can retry. The API rechecks the project at request time, so an archive
+race is rejected rather than serving another project's context. Context source
+contents and excerpts are not written to logs.
+
+When enabled, retrieval is bounded to at most 5 sources, the query is limited
+to 512 characters, and provider-bound context is limited to 5,000 characters.
+The provider receives excerpts as untrusted reference data inside delimiters;
+they are never rendered in Chat. Chat displays the exact citation metadata only:
+title, the persisted chunk UUID as `citationId`, `sourceId`, `sourceHash`,
+`chunkIndex`, current `availability` (`available`), heading, provenance, and
+optional source reference. It never renders the source excerpt.
+
+If retrieval finds no matches, the original prompt is still sent without
+grounding. If the search fails, Chat preserves the prompt and the checkbox so
+you can retry. Citation metadata is live per-turn UI state and is not durable
+across a reload. Stable citation reproducibility comes from CTX-101's immutable
+chunk identity and deterministic retrieval order, not from persisted Chat UI
+grounding metadata.
 
 ### Attachments
 
@@ -174,7 +242,16 @@ response produces `502 MCP_STATUS_INVALID` rather than an empty server list.
 Each server has a connect/disconnect toggle and the drawer provides refresh and
 retry feedback when status loading fails. Connect and disconnect success is the
 fixed `{ data: { accepted: true } }` DTO; raw upstream mutation bodies are never
-returned to the browser.
+returned to the browser. Opening the drawer refreshes its data automatically;
+the footer's **Refresh** button performs a manual refresh and shows the last
+refresh time alongside the current connection status.
+
+MCP tool state is refreshed after connection mutations and when the MCP session
+reconnects. If a direct built-in tool call is blocked, Chat shows fixed,
+actionable errors (`TOOL_DISABLED`, `TOOL_STATE_UNAVAILABLE`, or
+`PROJECT_IDENTITY_REQUIRED`) and links to **MCP Servers** when the project is
+known. The statically registered extension tools are the exception: they remain
+visible, but their execution is still project-state-gated and fails closed.
 
 ## API
 

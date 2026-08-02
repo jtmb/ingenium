@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  api,
   normalizeChatConfigResponse,
   normalizeManagedProviderConfigResponse,
 } from "../src/lib/api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("dashboard provider response normalization", () => {
   it("normalizes legacy managed provider fields and missing synthesis collections", () => {
@@ -48,6 +53,7 @@ describe("dashboard provider response normalization", () => {
       providers: undefined,
       agents: undefined,
     })).toEqual({
+      project: null,
       configured: false,
       primary: null,
       backup: null,
@@ -55,6 +61,28 @@ describe("dashboard provider response normalization", () => {
       providers: [],
       defaultSelection: null,
     });
+  });
+
+  it("preserves only a valid server-attested global project", () => {
+    expect(normalizeChatConfigResponse({ project: "server-shared" }).project).toBe("server-shared");
+    expect(normalizeChatConfigResponse({}).project).toBeNull();
+    expect(normalizeChatConfigResponse({ project: " server-shared " }).project).toBeNull();
+    expect(normalizeChatConfigResponse({ project: "../other-project" }).project).toBeNull();
+    expect(normalizeChatConfigResponse({ project: 42 }).project).toBeNull();
+  });
+
+  it("requests Chat config without a browser-selected project query", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { project: "server-shared" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.settings.chatConfig()).resolves.toMatchObject({
+      data: { project: "server-shared" },
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/opencode/chat-config");
   });
 
   it("normalizes current chat provider models before ChatShell searches them", () => {

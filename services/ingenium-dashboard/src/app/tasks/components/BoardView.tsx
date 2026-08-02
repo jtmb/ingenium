@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { api, Task, BoardColumn, BoardConfig } from "../../../lib/api";
 import { badgeTones } from "../../../lib/badgeTones";
 import TaskDetail from "./TaskDetail";
+import Select from "../../components/Select";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -704,7 +705,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
           <label className="sr-only" htmlFor="tasks-swimlane">
             Group tasks by
           </label>
-          <select
+          <Select
             id="tasks-swimlane"
             value={swimlane}
             onChange={(e) => setSwimlane(e.target.value as SwimlaneMode)}
@@ -715,7 +716,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                 {SWIMLANE_LABELS[m]}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -744,20 +745,20 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
         <div className="flex items-center gap-3 bg-[var(--color-surface)] border border-blue-200 rounded p-3 shadow-lg sticky bottom-0 z-10 flex-wrap">
           <span className="text-sm font-medium text-[var(--color-text-primary)]">{selectedIds.size} selected</span>
           <label className="sr-only" htmlFor="tasks-bulk-column">Move selected tasks to status</label>
-          <select id="tasks-bulk-column" value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
+          <Select id="tasks-bulk-column" value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Move to...</option>
             {columns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-          </select>
+          </Select>
           <label className="sr-only" htmlFor="tasks-bulk-assignee">Assign selected tasks to</label>
           <input id="tasks-bulk-assignee" value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
             placeholder="Assign to..." className="border border-[var(--color-border)] rounded px-2 py-1 text-sm w-32" />
           <label className="sr-only" htmlFor="tasks-bulk-priority">Set selected task priority</label>
-          <select id="tasks-bulk-priority" value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
+          <Select id="tasks-bulk-priority" value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Set Priority...</option>
             {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
-          </select>
+          </Select>
           <button onClick={handleBulkApply}
             className="bg-blue-600 text-white py-1.5 px-4 rounded text-sm hover:bg-blue-700">Apply</button>
           <button onClick={() => setSelectedIds(new Set())}

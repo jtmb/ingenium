@@ -4,8 +4,8 @@
  * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls
  * plus extension-registered tools (synthesize_observations, auto_observe_now).
  *
- * Every tool known to the system MUST be listed here. The ALL_TOOLS array and
- * CATEGORY_PREFIX map in mcp-tool-states.ts derive from this catalog.
+ * Every tool known to the system MUST be listed here. The mcp-tool-states
+ * category projection derives from this catalog.
  */
 
 export interface McpToolCatalogEntry {
@@ -96,6 +96,8 @@ const TASKS_ENDPOINTS = [
   "GET /api/v1/tasks",
   "POST /api/v1/tasks",
   "PATCH /api/v1/tasks/:id",
+  "POST /api/v1/tasks/:id/reserve",
+  "POST /api/v1/tasks/:id/release",
   "GET /api/v1/tasks/next",
   "POST /api/v1/tasks/search",
   "POST /api/v1/tasks/:id/comments",
@@ -178,6 +180,10 @@ const SERVERS_ENDPOINTS = [
   "DELETE /api/v1/servers/:name",
   "PATCH /api/v1/servers/:name",
   "POST /api/v1/servers/sync-all",
+];
+
+const MCP_REPORT_ENDPOINTS = [
+  "GET /api/v1/mcp-tools/report",
 ];
 
 const AGENTS_ENDPOINTS = [
@@ -790,7 +796,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: EXTRACTION_ENDPOINTS,
   },
 
-  // ── Tasks (24) ───────────────────────────────────────
+  // ── Tasks (26) ───────────────────────────────────────
   {
     name: "ingenium_task_create",
     category: "Tasks",
@@ -811,6 +817,22 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_task_move",
     category: "Tasks",
     description: "Move a task to a different column.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_reserve",
+    category: "Tasks",
+    description: "Reserve a task for a cooperative owner and worktree.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_release",
+    category: "Tasks",
+    description: "Release a task reservation for its cooperative owner and worktree.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: TASKS_ENDPOINTS,
@@ -983,6 +1005,12 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     defaultEnabled: true,
     apiEndpoints: TASKS_ENDPOINTS,
   },
+
+  // ── Task Coordination (4) ─────────────────────────────
+  { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
+  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot with optimistic revision control.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
+  { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
+  { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
 
   // ── Plans (3) ────────────────────────────────────────
   {
@@ -1214,7 +1242,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: PROVIDERS_ENDPOINTS,
   },
 
-  // ── Servers (5) ──────────────────────────────────────
+  // ── Servers (6) ──────────────────────────────────────
   {
     name: "ingenium_server_list",
     category: "Servers",
@@ -1254,6 +1282,14 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: SERVERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_mcp_report_get",
+    category: "Servers",
+    description: "Get the bounded MCP usefulness report for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: MCP_REPORT_ENDPOINTS,
   },
 
   // ── Agents (8) ───────────────────────────────────────
@@ -1638,7 +1674,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_job_create",
     category: "Jobs",
-    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    description: "Create a new job with optional schedule, trigger event, timeout, and metadata-only vault_item_ids authorization.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: JOBS_ENDPOINTS,
@@ -1646,7 +1682,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_job_update",
     category: "Jobs",
-    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes, vault_item_ids). Omit vault_item_ids to preserve references; [] revokes all.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: JOBS_ENDPOINTS,

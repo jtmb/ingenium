@@ -10,8 +10,6 @@
  * constraints.
  */
 
-// ── Internal API proxy ────────────────────────────────────────────────────
-
 /** Internal loopback address of the Ingenium API container. */
 export const API_PROXY_TARGET = "http://127.0.0.1:4097";
 
@@ -23,6 +21,7 @@ export const API_V1_DESTINATION = `${API_PROXY_TARGET}/api/v1/:path*`;
 
 const OPENCODE_WEB_GATEWAY_ORIGIN = "http://opencode.localhost:3000";
 const OPENCODE_CLI_GATEWAY_ORIGIN = "http://cli.localhost:3000";
+export const VSCODE_GATEWAY_ORIGIN = "http://vscode.localhost:3000";
 
 function configuredHttpsFrameOrigins(): string[] {
   const values = [
@@ -67,8 +66,6 @@ function isGatewayMode(): boolean {
   return isProductionGatewayBuild() || hasConfiguredOpenCodeOrigins();
 }
 
-// ── CSP directives ────────────────────────────────────────────────────────
-
 /**
  * Build the Content-Security-Policy header value.
  *
@@ -90,6 +87,7 @@ export function buildCsp(): string {
     ...(!isGatewayMode() ? ["http://localhost:4098", "http://localhost:4099"] : []),
     OPENCODE_WEB_GATEWAY_ORIGIN,
     OPENCODE_CLI_GATEWAY_ORIGIN,
+    VSCODE_GATEWAY_ORIGIN,
     ...configuredHttpsFrameOrigins(),
   ];
 

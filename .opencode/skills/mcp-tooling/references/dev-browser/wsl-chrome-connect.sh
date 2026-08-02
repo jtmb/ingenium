@@ -7,29 +7,20 @@
 #   echo '...' | ./wsl-chrome-connect.sh                                     # pipe from stdin
 #   ./wsl-chrome-connect.sh <<'EOF' ... EOF                                  # heredoc
 #
-# What it does:
-#   1. Checks if Windows Chrome is running with --remote-debugging-port=9222
-#   2. Launches Chrome on Windows if not running (with correct flags)
-#   3. Installs dev-browser on Windows if not present
-#   4. Pipes your script to `dev-browser --connect http://localhost:9222`
-#   5. Returns the JSON output from the script
-#
 # Requirements:
 #   - WSL2 with access to /mnt/c/ (Windows C: drive)
 #   - Chrome installed on Windows at default path
 #   - Node.js and npm on Windows (for dev-browser install)
 #
 # Exit codes:
-#   0 — Script executed successfully
-#   1 — Chrome binary not found
-#   2 — Script timed out
-#   3 — Script execution error
+#   0 — Wrapper completed, including a usage-only invocation
+#   1 — Chrome binary is missing or failed to start
+#   3 — Output is missing or dev-browser reported an error
 
-# No set -e: we handle errors explicitly with exit codes
+# Avoid `set -e` so command results can be inspected before choosing a user-facing status.
 
-# ─── Capture stdin before anything else (piped/heredoc input) ─────────────────
-# This MUST be first — any command (especially powershell.exe) can consume stdin.
-WIN_USER="james"  # Temporary default; updated after capture via powershell
+# Capture piped input before invoking any Windows command; those commands can consume the caller's stdin.
+WIN_USER="james"  # Seed the capture path until the Windows username is known.
 SCRIPT_TEMP_DIR="/mnt/c/Users/${WIN_USER}/AppData/Local/Temp"
 SCRIPT_FILE="wsl-chrome-stdin-$$.js"
 SCRIPT_STDIN_CAPTURE="${SCRIPT_TEMP_DIR}/${SCRIPT_FILE}"
@@ -44,15 +35,12 @@ else
   PIPE_MODE="none"
 fi
 
-# Now it's safe to use powershell.exe (stdin already captured)
+# The username lookup runs only after piped input is captured, avoiding stdin contention.
 DETECTED_USER="$(powershell.exe -Command '[Environment]::UserName' 2>/dev/null < /dev/null | tr -d '\r\n')"
 WIN_USER="${DETECTED_USER:-james}"
 
-# Update temp paths with actual username
 SCRIPT_TEMP_DIR="/mnt/c/Users/${WIN_USER}/AppData/Local/Temp"
 SCRIPT_STDIN_CAPTURE="${SCRIPT_TEMP_DIR}/${SCRIPT_FILE}"
-
-# ─── Configuration ───────────────────────────────────────────────────────────
 
 CHROME_PATH="/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"
 CHROME_PORT=9222
@@ -62,23 +50,17 @@ DEV_BROWSER_NPM_PACKAGE="dev-browser"
 DEV_BROWSER_CMD="C:\\Users\\${WIN_USER}\\AppData\\Roaming\\npm\\dev-browser.cmd"
 CHROME_DATA_DIR="C:\\Users\\${WIN_USER}\\AppData\\Local\\Temp\\chrome-debug"
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${CYAN}🔷${NC} $*" >&2; }
 ok()    { echo -e "${GREEN}✅${NC} $*" >&2; }
 warn()  { echo -e "${YELLOW}⚠️${NC} $*" >&2; }
 err()   { echo -e "${RED}❌${NC} $*" >&2; }
 
-# ─── Step 1: Check Chrome binary ──────────────────────────────────────────────
-
 if [ ! -f "$CHROME_PATH" ]; then
   err "Chrome not found at: $CHROME_PATH"
   err "Adjust CHROME_PATH in the script or install Chrome on Windows."
   exit 1
 fi
-
-# ─── Step 2: Check if Chrome is already listening on port 9222 ────────────────
 
 check_chrome() {
   powershell.exe -Command "
@@ -96,13 +78,13 @@ CHROME_STATUS=$(check_chrome)
 if [ "$CHROME_STATUS" = "NOT_RUNNING" ]; then
   info "Chrome not running on port ${CHROME_PORT}. Launching..."
 
-  # Kill any stale Chrome instances that might block the port
+  # Clear existing Chrome processes so the debug port can be rebound.
   powershell.exe -Command "
     Get-Process -Name chrome -ErrorAction SilentlyContinue | Stop-Process -Force
   " 2>/dev/null < /dev/null || true
   sleep 2
 
-  # Launch Chrome with remote debugging
+  # Use a separate temporary profile so the debug session does not reuse the normal Chrome profile.
   "$CHROME_PATH" \
     --remote-debugging-port=${CHROME_PORT} \
     --remote-allow-origins=* \
@@ -130,8 +112,6 @@ else
   ok "Chrome already running on port ${CHROME_PORT}"
 fi
 
-# ─── Step 3: Ensure dev-browser is installed on Windows ──────────────────────
-
 if ! powershell.exe -Command "Get-Command dev-browser.cmd -ErrorAction SilentlyContinue" 2>/dev/null < /dev/null | grep -q dev-browser; then
   info "dev-browser not found on Windows. Installing..."
   powershell.exe -Command "npm install -g ${DEV_BROWSER_NPM_PACKAGE}" 2>&1 < /dev/null | tail -1
@@ -144,10 +124,7 @@ else
   ok "dev-browser already installed on Windows"
 fi
 
-# ─── Step 4: Check if we have input ──────────────────────────────────────────
-
 if [ "${PIPE_MODE}" = "none" ] && [ $# -eq 0 ]; then
-  # No input — print usage
   echo ""
   echo "  Usage: $0 '<script>'           # inline script"
   echo "         $0 < script.js           # pipe from file"
@@ -164,30 +141,25 @@ if [ "${PIPE_MODE}" = "none" ] && [ $# -eq 0 ]; then
   exit 0
 fi
 
-# ─── Step 5: Execute the script via dev-browser on Windows ────────────────────
-
 info "Executing script via dev-browser on Windows..."
 info "Timeout: ${SCRIPT_TIMEOUT_SECONDS}s"
 
 if [ "${PIPE_MODE}" = "echo" ]; then
-  # Inline: write to temp file
+  # cmd.exe reads the script by Windows path, so inline input is materialized in the shared temp directory.
   WIN_SCRIPT="C:\\Users\\${WIN_USER}\\AppData\\Local\\Temp\\wsl-chrome-run-$$.js"
   WSL_SCRIPT="${SCRIPT_TEMP_DIR}/wsl-chrome-run-$$.js"
   echo "$SCRIPT_CONTENT" > "$WSL_SCRIPT"
 else
-  # Stdin was already captured at the top into SCRIPT_STDIN_CAPTURE
+  # Reuse the captured file so no later Windows command reads the caller's stdin.
   WIN_SCRIPT="C:\\Users\\${WIN_USER}\\AppData\\Local\\Temp\\${SCRIPT_FILE}"
   WSL_SCRIPT="$SCRIPT_STDIN_CAPTURE"
 fi
 
 OUTPUT=$(cmd.exe /c "type ${WIN_SCRIPT} | ${DEV_BROWSER_CMD} --connect http://localhost:9222 --timeout ${SCRIPT_TIMEOUT_SECONDS}" 2>&1) || true
 
-# Clean up temp files
 rm -f "$SCRIPT_STDIN_CAPTURE" "$WSL_SCRIPT" 2>/dev/null || true
 
-# ─── Step 6: Process output ──────────────────────────────────────────────────
-
-# Filter out cosmetic cmd.exe UNC path warnings
+# Drop benign cmd.exe warnings caused by starting from a WSL UNC working directory.
 OUTPUT=$(echo "$OUTPUT" | grep -v "CMD.EXE was started" | grep -v "UNC paths are not supported" | grep -v "Defaulting to Windows directory" | grep -v "wsl.localhost" || true)
 
 if [ -z "$OUTPUT" ]; then
@@ -195,17 +167,16 @@ if [ -z "$OUTPUT" ]; then
   exit 3
 fi
 
-# Check for known error patterns
 if echo "$OUTPUT" | grep -qi "Error:"; then
   err "dev-browser reported an error:"
   echo "$OUTPUT" >&2
   exit 3
 fi
 
-# Print the clean output (stdout only — status messages go to stderr)
+# Emit the filtered command output on stdout; wrapper status messages use stderr.
 echo "$OUTPUT"
 
-# If output is valid JSON, report success
+# The JSON check is informational; non-JSON output can still complete successfully.
 if echo "$OUTPUT" | python3 -m json.tool > /dev/null 2>&1; then
   ok "Script completed successfully"
 fi

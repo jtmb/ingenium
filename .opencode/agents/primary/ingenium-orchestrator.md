@@ -49,6 +49,7 @@ permission:
     "@security-audit": allow
     "@self-learning": allow
     "@database-conventions": allow
+    "@ponytail": allow
     "*": deny
 ---
 

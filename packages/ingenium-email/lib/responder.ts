@@ -105,9 +105,8 @@ export async function suggestResponse(
   uid: string | number,
   folder: string,
 ): Promise<ResponseSuggestion | null> {
-  // 🔴 L30: Gmail REST API accounts don't have IMAP connections —
-  // getEmail() was calling getConnection() which throws "No active IMAP
-  // connection".  Reconstruct the email from the DB cache instead.
+  // 🔴 L30: Gmail REST API accounts don't have IMAP connections. Reconstruct
+  // the email from the DB cache instead of attempting a live IMAP fetch.
   const cachedListing = emailCache.getCachedEmail(accountId, folder, String(uid));
   if (!cachedListing) return null;
 

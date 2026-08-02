@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { jobs, synthesisLlm, jobSuggestLlm } from "ingenium-core";
+import { jobs, jobEventDeliveries, jobSuggestLlm, synthesisLlm, trustedJobEvents } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 import { executeSynthesisBroker } from "../opencode-client.js";
@@ -14,6 +14,56 @@ import { resolveSynthesisProviderSelections } from "../synthesis-provider-resolu
  * /:id to prevent Express from capturing "runs" or "suggest" as the :id param.
  */
 export const jobsRouter = Router();
+
+function sendUnknownTriggerEvent(res: import("express").Response): void {
+  res.status(400).json({
+    error: {
+      code: "UNKNOWN_TRIGGER_EVENT",
+      message: "trigger_event must be null or a trusted job event catalog value",
+    },
+  });
+}
+
+const vaultItemIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseVaultItemIds(body: unknown): string[] | undefined | null {
+  if (!body || typeof body !== "object" || !Object.prototype.hasOwnProperty.call(body, "vault_item_ids")) {
+    return undefined;
+  }
+  const value = (body as Record<string, unknown>).vault_item_ids;
+  if (!Array.isArray(value) || value.length > jobs.JOB_VAULT_REFERENCE_MAX
+    || !value.every((itemId) => typeof itemId === "string" && vaultItemIdPattern.test(itemId))
+    || new Set(value).size !== value.length) {
+    return null;
+  }
+  return value as string[];
+}
+
+function sendVaultItemIdsValidation(res: import("express").Response): void {
+  res.status(422).json({
+    error: { code: "VALIDATION_ERROR", message: "vault_item_ids must be an array of up to 16 unique UUIDs" },
+  });
+}
+
+function sendVaultReferenceNotFound(res: import("express").Response): void {
+  res.status(422).json({
+    error: { code: "VAULT_ITEM_NOT_FOUND", message: "A vault item reference is unavailable" },
+  });
+}
+
+function parseBoundedPage(req: import("express").Request, res: import("express").Response): { limit: number; cursor?: string } | null {
+  const rawLimit = req.query.limit;
+  const limit = rawLimit === undefined ? 20 : Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "limit must be an integer between 1 and 100" } });
+    return null;
+  }
+  if (req.query.cursor !== undefined && (typeof req.query.cursor !== "string" || req.query.cursor.length === 0 || req.query.cursor.length > 512)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor is invalid" } });
+    return null;
+  }
+  return { limit, cursor: req.query.cursor as string | undefined };
+}
 
 // ============================================================================
 // 1. Collection-level routes (no params)
@@ -33,7 +83,9 @@ jobsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const { name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes } = req.body;
+  const body = req.body ?? {};
+  const { name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes } = body;
+  const vaultItemIds = parseVaultItemIds(body);
 
   if (!name || !agent || !prompt_template) {
     res.status(422).json({
@@ -41,18 +93,85 @@ jobsRouter.post("/", (req, res) => {
     });
     return;
   }
+  if (vaultItemIds === null) {
+    sendVaultItemIdsValidation(res);
+    return;
+  }
 
-  const job = jobs.createJob(
-    projectId,
-    name,
-    description,
-    agent,
-    prompt_template,
-    schedule_cron,
-    trigger_event,
-    timeout_minutes,
-  );
-  res.status(201).json({ data: job });
+  try {
+    const job = jobs.createJob(
+      projectId,
+      name,
+      description,
+      agent,
+      prompt_template,
+      schedule_cron,
+      trigger_event,
+      timeout_minutes,
+      vaultItemIds,
+    );
+    res.status(201).json({ data: job });
+  } catch (error) {
+    if (error instanceof jobs.JobTriggerEventError) {
+      sendUnknownTriggerEvent(res);
+      return;
+    }
+    if (error instanceof jobs.JobVaultReferenceError) {
+      if (error.code === "INVALID_VAULT_ITEM_IDS") sendVaultItemIdsValidation(res);
+      else sendVaultReferenceNotFound(res);
+      return;
+    }
+    throw error;
+  }
+});
+
+// GET /events — trusted-event metadata only. Payloads are intentionally never
+// exposed by this execution visibility route.
+jobsRouter.get("/events", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const options = parseBoundedPage(req, res);
+  if (!options) return;
+  try {
+    const page = trustedJobEvents.listTrustedJobEvents(projectId, options);
+    res.json({
+      data: page.data.map((event) => ({
+        id: event.id,
+        event_type: event.event_type,
+        source_audit_event_id: event.source_audit_event_id,
+        created_at: event.created_at,
+      })),
+      nextCursor: page.nextCursor,
+    });
+  } catch {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor is invalid" } });
+  }
+});
+
+// GET /event-deliveries — bounded keyset queue inspection; there is no replay
+// or delivery mutation route.
+jobsRouter.get("/event-deliveries", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const options = parseBoundedPage(req, res);
+  if (!options) return;
+  try {
+    const page = jobEventDeliveries.listJobEventDeliveries(projectId, options);
+    res.json({ data: page.data, nextCursor: page.nextCursor });
+  } catch {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor is invalid" } });
+  }
+});
+
+jobsRouter.get("/event-deliveries/:deliveryId", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const delivery = jobEventDeliveries.getJobEventDelivery(projectId, req.params.deliveryId!);
+  if (!delivery) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Event delivery not found" } });
+    return;
+  }
+  res.json({ data: delivery });
 });
 
 // ============================================================================
@@ -62,15 +181,19 @@ jobsRouter.post("/", (req, res) => {
 
 // POST /runs/:runId/cancel — cancel a running job
 jobsRouter.post("/runs/:runId/cancel", (req, res) => {
-  const _projectId = requireProject(req, res);
-  if (!_projectId) return;
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
 
   const runId = req.params.runId!;
 
-  // Try to kill the process if it's running
-  killRunProcess(runId);
-
-  const run = jobs.cancelJobRun(runId);
+  const existing = jobs.getJobRun(projectId, runId);
+  if (!existing) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Run not found" } });
+    return;
+  }
+  // Do not signal a process until the run has been proven to belong to this project.
+  killRunProcess(projectId, runId);
+  const run = jobs.cancelJobRun(projectId, runId);
   if (!run) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Run not found" } });
     return;
@@ -81,8 +204,8 @@ jobsRouter.post("/runs/:runId/cancel", (req, res) => {
 // GET /runs/:runId/logs — get logs for a run, supports tail polling via ?after=<seq>
 // The `after` param returns only entries after that sequence number (for incremental UI updates)
 jobsRouter.get("/runs/:runId/logs", (req, res) => {
-  const _projectId = requireProject(req, res);
-  if (!_projectId) return;
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
 
   const runId = req.params.runId!;
   const afterSeq = req.query.after ? parseInt(req.query.after as string) : undefined;
@@ -92,7 +215,11 @@ jobsRouter.get("/runs/:runId/logs", (req, res) => {
     return;
   }
 
-  const logs = jobs.getRunLogs(runId, afterSeq);
+  if (!jobs.getJobRun(projectId, runId)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Run not found" } });
+    return;
+  }
+  const logs = jobs.getRunLogs(projectId, runId, afterSeq);
   res.json({ data: logs, total: logs.length });
 });
 
@@ -166,11 +293,12 @@ jobsRouter.patch("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const allowedFields = ["name", "description", "agent", "prompt_template", "schedule_cron", "trigger_event", "enabled", "timeout_minutes"];
+  const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+  const allowedFields = ["name", "description", "agent", "prompt_template", "schedule_cron", "trigger_event", "enabled", "timeout_minutes", "vault_item_ids"];
   const fields: Record<string, unknown> = {};
   for (const key of allowedFields) {
-    if (key in req.body) {
-      fields[key] = req.body[key];
+    if (key in body) {
+      fields[key] = body[key];
     }
   }
 
@@ -179,7 +307,28 @@ jobsRouter.patch("/:id", (req, res) => {
     return;
   }
 
-  const updated = jobs.updateJob(projectId, req.params.id!, fields as any);
+  const vaultItemIds = parseVaultItemIds(body);
+  if (vaultItemIds === null) {
+    sendVaultItemIdsValidation(res);
+    return;
+  }
+  if (vaultItemIds !== undefined) fields.vault_item_ids = vaultItemIds;
+
+  let updated;
+  try {
+    updated = jobs.updateJob(projectId, req.params.id!, fields as any);
+  } catch (error) {
+    if (error instanceof jobs.JobTriggerEventError) {
+      sendUnknownTriggerEvent(res);
+      return;
+    }
+    if (error instanceof jobs.JobVaultReferenceError) {
+      if (error.code === "INVALID_VAULT_ITEM_IDS") sendVaultItemIdsValidation(res);
+      else sendVaultReferenceNotFound(res);
+      return;
+    }
+    throw error;
+  }
   if (!updated) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
     return;
@@ -193,8 +342,14 @@ jobsRouter.delete("/:id", (req, res) => {
   if (!projectId) return;
 
   const deleted = jobs.deleteJob(projectId, req.params.id!);
-  if (!deleted) {
+  if (deleted.status === "not_found") {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+    return;
+  }
+  if (deleted.status === "active_delivery") {
+    res.status(409).json({
+      error: { code: "JOB_ACTIVE_DELIVERY", message: "Job has an active event delivery" },
+    });
     return;
   }
   res.status(204).send();
@@ -223,7 +378,13 @@ jobsRouter.post("/:id/run", (req, res) => {
   // The .catch() logs failures but the response has already been sent.
   executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
     import("ingenium-core").then(({ logger }) => {
-      logger.error("jobs-route", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
+      const message = jobEventDeliveries.sanitizeJobEventText(err.message, 256);
+      logger.error("jobs-route", `Fire-and-forget executeJobRun failed: ${message}`, {
+        error: message,
+        name: jobEventDeliveries.sanitizeJobEventText(err.name, 64),
+        method: req.method,
+        path: req.originalUrl,
+      });
     });
   });
 
@@ -241,7 +402,12 @@ jobsRouter.get("/:id/runs", (req, res) => {
     return;
   }
 
-  const limit = parseInt(req.query.limit as string) || 50;
-  const list = jobs.listJobRuns(req.params.id!, limit);
+  const rawLimit = req.query.limit;
+  const limit = rawLimit === undefined ? 50 : Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "limit must be an integer between 1 and 100" } });
+    return;
+  }
+  const list = jobs.listJobRuns(projectId, req.params.id!, limit);
   res.json({ data: list, total: list.length });
 });

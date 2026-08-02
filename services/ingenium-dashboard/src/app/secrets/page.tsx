@@ -23,27 +23,22 @@ import CreateItemModal from "./components/CreateItemModal";
 export default function SecretsPage() {
   const project = useProject();
 
-  // --- Vault state ---
   const [loading, setLoading] = useState(true);
   const [sealed, setSealed] = useState(true);
   const [initialized, setInitialized] = useState(true); // default true for older API
   const [error, setError] = useState<string | null>(null);
 
-  // --- Data ---
   const [folders, setFolders] = useState<VaultFolder[]>([]);
   const [items, setItems] = useState<VaultItem[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<VaultItem | null>(null);
 
-  // --- Modals ---
   const [showUnseal, setShowUnseal] = useState(false);
   const [showCreateVault, setShowCreateVault] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
-  // --- Refresh key for re-fetching ---
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // --- Check vault status on mount ---
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
@@ -72,7 +67,6 @@ export default function SecretsPage() {
     return () => { cancelled = true; };
   }, [project, refreshKey]);
 
-  // --- Load data when unsealed ---
   useEffect(() => {
     if (sealed) return;
     let cancelled = false;
@@ -94,12 +88,10 @@ export default function SecretsPage() {
     return () => { cancelled = true; };
   }, [sealed, project, refreshKey]);
 
-  // --- Filter items by selected folder ---
   const filteredItems = selectedFolder
     ? items.filter((i) => i.folder_id === selectedFolder)
     : items;
 
-  // --- Handlers ---
   const handleUnsealSuccess = useCallback(() => {
     setShowUnseal(false);
     setSealed(false);
@@ -154,7 +146,6 @@ export default function SecretsPage() {
     }
   }, [project]);
 
-  // --- Loading ---
   if (loading) {
     return (
       <div className="space-y-8">
@@ -164,7 +155,6 @@ export default function SecretsPage() {
     );
   }
 
-  // --- Error (non-sealed) ---
   if (error && !sealed) {
     return (
       <div className="space-y-8">
@@ -182,9 +172,7 @@ export default function SecretsPage() {
     );
   }
 
-  // --- Sealed state ---
   if (sealed) {
-    // --- First-run: vault not yet initialized ---
     if (!initialized) {
       return (
         <div className="space-y-8">
@@ -218,7 +206,6 @@ export default function SecretsPage() {
       );
     }
 
-    // --- Existing vault: needs unseal ---
     return (
       <div className="space-y-8">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Secrets</h1>
@@ -250,10 +237,8 @@ export default function SecretsPage() {
     );
   }
 
-  // --- Unsealed state: 3-pane layout ---
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Secrets</h1>
         <button
@@ -264,9 +249,7 @@ export default function SecretsPage() {
         </button>
       </div>
 
-      {/* 3-pane layout */}
       <div className="flex h-[calc(100dvh-160px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
-        {/* Left pane: FolderTree */}
         <div className="w-56 shrink-0 border-r border-[var(--color-border)] overflow-y-auto bg-[var(--color-surface-muted)]">
           <FolderTree
             folders={folders}
@@ -277,7 +260,6 @@ export default function SecretsPage() {
           />
         </div>
 
-        {/* Center pane: ItemList */}
         <div className="w-72 shrink-0 border-r border-[var(--color-border)] overflow-y-auto flex flex-col">
           <ItemList
             items={filteredItems}
@@ -287,7 +269,6 @@ export default function SecretsPage() {
           />
         </div>
 
-        {/* Right pane: ItemDetail */}
         <div className="flex-1 min-w-0 overflow-y-auto">
           <ItemDetail
             item={selectedItem}
@@ -298,7 +279,6 @@ export default function SecretsPage() {
         </div>
       </div>
 
-      {/* Create item modal */}
       <CreateItemModal
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}

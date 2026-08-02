@@ -421,8 +421,8 @@ export function getAccountFoldersSyncStatus(accountId: string): FolderSyncStatus
 
 /**
  * Return UIDs from email_cache that are missing corresponding entries in
- * email_bodies. Used by backfillFolderBodies to find which emails need
- * body fetching. Returns the most recent UIDs first (date DESC), capped at limit.
+ * email_bodies. Used by body-backfill tasks to find which emails need body
+ * fetching. Returns the most recent UIDs first (date DESC), capped at limit.
  */
 export function getUidsMissingBodies(
   accountId: string,

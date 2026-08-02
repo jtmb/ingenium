@@ -49,6 +49,7 @@ import { backupsRouter } from "../lib/routes/backups.js";
 import { ragRouter } from "../lib/routes/rag.js";
 import { usageRouter } from "../lib/routes/usage.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
+import { coordinationRouter } from "../lib/routes/coordination.js";
 import {
   defaultMcpServerProjection,
   isPackagedMcpLauncher,
@@ -101,21 +102,8 @@ export const app = express();
 // to choose their rate-limit IP.
 app.set("trust proxy", false);
 
-// ════════════════════════════════════════════════════════════════════════════
-// Middleware pipeline — order matters:
-//   1. Security headers  (helmet)
-//   2. CORS              (must be early; preflight OPTIONS won't reach auth)
-//   3. Body parsing      (JSON → urlencoded)
-//   4. Rate limiting     (before auth: throttles brute-force token attempts)
-//   5. Auth              (after rate-limit: limited IPs never pay token cmp cost;
-//                          exact OAuth callback is the only allowlisted route)
-// ════════════════════════════════════════════════════════════════════════════
-
 app.use(helmet());
-// SECURITY: CORS and CSRF consume the same exact, credential-free dashboard
-// allowlist. Same-origin dashboard calls do not need CORS preflight.
-// Preflight requests continue to auth instead of becoming an implicit public
-// API allowlist. Same-origin dashboard calls do not need CORS preflight.
+// Keep preflight on the authenticated path so CORS cannot create a public API route.
 app.use(cors({ origin: [...config.dashboardOrigins], preflightContinue: true }));
 // 2mb JSON limit accommodates skill content, email bodies, and plugin source files
 // without opening the door to oversized payload attacks. The attachment endpoint
@@ -134,13 +122,11 @@ app.use(csrfMiddleware);
 // remain mandatory before the callback can complete.
 app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback);
 
-// Health check
 app.get("/api/v1/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
 app.use("/api/v1/auth", authPreflightRouter);
 
-// Routes
 // Mounted after bearer/CSRF protection. Its dedicated octet-stream media type
 // avoids the global JSON parser and it owns its own bounded raw parser.
 app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
@@ -151,6 +137,7 @@ app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/tasks", tasksRouter);
+app.use("/api/v1/coordination", coordinationRouter);
 app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);
@@ -174,7 +161,6 @@ app.use("/api/v1/opencode", opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
 
-// System-level routes (no project dependency)
 app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/docs", docsRouter);
@@ -227,9 +213,6 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
     logger.error("api", "DB startup check failed");
   }
 
-  // Register the default Ingenium MCP server in the DB (idempotent — skips if exists).
-  // Previously done by docker-entrypoint.sh curl calls; moving here ensures the server
-  // is registered in all environments (Docker, tsx dev, etc.) at startup.
   try {
     const globalProjectRec = projectsDb.getGlobalProject();
     if (globalProjectRec) {

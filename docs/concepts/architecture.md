@@ -162,8 +162,41 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **266 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **268**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **273 built-in registered tools** across **29 baseline categories**. Two extension-registered tools bring the built-in catalog to **275**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+
+## Task and Session Coordination Boundary (COORD-100/101)
+
+Task coordination is cooperative and managed-agent-only: the guarantee applies
+when agents use the same project and canonical worktree. It explicitly excludes
+manual editors and external processes, so it is not a filesystem write-enforcement
+mechanism. Task access remains project-scoped; foreign-project task IDs are
+treated as absent, and mutations use expected-revision CAS plus request-hash
+idempotency.
+
+Reservations use atomic reserve/release operations for an owner/worktree pair.
+The caller supplies a 32–512-character URL-safe opaque token; the database
+stores only its SHA-256 hash and public task results never return the token or
+hash. Legacy non-available reservations are quarantined transactionally by
+migration 074 because they cannot prove token possession. Exact supported claim
+forms are relative `path`, relative `tree`, and reserved `@build`/`@repository`
+claims; globs, absolute paths, traversal, `.git` paths, and secret-like paths
+are rejected.
+
+COORD-101 adds a project/worktree/session/incarnation registry. Each worktree
+has a durable, monotonic fence allocator; recovery advances the fence and
+rotates the caller-held ownership token, whose SHA-256 hash is the only stored
+form. Session mutations require the expected revision, fence, token, and an
+immutable request-hash receipt. Heartbeats extend only an unexpired active
+lease, so an expired session cannot be resurrected by heartbeat.
+
+Claims are exact `path`, `tree`, or reserved `@build`/`@repository` values with
+optional SHA-256 baselines. Claim batches and releases are atomic, and claims
+may be `active`, `released`, `dirty`, `quarantined`, or `collision`. Bounded
+credential-free operational snapshots are retained with optional project-owned
+task/revision and context-conversation/revision pointers. Closing releases
+active claims while retaining the session, claim, receipt, and fence evidence.
+All coordination writes checkpoint only after their transaction commits.
 
 ## Usage Telemetry
 
@@ -193,6 +226,35 @@ The dashboard `/usage` view consumes the same project-scoped summary,
 breakdown, freshness, and export contracts. It treats omitted cost/cache data
 as unknown rather than zero and preserves provider/model IDs for all supported
 providers.
+
+USAGE-100 adds a project-scoped advisory threshold layer over those existing
+aggregates. Migration 078 stores nullable request, total-token,
+provider-reported-cost, cache-read, and cache-write thresholds with revisioned
+CAS updates. Evaluation is read-only and uses either caller-supplied UTC
+`from`/`to` bounds or explicit all-history aggregation when both are omitted;
+there is no implicit reporting period. Results distinguish `disabled`,
+`unknown`, `below`, `equal`, and `above`, preserving known zero versus partial
+or unavailable subtotal. Reported cost is an amount only, with no currency or
+pricing inference. The layer is advisory: it does not block, throttle, route,
+or otherwise alter request execution, ledger production, mappings, or scheduler
+sync cursors. The API remains bearer-authenticated and project-scoped, with no
+MCP surface for this contract.
+
+USAGE-101 adds migration 079's durable attention lifecycle over the explicit
+all-history evaluation. It maintains one stable condition key per metric:
+request count, total tokens, provider-reported cost, cache-read tokens, and
+cache-write tokens. `unknown`, `equal`, and `above` remain active with
+`info`, `warning`, and `critical` severity; `below` and `disabled` resolve.
+Repeated unchanged evaluations emit no transition, while material evaluation,
+severity, freshness, or threshold-revision changes emit an immutable event and
+clear acknowledgement. A resolved condition reopens the same row;
+acknowledgement is revision-CAS and never resolves an item. Freshness uses
+successful mapped-source sync evidence (`disabled`, `unknown`, `fresh`, or
+`stale`), not event recency. The API scheduler reconciles mapped projects on
+`USAGE_SYNC_INTERVAL_MS` (five minutes by default), including failed or no-new
+data cycles for freshness; zero disables scheduled sync and attention
+evaluation. REST list/evaluate/ack routes are bearer-authenticated and
+project-scoped, with no MCP surface or request-execution enforcement.
 
 ## Provider Adapter Layer
 
@@ -404,6 +466,30 @@ Dashboard /config page  ──HTTP──▶  API (PUT /api/v1/config)
 |--------|----------|---------|
 | POST | `/api/v1/jobs/suggest` | Derive job config (prompt_template, schedule_cron, trigger_event) from a natural-language description using the Synthesis LLM. Returns `{ prompt_template, schedule_cron, trigger_event, configured }`. Requires a configured Synthesis LLM in Settings. |
 
+### Trusted Job Events and Delivery (JOB-100/JOB-101)
+
+The v1 trusted-event catalog is deliberately exact and limited to
+`context.conversation.archived`, `context.conversation.unarchived`, and
+`context.checkpoint.restored_as_new`. Events are project-scoped, schema version
+1, produced by `context.maintenance`, and contain only bounded identifiers and
+revision values. Their provenance is the immutable Context maintenance audit
+row; `source_audit_event_id` is also the dedupe identity within a project.
+
+The event rows are immutable, append-only, and retained indefinitely until an
+explicit authorized project lifecycle action. API validation and SQL triggers
+reject unknown values, while preserving historical `jobs.trigger_event` rows.
+There is no user append endpoint. JOB-101 snapshots each event once, including
+zero-match snapshots, and creates one delivery per exact event/job match for an
+enabled job in the same project. Enqueue is exactly-once; execution is bounded
+at-least-once for at most five attempts with 30/60/120/300/600-second backoffs.
+Leases persist only a SHA-256 owner hash and CAS revision. Process proof is
+hash-only and records PID/PGID, start time, executable, and nonce hash; an
+ambiguous identity is dead-lettered rather than duplicated. There is no payload
+or prompt interpolation and no manual replay. Event and delivery reads, plus
+run/log/cancel operations, are project-scoped and bounded; durable text is
+redacted. Deleting a job returns `409` while its delivery is active, then
+disables/hides the job while preserving delivery history.
+
 ## Pipeline Observability Architecture
 
 Every pipeline event is logged to the `pipeline_events` table and displayed at `/pipeline` in the dashboard:
@@ -590,6 +676,25 @@ The `ingenium-chat` agent uses **no hardcoded `model` field** — it inherits th
 | `model` | (not set) | Inherits from Chat request at runtime |
 | `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
 
+## Chat Project Context (CHAT-100)
+
+Chat's optional project-context grounding is an explicit per-send choice. The
+control starts off and resets after an accepted send. ProjectProvider validates
+the selected dashboard project before Chat mounts; that selected project is the
+Context search authority. This does not change Chat's global authority for
+Chat-owned tools or provider/model selection.
+
+Each requested search is bounded to at most 5 sources and a 512-character
+query. Excerpts are deduplicated and placed only in a provider system-context
+block capped at 5,000 characters. The block is delimited and explicitly marked
+as untrusted reference data, so excerpts are never rendered in the Chat UI.
+The UI retains only source metadata for live citations.
+
+No matches produce an ungrounded send rather than blocking the prompt. A
+retrieval error prevents that send while preserving the prompt and context
+choice for retry. Live citation metadata is not durable across reload; stable
+citation identity and reproducibility are owned by CTX-101.
+
 ## Native Provider OAuth Integration
 
 Native OpenCode provider integrations use two OAuth modes, both handled by the
@@ -728,22 +833,39 @@ The `plan_*` tools remain supported for backward compatibility. The `context_*` 
 
 All context operations follow the HARD RULE `checkpointAfterWrite()` must be called OUTSIDE `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED`.
 
-### Context RAG Ingestion (CTX-003)
+### Context RAG Sources (CTX-100)
 
-Context documents are a separate, project-scoped RAG corpus. They never inherit
-the generic RAG route's optional global-project fallback.
+Context sources are a separate, project-scoped corpus. They never inherit the
+generic RAG route's optional global-project fallback, and a source owned by
+another project is absent from list, get, and search results.
 
 | Input | Route | Bound and lifecycle |
 |-------|-------|---------------------|
-| Direct text / Markdown / JSON / JSONL | `POST /api/v1/context/uploads` | ≤1 MiB UTF-8; SHA-256 deduplicated per project; source, chunks, embeddings, and provenance commit together. |
-| Chunked document | `POST /api/v1/context/uploads/chunked`, then `.../:id/chunks` and `.../:id/complete` | ≤2 MiB total, ≤32 chunks, ≤64 KiB each; staged chunks are not searchable until ordered byte-size and SHA-256 verification succeeds in the final transaction. |
-| Current learning | `POST /api/v1/context/learning/ingest` | Explicit snapshot of current project observations and active traits; returns an explainable no-op when neither exists. |
+| Direct source | `POST /api/v1/context/sources` (alias: `/uploads`) | UTF-8 content ≤1 MiB; SHA-256 deduplicated per project; allowed MIME types are `text/plain`, `text/markdown`, `application/json`, and `application/x-ndjson`. |
+| Chunked source | `POST /api/v1/context/uploads/chunked`, then `.../:id/chunks` and `.../:id/complete` | Total ≤2 MiB, ≤32 chunks, each ≤64 KiB; staged chunks are not searchable until contiguous order, byte size, and SHA-256 verification succeed atomically. |
+
+Source metadata accepts priority (integer 0–10, default 5), up to 64
+deduplicated/sorted tags (each 1–64 characters; serialized tags ≤4 KiB), and a
+bounded JSON-object metadata value (≤16 KiB, with bounded depth/nodes and no
+path, credential, or secret-bearing keys/values). `sourceReference` is optional,
+opaque, path-free, control-character-free, and at most 256 characters. Upload
+requests reject path-bearing fields such as `file`, `filePath`, and
+`sourcePath`.
 
 The durable `context_rag_uploads` rows retain a source hash, provenance
-(`direct_upload`, `chunked_upload`, or `learning_snapshot`), and optional opaque source reference. Upload list routes
-return metadata only, never document bodies. The dedicated search and ask routes
-return project-local citations with provenance; `POST /context/rag/ask` passes
-only its local result set to the broker.
+(`direct_upload` or `chunked_upload` for CTX-100), and optional source reference.
+`GET /api/v1/context/sources` lists metadata, `GET
+/api/v1/context/sources/:sourceId` gets one source, and `GET
+/api/v1/context/sources/search?q=` searches source metadata. These responses
+contain no document bodies, chunk excerpts, or source paths; they expose only
+metadata such as title, hash, MIME type, byte size, chunk count, provenance,
+source reference, priority, tags, metadata, and timestamps.
+
+Source and chunk rows are immutable after publication. Incomplete chunk sessions
+remain outside the index; completed source/chunk/index/provenance writes commit
+together, and database guards reject source or chunk updates/deletes and chunk
+reassignment. Content retrieval and LLM grounding are not enabled by this
+metadata contract; chat grounding/default behavior belongs to CHAT-100.
 
 When a source is attached to an immutable checkpoint, migration 065 freezes its
 source and chunks at the database layer. A companion
@@ -751,6 +873,23 @@ source and chunks at the database layer. A companion
 MIME type, provenance, and source reference seen at checkpoint creation.
 `GET /context/conversations/:conversationId/checkpoints/:checkpointId/rag/search`
 therefore searches only that frozen source set and returns historical citations.
+
+### Context RAG Citations (CTX-101)
+
+Each Context RAG citation is evidence for one immutable persisted chunk:
+`citationId` is exactly the chunk's UUID (`rag_chunks.id`), while `sourceId`,
+`sourceHash`, and `chunkIndex` identify the owning immutable source, its SHA-256
+content hash, and the chunk's position. Retrieval currently reports
+`availability: "available"`. Search uses a total deterministic order:
+priority descending, BM25 rank ascending, source `updated_at` descending, source
+ID ascending, chunk index ascending, then chunk ID ascending. Because published
+sources and chunks are immutable, repeating the same retrieval returns the same
+citation identity and ordering while the source remains available. Foreign or
+missing sources produce neutral absence (no cross-project disclosure or
+substitute citation), rather than an error that reveals their existence.
+
+Generic RAG re-ingest or delete cannot mutate a published Context source; those
+attempts return `409 RAG_SOURCE_IMMUTABLE`.
 
 ### Context checkpoint governance (CTX-004)
 
@@ -852,8 +991,8 @@ Every canonical ingestion (`ingestCanonicalSource()`) is fully atomic within a s
 
 1. **Idempotency gate** — SHA-256 hash of the incoming content is compared against the stored `source_hash`. If unchanged, the function returns the existing source without any DB writes.
 2. **Path uniqueness** — A `UNIQUE INDEX` on `rag_sources(project_id, source_path) WHERE source_path IS NOT NULL` (migration 050) guarantees at most one source per canonical path per project. Re-ingesting the same path replaces the existing source.
-3. **Lifecycle state tracking** — The `rag_ingestion_state` table records the transition `in_progress → completed` within the same transaction. Partial state is never visible to readers: if the transaction fails (insert, chunk, or embedding write), all changes roll back and the state remains at its previous value.
-4. **Content replacement** — Existing chunks and embeddings are deleted before new ones are inserted, all in the same transaction. The source's `chunk_count`, `source_hash`, and `byte_size` are updated atomically.
+3. **Lifecycle state tracking** — The `rag_ingestion_state` table records the transition `in_progress → completed` within the same transaction. Partial state is never visible to readers: if the transaction fails during source or chunk indexing, all changes roll back and the state remains at its previous value.
+4. **Content replacement** — Existing chunks are deleted before new ones are inserted, all in the same transaction. SQLite FTS5 triggers keep `rag_chunks_fts` synchronized with `rag_chunks`; the source's `chunk_count`, `source_hash`, and `byte_size` are updated atomically.
 
 This guarantees that querying the index during an ingest operation sees either the complete previous version or the complete new version — never a partially-indexed source.
 
@@ -861,17 +1000,16 @@ This guarantees that querying the index during an ingest operation sees either t
 
 `INGENIUM_DOCS_ROOT` — Required for canonical repo indexing. Must point to the repository root (the parent of the `docs/` directory). `indexConfiguredDocs()` throws if unset. Verified by `context-rag-phase3.test.ts`.
 
-### Embedding Strategy
+### FTS5 Indexing Strategy
 
 | Property | Value |
 |----------|-------|
-| Model ID | `ingenium-ngram-v1` |
-| Dimensions | 384 |
-| Algorithm | FNV-1a character-trigram hash |
-| Semantic | ❌ No — deterministic bag-of-trigrams |
-| Storage | `rag_embeddings` table, `ON CONFLICT(chunk_id) DO UPDATE` |
+| Index | `rag_chunks_fts` |
+| Algorithm | SQLite FTS5 with Porter/unicode61 tokenization and prefix indexes |
+| Ranking | BM25 |
+| Storage | FTS5 index backed by `rag_chunks`; source metadata remains in `rag_sources` |
 
-The embedding is a deterministic non-learned hash: each 3-character sliding window updates a 384-dim accumulator with FNV-1a hashing (alternating +1/-1 per LSB), then L2-normalized. This enables cosine similarity for retrieval without an external embedding model or API cost.
+Canonical RAG, Context, and Docs retrieval is FTS5-only. No vector embeddings are generated or stored; migration 070 removes the legacy `rag_embeddings` table.
 
 ### Chunker
 
@@ -893,7 +1031,6 @@ Two functions in `rag.ts`:
 | `searchChunks()` | BM25 FTS5 only, snippet-generation, cross-project (include global) | `/search` route, `/ask` route, MCP search |
 | `searchContextUploadChunks()` | BM25 FTS5 only, constrained by `context_rag_uploads` | Context current retrieval; never includes global sources |
 | `searchChunksBySourceIds()` | BM25 FTS5 only, constrained to checkpoint-linked source IDs | Context historical checkpoint retrieval |
-| `hybridSearch()` | 70% BM25 + 30% n-gram cosine similarity, filters at vector_score ≥ 0.08 | Available but not currently wired to API routes |
 
 Both cap at 20 results by default. `searchChunks()` accepts `limit` (max configurable via API query param up to 100).
 
@@ -924,8 +1061,8 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 266 built-in tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
-| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 20 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 273 built-in tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 21 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
 ## Status Page Architecture
@@ -941,7 +1078,7 @@ The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnos
 
 ## Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 20 primary route-based pages plus the Settings overlay (21 user-facing views):
+The Ingenium Dashboard (http://localhost:3000) provides 21 primary route-based pages plus the Settings overlay (22 user-facing views):
 
 | Page | Purpose |
 |------|---------|
@@ -965,12 +1102,12 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary route-based p
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
 | Settings (overlay) | Full-screen, URL-driven overlay with 14 panels opened with `?settings=<tab>`; four panels are functional forms/launchers and ten link to their dedicated workspaces; `/settings` redirects to `/?settings=general` |
 
-Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. Together with the 20 primary routes, the App Router contains 25 page entrypoints. The dashboard talks to the API layer only — zero direct DB access.
+Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. Together with the 21 primary routes, the App Router contains 26 page entrypoints. The dashboard talks to the API layer only — zero direct DB access.
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **268 tools** across **28 baseline
-categories** (**266 server + 2 extension**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **275 tools** across **29 baseline
+categories** (**273 stdio + 2 extension**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
@@ -986,7 +1123,7 @@ and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-t
 | Status | 4 | service_status, service_application_detail, service_process_detail, service_process_logs |
 | Health | 1 | health_check |
 | OpenCode | 1 | opencode_messages |
-| Tasks | 24 | create, list, move, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update |
+| Tasks | 30 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_update, coordination_claim, coordination_release |
 | Plans (Context) | 3 | save, search, list |
 | Projects | 10 | list, init, delete, restore, list_archived, purge, set_global, rename, detail, migrate_workspace |
 | Plugins | 8 | list, get, enable, disable, create, delete, update, source |
@@ -1048,7 +1185,7 @@ highlight.js is used in two modes:
 Styles: `github.css` for light theme, `hljs-dark.css` for dark variant.
 
 ### Shared Markdown Renderer
-All Markdown rendering across the dashboard uses a single `MarkdownDocument` component (`components/MarkdownDocument.tsx`). It wraps `marked` (with GFM) and `DOMPurify` for safety, with `prose dark:prose-invert` for typography. Shared consumers include `DocsEditor` (View/Split modes) and `MarkdownViewer` (Preview mode). The proposal comparison view intentionally bypasses Markdown rendering — both Current and Proposed panels show raw source text in matching `<pre>` blocks.
+Dashboard document and skill previews use the shared `MarkdownDocument` component (`components/MarkdownDocument.tsx`), which wraps `marked` (with GFM) and `DOMPurify` for safety, with `prose dark:prose-invert` for typography. `ChatMarkdown` uses the same module's `renderMarkdown` helper while adding chat-specific classes. The proposal comparison view intentionally bypasses Markdown rendering — both Current and Proposed panels show raw source text in matching `<pre>` blocks.
 
 ## Docker Deployment
 
@@ -1066,13 +1203,14 @@ services:
       - ingenium-data:/app/.ingenium
 ```
 
-Inside the container, **supervisord** manages six processes:
+Inside the container, **supervisord** manages seven processes:
 1. **API boundary** (:4097 → private Express :4096) — authenticated bearer boundary and `express.json({ limit: "2mb" })` for large skill/plugin uploads
-2. **Dashboard** (Next.js on :3000) — 20 primary routes plus the Settings overlay
+2. **Dashboard** (Next.js on :3000) — 21 primary routes plus the Settings overlay
 3. **API** (private Express on :4096) — sole database authority
 4. **Nginx gateway** (:3000 and :1455) — local root gateways and the exact OAuth callback route
 5. **opencode-web** (on :4098) — private OpenCode web upstream behind the local `opencode.localhost:3000` gateway
 6. **ttyd-opencode** (on :4099) — private OpenCode CLI upstream behind the local `cli.localhost:3000` gateway. It serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe.
+7. **code-server** (private on :4100) — VS Code workspace upstream behind the exact local `vscode.localhost:3000` gateway; it is not publicly published.
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 

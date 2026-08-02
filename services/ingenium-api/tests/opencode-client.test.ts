@@ -406,6 +406,49 @@ describe("opencodeClient — method routing", () => {
     expect(Array.isArray(result)).toBe(true);
   });
 
+  it("encodes dynamic session, message, action, and permission IDs as one path segment", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.getSession("../global/config");
+    await opencodeClient.getSessionMessage("session/a", "message/b");
+    await opencodeClient.abortSession("session/a");
+    await opencodeClient.replyPermission("session/a", "permission/b", { response: "once" });
+
+    const urls = fetchSpy.mock.calls.map(([url]) => url as string);
+    expect(urls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/\/session\/\.\.%2Fglobal%2Fconfig$/),
+      expect.stringMatching(/\/session\/session%2Fa\/message\/message%2Fb$/),
+      expect.stringMatching(/\/session\/session%2Fa\/abort$/),
+      expect.stringMatching(/\/session\/session%2Fa\/permissions\/permission%2Fb$/),
+    ]));
+
+    await opencodeClient.getSessionMessage("session_1", "message_1");
+    expect(fetchSpy.mock.calls.at(-1)![0]).toMatch(/\/session\/session_1\/message\/message_1$/);
+  });
+
+  it("maps empty and dot path segments to one fixed upstream segment", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    for (const segment of ["", ".", ".."]) {
+      await opencodeClient.getSession(segment);
+      await opencodeClient.getSessionMessage("session_1", segment);
+    }
+
+    const paths = fetchSpy.mock.calls.map(([url]) => new URL(url as string).pathname);
+    expect(paths).toHaveLength(6);
+    expect(paths).toEqual(expect.arrayContaining([
+      "/session/__invalid_opencode_path_segment__",
+      "/session/session_1/message/__invalid_opencode_path_segment__",
+    ]));
+    for (const path of paths) {
+      expect(path).not.toBe("/");
+      expect(path).not.toBe("/session/");
+      expect(path).not.toContain("/global/config");
+    }
+  });
+
   it("listIntegrations() discovers native authentication methods", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { location: {}, data: [] }));
     vi.stubGlobal("fetch", fetchSpy);

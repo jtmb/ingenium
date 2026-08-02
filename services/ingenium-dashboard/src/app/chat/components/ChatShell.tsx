@@ -10,13 +10,23 @@ import ActivityDrawer from "./ActivityDrawer";
 import type { ActivitySelection } from "./chat-activity";
 import MCPDrawer from "./MCPDrawer";
 import {
+  isSafeProjectName,
   normalizeMcpServers,
   type McpServerView,
 } from "./mcp-status";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
 import { opencode } from "../../../lib/opencode";
-import { api, ApiError, type ChatConfigResponse } from "../../../lib/api";
+import { api, ApiError, type ChatConfigResponse, type TaskCaptureResult } from "../../../lib/api";
+import { useProject } from "../../../lib/ProjectContext";
+import TaskCaptureModal from "../../tasks/components/TaskCaptureModal";
+import {
+  CHAT_CONTEXT_MAX_SOURCES,
+  CHAT_CONTEXT_QUERY_MAX_CHARS,
+  buildProjectContext,
+  combineSystemInstructions,
+  unrequestedGrounding,
+} from "../../../lib/chat-grounding";
 
 /* ------------------------------------------------------------------ */
 /*  ChatShell — main layout orchestrator for the Chat mode            */
@@ -36,11 +46,15 @@ export default function ChatShell() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const [contextSearchError, setContextSearchError] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [compactState, setCompactState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [compactError, setCompactError] = useState<string | null>(null);
+  const [taskCaptureOpen, setTaskCaptureOpen] = useState(false);
+  const [taskCaptureSessionId, setTaskCaptureSessionId] = useState<string | null>(null);
+  const [taskCaptureNotice, setTaskCaptureNotice] = useState<{ title: string } | null>(null);
 
   /* ---- Auto-collapse sidebar on smaller screens ---- */
   useEffect(() => {
@@ -60,6 +74,7 @@ export default function ChatShell() {
   const [mcpServers, setMcpServers] = useState<McpServerView[]>([]);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpRefreshing, setMcpRefreshing] = useState(false);
+  const [mcpLastRefreshedAt, setMcpLastRefreshedAt] = useState<number | null>(null);
   const [mcpActionPending, setMcpActionPending] = useState<string | null>(null);
 
   /* ---- Activity drawer state ---- */
@@ -82,6 +97,8 @@ export default function ChatShell() {
   } = useOpenCodeSessions();
 
   const chat = useOpenCodeChat(activeId);
+  // ProjectProvider validates this selected dashboard project before ChatShell mounts.
+  const selectedProject = useProject();
 
   const openActivity = useCallback((messageId: string, partId: string) => {
     setActivitySelection({ messageId, partId });
@@ -112,6 +129,7 @@ export default function ChatShell() {
 
   /* ---- Chat config — Settings-backed provider/agent selection ---- */
   const [chatConfig, setChatConfig] = useState<ChatConfigResponse | null>(null);
+  const chatConfigProject = isSafeProjectName(chatConfig?.project) ? chatConfig.project : null;
   const [chatConfigLoading, setChatConfigLoading] = useState(true);
   const [chatConfigError, setChatConfigError] = useState<string | null>(null);
   // The catalog is not ready until the selection-recovery effect has resolved
@@ -208,10 +226,8 @@ export default function ChatShell() {
   }, [clearRateLimit, fetchChatConfig]);
 
   useEffect(() => {
-    fetchChatConfig();
-    // Only on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void fetchChatConfig();
+  }, [fetchChatConfig]);
 
   // Recover a usable pair whenever a refreshed catalog invalidates the current
   // selection. Provider and model share one state update so a provider switch
@@ -323,6 +339,25 @@ export default function ChatShell() {
     updatedAt: s.time.updated,
   }));
 
+  /** Task capture is identity-only and waits for the hook's session validation. */
+  const taskCaptureDisabled = !activeId || !activeSession || sessionsLoading || chat.isLoading || chat.isStreaming;
+
+  const handleCreateTask = useCallback(() => {
+    if (taskCaptureDisabled) return;
+    setTaskCaptureNotice(null);
+    setTaskCaptureSessionId(activeId);
+    setTaskCaptureOpen(true);
+  }, [activeId, taskCaptureDisabled]);
+
+  const handleTaskCaptureClose = useCallback(() => {
+    setTaskCaptureOpen(false);
+    setTaskCaptureSessionId(null);
+  }, []);
+
+  const handleTaskCaptured = useCallback((result: TaskCaptureResult) => {
+    setTaskCaptureNotice({ title: result.task.title });
+  }, []);
+
   /** Track whether this was the first message (for title rename). */
   const wasFirstMessage = useRef(chat.messages.length === 0);
   useEffect(() => {
@@ -344,6 +379,7 @@ export default function ChatShell() {
       const servers = normalizeMcpServers(raw);
       if (!servers) throw new Error("invalid MCP status response");
       setMcpServers(servers);
+      setMcpLastRefreshedAt(Date.now());
       return true;
     } catch {
       setMcpError("MCP status is unavailable. Verify OpenCode is running, then retry.");
@@ -353,10 +389,10 @@ export default function ChatShell() {
     }
   }, []);
 
-  // Refresh on mount and after drawer closes (covers connect/disconnect)
-  useEffect(() => {
-    void refreshMcpStatus();
-  }, [refreshMcpStatus]);
+  const handleMcpRefresh = useCallback(
+    () => refreshMcpStatus(),
+    [refreshMcpStatus],
+  );
 
   const changeMcpConnection = useCallback(async (name: string, action: "connect" | "disconnect") => {
     setMcpActionPending(name);
@@ -377,6 +413,10 @@ export default function ChatShell() {
       setMcpActionPending(null);
     }
   }, [refreshMcpStatus]);
+
+  const handleMcpOpen = useCallback(() => {
+    setMcpDrawerOpen(true);
+  }, []);
 
   /** Auto-focus the first focusable element in the mobile drawer when it opens. */
   useEffect(() => {
@@ -428,13 +468,32 @@ export default function ChatShell() {
   /* ---- Chat handlers ---- */
 
   const handleSend = useCallback(
-    async (text: string, _systemPrompt: string): Promise<boolean> => {
+    async (text: string, systemPrompt: string, options?: { useProjectContext?: boolean }): Promise<boolean> => {
       if (!activeId) return false;
       if (!hasSelectableModel || !providerId || !modelId) return false;
 
+      setContextSearchError(null);
       const shouldRename =
         wasFirstMessage.current &&
         activeSession?.title === "New conversation";
+
+      let grounding = unrequestedGrounding();
+      let system = combineSystemInstructions(systemPrompt);
+      if (options?.useProjectContext) {
+        try {
+          const result = await api.context.rag.search(
+            text.slice(0, CHAT_CONTEXT_QUERY_MAX_CHARS),
+            selectedProject,
+            CHAT_CONTEXT_MAX_SOURCES,
+          );
+          const context = buildProjectContext(selectedProject, result.data);
+          grounding = context.grounding;
+          system = combineSystemInstructions(systemPrompt, context.systemContext);
+        } catch {
+          setContextSearchError("Project context search is unavailable. Try sending again.");
+          return false;
+        }
+      }
 
       // Build parts array: text part + file parts from attachments
       const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }> = [
@@ -451,15 +510,19 @@ export default function ChatShell() {
       }
 
       try {
-        await chat.send(parts, {
+        const accepted = await chat.send(parts, {
           model: { providerID: providerId, modelID: modelId },
           agent: agentName,
+          system,
+          grounding,
         });
+        if (!accepted) return false;
       } catch {
         // send() handles its own error dispatch
+        return false;
       }
 
-      // Clear attachments after successful send
+      // The prompt contract accepted this send; only now may local composer state change.
       setAttachments([]);
 
       // Update session title from first message (best-effort - do not block)
@@ -471,7 +534,7 @@ export default function ChatShell() {
 
       return true;
     },
-    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel],
+    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel, selectedProject],
   );
 
   const handleStop = useCallback(async () => {
@@ -641,9 +704,42 @@ export default function ChatShell() {
           disabled={selectorsDisabled}
           modelDisabled={!hasSelectableModel}
           onMobileMenuOpen={() => setMobileDrawerOpen(true)}
-          onMcpOpen={() => setMcpDrawerOpen(true)}
+          onMcpOpen={handleMcpOpen}
           permissionCount={chat.permissions.length}
+          onCreateTask={handleCreateTask}
+          createTaskDisabled={taskCaptureDisabled}
         />
+        {chatConfigProject && (
+          <div
+            className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-1.5 text-xs text-[var(--color-text-muted)]"
+            data-testid="chat-global-project"
+          >
+            <span>Chat tools run through global project:</span>
+            <code className="truncate font-mono text-[var(--color-text-secondary)]">{chatConfigProject}</code>
+          </div>
+        )}
+        {contextSearchError && (
+          <div
+            className="flex shrink-0 items-center gap-2 px-4 py-2 text-sm text-[var(--color-error-text)]"
+            role="alert"
+            data-testid="chat-project-context-error"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              className="shrink-0"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="8" r="6" />
+              <path strokeLinecap="round" d="M8 5v3M8 10.5v.5" />
+            </svg>
+            <span>{contextSearchError}</span>
+          </div>
+        )}
         {/* No-LLM-configured warning */}
         {chatConfigReady && !hasSelectableModel && !chatConfigLoading && !chatConfigError && (
           <div className="px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-300 flex items-center gap-2 shrink-0">
@@ -742,6 +838,19 @@ export default function ChatShell() {
             </span>
           </div>
         )}
+        {taskCaptureNotice && (
+          <div
+            data-testid="chat-task-capture-status"
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded border border-[var(--color-success-border)] bg-[var(--color-success-bg)] px-4 py-2 text-sm text-[var(--color-success-text)] shadow-lg"
+          >
+            Task created: {" "}
+            <Link href="/tasks" className="font-medium underline hover:no-underline">
+              {taskCaptureNotice.title}
+            </Link>
+          </div>
+        )}
         {autoCreated ? (
           <>
             <ChatMessages
@@ -759,9 +868,10 @@ export default function ChatShell() {
               onSendReply={handleSendReply}
               onActivityOpen={openActivity}
               activitySelection={activitySelection}
+              mcpProject={chatConfigProject}
             />
             {/* Disabled composer — waiting for auto-created session */}
-            <div className="shrink-0 px-4 pb-4 pt-2 w-full">
+            <div className="shrink-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-4 pb-4 pt-2">
               <div className="max-w-3xl mx-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] shadow-sm px-4 py-3">
                 <p className="text-sm text-[var(--color-text-muted)] text-center">
                   Starting conversation...
@@ -889,14 +999,17 @@ export default function ChatShell() {
               onSendReply={handleSendReply}
               onActivityOpen={openActivity}
               activitySelection={activitySelection}
+              mcpProject={chatConfigProject}
             />
             <ChatInput
+              key={activeId}
               onSend={handleSend}
               onStop={handleStop}
               isLoading={chat.isStreaming || chat.isLoading}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               hasSelectableModel={hasSelectableModel}
+              projectContextProject={selectedProject}
             />
           </>
         )}
@@ -909,8 +1022,10 @@ export default function ChatShell() {
         servers={mcpServers}
         error={mcpError}
         isRefreshing={mcpRefreshing}
+        lastRefreshedAt={mcpLastRefreshedAt}
+        project={chatConfigProject}
         pendingServerName={mcpActionPending}
-        onRefresh={() => refreshMcpStatus()}
+        onRefresh={handleMcpRefresh}
         onConnect={(name) => changeMcpConnection(name, "connect")}
         onDisconnect={(name) => changeMcpConnection(name, "disconnect")}
       />
@@ -920,6 +1035,14 @@ export default function ChatShell() {
         messages={chat.messages}
         onClose={closeActivity}
       />
+      {activeId && (
+        <TaskCaptureModal
+          isOpen={taskCaptureOpen && taskCaptureSessionId === activeId}
+          source={{ source_type: "chat", session_id: activeId }}
+          onClose={handleTaskCaptureClose}
+          onCaptured={handleTaskCaptured}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import React from "react";
 
 // dompurify requires a browser window to initialize; in vitest's jsdom
 // environment the ESM module evaluates before jsdom injects window into
@@ -19,6 +20,8 @@ vi.mock("dompurify", () => {
 });
 
 import { renderMarkdown } from "../src/app/components/MarkdownDocument";
+import ChatMarkdown from "../src/app/chat/components/ChatMarkdown";
+import { render } from "@testing-library/react";
 
 describe("renderMarkdown", () => {
   it("renders headings", () => {
@@ -94,5 +97,14 @@ describe("renderMarkdown", () => {
     const html = renderMarkdown('> **Note:** This is important');
     expect(html).toContain("callout");
     expect(html).toContain("callout-note");
+  });
+
+  it("keeps chat markdown styling while using the shared sanitized renderer", () => {
+    const { container } = render(React.createElement(ChatMarkdown, { content: "**hello**" }));
+    const element = container.firstElementChild;
+
+    expect(element?.className).toContain("chat-markdown");
+    expect(element?.className).toContain("text-sm");
+    expect(element?.innerHTML).toContain("<strong>hello</strong>");
   });
 });

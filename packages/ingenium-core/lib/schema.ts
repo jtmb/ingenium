@@ -13,257 +13,390 @@ import { z } from "zod";
  */
 
 /** A workspace project. Supports soft-delete via `archived_at` and cross-project identity via `is_global`. */
-export const ProjectSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().min(1).max(64),
-  path: z.string().optional(),
-  archived_at: z.string().datetime().optional(),
-  is_global: z.coerce.boolean().default(false),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Project = z.infer<typeof ProjectSchema>;
+export interface Project {
+  id: string;
+  name: string;
+  path?: string;
+  archived_at?: string;
+  is_global: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 /** A learned or authored skill with full-text content, metadata, and file_tree for disk sync. */
-export const SkillSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  name: z.string().min(1).max(64),
-  description: z.string(),
-  content: z.string(),
-  category: z.string().optional(),
-  tags: z.string().optional(),
-  always_apply: z.coerce.number().default(0),
-  file_tree: z.string().optional().nullable(),
-  enabled: z.coerce.boolean().default(true),
-  revision: z.coerce.number().default(0),
-  archived_at: z.string().datetime().optional().nullable(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Skill = z.infer<typeof SkillSchema>;
+export interface Skill {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  content: string;
+  category?: string;
+  tags?: string;
+  always_apply: number;
+  file_tree?: string | null;
+  enabled: boolean;
+  revision: number;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 /** An immutable snapshot of a skill's complete state at a specific revision. Created automatically by DB triggers. */
-export const SkillVersionSchema = z.object({
-  id: z.number(),
-  skill_id: z.string(),
-  revision: z.number(),
-  name: z.string().min(1).max(64),
-  description: z.string(),
-  content: z.string(),
-  category: z.string().optional().nullable(),
-  tags: z.string().optional().nullable(),
-  always_apply: z.coerce.number().default(0),
-  file_tree: z.string().optional().nullable(),
-  enabled: z.coerce.boolean().default(true),
-  archived_at: z.string().datetime().optional().nullable(),
-  created_by: z.string().default("system"),
-  created_at: z.string().datetime(),
-});
-export type SkillVersion = z.infer<typeof SkillVersionSchema>;
+export interface SkillVersion {
+  id: number;
+  skill_id: string;
+  revision: number;
+  name: string;
+  description: string;
+  content: string;
+  category?: string | null;
+  tags?: string | null;
+  always_apply: number;
+  file_tree?: string | null;
+  enabled: boolean;
+  archived_at?: string | null;
+  created_by: string;
+  created_at: string;
+}
 
 /** A lineage record mapping a source skill (by project + name) to a canonical target skill. */
-export const SkillLineageSchema = z.object({
-  id: z.number(),
-  project_id: z.string(),
-  source_project_id: z.string(),
-  source_name: z.string(),
-  target_skill_id: z.string(),
-  source_hash: z.string().default(""),
-  merged_file_paths: z.string().default("[]"),
-  tombstone_path: z.string().optional().nullable(),
-  reason: z.string().default(""),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type SkillLineage = z.infer<typeof SkillLineageSchema>;
+export interface SkillLineage {
+  id: number;
+  project_id: string;
+  source_project_id: string;
+  source_name: string;
+  target_skill_id: string;
+  source_hash: string;
+  merged_file_paths: string;
+  tombstone_path?: string | null;
+  reason: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** A governance proposal for a skill mutation: create, update, merge, or archive. */
-export const SkillProposalSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  status: z.enum(["draft", "pending", "rejected", "applied", "rolled_back", "stale"]).default("draft"),
-  proposal_type: z.enum(["create", "update", "merge", "archive"]),
-  target_skill_id: z.string().optional().nullable(),
-  target_name: z.string(),
-  source_project_id: z.string().optional().nullable(),
-  source_name: z.string().optional().nullable(),
-  expected_revision: z.number().optional().nullable(),
-  expected_source_revision: z.number().optional().nullable(),
-  target_revision_before: z.number().optional().nullable(),
-  source_revision_before: z.number().optional().nullable(),
-  target_created: z.coerce.number().default(0),
-  proposed_state: z.string(),
-  evidence_json: z.string().default("[]"),
-  observation_ids: z.string().default("[]"),
-  quality_score: z.number().min(0).max(1).default(0),
-  novelty_score: z.number().min(0).max(1).default(0),
-  contradiction_flag: z.coerce.number().default(0),
-  candidate_group_key: z.string().optional().nullable(),
-  reviewer: z.string().optional().nullable(),
-  review_reason: z.string().optional().nullable(),
-  always_apply: z.coerce.number().default(0),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-  reviewed_at: z.string().datetime().optional().nullable(),
-  applied_at: z.string().datetime().optional().nullable(),
-  rolled_back_at: z.string().datetime().optional().nullable(),
-});
-export type SkillProposal = z.infer<typeof SkillProposalSchema>;
-
-/** A learning entry — a tagged, prioritised record of a decision, pattern, bug, or other context. */
-export const LearningSchema = z.object({
-  id: z.number(),
-  project_id: z.string(),
-  entry_type: z.enum(["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "learning", "plugin", "architecture", "implementation", "code_change", "enhancement", "observation", "ops", "question", "review", "documentation", "improvement", "milestone"]),
-  content: z.string().min(1),
-  tags: z.string().optional(),
-  status: z.enum(["pending", "processed", "failed"]).default("pending"),
-  priority: z.number().min(0).max(10).default(5),
-  session_id: z.string().optional(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Learning = z.infer<typeof LearningSchema>;
+export interface SkillProposal {
+  id: string;
+  project_id: string;
+  status: "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale";
+  proposal_type: "create" | "update" | "merge" | "archive";
+  target_skill_id?: string | null;
+  target_name: string;
+  source_project_id?: string | null;
+  source_name?: string | null;
+  expected_revision?: number | null;
+  expected_source_revision?: number | null;
+  target_revision_before?: number | null;
+  source_revision_before?: number | null;
+  target_created: number;
+  proposed_state: string;
+  evidence_json: string;
+  observation_ids: string;
+  quality_score: number;
+  novelty_score: number;
+  contradiction_flag: number;
+  candidate_group_key?: string | null;
+  reviewer?: string | null;
+  review_reason?: string | null;
+  always_apply: number;
+  created_at: string;
+  updated_at: string;
+  reviewed_at?: string | null;
+  applied_at?: string | null;
+  rolled_back_at?: string | null;
+}
 
 /** A kanban task with sub-tasking, scheduling, and time-tracking support. */
-export const TaskSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  title: z.string().min(1).max(200),
-  description: z.string().optional(),
-  column_id: z.string().default("todo"),
-  assigned_to: z.string().optional(),
-  depends_on: z.string().optional(),
-  files: z.string().optional(),
-  labels: z.string().optional(),
-  session_id: z.string().optional(),
-  parent_id: z.string().optional().nullable(),
-  issue_type: z.enum(["epic", "story", "task", "subtask"]).default("task"),
-  priority: z.number().int().default(0),
-  due_date: z.string().optional().nullable(),
-  start_date: z.string().optional().nullable(),
-  estimate_minutes: z.number().int().optional().nullable(),
-  spent_minutes: z.number().int().default(0),
-  remaining_minutes: z.number().int().optional().nullable(),
-  custom_fields: z.string().optional().nullable(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-  completed_at: z.string().datetime().optional().nullable(),
-});
-export type Task = z.infer<typeof TaskSchema>;
+export interface Task {
+  id: string;
+  project_id: string;
+  title: string;
+  description?: string;
+  column_id: string;
+  assigned_to?: string;
+  depends_on?: string;
+  files?: string;
+  labels?: string;
+  session_id?: string;
+  parent_id?: string | null;
+  issue_type: "epic" | "story" | "task" | "subtask";
+  priority: number;
+  due_date?: string | null;
+  start_date?: string | null;
+  estimate_minutes?: number | null;
+  spent_minutes: number;
+  remaining_minutes?: number | null;
+  custom_fields?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  revision: number;
+  reservation_state: "available" | "reserved" | "quarantined";
+  reservation_owner?: string | null;
+  reservation_worktree?: string | null;
+}
+
+/** Immutable, metadata-only snapshot of a trusted source attached to a task. */
+export const TASK_SOURCE_TYPES = ["email", "context", "docs", "chat", "job"] as const;
+export type TaskSourceType = typeof TASK_SOURCE_TYPES[number];
+
+export interface TaskSourceReference {
+  id: string;
+  project_id: string;
+  task_id: string;
+  source_type: TaskSourceType;
+  source_id: string;
+  display_title: string;
+  display_detail: string | null;
+  source_timestamp: string | null;
+  created_at: string;
+}
+
+/** Client input deliberately excludes all server-derived display metadata. */
+const TaskMutationTransportFields = {
+  expected_revision: z.number().int().nonnegative().optional(),
+  expectedRevision: z.number().int().nonnegative().optional(),
+  idempotency_key: z.string().min(1).max(128).optional(),
+  idempotencyKey: z.string().min(1).max(128).optional(),
+};
+
+export const TaskSourceReferenceCreateInputSchema = z.object({
+  source_type: z.enum(TASK_SOURCE_TYPES),
+  source_id: z.string().min(1).max(512),
+  ...TaskMutationTransportFields,
+}).strict();
+export type TaskSourceReferenceCreateInput = z.infer<typeof TaskSourceReferenceCreateInputSchema>;
+
+/** Shared capture contract. Only a task title and a trusted source identity cross this boundary. */
+const TaskCaptureTitleSchema = z.string().trim().min(1).max(256)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Invalid task title");
+const TaskCaptureSourceComponentSchema = z.string().min(1).max(256)
+  .refine((value) => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value), "Invalid task source identity");
+const TaskCaptureSessionIdSchema = TaskCaptureSourceComponentSchema
+  .refine((value) => !/[\\/]/.test(value) && value !== "." && value !== "..", "Invalid task source identity");
+const TaskCaptureDocsPageIdSchema = z.number().int().positive().max(999_999_999_999_999);
+
+export const TaskCaptureInputSchema = z.discriminatedUnion("source_type", [
+  z.object({
+    source_type: z.literal("email"),
+    title: TaskCaptureTitleSchema,
+    account_id: TaskCaptureSourceComponentSchema,
+    folder: TaskCaptureSourceComponentSchema,
+    uid: TaskCaptureSourceComponentSchema,
+    ...TaskMutationTransportFields,
+  }).strict(),
+  z.object({
+    source_type: z.literal("context"),
+    title: TaskCaptureTitleSchema,
+    source_id: z.string().uuid(),
+    ...TaskMutationTransportFields,
+  }).strict(),
+  z.object({
+    source_type: z.literal("docs"),
+    title: TaskCaptureTitleSchema,
+    page_id: TaskCaptureDocsPageIdSchema,
+    ...TaskMutationTransportFields,
+  }).strict(),
+  z.object({
+    source_type: z.literal("chat"),
+    title: TaskCaptureTitleSchema,
+    session_id: TaskCaptureSessionIdSchema,
+    ...TaskMutationTransportFields,
+  }).strict(),
+]);
+export type TaskCaptureInput = z.infer<typeof TaskCaptureInputSchema>;
+export type TaskCaptureSourceType = TaskCaptureInput["source_type"];
 
 /** A threaded comment on a task, with parent_comment_id for nested replies. */
-export const TaskCommentSchema = z.object({
-  id: z.string(),
-  task_id: z.string(),
-  parent_comment_id: z.string().optional().nullable(),
-  author: z.string(),
-  body: z.string(),
-  reactions: z.string().default("{}"),
-  edited_at: z.string().optional().nullable(),
-  created_at: z.string().datetime(),
-});
-export type TaskComment = z.infer<typeof TaskCommentSchema>;
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  parent_comment_id?: string | null;
+  author: string;
+  body: string;
+  reactions: string;
+  edited_at?: string | null;
+  created_at: string;
+}
 
 /** An audit event recording state transitions on a task (e.g., column move, assignment change). */
-export const TaskActivitySchema = z.object({
-  id: z.string(),
-  task_id: z.string(),
-  actor: z.string(),
-  event_type: z.string(),
-  payload: z.string().optional().nullable(),
-  created_at: z.string().datetime(),
-});
-export type TaskActivity = z.infer<typeof TaskActivitySchema>;
+export interface TaskActivity {
+  id: string;
+  task_id: string;
+  actor: string;
+  event_type: string;
+  payload?: string | null;
+  created_at: string;
+}
 
 /** A dependency link between two tasks: blocks, blocked_by, or relates_to. */
-export const TaskLinkSchema = z.object({
-  id: z.string(),
-  task_id: z.string(),
-  linked_task_id: z.string(),
-  link_type: z.enum(["blocks", "blocked_by", "relates_to"]),
-});
-export type TaskLink = z.infer<typeof TaskLinkSchema>;
+export interface TaskLink {
+  id: string;
+  task_id: string;
+  linked_task_id: string;
+  link_type: "blocks" | "blocked_by" | "relates_to";
+}
 
 /** A notification targeting a specific user about a task event (mention, assignment, watch status change). */
-export const TaskNotificationSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  recipient: z.string(),
-  task_id: z.string(),
-  kind: z.enum(["mentioned", "assigned", "watched_status"]),
-  read_at: z.string().optional().nullable(),
-  created_at: z.string().datetime(),
-});
-export type TaskNotification = z.infer<typeof TaskNotificationSchema>;
+export interface TaskNotification {
+  id: string;
+  project_id: string;
+  recipient: string;
+  task_id: string;
+  kind: "mentioned" | "assigned" | "watched_status";
+  read_at?: string | null;
+  created_at: string;
+}
 
 /** Kanban board layout: column definitions and custom field config stored as JSON strings. */
-export const BoardConfigSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  columns: z.string(),
-  custom_field_defs: z.string().default("[]"),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type BoardConfig = z.infer<typeof BoardConfigSchema>;
+export interface BoardConfig {
+  id: string;
+  project_id: string;
+  columns: string;
+  custom_field_defs: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Metadata-only provenance for an active job authorization to a vault item. */
+export interface JobVaultReference {
+  item_id: string;
+  authorized_at: string;
+  item_version: number;
+  availability: "available" | "unavailable";
+}
 
 /** A recurring or event-triggered job definition with agent assignment and scheduling config. */
-export const JobSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  name: z.string().min(1).max(128),
-  description: z.string().optional().nullable(),
-  agent: z.string().min(1),
-  prompt_template: z.string().min(1),
-  schedule_cron: z.string().optional().nullable(),
-  trigger_event: z.string().optional().nullable(),
-  enabled: z.coerce.boolean().default(true),
-  timeout_minutes: z.number().int().min(1).default(30),
+export interface Job {
+  id: string;
+  project_id: string;
+  name: string;
+  description?: string | null;
+  agent: string;
+  prompt_template: string;
+  schedule_cron?: string | null;
+  trigger_event?: string | null;
+  enabled: boolean;
+  timeout_minutes: number;
+  vault_references: JobVaultReference[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** JOB-100's intentionally small, trusted-only trigger catalog. */
+export const TRUSTED_JOB_EVENT_TYPES = [
+  "context.conversation.archived",
+  "context.conversation.unarchived",
+  "context.checkpoint.restored_as_new",
+] as const;
+export const TrustedJobEventTypeSchema = z.enum(TRUSTED_JOB_EVENT_TYPES);
+export type TrustedJobEventType = z.infer<typeof TrustedJobEventTypeSchema>;
+
+export const TRUSTED_JOB_EVENT_SCHEMA_VERSION = 1 as const;
+export const TRUSTED_JOB_EVENT_PRODUCER = "context.maintenance" as const;
+export const TrustedJobEventProducerSchema = z.literal(TRUSTED_JOB_EVENT_PRODUCER);
+
+const TrustedJobEventIdentifierSchema = z.string().uuid();
+const TrustedJobEventRevisionSchema = z.number().int().nonnegative();
+
+export const TrustedJobEventArchivePayloadSchema = z.object({
+  conversationId: TrustedJobEventIdentifierSchema,
+  expectedRevision: TrustedJobEventRevisionSchema,
+  archiveSequence: TrustedJobEventRevisionSchema,
+}).strict();
+export type TrustedJobEventArchivePayload = z.infer<typeof TrustedJobEventArchivePayloadSchema>;
+
+export const TrustedJobEventRestorePayloadSchema = z.object({
+  sourceConversationId: TrustedJobEventIdentifierSchema,
+  sourceCheckpointId: TrustedJobEventIdentifierSchema,
+  targetConversationId: TrustedJobEventIdentifierSchema,
+  expectedRevision: TrustedJobEventRevisionSchema,
+}).strict();
+export type TrustedJobEventRestorePayload = z.infer<typeof TrustedJobEventRestorePayloadSchema>;
+
+export type TrustedJobEventPayload = TrustedJobEventArchivePayload | TrustedJobEventRestorePayload;
+
+/** Stored trusted event metadata. Payload is parsed against event_type by core tooling. */
+export const TrustedJobEventRecordSchema = z.object({
+  id: TrustedJobEventIdentifierSchema,
+  project_id: TrustedJobEventIdentifierSchema,
+  event_type: TrustedJobEventTypeSchema,
+  schema_version: z.literal(TRUSTED_JOB_EVENT_SCHEMA_VERSION),
+  producer: TrustedJobEventProducerSchema,
+  source_audit_event_id: TrustedJobEventIdentifierSchema,
+  dedupe_key: TrustedJobEventIdentifierSchema,
+  payload: z.string().max(2048),
   created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Job = z.infer<typeof JobSchema>;
+}).strict();
+export type TrustedJobEventRecord = z.infer<typeof TrustedJobEventRecordSchema>;
 
 /** A single execution of a job, tracking its lifecycle from queued through completion or failure. */
-export const JobRunSchema = z.object({
-  id: z.string(),
-  job_id: z.string(),
-  status: z.enum(["queued", "running", "success", "failed", "timeout", "cancelled"]).default("queued"),
-  trigger: z.enum(["manual", "cron", "event"]),
-  started_at: z.string().datetime().optional().nullable(),
-  finished_at: z.string().datetime().optional().nullable(),
-  exit_code: z.number().int().optional().nullable(),
-  created_at: z.string().datetime(),
-});
-export type JobRun = z.infer<typeof JobRunSchema>;
+export interface JobRun {
+  id: string;
+  job_id: string;
+  status: "queued" | "running" | "success" | "failed" | "timeout" | "cancelled";
+  trigger: "manual" | "cron" | "event";
+  started_at?: string | null;
+  finished_at?: string | null;
+  exit_code?: number | null;
+  created_at: string;
+}
 
 /** An individual line of stdout/stderr output from a job run, ordered by sequence number. */
-export const JobRunLogSchema = z.object({
-  id: z.number(),
-  run_id: z.string(),
-  seq: z.number(),
-  stream: z.enum(["stdout", "stderr"]),
-  line: z.string(),
-  created_at: z.string().datetime(),
-});
-export type JobRunLog = z.infer<typeof JobRunLogSchema>;
+export interface JobRunLog {
+  id: number;
+  run_id: string;
+  seq: number;
+  stream: "stdout" | "stderr";
+  line: string;
+  created_at: string;
+}
+
+export type JobEventDeliveryState = "queued" | "leased" | "retry_wait" | "succeeded" | "dead_letter";
+
+/** Credential-free queue view; ownership hashes and process nonces never leave core internals. */
+export interface JobEventDelivery {
+  id: string;
+  trusted_event_id: string;
+  event_type: TrustedJobEventType;
+  job_id: string;
+  job_name: string;
+  state: JobEventDeliveryState;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  lease_revision: number;
+  lease_expires_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Bounded event execution metadata embedded in project-scoped run DTOs. */
+export interface JobRunEventMetadata {
+  delivery_id: string;
+  trusted_event_id: string;
+  attempt_number: number;
+  delivery_state: JobEventDeliveryState;
+}
+
+export interface JobRunWithEventMetadata extends JobRun {
+  event_delivery: JobRunEventMetadata | null;
+}
 
 /** A contextual memory entry with priority ranking — used by agents to recall past session context. */
-export const ContextSchema = z.object({
-  id: z.number(),
-  project_id: z.string(),
-  content: z.string().min(1),
-  priority: z.number().min(0).max(10).default(5),
-  tags: z.string().default("[]"),
-  session_id: z.string().optional().nullable(),
-  source: z.enum(["manual", "agent", "import", "system"]).default("manual"),
-  metadata: z.string().default("{}"),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type ContextEntry = z.infer<typeof ContextSchema>;
+export interface ContextEntry {
+  id: number;
+  project_id: string;
+  content: string;
+  priority: number;
+  tags: string;
+  session_id?: string | null;
+  source: "manual" | "agent" | "import" | "system";
+  metadata: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** Immutable conversation/checkpoint/message limits enforced by migration 063. */
 export const CONTEXT_CONVERSATION_TITLE_MAX_LENGTH = 256;
@@ -332,6 +465,47 @@ export function isBoundedContextMetadata(value: unknown): value is ContextMetada
     && !Array.isArray(value)
     && typeof value === "object"
     && isBoundedContextJson(value, CONTEXT_METADATA_MAX_BYTES);
+}
+
+/** Durable, project-scoped state for one cooperative coordination session. */
+export type CoordinationSessionState = "active" | "quarantined" | "closed";
+export type CoordinationClaimState = "active" | "released" | "dirty" | "quarantined" | "collision";
+
+export interface CoordinationSession {
+  id: string;
+  project_id: string;
+  worktree_id: string;
+  session_id: string;
+  incarnation: number;
+  revision: number;
+  fence: number;
+  state: CoordinationSessionState;
+  heartbeat_at: string;
+  expires_at: string;
+  snapshot: ContextMetadata;
+  snapshot_revision: number;
+  current_task_id: string | null;
+  current_task_revision: number | null;
+  context_conversation_id: string | null;
+  context_revision: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CoordinationClaim {
+  id: string;
+  project_id: string;
+  coordination_session_id: string;
+  worktree_id: string;
+  incarnation: number;
+  fence: number;
+  kind: "path" | "tree" | "reserved";
+  value: string;
+  baseline_sha256: string | null;
+  state: CoordinationClaimState;
+  created_at: string;
+  updated_at: string;
+  released_at: string | null;
 }
 
 const ContextTagsInputSchema = z.array(z.string().trim().min(1).max(64))
@@ -596,19 +770,18 @@ export const ContextCheckpointRagSourceSchema = z.object({
 export type ContextCheckpointRagSource = z.infer<typeof ContextCheckpointRagSourceSchema>;
 
 /** A registered child MCP server with its command, arguments, environment, and origin source tracking. */
-export const ServerSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  name: z.string().min(1).max(64),
-  command: z.string(),
-  args: z.string().optional(),
-  env: z.string().optional(),
-  source: z.enum(["opencode", "ingenium"]).default("opencode"),
-  enabled: z.coerce.boolean().default(true),
-  running: z.coerce.boolean().default(false),
-  created_at: z.string().datetime(),
-});
-export type Server = z.infer<typeof ServerSchema>;
+export interface Server {
+  id: string;
+  project_id: string;
+  name: string;
+  command: string;
+  args?: string;
+  env?: string;
+  source: "opencode" | "ingenium";
+  enabled: boolean;
+  running: boolean;
+  created_at: string;
+}
 
 /**
  * Canonical child MCP server identifiers are deliberately narrower than general
@@ -755,286 +928,307 @@ export const ChildMcpServerDefinitionSchema = z.object({
 });
 export type ChildMcpServerDefinition = z.infer<typeof ChildMcpServerDefinitionSchema>;
 
-export const ChildMcpDiscoveredToolSchema = z.object({
-  id: z.string().uuid(),
-  server_id: z.string().uuid(),
-  source_name: ChildMcpToolNameSchema,
-  canonical_name: z.string().regex(/^ingenium_[a-z][a-z0-9]*_[a-z][a-z0-9_]*$/),
-  // Child tools are grouped by their owning server so operators can distinguish
-  // two independently managed child catalogs without relying on a name prefix.
-  category: z.string().regex(/^Child MCP \/ [a-z][a-z0-9]{0,47}$/),
-  description: z.string().min(1).max(MCP_CHILD_TOOL_DESCRIPTION_MAX_LENGTH),
-  input_schema: z.string(),
-  discovered_at: z.string().datetime(),
-});
-export type ChildMcpDiscoveredTool = z.infer<typeof ChildMcpDiscoveredToolSchema>;
+export interface ChildMcpDiscoveredTool {
+  id: string;
+  server_id: string;
+  source_name: string;
+  canonical_name: string;
+  category: string;
+  description: string;
+  input_schema: string;
+  discovered_at: string;
+}
 
 /** An observation about user behavior — the raw input to the self-learning pipeline. */
-export const ObservationSchema = z.object({
-  id: z.number(),
-  project_id: z.string(),
-  observation_type: z.enum([
-    "correction", "preference", "pattern", "insight", "feedback",
-    "behavior", "terminology", "workflow", "error", "goal"
-  ]),
-  content: z.string().min(1),
-  importance: z.number().min(1).max(10).default(5),
-  source: z.enum(["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual", "auto-observer"]).default("agent"),
-  context: z.string().optional(),
-  status: z.enum(["pending", "processed", "skipped", "failed"]).default("pending"),
-  session_id: z.string().optional(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Observation = z.infer<typeof ObservationSchema>;
+export interface Observation {
+  id: number;
+  project_id: string;
+  observation_type: "correction" | "preference" | "pattern" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "error" | "goal";
+  content: string;
+  importance: number;
+  source: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | "auto-observer";
+  context?: string;
+  status: "pending" | "processed" | "skipped" | "failed";
+  session_id?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** A consolidated personality trait derived from observations by the synthesis pipeline. Confidence reflects corroboration strength. */
-export const PersonalityTraitSchema = z.object({
-  id: z.number(),
-  project_id: z.string(),
-  trait_type: z.enum([
-    "communication_style", "code_preference", "workflow_pattern",
-    "terminology", "priority_signal", "feedback_style",
-    "interaction_pattern", "domain_knowledge", "learned_skill", "personality_trait"
-  ]),
-  trait_value: z.string().min(1),
-  display_label: z.string().optional(),
-  confidence: z.number().min(0).max(1).default(0.5),
-  exemplar_observation_id: z.number().optional(),
-  exemplar_text: z.string().optional(),
-  source: z.string().default("synthesis"),
-  is_active: z.coerce.boolean().default(true),
-  metadata: z.string().optional(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type PersonalityTrait = z.infer<typeof PersonalityTraitSchema>;
+export interface PersonalityTrait {
+  id: number;
+  project_id: string;
+  trait_type: "communication_style" | "code_preference" | "workflow_pattern" | "terminology" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
+  trait_value: string;
+  display_label?: string;
+  confidence: number;
+  exemplar_observation_id?: number;
+  exemplar_text?: string;
+  source: string;
+  is_active: boolean;
+  metadata?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** An OpenCode plugin with file path and optional source content cache for disk-write operations. */
-export const PluginSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  name: z.string().min(1).max(64),
-  file_path: z.string(),
-  enabled: z.coerce.boolean().default(true),
-  source_content: z.string().optional(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Plugin = z.infer<typeof PluginSchema>;
+export interface Plugin {
+  id: string;
+  project_id: string;
+  name: string;
+  file_path: string;
+  enabled: boolean;
+  source_content?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** Per-tool enable/disable state for child MCP servers — allows toggling individual tools at runtime. */
-export const MCPToolStateSchema = z.object({
-  id: z.number().optional(),
-  project_id: z.string(),
-  tool_name: z.string(),
-  enabled: z.coerce.boolean().default(true),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type MCPToolState = z.infer<typeof MCPToolStateSchema>;
+export interface MCPToolState {
+  id?: number;
+  project_id: string;
+  tool_name: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 /** A slash-command definition with an associated file path and optional content. */
-export const CommandSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  name: z.string().min(1).max(64),
-  file_path: z.string(),
-  content: z.string().optional(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Command = z.infer<typeof CommandSchema>;
+export interface Command {
+  id: string;
+  project_id: string;
+  name: string;
+  file_path: string;
+  content?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** An agent profile with category, model, permission, and skill assignments. */
-export const AgentSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  name: z.string().min(1).max(64),
-  description: z.string().default(""),
-  category: z.enum(["primary", "execution", "research", "security", "chat"]).default("execution"),
-  mode: z.enum(["primary", "subagent"]).default("subagent"),
-  model: z.string().optional(),
-  reasoning_effort: z.string().optional(),
-  permissions: z.string().default("{}"),
-  metadata: z.string().default("{}"),
-  skills: z.string().default("[]"),
-  content: z.string().min(1),
-  enabled: z.coerce.boolean().default(true),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Agent = z.infer<typeof AgentSchema>;
+export interface Agent {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  category: "primary" | "execution" | "research" | "security" | "chat";
+  mode: "primary" | "subagent";
+  model?: string;
+  reasoning_effort?: string;
+  permissions: string;
+  metadata: string;
+  skills: string;
+  content: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 /** Project-level or global `opencode.json` configuration stored in the DB for API-driven editing. */
-export const ConfigSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  type: z.enum(["project", "global"]),
-  content: z.string(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type Config = z.infer<typeof ConfigSchema>;
+export interface Config {
+  id: string;
+  project_id: string;
+  type: "project" | "global";
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** An event in the self-learning pipeline timeline — tracks extraction, synthesis, and trait/skill lifecycle. */
-export const PipelineEventSchema = z.object({
-  id: z.number(),
-  project_id: z.string(),
-  event_type: z.enum([
-    "session_created", "session_idle", "observation_created", "observation_imported",
-    "observation_detected",
-    "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed",
-    "extraction_completed", "extraction_failed",
-    "trait_created", "trait_updated", "skill_created", "skill_updated",
-    "proposal_created", "proposal_submitted", "proposal_approved", "proposal_rejected",
-    "proposal_applied", "proposal_rolled_back",
-    "plugin_initialized", "plugin_error",
-  ]),
-  event_source: z.enum(["agent", "plugin", "synthesis", "system"]),
-  title: z.string().min(1),
-  description: z.string().optional(),
-  data: z.string().optional(),
-  parent_event_id: z.number().optional(),
-  session_id: z.string().optional(),
-  importance: z.number().min(1).max(10).default(5),
-  created_at: z.string().datetime(),
-});
-export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
+export interface PipelineEvent {
+  id: number;
+  project_id: string;
+  event_type: "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_completed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "proposal_created" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "proposal_applied" | "proposal_rolled_back" | "plugin_initialized" | "plugin_error";
+  event_source: "agent" | "plugin" | "synthesis" | "system";
+  title: string;
+  description?: string;
+  data?: string;
+  parent_event_id?: number;
+  session_id?: string;
+  importance: number;
+  created_at: string;
+}
 
 /** Non-sensitive metadata for an encrypted vault item. */
-export const VaultItemSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  folder_id: z.string().nullable(),
-  name: z.string().min(1),
-  type: z.enum(["login", "api_key", "note", "oauth"]),
-  tags: z.string().default("[]"),
-  urls: z.string().default("[]"),
-  username: z.string().nullable(),
-  version: z.coerce.number().int().default(1),
-  access_policy: z.string().default('{"mode":"restricted"}'),
-  expires_at: z.string().nullable(),
-  lease_duration_seconds: z.coerce.number().int().nullable(),
-  last_accessed_at: z.string().nullable(),
-  access_count: z.coerce.number().int().default(0),
-  created_at: z.string(),
-  updated_at: z.string(),
-});
-export type VaultItem = z.infer<typeof VaultItemSchema>;
+export interface VaultItem {
+  id: string;
+  project_id: string;
+  folder_id: string | null;
+  name: string;
+  type: "login" | "api_key" | "note" | "oauth";
+  tags: string;
+  urls: string;
+  username: string | null;
+  version: number;
+  access_policy: string;
+  expires_at: string | null;
+  lease_duration_seconds: number | null;
+  last_accessed_at: string | null;
+  access_count: number;
+  created_at: string;
+  updated_at: string;
+}
 
 /** A folder used to organize vault items within a project. */
-export const VaultFolderSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  name: z.string().min(1),
-  parent_folder_id: z.string().nullable(),
-});
-export type VaultFolder = z.infer<typeof VaultFolderSchema>;
+export interface VaultFolder {
+  id: string;
+  project_id: string;
+  name: string;
+  parent_folder_id: string | null;
+}
 
 /** An immutable audit record for vault activity. */
-export const VaultAuditSchema = z.object({
-  id: z.coerce.number().int(),
-  project_id: z.string(),
-  event_type: z.string(),
-  item_id: z.string().nullable(),
-  actor: z.string(),
-  details: z.string().nullable(),
-  ip_address: z.string().nullable(),
-  user_agent: z.string().nullable(),
-  created_at: z.string(),
-});
-export type VaultAudit = z.infer<typeof VaultAuditSchema>;
+export interface VaultAudit {
+  id: number;
+  project_id: string;
+  event_type: string;
+  item_id: string | null;
+  actor: string;
+  details: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
 
 /** The current status of the in-memory vault session and project inventory. */
-export const VaultStatusSchema = z.object({
-  sealed: z.coerce.boolean(),
-  items_count: z.coerce.number().int().nonnegative(),
-  folders_count: z.coerce.number().int().nonnegative(),
-  last_unsealed: z.string().nullable(),
-});
-export type VaultStatus = z.infer<typeof VaultStatusSchema>;
+export interface VaultStatus {
+  sealed: boolean;
+  items_count: number;
+  folders_count: number;
+  last_unsealed: string | null;
+}
 
 /** Metadata for a server-owned Ingenium and OpenCode database snapshot. */
-export const BackupRecordSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  filename: z.string(),
-  size_bytes: z.coerce.number().int().nonnegative(),
-  sha256: z.string(),
-  backup_type: z.enum(["manual", "scheduled_hourly", "scheduled_daily", "pre_restore"]),
-  components: z.string().default("{}"),
-  status: z.enum(["pending", "in_progress", "completed", "failed"]).default("completed"),
-  error_message: z.string().nullable(),
-  created_at: z.string(),
-});
-export type BackupRecord = z.infer<typeof BackupRecordSchema>;
+export interface BackupRecord {
+  id: string;
+  project_id: string;
+  filename: string;
+  size_bytes: number;
+  sha256: string;
+  backup_type: "manual" | "scheduled_hourly" | "scheduled_daily" | "pre_restore";
+  components: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  error_message: string | null;
+  created_at: string;
+}
 
 /** Lifecycle state for a restore request associated with a backup snapshot. */
-export const BackupRestoreJobSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  backup_id: z.string().nullable(),
-  status: z.enum(["validating", "confirmed", "applying", "completed", "failed", "rolled_back"]).default("validating"),
-  components: z.string().default("{}"),
-  error_message: z.string().nullable(),
-  started_at: z.string().nullable(),
-  completed_at: z.string().nullable(),
-  created_at: z.string(),
-});
-export type BackupRestoreJob = z.infer<typeof BackupRestoreJobSchema>;
+export interface BackupRestoreJob {
+  id: string;
+  project_id: string;
+  backup_id: string | null;
+  status: "validating" | "confirmed" | "applying" | "completed" | "failed" | "rolled_back";
+  components: string;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
 
 /** An ingestion source for RAG-backed documentation search. */
-export const RagSourceSchema = z.object({
-  id: z.string().uuid(), project_id: z.string(), title: z.string().min(1),
-  source_type: z.enum(["file", "text", "url"]),
-  source_path: z.string().nullable(), source_hash: z.string().nullable(), mime_type: z.string().nullable(),
-  byte_size: z.coerce.number().int().nullable(), chunk_count: z.coerce.number().int().nonnegative().default(0),
-  metadata: z.string().default("{}"), created_at: z.string(), updated_at: z.string(),
-});
-export type RagSource = z.infer<typeof RagSourceSchema>;
+export interface RagSource {
+  id: string;
+  project_id: string;
+  title: string;
+  source_type: "file" | "text" | "url";
+  source_path: string | null;
+  source_hash: string | null;
+  mime_type: string | null;
+  byte_size: number | null;
+  chunk_count: number;
+  metadata: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /** A token-aware, searchable segment belonging to a RAG source. */
-export const RagChunkSchema = z.object({
-  id: z.string().uuid(), source_id: z.string().uuid(), chunk_index: z.coerce.number().int().nonnegative(), content: z.string(),
-  token_count: z.coerce.number().int().nonnegative().default(0), heading_path: z.string().nullable(),
-  priority: z.coerce.number().int().min(0).max(10).default(5), tags: z.string().default("[]"), created_at: z.string(),
-});
-export type RagChunk = z.infer<typeof RagChunkSchema>;
+export interface RagChunk {
+  id: string;
+  source_id: string;
+  chunk_index: number;
+  content: string;
+  token_count: number;
+  heading_path: string | null;
+  priority: number;
+  tags: string;
+  created_at: string;
+}
 
 /** A RAG chunk enriched with FTS relevance rank and highlighted excerpt. */
-export const RagSearchResultSchema = RagChunkSchema.extend({
-  rank: z.coerce.number(), snippet: z.string(), source_name: z.string(),
-  source_path: z.string().nullable(), source_type: z.string(), project_id: z.string(),
-});
-export type RagSearchResult = z.infer<typeof RagSearchResultSchema>;
+export interface RagSearchResult extends RagChunk {
+  rank: number;
+  snippet: string;
+  source_name: string;
+  source_path: string | null;
+  source_type: string;
+  project_id: string;
+}
 
 /**
  * Provider-neutral usage metadata. Deliberately excludes prompts, message text,
  * reasoning content, tool payloads, and credentials.
  */
-export const UsageEventSchema = z.object({
-  id: z.string().uuid(),
-  project_id: z.string(),
-  source_instance: z.string().min(1).max(512),
-  source_part_id: z.string().min(1).max(512),
-  source_session_id: z.string().min(1).max(512),
-  source_message_id: z.string().min(1).max(512),
-  source_project_id: z.string().min(1).max(512),
-  provider_id: z.string().min(1).max(512).nullable(),
-  model_id: z.string().min(1).max(512).nullable(),
-  agent_id: z.string().min(1).max(512).nullable(),
-  status: z.enum(["success", "error", "partial", "unknown"]),
-  occurred_at: z.string().datetime(),
-  total_tokens: z.coerce.number().int().nonnegative().nullable(),
-  input_tokens: z.coerce.number().int().nonnegative().nullable(),
-  output_tokens: z.coerce.number().int().nonnegative().nullable(),
-  reasoning_tokens: z.coerce.number().int().nonnegative().nullable(),
-  cache_read_tokens: z.coerce.number().int().nonnegative().nullable(),
-  cache_write_tokens: z.coerce.number().int().nonnegative().nullable(),
-  cost_amount: z.coerce.number().nonnegative().nullable(),
-  cost_status: z.enum(["known", "partial", "unavailable"]),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
-});
-export type UsageEventRecord = z.infer<typeof UsageEventSchema>;
+export interface UsageEventRecord {
+  id: string;
+  project_id: string;
+  source_instance: string;
+  source_part_id: string;
+  source_session_id: string;
+  source_message_id: string;
+  source_project_id: string;
+  provider_id: string | null;
+  model_id: string | null;
+  agent_id: string | null;
+  status: "success" | "error" | "partial" | "unknown";
+  occurred_at: string;
+  total_tokens: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  reasoning_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  cost_amount: number | null;
+  cost_status: "known" | "partial" | "unavailable";
+  created_at: string;
+  updated_at: string;
+}
+
+/** Advisory-only project thresholds over provider-reported usage aggregates. */
+export interface UsageAdvisoryThresholdRecord {
+  project_id: string;
+  request_count: number | null;
+  total_tokens: number | null;
+  reported_cost_amount: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Durable, provider-neutral advisory attention lifecycle metadata (USAGE-101). */
+export interface UsageAttentionItemRecord {
+  id: string;
+  project_id: string;
+  condition: string;
+  metric: string;
+  status: "active" | "resolved";
+  evaluation_state: "disabled" | "unknown" | "below" | "equal" | "above";
+  severity: "info" | "warning" | "critical";
+  message_code: string;
+  observed: number | null;
+  threshold: number | null;
+  availability: "known" | "partial" | "unavailable";
+  freshness: "disabled" | "unknown" | "fresh" | "stale";
+  range_from: null;
+  range_to: null;
+  threshold_revision: number;
+  opened_at: string;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+  reopened_at: string | null;
+  reopen_count: number;
+  last_evaluated_at: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}

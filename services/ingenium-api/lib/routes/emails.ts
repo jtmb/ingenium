@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextFunction, Request, Router, Response } from "express";
 import { checkpointAfterWrite, emailCache, execTransaction, getDb, logger, settings, synthesisLlm } from "ingenium-core";
-import { registerMailWatcher, unregisterMailWatcher } from "../mail-watchers.js";
-import { decryptCredentialValue } from "ingenium-email/lib/credential-crypto";
 import {
   // Account CRUD
   listAccounts,
@@ -55,8 +53,9 @@ import {
   setAccountConnected,
   // Providers
   GmailProvider,
+  sanitizeProviderError,
+  validateEmailAccountMigrationCredentials,
 } from "ingenium-email";
-import * as emailSecurity from "ingenium-email";
 import type {
   EmailAccount,
   EmailAttachment,
@@ -94,21 +93,9 @@ type MailOperation = "oauth" | "imap" | "smtp" | "sync" | "api";
 
 /**
  * The mail package is the one sanitization boundary for provider failures.
- * The fallback preserves safe behavior in focused route tests that mock only
- * the legacy mail exports; production always uses the centralized sanitizer.
  */
 function safeMailFailure(error: unknown, operation: MailOperation): SafeMailFailure {
-  if (Object.prototype.hasOwnProperty.call(emailSecurity, "sanitizeProviderError")) {
-    const sanitize = Reflect.get(emailSecurity, "sanitizeProviderError") as
-      | ((value: unknown, source: MailOperation) => SafeMailFailure)
-      | undefined;
-    if (sanitize) return sanitize(error, operation);
-  }
-  return {
-    code: "PROVIDER_ERROR",
-    message: "The email operation could not be completed. Try again later.",
-    retryable: true,
-  };
+  return sanitizeProviderError(error, operation);
 }
 
 function safeMailDiagnostic(error: unknown, operation: MailOperation): Record<string, unknown> {
@@ -152,15 +139,14 @@ async function getAccountAuthOrError(
     });
     return null;
   }
-  const projectId = resolveEmailProject();
-  const account = getAccount(projectId, accountId);
+  const account = getAccount(accountId);
   if (!account) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
     });
     return null;
   }
-  const creds = getCredentials(projectId, accountId);
+  const creds = getCredentials(accountId);
   if (!creds) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Credentials for account '${accountId}' not found` },
@@ -171,7 +157,7 @@ async function getAccountAuthOrError(
   let tokens = creds.tokens;
   if (account.authType === "oauth2" && tokens?.expiryDate && tokens.expiryDate < Date.now() + 60_000) {
     try {
-      const refreshed = await getValidTokens(projectId, accountId, account.provider as EmailProvider);
+      const refreshed = await getValidTokens(accountId, account.provider as EmailProvider);
       if (refreshed) tokens = refreshed;
     } catch { /* use existing tokens */ }
   }
@@ -188,12 +174,11 @@ async function withImapConnection<T>(
   auth: { password?: string; tokens?: OAuthToken },
   fn: (accountId: string) => Promise<T>,
 ): Promise<T> {
-  const projectId = resolveEmailProject();
   await connectAccount(account, auth);
   try {
     const result = await fn(account.id);
     try {
-      setAccountConnected(projectId, account.id, true);
+      setAccountConnected(account.id, true);
     } catch { /* non-fatal */ }
     return result;
   } catch (error: unknown) {
@@ -239,19 +224,18 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
   }
 
   try {
-    const projectId = resolveEmailProject();
     const tokens = await exchangeCode(provider, code, state, redirectUri);
 
     // Create the account if it doesn't exist yet
     let acctId = accountId;
     let createdAccountWithTokens = false;
     if (!acctId) {
-      const existingAccounts = listAccounts(projectId);
+      const existingAccounts = listAccounts();
       const existing = existingAccounts.find(a => a.email === tokens.email);
       if (existing) {
         acctId = existing.id;
       } else {
-        const account = createOAuthAccountWithTokens(projectId, {
+        const account = createOAuthAccountWithTokens({
           email: tokens.email || `${provider}-${Date.now()}@unknown`,
           provider: provider as EmailProvider,
           authType: "oauth2",
@@ -264,11 +248,11 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 
     // Existing accounts keep their metadata; only their encrypted token record changes.
     if (!createdAccountWithTokens) {
-      storeTokens(projectId, acctId, tokens);
+      storeTokens(acctId, tokens);
     }
     // Replace a parked credential-error worker so OAuth reconnect resumes sync.
     stopAccountWorker(acctId);
-    startEngine(projectId);
+    startEngine();
     res.json({ data: { success: true, accountId: acctId } });
   } catch (error: unknown) {
     respondWithSafeMailError(res, error, "oauth");
@@ -280,9 +264,8 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 /** GET /accounts?project=&include_hidden=true — List all email accounts.
  *  Default: only returns non-hidden accounts. Pass include_hidden=true to get all. */
 emailsRouter.get("/accounts", (req, res) => {
-  const projectId = resolveEmailProject();
   const includeHidden = req.query.include_hidden === "true";
-  let accounts = listAccounts(projectId);
+  let accounts = listAccounts();
   if (!includeHidden) {
     accounts = accounts.filter(a => !a.hidden);
   }
@@ -291,7 +274,6 @@ emailsRouter.get("/accounts", (req, res) => {
 
 /** POST /accounts?project= — Add a new email account. */
 emailsRouter.post("/accounts", (req, res) => {
-  const projectId = resolveEmailProject();
   const { email, provider, authType, name, appPassword, imapHost, smtpHost, imapPort, smtpPort } = req.body;
   if (!email || !provider || !authType) {
     res.status(422).json({
@@ -311,21 +293,20 @@ emailsRouter.post("/accounts", (req, res) => {
     smtpPort,
   } as Omit<EmailAccount, "id" | "connected">;
   const account = appPassword
-    ? createAccountWithCredentials(projectId, accountInput, {
+    ? createAccountWithCredentials(accountInput, {
       imapPass: appPassword,
       smtpPass: appPassword,
     })
-    : addAccount(projectId, accountInput);
+    : addAccount(accountInput);
 
-  startEngine(projectId);
+  startEngine();
   res.status(201).json({ data: account });
 });
 
 /** DELETE /accounts/:id?project= — Remove an email account. */
 emailsRouter.delete("/accounts/:id", async (req, res) => {
-  const projectId = resolveEmailProject();
   const accountId = req.params.id!;
-  const account = getAccount(projectId, accountId);
+  const account = getAccount(accountId);
   if (!account) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
@@ -336,9 +317,7 @@ emailsRouter.delete("/accounts/:id", async (req, res) => {
   // Stop the account's sync engine worker BEFORE deleting data
   stopAccountWorker(accountId);
   await stopWatcher(accountId).catch(() => undefined);
-  unregisterMailWatcher(accountId);
-
-  removeAccount(projectId, accountId);
+  removeAccount(accountId);
   // Also clear all cached emails, bodies, suggestions, summaries, and sync state for this account
   emailCache.clearCache(accountId);
   res.status(204).send();
@@ -346,9 +325,8 @@ emailsRouter.delete("/accounts/:id", async (req, res) => {
 
 /** PATCH /accounts/:id?project= — Update account metadata (e.g., hidden flag). */
 emailsRouter.patch("/accounts/:id", (req, res) => {
-  const projectId = resolveEmailProject();
   const accountId = req.params.id!;
-  const account = getAccount(projectId, accountId);
+  const account = getAccount(accountId);
   if (!account) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
@@ -361,15 +339,14 @@ emailsRouter.patch("/accounts/:id", (req, res) => {
     account.hidden = !!hidden;
   }
 
-  storeAccount(projectId, account);
+  storeAccount(account);
   res.json({ data: account });
 });
 
 /** PATCH /accounts/:id/credentials — Replace app-password credentials in place. */
 emailsRouter.patch("/accounts/:id/credentials", async (req, res) => {
-  const projectId = resolveEmailProject();
   const accountId = req.params.id!;
-  const account = getAccount(projectId, accountId);
+  const account = getAccount(accountId);
   if (!account) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` } });
     return;
@@ -385,9 +362,9 @@ emailsRouter.patch("/accounts/:id/credentials", async (req, res) => {
   }
 
   try {
-    storeCredentials(projectId, accountId, { imapPass: appPassword, smtpPass: appPassword });
+    storeCredentials(accountId, { imapPass: appPassword, smtpPass: appPassword });
     stopAccountWorker(accountId);
-    startEngine(projectId);
+    startEngine();
     // Never return the submitted credential or stored encrypted material.
     res.json({ data: { success: true, accountId } });
   } catch (error: unknown) {
@@ -705,7 +682,7 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     };
 
     // Get voice samples from Sent folder
-    const creds = getCredentials(projectId, account.id);
+    const creds = getCredentials(account.id);
     const freshToken = await getFreshGmailToken(account.id).catch(() => "");
     const tokens: OAuthToken = creds?.tokens ?? { accessToken: freshToken, refreshToken: "", expiryDate: 0, scope: "" };
     const voiceSamples = await getVoiceSamples(account, tokens, 15);
@@ -870,7 +847,6 @@ emailsRouter.post("/watch/start", async (req, res) => {
 
   try {
     await startWatcher(projectId, accountId);
-    registerMailWatcher(accountId);
     res.json({ data: { running: true, accountId } });
   } catch (error: unknown) {
     respondWithSafeMailError(res, error, "imap");
@@ -889,7 +865,6 @@ emailsRouter.post("/watch/stop", async (req, res) => {
 
   try {
     await stopWatcher(accountId);
-    unregisterMailWatcher(accountId);
     res.json({ data: { running: false, accountId } });
   } catch (error: unknown) {
     respondWithSafeMailError(res, error, "imap");
@@ -1555,83 +1530,7 @@ function validateMailMigrationGroup(group: MailSettingRow[]): boolean {
 
   const account = accounts[0]!;
   const accountId = account.key.slice("email_account_".length);
-  if (Object.prototype.hasOwnProperty.call(emailSecurity, "validateEmailAccountMigrationCredentials")) {
-    const validate = Reflect.get(emailSecurity, "validateEmailAccountMigrationCredentials") as
-      | ((id: string, raw: string, oauthRaw?: string) => { valid: boolean })
-      | undefined;
-    return Boolean(validate?.(accountId, account.value, oauth[0]?.value).valid);
-  }
-
-  // Compatibility only for focused route tests that replace the package root
-  // with a narrow mock. It uses the same AES-GCM decryptor and fails closed;
-  // it is not a blind-copy fallback.
-  return validateMailMigrationGroupWithActiveKey(accountId, account.value, oauth[0]?.value);
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function decryptMigrationValue(value: unknown, requireNonEmpty: boolean): string | undefined {
-  if (typeof value !== "string" || !value) return undefined;
-  try {
-    const decrypted = decryptCredentialValue(value);
-    return requireNonEmpty && !decrypted ? undefined : decrypted;
-  } catch {
-    return undefined;
-  }
-}
-
-function validateMailMigrationTokens(value: unknown, email: string): { accessToken: string; refreshToken: string } | undefined {
-  if (!isObjectRecord(value) || typeof value.accessToken !== "string" || typeof value.refreshToken !== "string") {
-    return undefined;
-  }
-  if (typeof value.email === "string" && value.email
-    && value.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
-    return undefined;
-  }
-  const accessToken = decryptMigrationValue(value.accessToken, true);
-  const refreshToken = decryptMigrationValue(value.refreshToken, false);
-  return accessToken === undefined || refreshToken === undefined ? undefined : { accessToken, refreshToken };
-}
-
-function validateMailMigrationGroupWithActiveKey(accountId: string, accountRaw: string, oauthRaw?: string): boolean {
-  let account: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(accountRaw);
-    if (!isObjectRecord(parsed)) return false;
-    account = parsed;
-  } catch {
-    return false;
-  }
-  if (account.id !== accountId || typeof account.email !== "string" || !account.email
-    || (account.provider !== undefined && typeof account.provider !== "string")
-    || (account.authType !== undefined && typeof account.authType !== "string")) {
-    return false;
-  }
-
-  for (const credential of [account.imapPass, account.smtpPass]) {
-    if (credential !== undefined && decryptMigrationValue(credential, true) === undefined) return false;
-  }
-
-  const tokens: Array<{ accessToken: string; refreshToken: string }> = [];
-  if (account.tokens !== undefined) {
-    const value = validateMailMigrationTokens(account.tokens, account.email);
-    if (!value) return false;
-    tokens.push(value);
-  }
-  if (oauthRaw !== undefined) {
-    try {
-      const value = validateMailMigrationTokens(JSON.parse(oauthRaw) as unknown, account.email);
-      if (!value) return false;
-      tokens.push(value);
-    } catch {
-      return false;
-    }
-  }
-  if (tokens.length === 2 && (tokens[0]!.accessToken !== tokens[1]!.accessToken
-    || tokens[0]!.refreshToken !== tokens[1]!.refreshToken)) return false;
-  return account.authType !== "oauth2" || tokens.length > 0;
+  return validateEmailAccountMigrationCredentials(accountId, account.value, oauth[0]?.value).valid;
 }
 
 /**
@@ -1727,16 +1626,4 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
     logger.warn("email", "Mail account migration failed; source settings were retained");
     return emptyMailMigrationResult();
   }
-}
-
-/**
- * 🔴 DEPRECATED — use startEngine(projectId) instead.
- * The sync engine now owns all IMAP I/O via its priority-queue background workers.
- * Kept for backward compatibility: just delegates to startEngine.
- * TODO(v3): remove this function and update all callers.
- */
-export async function prefetchAllAccounts(): Promise<void> {
-  const projectId = resolveEmailProject();
-  logger.info("email", "DEPRECATED: prefetchAllAccounts called — delegating to startEngine");
-  startEngine(projectId);
 }

@@ -23,6 +23,8 @@ random_secret() {
 
 value_for() {
   key="$1"
+  # grep -c returns 1 when the key is absent; that is an expected branch under
+  # set -e, so tolerate only that status before checking for duplicates.
   matches="$(grep -c "^${key}=" "$env_file" || true)"
   if [ "$matches" -gt 1 ]; then
     fail "${key} is declared more than once in .env"

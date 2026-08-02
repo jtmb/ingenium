@@ -1,32 +1,10 @@
 import { test, expect } from "@playwright/test";
 
-/**
- * E2E tests for the mail page's DB-backed cache layer.
- *
- * Tests run against the live Docker container (port 3000/4097) with a real
- * Gmail account (james.branco@gmail.com, id 68a96f5b-faaf-41d3-967e-5981564ec080)
- * that has been synced to the SQLite cache. The cache is populated by the
- * 15-minute scheduler and serves sub-2ms responses.
- *
- * Test 5 uses page.route() to mock the cold-sync state — this is valid
- * because it tests the gating UI behavior, not the sync engine itself.
- *
- * Selectors use roles, labels, and text content. data-testid attributes
- * are used where available (EmailReader, EmailErrorBoundary, mail-gating-cold).
- *
- * 🔴 KNOWN ISSUE: page.waitForLoadState("load") is used, never "networkidle",
- * because the mail page polls /sync-status every 2s.
- * 🔴 KNOWN ISSUE: URL patterns matching GET /emails/** must exclude
- * /sync-status to avoid false matches.
- */
+/** Mail cache and cold-gating checks against the configured mail service. */
 
 const API_BASE = "http://localhost:4097/api/v1";
 const MAIL_PAGE = "http://localhost:3000/mail";
 const ACCOUNT_ID = "68a96f5b-faaf-41d3-967e-5981564ec080";
-
-// =========================================================================
-//  Helpers
-// =========================================================================
 
 /**
  * Poll the sync-status endpoint every 2s until the cache is warm.
@@ -76,48 +54,32 @@ async function waitForWarmCache(page: any, timeout = 60_000): Promise<void> {
   );
 }
 
-// =========================================================================
-//  Tests
-// =========================================================================
-
 test.describe("Mail — Cache Warming", () => {
-  /* ================================================================== */
-  /*  1. All folders have cached data after sync                          */
-  /* ================================================================== */
-
   test("1 - all folders have cached headers and bodies after sync", async ({ page }) => {
-    // Trigger a full-account sync to ensure the cache is populated.
-    // This blocks until all folders are synced sequentially — may take up
-    // to 2 minutes for a 34K-message Gmail INBOX.
+    // The sync completes folders sequentially, so this is intentionally bounded
+    // by the suite's long-running mail timeout.
     const syncResp = await page.request.post(
       `${API_BASE}/emails/sync?account=${ACCOUNT_ID}&project=global-default`,
     );
     expect(syncResp.ok()).toBeTruthy();
 
-    // Poll sync-status until cache is warm (totalBodies > 50, 3+ folders
-    // with cached headers). Uses cachedCount (not bodyCount) for the
-    // folder-level check because body caching occurs on individual email
-    // reads, not during sync. INBOX bodyCount > 0 is asserted because
-    // the scheduler/prior activity has precached bodies there.
+    // Header caching happens during sync; body caching is demand-driven, so the
+    // folder and INBOX thresholds intentionally use different counters.
     const status = await pollUntilWarm(page);
 
-    // — Assertions —
     expect(status.overall).toBe("done");
     expect(status.totalBodies).toBeGreaterThan(50);
     expect(status.totalCached).toBeGreaterThan(0);
 
-    // INBOX must have cached bodies
     const inboxFolder = status.folders.find((f: any) => f.folder === "INBOX");
     expect(inboxFolder).toBeDefined();
     expect(inboxFolder.bodyCount).toBeGreaterThan(0);
 
-    // At least 3 folders must have cached headers (proves multi-folder sync)
     const foldersWithCache = status.folders.filter(
       (f: any) => f.cachedCount > 0,
     );
     expect(foldersWithCache.length).toBeGreaterThanOrEqual(3);
 
-    // Log folder-level stats for diagnostics
     test.info().annotations.push({
       type: "cache-stats",
       description: [
@@ -132,25 +94,18 @@ test.describe("Mail — Cache Warming", () => {
     });
   });
 
-  /* ================================================================== */
-  /*  2. Folder click returns cached data, not pending                    */
-  /* ================================================================== */
-
   test("2 - folder click returns cached data, not pending", async ({ page }) => {
     await page.goto("/mail", { waitUntil: "load" });
 
-    // Wait for sync-status to show warm state. The page polls every 2s.
     await waitForWarmCache(page);
 
-    // Click Starred folder in the sidebar (display name = "Starred",
-    // IMAP path = "[Gmail]/Starred")
+    // The UI label and provider path differ for Gmail system folders.
     const starredBtn = page
       .locator("button")
       .filter({ hasText: /Starred/ })
       .first();
     await expect(starredBtn).toBeVisible({ timeout: 10_000 });
 
-    // Intercept the API response for the Starred folder email fetch
     const emailResponsePromise = page.waitForResponse(
       (resp) => {
         const url = resp.url();
@@ -171,28 +126,20 @@ test.describe("Mail — Cache Warming", () => {
     const emailResponse = await emailResponsePromise;
     const body = await emailResponse.json();
 
-    // Assert: source is "cache", not "pending" or "imap"
     expect(body.source).toBe("cache");
     expect(body.source).not.toBe("pending");
     expect(body.source).not.toBe("imap");
     expect(Array.isArray(body.data)).toBeTruthy();
 
-    // Email list must render within 3s of the response
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 3000 });
   });
 
-  /* ================================================================== */
-  /*  3. Email body opens from cache in < 2s                              */
-  /* ================================================================== */
-
   test("3 - email body opens from cache in under 2 seconds", async ({ page }) => {
     await page.goto("/mail", { waitUntil: "load" });
 
-    // Wait for warm state
     await waitForWarmCache(page);
 
-    // Click Starred folder to get the email list
     const starredBtn = page
       .locator("button")
       .filter({ hasText: /Starred/ })
@@ -200,20 +147,16 @@ test.describe("Mail — Cache Warming", () => {
     await expect(starredBtn).toBeVisible({ timeout: 10_000 });
     await starredBtn.click();
 
-    // Wait for email list to render
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15_000 });
 
     const rowCount = await emailRows.count();
     expect(rowCount, "Starred must contain at least one cached email").toBeGreaterThan(0);
 
-    // Click the first email and measure timing
     const start = Date.now();
     await emailRows.first().click();
 
-    // Wait for reader content to appear — accepts either the HTML iframe
-    // (for HTML emails) or the reader content container (for text emails).
-    // The first visible of the two signals completion.
+    // HTML and plain-text messages expose different completion markers.
     const readerContent = page.locator('[data-testid="email-reader-content"]');
     const htmlIframe = page.locator('[data-testid="email-html-iframe"]');
     await Promise.race([
@@ -230,20 +173,13 @@ test.describe("Mail — Cache Warming", () => {
     });
   });
 
-  /* ================================================================== */
-  /*  4. No [Gmail] bare container in sidebar                             */
-  /* ================================================================== */
-
   test("4 - no [Gmail] bare container in sidebar", async ({ page }) => {
     await page.goto("/mail", { waitUntil: "load" });
 
-    // Wait for the sidebar state instead of sleeping through the poll interval.
     await expect(page.locator("button").filter({ hasText: /INBOX/ }).first()).toBeVisible({ timeout: 15_000 });
 
-    // The mail page (page.tsx) filters the bare "[Gmail]" container from
-    // the folder list (f.name !== "[Gmail]"). Verify no button shows
-    // EXACT text "[Gmail]" without a trailing "/" (which would indicate a
-    // subfolder path like "[Gmail]/Starred").
+    // Gmail exposes system folders under a container; the container itself is
+    // not a selectable folder.
     const allButtons = page.locator("button");
     const btnCount = await allButtons.count();
     let bareGmailCount = 0;
@@ -257,13 +193,7 @@ test.describe("Mail — Cache Warming", () => {
     expect(bareGmailCount).toBe(0);
   });
 
-  /* ================================================================== */
-  /*  5. Cold INBOX shows Preparing screen (not 3-pane layout)           */
-  /* ================================================================== */
-
   test("5 - cold INBOX shows Preparing screen, not 3-pane content", async ({ page }) => {
-    // Intercept sync-status to simulate cold cache (overall="syncing",
-    // totalCached=0, INBOX cachedCount=0)
     await page.route("**/api/v1/emails/sync-status**", async (route) => {
       await route.fulfill({
         status: 200,
@@ -304,7 +234,6 @@ test.describe("Mail — Cache Warming", () => {
       });
     });
 
-    // Intercept INBOX email listing to return pending state
     await page.route(
       (url) =>
         url.pathname === "/api/v1/emails" &&
@@ -325,38 +254,28 @@ test.describe("Mail — Cache Warming", () => {
 
     await page.goto("/mail", { waitUntil: "load" });
 
-    // The "h1 Mail" heading should always be present
     const mailHeading = page.locator("h1").filter({ hasText: "Mail" });
     await expect(mailHeading).toBeVisible({ timeout: 5000 });
 
-    // ✅ The cold-gating "Preparing your mailbox…" screen should be visible
-    // (data-testid="mail-gating-cold" rendered when isInboxCold is true)
     const coldGating = page.locator('[data-testid="mail-gating-cold"]');
     await expect(coldGating).toBeVisible({ timeout: 5000 });
 
-    // ✅ "Preparing your mailbox…" heading text should be present
     const preparingHeading = page.getByText("Preparing your mailbox…");
     await expect(preparingHeading).toBeVisible({ timeout: 3000 });
 
-    // ✅ 3-pane layout should NOT be visible — the flex container with
-    // FolderSidebar + EmailList + EmailReader is replaced by cold gating
-    // when isInboxCold is true (see page.tsx ternary at line 452).
+    // Cold gating replaces the three-pane layout while INBOX has no cache.
     const threePaneLayout = page.locator(
-      // The 3-pane container has border + rounded and wraps the three panels
       'div.flex.h-\\[calc\\(100vh-180px\\)\\]',
     );
     await expect(threePaneLayout).not.toBeVisible({ timeout: 3000 });
 
-    // The email list panel (w-[350px] flex-shrink-0) should not be present
     const emailListPanel = page.locator('div.w-\\[350px\\].flex-shrink-0').first();
     await expect(emailListPanel).not.toBeVisible({ timeout: 3000 });
 
-    // Also verify — no email rows should be present (cache is completely empty)
     const emailRows = page.locator("div.cursor-pointer");
     const rowCount = await emailRows.count();
     expect(rowCount).toBe(0);
 
-    // Cleanup mocks
     await page.unrouteAll();
   });
 });

@@ -137,6 +137,10 @@ export default function Overlay({
         if (!panel) return;
         const focusable = Array.from(
           panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter(
+          (element) =>
+            !element.matches(':disabled, [aria-disabled="true"], [tabindex="-1"]') &&
+            !element.closest("[hidden], [inert]"),
         );
         const first = focusable[0];
         const last = focusable[focusable.length - 1];

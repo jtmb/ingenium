@@ -72,11 +72,11 @@ function oauthToken(): OAuthToken {
 
 async function seedAccount() {
   fixture = await createFixture();
-  const account = fixture.accounts.createAccountWithCredentials(fixture.globalId, accountInput(), {
+  const account = fixture.accounts.createAccountWithCredentials(accountInput(), {
     imapPass: "phase4-imap-password",
     smtpPass: "phase4-smtp-password",
   });
-  fixture.oauth.storeTokens(fixture.globalId, account.id, oauthToken());
+  fixture.oauth.storeTokens(account.id, oauthToken());
   return account;
 }
 
@@ -90,11 +90,11 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     fixture!.core.resetDbForTest();
     const reopened = await import("ingenium-core");
 
-    expect(fixture!.accounts.getAccount(fixture!.globalId, account.id)?.email).toBe("phase4@example.test");
-    expect(fixture!.accounts.getCredentials(fixture!.globalId, account.id)).toMatchObject({
+    expect(fixture!.accounts.getAccount(account.id)?.email).toBe("phase4@example.test");
+    expect(fixture!.accounts.getCredentials(account.id)).toMatchObject({
       password: "phase4-imap-password",
     });
-    await expect(fixture!.oauth.getValidTokens(fixture!.globalId, account.id, "custom")).resolves.toMatchObject({
+    await expect(fixture!.oauth.getValidTokens(account.id, "custom")).resolves.toMatchObject({
       accessToken: "phase4-access-token",
       refreshToken: "phase4-refresh-token",
     });
@@ -111,11 +111,11 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     const account = await seedAccount();
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = WRONG_KEY;
 
-    expect(fixture!.accounts.getAccount(fixture!.globalId, account.id)).toMatchObject({
+    expect(fixture!.accounts.getAccount(account.id)).toMatchObject({
       email: "phase4@example.test",
     });
-    expect(fixture!.accounts.getCredentials(fixture!.globalId, account.id)).toBeUndefined();
-    await expect(fixture!.oauth.getValidTokens(fixture!.globalId, account.id, "custom")).resolves.toBeNull();
+    expect(fixture!.accounts.getCredentials(account.id)).toBeUndefined();
+    await expect(fixture!.oauth.getValidTokens(account.id, "custom")).resolves.toBeNull();
   });
 
   it("does not partially replace credentials or OAuth tokens when the key is malformed", async () => {
@@ -126,16 +126,16 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     const oauthBefore = fixture!.core.settings.getSetting(fixture!.globalId, oauthKey);
 
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = "malformed-key";
-    expect(() => fixture!.accounts.storeCredentials(fixture!.globalId, account.id, { imapPass: "replacement" }))
+    expect(() => fixture!.accounts.storeCredentials(account.id, { imapPass: "replacement" }))
       .toThrow(/encryption|credentials were not changed/i);
-    expect(() => fixture!.oauth.storeTokens(fixture!.globalId, account.id, oauthToken()))
+    expect(() => fixture!.oauth.storeTokens(account.id, oauthToken()))
       .toThrow(/encryption|credentials were not changed/i);
 
     expect(fixture!.core.settings.getSetting(fixture!.globalId, accountKey)).toBe(accountBefore);
     expect(fixture!.core.settings.getSetting(fixture!.globalId, oauthKey)).toBe(oauthBefore);
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = TEST_KEY;
-    expect(fixture!.accounts.getCredentials(fixture!.globalId, account.id)?.password).toBe("phase4-imap-password");
-    await expect(fixture!.oauth.getValidTokens(fixture!.globalId, account.id, "custom")).resolves.toMatchObject({
+    expect(fixture!.accounts.getCredentials(account.id)?.password).toBe("phase4-imap-password");
+    await expect(fixture!.oauth.getValidTokens(account.id, "custom")).resolves.toMatchObject({
       accessToken: "phase4-access-token",
     });
   });
@@ -144,12 +144,12 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     fixture = await createFixture();
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = "malformed-key";
 
-    expect(() => fixture!.accounts.createAccountWithCredentials(fixture!.globalId, accountInput(), {
+    expect(() => fixture!.accounts.createAccountWithCredentials(accountInput(), {
       imapPass: "account-secret",
     })).toThrow(/encryption|credentials were not changed/i);
-    expect(() => fixture!.accounts.createOAuthAccountWithTokens(fixture!.globalId, accountInput(), oauthToken()))
+    expect(() => fixture!.accounts.createOAuthAccountWithTokens(accountInput(), oauthToken()))
       .toThrow(/encryption|credentials were not changed/i);
-    expect(fixture!.accounts.listAccounts(fixture!.globalId)).toEqual([]);
+    expect(fixture!.accounts.listAccounts()).toEqual([]);
     expect(fixture!.core.settings.getSetting(fixture!.globalId, "email_encryption_key_fingerprint")).toBeUndefined();
   });
 
@@ -157,40 +157,40 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     const account = await seedAccount();
     delete process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
 
-    expect(fixture!.accounts.listAccounts(fixture!.globalId)).toMatchObject([
+    expect(fixture!.accounts.listAccounts()).toMatchObject([
       { id: account.id, email: "phase4@example.test" },
     ]);
-    expect(fixture!.accounts.getCredentials(fixture!.globalId, account.id)).toBeUndefined();
+    expect(fixture!.accounts.getCredentials(account.id)).toBeUndefined();
   });
 
   it("resolves accounts against a recreated global project instead of a deleted project", async () => {
     fixture = await createFixture();
     const oldGlobalId = fixture.globalId;
-    const oldAccount = fixture.accounts.addAccount(oldGlobalId, accountInput());
-    fixture.accounts.removeAccount(oldGlobalId, oldAccount.id);
+    const oldAccount = fixture.accounts.addAccount(accountInput());
+    fixture.accounts.removeAccount(oldAccount.id);
     expect(fixture.core.projects.deleteProject("global-default")).toEqual({ status: "deleted" });
 
     const replacement = fixture.core.projects.createProject("replacement-global", true);
-    const replacementAccount = fixture.accounts.addAccount(replacement.id, {
+    const replacementAccount = fixture.accounts.addAccount({
       ...accountInput(),
       email: "replacement@example.test",
     });
 
     expect(fixture.accounts.getGlobalProjectId()).toBe(replacement.id);
-    expect(fixture.accounts.getAccount(oldGlobalId, replacementAccount.id)?.email).toBe("replacement@example.test");
+    expect(fixture.accounts.getAccount(replacementAccount.id)?.email).toBe("replacement@example.test");
     expect(fixture.core.settings.getSetting(oldGlobalId, `email_account_${replacementAccount.id}`)).toBeUndefined();
     expect(fixture.core.settings.getSetting(replacement.id, `email_account_${replacementAccount.id}`)).toContain("replacement@example.test");
   });
 
-  it("keeps writes in the canonical global namespace when given a non-global project", async () => {
+  it("keeps writes in the canonical global namespace", async () => {
     fixture = await createFixture();
     const external = fixture.core.projects.createProject("phase4-external");
 
-    const account = fixture.accounts.addAccount(external.id, {
+    const account = fixture.accounts.addAccount({
       ...accountInput(),
       email: "canonical-write@example.test",
     });
-    fixture.accounts.storeCredentials(external.id, account.id, { imapPass: "canonical-password" });
+    fixture.accounts.storeCredentials(account.id, { imapPass: "canonical-password" });
 
     expect(fixture.core.settings.getSetting(
       fixture.globalId,
@@ -200,7 +200,7 @@ describe("Phase 4 email persistence and credential boundaries", () => {
       external.id,
       `email_account_${account.id}`,
     )).toBeUndefined();
-    expect(fixture.accounts.getCredentials(external.id, account.id)).toMatchObject({
+    expect(fixture.accounts.getCredentials(account.id)).toMatchObject({
       password: "canonical-password",
     });
   });
@@ -212,6 +212,6 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     await expect(fixture.oauth.exchangeCode("yahoo", "invalid-code", result.state)).rejects.toThrow("not supported");
     expect(fixture.core.settings.getSetting(fixture.globalId, "oauth_state_yahoo")).toBeUndefined();
     expect(fixture.core.settings.getSetting(fixture.globalId, "email_oauth_unknown")).toBeUndefined();
-    expect(fixture.accounts.listAccounts(fixture.globalId)).toEqual([]);
+    expect(fixture.accounts.listAccounts()).toEqual([]);
   });
 });

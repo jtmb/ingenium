@@ -7,7 +7,9 @@ CONFIG="$REPO_ROOT/opencode.json"
 EXPECTED_LOGICAL_AGENT_COUNT=12
 MAX_ACTIVE_SUBAGENTS=6
 MAX_CONCURRENT_WRITERS=3
+MAX_NON_WRITERS=3
 ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
+ROADMAP_ARCHIVE_DIR="$REPO_ROOT/docs/reference/archive"
 FAILED=0
 
 pass() { printf 'PASS: %s\n' "$1"; }
@@ -37,7 +39,58 @@ profile_has_writer_permission() {
   ' "$1"
 }
 
-# Collect active agent files (YAML frontmatter only)
+profile_has_exact_ponytail_skill_permission() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  skill:[[:space:]]*$/ { in_skill = 1; next }
+    in_skill && /^  [^[:space:]]/ { in_skill = 0 }
+    in_skill && /^    "@ponytail":[[:space:]]*allow[[:space:]]*$/ {
+      entries++
+      allowed++
+      next
+    }
+    in_skill && /^    "@ponytail":/ { entries++ }
+
+    END { exit(entries == 1 && allowed == 1 ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_exact_question_deny() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  question:[[:space:]]*deny[[:space:]]*$/ { denied++; next }
+    /^  question:/ { other++ }
+
+    END { exit(denied == 1 && other == 0 ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_broker_wildcard_deny_only() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^permission:[[:space:]]*$/ { in_permission = 1; next }
+    in_permission && /^[^[:space:]]/ { in_permission = 0; next }
+    !in_permission { next }
+    /^[[:space:]]*$/ || /^  #/ { next }
+    /^  "\*": deny[[:space:]]*$/ { wildcard_denies++; next }
+    /^[[:space:]]/ { exceptions++ }
+
+    END { exit(wildcard_denies == 1 && exceptions == 0 ? 0 : 1) }
+  ' "$1"
+}
+
 mapfile -t AGENT_FILES < <(find "$AGENTS_DIR" -type f -name '*.md' -print | sort)
 mapfile -t AGENT_FILES < <(for file in "${AGENT_FILES[@]}"; do [[ "$(head -n 1 "$file")" == '---' ]] && printf '%s\n' "$file"; done)
 
@@ -46,7 +99,77 @@ if [[ "${#AGENT_FILES[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-# Check frontmatter completeness and no Markdown model field.
+# Every non-broker profile, including compatibility mirrors, explicitly opts in.
+ponytail_permissions_valid=1
+for file in "${AGENT_FILES[@]}"; do
+  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  [[ "$profile_name" == "ingenium-llm-broker" ]] && continue
+  if ! profile_has_exact_ponytail_skill_permission "$file"; then
+    fail "$profile_name must define exactly one allowed @ponytail skill permission"
+    ponytail_permissions_valid=0
+  fi
+done
+if [[ "$ponytail_permissions_valid" -eq 1 ]]; then
+  pass "all non-broker profiles explicitly allow @ponytail"
+fi
+
+question_permissions_valid=1
+for file in "${AGENT_FILES[@]}"; do
+  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  [[ "$profile_name" == "ingenium-llm-broker" ]] && continue
+  if ! profile_has_exact_question_deny "$file"; then
+    fail "$profile_name must define exactly one scalar question: deny permission"
+    question_permissions_valid=0
+  fi
+done
+if [[ "$question_permissions_valid" -eq 1 ]]; then
+  pass "all non-broker profiles explicitly deny the question tool"
+fi
+
+BROKER_PROFILE="$AGENTS_DIR/execution/ingenium-llm-broker.md"
+if [[ ! -r "$BROKER_PROFILE" ]] || ! profile_has_broker_wildcard_deny_only "$BROKER_PROFILE"; then
+  fail "broker must retain exactly one wildcard deny permission with no exceptions"
+else
+  pass "broker retains its wildcard-denied permission boundary"
+fi
+
+if ! node - "$CONFIG" <<'NODE'
+const fs = require("fs");
+const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const errors = [];
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+if (!isRecord(config.permission) || config.permission.question !== "deny") {
+  errors.push("root permission.question must be deny");
+}
+
+const plan = config.agent?.plan;
+if (!isRecord(plan) || !isRecord(plan.permission) || plan.permission.question !== "allow") {
+  errors.push("built-in plan permission.question must be allow");
+}
+
+for (const [name, projection] of Object.entries(config.agent ?? {})) {
+  if (name === "plan" || !isRecord(projection)) continue;
+  for (const [label, value] of [
+    ["question", projection.question],
+    ["permission.question", isRecord(projection.permission) ? projection.permission.question : undefined],
+  ]) {
+    if (value === "allow" || value === "ask") {
+      errors.push(`custom agent ${name} must not ${label}=${value}`);
+    }
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: root denies question, built-in Plan allows it, and custom projections do not grant it");
+NODE
+then
+  FAILED=1
+fi
+
 # Old agent topology tolerates the duplicate root-level ingenium-chat.md
 # (it mirrors chat/ingenium-chat.md for legacy OpenCode discovery).
 declare -A NAMES=()
@@ -56,11 +179,9 @@ declare -A NON_WRITER_NAMES=()
 for file in "${AGENT_FILES[@]}"; do
   name="$(basename "$file" .md)"
 
-  # Read name from frontmatter for accurate dedup
   fm_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
   [[ -z "$fm_name" ]] && fm_name="$name"
 
-  # Detect hidden agents
   if grep -q '^hidden:.*true' "$file"; then
     HIDDEN_NAMES["$fm_name"]=1
   fi
@@ -69,7 +190,6 @@ for file in "${AGENT_FILES[@]}"; do
     WRITER_NAMES["$fm_name"]=1
   fi
 
-  # Tolerate duplicate root-level ingenium-chat (canonical copy in chat/ subdirectory)
   if [[ -n "${NAMES[$fm_name]:-}" && "$fm_name" == "ingenium-chat" ]]; then
     continue
   fi
@@ -128,9 +248,6 @@ else
   pass "$EXPECTED_LOGICAL_AGENT_COUNT logical agent profiles are preserved (chat compatibility mirror deduplicated)"
 fi
 
-# ============================================================
-# 1. Validate Prompt Engineer and Terra agent files are absent
-# ============================================================
 for file in "${AGENT_FILES[@]}"; do
   base="$(basename "$file" .md)"
   if [[ "$base" == "ingenium-prompt-engineer" ]]; then
@@ -142,15 +259,8 @@ for file in "${AGENT_FILES[@]}"; do
 done
 if [[ "$FAILED" -eq 0 ]]; then pass "Prompt Engineer and Terra agent files are absent"; fi
 
-# ============================================================
-# 2. Verify non-hidden active agents (except hidden ingenium-llm-broker)
-#    have model mappings in centralized opencode.json with case-sensitive
-#    variant validation by provider
-# ============================================================
-# Build list of active agent names, excluding hidden ingenium-llm-broker
 declare -a CHECK_NAMES=()
 for name in "${!NAMES[@]}"; do
-  # Skip hidden ingenium-llm-broker — system-internal agent, no model mapping required
   [[ "$name" == "ingenium-llm-broker" ]] && continue
   CHECK_NAMES+=("$name")
 done
@@ -220,11 +330,6 @@ else
   pass "no active non-hidden agents to check (skipped)"
 fi
 
-# ============================================================
-# 2b. Canonical active-model guidance must match opencode.json.
-#     Only inspect the explicit local-model active-assignment references;
-#     historical examples, drafts, and archived material are not authority.
-# ============================================================
 ORCHESTRATOR="$AGENTS_DIR/primary/ingenium-orchestrator.md"
 LOCAL_MODEL_GUIDANCE_SOURCES=(
   "$REPO_ROOT/.opencode/skills/local-models/SKILL.md"
@@ -358,10 +463,6 @@ elif [[ "$local_model_guidance_valid" -eq 1 ]]; then
   pass "no active non-hidden agents to check (skipped canonical model guidance)"
 fi
 
-# ============================================================
-# 2c. Canonical agent docs must respect QA Vision's denied Bash permission.
-#     Keep this an explicit allow-list so drafts and archives cannot affect it.
-# ============================================================
 QA_VISION_PROFILE="$AGENTS_DIR/execution/ingenium-qa-vision.md"
 CANONICAL_AGENT_DOCS=(
   "$REPO_ROOT/AGENTS.md"
@@ -396,10 +497,6 @@ else
   fi
 fi
 
-# ============================================================
-# 3. Validate no stale Terra/Prompt Engineer task allow entries
-#    in orchestrator
-# ============================================================
 WORKFLOW_POLICY_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/source-index.md"
 AGENT_LIMITS_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/agent-limits.md"
 DOCUMENTED_POLICY_SOURCES=(
@@ -545,9 +642,8 @@ validate_orchestrator_bash_permissions() {
   return 1
 }
 
-# The root config intentionally remains permissive for normal agents. The
-# orchestrator must retain its stricter, explicit question-tool denial in both
-# the profile and any agent-specific config projection.
+# The root config denies questions globally. The orchestrator must retain its
+# explicit profile denial and cannot regain it through its centralized projection.
 validate_orchestrator_question_boundary() {
   local errors=0
   local -a question_rules=()
@@ -594,12 +690,14 @@ if (!projection || typeof projection !== "object") {
   const projectedQuestionPermissions = [
     ["agent.question", projection.question],
     ["agent.permission.question", projection.permission?.question],
-    ["root permission.question", config.permission?.question],
   ];
   for (const [label, value] of projectedQuestionPermissions) {
     if (value !== undefined && value !== "deny") {
       errors.push(`${label} must be absent or deny, found ${JSON.stringify(value)}`);
     }
+  }
+  if (config.permission?.question !== "deny") {
+    errors.push(`root permission.question must be deny, found ${JSON.stringify(config.permission?.question)}`);
   }
 }
 
@@ -792,11 +890,6 @@ else
   fi
 fi
 
-# ============================================================
-# 4. Validate every canonical policy source and recognizable examples.
-#    Policy copies must agree on the 6-active/3-writer limits.  Examples are
-#    checked by observed @agent lines, rather than trusting their prose.
-# ============================================================
 for policy_source in "${DOCUMENTED_POLICY_SOURCES[@]}"; do
   if [[ -r "$policy_source" ]]; then
     pass "canonical policy source is available for safe inspection: ${policy_source#"$REPO_ROOT"/}"
@@ -851,7 +944,7 @@ for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
     'Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope.' \
     "autonomous scoped source-fix and deployment policy"
   check_policy_pattern "$policy_source" "$policy_label" \
-    'Only Plan mode may use interactive decision questions\.' \
+    'Only Plan mode may use interactive decision questions\.|The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not\.' \
     "Plan-mode-only interactive decision policy"
   check_policy_pattern "$policy_source" "$policy_label" \
     'Orchestration never invokes the `question` tool' \
@@ -1021,6 +1114,7 @@ validate_wave_block() {
   local block="$2"
   local active_count=0
   local writer_count=0
+  local non_writer_count=0
   local agent_line agent_ref agent_name
   local -a agent_lines=()
   mapfile -t agent_lines < <(
@@ -1044,30 +1138,39 @@ validate_wave_block() {
       elif [[ "$agent_line" == *"(writer"* ]]; then
         fail "$label marks permissions-derived non-writer $agent_ref as a writer"
         policy_errors=1
+      else
+        non_writer_count=$((non_writer_count + 1))
       fi
     done < <(printf '%s\n' "$agent_line" | grep -Eo '@[[:alnum:]-]+' || true)
   done
 
-  if [[ "$active_count" -le "$MAX_ACTIVE_SUBAGENTS" && "$writer_count" -le "$MAX_CONCURRENT_WRITERS" ]]; then
-    pass "$label stays within max 6 active agents and max 3 permission-derived writers ($active_count/$writer_count)"
+  if [[ "$active_count" -le "$MAX_ACTIVE_SUBAGENTS" && \
+        "$writer_count" -le "$MAX_CONCURRENT_WRITERS" && \
+        "$non_writer_count" -le "$MAX_NON_WRITERS" && \
+        $((writer_count + non_writer_count)) -eq "$active_count" ]]; then
+    pass "$label stays within max 6 active agents, max 3 writers, and max 3 non-writers ($active_count/$writer_count/$non_writer_count)"
   else
-    fail "$label exceeds max 6 active/3 permission-derived writers ($active_count/$writer_count)"
+    fail "$label exceeds max 6 active/3 writers/3 non-writers or has an unclassified agent ($active_count/$writer_count/$non_writer_count)"
     policy_errors=1
   fi
 
-  local declared_active="" declared_writers=""
-  if [[ "$block" =~ \(([0-9]+)[[:space:]]+active,[[:space:]]*([0-9]+)[[:space:]]+writers ]]; then
+  local declared_active="" declared_writers="" declared_non_writers=""
+  if [[ "$block" =~ \(([0-9]+)[[:space:]]+active,[[:space:]]*([0-9]+)[[:space:]]+writers?,[[:space:]]*([0-9]+)[[:space:]]+non[-[:space:]]writers? ]]; then
     declared_active="${BASH_REMATCH[1]}"
     declared_writers="${BASH_REMATCH[2]}"
-  elif [[ "$block" =~ Active:[[:space:]]*([0-9]+),[[:space:]]*Writers:[[:space:]]*([0-9]+) ]]; then
+    declared_non_writers="${BASH_REMATCH[3]}"
+  elif [[ "$block" =~ Active:[[:space:]]*([0-9]+),[[:space:]]*Writers:[[:space:]]*([0-9]+),[[:space:]]*Non[-[:space:]]writers:[[:space:]]*([0-9]+) ]]; then
     declared_active="${BASH_REMATCH[1]}"
     declared_writers="${BASH_REMATCH[2]}"
+    declared_non_writers="${BASH_REMATCH[3]}"
   fi
   if [[ -n "$declared_active" ]]; then
-    if [[ "$declared_active" -eq "$active_count" && "$declared_writers" -eq "$writer_count" ]]; then
-      pass "$label declaration matches observed agents ($declared_active/$declared_writers)"
+    if [[ "$declared_active" -eq "$active_count" && \
+          "$declared_writers" -eq "$writer_count" && \
+          "$declared_non_writers" -eq "$non_writer_count" ]]; then
+      pass "$label declaration matches observed agents ($declared_active/$declared_writers/$declared_non_writers)"
     else
-      fail "$label declares $declared_active/$declared_writers but contains $active_count/$writer_count"
+      fail "$label declares $declared_active/$declared_writers/$declared_non_writers but contains $active_count/$writer_count/$non_writer_count"
       policy_errors=1
     fi
   fi
@@ -1131,9 +1234,6 @@ if [[ "$policy_errors" -eq 0 ]]; then
   pass "all canonical policy sources and recognizable examples passed"
 fi
 
-# ============================================================
-# 5. Chat read-only safety boundary — canonical profile in chat/ subdirectory
-# ============================================================
 CHAT_FILE="$AGENTS_DIR/chat/ingenium-chat.md"
 if [[ ! -f "$CHAT_FILE" ]]; then
   fail "no chat agent profile found at $CHAT_FILE"
@@ -1143,12 +1243,6 @@ else
   pass "canonical chat remains read-only and cannot delegate"
 fi
 
-# ============================================================
-# 6. Causal-remediation policy contract. These checks intentionally inspect
-#    canonical profiles and policy references, not archives or historical
-#    examples. They make premature escalation and recursive reviewer handoffs
-#    static regressions rather than runtime surprises.
-# ============================================================
 FINITE_TASK_CONTRACT_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/finite-task-contract.md"
 ORCHESTRATOR_PRIMER_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md"
 ORCHESTRATOR_FLOW_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/references/orchestrator-flow.md"
@@ -1204,20 +1298,32 @@ validate_roadmap_terminal_state() {
   ' "$ROADMAP_FILE" | sort)"
 
   if [[ -n "$active_ids" ]]; then
-    if grep -Eqi 'final[[:space:]-]+completion|terminal[[:space:]-]+PASS' "$ROADMAP_FILE" && \
-       ! grep -Eqi 'no final completion may be' "$ROADMAP_FILE"; then
+    if grep -Eqi 'final[[:space:]-]+completion|terminal[[:space:]-]+PASS|Only[[:space:]]+`?PASS`?' "$ROADMAP_FILE" && \
+       ! grep -Eqi 'no final completion may be|does not end the turn with a progress or completion response' "$ROADMAP_FILE"; then
       fail "ROADMAP.md claims final completion while active work markers remain"
       causal_policy_errors=1
     else
       pass "ROADMAP.md blocks final PASS/completion while active markers remain"
     fi
-    require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'TodoWrite/roadmap reconciliation' 'active-marker reconciliation requirement'
+    require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'TodoWrite.*(reconcil|live checklist)' 'active-marker/TodoWrite separation and reconciliation requirement'
   else
     pass "ROADMAP.md has no unreconciled active work markers"
   fi
-  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'STOP.*CANCELLED.*only on an explicit user request' 'explicit-user-request STOP/CANCELLED task contracts'
-  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'named authorized writer deployment owner.*Docker/Compose permission' 'runtime deployment owner requirement'
-  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'active markers block terminal completion[[:space:]]+only;[[:space:]]+they do not block autonomous resumption' 'active-marker status semantics'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'explicit user.*STOP.*CANCELLED.*terminal|STOP.*CANCELLED.*only on an explicit user request|Only.*PASS.*ESCALATE_USER.*STOP.*CANCELLED' \
+    'explicit-user-request STOP/CANCELLED task contracts'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'Deployment owner|named authorized writer deployment owner.*Docker/Compose permission' \
+    'task-level/runtime deployment owner requirement'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'open-roadmap rule|active markers block terminal completion' \
+    'open-roadmap terminal guard'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'roadmap task or TodoWrite item is open' \
+    'open-roadmap work detection'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'immediately dispatches the next declared phase|autonomous resumption' \
+    'open-roadmap synchronous resumption'
 }
 
 # Require a task-level deployment-owner field. Runtime tasks name an
@@ -1228,8 +1334,8 @@ validate_roadmap_task_deployment_owners() {
   local block=""
   local missing=0
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ^####[[:space:]] ]]; then
-      if [[ -n "$task" && "$block" != *"- **Deployment owner:**"* ]]; then
+    if [[ "$line" =~ ^#{3,4}[[:space:]]+[A-Z][A-Z0-9]*-[0-9]{3}[[:space:]]+[-—] ]]; then
+      if [[ -n "$task" && "$block" != *"**Deployment owner:**"* ]]; then
         fail "ROADMAP.md task $task is missing a task-level Deployment owner"
         causal_policy_errors=1
         missing=1
@@ -1240,7 +1346,7 @@ validate_roadmap_task_deployment_owners() {
       block+=$'\n'$line
     fi
   done < "$ROADMAP_FILE"
-  if [[ -n "$task" && "$block" != *"- **Deployment owner:**"* ]]; then
+  if [[ -n "$task" && "$block" != *"**Deployment owner:**"* ]]; then
     fail "ROADMAP.md task $task is missing a task-level Deployment owner"
     causal_policy_errors=1
     missing=1
@@ -1250,12 +1356,257 @@ validate_roadmap_task_deployment_owners() {
   fi
 }
 
+# The roadmap is the source of truth for task identity.  Do not maintain a
+# second hard-coded allow-list here: new families (for example USAGE-*) must
+# receive the same contract checks as the original BUG/MCP/CTX/DOC families.
+validate_roadmap_task_contracts() {
+  local task=""
+  local block=""
+  local line
+  local errors=0
+  local graph_block
+  local token
+  local prefix
+  local start_number
+  local end_number
+  local number
+  local next_task
+  local -a required_fields=(
+    '\*\*IN_SCOPE:\*\*'
+    '\*\*OUT_OF_SCOPE:\*\*'
+    '\*\*Owner:\*\*'
+    '\*\*Dependencies:\*\*'
+    '\*\*Acceptance:\*\*'
+    '\*\*STOP_CONDITION:\*\*'
+    '\*\*Escalation:\*\*'
+    '\*\*Verification owner:\*\*'
+    '\*\*Deployment owner:\*\*'
+    '\*\*Rollback/safety:\*\*'
+    '\*\*Tests:\*\*'
+    '\*\*Docs:\*\*'
+    '\*\*Exclusive writer territory:\*\*'
+    '\*\*Phase/counts:\*\*'
+    '\*\*Verification plan:\*\*'
+    '\*\*Causal remediation rule:\*\*'
+    '\*\*Finding classification:\*\*'
+  )
+  declare -A task_ids=()
+  declare -A graph_task_ids=()
+
+  validate_task_block() {
+    local task_id="$1"
+    local task_block="$2"
+    local field
+    for field in "${required_fields[@]}"; do
+      if ! grep -Eqi -- "$field" <<<"$task_block"; then
+        fail "ROADMAP.md task $task_id is missing contract field matching $field"
+        causal_policy_errors=1
+        errors=1
+      fi
+    done
+
+    local phase_counts
+    local phase_writers
+    local phase_non_writers
+    phase_counts="$(grep -Eio -- '-[[:space:]]+\*\*Phase/counts:\*\*[[:space:]]+.*' <<<"$task_block" | head -n 1 || true)"
+    if [[ ! "$phase_counts" =~ ([0-9]+)[[:space:]]+writers?[[:space:]]*/[[:space:]]*([0-9]+)[[:space:]]+non[-[:space:]]*writers? ]]; then
+      fail "ROADMAP.md task $task_id has an invalid Phase/counts allocation"
+      causal_policy_errors=1
+      errors=1
+    else
+      phase_writers="${BASH_REMATCH[1]}"
+      phase_non_writers="${BASH_REMATCH[2]}"
+      if [[ "$phase_writers" -gt "$MAX_CONCURRENT_WRITERS" || \
+            "$phase_non_writers" -gt "$MAX_NON_WRITERS" || \
+            $((phase_writers + phase_non_writers)) -gt "$MAX_ACTIVE_SUBAGENTS" ]]; then
+        fail "ROADMAP.md task $task_id exceeds the 6-active/3-writer/3-non-writer phase limits"
+        causal_policy_errors=1
+        errors=1
+      fi
+    fi
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^#{3,4}[[:space:]]+([A-Z][A-Z0-9]*-[0-9]{3})([[:space:]]+[-—]) ]]; then
+      next_task="${BASH_REMATCH[1]}"
+      if [[ -n "$task" ]]; then
+        validate_task_block "$task" "$block"
+      fi
+      task="$next_task"
+      block="$line"
+      if [[ -n "${task_ids[$task]:-}" ]]; then
+        fail "ROADMAP.md repeats approved task ID $task"
+        causal_policy_errors=1
+        errors=1
+      fi
+      task_ids["$task"]=1
+    elif [[ -n "$task" ]]; then
+      block+=$'\n'"$line"
+    fi
+  done < "$ROADMAP_FILE"
+
+  if [[ -n "$task" ]]; then
+    validate_task_block "$task" "$block"
+  fi
+  if [[ "${#task_ids[@]}" -eq 0 ]]; then
+    fail "ROADMAP.md has no approved task contracts"
+    causal_policy_errors=1
+    errors=1
+  fi
+
+  graph_block="$(awk '
+    /^## Phase dependency graph and allocations$/ { capture = 1; next }
+    capture && /^## / { exit }
+    capture { print }
+  ' "$ROADMAP_FILE")"
+  if [[ -z "$graph_block" ]]; then
+    fail "ROADMAP.md is missing the approved phase dependency graph"
+    causal_policy_errors=1
+    errors=1
+  else
+    while IFS= read -r token; do
+      [[ -z "$token" ]] && continue
+      if [[ "$token" =~ ^([A-Z][A-Z0-9]*)-([0-9]{3})\.\.([0-9]{3})$ ]]; then
+        prefix="${BASH_REMATCH[1]}"
+        start_number=$((10#${BASH_REMATCH[2]}))
+        end_number=$((10#${BASH_REMATCH[3]}))
+        if [[ "$start_number" -gt "$end_number" ]]; then
+          fail "ROADMAP.md has a descending approved task range: $token"
+          causal_policy_errors=1
+          errors=1
+          continue
+        fi
+        for ((number = start_number; number <= end_number; number++)); do
+          graph_task_ids["$prefix-$(printf '%03d' "$number")"]=1
+        done
+      else
+        graph_task_ids["$token"]=1
+      fi
+    done < <(grep -Eo '[A-Z][A-Z0-9]*-[0-9]{3}(\.\.[0-9]{3})?' <<<"$graph_block" | sort -u || true)
+
+    if [[ "${#graph_task_ids[@]}" -eq 0 ]]; then
+      fail "ROADMAP.md approved phase dependency graph declares no task IDs"
+      causal_policy_errors=1
+      errors=1
+    fi
+    for token in "${!graph_task_ids[@]}"; do
+      if [[ -z "${task_ids[$token]:-}" ]]; then
+        fail "ROADMAP.md phase graph references task without a contract: $token"
+        causal_policy_errors=1
+        errors=1
+      fi
+    done
+    for token in "${!task_ids[@]}"; do
+      if [[ -z "${graph_task_ids[$token]:-}" ]]; then
+        fail "ROADMAP.md task is not present in the approved phase graph: $token"
+        causal_policy_errors=1
+        errors=1
+      fi
+    done
+  fi
+
+  if [[ "$errors" -eq 0 ]]; then
+    pass "ROADMAP.md approved task IDs and contract fields are dynamic and complete (${#task_ids[@]} tasks)"
+  fi
+}
+
+# The active roadmap may be replaced, but its dated archive and checksum sidecar
+# must remain present.  Byte-level hash verification belongs to the append-only
+# test; keep this policy test focused on the canonical artifact contract.
+validate_roadmap_archive() {
+  local archive
+  local sidecar
+  local recorded_hash
+  local archive_errors=0
+  local -a archives=()
+
+  if [[ ! -d "$ROADMAP_ARCHIVE_DIR" ]]; then
+    fail "roadmap archive directory is missing: $ROADMAP_ARCHIVE_DIR"
+    causal_policy_errors=1
+    return
+  fi
+
+  mapfile -t archives < <(find "$ROADMAP_ARCHIVE_DIR" -maxdepth 1 -type f -name 'ROADMAP-*.md' -print | sort)
+  if [[ "${#archives[@]}" -eq 0 ]]; then
+    fail "no canonical ROADMAP archive exists in $ROADMAP_ARCHIVE_DIR"
+    causal_policy_errors=1
+    return
+  fi
+
+  for archive in "${archives[@]}"; do
+    sidecar="${archive}.sha256"
+    if [[ ! -r "$sidecar" ]]; then
+      fail "roadmap archive is missing its checksum sidecar: ${sidecar#"$REPO_ROOT"/}"
+      causal_policy_errors=1
+      archive_errors=1
+      continue
+    fi
+
+    recorded_hash="$(awk 'NF { print $1; exit }' "$sidecar")"
+    if [[ ! "$recorded_hash" =~ ^[[:xdigit:]]{64}$ ]]; then
+      fail "roadmap archive checksum sidecar is malformed: ${sidecar#"$REPO_ROOT"/}"
+      causal_policy_errors=1
+      archive_errors=1
+      continue
+    fi
+
+  done
+
+  if [[ "$archive_errors" -eq 0 ]]; then
+    pass "canonical roadmap archive(s) have SHA-256 sidecars (${#archives[@]})"
+  fi
+}
+
 if [[ ! -r "$ROADMAP_FILE" ]]; then
   fail "ROADMAP.md is missing or unreadable"
 else
+  validate_roadmap_archive
   validate_roadmap_terminal_state
   validate_roadmap_task_deployment_owners
+  validate_roadmap_task_contracts
 fi
+
+# The new phase contract is synchronous: a phase is a bounded six-agent
+# barrier, with capacity for three permission-derived writers and three
+# non-writers.  Exclusive territories make the zero-overlap rule observable.
+SYNCHRONOUS_PHASE_POLICY_SOURCES=(
+  "$ROADMAP_FILE"
+)
+for policy_source in "${SYNCHRONOUS_PHASE_POLICY_SOURCES[@]}"; do
+  if [[ ! -r "$policy_source" ]]; then
+    fail "synchronous phase policy source is missing or unreadable: $policy_source"
+    causal_policy_errors=1
+    continue
+  fi
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    '(^|[^0-9])6[[:space:]-]+active|active[^[:alnum:]]+6' \
+    'six-active phase ceiling'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    '3[[:space:]-]+(concurrent[[:space:]-]+)?writers?' \
+    'three-writer phase ceiling'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    '3[[:space:]-]*(non[-[:space:]]writers?|non[-[:space:]]*writer)|non[-[:space:]]writers?.{0,80}3|Remaining capacity.{0,80}3' \
+    'three-non-writer phase capacity'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'synchron|serialized' \
+    'synchronous phase execution'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'phase.*barrier|barrier.*(phase|wave|subwave)|(phase|wave).*(finish|complete|verif).*(before|prior to).*(next[[:space:]-]*)?(phase|wave)' \
+    'synchronous phase barrier'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'zero[[:space:]-]+overlap|overlap.*zero|write territory overlap.*0|exclusive[[:space:]-]+territor' \
+    'zero-overlap exclusive territory rule'
+done
+
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'Deployment owner' 'deployment-owner contract coverage'
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'visual|1440x900|390x844|qa-vision' 'visual-gate contract coverage'
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'QA/security.*once|QA.*security.*once|QA/security report' 'bounded QA/security review coverage'
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'security-auditor|security' 'security-review contract coverage'
 
 for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
   if [[ ! -r "$policy_source" ]]; then

@@ -8,6 +8,7 @@ import QuestionPrompt from "./QuestionPrompt";
 import type { ToolState } from "./ToolCallCard";
 import type { OpenCodePart, ToolPart, FilePart } from "../../../lib/opencode";
 import type { PermissionRequest } from "../../../lib/use-opencode-chat";
+import type { ChatGrounding } from "../../../lib/chat-grounding";
 import type { QuestionItem as ChatQuestionItem } from "./QuestionPrompt";
 import type { ActivitySelection } from "./chat-activity";
 
@@ -18,6 +19,8 @@ export interface ChatMessage {
   reasoning?: string;  // separate reasoning content
   parts?: OpenCodePart[];
   model?: { providerID: string; modelID: string };  // from message.updated info
+  /** Local-only metadata for the project context used by this outgoing turn. */
+  grounding?: ChatGrounding;
   timestamp: number;
   isStreaming?: boolean;
 }
@@ -45,6 +48,8 @@ interface ChatMessagesProps {
   onActivityOpen?: (messageId: string, partId: string) => void;
   /** Current drawer selection, used to expose expanded state on the trigger. */
   activitySelection?: ActivitySelection | null;
+  /** Authoritative global project used for safe MCP management links. */
+  mcpProject?: string | null;
 }
 
 /** Map OpenCode ToolPart status to ToolCallCard state. */
@@ -61,6 +66,47 @@ function mapToolState(status?: string): ToolState {
     default:
       return "pending";
   }
+}
+
+/** Render source metadata only; excerpts remain confined to the provider system prompt. */
+function ProjectContextStatus({ grounding }: { grounding: ChatGrounding }) {
+  if (grounding.status === "not_requested") {
+    return (
+      <p className="mt-2 text-xs text-[var(--color-text-muted)]" data-testid="chat-project-context">
+        Project context: not requested
+      </p>
+    );
+  }
+
+  if (grounding.status === "no_matches") {
+    return (
+      <p className="mt-2 text-xs text-[var(--color-text-muted)]" data-testid="chat-project-context">
+        Project context: requested — no matches
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-2 text-xs text-[var(--color-text-secondary)]" data-testid="chat-project-context">
+      <p>
+        Project context: requested — {grounding.sources.length} {grounding.sources.length === 1 ? "source" : "sources"} used from {grounding.project}
+      </p>
+      <ol className="mt-1 space-y-1 pl-4 list-decimal">
+        {grounding.sources.map((source) => (
+          <li key={source.citationId}>
+            <span>{source.title}</span>
+            <span> — Heading: {source.heading ?? "None"}</span>
+            <span> — Provenance: {source.provenance}</span>
+            {source.sourceReference && <span> — Source: {source.sourceReference}</span>}
+            <span> — Citation: <code className="break-all" data-testid="chat-context-citation-id">{source.citationId}</code></span>
+            <span> — Source hash: {source.sourceHash ?? "Unknown"}</span>
+            <span> — Chunk index: {source.chunkIndex}</span>
+            <span> — Availability: {source.availability}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
 }
 
 /**
@@ -369,6 +415,7 @@ export default function ChatMessages({
   onSendReply,
   onActivityOpen,
   activitySelection,
+  mcpProject,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
@@ -410,89 +457,91 @@ export default function ChatMessages({
   if (messages.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center min-h-0" data-testid="chat-empty-state">
-        {isLoading ? (
-          /* Initial loading spinner */
-          <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
-            <div className="w-16 h-16 rounded-full bg-[var(--color-surface-selected)] flex items-center justify-center">
-              <svg
-                width="28"
-                height="28"
-                viewBox="0 0 28 28"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="text-[var(--color-text-secondary)] animate-spin"
-                aria-hidden="true"
-              >
-                <circle cx="14" cy="14" r="11" strokeOpacity="0.25" />
-                <path strokeLinecap="round" d="M14 3a11 11 0 0111 11" />
-              </svg>
+        <div className="mx-auto w-full max-w-3xl space-y-6" data-testid="chat-message-rail">
+          {isLoading ? (
+            /* Initial loading spinner */
+            <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
+              <div className="w-16 h-16 rounded-full bg-[var(--color-surface-selected)] flex items-center justify-center">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 28 28"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className="text-[var(--color-text-secondary)] animate-spin"
+                  aria-hidden="true"
+                >
+                  <circle cx="14" cy="14" r="11" strokeOpacity="0.25" />
+                  <path strokeLinecap="round" d="M14 3a11 11 0 0111 11" />
+                </svg>
+              </div>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Loading conversation...
+              </p>
             </div>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Loading conversation...
-            </p>
-          </div>
-        ) : error ? (
-          /* Error state */
-          <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
-            <div className="w-16 h-16 rounded-full bg-[var(--color-error-bg)] flex items-center justify-center">
-              <svg
-                width="28"
-                height="28"
-                viewBox="0 0 28 28"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="text-[var(--color-error-text)]"
-                aria-hidden="true"
-              >
-                <circle cx="14" cy="14" r="11" />
-                <path strokeLinecap="round" d="M14 9v5M14 19.5v.5" />
-              </svg>
+          ) : error ? (
+            /* Error state */
+            <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
+              <div className="w-16 h-16 rounded-full bg-[var(--color-error-bg)] flex items-center justify-center">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 28 28"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className="text-[var(--color-error-text)]"
+                  aria-hidden="true"
+                >
+                  <circle cx="14" cy="14" r="11" />
+                  <path strokeLinecap="round" d="M14 9v5M14 19.5v.5" />
+                </svg>
+              </div>
+              <p className="text-sm text-[var(--color-error-text)]">
+                {error}
+              </p>
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="mt-1 px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                >
+                  Try Again
+                </button>
+              )}
             </div>
-            <p className="text-sm text-[var(--color-error-text)]">
-              {error}
-            </p>
-            {onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="mt-1 px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-              >
-                Try Again
-              </button>
-            )}
-          </div>
-        ) : (
-          /* Welcome state */
-          <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
-            {/* Chat icon */}
-            <div className="w-16 h-16 rounded-full bg-[var(--color-surface-selected)] flex items-center justify-center">
-              <svg
-                width="28"
-                height="28"
-                viewBox="0 0 28 28"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="text-[var(--color-text-secondary)]"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4.67 5.83h18.66c1.29 0 2.34 1.05 2.34 2.34v11.66c0 1.29-1.05 2.34-2.34 2.34H9.63l-4.96 4.96V8.17c0-1.29 1.05-2.34 2.34-2.34z"
-                />
-              </svg>
+          ) : (
+            /* Welcome state */
+            <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
+              {/* Chat icon */}
+              <div className="w-16 h-16 rounded-full bg-[var(--color-surface-selected)] flex items-center justify-center">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 28 28"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className="text-[var(--color-text-secondary)]"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4.67 5.83h18.66c1.29 0 2.34 1.05 2.34 2.34v11.66c0 1.29-1.05 2.34-2.34 2.34H9.63l-4.96 4.96V8.17c0-1.29 1.05-2.34 2.34-2.34z"
+                  />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+                How can I help you today?
+              </h2>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Ask me anything — code, research, writing, or analysis.
+              </p>
             </div>
-            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-              How can I help you today?
-            </h2>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Ask me anything — code, research, writing, or analysis.
-            </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   }
@@ -510,61 +559,62 @@ export default function ChatMessages({
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-4 space-y-6"
+      className="flex-1 overflow-y-auto [scrollbar-gutter:stable] overflow-x-hidden min-h-0 px-4 py-4"
       data-testid="chat-messages-container"
     >
-      {/* Error banner */}
-      {error && (
-        <div
-          className="py-1 text-xs text-[var(--color-text-muted)]"
-          role="alert"
-          data-testid="chat-stream-error"
-        >
-          <div className="flex items-start gap-2">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="shrink-0 mt-0.5 text-[var(--color-text-muted)]"
-              aria-hidden="true"
-            >
-              <circle cx="8" cy="8" r="6.5" />
-              <path strokeLinecap="round" d="M8 5v3M8 10.5v.5" />
-            </svg>
-            <span className="flex-1">{error}</span>
-            {onDismissError && (
-              <button
-                type="button"
-                onClick={onDismissError}
-                className="shrink-0 p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                aria-label="Dismiss error"
-                title="Dismiss"
+      <div className="mx-auto w-full max-w-3xl space-y-6" data-testid="chat-message-rail">
+        {/* Error banner */}
+        {error && (
+          <div
+            className="py-1 text-xs text-[var(--color-text-muted)]"
+            role="alert"
+            data-testid="chat-stream-error"
+          >
+            <div className="flex items-start gap-2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="shrink-0 mt-0.5 text-[var(--color-text-muted)]"
+                aria-hidden="true"
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 14 14"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  aria-hidden="true"
+                <circle cx="8" cy="8" r="6.5" />
+                <path strokeLinecap="round" d="M8 5v3M8 10.5v.5" />
+              </svg>
+              <span className="flex-1">{error}</span>
+              {onDismissError && (
+                <button
+                  type="button"
+                  onClick={onDismissError}
+                  className="shrink-0 p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                  aria-label="Dismiss error"
+                  title="Dismiss"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3.5 3.5l7 7M10.5 3.5l-7 7"
-                  />
-                </svg>
-              </button>
-            )}
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3.5 3.5l7 7M10.5 3.5l-7 7"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {messages.map((msg, idx) => {
+        {messages.map((msg, idx) => {
         const isUser = msg.role === "user";
         const isLastAssistant =
           msg.role === "assistant" && idx === messages.length - 1;
@@ -597,6 +647,7 @@ export default function ChatMessages({
                   <p className="whitespace-pre-wrap break-words">
                     {msg.content}
                   </p>
+                  {msg.grounding && <ProjectContextStatus grounding={msg.grounding} />}
                 </div>
               ) : (
                 /* Assistant content — bare, no card wrapper */
@@ -634,6 +685,7 @@ export default function ChatMessages({
                         }
                         output={tp.state?.output}
                         error={tp.state?.error}
+                        mcpProject={mcpProject}
                         onWebSearchOpen={
                           onActivityOpen
                             ? () => onActivityOpen(msg.id, tp.id)
@@ -726,80 +778,81 @@ export default function ChatMessages({
             )}
           </div>
         );
-      })}
+        })}
 
-      {/* Active questions from the agent */}
-      {activeQuestions && activeQuestions.length > 0 && (
-        <div className="flex justify-start">
-          <div className="max-w-full sm:max-w-[85%]">
-            <QuestionPrompt
-              requestId={activeQuestions[0]!.id}
-              questions={activeQuestions}
-              isActive={!isStreaming}
-              onReply={(_requestId, answers) => {
-                const answerText = Object.entries(answers)
-                  .map(([, labels]) =>
-                    Array.isArray(labels) ? labels.join(", ") : labels,
-                  )
-                  .join("\n");
-                if (onSendReply) {
-                  onSendReply(answerText);
-                }
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Permission prompts — rendered inline after messages. */}
-      {permissions && permissions.length > 0 && replyPermission && (
-        <div className="flex justify-start">
-          <div className="max-w-[85%]">
-            {permissions.map((p) => (
-              <PermissionPrompt
-                key={p.id}
-                requestId={p.id}
-                action={p.action}
-                pattern={p.pattern}
-                onReply={(requestId, reply) => replyPermission(requestId, reply)}
-                isActive={true}
+        {/* Active questions from the agent */}
+        {activeQuestions && activeQuestions.length > 0 && (
+          <div className="flex justify-start">
+            <div className="max-w-full sm:max-w-[85%]">
+              <QuestionPrompt
+                requestId={activeQuestions[0]!.id}
+                questions={activeQuestions}
+                isActive={!isStreaming}
+                onReply={(_requestId, answers) => {
+                  const answerText = Object.entries(answers)
+                    .map(([, labels]) =>
+                      Array.isArray(labels) ? labels.join(", ") : labels,
+                    )
+                    .join("\n");
+                  if (onSendReply) {
+                    onSendReply(answerText);
+                  }
+                }}
               />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Loading indicator */}
-      {isLoading && (
-        <div className="flex justify-start" data-testid="chat-activity-status">
-          <div className="max-w-[85%] py-1">
-            <div className="flex items-center gap-2">
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-[var(--color-text-muted)] animate-pulse"
-                aria-label="Loading"
-              />
-              <span className="text-xs text-[var(--color-text-muted)]">Loading…</span>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Streaming activity indicator — visible while assistant is generating */}
-      {isStreaming && !isLoading && !hasActiveAssistant && !hasLiveReasoning && (
-        <div className="flex justify-start" data-testid="chat-activity-status">
-          <div className="max-w-[85%] py-1">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-pulse"
-                aria-label="Assistant is working"
-              />
-              <span className="text-xs text-[var(--color-text-muted)]">
-                Generating…
-              </span>
+        {/* Permission prompts — rendered inline after messages. */}
+        {permissions && permissions.length > 0 && replyPermission && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%]">
+              {permissions.map((p) => (
+                <PermissionPrompt
+                  key={p.id}
+                  requestId={p.id}
+                  action={p.action}
+                  pattern={p.pattern}
+                  onReply={(requestId, reply) => replyPermission(requestId, reply)}
+                  isActive={true}
+                />
+              ))}
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Loading indicator */}
+        {isLoading && (
+          <div className="flex justify-start" data-testid="chat-activity-status">
+            <div className="max-w-[85%] py-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-[var(--color-text-muted)] animate-pulse"
+                  aria-label="Loading"
+                />
+                <span className="text-xs text-[var(--color-text-muted)]">Loading…</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming activity indicator — visible while assistant is generating */}
+        {isStreaming && !isLoading && !hasActiveAssistant && !hasLiveReasoning && (
+          <div className="flex justify-start" data-testid="chat-activity-status">
+            <div className="max-w-[85%] py-1">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-pulse"
+                  aria-label="Assistant is working"
+                />
+                <span className="text-xs text-[var(--color-text-muted)]">
+                  Generating…
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* prefers-reduced-motion: disable bounce animation */}
       <style jsx>{`

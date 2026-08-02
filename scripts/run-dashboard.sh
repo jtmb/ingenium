@@ -14,4 +14,4 @@ exec env -i \
   DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}" \
   PORT="3001" \
   HOSTNAME="127.0.0.1" \
-  node /app/scripts/run-dashboard.mjs
+  node /app/services/ingenium-dashboard/server.js

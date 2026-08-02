@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   mcpStatus: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
+  globalProject: "global-default",
 }));
 
 vi.mock("../src/lib/api", async (importOriginal) => {
@@ -31,6 +32,11 @@ vi.mock("../src/lib/opencode", () => ({
   },
 }));
 
+vi.mock("../src/lib/ProjectContext", () => ({
+  useGlobalProject: () => ({ project: mocks.globalProject, loading: false, error: null }),
+  useProject: () => "selected-project",
+}));
+
 vi.mock("../src/lib/use-opencode-sessions", () => ({
   useOpenCodeSessions: () => ({
     sessions: [{ id: "sess-1", title: "Test", time: { created: 1, updated: 1 } }],
@@ -50,6 +56,7 @@ vi.mock("../src/lib/use-opencode-chat", () => ({
 import ChatShell from "../src/app/chat/components/ChatShell";
 
 const config = {
+  project: "global-default",
   configured: true,
   primary: { providerId: "provider", modelId: "model", label: "Provider", isCustom: false },
   backup: null,
@@ -104,6 +111,7 @@ describe("ChatShell MCP refresh and action errors", () => {
   beforeEach(() => {
     restoreMatchMedia = setupMatchMedia();
     localStorage.clear();
+    mocks.globalProject = "global-default";
     mocks.chatConfig.mockResolvedValue({ data: config });
     mocks.saveChatSelection.mockResolvedValue({ data: { providerId: "provider", modelId: "model" } });
     mocks.connect.mockResolvedValue({});
@@ -125,6 +133,47 @@ describe("ChatShell MCP refresh and action errors", () => {
     expect(await screen.findByText("Connected")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
     expect(mocks.saveChatSelection).not.toHaveBeenCalled();
+  });
+
+  it("refreshes status each time the drawer is reopened and offers a normal Refresh action", async () => {
+    mocks.mcpStatus.mockResolvedValue({ alpha: { status: "connected" } });
+    render(<ChatShell />);
+
+    await openDrawer();
+    await waitFor(() => expect(mocks.mcpStatus).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Close MCP drawer" }));
+    fireEvent.click(screen.getByRole("button", { name: "MCP servers" }));
+    await waitFor(() => expect(mocks.mcpStatus).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(mocks.mcpStatus).toHaveBeenCalledTimes(3));
+    expect(screen.getByTestId("mcp-last-refresh").textContent).toContain("Last refreshed:");
+  });
+
+  it("loads Chat configuration and shows tools use the authoritative global project", async () => {
+    mocks.mcpStatus.mockRejectedValue(new Error("unavailable"));
+    mocks.globalProject = "browser-selected-project";
+    mocks.chatConfig.mockResolvedValue({ data: { ...config, project: "server-shared" } });
+    render(<ChatShell />);
+
+    expect((await screen.findByTestId("chat-global-project")).textContent).toContain(
+      "Chat tools run through global project:server-shared",
+    );
+    await openDrawer();
+    expect(screen.getByRole("link", { name: "MCP Servers" }).getAttribute("href"))
+      .toBe("/mcp-servers?project=server-shared");
+    await waitFor(() => expect(mocks.chatConfig).toHaveBeenCalledWith());
+  });
+
+  it("does not substitute the browser global project when server attestation is absent", async () => {
+    mocks.globalProject = "browser-selected-project";
+    mocks.mcpStatus.mockRejectedValue(new Error("unavailable"));
+    mocks.chatConfig.mockResolvedValue({ data: { ...config, project: null } });
+    render(<ChatShell />);
+
+    await openDrawer();
+    expect(screen.queryByTestId("chat-global-project")).toBeNull();
+    expect(screen.queryByRole("link", { name: "MCP Servers" })).toBeNull();
   });
 
   it("persists the exact catalog-selected provider and model through the server endpoint", async () => {

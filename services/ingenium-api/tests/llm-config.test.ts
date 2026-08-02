@@ -965,6 +965,7 @@ describe("runtime OpenCode providers", () => {
   it("restores validated legacy llm-config selections to the Chat catalog", async () => {
     const legacyProjectName = "llm-config-legacy-catalog-compatibility";
     projects.createProject(legacyProjectName);
+    projects.setProjectGlobal(legacyProjectName, true);
 
     const save = await fetch(`${baseUrl}/api/v1/settings/llm-config${projectQ(legacyProjectName)}`, {
       method: "POST",
@@ -1047,6 +1048,7 @@ describe("runtime OpenCode providers", () => {
 
   it("returns managed and builtin providers without exposing provider secrets or topology", async () => {
     const managedProject = projects.createProject("llm-config-managed-runtime");
+    projects.setProjectGlobal(managedProject.name, true);
     settings.setSetting(managedProject.id, "llm_provider_configs", JSON.stringify([{
       id: "managed-primary",
       name: "Managed Primary",
@@ -1107,6 +1109,7 @@ describe("runtime OpenCode providers", () => {
   it("uses the OpenCode runtime default when no managed provider is available", async () => {
     const builtinOnlyProject = "llm-config-builtin-runtime";
     projects.createProject(builtinOnlyProject);
+    projects.setProjectGlobal(builtinOnlyProject, true);
     const providerSpy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue(runtimeProviderList());
 
     const res = await fetch(`${baseUrl}/api/v1/opencode/chat-config${projectQ(builtinOnlyProject)}`);
@@ -1119,6 +1122,7 @@ describe("runtime OpenCode providers", () => {
   it("omits arbitrary legacy synthesis settings from the browser DTO", async () => {
     const legacyOnlyProject = "llm-config-legacy-chat-omit";
     const project = projects.createProject(legacyOnlyProject);
+    projects.setProjectGlobal(project.name, true);
     settings.setSetting(project.id, "synthesis_provider", "untrusted-provider");
     settings.setSetting(project.id, "synthesis_model", "untrusted-model");
     settings.setSetting(project.id, "synthesis_backup_provider", "untrusted-backup");
@@ -1139,6 +1143,7 @@ describe("runtime OpenCode providers", () => {
   it("projects legacy selections only when the exact pair exists in the current catalog", async () => {
     const managedProject = "llm-config-legacy-chat-allowed";
     const project = projects.createProject(managedProject);
+    projects.setProjectGlobal(project.name, true);
     setManagedChatCatalog([{
       id: "managed-provider",
       name: "Managed Provider",

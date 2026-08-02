@@ -35,74 +35,48 @@ async function mockChatConfig(
  */
 test.describe("Chat — Provider Configuration States", () => {
   test("selectors disabled, send disabled, typing+Enter does nothing", async ({ page }) => {
-    /* ------------------------------------------------------------------ */
-    /*  1. Navigate to /chat with NO providers configured                  */
-    /* ------------------------------------------------------------------ */
     await mockChatConfig(page, { status: 200, body: NO_PROVIDER_CHAT_CONFIG });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
-    // Wait for the Chat page to render — look for the composer input
     const composer = page.locator('[data-testid="chat-composer"]');
     await expect(composer).toBeVisible({ timeout: 8000 });
 
-    /* ------------------------------------------------------------------ */
-    /*  2. Verify selectors present but disabled (opacity-40)              */
-    /* ------------------------------------------------------------------ */
     const providerSelect = page.locator('[data-testid="chat-header-provider"]');
     await expect(providerSelect).toBeVisible({ timeout: 5000 });
 
-    // The select should be disabled with opacity-40 class
     await expect(providerSelect).toBeDisabled();
     await expect(providerSelect).toHaveClass(/opacity-40/);
 
-    // Model select should also be disabled
     const modelSelect = page.locator('[data-testid="chat-header-model"]');
     await expect(modelSelect).toBeVisible({ timeout: 3000 });
     await expect(modelSelect).toBeDisabled();
     await expect(modelSelect).toHaveClass(/opacity-40/);
 
-    // Agent select should also be disabled
     const agentSelect = page.locator('[data-testid="chat-header-agent"]');
     await expect(agentSelect).toBeVisible({ timeout: 3000 });
     await expect(agentSelect).toBeDisabled();
     await expect(agentSelect).toHaveClass(/opacity-40/);
 
-    /* ------------------------------------------------------------------ */
-    /*  3. Verify "No providers available" placeholder text                */
-    /* ------------------------------------------------------------------ */
-    // The only option in the provider select should be "No providers available"
     const providerOptions = providerSelect.locator("option");
     await expect(providerOptions).toHaveCount(1);
     await expect(providerOptions.first()).toHaveText("No providers available");
 
-    // Verify the no-model banner is visible
     const banner = page.getByText("No model is available. Go to", { exact: false });
     await expect(banner).toBeVisible({ timeout: 3000 });
 
-    // The banner should have a link to Settings → Providers
     const settingsLink = page.getByRole("link", { name: "Settings → Providers" });
     await expect(settingsLink).toBeVisible();
     await expect(settingsLink).toHaveAttribute("href", "/chat?settings=providers");
 
-    /* ------------------------------------------------------------------ */
-    /*  4. Verify send button is disabled                                  */
-    /* ------------------------------------------------------------------ */
     const sendBtn = page.locator('[data-testid="chat-send-btn"]');
     await expect(sendBtn).toBeVisible({ timeout: 3000 });
 
-    // The send button should be disabled when no selectable model
     await expect(sendBtn).toBeDisabled();
-    // It should have the cursor-not-allowed class
     await expect(sendBtn).toHaveClass(/cursor-not-allowed/);
 
-    /* ------------------------------------------------------------------ */
-    /*  5. Type text and press Enter — nothing should happen               */
-    /* ------------------------------------------------------------------ */
-    // Type in the composer
     await composer.fill("Hello, is this thing on?");
     await expect(composer).toHaveValue("Hello, is this thing on?");
 
-    // Press Enter — the send handler checks `if (!hasSelectableModel) return;`
     await composer.press("Enter");
 
     // The fixture may already expose a session/message; assert that this

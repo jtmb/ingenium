@@ -1,8 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Mock data — shapes match the OpenCode API contract                       */
-/* ──────────────────────────────────────────────────────────────────────── */
+import { expect, test } from "./external-suite-navigation-governor";
+import type { Page } from "@playwright/test";
 
 const SESSION_ID = "chat-e2e-test-session";
 const SESSION_TITLE = "Test Conversation";
@@ -100,10 +97,6 @@ const OVERFLOW_MESSAGES = Array.from({ length: 160 }, (_, index) => ({
   }],
 }));
 
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Route-matching helpers                                                  */
-/* ──────────────────────────────────────────────────────────────────────── */
-
 /** True when the request's pathname starts with the given prefix. */
 function pathStarts(prefix: string) {
   return (url: URL) => url.pathname.startsWith(prefix);
@@ -145,10 +138,6 @@ function noContent(route: { fulfill: (opts: { status: number }) => void }) {
   route.fulfill({ status: 204 });
 }
 
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Session routes (list + create at the base path)                         */
-/* ──────────────────────────────────────────────────────────────────────── */
-
 function mockSessionListCreate(page: Page) {
   return page.route(
     (url) => pathExact("/api/v1/opencode/sessions")(url),
@@ -161,10 +150,6 @@ function mockSessionListCreate(page: Page) {
     },
   );
 }
-
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Chat-config route                                                       */
-/* ──────────────────────────────────────────────────────────────────────── */
 
 type MockChatConfig = typeof NO_PROVIDERS_CONFIG | typeof WITH_PROVIDERS_CONFIG;
 
@@ -191,73 +176,55 @@ function mockChatSelection(page: Page) {
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Generic sub-route handler for any /sessions/:id/* path                  */
-/*  Returns safe default responses so fetches don't throw.                  */
-/* ──────────────────────────────────────────────────────────────────────── */
-
 function mockSessionSubRoutes(page: Page, messages: typeof OVERFLOW_MESSAGES = []) {
-  // Prompt
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/prompt$/.test(url.pathname),
     (route) => json200(MOCK_PROMPT_RESPONSE)(route),
   );
-  // Abort
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/abort$/.test(url.pathname),
     (route) => json200({})(route),
   );
-  // Init
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/init$/.test(url.pathname),
     (route) => json200({})(route),
   );
-  // Messages (list for a session)
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/messages$/.test(url.pathname),
     (route) => json200(messages)(route),
   );
-  // Fork
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/fork$/.test(url.pathname),
     (route) => json200({ ...MOCK_SESSION, id: `forked-${Date.now()}` })(route),
   );
-  // Share
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/share$/.test(url.pathname),
     (route) => json200({ ...MOCK_SESSION })(route),
   );
-  // Compact
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/compact$/.test(url.pathname),
     (route) => json200({})(route),
   );
-  // Revert
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/revert$/.test(url.pathname),
     (route) => json200({ ...MOCK_SESSION })(route),
   );
-  // Unrevert
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/unrevert$/.test(url.pathname),
     (route) => json200({ ...MOCK_SESSION })(route),
   );
-  // Children
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/children$/.test(url.pathname),
     (route) => json200([])(route),
   );
-  // Diff
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/diff$/.test(url.pathname),
     (route) => json200({})(route),
   );
-  // Command
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/command$/.test(url.pathname),
     (route) => json200({})(route),
   );
-  // PATCH sessions/:id (rename)
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+$/.test(url.pathname),
     (route) => {
@@ -267,11 +234,9 @@ function mockSessionSubRoutes(page: Page, messages: typeof OVERFLOW_MESSAGES = [
       if (route.request().method() === "DELETE") {
         return noContent(route);
       }
-      // GET by id
       return json200(MOCK_SESSION)(route);
     },
   );
-  // Individual message routes (delete message, get message)
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/messages\/[^/]+$/.test(url.pathname),
     (route) => {
@@ -283,20 +248,12 @@ function mockSessionSubRoutes(page: Page, messages: typeof OVERFLOW_MESSAGES = [
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Agents endpoint                                                         */
-/* ──────────────────────────────────────────────────────────────────────── */
-
 function mockAgentsEndpoint(page: Page) {
   page.route(
     (url) => pathExact("/api/v1/opencode/agents")(url),
     (route) => json200([{ id: "ingenium-chat", name: "Ingenium Chat" }])(route),
   );
 }
-
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Convenience: apply all mocks for a given scenario                       */
-/* ──────────────────────────────────────────────────────────────────────── */
 
 async function applyMocks(
   page: Page,
@@ -319,20 +276,12 @@ function mockNoProviders(page: Page, messages: typeof OVERFLOW_MESSAGES = []) {
   return applyMocks(page, NO_PROVIDERS_CONFIG, messages);
 }
 
-/* ──────────────────────────────────────────────────────────────────────── */
-/*  Tests                                                                   */
-/* ──────────────────────────────────────────────────────────────────────── */
-
 test.describe("Chat UI — /chat page", () => {
   test.describe.configure({ mode: "serial" });
 
-  /* ────────────────────────────────────────────────────────────────────── */
-  /*  1. No providers — disabled UI                                        */
-  /* ────────────────────────────────────────────────────────────────────── */
   test("no providers — selectors disabled, banner visible, typing preserves text", async ({ page }) => {
     mockNoProviders(page);
 
-    // Track chat-config request completion
     const configDone = page.waitForResponse(
       (r) => r.url().includes("/chat-config") && r.status() === 200,
     );
@@ -340,43 +289,34 @@ test.describe("Chat UI — /chat page", () => {
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
     await configDone;
 
-    // Wait for the composer (session auto-created via mock)
     const composer = page.locator('[data-testid="chat-composer"]');
     await expect(composer).toBeVisible({ timeout: 15000 });
 
-    // Provider selector exists and is disabled
     const providerSelect = page.locator('[data-testid="chat-header-provider"]');
     await expect(providerSelect).toBeVisible({ timeout: 10000 });
     await expect(providerSelect).toBeDisabled({ timeout: 5000 });
 
-    // Model selector exists and is disabled
     const modelSelect = page.locator('[data-testid="chat-header-model"]');
     await expect(modelSelect).toBeVisible({ timeout: 5000 });
     await expect(modelSelect).toBeDisabled({ timeout: 5000 });
 
-    // Agent selector exists and is disabled
     const agentSelect = page.locator('[data-testid="chat-header-agent"]');
     await expect(agentSelect).toBeVisible({ timeout: 5000 });
     await expect(agentSelect).toBeDisabled({ timeout: 5000 });
 
-    // Send button is disabled
     const sendBtn = page.locator('[data-testid="chat-send-btn"]');
     await expect(sendBtn).toBeVisible({ timeout: 5000 });
     await expect(sendBtn).toBeDisabled();
 
-    // "No model is available" banner is visible
     await expect(page.getByText("No model is available")).toBeVisible({ timeout: 5000 });
 
-    // Type text and press Enter — text should be preserved since no selectable model
+    // Without a selectable model, submission must not clear the draft.
     await composer.fill("Hello, is this thing on?");
     await expect(composer).toHaveValue("Hello, is this thing on?");
     await composer.press("Enter");
     await expect(composer).toHaveValue("Hello, is this thing on?");
   });
 
-  /* ────────────────────────────────────────────────────────────────────── */
-  /*  2. Provider selection and model switching                             */
-  /* ────────────────────────────────────────────────────────────────────── */
   test("provider/model selectors allow switching between configured providers", async ({ page }) => {
     mockHappyPath(page);
 
@@ -387,7 +327,6 @@ test.describe("Chat UI — /chat page", () => {
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
     await configDone;
 
-    // Wait for selectors to be enabled
     const providerSelect = page.locator('[data-testid="chat-header-provider"]');
     await expect(providerSelect).toBeVisible({ timeout: 15000 });
     await expect(providerSelect).toBeEnabled({ timeout: 10000 });
@@ -400,24 +339,20 @@ test.describe("Chat UI — /chat page", () => {
     await expect(agentSelect).toBeVisible({ timeout: 5000 });
     await expect(agentSelect).toBeEnabled({ timeout: 5000 });
 
-    // Default selection is DeepSeek
     await expect(providerSelect).toHaveValue("deepseek");
     await expect(modelSelect).toHaveValue("deepseek-v4-pro");
 
-    // Verify provider options
     const providerOptions = providerSelect.locator("option");
     await expect(providerOptions).toHaveCount(2);
     await expect(providerOptions.nth(0)).toHaveText("DeepSeek");
     await expect(providerOptions.nth(1)).toHaveText("OpenAI");
 
-    // Verify model options for DeepSeek
     const modelOptions = modelSelect.locator("option");
     await expect(modelOptions).toHaveCount(2);
     await expect(modelOptions.nth(0)).toHaveText("deepseek-v4-pro");
     await expect(modelOptions.nth(1)).toHaveText("deepseek-v4-flash");
 
-    // Switch provider to OpenAI — model list should update and persist the
-    // exact pair only through the dedicated server selection endpoint.
+    // Persist the provider/model pair through the dedicated server endpoint.
     const providerSelectionRequest = page.waitForRequest(
       (request) => request.url().includes("/api/v1/opencode/chat-selection")
         && request.method() === "PUT",
@@ -433,7 +368,6 @@ test.describe("Chat UI — /chat page", () => {
     await expect(openaiModelOptions.nth(0)).toHaveText("GPT-4o");
     await expect(openaiModelOptions.nth(1)).toHaveText("GPT-5.6 Luna");
 
-    // Switch model within the provider
     const modelSelectionRequest = page.waitForRequest(
       (request) => request.url().includes("/api/v1/opencode/chat-selection")
         && request.method() === "PUT",
@@ -445,44 +379,34 @@ test.describe("Chat UI — /chat page", () => {
       modelId: "gpt-5.6-luna",
     });
 
-    // Switch back to DeepSeek
     await providerSelect.selectOption("deepseek");
     await expect(modelSelect).toHaveValue("deepseek-v4-pro");
   });
 
-  /* ────────────────────────────────────────────────────────────────────── */
-  /*  3. Session sidebar visibility and toggle                              */
-  /* ────────────────────────────────────────────────────────────────────── */
   test("session sidebar is visible, New Chat button, collapse/expand toggle", async ({ page }) => {
     mockHappyPath(page);
 
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
-    // Sidebar should be visible in the expanded state
     const sidebar = page.locator('[data-testid="session-sidebar"]');
     await expect(sidebar).toBeVisible({ timeout: 15000 });
     await expect(sidebar).toHaveAttribute("aria-label", "Chat sessions");
 
-    // "New Chat" button exists in the sidebar header
     const newChatBtn = page.getByRole("button", { name: /New conversation/i });
     await expect(newChatBtn.first()).toBeVisible({ timeout: 5000 });
 
-    // Collapse toggle is visible and labelled "Collapse sidebar"
     const toggle = page.locator('[data-testid="session-sidebar-toggle"]');
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-label", "Collapse sidebar");
     await toggle.click();
 
-    // Sidebar collapses — aria-label changes
     await expect(sidebar).toBeVisible();
     await expect(sidebar).toHaveAttribute("aria-label", "Chat sidebar collapsed");
 
-    // Toggle now says "Expand sidebar"
     const expandToggle = page.locator('[data-testid="session-sidebar-toggle"]');
     await expect(expandToggle).toHaveAttribute("aria-label", "Expand sidebar");
     await expandToggle.click();
 
-    // Sidebar expands again
     await expect(sidebar).toHaveAttribute("aria-label", "Chat sessions");
   });
 
@@ -492,21 +416,16 @@ test.describe("Chat UI — /chat page", () => {
 
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
-    // Hamburger button is visible on mobile
     const hamburger = page.locator('[data-testid="chat-header-hamburger"]');
     await expect(hamburger).toBeVisible({ timeout: 15000 });
 
-    // Click hamburger to open the drawer overlay
     await hamburger.click();
 
-    // Drawer dialog appears (chat sessions drawer, not the nav drawer)
     const drawer = page.getByRole("dialog", { name: "Chat sessions" });
     await expect(drawer).toBeVisible({ timeout: 5000 });
 
-    // Drawer contains a sidebar
     await expect(drawer.locator('[data-testid="session-sidebar"]')).toBeVisible({ timeout: 3000 });
 
-    // Press Escape to close the drawer (the drawer listens for Escape keydown)
     await page.keyboard.press("Escape");
     await expect(drawer).not.toBeVisible({ timeout: 3000 });
     await expect(drawer).not.toBeAttached({ timeout: 3000 });
@@ -547,9 +466,6 @@ test.describe("Chat UI — /chat page", () => {
     }
   });
 
-  /* ────────────────────────────────────────────────────────────────────── */
-  /*  4. Enter sends, Shift+Enter adds newline                              */
-  /* ────────────────────────────────────────────────────────────────────── */
   test("Shift+Enter adds newlines, Enter sends and clears composer", async ({ page }) => {
     mockHappyPath(page);
 
@@ -565,11 +481,10 @@ test.describe("Chat UI — /chat page", () => {
 
     const sendBtn = page.locator('[data-testid="chat-send-btn"]');
 
-    // Fill text first — send button enables only when hasText is true
+    // The send control is gated by non-empty composer text.
     await composer.fill("First line");
     await expect(sendBtn).toBeEnabled({ timeout: 10000 });
 
-    // Shift+Enter should add newlines without sending
     await composer.press("Shift+Enter");
     await composer.press("Shift+Enter");
     await composer.type("Third line");
@@ -579,10 +494,8 @@ test.describe("Chat UI — /chat page", () => {
     expect(afterShiftEnter).toContain("Third line");
     expect(afterShiftEnter.split("\n").length).toBeGreaterThanOrEqual(3);
 
-    // Send button should still be enabled
     await expect(sendBtn).toBeEnabled();
 
-    // Enter sends the message
     await composer.fill("Test message");
     await composer.press("Enter");
 
@@ -591,9 +504,6 @@ test.describe("Chat UI — /chat page", () => {
     await expect(composer).toHaveValue("", { timeout: 8000 });
   });
 
-  /* ────────────────────────────────────────────────────────────────────── */
-  /*  5. Chat session persistence                                           */
-  /* ────────────────────────────────────────────────────────────────────── */
   test("new chat creates a session, navigating away and back retains it", async ({ page }) => {
     mockHappyPath(page);
 
@@ -604,30 +514,24 @@ test.describe("Chat UI — /chat page", () => {
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
     await sessionLoaded;
 
-    // Sidebar is visible with our mock session
     const sidebar = page.locator('[data-testid="session-sidebar"]');
     await expect(sidebar).toBeVisible({ timeout: 15000 });
     await expect(sidebar.getByText(SESSION_TITLE)).toBeVisible({ timeout: 5000 });
 
-    // Click "New Chat" button
     const newChatBtn = page.getByRole("button", { name: /New conversation/i });
     await expect(newChatBtn.first()).toBeVisible({ timeout: 5000 });
     await newChatBtn.first().click();
 
-    // Composer is still visible after creating new chat
     const composer = page.locator('[data-testid="chat-composer"]');
     await expect(composer).toBeVisible({ timeout: 10000 });
 
-    // Navigate away to home
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toBeVisible({ timeout: 10000 });
 
-    // Navigate back to chat
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
     await expect(page.locator('[data-testid="chat-composer"]')).toBeVisible({ timeout: 15000 });
 
-    // Sidebar retains the original session
     await expect(sidebar).toBeVisible({ timeout: 10000 });
     await expect(sidebar.getByText(SESSION_TITLE)).toBeVisible({ timeout: 5000 });
   });

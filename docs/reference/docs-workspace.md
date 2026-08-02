@@ -5,13 +5,12 @@ description: Canonical contract for the Documentation Workspace API — routes, 
 
 # Docs Workspace Reference — Canonical Contract
 
-> **STATUS**: ✅ ROUTES VERIFIED (W1B) + ✅ DASHBOARD UI (W2) — The Express API implements **52 canonical endpoints** (51 in `docs.ts` + 1 in `docs-ai.ts`). All 6 backward-compatibility aliases have been **removed** from the API. All routes have DTO camelCase mapping, ownership checks, and error mapping.  
+> **STATUS**: ✅ ROUTES VERIFIED (W1B) + ✅ DASHBOARD UI — The Express API implements **52 canonical endpoints** (51 in `docs.ts` + 1 in `docs-ai.ts`). All 6 backward-compatibility aliases have been **removed** from the API. All routes have DTO camelCase mapping, ownership checks, and error mapping.
 > 🟢 **MCP handlers: ALIGNED** — All 7 handler defects verified as fixed in `services/ingenium-server/lib/tools/docs.ts`. Handlers use canonical paths with pageId scoping.  
 > 🟢 **Dashboard client: ALIGNED** — All paths verified in `services/ingenium-dashboard/src/lib/api.ts`. PUT (not PATCH), `expectedRevision` camelCase, pageId in all comment/version/trash routes.  
 > 🟢 **DOCS_ENDPOINTS catalog: ALIGNED** (49 entries; 3 source-verified gaps in `mcp-tool-catalog.ts`) — Gaps: slug-lookup `GET /pages` (not in array), non-resolve `PUT /comments/:commentId` (not in array), and `POST /docs/ai` (docs-ai.ts, separate router).
-> 🟢 **Route parity test: ALIGNED** — `tests/route-parity-docs.test.ts` (385 lines) has green assertions for all 3 layers.  
-> 🟢 **Dashboard UI (W2): IMPLEMENTED** — `/docs` is an immersive responsive 3-pane workspace with tree refresh/mutations, named create dialog, explicit publish, archive/trash/restore, move with cycle prevention, rename, project links, attachments, panel tabs (Info/Tags/Backlinks/Comments/History/Linked/Files/Trash), FTS5 search, template picker, and import/export entry actions. `/standalone` routes into `/docs?space=...` as a docs-space selector/creator. Navigation Docs link is active (stale Coming Soon badge removed). See [docs-workspace Dashboard UI](#dashboard-ui-w2) below.
-> 🔴 **W3 Editor (TipTap/source)**: Rich WYSIWYG TipTap editor and source-mode split pane remain pending. Current editor is a basic textarea-based Markdown editor. W3 E2E Playwright proof also pending.
+> 🟢 **Dashboard UI: IMPLEMENTED** — `/docs` is an immersive responsive 3-pane workspace with tree refresh/mutations, named create dialog, explicit publish, archive/trash/restore, move with cycle prevention, rename, project links, attachments, panel tabs (Info/Tags/Backlinks/Comments/History/Linked/Files/Trash), FTS5 search, template picker, and import/export entry actions. `/standalone` routes into `/docs?space=...` as a docs-space selector/creator. Navigation Docs link is active. See [Dashboard UI](#dashboard-ui) below.
+> 🔴 **Rich editor proof pending**: The Markdown editor has CodeMirror source and split-preview modes; a WYSIWYG TipTap editor and focused E2E proof remain pending.
 >
 > Core module items marked ✅ FIXED are verified at the core layer. API endpoint status is documented in the [Route tables](#canonical-routes) below. See the [Rescue Contract Ledger](#-rescue-contract-ledger) for current status.
 
@@ -34,7 +33,7 @@ MCP callers, and explicitly authorized workflows.
 - [Database Migrations](database-migrations.md) — migration file format and execution rules
 - [docs/* schema definitions](#database-schema) — only copied here for contract completeness
 - [API error handler conventions](../../services/ingenium-api/lib/middleware/errors.ts) — error envelope pattern
-- [INGENIUM_HOME convention](../../docs/VARIABLES.md) — attachment storage root
+- [INGENIUM_HOME convention](../develop/variables.md) — attachment storage root
 
 ---
 
@@ -42,8 +41,8 @@ MCP callers, and explicitly authorized workflows.
 
 🟢 **W1A Core-fixed items** are verified at the `packages/ingenium-core` level by unit tests (89+ tests).  
 🟢 **W1B Route-implemented items** are verified by reading `services/ingenium-api/lib/routes/docs.ts` + `docs-ai.ts` (51 canonical endpoints in docs.ts + 1 in docs-ai.ts = 52 route registrations; all 6 aliases removed from API).  
-🟢 **W2 Dashboard UI items** are verified by reading `services/ingenium-dashboard/src/app/docs/page.tsx` (1152 lines) — 3-pane workspace, tree refresh/mutations, create/publish/archive/move/rename, panel tabs, attachments, project links, search, templates, import/export, trash, and `services/ingenium-dashboard/src/app/standalone/page.tsx` (552 lines) — docs space selector/creator. Navigation Docs link is active (stale badge removed).  
-🔴 **W3 items still pending**: rich TipTap WYSIWYG/source editor, E2E Playwright test suite.
+🟢 **Dashboard UI** is verified by `services/ingenium-dashboard/src/app/docs/page.tsx` and `services/ingenium-dashboard/src/app/standalone/page.tsx`: 3-pane workspace, tree refresh/mutations, create/publish/archive/move/rename, panel tabs, attachments, project links, search, templates, import/export, trash, and docs-space selection/creation. Navigation Docs link is active.
+🔴 **Pending**: rich TipTap WYSIWYG editor and focused E2E Playwright proof.
 
 | # | Defect | Layer | Status | Notes |
 |---|--------|-------|--------|-------|
@@ -544,7 +543,7 @@ All request bodies and response payloads use **camelCase**. The DB stores `snake
 
 ### 🔴 Project IDs are TEXT (canonical fact)
 
-`projects.id` is defined as **TEXT PRIMARY KEY** in `001_init.sql`. Migration `037_docs_project_links.sql` originally declared `project_id INTEGER`, but **migration 040** now rebuilds `docs_page_projects` with `project_id TEXT`. This fix is verified at the core layer — `linkProject()` accepts `string projectId`, tests confirm TEXT FK (`docs-contract.test.ts:737-744`).
+`projects.id` is defined as **TEXT PRIMARY KEY** in `001_init.sql`. Migration `037_docs_project_links.sql` originally declared `project_id INTEGER`, but **migration 040** now rebuilds `docs_page_projects` with `project_id TEXT`. Core project-link coverage is in `docs.test.ts`.
 
 ✅ **API route**: `POST /pages/:id/projects` accepts `projectId` as any type and converts with `String(projectId)` (line 1375). `DELETE /pages/:id/projects/:projectId` treats path param as raw string (line 1415). The MCP handlers use `projectId: string`/`linkedProjectId: string`, preserving TEXT project IDs end to end.
 
@@ -555,7 +554,7 @@ Pages have a `revision` counter (starts at 0 for draft, incremented on every pub
 { "error": { "code": "CONFLICT", "message": "...", "currentRevision": 5 } }
 ```
 
-✅ **Core-implemented**: `createPage()` starts revision at 0. `publishPage()` and `updatePage()` both accept optional `expectedRevision` and return `{ conflict: true, currentRevision }` on mismatch. Verified by tests (`docs.test.ts:345-363`, `docs-contract.test.ts:282-303`).
+✅ **Core-implemented**: `createPage()` starts revision at 0. `publishPage()` and `updatePage()` both accept optional `expectedRevision` and return `{ conflict: true, currentRevision }` on mismatch. Verified by `docs.test.ts`.
 
 ### 🔴 Draft/Publish Lifecycle (Draft-First)
 
@@ -564,7 +563,7 @@ Pages have a `revision` counter (starts at 0 for draft, incremented on every pub
 - **Explicit Publish** (`POST /pages/:id/publish`) atomically: copies draft content/title/slug → published columns, increments `revision` (0→1 on first publish, N→N+1 on re-publish), saves exactly one version snapshot in `docs_page_versions`, rebuilds backlinks from wikilinks, and clears the draft row. Optional `expectedRevision` enables optimistic concurrency. This is an API action, not just editor-side UX.
 - **Soft delete** sets status → `'archived'`. Permanent delete removes from trash.
 
-✅ **Core-implemented**: `createPage()`, `publishPage()`, `saveDraft()`, `archivePage()`, `restorePage()` all verified by tests (`docs.test.ts` sections 2–5, `docs-contract.test.ts` "draft/publish lifecycle"). API routes and Dashboard UI implemented.
+✅ **Core-implemented**: `createPage()`, `publishPage()`, `saveDraft()`, `archivePage()`, and `restorePage()` are covered by `docs.test.ts`. API routes and Dashboard UI are implemented.
 
 ### 🔴 Content Limits
 
@@ -579,7 +578,7 @@ Pages have a `revision` counter (starts at 0 for draft, incremented on every pub
 | Version history | Last 100 kept; older pruned | Not implemented | 🔴 Not implemented |
 | Draft save interval | 30 seconds (frontend timer) | Dashboard | 🔴 Frontend |
 
-✅ **Content limit boundary tests verify**: `docs.test.ts:273-279` (createPage), `docs.test.ts:414-421` (updatePage), `docs.test.ts:445-449` (saveDraft), `docs.test.ts:611-628` (comments), `docs-contract.test.ts:153-204` (all boundary tests).
+✅ **Content limit boundary tests** are covered by `docs.test.ts` for create, update, draft, and comments.
 
 ### 🔴 Cycle Prevention (Mandatory Validation)
 
@@ -589,7 +588,7 @@ Page hierarchy cycle prevention is **mandatory** in create and move operations:
 - **On page move**: `POST /pages/:id/move` with `newParentId` must validate that the target parent is not the page itself or one of its descendants. Reject with `409 CONFLICT` and code `CYCLE_DETECTED` if a cycle would be created.
 - **Backlink graph** (`docs_page_links`): Rebuilt by `rebuildBacklinks()` after every create/update/restore. This parses `[[wikilink]]` patterns, resolves slugs, inserts links (skipping self-references), and uses `INSERT OR IGNORE`. This is a separate concern from hierarchy cycle prevention.
 
-✅ **Core-implemented**: `movePage()` in `docs.ts:641-684` implements `wouldCreateCycle()` (walks parent chain), returns `PARENT_SELF`/`PARENT_CYCLE` errors. `createPage()` validates parent through `validateParentPage()`. Verified by 7 tests (`docs.test.ts:475-541`, `docs-contract.test.ts:347-400`). API cycle-to-HTTP-409 mapping pending.
+✅ **Core-implemented**: `movePage()` in `docs.ts` implements `wouldCreateCycle()` (walks parent chain), returns `PARENT_SELF`/`PARENT_CYCLE` errors. `createPage()` validates parent through `validateParentPage()`. Covered by `docs.test.ts`. API cycle-to-HTTP-409 mapping remains pending.
 
 ### 🔴 Attachment Rules
 
@@ -597,7 +596,7 @@ Page hierarchy cycle prevention is **mandatory** in create and move operations:
 2. **Storage path**: Files stored at `{INGENIUM_HOME}/attachments/{pageId}/{uuid}.{ext}`.
 3. **Path traversal prevention**: The stored `filename` is a server-generated UUID; the `original_name` is stored separately for display.
 4. **Delete cascade**: When a page is archived/permanently deleted, attachments are removed from disk + DB (ON DELETE CASCADE).
-5. **✅ `saveAttachment` uses `ON CONFLICT DO UPDATE`** (not `INSERT OR REPLACE`). HARD RULE #11 compliance verified by tests: same (page_id, filename) upsert preserves row ID (`docs.test.ts:548-561`, `docs-contract.test.ts:81-99`). `deleteAttachment()` returns the deleted row for ownership verification (`docs.test.ts:563-575`).
+5. **✅ `saveAttachment` uses `ON CONFLICT DO UPDATE`** (not `INSERT OR REPLACE`). HARD RULE #11 compliance is covered by `docs.test.ts`: same `(page_id, filename)` upsert preserves row ID, and `deleteAttachment()` returns the deleted row for ownership verification.
 
 ### 🔴 max_tokens = 8192 (AI)
 
@@ -682,13 +681,13 @@ The 6 backward-compat aliases (`PUT /move`, `POST /link-project`, `POST /comment
 
 ---
 
-## Dashboard UI (W2 Implemented)
+## Dashboard UI
 
 The Docs Workspace dashboard at `/docs` provides an immersive responsive 3-pane workspace.
 
 ### Layout
 - **Left pane** — `PageTree` component: collapsible tree of pages in the selected space. Supports keyboard navigation, inline rename, move dialog, archive action, and tree refresh after mutations. A "New Page" button opens the `CreatePageDialog`.
-- **Center pane** — Main content area: `DocsEditor` (basic textarea-based Markdown editor with View/Edit/Source/Split mode buttons). Shows `WelcomeScreen` when no page is selected, `PageLoadingSkeleton` during load, and error states on failure. Rename inline bar appears above the editor when triggered.
+- **Center pane** — Main content area: `DocsEditor` (Markdown editor with View/Edit/Source/Split modes; Source and Split use CodeMirror with a live preview). Shows `WelcomeScreen` when no page is selected, `PageLoadingSkeleton` during load, and error states on failure. Rename inline bar appears above the editor when triggered.
 - **Right sidebar** — Tabbed panel (`RightSidebar`) with 8 tabs: Info, Tags, Backlinks, Comments, History, Linked (project links), Files (attachments), Trash. Toggleable via the sidebar button. Page-scoped tabs are disabled when no page is selected.
 
 ### Actions (source-verified from `page.tsx`)
@@ -715,21 +714,21 @@ The Docs Workspace dashboard at `/docs` provides an immersive responsive 3-pane 
 ### Standalone Mode (`/standalone?page=docs`)
 The `/standalone` page supports `page=docs` as a valid value. `StandaloneDocs()` fetches all spaces, displays them as a selectable list with "New Space" creation dialog (name + description). Selecting a space navigates to `/docs?space=<id>`. This enables embedding the docs workspace in tiling window managers or Electron BrowserView.
 
-### Editor Modes (Current — W2 Basic)
+### Editor Modes
 
-The Docs Workspace currently offers a basic textarea-based Markdown editor:
+The Docs Workspace provides a Markdown editor with CodeMirror source and split-preview modes:
 
 | Mode | Description | W3 Status |
 |------|-------------|-----------|
 | **View** | Rendered Markdown output — read-only view | ✅ Implemented |
-| **Edit** | Basic textarea-based Markdown editing | 🔴 Pending (TipTap/rich editor) |
-| **Source** | Raw Markdown source editing in textarea | 🔴 Pending (syntax highlighting) |
-| **Split** | Side-by-side Source + Preview | 🔴 Pending (live preview) |
+| **Edit** | Markdown editing in a textarea with formatting controls | 🔴 WYSIWYG TipTap editor pending |
+| **Source** | CodeMirror Markdown source editor with line numbers, syntax highlighting, and dark theme | ✅ Implemented |
+| **Split** | CodeMirror source beside a debounced live preview | ✅ Implemented |
 
-> The WYSIWYG TipTap/ProseMirror rich editor, source-mode syntax highlighting, and split-pane live preview are **W3 pending** and not yet implemented.
+> A WYSIWYG TipTap/ProseMirror rich editor remains pending. Source-mode syntax highlighting and split-pane live preview are implemented.
 
 ### Navigation
-The Docs link in the navigation sidebar (`Navigation.tsx:230`) is active with no "Coming Soon" badge. The stale badge was removed as part of W2.
+The Docs link in the navigation sidebar is active with no "Coming Soon" badge.
 
 ---
 

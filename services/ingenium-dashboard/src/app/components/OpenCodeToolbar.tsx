@@ -15,8 +15,7 @@ interface OpenCodeToolbarProps {
  * Compact integrated toolbar at the top of the OpenCode viewport.
  *
  * Contains a segmented Web/CLI toggle, fullscreen button, pop-out button,
- * and a status indicator (green=loaded, red=loading). Replaces the old
- * floating glass OpenCodeSwitch tab.
+ * and a status indicator (green=loaded, red=loading).
  *
  * Keyboard shortcut: Ctrl+Shift+` toggles Web ↔ CLI mode.
  */

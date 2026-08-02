@@ -26,7 +26,11 @@ export function getEmailEncryptionKeyFingerprint(): string {
     .digest("hex");
 }
 
-/** Encrypt string data with AES-256-GCM using a fresh IV for every value. */
+/**
+ * Encrypt string data with AES-256-GCM using a fresh IV for every value.
+ * Stored values are base64([16-byte IV | 16-byte auth tag | ciphertext]) so
+ * decryption can recover the per-value GCM inputs without separate columns.
+ */
 export function encryptCredentialValue(data: string): string {
   const key = getEmailEncryptionKey();
   const iv = crypto.randomBytes(16);
@@ -35,7 +39,10 @@ export function encryptCredentialValue(data: string): string {
   return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64");
 }
 
-/** Decrypt an AES-256-GCM credential value. Authentication failures throw. */
+/**
+ * Decrypt a base64([16-byte IV | 16-byte auth tag | ciphertext]) credential
+ * value. Authentication failures throw.
+ */
 export function decryptCredentialValue(encrypted: string): string {
   const key = getEmailEncryptionKey();
   const combined = Buffer.from(encrypted, "base64");

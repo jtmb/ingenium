@@ -1,14 +1,11 @@
 import type { Server } from "node:http";
 import { logger } from "ingenium-core";
 import {
-  getGlobalProjectId,
-  listAccounts,
   stopEngine,
-  stopWatcher,
+  stopAllWatchers,
 } from "ingenium-email";
 import { stopBackupScheduler } from "./backup-scheduler.js";
 import { stopAllJobRuns } from "./job-runner.js";
-import { getRegisteredMailWatcherIds } from "./mail-watchers.js";
 import { stopScheduler } from "./scheduler.js";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -43,23 +40,11 @@ interface SignalProcess {
   removeListener(event: "SIGTERM" | "SIGINT", listener: () => void): unknown;
 }
 
-async function stopMailWatchers(): Promise<void> {
-  const accountIds = new Set(getRegisteredMailWatcherIds());
-  try {
-    const projectId = getGlobalProjectId();
-    for (const account of listAccounts(projectId)) accountIds.add(account.id);
-  } catch {
-    // A registered watcher may still need cleanup after its account was removed.
-  }
-
-  await Promise.allSettled([...accountIds].map((accountId) => stopWatcher(accountId)));
-}
-
 const defaultDependencies: LifecycleDependencies = {
   stopScheduler,
   stopBackupScheduler,
   stopJobs: stopAllJobRuns,
-  stopMailWatchers,
+  stopMailWatchers: stopAllWatchers,
   stopMailEngine: stopEngine,
 };
 

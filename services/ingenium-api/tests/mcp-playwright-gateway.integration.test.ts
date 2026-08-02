@@ -14,6 +14,7 @@ import {
   type ChildMcpToolHost,
 } from "../../ingenium-server/lib/child-mcp-gateway.js";
 import { ChildMcpRuntimeManager } from "../../ingenium-server/lib/proxy.js";
+import { getProjectStateAttestation } from "../../ingenium-server/lib/tool-state-gate.js";
 import {
   CHILD_MCP_RUNTIME_HANDOFF_HEADER,
   CHILD_MCP_RUNTIME_HANDOFF_PATH,
@@ -190,8 +191,11 @@ function createGatewayApi(baseUrl: string): ChildMcpGatewayApi {
       );
       const body = await jsonBody(response);
       const enabled = (body.data as { enabled?: unknown } | undefined)?.enabled;
-      if (!response.ok || typeof enabled !== "boolean") return "unavailable";
-      return enabled ? "enabled" : "disabled";
+      const attestation = getProjectStateAttestation(body, project);
+      if (!response.ok || !attestation || typeof enabled !== "boolean") {
+        return { state: "unavailable", attestation: null };
+      }
+      return { state: enabled ? "enabled" : "disabled", attestation };
     },
   };
 }
@@ -245,6 +249,37 @@ afterEach(async () => {
   temporaryDirectory = "";
   if (originalDbPath === undefined) delete process.env.INGENIUM_CORE_DB_PATH;
   else process.env.INGENIUM_CORE_DB_PATH = originalDbPath;
+});
+
+describe("MCP-005 gateway API fixture", () => {
+  it("maps an enabled tool state only when the API attests the project", async () => {
+    const app = express();
+    app.get("/api/v1/mcp-tools/:name/state", (_req, res) => {
+      res.json({
+        project: projectName,
+        project_id: "mcp-playwright-gateway-project-id",
+        data: { enabled: true },
+      });
+    });
+    const baseUrl = await startHttpServer(app);
+
+    await expect(createGatewayApi(baseUrl).toolEnabled(projectName, "ingenium_playwright_browser_navigate"))
+      .resolves.toEqual({
+        state: "enabled",
+        attestation: { project: projectName, project_id: "mcp-playwright-gateway-project-id" },
+      });
+  });
+
+  it("fails closed for a legacy tool-state response without project attestation", async () => {
+    const app = express();
+    app.get("/api/v1/mcp-tools/:name/state", (_req, res) => {
+      res.json({ data: { enabled: true } });
+    });
+    const baseUrl = await startHttpServer(app);
+
+    await expect(createGatewayApi(baseUrl).toolEnabled(projectName, "ingenium_playwright_browser_navigate"))
+      .resolves.toEqual({ state: "unavailable", attestation: null });
+  });
 });
 
 describe("MCP-005 real Playwright child gateway", () => {

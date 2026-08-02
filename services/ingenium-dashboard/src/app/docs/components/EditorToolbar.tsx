@@ -34,8 +34,6 @@ function ToolButton({
   );
 }
 
-// ── Mode toggle ────────────────────────────────────────────────────────────────
-
 function ModeButton({
   active,
   onClick,

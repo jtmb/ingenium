@@ -236,7 +236,6 @@ export default function OpenCodeFrame({
     );
   }
 
-  // ── Availability guard ──────────────────────────────────────────────
   const activeAvailability = runtime.availability[mode];
   if (activeAvailability === "unavailable" || activeUrl === null) {
     const authUrl = getOpenCodeAuthUrl(mode);

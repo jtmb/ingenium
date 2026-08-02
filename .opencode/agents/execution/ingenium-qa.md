@@ -4,6 +4,7 @@ description: "Targeted, read-only QA. Performs one declared verification pass af
 mode: subagent
 permission:
   read: allow
+  question: deny
   bash: allow
   glob: allow
   grep: allow
@@ -25,6 +26,7 @@ permission:
     "@documentation": allow
     "@security-audit": allow
     "@database-conventions": allow
+    "@ponytail": allow
     "*": deny
 ---
 

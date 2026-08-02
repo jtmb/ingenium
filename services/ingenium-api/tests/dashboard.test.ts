@@ -33,6 +33,21 @@ let projectId: string;
 let projectName: string;
 let server: Server | null = null;
 let baseUrl: string;
+const nativeFetch = globalThis.fetch;
+
+function supervisorResponse(): string {
+  return [
+    "ingenium-api",
+    "ingenium-api-boundary",
+    "ingenium-dashboard",
+    "ingenium-gateway",
+    "opencode-web",
+    "ttyd-opencode",
+    "vscode",
+  ]
+    .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>RUNNING</string></value></member><member><name>start</name><value><i4>1</i4></value></member></struct>`)
+    .join("");
+}
 
 function buildApp(): express.Express {
   const app = express();
@@ -60,9 +75,17 @@ beforeAll(async () => {
       resolve();
     });
   });
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "http://127.0.0.1:9001/RPC2") {
+      return new Response(supervisorResponse(), { status: 200 });
+    }
+    return nativeFetch(input, init);
+  });
 });
 
 afterAll(async () => {
+  vi.unstubAllGlobals();
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
@@ -123,6 +146,17 @@ describe("GET /api/v1/dashboard/summary", () => {
     expect(body.data.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/);
   });
 
+  it("includes all seven supervised processes in the health strip", async () => {
+    const res = await fetch(`${baseUrl}/api/v1/dashboard/summary?project=${projectName}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.data.health.services).toHaveLength(9);
+    expect(body.data.health.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "VS Code", status: "running" }),
+    ]));
+  });
+
   it("correctly counts tasks by column", async () => {
     const tasksModule = await import("ingenium-core").then((m) => m.tasks);
 
@@ -130,9 +164,9 @@ describe("GET /api/v1/dashboard/summary", () => {
     tasksModule.createTask(projectId, "Todo 1");
     tasksModule.createTask(projectId, "Todo 2");
     const inProgress = tasksModule.createTask(projectId, "In Progress 1");
-    tasksModule.moveTask(inProgress.id, "in_progress");
+    tasksModule.moveTask(projectId, inProgress.id, "in_progress");
     const review = tasksModule.createTask(projectId, "Review 1");
-    tasksModule.moveTask(review.id, "review");
+    tasksModule.moveTask(projectId, review.id, "review");
 
     const res = await fetch(`${baseUrl}/api/v1/dashboard/summary?project=${projectName}`);
     expect(res.status).toBe(200);
@@ -171,9 +205,9 @@ describe("GET /api/v1/dashboard/summary", () => {
     jobsModule.startJobRun(projectId, job.id, "manual");
 
     // Get the run ID and mark it as failed
-    const runs = jobsModule.listJobRuns(job.id, 1);
+    const runs = jobsModule.listJobRuns(projectId, job.id, 1);
     if (runs.length > 0) {
-      jobsModule.finishJobRun(runs[0]!.id, "failed", 1);
+      jobsModule.finishJobRun(projectId, runs[0]!.id, "failed", 1);
     }
 
     // Create a disabled job — should NOT appear in failedRecently

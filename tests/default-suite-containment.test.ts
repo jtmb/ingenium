@@ -24,6 +24,7 @@ const OPT_IN_FILES = [
   "mail.spec.ts",
   "chat-real-provider.smoke.spec.ts",
   "opencode.spec.ts",
+  "vscode-docker.spec.ts",
   "integration.spec.ts",
   "qa-mail-darkmode-screenshots.spec.ts",
 ] as const;
@@ -62,6 +63,25 @@ describe("default Playwright suite containment", () => {
     for (const file of OPT_IN_FILES) {
       expect(config).not.toContain(file);
     }
+  });
+
+  it("keeps external Docker selection read-only and mail-specific", () => {
+    const dockerConfig = sourceFor("tests/playwright.docker.config.ts");
+    const mailConfig = sourceFor("tests/playwright.mail.config.ts");
+    expect(dockerConfig).toContain("integration.spec.ts");
+    expect(dockerConfig).not.toContain("all-pages.spec.ts");
+    expect(dockerConfig).not.toContain("mail.spec.ts");
+    expect(dockerConfig).not.toContain("chat-real-provider.smoke.spec.ts");
+    expect(mailConfig).toContain("mail.spec.ts");
+    expect(mailConfig).toContain("mail-global-setup.ts");
+  });
+
+  it("serializes Docker browser work against the external gateway budget", () => {
+    const dockerConfig = sourceFor("tests/playwright.docker.config.ts");
+
+    expect(dockerConfig).toContain("workers: 1");
+    expect(dockerConfig).toContain("fullyParallel: false");
+    expect(dockerConfig).toContain("retries: 0");
   });
 
   it("uses a CJS-compatible canonical repository root in the default config", () => {

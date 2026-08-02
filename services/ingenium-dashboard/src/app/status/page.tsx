@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import ServiceOverlay from "./ServiceOverlay";
 import { badgeTones } from "../../lib/badgeTones";
 import { getApiBase } from "@/lib/api";
+import { formatUptime } from "@/lib/time";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,16 +79,6 @@ const API_URL = getApiBase();
 const POLL_INTERVAL = 2000;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatUptime(seconds: number): string {
-  if (seconds <= 0) return "—";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
 
 function stateBadge(state: ServiceState): {
   label: string;

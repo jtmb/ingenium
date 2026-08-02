@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { dashboardFetch, getApiBase } from "@/lib/api";
+import { Dropdown, DropdownItem, DropdownPanel, DropdownTrigger } from "@/app/components/Dropdown";
 
 export type AIAction =
   | "outline"
@@ -280,9 +281,9 @@ const AIActions: React.FC<AIActionsProps> = ({
 
   return (
     <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
+      <Dropdown open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownTrigger
+        aria-label="AI"
         title="AI Assistance"
         className={`shrink-0 p-1.5 rounded transition-colors flex items-center gap-1 text-xs
           ${isOpen
@@ -294,10 +295,10 @@ const AIActions: React.FC<AIActionsProps> = ({
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
         </svg>
         <span className="hidden sm:inline">AI</span>
-      </button>
+      </DropdownTrigger>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-64 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 p-2">
+        <DropdownPanel aria-label="AI actions" className="right-0 top-full mt-1 w-64 p-2 shadow-lg">
           <div className="space-y-1">
             {ACTIONS.map((actionDef) => {
               const disabledReason = getDisabledReason(actionDef);
@@ -305,11 +306,11 @@ const AIActions: React.FC<AIActionsProps> = ({
               const isLoading = loading === actionDef.action;
 
               return (
-                <button
+                <DropdownItem
                   key={actionDef.action}
-                  type="button"
                   onClick={() => handleAction(actionDef)}
                   disabled={!!loading || isDisabled}
+                  closeOnSelect={false}
                   title={disabledReason ?? actionDef.description}
                   className={`w-full text-left px-2 py-1.5 text-xs rounded transition-colors flex items-center gap-2
                     ${isDisabled
@@ -326,17 +327,17 @@ const AIActions: React.FC<AIActionsProps> = ({
                     </svg>
                   )}
                   <span>{actionDef.label}</span>
-                </button>
+                </DropdownItem>
               );
             })}
           </div>
-        </div>
+        </DropdownPanel>
       )}
 
       {/* Result/error overlay — stale results show both the actionable error and
           the preserved preview so the user can retry or discard it. */}
       {(result || error) && (
-        <div className="absolute right-0 top-full mt-1 w-96 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 p-3">
+        <div className="absolute right-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-lg">
           {error && (
             <div role="alert" className={result ? "mb-3" : undefined}>
               <p className="text-xs text-red-600 dark:text-red-400 mb-2">{error}</p>
@@ -377,6 +378,7 @@ const AIActions: React.FC<AIActionsProps> = ({
           )}
         </div>
       )}
+      </Dropdown>
     </div>
   );
 };

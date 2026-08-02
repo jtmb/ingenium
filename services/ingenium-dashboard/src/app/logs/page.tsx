@@ -6,7 +6,6 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, type LogEntry } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
-// ── Constants ────────────────────────────────────────────────────────────
 // 500-entry cap prevents unbounded memory growth in long-running sessions.
 // 2s poll interval gives near-real-time log display without saturating the API.
 const MAX_ENTRIES = 500;
@@ -15,7 +14,6 @@ const POLL_MS = 2_000;
 const ALL_LEVELS = ["debug", "info", "warn", "error"] as const;
 type Level = (typeof ALL_LEVELS)[number];
 
-// ── Color maps ───────────────────────────────────────────────────────────
 function sourceBadgeColor(src: string): string {
   const hues: Record<string, string> = {
     agent: "blue",
@@ -59,7 +57,6 @@ const SOURCE_LABEL: Record<string, string> = {
   email: "Email",
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString("en-GB", { hour12: false });
@@ -72,8 +69,6 @@ function fmtFull(iso: string): string {
 function dedupeKey(e: LogEntry): string {
   return `${e.timestamp}|${e.source}|${e.level}|${e.message}`;
 }
-
-// ── Page ─────────────────────────────────────────────────────────────────
 
 /**
  * LogsPage — Live system log stream with source/level filters and search.
@@ -94,12 +89,10 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set(["all"]));
   const [selectedLevels, setSelectedLevels] = useState<Set<Level>>(new Set(["info", "warn", "error"]));
   const [searchText, setSearchText] = useState("");
 
-  // UI state
   const [paused, setPaused] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -108,7 +101,6 @@ export default function LogsPage() {
   const seenKeys = useRef(new Set<string>());
   const lastTimestampRef = useRef<string>("");
 
-  // ── Fetch ──────────────────────────────────────────────────────────────
   const fetchLogs = useCallback(() => {
     api.logs
       .list(project, lastTimestampRef.current || undefined, 200)
@@ -152,12 +144,10 @@ export default function LogsPage() {
       });
   }, [project]);
 
-  // Initial fetch
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
 
-  // ── Polling ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (paused) {
       if (intervalRef.current) {
@@ -172,7 +162,6 @@ export default function LogsPage() {
     };
   }, [paused, fetchLogs]);
 
-  // ── Auto-scroll ────────────────────────────────────────────────────────
   useEffect(() => {
     if (shouldAutoScroll.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -186,7 +175,6 @@ export default function LogsPage() {
     shouldAutoScroll.current = scrollHeight - scrollTop - clientHeight < 4;
   }, []);
 
-  // ── Filter logic ───────────────────────────────────────────────────────
   const filteredEntries = useMemo(() => {
     const showAllSources = selectedSources.has("all");
     return entries.filter((e) => {
@@ -201,13 +189,11 @@ export default function LogsPage() {
     });
   }, [entries, selectedSources, selectedLevels, searchText]);
 
-  // Derived stats
   const activeSourcesCount = useMemo(
     () => new Set(entries.map((e) => e.source)).size,
     [entries],
   );
 
-  // ── Toggle helpers ─────────────────────────────────────────────────────
   const toggleSource = (src: string) => {
     setSelectedSources((prev) => {
       const next = new Set(prev);
@@ -240,10 +226,8 @@ export default function LogsPage() {
     });
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4 min-w-0">
-      {/* ── Status Header ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="min-w-0">
           <h1 className="break-words text-3xl font-bold">System Logs</h1>
@@ -282,14 +266,11 @@ export default function LogsPage() {
         </div>
       </div>
 
-      {/* ── Filter Bar ──────────────────────────────────────────────────── */}
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 hover:shadow-md transition-shadow space-y-3">
-        {/* Source pills */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-[var(--color-text-muted)] mr-1 font-medium">
             Sources:
           </span>
-          {/* All pill */}
           <button
             onClick={() => toggleSource("all")}
             className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
@@ -319,7 +300,6 @@ export default function LogsPage() {
           })}
         </div>
 
-        {/* Level checkboxes + search */}
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
           <span className="text-xs text-[var(--color-text-muted)] font-medium">Levels:</span>
           {ALL_LEVELS.map((lvl) => {
@@ -359,7 +339,6 @@ export default function LogsPage() {
         </div>
       </div>
 
-      {/* ── Log Table ────────────────────────────────────────────────────── */}
       {loading && entries.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
           Loading logs...

@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
+import Select from "../components/Select";
 import { api, type Agent } from "@/lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
@@ -154,16 +155,16 @@ export default function AgentsPage() {
             onChange={e => setNewDesc(e.target.value)}
           />
           <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
-            <select aria-label="New agent category" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={newCat} onChange={e => setNewCat(e.target.value)}>
+            <Select wrapperClassName="w-full sm:flex-1" aria-label="New agent category" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={newCat} onChange={e => setNewCat(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="execution">Execution</option>
               <option value="research">Research</option>
               <option value="security">Security</option>
-            </select>
-            <select aria-label="New agent mode" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={newMode} onChange={e => setNewMode(e.target.value)}>
+            </Select>
+            <Select wrapperClassName="w-full sm:flex-1" aria-label="New agent mode" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={newMode} onChange={e => setNewMode(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="subagent">Subagent</option>
-            </select>
+            </Select>
           </div>
           <input
             className="border p-2 rounded w-full"
@@ -211,12 +212,12 @@ export default function AgentsPage() {
                       onChange={e => setEditDesc(e.target.value)}
                     />
                     <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
-                      <select aria-label="Agent category" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={editCat} onChange={e => setEditCat(e.target.value)}>
+                      <Select wrapperClassName="w-full sm:flex-1" aria-label="Agent category" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={editCat} onChange={e => setEditCat(e.target.value)}>
                         <option value="primary">Primary</option>
                         <option value="execution">Execution</option>
                         <option value="research">Research</option>
                         <option value="security">Security</option>
-                      </select>
+                      </Select>
                       <input
                         className="w-full rounded border p-2 sm:flex-1"
                         placeholder="Runtime model (opencode.json)"

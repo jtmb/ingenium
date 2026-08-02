@@ -1,36 +1,11 @@
 /**
  * MCP tool handlers for email operations.
  * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
- * Provides 27 tools: 7 basic + 6 self-learning + 14 admin/operations tools.
- * Logs observations to the self-learning pipeline as a side effect for behavior tracking.
+ * Provides 27 tools: 7 basic + 6 assistance + 14 admin/operations tools.
  */
-import { createWriteStream, promises as fs } from "node:fs";
-import path from "node:path";
-import { pipeline } from "node:stream/promises";
 import { api } from "../client.js";
 import { apiRequestHeaders, config } from "../../config/index.js";
-
-/** Validated workspace-bounded path for attachment downloads. */
-const WORKSPACE_ROOT = "/workspace";
-const HOME_ROOT = process.env.HOME ?? "/home/appuser";
-const FORBIDDEN_PREFIXES = ["/etc", "/root", "/proc", "/sys", "/dev", "/tmp"];
-
-function validateSafePath(outputPath: string): string {
-  const resolved = path.resolve(outputPath);
-  // Must be within workspace or home, not in a forbidden location
-  const isInWorkspace = resolved === WORKSPACE_ROOT || resolved.startsWith(WORKSPACE_ROOT + "/");
-  const isInHome = resolved === HOME_ROOT || resolved.startsWith(HOME_ROOT + "/");
-  if (!isInWorkspace && !isInHome) {
-    throw new Error(
-      `Path "${outputPath}" resolves to "${resolved}" — must be within ${WORKSPACE_ROOT} or ${HOME_ROOT}`,
-    );
-  }
-  const forbidden = FORBIDDEN_PREFIXES.find((p) => resolved === p || resolved.startsWith(p + "/"));
-  if (forbidden) {
-    throw new Error(`Path "${outputPath}" resolves to a forbidden location (${forbidden})`);
-  }
-  return resolved;
-}
+import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
 
 // ── Basic Email Tools ──────────────────────────────────────────────────────
 
@@ -42,12 +17,6 @@ export async function emailList(project: string, account: string, folder?: strin
     page: String(page ?? 1),
     limit: "20",
   });
-  await api.post("/observations", {
-    observation_type: "behavior",
-    content: `Agent listed emails in ${folder ?? "INBOX"} for account ${account}`,
-    importance: 3,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -58,12 +27,6 @@ export async function emailSearch(project: string, account: string, query: strin
     q: query,
     folder: folder ?? "INBOX",
   });
-  await api.post("/observations", {
-    observation_type: "research",
-    content: `Agent searched emails for "${query}"`,
-    importance: 5,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -73,12 +36,6 @@ export async function emailRead(project: string, account: string, uid: number, f
     project, account,
     folder: folder ?? "INBOX",
   });
-  await api.post("/observations", {
-    observation_type: "behavior",
-    content: `Agent read email #${uid} from ${folder ?? "INBOX"}`,
-    importance: 3,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -93,12 +50,6 @@ export async function emailSend(
   if (cc) body.cc = cc.split(",").map((s: string) => ({ address: s.trim() }));
   if (bcc) body.bcc = bcc.split(",").map((s: string) => ({ address: s.trim() }));
   const res = await api.post("/emails", body, { project });
-  await api.post("/observations", {
-    observation_type: "preference",
-    content: `Agent sent email to ${to} about "${subject}"`,
-    importance: 7,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -109,12 +60,6 @@ export async function emailDraft(
   const body: any = { account, to: to.split(",").map((s: string) => ({ address: s.trim() })), subject };
   if (html) body.html = html;
   const res = await api.post("/emails/draft", body, { project });
-  await api.post("/observations", {
-    observation_type: "preference",
-    content: `Agent drafted email to ${to} about "${subject}"`,
-    importance: 5,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -130,7 +75,7 @@ export async function emailAccounts(project: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-// ── Self-Learning Email Tools ──────────────────────────────────────────────
+// ── Email Assistance Tools ─────────────────────────────────────────────────
 
 /** Triage emails — categorize by priority and suggest actions */
 export async function emailTriage(project: string, account: string, limit?: number) {
@@ -138,12 +83,6 @@ export async function emailTriage(project: string, account: string, limit?: numb
     project, account,
     limit: String(limit ?? 20),
   });
-  await api.post("/observations", {
-    observation_type: "pattern",
-    content: `Agent triaged inbox for account ${account}`,
-    importance: 6,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -152,14 +91,6 @@ export async function emailSuggestResponse(project: string, account: string, uid
   const params: Record<string, string> = { project, account };
   if (folder) params.folder = folder;
   const res = await api.get(`/emails/suggest/${uid}`, params);
-  if (res.data?.matchedSkill) {
-    await api.post("/observations", {
-      observation_type: "insight",
-      content: `Response pattern "${res.data.matchedSkill}" matched email #${uid} (confidence: ${res.data.confidence})`,
-      importance: 7,
-      source: "agent",
-    }, { project });
-  }
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -168,11 +99,8 @@ export async function emailDraftResponse(project: string, account: string, uid: 
   const params: Record<string, string> = { project, account };
   if (folder) params.folder = folder;
   const suggest = await api.get(`/emails/suggest/${uid}`, params);
-  // New API shape: { suggestions: [...], source: "...", configured: boolean }
-  // Old API shape: { data: { body, subject, matchedSkill, ... } } — for backward compat
-  // TODO: Remove backward-compat shim once all instances are migrated to new API shape.
   const suggestions: Array<{ tone?: string; subject?: string; body?: string }> =
-    suggest.data?.suggestions ?? (suggest.data?.body ? [suggest.data] : []);
+    suggest.data?.suggestions ?? [];
   const first = suggestions[0];
   if (!first?.body) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: "No suggestion available" }) }] };
@@ -187,12 +115,6 @@ export async function emailDraftResponse(project: string, account: string, uid: 
     html: first.body,
   }, { project });
   const sourceInfo = suggest.data?.source ?? "unknown";
-  await api.post("/observations", {
-    observation_type: "preference",
-    content: `Agent auto-drafted response to email #${uid} (source: ${sourceInfo})`,
-    importance: 7,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify({ draft: draft.data, suggestion: first, source: sourceInfo }) }] };
 }
 
@@ -206,12 +128,6 @@ export async function emailPatterns(project: string) {
 /** Start IMAP IDLE watcher for real-time email monitoring */
 export async function emailWatchStart(project: string, account: string) {
   const res = await api.post("/emails/watch/start", { account }, { project });
-  await api.post("/observations", {
-    observation_type: "workflow",
-    content: `Agent started IMAP watcher for account ${account}`,
-    importance: 5,
-    source: "agent",
-  }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -350,13 +266,11 @@ export async function emailAttachmentGet(
   // 🔴 Validate outputPath before making any network call
   let safePath: string;
   try {
-    safePath = validateSafePath(outputPath);
-  } catch (err: any) {
-    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${err.message}` }) }] };
+    safePath = resolveSafeDownloadPath(outputPath);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Invalid path";
+    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${message}` }) }] };
   }
-
-  // Ensure the parent directory exists
-  await fs.mkdir(path.dirname(safePath), { recursive: true });
 
   // Build the API URL and perform a raw fetch for binary response
   const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
@@ -373,18 +287,6 @@ export async function emailAttachmentGet(
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };
   }
 
-  const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
-
-  // Stream to file — NEVER buffer the full binary in memory
-  if (!response.body) {
-    // Fallback for responses without a readable body (extremely rare)
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.writeFile(safePath, buffer);
-  } else {
-    const fileStream = createWriteStream(safePath);
-    await pipeline(response.body, fileStream);
-  }
-
-  const stat = await fs.stat(safePath);
-  return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size: stat.size }) }] };
+  const { mimeType, size } = await streamDownloadResponse(response, safePath);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size }) }] };
 }

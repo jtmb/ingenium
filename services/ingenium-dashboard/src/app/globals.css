@@ -56,6 +56,7 @@
   --color-nav-text: #6b7280;
   --color-nav-text-hover: #111827;
   --color-nav-text-active: #2563eb;
+  --color-nav-scrollbar-thumb: #cbd5e1;
 
   /* Code / pre blocks */
   --color-code-bg: #f3f4f6;
@@ -110,6 +111,7 @@
   --color-nav-text: #a0a0a0;
   --color-nav-text-hover: #e5e5e5;
   --color-nav-text-active: #e5e5e5;
+  --color-nav-scrollbar-thumb: #525252;
 
   /* Code / pre blocks */
   --color-code-bg: #1f1f1f;
@@ -120,6 +122,111 @@
 @layer base {
   *, ::before, ::after {
     border-color: var(--color-border);
+  }
+}
+
+/* The external navigation prepaint script sets this before React hydrates.
+   Keeping the compact visual rules here means React can safely adopt the
+   persisted value after hydration without changing the server-rendered tree. */
+html[data-nav-compact="true"] .desktop-navigation {
+  width: 3.5rem;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .nav-item-link,
+html[data-nav-compact="true"] .desktop-navigation .nav-group-control {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .nav-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .nav-badge {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .nav-divider {
+  margin-right: 0.5rem;
+  margin-left: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-navigation,
+  .nav-group-items,
+  .mobile-navigation-drawer {
+    transition: none;
+  }
+}
+
+/* The left navigation keeps a stable, narrow scrollbar gutter without adding
+   idle chrome. Hover changes only the thumb color, so the reserved geometry
+   never changes while scrolling or moving the pointer over the sidebar. */
+.nav-scroll-area {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.nav-scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.nav-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nav-scroll-area::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+.nav-scroll-area::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (hover: hover) {
+  .nav-scroll-area:hover {
+    scrollbar-color: var(--color-nav-scrollbar-thumb) transparent;
+  }
+
+  .nav-scroll-area:hover::-webkit-scrollbar-thumb {
+    background-color: var(--color-nav-scrollbar-thumb);
+  }
+}
+
+/* Touch browsers can keep :hover latched after a tap; keep the scrollbar
+   chrome hidden there instead of turning a desktop hover affordance permanent. */
+@media (hover: none) {
+  .nav-scroll-area:hover {
+    scrollbar-color: transparent transparent;
+  }
+
+  .nav-scroll-area:hover::-webkit-scrollbar-thumb {
+    background-color: transparent;
   }
 }
 

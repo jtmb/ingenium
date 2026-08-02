@@ -27,6 +27,11 @@ const emailMocks = vi.hoisted(() => {
     storeTokens: noop,
     getEmailEncryptionDiagnostics: vi.fn(() => ({ status: "ready" as EncryptionStatus, globalProjectId: "global-project" })),
     validateEmailAccountMigrationCredentials: vi.fn(),
+    sanitizeProviderError: vi.fn(() => ({
+      code: "PROVIDER_ERROR",
+      message: "The email operation could not be completed. Try again later.",
+      retryable: true,
+    })),
     connectAccount: noop,
     disconnectAccount: noop,
     moveEmail: noop,
@@ -53,7 +58,7 @@ const emailMocks = vi.hoisted(() => {
     getEngineStatus: noop,
     stopAccountWorker: noop,
     setAccountConnected: noop,
-    GmailProvider: class {},
+    GmailProvider: {},
   };
 });
 

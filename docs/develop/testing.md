@@ -21,7 +21,7 @@ divergent snapshot rejection without partial writes. The tests also verify
 fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
 markers and rejection of same-inode, same-size mutation during the
 descriptor-bound read. The transport-parity check
-also verifies `ingenium_context_upload_file` and the **268-tool** inventory
+also verifies `ingenium_context_upload_file` and the **275-tool** inventory
 (266 server registrations plus 2 extension tools).
 
 ## Default test run
@@ -46,6 +46,12 @@ already been built. It skips the build step, not production mode: the
 dashboard still runs with `next start`.
 
 ### Strict containment ownership
+
+The strict audit is the post-teardown gate for the run-owned default fixture,
+not cleanup for an already-deployed external Docker suite. The Docker suite
+starts no fixture processes or manifest; Playwright owns its browser/output
+cleanup and Compose owns the deployed services. Do not run the fixture audit as
+the Docker suite's teardown step.
 
 The strict audit does not treat a configured or expected port number as proof
 of ownership. A listening fixture port is accepted only when its manifest and
@@ -176,6 +182,94 @@ RUN_DASHBOARD_MAIL=1 npx playwright test --config=tests/playwright.mail.config.t
 RUN_DASHBOARD_MANUAL=1 npx playwright test --config=tests/playwright.manual.config.ts
 ```
 
+The Docker preflight uses `http://opencode.localhost:3000` and
+`http://cli.localhost:3000` by default. The private container listeners on
+`4098` and `4099` are never Docker-suite defaults. Its focused QA command is:
+
+```bash
+RUN_DASHBOARD_DOCKER=1 npx playwright test --config=tests/playwright.docker.config.ts
+```
+
+External Docker browser work is serialized (`workers: 1`,
+`fullyParallel: false`). Before every same-origin dashboard document request,
+the Docker and route-parity suites share a worker-local serialized governor.
+Retained Docker traces measured 9 dynamic requests in 384ms for the observations
+reload, 4 in 360ms for OpenCode, and 11 in 382ms for chat; the retained
+route-parity network log recorded 7 RSC requests in 26ms. Static `/_next/static/`
+assets and OpenCode/code-server origins are excluded. Nginx permits 30 requests
+per second with a 60-request burst, so the governor reserves 12 requests per
+route and dispatches documents at most every 400ms. It waits the full
+`60 / 30 = 2s` decay interval after global preflight.
+
+The latest retained Docker `opencode-chat` failure trace covers a 758ms
+read burst: 12 logical `GET` dispatches — projects (3), sessions (4: two lists
+and two message reads), chat config (1), permissions (2), and questions (2).
+The sessions and chat-config calls are page-mocked in that scenario. The
+context-route `route.fetch()` therefore records 19 trace resource reads, but
+only seven direct API reads reach the fixed-window limiter: projects (3),
+permissions (2), and questions (2). The question and permission source polls
+are respectively 3 seconds while idle and 5 seconds while streaming, so neither
+periodic interval elapses during that burst; the duplicate calls are initial
+and session-transition refreshes.
+
+The API source default and its limiter test establish 100 requests per
+60-second window. Docker supplies a 6-second transition interval through its
+Playwright project metadata, rather than changing test order or adding a
+test-specific exception. That admits 10 transitions: `10 × 7 + 2` Docker
+preflight reads = 72, retaining 28 requests of fixed-window headroom. Route
+parity explicitly retains its verified 3-second project-metadata interval.
+This covers repeated `goto` and `reload` calls plus fresh pages created by a
+test; it does not pace OpenCode/code-server origins or asset subrequests.
+
+The retained failures distinguish the two limiters without retaining response
+bodies: the API fixed-window limiter returns JSON `RATE_LIMITED` plus a numeric
+`Retry-After`; the Nginx gateway limiter returns no `Retry-After` (normally an
+Nginx HTML body/server header). In the Docker and route-parity Playwright
+workers only, a same-origin, bodyless `GET` or `HEAD` under `/api/v1/` may be
+replayed once through `route.fetch` when the first `429` has a valid numeric or
+HTTP-date `Retry-After` no greater than 10 seconds. The worker waits that exact
+duration plus one clock tick and preserves the original request headers and
+authentication. Event-stream reads are left live because `route.fetch` cannot
+replay an open stream. A second `429`, missing/invalid/excessive header, mutation,
+request body, non-API request, and every RSC request remains fatal. This does
+not apply to the default fixture suite, deployed applications, or Node preflight
+requests. In particular, a no-header RSC `429` is a governor failure, never a
+retry signal; do not increase the 12-request/400ms drain without new retained
+request-count evidence. The 10-second browser replay maximum is intentionally
+unchanged.
+
+Before any external test starts, Docker and route-parity global setup issue one
+read-only API health preflight. If its first response has a valid numeric or
+HTTP-date `Retry-After` no greater than the known 60-second API window, setup
+waits that exact delay plus one clock tick and retries it once. A missing,
+invalid, excessive, or second `429` is fatal; no other preflight request is
+replayed. Docker preflight then resolves the selected project against the live
+project list rather than assuming fixture data.
+
+The custom external-suite fixture installs its context route handler before test
+code runs and stops it after each test: it stops accepting new routes,
+unregisters the retained handler, and awaits already-started route work before
+Playwright releases page/context fixtures. One route is admitted once, so it
+cannot fulfill twice. Only the exact `Route is already handled!` or `Test
+ended.` race is suppressed after teardown has begun; active-test and all other
+teardown errors remain fatal.
+
+`INGENIUM_E2E_PROJECT` is optional, but when set it must name an existing,
+active project returned by the deployment's same-origin `GET /api/v1/projects`
+preflight. Without it, the Docker suite uses the sole active global project.
+The suite neither creates nor deletes projects, and its general checks do not
+require a configured mail account or provider. Real mail coverage remains the
+separate `RUN_DASHBOARD_MAIL=1` suite; it is not reported as a Docker pass when
+unselected.
+
+For the run-owned fixture suite, run the strict containment gate only after
+Playwright teardown completes:
+
+```bash
+npx playwright test --config=tests/playwright.config.ts && \
+  npx tsx tests/suite-containment-audit.ts --strict
+```
+
 The Docker, provider, mail, and manual suites require their target services
 to be running before invocation. The provider and mail suites require the
 configured real provider/account; they do not manufacture credentials or
@@ -207,10 +301,11 @@ environment or secret manager; never add them to docs, source, or config.
   `tests/artifacts/manual/<date>/`; never save them at the repository root.
   Visual artifacts must be run-scoped; use a descriptive scope beneath the
   run directory so concurrent runs cannot overwrite one another.
-- After every run, verify the result, teardown, open ports, temporary run
-  directories, active handles, and process RSS. The containment audit reports
-  these signals and strict mode fails on unexpected listening ports, leftover
-  Playwright temp directories, or RSS above the configured limit:
+- After every run-owned fixture run, verify the result, teardown, open ports,
+  temporary run directories, active handles, and process RSS. The containment
+  audit reports these signals and strict mode fails on unexpected listening
+  ports, leftover Playwright temp directories, or RSS above the configured
+  limit:
 
   ```bash
   npx tsx tests/suite-containment-audit.ts --strict
@@ -238,6 +333,19 @@ Treat this audit as a required post-run gate, not as optional reporting.
   successful verification. Record it as not run/blocked and run the required
   suite with its explicit preconditions.
 
+### VS Code theme and pinned-extension acceptance
+
+The VSCODE-103 acceptance evidence is retained in the raw canonical run at
+`tests/artifacts/test-runs/run-20260802-vscode103/` and the visual evidence at
+`tests/artifacts/visual-qa/run-20260802-vscode103/`. Acceptance covers fresh
+and existing `vscode-data` volumes, restart/offline operation, exact
+`sst-dev.opencode@0.0.13` identity and SHA-256, code-server engine
+compatibility, appuser ownership, idempotence, user/workspace theme override
+preservation, and dark/light system behavior at 1440x900 and 390x844. QA and
+security review are bounded to the declared acceptance and provenance/offline
+boundary respectively; Docker acceptance verifies all 7 supervisord services
+remain healthy. Evidence contains no workspace content or secrets.
+
 ## Production dashboard route parity
 
 The route-parity suite is a separate, read-only production acceptance gate. It
@@ -254,7 +362,7 @@ npx playwright test --config=tests/dashboard-route-parity/playwright.config.ts
 `INGENIUM_PRODUCTION_DASHBOARD_URL` and `INGENIUM_E2E_DASHBOARD_URL` are
 compatibility aliases for the target URL. The target must be an absolute HTTP(S)
 root origin with no credentials, query, fragment, or shared sub-path. The suite
-loads the production `.next` route manifests, derives the canonical 20 primary
+loads the production `.next` route manifests, derives the canonical 23 primary
 routes from dashboard navigation, checks settings deep links and supported query
 variants, rejects retired routes, and smoke-renders every route through the
 gateway. Its inventory is deterministic: primary routes come from the navigation
@@ -279,9 +387,18 @@ Coverage includes:
 - rendered navigation parity, retired-route rejection, and a no-mutation guard
   for read-only inspection and settings deep links.
 
-The suite retries only observed gateway `429` responses within a bounded timeout;
-it does not sleep for a fixed duration or fall back to a development server. A
-missing artifact route, stale navigation target, failed gateway response, or
+The global preflight applies the one-time API-health drain described above; its
+gateway root response still treats every `429` as fatal. The shared document
+governor reserves 12 observed-plus-headroom dynamic requests at 30 requests per
+second, serializes dashboard documents at one per 400ms, drains the 60-request
+Nginx burst for 2 seconds after global setup, and waits 3 seconds before each
+external test transition. During browser checks only, the bounded same-origin
+API-read recovery described above may replay a valid `Retry-After` response
+once; all RSC and non-API `429` responses remain fatal and are classified by
+`Retry-After`, body kind, and server header. OpenCode/code-server documents and
+asset subrequests are not paced. The suite does not fall back to a development
+server.
+A missing artifact route, stale navigation target, failed gateway response, or
 unexpected mutation is therefore a deterministic acceptance failure.
 
 Run this suite after the production dashboard has been built and deployed. A

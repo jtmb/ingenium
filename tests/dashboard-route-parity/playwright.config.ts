@@ -1,11 +1,14 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 import { getPlaywrightOutputDirectory } from "../test-run-context";
+import {
+  ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
+} from "../ingenium-dashboard/external-suite-navigation-governor";
 import { productionDashboardUrl } from "./runtime";
 
 /** The exclusive allow-list intentionally selects no legacy dashboard specs. */
 export const ROUTE_PARITY_TEST_MATCH = "production-route-parity.spec.ts";
-const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "../..");
+const PLAYWRIGHT_REPO_ROOT = resolve(__dirname, "../..");
 
 export default defineConfig({
   testDir: ".",
@@ -17,6 +20,12 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
+  projects: [{
+    name: "dashboard-route-parity",
+    metadata: {
+      externalSuiteTransitionIntervalMs: ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
+    },
+  }],
   outputDir: getPlaywrightOutputDirectory("dashboard-route-parity", PLAYWRIGHT_REPO_ROOT),
   use: {
     // The target must be an already-running production artifact/gateway. This

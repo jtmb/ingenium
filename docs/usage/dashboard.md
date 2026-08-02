@@ -14,7 +14,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container with six supervisord processes: API, the private API boundary, Dashboard, gateway, opencode-web (internal :4098), and ttyd-opencode (internal :4099). Browser access uses the local `localhost:3000` dashboard root and `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots without browser credentials. Direct 4098/4099 access is not supported. The built-in MCP catalog contains **268 tools** across **28 baseline categories** (266 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
+Docker starts a single container with seven supervisord processes: API, the private API boundary, Dashboard, gateway, opencode-web (internal :4098), ttyd-opencode (internal :4099), and code-server (private :4100). Browser access uses the local `localhost:3000` dashboard root, `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots, and `vscode.localhost:3000` VS Code root without browser credentials. Direct 4098/4099/4100 access is not supported. The built-in MCP catalog contains **275 tools** across **29 baseline categories** (273 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -60,6 +60,7 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 | `/` | Home — operational dashboard with live metrics |
 | `/chat` | Ingenium Chat — standalone conversational agent interface |
 | `/opencode` | Embedded OpenCode Web/CLI iframes |
+| `/vscode` | Local-only VS Code workspace through `http://vscode.localhost:3000/` |
 | `/projects` | Project management |
 | `/skills` | Skills grid with detail overlay |
 | `/docs` | Documentation workspace |
@@ -78,8 +79,93 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 | `/personality` | Personality traits |
 | `/context` | Immutable context conversation memory |
 | `/pipeline` | Pipeline event timeline |
-| `/usage` | Provider-neutral project usage totals, daily UTC series, breakdowns, freshness, filters, and CSV export |
-| Settings (overlay) | Full-screen settings overlay
+ | `/usage` | Provider-neutral project usage totals, daily UTC series, breakdowns, freshness, filters, and CSV export |
+ | Settings (overlay) | Full-screen settings overlay
+
+### Navigation shell
+
+The dashboard's top bar places the burger control immediately before the
+Ingenium logo. On desktop it toggles the left navigation rail between the full
+224px layout and a compact 56px icon rail; the choice persists and is applied
+before paint. Compact links retain their order, groups, active states, and
+accessible names, with native browser `title` text available for icons.
+
+On mobile, the same control opens the existing full navigation as a modal
+drawer. The drawer traps focus, makes the page behind it inert, locks body
+scroll while open, and restores focus when closed by the user. Escape, the
+backdrop, a route change, or resizing to desktop closes it; reduced-motion
+preferences remove navigation transitions. The left rail and drawer retain
+native wheel, touch, Page Down, and keyboard scrolling. Their scrollbar gutter
+is stable, remains invisible while idle, and reveals only the thumb on hover;
+the scrollbar styling does not change the main content or create overflow.
+
+### VS Code workspace
+
+Open `/vscode` from the Workspace navigation group or directly by URL. The page
+embeds code-server through the established port-`3000` virtual-host gateway at
+`http://vscode.localhost:3000/`; code-server itself stays private at
+`127.0.0.1:4100`. The workspace uses `/workspace`, a persistent `vscode-data`
+volume, a full terminal, and the stock Open VSX/user-managed extension flow.
+
+The iframe is intentionally unsandboxed because it is trusted first-party content
+on a separate origin and requests only `allow="clipboard-write"`. If the local
+service is unavailable, use **Open VS Code in a new tab** or retry. The same view
+is available without dashboard chrome at `/standalone?page=vscode`.
+
+The `vscode-data` volume preserves the workspace's code-server state across
+restart and rebuild; removing the volume intentionally removes that persisted
+state.
+
+This is an administrator-grade local profile for Windows/WSL localhost use. Do
+not expose it to LAN, remote, shared, or untrusted users; there is no supported
+host `3002` or public `4100` endpoint.
+
+### VS Code theme and OpenCode extension
+
+The image includes a code-free built-in configuration-defaults extension. It
+enables automatic system color detection and selects **Dark Modern** or **Light
+Modern** accordingly. An explicit user or workspace theme setting takes
+precedence; Ingenium does not mutate User `settings.json` or workspace settings.
+
+The official Open VSX extension `sst-dev.opencode@0.0.13` is preinstalled from
+the image-baked VSIX at
+`https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`
+(`SHA-256: e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`).
+It is installed offline as `appuser` into the persistent `vscode-data` volume;
+there is no runtime marketplace or registry installation. On first start and
+after upgrades, the service revalidates the extension identity, engine
+compatibility, and hash before ensuring the persisted installation is present.
+
+VS Code is preinstalled, but code-server disables extensions in Restricted Mode
+until the user explicitly trusts the workspace. Ingenium never auto-trusts a
+workspace. This remains an administrator-grade local surface: do not expose it
+to LAN, remote, shared, or untrusted users.
+
+## Jobs
+
+Navigate to `/jobs` for the operator workspace. The page has three views:
+
+- **Jobs** — scheduled jobs, status, enable/disable controls, detail views, run
+  history, and **Run Now**. Run Now is a new manual run, not replay of an event
+  delivery.
+- **Event queue** — bounded trusted-event deliveries with state, attempt count,
+  retry/lease timing, sanitized error text, and timestamps.
+- **Trusted events** — content-free event and source-audit metadata.
+
+Event queue and Trusted events use cursor pagination with **Load more**. Their
+filters apply only to results loaded in the browser, and the headings identify
+them as loaded results. Jobs run history and the Event queue poll for refreshed
+state while open; Trusted events refresh when the view is loaded again. Event and
+delivery records are read-only: payloads, prompts, process details, lease
+owners, and replay/retry/dead-letter actions are not exposed. Delivery retries
+are bounded to five attempts with 30/60/120/300/600-second backoffs; dead-letter
+is terminal. Deleting a job with an active delivery is rejected with `409` while
+delivery history is preserved.
+
+The job editor's trigger Select contains only the exact trusted event catalog
+and preserves an existing legacy trigger value while that job is edited. The
+workspace provides loading, empty, retry, and error states with status/alert
+semantics, keyboard-focusable tables, and responsive mobile cards.
 
 ## Skills
 
@@ -154,9 +240,11 @@ only after selecting a conversation or running a bounded in-conversation search.
 **How to use**:
 - Navigate to `/context`. The page uses the active project from the project dropdown; project selection is preserved in the route query when present.
 - Choose a conversation from the responsive index to inspect its ordered message timeline and checkpoint history.
+- In **Context sources**, choose **Create task** for a source, enter a title, and confirm with **Create Task**. This is title-only capture: only source metadata and the canonical source ID are referenced; source bodies, attachments, and content are not copied.
+- Context source capture is restricted to the explicitly selected project. It does not use the global-project fallback. Repeating a capture returns the existing task rather than creating a duplicate.
 - Use **Search** to find messages within the selected conversation. Search results are explicit content retrievals, not content returned by the index.
 - Select **Restore as new conversation** on a checkpoint to branch a new immutable conversation at that checkpoint. The source conversation and checkpoint remain unchanged.
-- Loading, unavailable, and empty states describe whether a project has no conversations or the dashboard could not reach the API.
+- Loading, unavailable, and empty states describe whether a project has no conversations or the dashboard could not reach the API. A missing or unavailable source causes capture to fail without creating a task; retry after the source is available.
 
 **API**: Uses the project-scoped immutable conversation endpoints under `/api/v1/context/conversations`. See [API Reference](../develop/api.md#context--canonical-agent-memory) for the endpoint contract.
 
@@ -182,7 +270,8 @@ zero. Credentials and API tokens are never exposed.
 Usage collection reads assistant `step-finish` metadata only. An OpenCode
 project must have an explicit mapping to the active Ingenium project; unmapped
 sessions are quarantined and never fall back to `global-default`. See
-[Usage Telemetry](usage.md) for mapping, partial-cost, UTC, and export details.
+[Usage Telemetry](usage.md) for mapping, advisory thresholds, attention
+lifecycle, partial-cost, UTC, freshness, project reset, and export details.
 
 ## Chat
 

@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 268-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 275-tool built-in Ingenium MCP catalog across 29 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **268 tools** across **28 baseline categories**:
-266 tools registered by the server and 2 extension tools. A project-scoped
+The built-in catalog contains **275 tools** across **29 baseline categories**:
+273 tools registered by stdio and 2 extension tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** name (except where noted).
@@ -33,8 +33,26 @@ built-in and discovered tools. Disabling a tool removes it from the MCP
 disabled error. Re-enabling restores both visibility and execution. If the
 project identity or authoritative API state is unavailable, the MCP server
 fails closed and treats the tool as disabled. The server refreshes this
-projection periodically and emits a tool-list-changed notification when the
-visible set changes.
+projection periodically, after state refresh/reconnect, and emits a
+tool-list-changed notification when the visible set changes.
+
+Tools with no persisted state use their catalog `defaultEnabled` value; an
+unknown tool or state never inherits an enabled default and fails closed. For
+project-scoped state requests, the API requires and echoes both the requested
+`project` name and its resolved `project_id`; a response without that matching
+identity pair is not authoritative. Category enable/disable operations are
+atomic and idempotent. The Tool Manager disables its controls when the API's
+authoritative project does not match the selected project.
+
+Built-in server tools disappear from dynamic discovery when disabled, and
+direct invocation returns a fixed actionable error: `TOOL_DISABLED` with
+`This tool is disabled for the project.` State or identity failures return
+`TOOL_STATE_UNAVAILABLE` or `PROJECT_IDENTITY_REQUIRED` with fixed messages;
+Chat links these errors to **MCP Servers** when the project is known. The
+extension plugin tools `auto_observe_now` and `synthesize_observations` remain
+statically visible because OpenCode registers them as plugin tools; this is the
+visibility exception, not an execution bypass—they remain project-state-gated
+and fail closed when disabled or when state is unknown.
 
 The guarantee is tested with an in-memory fixture in
 `services/ingenium-server/tests/tool-visibility.test.ts` and the dashboard
@@ -52,6 +70,90 @@ launcher or transport. A safe read smoke test is `ingenium_health_check`; it
 does not require a project argument. Authentication, unavailable transport, and
 unrecognized status failures are reported with fixed diagnostics that do not
 include bearer tokens or upstream error text.
+
+### MCP usefulness report (public/developer schema)
+
+The MCP-103 report is bounded, evidence-only JSON. It is not a score or a
+usefulness claim: it contains no prompts, results, arguments, errors, URLs,
+headers, environment values, project identity, credentials, or secrets. The
+fixed top-level shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "provenance": "fixture",
+  "generatedAt": "2026-07-31T12:00:10.000Z",
+  "freshness": {
+    "status": "fresh",
+    "observedAt": "2026-07-31T12:00:00.000Z",
+    "durationMs": 60000
+  },
+  "catalog": {
+    "status": "conformant",
+    "issues": []
+  },
+  "tools": []
+}
+```
+
+- `schemaVersion` is currently `1`; `provenance` is `fixture` or `live`.
+- `generatedAt` is the UTC report-generation timestamp. Freshness is global,
+  not repeated per tool: `freshness.status` is `fresh`, `stale`, or `unknown`,
+  with the source `observedAt` (or `null`) and the configured `durationMs`.
+- `catalog.status` is `conformant`, `nonconformant`, or `unknown`.
+  `catalog.issues` is a bounded list of `{ code, toolName }`; it contains
+  fixed conformance issue codes, never diagnostic messages. An unknown catalog
+  has no issues attached to it.
+- Each `tools[]` entry has `{ name, boundary, visibility, invocation }`.
+  `boundary` is `mcp-stdio` or `opencode-extension`; `visibility.status` is
+  `reachable`, `unreachable`, `unknown`, or `not-applicable`; and
+  `invocation.status` is `success`, `failed`, `not-run`, or `unknown`.
+  Catalog and freshness are global fields, not per-tool copies.
+
+Reason values are fixed and constrained by status. Successful or reachable
+evidence uses `reason: null`. Visibility reasons are `not-listed`,
+`transport-unavailable`, `list-unavailable`, `TOOL_STATE_UNAVAILABLE`, or
+`not-requested` (the last is used for `not-applicable` and may describe
+unknown/not-requested evidence). Invocation reasons are `invocation-failed`,
+`PROJECT_IDENTITY_REQUIRED`, `TOOL_DISABLED`, `TOOL_STATE_UNAVAILABLE`,
+`unsafe-invocation`, `transport-unavailable`, `list-unavailable`,
+`invalid-response`, or `not-requested`. `not-run` means an invocation was
+intentionally not attempted; `unknown` means the collector could not establish
+the state. Extension-boundary tools are not applicable to the stdio visibility
+probe and are not invoked (`not-applicable` / `not-requested`, then `not-run` /
+`not-requested`).
+
+The configured collector reads the local `mcp.ingenium` entry, lists tools, and
+invokes only the provider-free `health_check` safely; all other tool
+invocations are `not-run` with `unsafe-invocation` when invocation is possible
+(transport/list failures remain `unknown`, and extension tools remain
+`not-run` / `not-requested`). Fixture and live runs use the same report schema;
+`provenance` identifies which evidence source was used.
+The catalog is limited to 1,000 tools and serialized output to 64 KiB. Catalog
+issues and tool entries are deterministically sorted (tool name, with issues
+sorted by code then tool name).
+
+The authenticated API endpoint is `GET /api/v1/mcp-tools/report?project=<name>`.
+Its response envelope is `{ project, project_id, data, total }`; `data` is the
+bounded report above, and each tool is enriched with its current catalog
+`category` and effective project `enabled` state before filters are applied.
+The endpoint accepts `q`, `category`, `enabled`, `boundary`, `visibility`, and
+`invocation` filters. It is capped at 64 KiB, uses a per-project 30-second
+cache for collection, and sends `Cache-Control: private, no-store` with
+`Vary: Authorization`.
+
+The live collector uses a fixed server-owned packaged launcher and an
+ephemeral probe. Probe mode lists tools and invokes only the provider-free
+`health_check`, then closes the child. It sets
+`INGENIUM_MCP_REPORT_MODE=1`; that mode does not start the child MCP gateway.
+Fixed query errors are `413 MCP_REPORT_QUERY_TOO_LARGE` and `422
+INVALID_MCP_REPORT_QUERY`; unavailable or oversized report generation returns
+`503 MCP_REPORT_UNAVAILABLE`, and concurrent collection may return `503
+MCP_REPORT_BUSY`. When a runtime probe cannot certify source registration or
+catalog parity, `catalog.status` is `unknown` rather than a conformance claim.
+
+The report is also exposed as the project-scoped tool
+`ingenium_mcp_report_get`, with the same filters and bounded response.
 
 ## PROJECTS — Managing workspaces
 
@@ -124,7 +226,25 @@ include bearer tokens or upstream error text.
 
 ## TASKS — Full task management (Kanban)
 
-24 tools: create, list, move, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update.
+30 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_update, coordination_claim, coordination_release.
+
+`ingenium_task_reserve` and `ingenium_task_release` are cooperative managed-agent
+operations. They require the same project and canonical worktree boundary,
+expected revision, idempotency key, owner, worktree, and a caller-held
+32–512-character URL-safe opaque reservation token. Only the token's SHA-256
+hash is stored; neither the token nor hash is returned. Manual editors and
+external processes are outside the guarantee.
+
+The coordination tools are project-scoped and use snake_case inputs. They map
+to status (`GET /coordination/snapshot`), session operations (`register`,
+`recover`, `update`, `heartbeat`, `close`, `takeover`), atomic claim batches
+(`POST /coordination/claims/batch`), and atomic releases
+(`POST /coordination/claims/release`). Status claims are redacted to IDs,
+kind/state, and timestamps; token material, claim values, and baselines are
+never returned. Transport failures return the fixed
+`COORDINATION_UNAVAILABLE`; malformed API data returns
+`COORDINATION_INVALID_RESPONSE`; upstream errors are reduced to an allowlisted
+typed code with a fixed message.
 
 ## PLANS — Saved notes & context (legacy)
 
@@ -275,11 +395,11 @@ not expect them in audit responses.
 | `ingenium_docs_rag_source_get` | Get a single RAG source by ID |
 | `ingenium_docs_rag_source_delete` | Delete a RAG source by ID and cascade its chunks |
 | `ingenium_docs_rag_reingest` | Re-ingest an existing RAG source with new text |
-| `ingenium_docs_rag_stats` | Get RAG index statistics (document count, chunk count, etc.) and vector capability `{ available, provider: "deterministic-n-gram", semantic: false }` |
+| `ingenium_docs_rag_stats` | Get RAG index statistics (`total_sources`, `total_chunks`) |
 
 **Indexing sources**: (1) Canonical repo Markdown files via `POST /rag/ingest` using `INGENIUM_DOCS_ROOT` — walked from `{root}/docs/`, symlink-protected, hash-idempotent. (2) Docs Workspace pages at lifecycle boundaries (publish, update, archive, restore) — auto-indexed as `docs-page:{id}`. (3) Manual ingestion via `ingenium_docs_ingest`.
 
-**Embedding strategy**: Deterministic 384-dim FNV-1a character-trigram hash (`ingenium-ngram-v1`) — NOT semantic. The `hybridSearch()` function exists (70% BM25 + 30% n-gram cosine similarity) but is not currently wired to API routes — the `/search` and `/ask` routes use BM25 FTS5 via `searchChunks()`. See `packages/ingenium-core/lib/tools/rag.ts`.
+**Search strategy**: The `/search` and `/ask` routes use BM25 FTS5 via `searchChunks()` across retained RAG source chunks. Migration 070 removed the legacy embedding table; no vector or hybrid retrieval feature is exposed. See `packages/ingenium-core/lib/tools/rag.ts`.
 
 ## SERVERS — Child MCP servers
 
@@ -314,6 +434,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 268 tools across 28 categories (266 server + 2 extension).** Project-scoped child
+**Built-in baseline: 275 tools across 29 categories (273 stdio + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

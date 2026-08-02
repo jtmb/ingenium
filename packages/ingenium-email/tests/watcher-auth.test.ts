@@ -15,7 +15,15 @@ vi.mock("../lib/accounts.js", () => ({
   getCredentials: vi.fn(),
 }));
 
-import { logWatcherObservation } from "../lib/watcher.js";
+import { getAccount, getCredentials } from "../lib/accounts.js";
+import { connectAccount, disconnectAccount } from "../lib/imap.js";
+import { triageEmails } from "../lib/triage.js";
+import {
+  getWatcherStatus,
+  logWatcherObservation,
+  startWatcher,
+  stopAllWatchers,
+} from "../lib/watcher.js";
 
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
@@ -93,10 +101,12 @@ function expectNoAuthorizationForFile(contents: string, mode = 0o600): Promise<v
   });
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await stopAllWatchers();
   restoreApiTokenEnvironment();
   removeTestTokenDirectory();
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe("email watcher API authentication", () => {
@@ -174,5 +184,32 @@ describe("email watcher API authentication", () => {
     for (const request of fetchMock.mock.calls) {
       expect(new Headers(request[1]?.headers).get("Authorization")).toBe(`Bearer ${canonicalToken}`);
     }
+  });
+});
+
+describe("email watcher shutdown", () => {
+  it("stops every watcher in the authoritative watcher map", async () => {
+    const client = { mailboxOpen: vi.fn(), on: vi.fn() };
+    vi.mocked(getAccount).mockImplementation((accountId) => ({
+      id: accountId,
+      email: `${accountId}@example.test`,
+      name: accountId,
+      provider: "custom",
+      authType: "app_password",
+      connected: true,
+    }));
+    vi.mocked(getCredentials).mockReturnValue({ password: "watcher-password" });
+    vi.mocked(connectAccount).mockResolvedValue(client as never);
+    vi.mocked(triageEmails).mockResolvedValue([]);
+
+    await startWatcher("global-project", "first");
+    await startWatcher("global-project", "second");
+    await stopAllWatchers();
+
+    expect(disconnectAccount).toHaveBeenCalledTimes(2);
+    expect(disconnectAccount).toHaveBeenCalledWith("first");
+    expect(disconnectAccount).toHaveBeenCalledWith("second");
+    expect(getWatcherStatus("first")).toEqual({ running: false });
+    expect(getWatcherStatus("second")).toEqual({ running: false });
   });
 });

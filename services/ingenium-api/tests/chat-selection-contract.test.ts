@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   isValidProjectName: vi.fn(),
   setSetting: vi.fn(),
   getChatProviderCatalog: vi.fn(),
+  getAllowedLegacyChatSelection: vi.fn(),
   getStoredOrDefaultChatSelection: vi.fn(),
   isAllowedChatSelection: vi.fn(),
   getBuiltinChatProvider: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("../lib/chat-provider-catalog.js", () => ({
   CHAT_SELECTION_SETTING: "chat_selection",
   getBuiltinChatProvider: mocks.getBuiltinChatProvider,
   getChatProviderCatalog: mocks.getChatProviderCatalog,
+  getAllowedLegacyChatSelection: mocks.getAllowedLegacyChatSelection,
   getStoredOrDefaultChatSelection: mocks.getStoredOrDefaultChatSelection,
   isAllowedChatSelection: mocks.isAllowedChatSelection,
   isValidChatSelectionIdentifier: (value: unknown) => typeof value === "string"
@@ -74,10 +76,11 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mocks.getGlobalProject.mockReturnValue({ id: "global-project" });
+  mocks.getGlobalProject.mockReturnValue({ id: "global-project", name: "server-global" });
   mocks.getProject.mockImplementation((name: string) => ({ id: `${name}-id` }));
   mocks.isValidProjectName.mockReturnValue(true);
   mocks.getChatProviderCatalog.mockResolvedValue(catalog);
+  mocks.getAllowedLegacyChatSelection.mockReturnValue(null);
   mocks.isAllowedChatSelection.mockReturnValue(true);
   mocks.setSetting.mockReturnValue("");
 });
@@ -96,7 +99,7 @@ describe("PUT /opencode/chat-selection", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      data: { providerId: "global-provider", modelId: "global-model" },
+      data: { project: "server-global", providerId: "global-provider", modelId: "global-model" },
     });
     expect(mocks.getChatProviderCatalog).toHaveBeenCalledWith("global-project");
     expect(mocks.isAllowedChatSelection).toHaveBeenCalledWith(catalog.providers, {
@@ -128,8 +131,8 @@ describe("PUT /opencode/chat-selection", () => {
     expect(mocks.setSetting).not.toHaveBeenCalled();
   });
 
-  it("rejects a browser project override before catalog lookup or persistence", async () => {
-    const response = await fetch(`${baseUrl}/chat-selection?project=browser-project`, {
+  it("rejects an encoded project-injection attempt before catalog lookup or persistence", async () => {
+    const response = await fetch(`${baseUrl}/chat-selection?${new URLSearchParams({ project: "shared&project=foreign" })}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ providerId: "global-provider", modelId: "global-model" }),
@@ -148,6 +151,20 @@ describe("PUT /opencode/chat-selection", () => {
 });
 
 describe("GET /opencode/chat-config", () => {
+  it.each(["shared#archived", "shared&project=foreign"])(
+    "ignores the caller project %s and attests the server global project",
+    async (project) => {
+      const response = await fetch(`${baseUrl}/chat-config?${new URLSearchParams({ project })}`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { project: "server-global" },
+      });
+      expect(mocks.getChatProviderCatalog).toHaveBeenCalledWith("global-project");
+      expect(mocks.getProject).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns a sanitized 503 when catalog discovery throws", async () => {
     mocks.getChatProviderCatalog.mockRejectedValue(new Error("private provider endpoint failed"));
 

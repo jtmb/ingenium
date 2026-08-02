@@ -1,9 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, type CategorizedMcpTool, type ChildMcpScope, type ChildMcpServer } from "@/lib/api";
+import {
+  api,
+  type CategorizedMcpTool,
+  type ChildMcpScope,
+  type ChildMcpServer,
+  type McpToolCatalogResponse,
+  type McpToolReport,
+  type McpToolReportResponse,
+  type McpToolReportTool,
+} from "@/lib/api";
 import { opencode } from "@/lib/opencode";
 import { useProject } from "@/lib/ProjectContext";
+import Select from "../../components/Select";
 import {
   getMcpStatusLabel,
   normalizeMcpServers,
@@ -19,6 +29,52 @@ const DISCOVERY_MESSAGES: Record<string, string> = {
   invalid_response: "The child server returned an invalid discovery response.",
   timeout: "Child server discovery timed out.",
 };
+
+const EXTENSION_PLUGIN_TOOLS = new Set(["auto_observe_now", "synthesize_observations"]);
+
+export function isExtensionPluginTool(toolName: string): boolean {
+  return EXTENSION_PLUGIN_TOOLS.has(toolName);
+}
+
+export function hasMcpToolProjectMismatch(
+  requestedProject: string,
+  authoritativeProject: string | null,
+): boolean {
+  return authoritativeProject !== null && authoritativeProject !== requestedProject;
+}
+
+type McpProjectAuthority = {
+  project: string | null;
+  projectId: string | null;
+};
+
+function stringAuthority(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function catalogAuthority(response: McpToolCatalogResponse): McpProjectAuthority {
+  return {
+    project: stringAuthority(response.project),
+    projectId: stringAuthority(response.project_id),
+  };
+}
+
+function reportAuthority(response: McpToolReportResponse): McpProjectAuthority {
+  return {
+    project: stringAuthority(response.project),
+    projectId: stringAuthority(response.project_id),
+  };
+}
+
+/** Both project name and project ID must agree when both report surfaces provide them. */
+export function hasMcpToolAuthorityConflict(
+  catalog: McpProjectAuthority | null,
+  report: McpProjectAuthority | null,
+): boolean {
+  if (!catalog || !report) return false;
+  return (catalog.project !== null && report.project !== null && catalog.project !== report.project)
+    || (catalog.projectId !== null && report.projectId !== null && catalog.projectId !== report.projectId);
+}
 
 /**
  * Convert backend failures into fixed, browser-safe messages.
@@ -45,6 +101,18 @@ export function getSafeMcpErrorMessage(error: unknown, operation: "load" | "crea
     case "toggle": return "Unable to update the tool state.";
     default: return "Unable to refresh MCP server data.";
   }
+}
+
+/** Report errors are deliberately fixed: report bodies can include transport diagnostics. */
+export function getSafeMcpReportErrorMessage(error: unknown): string {
+  const status = error && typeof error === "object" && "status" in error
+    ? (error as { status?: unknown }).status
+    : undefined;
+
+  if (status === 413) return "The MCP report is too large to display.";
+  if (status === 422) return "The MCP report request was rejected.";
+  if (status === 503) return "The MCP report is temporarily unavailable.";
+  return "Unable to refresh the MCP report.";
 }
 
 /** Return only the fixed diagnostic text supported by the discovery contract. */
@@ -98,6 +166,40 @@ function getServerToolsCount(server: ChildMcpServer, discoveredTools: Array<{ se
   return discoveredTools.filter((tool) => tool.server_id === server.id).length;
 }
 
+function reportLabel(value: unknown, labels: Record<string, string>): string {
+  return typeof value === "string" ? labels[value] ?? "Unknown" : "Unknown";
+}
+
+function reportReasonLabel(value: unknown): string {
+  if (value === null) return "No reason reported";
+  return reportLabel(value, {
+    PROJECT_IDENTITY_REQUIRED: "Project identity required",
+    TOOL_DISABLED: "Tool disabled",
+    TOOL_STATE_UNAVAILABLE: "Tool state unavailable",
+    "transport-unavailable": "Transport unavailable",
+    "list-unavailable": "Tool list unavailable",
+    "not-listed": "Not listed",
+    "invocation-failed": "Invocation failed",
+    "invalid-response": "Invalid response",
+    "unsafe-invocation": "Not run safely",
+    "not-requested": "Not requested",
+  });
+}
+
+function reportEvidenceLabel(
+  evidence: McpToolReportTool["visibility"] | McpToolReportTool["invocation"] | undefined,
+  labels: Record<string, string>,
+): string {
+  if (!evidence) return "Unknown — not reported";
+  return `${reportLabel(evidence.status, labels)} — ${reportReasonLabel(evidence.reason)}`;
+}
+
+function reportDate(value: unknown): string {
+  if (typeof value !== "string") return "Unknown";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
 export default function McpServerManager() {
   const project = useProject();
   const [tab, setTab] = useState<Tab>("servers");
@@ -111,6 +213,11 @@ export default function McpServerManager() {
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [toolError, setToolError] = useState<string | null>(null);
+  const [report, setReport] = useState<McpToolReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [catalogProjectAuthority, setCatalogProjectAuthority] = useState<McpProjectAuthority | null>(null);
+  const [reportProjectAuthority, setReportProjectAuthority] = useState<McpProjectAuthority | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(true);
@@ -129,6 +236,10 @@ export default function McpServerManager() {
     setLifecycleError(null);
     setServerError(null);
     setToolError(null);
+    setCatalogProjectAuthority(null);
+    setReport(null);
+    setReportError(null);
+    setReportProjectAuthority(null);
 
     const [serverResult, discoveredResult, categoryResult, runtimeResult] = await Promise.allSettled([
       api.mcpServers.list(project),
@@ -153,6 +264,7 @@ export default function McpServerManager() {
 
     if (categoryResult.status === "fulfilled") {
       setCategories(Array.isArray(categoryResult.value.data) ? categoryResult.value.data : []);
+      setCatalogProjectAuthority(catalogAuthority(categoryResult.value));
     } else {
       setCategories([]);
       setToolError("Unable to refresh the MCP tool catalog.");
@@ -174,7 +286,34 @@ export default function McpServerManager() {
     setRefreshing(false);
   }, [project]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  const loadReport = useCallback(async () => {
+    setReportLoading(true);
+    setReportError(null);
+    setReport(null);
+    setReportProjectAuthority(null);
+    try {
+      const response = await api.mcpTools.report(project);
+      const authority = reportAuthority(response);
+      if (!authority.project || !authority.projectId || !response.data || !Array.isArray(response.data.tools)) {
+        setReportError("The MCP report returned an invalid response.");
+        return;
+      }
+      setReport(response.data);
+      setReportProjectAuthority(authority);
+    } catch (error) {
+      setReportError(getSafeMcpReportErrorMessage(error));
+    } finally {
+      setReportLoading(false);
+    }
+  }, [project]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadData(), loadReport()]);
+  }, [loadData, loadReport]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const runtimeByName = useMemo(
     () => new Map(runtimeStatuses.map((status) => [status.name, status])),
@@ -184,6 +323,19 @@ export default function McpServerManager() {
   const totalTools = categories.reduce((total, category) => total + category.total_count, 0);
   const enabledTools = categories.reduce((total, category) => total + category.enabled_count, 0);
   const categoryNames = categories.map((category) => category.category);
+  const authoritativeProject = hasMcpToolProjectMismatch(project, catalogProjectAuthority?.project ?? null)
+    ? catalogProjectAuthority?.project ?? null
+    : hasMcpToolProjectMismatch(project, reportProjectAuthority?.project ?? null)
+      ? reportProjectAuthority?.project ?? null
+      : reportProjectAuthority?.project ?? catalogProjectAuthority?.project ?? null;
+  const projectNameMismatch = hasMcpToolProjectMismatch(project, catalogProjectAuthority?.project ?? null)
+    || hasMcpToolProjectMismatch(project, reportProjectAuthority?.project ?? null);
+  const projectAuthorityConflict = hasMcpToolAuthorityConflict(catalogProjectAuthority, reportProjectAuthority);
+  const projectMismatch = projectNameMismatch || projectAuthorityConflict;
+  const reportToolsByName = useMemo(
+    () => new Map((report?.tools ?? []).map((tool) => [tool.name, tool])),
+    [report],
+  );
   const filteredCategories = categories
     .filter((category) => categoryFilter === "All" || category.category === categoryFilter)
     .map((category) => ({
@@ -256,6 +408,7 @@ export default function McpServerManager() {
   };
 
   const toggleTool = async (toolName: string, enabled: boolean) => {
+    if (projectMismatch) return;
     setBusyAction(`tool:${toolName}`);
     setToolError(null);
     try {
@@ -268,6 +421,10 @@ export default function McpServerManager() {
           tools: category.tools.map((tool) => tool.tool_name === toolName ? { ...tool, enabled: !enabled } : tool),
         };
       }));
+      setReport((current) => current ? {
+        ...current,
+        tools: current.tools.map((tool) => tool.name === toolName ? { ...tool, enabled: !enabled } : tool),
+      } : current);
     } catch (error) {
       setToolError(getSafeMcpErrorMessage(error, "toggle"));
     } finally {
@@ -276,6 +433,7 @@ export default function McpServerManager() {
   };
 
   const toggleCategory = async (categoryName: string, enabled: boolean) => {
+    if (projectMismatch) return;
     setBusyAction(`category:${categoryName}`);
     setToolError(null);
     try {
@@ -283,6 +441,10 @@ export default function McpServerManager() {
       setCategories((current) => current.map((category) => category.category === categoryName
         ? { ...category, enabled_count: enabled ? category.total_count : 0, tools: category.tools.map((tool) => ({ ...tool, enabled })) }
         : category));
+      setReport((current) => current ? {
+        ...current,
+        tools: current.tools.map((tool) => tool.category === categoryName ? { ...tool, enabled } : tool),
+      } : current);
     } catch (error) {
       setToolError(getSafeMcpErrorMessage(error, "toggle"));
     } finally {
@@ -311,28 +473,38 @@ export default function McpServerManager() {
           Servers
           <span className="ml-2 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-xs">{servers.length}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => setTab("tools")}
+          <button
+            type="button"
+            onClick={() => {
+              setTab("tools");
+              void loadReport();
+            }}
           className={`rounded-t px-4 py-2.5 text-sm font-medium ${tab === "tools" ? "border border-b-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-nav-text-active)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"}`}
           aria-pressed={tab === "tools"}
         >
           Tools
           <span className="ml-2 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-xs">{totalTools}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => void loadData()}
-          disabled={refreshing}
+          <button
+            type="button"
+            onClick={() => void refreshAll()}
+            disabled={refreshing || reportLoading}
           className="ml-auto mb-1 rounded border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:cursor-wait disabled:opacity-50"
           aria-label="Refresh MCP servers"
         >
-          {refreshing ? "Refreshing…" : "Refresh"}
+          {refreshing || reportLoading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
       {pageError && <div role="alert" className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] px-4 py-3 text-sm text-[var(--color-error-text)]">{pageError}</div>}
       {lifecycleError && <div role="status" className="rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-warning-text)]">{lifecycleError}</div>}
+      {projectMismatch && (
+        <div role="alert" className="rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-warning-text)]">
+          {projectAuthorityConflict && !projectNameMismatch
+            ? "MCP tool state and report disagree on project identity. Tool controls are disabled until the project context is refreshed."
+            : <>MCP tool state belongs to project <strong>{authoritativeProject}</strong>, not the selected project. Tool controls are disabled until the project context is refreshed.</>}
+        </div>
+      )}
 
       {tab === "servers" && (
         <div className="space-y-5">
@@ -392,10 +564,10 @@ export default function McpServerManager() {
               <div className="flex flex-wrap items-end gap-3">
                 <label className="space-y-1 text-sm">
                   <span className="block font-medium">Scope</span>
-                  <select aria-label="Scope" value={scope} onChange={(event) => setScope(event.target.value as ChildMcpScope)} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                  <Select aria-label="Scope" value={scope} onChange={(event) => setScope(event.target.value as ChildMcpScope)} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                     <option value="project">This project</option>
                     <option value="global">Global project</option>
-                  </select>
+                  </Select>
                 </label>
                 <button type="submit" disabled={busyAction === "create" || !serverName.trim() || !executable.trim()} className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                   {busyAction === "create" ? "Registering…" : "Register server"}
@@ -431,7 +603,7 @@ export default function McpServerManager() {
                       <button type="button" onClick={() => void connectOrDisconnect(server, connected)} disabled={busyAction === `connect:${server.name}` || busyAction === `disconnect:${server.name}`} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:cursor-wait disabled:opacity-50">
                         {busyAction === `connect:${server.name}` || busyAction === `disconnect:${server.name}` ? "Working…" : connected ? "Disconnect" : "Connect"}
                       </button>
-                      <button type="button" onClick={() => void loadData()} disabled={refreshing} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:opacity-50">Refresh</button>
+                      <button type="button" onClick={() => void refreshAll()} disabled={refreshing || reportLoading} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:opacity-50">Refresh</button>
                       <button type="button" onClick={() => void removeServer(server)} disabled={busyAction === `remove:${server.name}`} className="rounded border border-[var(--color-error-border)] px-3 py-2 text-sm text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] disabled:opacity-50">Remove</button>
                     </div>
                   </div>
@@ -471,15 +643,44 @@ export default function McpServerManager() {
           <div className="flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap gap-2">
               <input aria-label="Search tools" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tools…" className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm md:w-72" />
-              <select aria-label="Tool category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+              <Select aria-label="Tool category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="All">All categories</option>
                 {categoryNames.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="text-sm text-[var(--color-text-muted)]">
               <strong className="text-[var(--color-success-text)]">{enabledTools}</strong> enabled · <strong>{totalTools - enabledTools}</strong> disabled · <strong>{totalTools}</strong> total
             </div>
           </div>
+          <section aria-labelledby="mcp-report-heading" className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 id="mcp-report-heading" className="text-sm font-semibold">MCP report</h2>
+                <p className="text-xs text-[var(--color-text-muted)]">Current boundary, visibility, and invocation status for this project.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadReport()}
+                disabled={reportLoading}
+                className="rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-hover)] disabled:cursor-wait disabled:opacity-50"
+              >
+                {reportLoading ? "Refreshing report…" : "Retry report"}
+              </button>
+            </div>
+            {reportLoading && <p role="status" className="mt-3 text-sm text-[var(--color-text-muted)]">Loading MCP report…</p>}
+            {reportError && <p role="alert" data-testid="mcp-report-error" className="mt-3 text-sm text-[var(--color-error-text)]">{reportError}</p>}
+            {report && (
+              <>
+                <dl data-testid="mcp-report-summary" className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-xs text-[var(--color-text-secondary)] sm:grid-cols-2 lg:grid-cols-4">
+                  <div><dt className="text-[var(--color-text-muted)]">Provenance</dt><dd>{reportLabel(report.provenance, { live: "Live", fixture: "Fixture" })}</dd></div>
+                  <div><dt className="text-[var(--color-text-muted)]">Generated</dt><dd>{reportDate(report.generatedAt)}</dd></div>
+                  <div><dt className="text-[var(--color-text-muted)]">Freshness</dt><dd>{reportLabel(report.freshness.status, { fresh: "Fresh", stale: "Stale", unknown: "Unknown" })}</dd></div>
+                  <div><dt className="text-[var(--color-text-muted)]">Catalog</dt><dd>{reportLabel(report.catalog.status, { conformant: "Conformant", nonconformant: "Nonconformant", unknown: "Unknown" })} · {report.catalog.issues.length} issues</dd></div>
+                </dl>
+                {report.tools.length === 0 && <p data-testid="mcp-report-empty" className="mt-3 text-sm text-[var(--color-text-muted)]">The MCP report returned no rows.</p>}
+              </>
+            )}
+          </section>
           {toolError && <p role="alert" className="text-sm text-[var(--color-error-text)]">{toolError}</p>}
           {loading && categories.length === 0 && <p className="text-sm text-[var(--color-text-muted)]">Loading MCP tool catalog…</p>}
           <div className="space-y-3">
@@ -491,28 +692,50 @@ export default function McpServerManager() {
                     <h2 className="font-semibold text-sm">{category.category}</h2>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-[var(--color-text-muted)]">{category.enabled_count}/{category.total_count} enabled</span>
-                      <button type="button" onClick={() => void toggleCategory(category.category, !allEnabled)} disabled={busyAction === `category:${category.category}`} className="rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface)] disabled:opacity-50">
+                      <button type="button" onClick={() => void toggleCategory(category.category, !allEnabled)} disabled={projectMismatch || busyAction === `category:${category.category}`} className="rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface)] disabled:opacity-50">
                         {busyAction === `category:${category.category}` ? "Updating…" : allEnabled ? "Disable all" : "Enable all"}
                       </button>
                     </div>
                   </div>
                   <div className="divide-y divide-[var(--color-border)]">
-                    {category.tools.map((tool) => (
-                      <div key={tool.tool_name} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--color-surface-hover)]">
-                        <span className={`break-all font-mono text-xs ${tool.enabled ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-muted)]"}`}>{tool.tool_name}</span>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={tool.enabled}
-                          aria-label={`${tool.enabled ? "Disable" : "Enable"} ${tool.tool_name}`}
-                          onClick={() => void toggleTool(tool.tool_name, tool.enabled)}
-                          disabled={busyAction === `tool:${tool.tool_name}`}
-                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${tool.enabled ? "bg-green-500" : "bg-[var(--color-border)]"} disabled:opacity-50`}
-                        >
-                          <span className={`absolute top-1 h-3 w-3 rounded-full bg-[var(--color-surface)] transition-transform ${tool.enabled ? "left-5" : "left-1"}`} />
-                        </button>
-                      </div>
-                    ))}
+                    {category.tools.map((tool) => {
+                      const reportTool = reportToolsByName.get(tool.tool_name);
+                      const reportEnabled = reportTool?.enabled ?? tool.enabled;
+                      return (
+                        <div key={tool.tool_name} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--color-surface-hover)]">
+                          <div className="min-w-0 flex-1">
+                            <span className={`break-all font-mono text-xs ${tool.enabled ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-muted)]"}`}>{tool.tool_name}</span>
+                            {isExtensionPluginTool(tool.tool_name) && (
+                              <span
+                                className="ml-2 inline-flex rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 align-middle text-[10px] font-sans text-[var(--color-text-muted)]"
+                                data-testid={`extension-tool-label-${tool.tool_name}`}
+                                title="Extension plugin tools remain statically visible; execution is gated by project state."
+                              >
+                                Extension plugin · static visibility / execution-gated
+                              </span>
+                            )}
+                            <div data-testid={`mcp-report-tool-${tool.tool_name}`} className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
+                              <span>Category: {category.category}</span>
+                              <span>State: {reportEnabled ? "Enabled" : "Disabled"}</span>
+                              <span>Boundary: {reportLabel(reportTool?.boundary, { "mcp-stdio": "MCP stdio", "opencode-extension": "OpenCode extension" })}</span>
+                              <span>Visibility: {reportEvidenceLabel(reportTool?.visibility, { reachable: "Reachable", unreachable: "Unreachable", unknown: "Unknown", "not-applicable": "Not applicable" })}</span>
+                              <span>Invocation: {reportEvidenceLabel(reportTool?.invocation, { success: "Success", failed: "Failed", "not-run": "Not run", unknown: "Unknown" })}</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={tool.enabled}
+                            aria-label={`${tool.enabled ? "Disable" : "Enable"} ${tool.tool_name}`}
+                            onClick={() => void toggleTool(tool.tool_name, tool.enabled)}
+                            disabled={projectMismatch || busyAction === `tool:${tool.tool_name}`}
+                            className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${tool.enabled ? "bg-green-500" : "bg-[var(--color-border)]"} disabled:opacity-50`}
+                          >
+                            <span className={`absolute top-1 h-3 w-3 rounded-full bg-[var(--color-surface)] transition-transform ${tool.enabled ? "left-5" : "left-1"}`} />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </section>
               );

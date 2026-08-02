@@ -305,6 +305,11 @@ export function buildPageSpecificQueryVariants(
       query: { page: "opencode", standalone: "1" },
     },
     {
+      name: "standalone VS Code page",
+      path: "/standalone",
+      query: { page: "vscode", standalone: "1" },
+    },
+    {
       name: "standalone chat page",
       path: "/standalone",
       query: { page: "chat", standalone: "1" },

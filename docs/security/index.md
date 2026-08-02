@@ -123,3 +123,42 @@ audit details.
 | **No plaintext on disk** | Secrets are encrypted before reaching the DB. `vault_items.encrypted` is always ciphertext. |
 | **Soft-delete** | Deleting an item sets `access_policy` to `{"mode":"deleted"}`; the ciphertext remains in the DB until a future purge. |
 | **Audit immutability** | Audit log is append-only; entries are never modified or deleted. |
+
+## Usage threshold security boundary (USAGE-100)
+
+Usage thresholds are project-scoped metadata over provider-reported aggregates,
+not billing or enforcement controls. The authenticated API requires an explicit
+project and rejects missing or foreign projects; no MCP surface bypasses that
+boundary. Threshold updates use expected-revision CAS, while evaluation is
+read-only and does not alter telemetry, mappings, scheduler cursors, or request
+execution. Stored fields contain no credentials, provider secrets, currency, or
+pricing rules. Reported cost is preserved only as the provider-reported numeric
+amount, and partial or unavailable values remain unknown rather than being
+treated as zero.
+
+## Trusted Job Event Boundary (JOB-100)
+
+Trusted job events accept only the exact v1 catalog: `context.conversation.archived`,
+`context.conversation.unarchived`, and `context.checkpoint.restored_as_new`.
+Payloads are bounded, strict, and content-free; they contain identifiers and
+revision/sequence values only. Each row is project-scoped and must match an
+immutable Context maintenance audit row, with the source audit ID serving as
+the dedupe key. The SQL schema/triggers are the final trust boundary, so direct
+SQL callers cannot insert unknown events, alter/delete stored events, or forge
+provenance; the API applies the same rejection.
+
+There is no user-facing event append endpoint. Historical job trigger values
+remain preserved, while new or changed values are restricted to the catalog or
+`NULL`. Events are retained indefinitely as append-only evidence. JOB-101
+dispatches only exact same-project matches for enabled jobs and snapshots each
+event once, including zero-match events. Delivery execution is bounded to five
+attempts with fixed backoffs; lease ownership is stored only as a SHA-256 hash
+and guarded by CAS. Process proof stores only PID/PGID, start time, executable,
+and a nonce hash. Missing or ambiguous identity dead-letters the delivery to
+avoid duplicate execution. Payloads and prompts are not exposed or interpolated;
+durable errors/log-like text is bounded and redacted, and no manual replay is
+available. Project-scoped routes prevent cross-project event, delivery, run,
+log, and cancel access. Job deletion is blocked with `409` during an active
+delivery and otherwise preserves historical delivery evidence. Child job
+processes receive only an allowlisted environment and never inherit API or
+provider credentials.

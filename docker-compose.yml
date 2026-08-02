@@ -46,6 +46,9 @@ services:
       - ingenium-data:/app/.ingenium
       - opencode-config:/home/appuser/.config
       - opencode-data:/home/appuser/.local
+      # code-server is an administrator-grade, auth-none local profile with a
+      # full terminal. It is unsupported for LAN, remote, shared, or untrusted users.
+      - vscode-data:/home/appuser/vscode-data
       - ./opencode.json:/app/opencode.json:ro
       # Compose must be started from a WSL/Linux shell with HOME set. The
       # complete host repository root is the workspace contract; do not replace
@@ -68,3 +71,4 @@ volumes:
   ingenium-data:
   opencode-config:
   opencode-data:
+  vscode-data:

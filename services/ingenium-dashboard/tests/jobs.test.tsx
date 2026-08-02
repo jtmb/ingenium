@@ -3,12 +3,20 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import React from "react";
 import type { Job } from "../src/lib/api";
 
-const { listJobs, listRuns, updateJob, listAgents, getSetting } = vi.hoisted(() => ({
+const { listJobs, listRuns, updateJob, listAgents, getSetting, runJob, cancelRun, runLogs, deleteJob, createJob, eventDeliveries, trustedEvents, suggestJob } = vi.hoisted(() => ({
   listJobs: vi.fn(),
   listRuns: vi.fn(),
   updateJob: vi.fn(),
   listAgents: vi.fn(),
   getSetting: vi.fn(),
+  runJob: vi.fn(),
+  cancelRun: vi.fn(),
+  runLogs: vi.fn(),
+  deleteJob: vi.fn(),
+  createJob: vi.fn(),
+  eventDeliveries: vi.fn(),
+  trustedEvents: vi.fn(),
+  suggestJob: vi.fn(),
 }));
 
 vi.mock("../src/lib/api", () => ({
@@ -17,6 +25,14 @@ vi.mock("../src/lib/api", () => ({
       list: listJobs,
       runs: listRuns,
       update: updateJob,
+      run: runJob,
+      cancelRun,
+      runLogs,
+      delete: deleteJob,
+      create: createJob,
+      eventDeliveries,
+      trustedEvents,
+      suggest: suggestJob,
     },
     agents: {
       list: listAgents,
@@ -27,6 +43,13 @@ vi.mock("../src/lib/api", () => ({
   },
   dashboardFetch: vi.fn(),
   getApiBase: () => "http://dashboard.test/api/v1",
+  sanitizeJobDisplayText: (value: unknown, fallback: string) => typeof value === "string" ? value : fallback,
+  ApiError: class ApiError extends Error { status = 0; retryAfterSeconds = null; },
+  TRUSTED_JOB_EVENT_TYPES: [
+    "context.conversation.archived",
+    "context.conversation.unarchived",
+    "context.checkpoint.restored_as_new",
+  ],
 }));
 
 vi.mock("../src/lib/ProjectContext", () => ({
@@ -121,7 +144,7 @@ describe("Jobs edit mutation state", () => {
     const overlayHeading = await screen.findByRole("heading", { name: `Edit Job: ${JOB.name}` });
     fireEvent.click(screen.getByRole("button", { name: "Update Job" }));
 
-    await waitFor(() => expect(screen.getByText("Update failed")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Update failed/)).toBeTruthy());
     expect(overlayHeading).toBeTruthy();
     expect((screen.getByRole("button", { name: "Update Job" }) as HTMLButtonElement).disabled).toBe(false);
   });

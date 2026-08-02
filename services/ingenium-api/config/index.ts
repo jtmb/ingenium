@@ -1,5 +1,3 @@
-import { resolveCoreDbPath } from "ingenium-core";
-
 export const DEFAULT_DASHBOARD_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
@@ -50,9 +48,6 @@ export function getDashboardAllowedOrigins(
  * - rateLimit:  100 req/min per IP — conservative, tuned for agentic workloads not human browsing
  * - dashboardOrigins: exact browser origins accepted by CORS and CSRF. Configure
  *                     DASHBOARD_ALLOWED_ORIGINS as a comma-separated allowlist.
- * - coreDbPath: resolved centrally by ingenium-core. The deployed default is
- *               /app/.ingenium/data and host development uses one canonical
- *               local fallback when no path is configured.
  */
 const dashboardOrigins = getDashboardAllowedOrigins();
 
@@ -60,8 +55,5 @@ export const config = {
   port: parseInt(process.env.INGENIUM_API_PORT ?? "4097", 10),
   rateLimit: parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10),
   dashboardOrigins,
-  // Retained for compatibility with callers that only need the primary origin.
-  corsOrigin: dashboardOrigins[0] ?? "",
-  coreDbPath: resolveCoreDbPath(),
   opencodeUrl: process.env.OPENCODE_SERVER_URL ?? "http://localhost:4098",
 };

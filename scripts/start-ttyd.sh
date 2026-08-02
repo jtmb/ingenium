@@ -4,6 +4,12 @@ set -eu
 
 /app/scripts/wait-for-opencode.sh
 
+# Keep the browser-facing terminal free of inherited credentials. The gateway
+# supplies the fixed identity, while the MCP child reads the protected token
+# through its worktree-relative path rather than an inline bearer value.
+# The empty OpenCode password is intentional: browser authentication belongs
+# to the local gateway. ttyd's loopback bind, origin check, and injected header
+# keep the browser-to-terminal boundary in that gateway.
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   HOME="/home/appuser" \

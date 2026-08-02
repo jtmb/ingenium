@@ -8,12 +8,12 @@ const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
  * Playwright E2E test configuration for real-provider smoke tests.
  *
  * This config is for the real-provider smoke suite only. It does not start
- * Docker or any web servers; the requested provider environment must already
- * be running.
+ * Docker or any web servers; the configured provider service must already be
+ * available.
  *
  * Key differences from the main playwright.config.ts:
  * - No webServer entries (Docker handles everything)
- * - No TEST_DB_PATH / TEST_PROJECT / TEST_TMP (Docker manages the DB)
+ * - No fixture database is started; provider setup owns the external state
  * - baseURL is configurable for an authenticated external deployment
  * - Longer timeouts (3 min test, 2 min expect) for real LLM calls
  * - fullyParallel: false — one test at a time to avoid session races
@@ -37,7 +37,7 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    // Generous timeout for expect() assertions — real LLM responses can be slow
+    // Provider responses may exceed normal UI interaction timing.
     actionTimeout: 120000,
   },
   expect: {

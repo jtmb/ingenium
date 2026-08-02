@@ -3,7 +3,9 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, PersonalityTrait } from "../../lib/api";
+import { formatRelativeTime } from "../../lib/time";
 import Overlay from "../components/Overlay";
+import Select from "../components/Select";
 
 const ESTABLISHED_CONFIDENCE_THRESHOLD = 0.3;
 type PersonalityTraitDetails = PersonalityTrait & { metadata?: string };
@@ -59,19 +61,6 @@ export default function PersonalityPage() {
   const [selectedTrait, setSelectedTrait] = useState<PersonalityTraitDetails | null>(null);
   const [sortMode, setSortMode] = useState<"grouped" | "newest">("grouped");
   const [error, setError] = useState<string | null>(null);
-  const [renderedAt] = useState(() => Date.now());
-
-  function formatRelative(iso: string): string {
-    const diff = renderedAt - new Date(iso).getTime();
-    const sec = Math.abs(Math.floor(diff / 1000));
-    if (sec < 60) return `${sec}s ago`;
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hrs = Math.floor(min / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
-  }
-
   useEffect(() => {
     api.personality.list(project)
       .then((r) => {
@@ -121,13 +110,13 @@ export default function PersonalityPage() {
         <h1 className="min-w-0 break-words text-3xl font-bold">Personality Profile</h1>
         <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:justify-end">
           <span className="text-sm text-[var(--color-text-muted)]">Sort:</span>
-          <select aria-label="Sort personality traits" value={sortMode} onChange={(e) => {
+          <Select aria-label="Sort personality traits" value={sortMode} onChange={(e) => {
             const nextMode = e.target.value;
             if (nextMode === "grouped" || nextMode === "newest") setSortMode(nextMode);
           }} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="grouped">Grouped by type</option>
             <option value="newest">Newest first</option>
-          </select>
+          </Select>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--color-text-muted)]" role="status" aria-label="Personality trait counts">
             <span>Established: <strong className="text-[var(--color-text-secondary)]">{establishedTraits.length}</strong></span>
             <span>Emerging: <strong className="text-[var(--color-warning-text)]">{emergingTraits.length}</strong></span>
@@ -176,7 +165,7 @@ export default function PersonalityPage() {
                 </div>
                 <div className="flex w-full items-center justify-end gap-3 sm:w-auto sm:shrink-0">
                   <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="-m-2 p-2 text-lg leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)]" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
-                  <span className="hidden sm:inline text-xs text-[var(--color-warning-text)]">{formatRelative(t.created_at)}</span>
+                  <span className="hidden sm:inline text-xs text-[var(--color-warning-text)]">{formatRelativeTime(t.created_at)}</span>
                   <ConfidenceBar trait={t} width="w-16" />
                 </div>
               </div>
@@ -200,7 +189,7 @@ export default function PersonalityPage() {
               </div>
               <div className="flex w-full items-center justify-end gap-3 sm:w-auto sm:shrink-0">
                 <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="-m-2 p-2 text-lg leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)]" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
-                <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(t.created_at)}</span>
+                <span className="text-xs text-[var(--color-text-muted)]">{formatRelativeTime(t.created_at)}</span>
                 <ConfidenceBar trait={t} width="w-16" />
               </div>
             </div>

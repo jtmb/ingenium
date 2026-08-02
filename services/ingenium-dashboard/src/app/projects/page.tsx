@@ -4,18 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useProject, persistProject } from "../../lib/ProjectContext";
 import { api, Project } from "../../lib/api";
 import { badgeTones } from "../../lib/badgeTones";
+import { formatRelativeTime } from "../../lib/time";
 import Overlay from "../components/Overlay";
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const sec = Math.abs(Math.floor(diff / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hrs = Math.floor(min / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 /**
  * ProjectsPage — Multi-project management (create, rename, archive, restore, delete).
@@ -117,7 +107,7 @@ export default function ProjectsPage() {
         {displayed.map((p) => {
           const d = details[p.name];
           const synth = d?.latest_synthesis;
-          const synthCount = synth ? formatRelative(synth) : "—";
+          const synthCount = synth ? formatRelativeTime(synth) : "—";
 
           return (
             <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="min-w-0 cursor-pointer overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface)] hover:shadow-md transition-shadow">
@@ -132,7 +122,7 @@ export default function ProjectsPage() {
                     )}
                     {p.archived_at && <span className={`text-xs ${badgeTones('error')} px-2 py-0.5 rounded font-medium`}>ARCHIVED</span>}
                   </div>
-                  <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Created {formatRelative(p.created_at)}</div>
+                  <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Created {formatRelativeTime(p.created_at)}</div>
                 </div>
                 <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
                   {view === "active" && (
@@ -188,7 +178,7 @@ export default function ProjectsPage() {
                           {d.recent_skills.slice(0, 5).map((s: any) => (
                             <div key={s.name} className="flex min-w-0 justify-between gap-2 text-sm">
                               <span className="min-w-0 break-all text-[var(--color-text-link)]">{s.name}</span>
-                              <span className="shrink-0 text-xs text-[var(--color-text-muted)]">{formatRelative(s.created_at)}</span>
+                              <span className="shrink-0 text-xs text-[var(--color-text-muted)]">{formatRelativeTime(s.created_at)}</span>
                             </div>
                           ))}
                         </div>
@@ -203,7 +193,7 @@ export default function ProjectsPage() {
                           {d.observation_stats.recent.slice(0, 5).map((o: any, i: number) => (
                             <div key={i} className="flex min-w-0 justify-between gap-2 text-xs">
                               <span className="min-w-0 break-words text-[var(--color-text-secondary)] sm:max-w-[200px] sm:truncate">{o.content?.substring(0, 80)}</span>
-                              <span className="ml-2 shrink-0 text-[var(--color-text-muted)]">{formatRelative(o.created_at)}</span>
+                              <span className="ml-2 shrink-0 text-[var(--color-text-muted)]">{formatRelativeTime(o.created_at)}</span>
                             </div>
                           ))}
                         </div>
@@ -224,7 +214,7 @@ export default function ProjectsPage() {
                                 "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
                               }`}>{e.event_type}</span>
                               <span className="min-w-0 flex-1 break-words text-[var(--color-text-secondary)]">{e.title}</span>
-                              <span className="shrink-0 text-[var(--color-text-muted)]">{formatRelative(e.created_at)}</span>
+                              <span className="shrink-0 text-[var(--color-text-muted)]">{formatRelativeTime(e.created_at)}</span>
                             </div>
                           ))}
                         </div>

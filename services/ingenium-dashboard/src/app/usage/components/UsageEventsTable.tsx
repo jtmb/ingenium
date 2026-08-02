@@ -3,9 +3,12 @@ import { formatCostWithAvailability, formatNullableNumber, formatUtcTimestamp, r
 
 interface UsageEventsTableProps {
   page: UsageEventsPage;
+  loadingMore: boolean;
+  loadMoreError: string | null;
+  onLoadMore: () => void;
 }
 
-export default function UsageEventsTable({ page }: UsageEventsTableProps) {
+export default function UsageEventsTable({ page, loadingMore, loadMoreError, onLoadMore }: UsageEventsTableProps) {
   return (
     <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow" aria-labelledby="usage-events-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -54,6 +57,19 @@ export default function UsageEventsTable({ page }: UsageEventsTableProps) {
           </tbody>
         </table>
       </div>
+      {loadMoreError && <p className="mt-3 text-sm text-[var(--color-error-text)]" role="alert">Could not load more events: {loadMoreError}</p>}
+      {page.pagination.hasMore && page.pagination.nextCursor && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+          >
+            {loadingMore ? "Loading…" : "Load more events"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

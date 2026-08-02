@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build --workspace=ingenium-core && tsc",
+    "build": "npm run build --workspace=ingenium-email && tsc",
     "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
     "test": "vitest run --config vitest.config.ts",
@@ -12,6 +12,7 @@
     "typecheck": "node scripts/typecheck-with-clean-core.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@types/formidable": "^3.5.1",
     "cors": "^2.8.5",
     "express": "^4.21.0",
@@ -20,8 +21,6 @@
     "ingenium-core": "*",
     "ingenium-email": "*",
     "multer": "^2.2.0",
-    "pino": "^9.0.0",
-    "pino-http": "^10.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

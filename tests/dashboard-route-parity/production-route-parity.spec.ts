@@ -1,4 +1,5 @@
-import { expect, test, type BrowserContext, type Page, type Request } from "@playwright/test";
+import { expect, test } from "../ingenium-dashboard/external-suite-navigation-governor";
+import type { BrowserContext, Page, Request } from "@playwright/test";
 import {
   buildPageSpecificQueryVariants,
   discoverRouteInventory,
@@ -13,11 +14,9 @@ import { productionDashboardRoute } from "./runtime";
 
 const inventory: RouteInventory = discoverRouteInventory();
 const retiredRouteExpectation = inventory.canonicalNavigationRoutes.filter(isRetiredDashboardRoute);
-const RATE_LIMIT_RETRY_INTERVALS = [250, 500, 1_000, 2_000];
 const NO_ACCOUNT_SENTINEL = "route-parity-no-account";
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const DOCS_SPACES_LIST_URL = /\/api\/v1\/docs\/spaces\/?(?:\?.*)?$/;
-const NEXT_STATIC_ASSET_URL = /\/_next\/static\//;
 const SETTINGS_VIEWPORTS = [
   { name: "desktop", width: 1_440, height: 900 },
   { name: "mobile", width: 390, height: 844 },
@@ -92,32 +91,10 @@ async function installReadOnlyBrowserGuards(
 async function installDocumentOnlyRoute(page: Page): Promise<void> {
   await page.route("**/*", async (route) => {
     if (route.request().resourceType() === "document") {
-      await route.continue();
+      await route.fallback();
       return;
     }
     await route.abort("blockedbyclient");
-  });
-}
-
-/** Retry only observed gateway 429s for static assets needed by UI checks. */
-async function installRateLimitAssetRetry(page: Page): Promise<void> {
-  await page.route(NEXT_STATIC_ASSET_URL, async (route) => {
-    let response: Awaited<ReturnType<typeof route.fetch>> | undefined;
-    await expect
-      .poll(
-        async () => {
-          response = await route.fetch();
-          return response.status();
-        },
-        {
-          intervals: RATE_LIMIT_RETRY_INTERVALS,
-          timeout: 15_000,
-          message: `Static asset ${route.request().url()} stayed rate limited`,
-        },
-      )
-      .not.toBe(429);
-    if (!response) throw new Error(`Static asset ${route.request().url()} did not produce a response`);
-    await route.fulfill({ response });
   });
 }
 
@@ -138,10 +115,9 @@ async function runReadOnlyBrowserCheck<T>(
   context: BrowserContext,
   label: string,
   operation: () => Promise<T>,
-  options: { documentOnly?: boolean; retryRateLimitedAssets?: boolean } = {},
+  options: { documentOnly?: boolean } = {},
 ): Promise<T> {
   const guards = await installReadOnlyBrowserGuards(page, context);
-  if (options.retryRateLimitedAssets) await installRateLimitAssetRetry(page);
   if (options.documentOnly) await installDocumentOnlyRoute(page);
   let result: T | undefined;
   let operationError: unknown;
@@ -180,22 +156,7 @@ async function gotoProductionRoute(
   page: Page,
   path: string,
 ): Promise<Awaited<ReturnType<Page["goto"]>>> {
-  let response: Awaited<ReturnType<Page["goto"]>>;
-  await expect
-    .poll(
-      async () => {
-        response = await page.goto(path, { waitUntil: "domcontentloaded" });
-        if (response?.status() !== 200) return false;
-        return true;
-      },
-      {
-        intervals: RATE_LIMIT_RETRY_INTERVALS,
-        timeout: 15_000,
-        message: `${path} did not reach a successful document response`,
-      },
-    )
-    .toBe(true);
-  return response!;
+  return page.goto(path, { waitUntil: "domcontentloaded" });
 }
 
 async function openSettingsDeepLink(page: Page, tab: string): Promise<void> {
@@ -266,7 +227,6 @@ async function openSettingsCompatibilityRoute(page: Page): Promise<void> {
     .poll(
       () => new URL(page.url()).searchParams.get("settings"),
       {
-        intervals: RATE_LIMIT_RETRY_INTERVALS,
         timeout: 15_000,
         message: "settings compatibility redirect did not reach settings=general",
       },
@@ -280,8 +240,10 @@ test.describe("Production dashboard route parity", () => {
     expect(inventory.canonicalNavigationRoutes).toContain("/");
     expect(inventory.canonicalNavigationRoutes).toContain("/secrets");
     expect(inventory.canonicalNavigationRoutes).toContain("/mcp-servers");
+    expect(inventory.canonicalNavigationRoutes).toContain("/usage");
+    expect(inventory.canonicalNavigationRoutes).toContain("/vscode");
     expect(retiredRouteExpectation).toEqual([]);
-    expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(20);
+    expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(23);
   });
 
   test("uses the explicit 14-ID settings deep-link inventory", () => {
@@ -387,7 +349,7 @@ test.describe("Production dashboard route parity", () => {
           await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
           expect(new URL(page.url()).searchParams.get("settings")).toBe(deepLink.id);
           await assertSettingsSelection(page, deepLink, viewport.name);
-        }, { retryRateLimitedAssets: true });
+        });
       });
     }
   }
@@ -405,14 +367,14 @@ test.describe("Production dashboard route parity", () => {
         // Invalid IDs open the overlay but are not rewritten by the client;
         // retaining the request also keeps this assertion non-mutating.
         expect(new URL(page.url()).searchParams.get("settings")).toBe(UNSUPPORTED_SETTINGS_ID);
-      }, { retryRateLimitedAssets: true });
+      });
     });
   }
 
   test("keeps the direct settings compatibility route on the supported redirect path", async ({ page, context }) => {
     await runReadOnlyBrowserCheck(page, context, "settings compatibility redirect", async () => {
       await openSettingsCompatibilityRoute(page);
-    }, { retryRateLimitedAssets: true });
+    });
   });
 
   test("does not introduce stale dashboard route expectations into this suite", () => {

@@ -3,8 +3,7 @@
 import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
 import type { EmailProvider } from "./types.js";
-import * as core from "ingenium-core";
-import { settings, getDb } from "ingenium-core";
+import { checkpointAfterWrite, settings, getDb } from "ingenium-core";
 import { getCredentials, getGlobalProjectId, storeOAuthTokens } from "./accounts.js";
 import { decryptCredentialValue, encryptCredentialValue } from "./credential-crypto.js";
 import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
@@ -50,14 +49,6 @@ function getOAuthCreds(
 export const encryptCredentials = encryptCredentialValue;
 export const decryptCredentials = decryptCredentialValue;
 
-function checkpointOAuthStateDelete(): void {
-  // Focused legacy tests can mock only the settings APIs. Production has the
-  // checkpoint export; use ownership checking so a partial mock stays safe.
-  if (!Object.prototype.hasOwnProperty.call(core, "checkpointAfterWrite")) return;
-  const checkpoint = Reflect.get(core, "checkpointAfterWrite") as (() => void) | undefined;
-  checkpoint?.();
-}
-
 // ── OAuth token storage ───────────────────────────────────────────────────
 
 /**
@@ -68,11 +59,10 @@ function checkpointOAuthStateDelete(): void {
  * plaintext (warns at startup).  Never logs token values.
  */
 export function storeTokens(
-  _projectId: string,
   accountId: string,
   tokens: OAuthToken,
 ): void {
-  storeOAuthTokens(_projectId, accountId, tokens);
+  storeOAuthTokens(accountId, tokens);
 }
 
 /**
@@ -85,20 +75,18 @@ export function storeTokens(
  * Returns null if no stored tokens exist (account needs re-authentication).
  */
 export async function getValidTokens(
-  _projectId: string,
   accountId: string,
   provider: EmailProvider,
 ): Promise<OAuthToken | null> {
-  const projectId = getGlobalProjectId();
-  const tokens = getCredentials(projectId, accountId)?.tokens;
+  const tokens = getCredentials(accountId)?.tokens;
   if (!tokens) return null;
 
   // Check if expired (with 60-second buffer to avoid TOCTOU expiry races)
   const now = Date.now();
   if (tokens.expiryDate && tokens.expiryDate < now + 60_000) {
     // Auto-refresh
-    const refreshed = await refreshAccessToken(provider, tokens.refreshToken, projectId);
-    storeTokens(projectId, accountId, refreshed);
+    const refreshed = await refreshAccessToken(provider, tokens.refreshToken);
+    storeTokens(accountId, refreshed);
     return refreshed;
   }
 
@@ -188,7 +176,6 @@ async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node"
  */
 export async function getOAuthUrl(
   provider: EmailProvider,
-  _projectId?: string,
 ): Promise<{ url: string; state: string }> {
   try {
     const state = crypto.randomBytes(16).toString("hex");
@@ -245,8 +232,7 @@ export async function exchangeCode(
   provider: EmailProvider,
   code: string,
   state: string,
-  _redirectUri?: string,
-  _projectId?: string,
+  redirectUri?: string,
 ): Promise<OAuthToken> {
   try {
     const pid = getGlobalProjectId();
@@ -259,13 +245,13 @@ export async function exchangeCode(
     const db = getDb();
     db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
       .run(pid, `oauth_state_${provider}`);
-    checkpointOAuthStateDelete();
+    checkpointAfterWrite();
 
-    const redirectUri = _redirectUri ?? getRedirectUri();
+    const resolvedRedirectUri = redirectUri ?? getRedirectUri();
 
     if (provider === "gmail") {
       const { client: gClient } = await cachedGoogleClient(pid);
-      const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
+      const { tokens } = await gClient.getToken({ code, redirect_uri: resolvedRedirectUri });
       // Extract email from id_token JWT (unverified decode — standard for getting email claim)
       let email: string | undefined;
       if (tokens.id_token) {
@@ -296,7 +282,7 @@ export async function exchangeCode(
           "https://outlook.office.com/SMTP.Send",
           "offline_access",
         ],
-        redirectUri,
+        redirectUri: resolvedRedirectUri,
       });
       return {
         accessToken: result?.accessToken ?? "",
@@ -320,8 +306,7 @@ export async function exchangeCode(
  * Throws if no stored tokens exist (account needs re-authentication).
  */
 export async function getFreshGmailToken(accountId: string): Promise<string> {
-  const projectId = getGlobalProjectId();
-  const tokens = await getValidTokens(projectId, accountId, "gmail");
+  const tokens = await getValidTokens(accountId, "gmail");
   if (!tokens) {
     throw new ProviderOperationError("AUTH_REQUIRED", "oauth", false);
   }
@@ -332,12 +317,8 @@ export async function getFreshGmailToken(accountId: string): Promise<string> {
 export async function refreshAccessToken(
   provider: EmailProvider,
   refreshToken: string,
-  _projectId?: string,
 ): Promise<OAuthToken> {
   try {
-    // OAuth credentials are shared mail infrastructure. Preserve the optional
-    // argument for API compatibility, but never let a caller select a
-    // non-global project's client credentials.
     const projectId = getGlobalProjectId();
 
     if (provider === "gmail") {

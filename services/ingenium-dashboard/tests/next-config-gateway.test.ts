@@ -50,7 +50,7 @@ describe("Next.js gateway configuration", () => {
 
     expect(frameSrc).toBe(
       "frame-src 'self' http://localhost:4098 http://localhost:4099 " +
-      "http://opencode.localhost:3000 http://cli.localhost:3000",
+        "http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(frameSrc).not.toContain("*");
     expect(frameSrc).not.toContain("/opencode-web");
@@ -63,7 +63,7 @@ describe("Next.js gateway configuration", () => {
     const frameSrc = csp.split("; ").find((directive) => directive.startsWith("frame-src "));
 
     expect(frameSrc).toBe(
-      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000",
+      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(frameSrc).not.toContain(":4098");
     expect(frameSrc).not.toContain(":4099");
@@ -74,7 +74,7 @@ describe("Next.js gateway configuration", () => {
     process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = "https://cli.example.com";
     const csp = await contentSecurityPolicy(await loadNextConfig());
 
-    expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000");
+    expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000");
     expect(csp).not.toContain("http://localhost:4098");
     expect(csp).not.toContain("http://localhost:4099");
     expect(csp).toContain("https://opencode.example.com https://cli.example.com");

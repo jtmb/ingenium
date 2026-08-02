@@ -14,6 +14,7 @@ import { buildContextUrl } from "../context-navigation";
 import ContextCheckpointHistory from "./ContextCheckpointHistory";
 import ContextConversationList from "./ContextConversationList";
 import ContextMessageTimeline from "./ContextMessageTimeline";
+import ContextSourcesSection from "./ContextSourcesSection";
 
 type ContextDetail = {
   conversation: ContextConversationSummary;
@@ -234,6 +235,8 @@ export default function ContextWorkspace() {
         </div>
         <p className="text-xs text-[var(--color-text-muted)]">Conversation content is never included in index or search responses.</p>
       </header>
+
+      <ContextSourcesSection project={project} />
 
       <div className="grid min-h-[36rem] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
         <ContextConversationList

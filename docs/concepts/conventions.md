@@ -12,11 +12,20 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 - **CLI mode** — Uses the local root gateway `http://cli.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_CLI_URL`). OpenCode is not served under a shared dashboard subpath because its root-relative assets and WebSockets require a root origin.
 - **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099` remain private upstreams. LAN/remote use requires an operator-managed authenticated TLS profile and both public origins at build time.
 - **Authentication** — The default Windows↔WSL gateway does not use HTTP Basic Auth or browser bearer tokens. It is a local plain-HTTP profile, not a LAN/remote security profile; remote access requires an operator-managed authenticated TLS profile.
-- **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The old floating right-edge `OpenCodeSwitch` component is deprecated in the main page but persists for the standalone pop-out (`/standalone?page=opencode`), which uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
+- **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The standalone pop-out (`/standalone?page=opencode`) uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.
 - **Session sharing**: Web iframe and CLI ttyd sessions share the same backend process state; direct host attachment to the private upstream ports is not part of the browser-facing contract.
 - **Workspace** (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+
+## VS Code workspace
+
+- **Origin** — `/vscode` and `/standalone?page=vscode` use the exact local root `http://vscode.localhost:3000/` on the established port-`3000` virtual-host gateway.
+- **Boundary** — code-server listens privately at `127.0.0.1:4100`; no host `3002` or public `4100` endpoint is supported. The default Windows/WSL firewall and localhost-forwarding assumption is for local use only, not LAN, remote, shared, or untrusted access.
+- **Embedding** — The trusted separate-origin iframe is unsandboxed and requests only `allow="clipboard-write"`; the page also offers a standalone/new-tab fallback. code-server provides the `/workspace` terminal and stock Open VSX/user-managed extension flow.
+- **Theme defaults** — Use the code-free built-in `configurationDefaults` contribution to enable system color detection with **Dark Modern** and **Light Modern**. User and workspace settings override these defaults; never mutate User `settings.json` or workspace settings to enforce a theme.
+- **Pinned extension** — `sst-dev.opencode@0.0.13` is baked from the official Open VSX VSIX (`https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`, SHA-256 `e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`) and installed offline/idempotently as `appuser` into persistent `vscode-data`. Runtime registry installation is not supported; upgrades revalidate identity, engine, hash, and persistence.
+- **Workspace trust** — The extension is preinstalled, but Restricted Mode disables it until the user explicitly trusts the workspace. Ingenium does not auto-trust. This is an administrator-grade local surface and must not be exposed to LAN, remote, shared, or untrusted users.
 
 ## DB Isolation
 - Only `packages/ingenium-core` and `services/ingenium-api` may import SQL libraries

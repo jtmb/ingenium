@@ -4,14 +4,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { logger, projects, settings } from "ingenium-core";
+import { logger, settings } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
   isOpenCodeError,
   type SendPromptBody,
 } from "../opencode-client.js";
-import { requireProject } from "../helpers.js";
+import { requireActiveGlobalProject } from "../helpers.js";
 import {
   CHAT_SELECTION_SETTING,
   getBuiltinChatProvider,
@@ -548,6 +548,7 @@ interface ChatProviderInfo {
 }
 
 interface ChatConfigResponse {
+  project: string;
   configured: boolean;
   primary: ChatProviderInfo | null;
   backup: ChatProviderInfo | null;
@@ -574,9 +575,11 @@ function legacyChatDto(
   };
 }
 
+// Chat configuration is instance-owned; any caller project query is ignored.
 opencodeRouter.get("/chat-config", async (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
+  const globalProject = requireActiveGlobalProject(req, res);
+  if (!globalProject) return;
+  const projectId = globalProject.id;
 
   let providers: ExpandedChatProviderInfo[];
   try {
@@ -620,6 +623,7 @@ opencodeRouter.get("/chat-config", async (req, res) => {
   const backup = primary ? legacyChatDto(projectId, providers, "backup") : null;
 
   const response: ChatConfigResponse = {
+    project: globalProject.name,
     configured: primary !== null,
     primary,
     backup,
@@ -630,19 +634,6 @@ opencodeRouter.get("/chat-config", async (req, res) => {
 
   res.json({ data: response });
 });
-
-function resolveGlobalChatProject(res: Response): string | null {
-  try {
-    const globalProject = projects.getGlobalProject();
-    if (globalProject) return globalProject.id;
-  } catch {
-    logger.warn(SOURCE, "Chat selection rejected because global project resolution failed");
-    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "Chat model selection is unavailable until the global project is repaired." } });
-    return null;
-  }
-  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "Chat model selection requires an active global project." } });
-  return null;
-}
 
 /**
  * Persist the one global, non-secret Chat selection. This route is mounted
@@ -661,8 +652,9 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
     return;
   }
 
-  const projectId = resolveGlobalChatProject(res);
-  if (!projectId) return;
+  const globalProject = requireActiveGlobalProject(req, res);
+  if (!globalProject) return;
+  const projectId = globalProject.id;
   try {
     const catalog = await getChatProviderCatalog(projectId);
     if (catalog.unavailable) {
@@ -675,7 +667,7 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
       return;
     }
     settings.setSetting(projectId, CHAT_SELECTION_SETTING, JSON.stringify(selection));
-    res.json({ data: selection });
+    res.json({ data: { project: globalProject.name, ...selection } });
   } catch {
     logger.warn(SOURCE, "Chat selection validation failed while loading the global catalog");
     res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
