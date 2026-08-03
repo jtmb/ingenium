@@ -2,6 +2,7 @@ import { createHmac, randomInt, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import {
   decryptSecret,
+  decryptSecretBuffer,
   deriveKey,
   encryptSecret,
   generateDEK,
@@ -11,6 +12,7 @@ import {
   wrapKey,
 } from "./vault-crypto.js";
 import { migrateLegacyOAuthClientSecretsForActiveGlobalProject } from "./protected-settings.js";
+import { insertJobVaultRuntimeAudit } from "./jobs.js";
 
 const VERIFY_DATA = Buffer.from("ingenium-vault-v1");
 const DELETED_POLICY = '{"mode":"deleted"}';
@@ -19,6 +21,49 @@ const DELETED_POLICY = '{"mode":"deleted"}';
 export const VAULT_PASSPHRASE_MIN_LENGTH = 12;
 
 let masterKey: Buffer | null = null;
+
+export class VaultJobSecretsUnavailableError extends Error {
+  readonly code = "VAULT_SECRETS_UNAVAILABLE" as const;
+
+  constructor() {
+    super("VAULT_SECRETS_UNAVAILABLE");
+    this.name = "VaultJobSecretsUnavailableError";
+  }
+}
+
+/** A run-owned plaintext buffer. Call release after the bounded runner tears down. */
+export interface VaultJobSecretHandle {
+  readonly itemId: string;
+  readonly authorizedItemVersion: number;
+  readonly value: Buffer;
+  release(): void;
+}
+
+/** Execution-only vault material. It is never suitable for API or MCP responses. */
+export interface VaultJobSecretsResolution {
+  readonly secrets: readonly VaultJobSecretHandle[];
+  readonly deadlineAt: number;
+  release(): void;
+}
+
+type VaultJobSecretBufferObserver = (kind: "dek" | "plaintext", buffer: Buffer) => void;
+let vaultJobSecretBufferObserver: VaultJobSecretBufferObserver | undefined;
+
+/** Test-only seam proving transient resolver buffers are zeroed before release returns. */
+export function configureVaultJobSecretBufferObserverForTesting(
+  observer?: VaultJobSecretBufferObserver,
+): () => void {
+  const previous = vaultJobSecretBufferObserver;
+  vaultJobSecretBufferObserver = observer;
+  return () => {
+    vaultJobSecretBufferObserver = previous;
+  };
+}
+
+function zeroJobSecretBuffer(kind: "dek" | "plaintext", buffer: Buffer): void {
+  buffer.fill(0);
+  vaultJobSecretBufferObserver?.(kind, buffer);
+}
 
 type VaultItemMetadata = {
   id: string;
@@ -195,6 +240,196 @@ export function isSealed(): boolean {
   return masterKey === null;
 }
 
+function unavailableJobSecrets(): never {
+  throw new VaultJobSecretsUnavailableError();
+}
+
+function recordJobSecretDenied(projectId: string, jobId: string, runId: string): void {
+  let recorded = false;
+  try {
+    recorded = execTransaction(() => {
+      const db = getDb(dbPath());
+      const activeProject = db.prepare(
+        "SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL",
+      ).get(projectId);
+      if (!activeProject) return false;
+      return insertJobVaultRuntimeAudit(db, {
+        projectId,
+        jobId,
+        runId,
+        action: "access_denied",
+      });
+    });
+  } catch {
+    // A failing audit must not expose the authorization cause or prevent the
+    // execution boundary from failing closed.
+  }
+  if (recorded) checkpointAfterWrite();
+}
+
+function jobTimeoutDeadline(nowMs: number, timeoutMinutes: number): number | null {
+  const minutes = Number.isSafeInteger(timeoutMinutes) && timeoutMinutes > 0 ? timeoutMinutes : 30;
+  const deadline = nowMs + minutes * 60_000;
+  return Number.isSafeInteger(deadline) ? deadline : null;
+}
+
+/**
+ * Resolve secrets for one already-created run immediately before process spawn.
+ * This is deliberately execution-only: callers receive mutable Buffers that
+ * must be released after use and no authorization detail is returned on error.
+ */
+export function resolveJobVaultSecrets(
+  projectId: string,
+  jobId: string,
+  runId: string,
+): VaultJobSecretsResolution | null {
+  const db = getDb(dbPath());
+  const candidate = db.prepare(
+    `SELECT count(reference.item_id) AS reference_count
+     FROM projects project
+     JOIN jobs job ON job.project_id = project.id
+     JOIN job_runs run ON run.project_id = job.project_id AND run.job_id = job.id AND run.id = ?
+     LEFT JOIN job_vault_references reference
+       ON reference.project_id = job.project_id AND reference.job_id = job.id
+     WHERE project.id = ? AND project.archived_at IS NULL
+       AND job.id = ? AND job.enabled = 1 AND job.deleted_at IS NULL
+     GROUP BY job.id`,
+   ).get(runId, projectId, jobId) as { reference_count: number } | undefined;
+
+  if (!candidate) unavailableJobSecrets();
+  if (candidate.reference_count === 0) return null;
+
+  const key = masterKey;
+  if (!key) {
+    recordJobSecretDenied(projectId, jobId, runId);
+    unavailableJobSecrets();
+  }
+
+  const handles: VaultJobSecretHandle[] = [];
+  const release = () => {
+    for (const handle of handles) handle.release();
+  };
+
+  try {
+    const result = execTransaction(() => {
+      const transactionDb = getDb(dbPath());
+      const job = transactionDb.prepare(
+        `SELECT job.timeout_minutes, config.sealed, count(all_reference.item_id) AS reference_count
+          FROM projects project
+          JOIN jobs job ON job.project_id = project.id
+          JOIN job_runs run ON run.project_id = job.project_id AND run.job_id = job.id AND run.id = ?
+          JOIN vault_config config ON config.id = 1
+         LEFT JOIN job_vault_references all_reference
+           ON all_reference.project_id = job.project_id AND all_reference.job_id = job.id
+         WHERE project.id = ? AND project.archived_at IS NULL
+           AND job.id = ? AND job.enabled = 1 AND job.deleted_at IS NULL
+         GROUP BY job.id, config.sealed`,
+       ).get(runId, projectId, jobId) as {
+        timeout_minutes: number;
+        sealed: number;
+        reference_count: number;
+      } | undefined;
+      if (!job || job.sealed !== 0 || job.reference_count === 0) unavailableJobSecrets();
+
+      const references = transactionDb.prepare(
+        `SELECT reference.item_id, reference.authorized_item_version,
+                item.id AS active_item_id, item.version, item.access_policy,
+                item.expires_at, item.lease_duration_seconds, item.encrypted, item.wrapped_kek
+         FROM job_vault_references reference
+         LEFT JOIN vault_items item
+           ON item.project_id = reference.project_id AND item.id = reference.item_id
+         WHERE reference.project_id = ? AND reference.job_id = ? AND reference.status = 'authorized'
+         ORDER BY reference.item_id ASC`,
+      ).all(projectId, jobId) as Array<{
+        item_id: string;
+        authorized_item_version: number;
+        active_item_id: string | null;
+        version: number | null;
+        access_policy: string | null;
+        expires_at: string | null;
+        lease_duration_seconds: number | null;
+        encrypted: Buffer | null;
+        wrapped_kek: Buffer | null;
+      }>;
+      if (references.length === 0) unavailableJobSecrets();
+
+      const nowMs = Date.now();
+      let deadlineAt = jobTimeoutDeadline(nowMs, job.timeout_minutes);
+      if (deadlineAt === null) unavailableJobSecrets();
+
+      for (const reference of references) {
+        if (
+          reference.active_item_id !== reference.item_id
+          || reference.access_policy === DELETED_POLICY
+          || reference.version !== reference.authorized_item_version
+          || !reference.encrypted
+          || !reference.wrapped_kek
+        ) {
+          unavailableJobSecrets();
+        }
+
+        if (reference.expires_at !== null) {
+          const expiresAt = Date.parse(reference.expires_at);
+          if (!Number.isSafeInteger(expiresAt) || expiresAt <= nowMs) unavailableJobSecrets();
+          deadlineAt = Math.min(deadlineAt, expiresAt);
+        }
+        if (reference.lease_duration_seconds !== null) {
+          if (!Number.isSafeInteger(reference.lease_duration_seconds) || reference.lease_duration_seconds <= 0) {
+            unavailableJobSecrets();
+          }
+          const leaseDeadline = nowMs + reference.lease_duration_seconds * 1_000;
+          if (!Number.isSafeInteger(leaseDeadline)) unavailableJobSecrets();
+          deadlineAt = Math.min(deadlineAt, leaseDeadline);
+        }
+
+        let dek: Buffer | undefined;
+        let plaintext: Buffer | undefined;
+        try {
+          dek = unwrapKey(reference.wrapped_kek, key);
+          plaintext = decryptSecretBuffer(reference.encrypted, dek);
+          let released = false;
+          const value = plaintext;
+          handles.push({
+            itemId: reference.item_id,
+            authorizedItemVersion: reference.authorized_item_version,
+            value,
+            release: () => {
+              if (released) return;
+              released = true;
+              zeroJobSecretBuffer("plaintext", value);
+            },
+          });
+          plaintext = undefined;
+        } finally {
+          if (plaintext) zeroJobSecretBuffer("plaintext", plaintext);
+          if (dek) zeroJobSecretBuffer("dek", dek);
+        }
+
+        const accessTime = new Date().toISOString();
+        transactionDb.prepare(
+          "UPDATE vault_items SET last_accessed_at = ?, access_count = access_count + 1 WHERE project_id = ? AND id = ? AND version = ? AND access_policy <> ?",
+        ).run(accessTime, projectId, reference.item_id, reference.version, DELETED_POLICY);
+        if (!insertJobVaultRuntimeAudit(transactionDb, {
+          projectId,
+          jobId,
+          runId,
+          action: "secret_read",
+          itemId: reference.item_id,
+          authorizedItemVersion: reference.authorized_item_version,
+        })) unavailableJobSecrets();
+      }
+
+      return deadlineAt;
+    });
+    checkpointAfterWrite();
+    return { secrets: handles, deadlineAt: result, release };
+  } catch {
+    release();
+    recordJobSecretDenied(projectId, jobId, runId);
+    unavailableJobSecrets();
+  }
+}
+
 /** Encrypt and store a vault item with a unique data encryption key. */
 export function createItem(
   projectId: string,
@@ -257,7 +492,13 @@ export function decryptItem(projectId: string, itemId: string): string | null {
 
     const dek = unwrapKey(item.wrapped_kek, key);
     try {
-      const plaintext = decryptSecret(item.encrypted, dek).toString("utf8");
+      const plaintextBuffer = decryptSecret(item.encrypted, dek);
+      let plaintext: string;
+      try {
+        plaintext = plaintextBuffer.toString("utf8");
+      } finally {
+        plaintextBuffer.fill(0);
+      }
       const now = new Date().toISOString();
       db.prepare(
         "UPDATE vault_items SET last_accessed_at = ?, access_count = access_count + 1 WHERE project_id = ? AND id = ?",

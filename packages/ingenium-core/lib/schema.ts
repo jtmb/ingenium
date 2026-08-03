@@ -258,12 +258,12 @@ export interface BoardConfig {
   updated_at: string;
 }
 
-/** Metadata-only provenance for an active job authorization to a vault item. */
+/** Metadata-only provenance for a job authorization to a vault item. */
 export interface JobVaultReference {
   item_id: string;
   authorized_at: string;
-  item_version: number;
-  availability: "available" | "unavailable";
+  authorized_item_version: number;
+  status: "authorized" | "version_stale" | "unavailable";
 }
 
 /** A recurring or event-triggered job definition with agent assignment and scheduling config. */
@@ -278,6 +278,7 @@ export interface Job {
   trigger_event?: string | null;
   enabled: boolean;
   timeout_minutes: number;
+  revision: number;
   vault_references: JobVaultReference[];
   created_at: string;
   updated_at: string;
@@ -1111,17 +1112,20 @@ export interface BackupRecord {
   created_at: string;
 }
 
-/** Lifecycle state for a restore request associated with a backup snapshot. */
-export interface BackupRestoreJob {
+/** RESTORE-100's durable, dry-run-only restore approval plan. */
+export interface BackupRestorePlanRecord {
   id: string;
   project_id: string;
-  backup_id: string | null;
-  status: "validating" | "confirmed" | "applying" | "completed" | "failed" | "rolled_back";
-  components: string;
-  error_message: string | null;
-  started_at: string | null;
-  completed_at: string | null;
+  backup_id: string;
+  state: "previewed" | "authorized" | "confirmed" | "ready_for_executor" | "execution_authorized" | "queued" | "executor_claimed" | "quiescing" | "snapshotting" | "swapping" | "verifying" | "restarting" | "completed" | "rolling_back" | "rolled_back" | "rollback_failed" | "failed" | "cancelled";
+  revision: number;
+  dry_run: 1;
+  manifest_hash: string;
+  plan_hash: string;
+  blockers_json: string;
+  warnings_json: string;
   created_at: string;
+  updated_at: string;
 }
 
 /** An ingestion source for RAG-backed documentation search. */

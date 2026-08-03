@@ -151,7 +151,7 @@ The "New item" button opens a CreateItemModal with fields for name, credential v
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/v1/vault/status` | GET | Check if vault is sealed and initialized |
+| `/api/v1/vault/status` | GET | Sealed-safe check of vault state and next action; never unseals |
 | `/api/v1/vault/initialize` | POST | Create a new vault (passphrase + confirmation) |
 | `/api/v1/vault/unseal` | POST | Unseal vault with passphrase |
 | `/api/v1/vault/seal` | POST | Re-seal the vault |
@@ -162,6 +162,7 @@ The "New item" button opens a CreateItemModal with fields for name, credential v
 | `/api/v1/vault/items` | POST | Create a new item |
 | `/api/v1/vault/items/:id` | PATCH | Update an item |
 | `/api/v1/vault/items/:id` | DELETE | Delete an item |
+| `/api/v1/jobs/:id/vault-audit` | GET | Bounded, job-scoped metadata-only authorization/runtime audit |
 
 `GET /status` includes `nextAction: "initialize"` on first run and
 `nextAction: "unseal"` when an existing vault is sealed. For Dashboard calls,
@@ -215,3 +216,20 @@ conflicting protected value.
 - Losing `INGENIUM_EMAIL_ENCRYPTION_KEY` continuity makes encrypted mail
   credentials unreadable; the system reports reconnect/decryption failure and
   does not guess, re-encrypt, or overwrite the source data.
+
+## Job references (VAULT-100)
+
+Jobs may opt in to up to 16 active vault item IDs from the same project. This is
+authorization metadata only: job views expose the stable item ID,
+`status`, authorization timestamp, and captured `authorized_item_version`, including
+when the vault is sealed. They never expose item names, values, ciphertext, or
+other vault metadata.
+
+For job create, omit `vault_item_ids` for no references. For job updates, omit it
+to preserve references, provide a list to replace them, or provide `[]` to
+revoke all. Invalid, duplicate, over-limit, foreign, deleted, or missing IDs
+fail closed with bounded generic errors. Authorization and revocation are
+immutable `authorized`/`revoked` audit events attributed to `authenticated_api`.
+The job audit also records metadata-only `secret_read` and `access_denied`
+actions under the job-run actor category. This feature does not
+decrypt or unseal the vault and does not provide runner or log injection.

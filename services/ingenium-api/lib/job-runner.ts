@@ -1,7 +1,25 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
-import { jobEventDeliveries, jobs, logger } from "ingenium-core";
+import {
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmdirSync,
+  statfsSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import { isAbsolute, join, resolve, sep } from "node:path";
+import { jobEventDeliveries, jobs, logger, vault } from "ingenium-core";
 
 let activeRunCount = 0;
 
@@ -34,33 +52,59 @@ const closePromises = new Map<string, Promise<void>>();
 const terminationCompletions = new Map<string, Promise<void>>();
 const resolveEscalations = new Map<string, () => void>();
 const groupRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const vaultSecretRuns = new Map<string, VaultSecretRunFiles>();
+const recoveredVaultRuns = new Map<string, jobs.VaultSecretRunRecovery>();
+let vaultRecoveryInFlight: Promise<void> | null = null;
+const vaultRedactionRuns = new Set<string>();
+const teardownAttempts = new Map<string, Promise<void>>();
 
 // `detached: true` starts a POSIX child as the leader of a new process group.
 // Windows does not expose the same portable process-group signal semantics.
 const supportsOwnedProcessGroups = process.platform !== "win32";
 const RUN_NONCE_ENV = "INGENIUM_JOB_RUN_NONCE";
 const JOB_CHILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+export const VAULT_JOB_SECRET_ROOT = "/dev/shm/ingenium-job-secrets";
+const VAULT_OPENCODE_CONFIG_SOURCE = "/home/appuser/.config/opencode/opencode.jsonc";
+const VAULT_OPENCODE_AUTH_SOURCE = "/home/appuser/.local/share/opencode/auth.json";
+const VAULT_RUNTIME_DIRECTORIES = ["home", "config", "data", "cache", "state", "tmp"] as const;
+const VAULT_RUNTIME_DIRECTORY_SET = new Set<string>(VAULT_RUNTIME_DIRECTORIES);
+const VAULT_CONFIG_MAX_BYTES = 1024 * 1024;
+const VAULT_AUTH_MAX_BYTES = 1024 * 1024;
+const VAULT_SECRET_MAX_BYTES = 1024 * 1024;
+const TMPFS_MAGIC = 0x01021994;
+const VAULT_OUTPUT_REDACTION = "Vault job output redacted.";
+const VAULT_UNAVAILABLE_CODE = "vault_secrets_unavailable";
+const VAULT_UNAVAILABLE_MESSAGE = "Vault secrets are unavailable.";
+const RUN_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Deliberately do not inherit the API process environment. It carries boundary
  * credentials and provider secrets that an agent process must never receive.
  */
-export function buildJobProcessEnvironment(projectId: string, runNonce: string): NodeJS.ProcessEnv {
-  return {
+export function buildJobProcessEnvironment(
+  projectId: string,
+  runNonce: string,
+  vaultSecretFiles?: Readonly<Record<string, string>>,
+  vaultRuntime?: VaultOpenCodeRuntime,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
     PATH: process.env.PATH || JOB_CHILD_PATH,
-    HOME: "/home/appuser",
+    HOME: vaultRuntime?.home ?? "/home/appuser",
     USER: process.env.USER || "appuser",
     SHELL: process.env.SHELL || "/bin/sh",
     TERM: process.env.TERM || "dumb",
     LANG: process.env.LANG || "C.UTF-8",
     ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
     ...(process.env.LC_CTYPE ? { LC_CTYPE: process.env.LC_CTYPE } : {}),
-    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || "/home/appuser/.config",
-    XDG_DATA_HOME: process.env.XDG_DATA_HOME || "/home/appuser/.local/share",
-    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || "/home/appuser/.cache",
+    XDG_CONFIG_HOME: vaultRuntime?.config ?? (process.env.XDG_CONFIG_HOME || "/home/appuser/.config"),
+    XDG_DATA_HOME: vaultRuntime?.data ?? (process.env.XDG_DATA_HOME || "/home/appuser/.local/share"),
+    XDG_CACHE_HOME: vaultRuntime?.cache ?? (process.env.XDG_CACHE_HOME || "/home/appuser/.cache"),
+    ...(vaultRuntime ? { XDG_STATE_HOME: vaultRuntime.state, TMPDIR: vaultRuntime.tmp } : {}),
     INGENIUM_JOB_PROJECT_ID: projectId,
     [RUN_NONCE_ENV]: runNonce,
   };
+  if (vaultSecretFiles) environment.INGENIUM_VAULT_SECRET_FILES = JSON.stringify(vaultSecretFiles);
+  return environment;
 }
 
 function safeJobLogText(value: unknown, maxBytes = 256): string {
@@ -75,6 +119,8 @@ export interface JobProcessIdentity {
   startTime: string;
   executable: string;
   runNonce?: string;
+  /** Present for procfs-derived identities; never persisted with run metadata. */
+  ownerId?: number;
 }
 
 export interface JobProcessGroup {
@@ -94,8 +140,12 @@ export interface JobProcessInspector {
 
 interface JobRunnerRuntime {
   processInspector: JobProcessInspector;
+  findProcessesByNonceHash: (nonceHash: string) => JobProcessIdentity[] | null;
   createRunNonce: () => string;
   signalProcessGroup: (processGroupId: number, signal: NodeJS.Signals) => void;
+  vaultSecretRoot: string;
+  openCodeConfigPath: string;
+  openCodeAuthPath: string;
 }
 
 interface EventExecutionContext {
@@ -113,7 +163,7 @@ interface ProcessTrackingEvent {
 
 interface OwnedDetachedRun {
   runId: string;
-  runNonce: string;
+  runNonceHash: string;
   processGroupId: number;
   leader: JobProcessIdentity | null;
   initialGroupMembers: JobProcessIdentity[];
@@ -122,10 +172,35 @@ interface OwnedDetachedRun {
   events: ProcessTrackingEvent[];
 }
 
+interface VaultSecretRunFiles {
+  projectId: string;
+  root: string;
+  runDir: string;
+  itemIds: string[];
+  resolution: vault.VaultJobSecretsResolution;
+  runtime: VaultOpenCodeRuntime;
+}
+
+interface VaultOpenCodeRuntime {
+  home: string;
+  config: string;
+  data: string;
+  cache: string;
+  state: string;
+  tmp: string;
+}
+
+class VaultSecretStorageError extends Error {
+  constructor() {
+    super("VAULT_SECRET_STORAGE_UNAVAILABLE");
+    this.name = "VaultSecretStorageError";
+  }
+}
+
 /** Read-only diagnostic shape exposed only for colocated deterministic tests. */
 export interface OwnedDetachedRunDiagnostic {
   runId: string;
-  runNonce: string;
+  runNonceHash: string;
   processGroupId: number;
   leader: JobProcessIdentity | null;
   initialGroupMembers: JobProcessIdentity[];
@@ -170,9 +245,78 @@ function readRunNonce(environment: string): string | undefined {
   return environment.split("\0").find((entry) => entry.startsWith(prefix))?.slice(prefix.length) || undefined;
 }
 
-function inspectLinuxStat(processId: number): Omit<JobProcessIdentity, "executable" | "runNonce"> | null {
+interface ParsedProcStatFields {
+  processId: number;
+  processGroupId: number;
+  sessionId: number;
+  startTime: string | undefined;
+}
+
+function parseProcStatFields(processId: number, raw: string): ParsedProcStatFields | null {
+  const openParen = raw.indexOf("(");
+  const closeParen = raw.lastIndexOf(")");
+  if (openParen <= 0 || closeParen <= openParen) return null;
+
+  const parsedProcessId = Number(raw.slice(0, openParen).trim());
+  const fields = raw.slice(closeParen + 1).trim().split(/\s+/);
+  const processGroupId = Number(fields[2]);
+  const sessionId = Number(fields[3]);
+  if (
+    parsedProcessId !== processId
+    || !Number.isSafeInteger(processGroupId)
+    || !Number.isSafeInteger(sessionId)
+  ) {
+    return null;
+  }
+  return { processId, processGroupId, sessionId, startTime: fields[19] };
+}
+
+function isProcfsRace(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && ((error as { code?: unknown }).code === "ENOENT" || (error as { code?: unknown }).code === "ESRCH");
+}
+
+export interface ProcfsAccessForTesting {
+  listProcessIds(): readonly number[];
+  lstatProcess(processId: number): { uid: number };
+  readProcessStat(processId: number): string;
+  readProcessExecutable(processId: number): string;
+  readProcessEnvironment(processId: number): string;
+}
+
+const linuxProcfsAccess: ProcfsAccessForTesting = {
+  listProcessIds: () => readdirSync("/proc", { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .map((entry) => Number(entry.name)),
+  lstatProcess: (processId) => lstatSync(`/proc/${processId}`),
+  readProcessStat: (processId) => readFileSync(`/proc/${processId}/stat`, "utf-8"),
+  readProcessExecutable: (processId) => readlinkSync(`/proc/${processId}/exe`),
+  readProcessEnvironment: (processId) => readFileSync(`/proc/${processId}/environ`, "utf-8"),
+};
+
+function inspectLinuxStatFromProcfs(
+  procfs: ProcfsAccessForTesting,
+  processId: number,
+): Omit<JobProcessIdentity, "executable" | "runNonce" | "ownerId"> | null {
   try {
-    return parseProcStat(processId, readFileSync(`/proc/${processId}/stat`, "utf-8"));
+    return parseProcStat(processId, procfs.readProcessStat(processId));
+  } catch {
+    return null;
+  }
+}
+
+function inspectLinuxProcessFromStat(
+  procfs: ProcfsAccessForTesting,
+  stat: Omit<JobProcessIdentity, "executable" | "runNonce" | "ownerId">,
+  ownerId: number,
+): JobProcessIdentity | null {
+  try {
+    const executable = procfs.readProcessExecutable(stat.processId);
+    const runNonce = readRunNonce(procfs.readProcessEnvironment(stat.processId));
+    if (!executable) return null;
+    return { ...stat, executable, runNonce, ownerId };
   } catch {
     return null;
   }
@@ -187,41 +331,117 @@ function inspectLinuxProcess(processId: number): JobProcessIdentity | null {
   if (process.platform !== "linux" || !Number.isSafeInteger(processId) || processId <= 0) return null;
 
   try {
-    const stat = inspectLinuxStat(processId);
-    const executable = readlinkSync(`/proc/${processId}/exe`);
-    const runNonce = readRunNonce(readFileSync(`/proc/${processId}/environ`, "utf-8"));
-    if (!stat || !executable) return null;
-    return { ...stat, executable, runNonce };
+    const ownerId = linuxProcfsAccess.lstatProcess(processId).uid;
+    const stat = inspectLinuxStatFromProcfs(linuxProcfsAccess, processId);
+    return stat ? inspectLinuxProcessFromStat(linuxProcfsAccess, stat, ownerId) : null;
   } catch {
     return null;
   }
 }
 
+/** Find only same-UID processes carrying an exact hash-matched run nonce. */
+function findLinuxProcessesByNonceHash(nonceHash: string): JobProcessIdentity[] | null {
+  if (process.platform !== "linux" || !/^[0-9a-f]{64}$/.test(nonceHash)) return null;
+  let owner: number;
+  try {
+    owner = processOwnerId();
+  } catch {
+    return null;
+  }
+  try {
+    const matches: JobProcessIdentity[] = [];
+    for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+      const processId = Number(entry.name);
+      let metadata: ReturnType<typeof lstatSync>;
+      try {
+        metadata = lstatSync(`/proc/${processId}`);
+      } catch {
+        continue;
+      }
+      if (metadata.uid !== owner) continue;
+      const identity = inspectLinuxProcess(processId);
+      if (identity && identity.ownerId === owner && hashNonce(identity.runNonce) === nonceHash) matches.push(identity);
+    }
+    return matches;
+  } catch {
+    return null;
+  }
+}
+
+function inspectLinuxGroup(
+  processGroupId: number,
+  runnerOwnerId: number,
+  procfs: ProcfsAccessForTesting,
+): JobProcessGroup | null {
+  if (!Number.isSafeInteger(processGroupId) || processGroupId <= 0) return null;
+
+  let processIds: readonly number[];
+  try {
+    processIds = procfs.listProcessIds();
+  } catch {
+    return null;
+  }
+
+  const members: JobProcessIdentity[] = [];
+  let groupSessionId: number | undefined;
+  for (const processId of processIds) {
+    if (!Number.isSafeInteger(processId) || processId <= 0) continue;
+
+    // Ownership is checked before any procfs content read. This lets unrelated
+    // root/kernel entries be ignored without treating their unreadability as an
+    // ambiguity in the runner-owned detached group.
+    let metadata: { uid: number };
+    try {
+      metadata = procfs.lstatProcess(processId);
+    } catch (error) {
+      if (isProcfsRace(error)) continue;
+      return null;
+    }
+    if (metadata.uid !== runnerOwnerId) continue;
+
+    let rawStat: string;
+    try {
+      rawStat = procfs.readProcessStat(processId);
+    } catch (error) {
+      // A known leader that becomes unreadable is ambiguous, as is any
+      // same-UID process whose group membership cannot be established.
+      if (isProcfsRace(error)) continue;
+      return null;
+    }
+    const parsed = parseProcStatFields(processId, rawStat);
+    if (!parsed) return null;
+    // Kernel entries with PGID zero cannot belong to a real detached group.
+    if (parsed.processGroupId === 0) continue;
+    if (parsed.processGroupId !== processGroupId) continue;
+
+    const stat = parseProcStat(processId, rawStat);
+    if (!stat) return null;
+    if (groupSessionId === undefined) groupSessionId = stat.sessionId;
+    else if (groupSessionId !== stat.sessionId) return null;
+
+    const identity = inspectLinuxProcessFromStat(procfs, stat, metadata.uid);
+    if (!identity) return null;
+    members.push(identity);
+  }
+  return { processGroupId, members };
+}
+
+/** Test-only procfs seam for ownership/race semantics without live process signals. */
+export function inspectLinuxProcessGroupForTesting(
+  processGroupId: number,
+  runnerOwnerId: number,
+  procfs: ProcfsAccessForTesting,
+): JobProcessGroup | null {
+  return inspectLinuxGroup(processGroupId, runnerOwnerId, procfs);
+}
+
 const linuxProcessInspector: JobProcessInspector = {
   inspectProcess: inspectLinuxProcess,
   inspectGroup(processGroupId): JobProcessGroup | null {
-    if (process.platform !== "linux" || !Number.isSafeInteger(processGroupId) || processGroupId <= 0) return null;
-
+    if (process.platform !== "linux") return null;
     try {
-      const members: JobProcessIdentity[] = [];
-      for (const entry of readdirSync("/proc", { withFileTypes: true })) {
-        if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
-        const processId = Number(entry.name);
-        const stat = inspectLinuxStat(processId);
-        // A process can disappear between readdir and its procfs reads. Do not
-        // guess that the remaining entries are complete; retry on the next
-        // verification instead of potentially signalling an unknown member.
-        if (!stat) return null;
-        if (stat.processGroupId !== processGroupId) continue;
-
-        // Only inspect environ/exe for a member of the candidate group. Other
-        // users' unrelated processes need not be readable for us to make a
-        // complete ownership decision about this detached group.
-        const identity = inspectLinuxProcess(processId);
-        if (!identity) return null;
-        members.push(identity);
-      }
-      return { processGroupId, members };
+      return inspectLinuxGroup(processGroupId, processOwnerId(), linuxProcfsAccess);
     } catch {
       return null;
     }
@@ -230,10 +450,14 @@ const linuxProcessInspector: JobProcessInspector = {
 
 const defaultJobRunnerRuntime: JobRunnerRuntime = {
   processInspector: linuxProcessInspector,
+  findProcessesByNonceHash: findLinuxProcessesByNonceHash,
   createRunNonce: randomUUID,
   signalProcessGroup(processGroupId, signal): void {
     process.kill(-processGroupId, signal);
   },
+  vaultSecretRoot: VAULT_JOB_SECRET_ROOT,
+  openCodeConfigPath: VAULT_OPENCODE_CONFIG_SOURCE,
+  openCodeAuthPath: VAULT_OPENCODE_AUTH_SOURCE,
 };
 
 let jobRunnerRuntime = defaultJobRunnerRuntime;
@@ -250,13 +474,550 @@ export function configureJobRunnerRuntimeForTesting(overrides: Partial<JobRunner
   };
 }
 
+function processOwnerId(): number {
+  const owner = process.getuid?.();
+  if (typeof owner !== "number" || !Number.isSafeInteger(owner) || owner < 0) throw new VaultSecretStorageError();
+  return owner;
+}
+
+function hasExactMode(stat: { mode: number }, mode: number): boolean {
+  return (stat.mode & 0o777) === mode;
+}
+
+function assertVaultSecretRoot(): string {
+  const root = jobRunnerRuntime.vaultSecretRoot;
+  if (!isAbsolute(root) || root !== resolve(root)) throw new VaultSecretStorageError();
+  const owner = processOwnerId();
+  let rootStat: ReturnType<typeof lstatSync>;
+  try {
+    rootStat = lstatSync(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.uid !== owner || !hasExactMode(rootStat, 0o700)) {
+      throw new VaultSecretStorageError();
+    }
+    const fsType = Number(statfsSync(root).type);
+    if (!Number.isSafeInteger(fsType) || fsType !== TMPFS_MAGIC) throw new VaultSecretStorageError();
+    const noFollow = fsConstants.O_NOFOLLOW;
+    const directory = fsConstants.O_DIRECTORY;
+    if (typeof noFollow !== "number" || typeof directory !== "number") throw new VaultSecretStorageError();
+    const descriptor = openSync(root, fsConstants.O_RDONLY | directory | noFollow);
+    try {
+      const opened = fstatSync(descriptor);
+      if (!opened.isDirectory() || opened.uid !== owner || !hasExactMode(opened, 0o700)) throw new VaultSecretStorageError();
+    } finally {
+      closeSync(descriptor);
+    }
+    return root;
+  } catch (error) {
+    if (error instanceof VaultSecretStorageError) throw error;
+    throw new VaultSecretStorageError();
+  }
+}
+
+function strictRunDirectory(root: string, runId: string): string {
+  if (!RUN_UUID_PATTERN.test(runId)) throw new VaultSecretStorageError();
+  const rootPath = resolve(root);
+  const runDir = resolve(rootPath, runId);
+  if (!runDir.startsWith(`${rootPath}${sep}`) || runDir !== join(rootPath, runId)) throw new VaultSecretStorageError();
+  return runDir;
+}
+
+function assertPrivateDirectory(path: string, owner: number): void {
+  const metadata = lstatSync(path);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== owner || !hasExactMode(metadata, 0o700)) {
+    throw new VaultSecretStorageError();
+  }
+}
+
+function createPrivateDirectory(path: string, owner: number): void {
+  mkdirSync(path, { mode: 0o700 });
+  chmodSync(path, 0o700);
+  assertPrivateDirectory(path, owner);
+}
+
+function readPrivateRuntimeSource(path: string, maxBytes: number): Buffer {
+  const owner = processOwnerId();
+  let descriptor: number | undefined;
+  try {
+    const metadata = lstatSync(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== owner
+      || !hasExactMode(metadata, 0o600) || metadata.nlink !== 1 || metadata.size < 1 || metadata.size > maxBytes) {
+      throw new VaultSecretStorageError();
+    }
+    descriptor = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.uid !== owner || !hasExactMode(opened, 0o600)
+      || opened.nlink !== 1 || opened.size < 1 || opened.size > maxBytes) throw new VaultSecretStorageError();
+    const content = readFileSync(descriptor);
+    if (content.length < 1 || content.length > maxBytes) {
+      content.fill(0);
+      throw new VaultSecretStorageError();
+    }
+    return content;
+  } catch (error) {
+    if (error instanceof VaultSecretStorageError) throw error;
+    throw new VaultSecretStorageError();
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function stripJsoncComments(input: string): string {
+  let output = "";
+  let quote = "";
+  let escaped = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const current = input[index]!;
+    const next = input[index + 1];
+    if (quote) {
+      output += current;
+      if (escaped) escaped = false;
+      else if (current === "\\") escaped = true;
+      else if (current === quote) quote = "";
+      continue;
+    }
+    if (current === '"') {
+      quote = current;
+      output += current;
+      continue;
+    }
+    if (current === "/" && next === "/") {
+      index += 1;
+      while (index + 1 < input.length && input[index + 1] !== "\n" && input[index + 1] !== "\r") index += 1;
+      continue;
+    }
+    if (current === "/" && next === "*") {
+      index += 1;
+      while (index + 1 < input.length && !(input[index] === "*" && input[index + 1] === "/")) index += 1;
+      if (index + 1 >= input.length) throw new VaultSecretStorageError();
+      index += 1;
+      continue;
+    }
+    output += current;
+  }
+  if (quote) throw new VaultSecretStorageError();
+  return output;
+}
+
+function removeJsoncTrailingCommas(input: string): string {
+  let output = "";
+  let quote = "";
+  let escaped = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const current = input[index]!;
+    if (quote) {
+      output += current;
+      if (escaped) escaped = false;
+      else if (current === "\\") escaped = true;
+      else if (current === quote) quote = "";
+      continue;
+    }
+    if (current === '"') {
+      quote = current;
+      output += current;
+      continue;
+    }
+    if (current === ",") {
+      let next = index + 1;
+      while (next < input.length && /\s/.test(input[next]!)) next += 1;
+      if (input[next] === "}" || input[next] === "]") continue;
+    }
+    output += current;
+  }
+  if (quote) throw new VaultSecretStorageError();
+  return output;
+}
+
+/** Keep provider/model/agent settings while dropping plugins and MCP persistence paths. */
+function isolateOpenCodeConfig(source: Buffer): Buffer {
+  try {
+    const parsed = JSON.parse(removeJsoncTrailingCommas(stripJsoncComments(source.toString("utf8"))));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new VaultSecretStorageError();
+    const config = parsed as Record<string, unknown>;
+    const isolated: Record<string, unknown> = {};
+    for (const key of ["$schema", "provider", "model", "agent", "permission"]) {
+      if (Object.hasOwn(config, key)) isolated[key] = config[key];
+    }
+    return Buffer.from(`${JSON.stringify(isolated)}\n`, "utf8");
+  } catch (error) {
+    if (error instanceof VaultSecretStorageError) throw error;
+    throw new VaultSecretStorageError();
+  } finally {
+    source.fill(0);
+  }
+}
+
+function writePrivateRuntimeFile(path: string, value: Buffer): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(
+      path,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+      0o600,
+    );
+    let offset = 0;
+    while (offset < value.length) {
+      const written = writeSync(descriptor, value, offset, value.length - offset);
+      if (written <= 0) throw new VaultSecretStorageError();
+      offset += written;
+    }
+    fsyncSync(descriptor);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    value.fill(0);
+  }
+  const metadata = lstatSync(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !hasExactMode(metadata, 0o600) || metadata.nlink !== 1) {
+    throw new VaultSecretStorageError();
+  }
+}
+
+function createVaultOpenCodeRuntime(runDir: string, owner: number): VaultOpenCodeRuntime {
+  const runtime: VaultOpenCodeRuntime = {
+    home: join(runDir, "home"),
+    config: join(runDir, "config"),
+    data: join(runDir, "data"),
+    cache: join(runDir, "cache"),
+    state: join(runDir, "state"),
+    tmp: join(runDir, "tmp"),
+  };
+  const configSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeConfigPath, VAULT_CONFIG_MAX_BYTES);
+  let isolatedConfig: Buffer | undefined;
+  let authSource: Buffer | undefined;
+  try {
+    isolatedConfig = isolateOpenCodeConfig(configSource);
+    authSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeAuthPath, VAULT_AUTH_MAX_BYTES);
+    for (const directory of VAULT_RUNTIME_DIRECTORIES) createPrivateDirectory(join(runDir, directory), owner);
+    const configDirectory = join(runtime.config, "opencode");
+    const dataDirectory = join(runtime.data, "opencode");
+    createPrivateDirectory(configDirectory, owner);
+    createPrivateDirectory(dataDirectory, owner);
+    writePrivateRuntimeFile(join(configDirectory, "opencode.jsonc"), isolatedConfig);
+    isolatedConfig = undefined;
+    writePrivateRuntimeFile(join(dataDirectory, "auth.json"), authSource);
+    authSource = undefined;
+    return runtime;
+  } finally {
+    configSource.fill(0);
+    isolatedConfig?.fill(0);
+    authSource?.fill(0);
+  }
+}
+
+function validateVaultOpenCodeSources(): void {
+  const configSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeConfigPath, VAULT_CONFIG_MAX_BYTES);
+  let isolated: Buffer | undefined;
+  let authSource: Buffer | undefined;
+  try {
+    isolated = isolateOpenCodeConfig(configSource);
+    authSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeAuthPath, VAULT_AUTH_MAX_BYTES);
+  } finally {
+    configSource.fill(0);
+    isolated?.fill(0);
+    authSource?.fill(0);
+  }
+}
+
+type VaultRunDirectoryState = "absent" | "complete" | "safe_partial" | "unsafe";
+
+interface InspectedVaultSecretDirectory {
+  state: VaultRunDirectoryState;
+  itemIds: string[];
+}
+
+function vaultRunChild(runDir: string, name: string): string {
+  const path = join(runDir, name);
+  if (resolve(path) !== path || !path.startsWith(`${runDir}${sep}`)) throw new VaultSecretStorageError();
+  return path;
+}
+
+function isExpectedPrivateDirectory(path: string, owner: number): boolean {
+  try {
+    const metadata = lstatSync(path);
+    return metadata.isDirectory()
+      && !metadata.isSymbolicLink()
+      && metadata.uid === owner
+      && hasExactMode(metadata, 0o700)
+      && Number.isSafeInteger(metadata.nlink)
+      && metadata.nlink >= 2;
+  } catch {
+    return false;
+  }
+}
+
+function isExpectedPrivateFile(path: string, owner: number, minBytes: number, maxBytes: number): boolean {
+  try {
+    const metadata = lstatSync(path);
+    return metadata.isFile()
+      && !metadata.isSymbolicLink()
+      && metadata.uid === owner
+      && hasExactMode(metadata, 0o600)
+      && metadata.nlink === 1
+      && Number.isSafeInteger(metadata.size)
+      && metadata.size >= minBytes
+      && metadata.size <= maxBytes;
+  } catch {
+    return false;
+  }
+}
+
+/** Validate only the known pre-spawn XDG subtree; missing materialization is safe. */
+function inspectVaultRuntimeDirectory(runDir: string, name: string, owner: number): boolean | null {
+  const directory = vaultRunChild(runDir, name);
+  if (!isExpectedPrivateDirectory(directory, owner)) return null;
+  let entries: string[];
+  try {
+    entries = readdirSync(directory);
+  } catch {
+    return null;
+  }
+  if (entries.length !== new Set(entries).size) return null;
+
+  if (name !== "config" && name !== "data") return entries.length === 0;
+  if (entries.some((entry) => entry !== "opencode")) return null;
+  if (entries.length === 0) return false;
+
+  const opencodeDirectory = vaultRunChild(directory, "opencode");
+  if (!isExpectedPrivateDirectory(opencodeDirectory, owner)) return null;
+  let nestedEntries: string[];
+  try {
+    nestedEntries = readdirSync(opencodeDirectory);
+  } catch {
+    return null;
+  }
+  if (nestedEntries.some((entry) => entry !== (name === "config" ? "opencode.jsonc" : "auth.json"))) return null;
+  if (nestedEntries.length === 0) return false;
+  const fileName = name === "config" ? "opencode.jsonc" : "auth.json";
+  const maxBytes = name === "config" ? VAULT_CONFIG_MAX_BYTES : VAULT_AUTH_MAX_BYTES;
+  return isExpectedPrivateFile(vaultRunChild(opencodeDirectory, fileName), owner, 1, maxBytes);
+}
+
+function inspectVaultSecretDirectory(
+  root: string,
+  runId: string,
+  allowedItemIds: ReadonlySet<string>,
+): InspectedVaultSecretDirectory {
+  const owner = processOwnerId();
+  let runDir: string;
+  try {
+    runDir = strictRunDirectory(root, runId);
+    const directory = lstatSync(runDir);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== owner
+      || !hasExactMode(directory, 0o700) || !Number.isSafeInteger(directory.nlink) || directory.nlink < 2) {
+      return { state: "unsafe", itemIds: [] };
+    }
+    const entries = readdirSync(runDir, { withFileTypes: true });
+    const itemIds: string[] = [];
+    let complete = true;
+    for (const entry of entries) {
+      if (VAULT_RUNTIME_DIRECTORY_SET.has(entry.name)) {
+        continue;
+      }
+      if (!RUN_UUID_PATTERN.test(entry.name) || !allowedItemIds.has(entry.name)) return { state: "unsafe", itemIds: [] };
+      if (!isExpectedPrivateFile(vaultRunChild(runDir, entry.name), owner, 0, VAULT_SECRET_MAX_BYTES)) {
+        return { state: "unsafe", itemIds: [] };
+      }
+      itemIds.push(entry.name);
+    }
+    if (itemIds.length !== allowedItemIds.size) complete = false;
+    for (const directoryName of VAULT_RUNTIME_DIRECTORIES) {
+      if (!entries.some((entry) => entry.name === directoryName)) {
+        complete = false;
+        continue;
+      }
+      const runtimeComplete = inspectVaultRuntimeDirectory(runDir, directoryName, owner);
+      if (runtimeComplete === null) return { state: "unsafe", itemIds: [] };
+      complete &&= runtimeComplete;
+    }
+    return { state: complete ? "complete" : "safe_partial", itemIds };
+  } catch (error) {
+    if (isProcfsRace(error)) return { state: "absent", itemIds: [] };
+    return { state: "unsafe", itemIds: [] };
+  }
+}
+
+function removeExpectedPrivateFile(path: string, owner: number, minBytes: number, maxBytes: number): boolean {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    return isProcfsRace(error);
+  }
+  if (!isExpectedPrivateFile(path, owner, minBytes, maxBytes)) return false;
+  try {
+    unlinkSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeExpectedPrivateDirectory(path: string, owner: number): boolean {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    return isProcfsRace(error);
+  }
+  if (!isExpectedPrivateDirectory(path, owner)) return false;
+  try {
+    rmdirSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Delete only a freshly revalidated exact safe directory, never an open-ended tree. */
+function removeSafeVaultSecretDirectory(
+  root: string,
+  runId: string,
+  itemIds: readonly string[],
+  verifyBeforeDelete: () => boolean = () => true,
+): boolean {
+  const expected = new Set(itemIds);
+  const inspected = inspectVaultSecretDirectory(root, runId, expected);
+  if ((inspected.state !== "complete" && inspected.state !== "safe_partial")
+    || inspected.itemIds.some((itemId) => !expected.has(itemId))) return false;
+  // Fence the scan-to-delete window. The second inspection must still prove a
+  // bounded, known-only tree immediately before removing any secret file.
+  const confirmed = inspectVaultSecretDirectory(root, runId, expected);
+  if ((confirmed.state !== "complete" && confirmed.state !== "safe_partial")
+    || confirmed.itemIds.some((itemId) => !expected.has(itemId))) return false;
+  if (!verifyBeforeDelete()) return false;
+  try {
+    const runDir = strictRunDirectory(root, runId);
+    const owner = processOwnerId();
+    for (const itemId of confirmed.itemIds) {
+      if (!removeExpectedPrivateFile(vaultRunChild(runDir, itemId), owner, 0, VAULT_SECRET_MAX_BYTES)) return false;
+    }
+    for (const [directoryName, fileName, maxBytes] of [
+      ["config", "opencode.jsonc", VAULT_CONFIG_MAX_BYTES],
+      ["data", "auth.json", VAULT_AUTH_MAX_BYTES],
+    ] as const) {
+      const runtimeDirectory = vaultRunChild(runDir, directoryName);
+      const opencodeDirectory = vaultRunChild(runtimeDirectory, "opencode");
+      if (!removeExpectedPrivateFile(vaultRunChild(opencodeDirectory, fileName), owner, 1, maxBytes)) return false;
+      if (!removeExpectedPrivateDirectory(opencodeDirectory, owner)) return false;
+    }
+    for (const directoryName of VAULT_RUNTIME_DIRECTORIES) {
+      if (!removeExpectedPrivateDirectory(vaultRunChild(runDir, directoryName), owner)) return false;
+    }
+    return removeExpectedPrivateDirectory(runDir, owner);
+  } catch {
+    return false;
+  }
+}
+
+function retainVaultSecretDirectory(): void {
+  logger.warn("job-runner", "Vault secret directory retained because integrity checks failed");
+}
+
+function createVaultSecretRunFiles(
+  projectId: string,
+  runId: string,
+  resolution: vault.VaultJobSecretsResolution,
+): VaultSecretRunFiles {
+  let root: string | undefined;
+  let runDir: string | undefined;
+  let owner: number | undefined;
+  const itemIds: string[] = [];
+  let createdDirectory = false;
+  try {
+    // Fail before creating tmpfs state when a persistent source is unavailable,
+    // malformed, linked, oversized, or too broadly readable.
+    validateVaultOpenCodeSources();
+    root = assertVaultSecretRoot();
+    runDir = strictRunDirectory(root, runId);
+    owner = processOwnerId();
+    mkdirSync(runDir, { mode: 0o700 });
+    createdDirectory = true;
+    chmodSync(runDir, 0o700);
+    const runDirectory = lstatSync(runDir);
+    if (!runDirectory.isDirectory() || runDirectory.isSymbolicLink() || runDirectory.uid !== owner || !hasExactMode(runDirectory, 0o700)) {
+      throw new VaultSecretStorageError();
+    }
+
+    const runtime = createVaultOpenCodeRuntime(runDir, owner);
+
+    for (const secret of resolution.secrets) {
+      if (!RUN_UUID_PATTERN.test(secret.itemId) || itemIds.includes(secret.itemId)
+        || secret.value.length > VAULT_SECRET_MAX_BYTES) throw new VaultSecretStorageError();
+      const filePath = join(runDir, secret.itemId);
+      if (resolve(filePath) !== filePath) throw new VaultSecretStorageError();
+      const descriptor = openSync(
+        filePath,
+        fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+        0o600,
+      );
+      itemIds.push(secret.itemId);
+      try {
+        let offset = 0;
+        while (offset < secret.value.length) {
+          const written = writeSync(descriptor, secret.value, offset, secret.value.length - offset);
+          if (written <= 0) throw new VaultSecretStorageError();
+          offset += written;
+        }
+        secret.value.fill(0);
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      const file = lstatSync(filePath);
+      if (!file.isFile() || file.isSymbolicLink() || file.uid !== owner || !hasExactMode(file, 0o600) || file.nlink !== 1) {
+        throw new VaultSecretStorageError();
+      }
+    }
+
+    const directoryDescriptor = openSync(runDir, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW);
+    try {
+      fsyncSync(directoryDescriptor);
+    } finally {
+      closeSync(directoryDescriptor);
+    }
+    const run = { projectId, root, runDir, itemIds, resolution, runtime };
+    vaultSecretRuns.set(runId, run);
+    return run;
+  } catch {
+    resolution.release();
+    if (createdDirectory && root && removeSafeVaultSecretDirectory(root, runId, itemIds)) {
+      jobs.markVaultJobRunCleaned(projectId, runId);
+    } else {
+      jobs.markVaultJobRunTeardownPending(projectId, runId);
+      if (createdDirectory) retainVaultSecretDirectory();
+    }
+    throw new VaultSecretStorageError();
+  }
+}
+
+function vaultSecretFileMap(run: VaultSecretRunFiles): Record<string, string> {
+  const paths: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const itemId of run.itemIds) {
+    const path = join(run.runDir, itemId);
+    if (!RUN_UUID_PATTERN.test(itemId) || !isAbsolute(path) || resolve(path) !== path) throw new VaultSecretStorageError();
+    paths[itemId] = path;
+  }
+  return paths;
+}
+
+function cleanupVaultSecretRun(runId: string): boolean {
+  const run = vaultSecretRuns.get(runId);
+  if (!run) return false;
+  vaultSecretRuns.delete(runId);
+  run.resolution.release();
+  if (removeSafeVaultSecretDirectory(run.root, runId, run.itemIds)) {
+    jobs.markVaultJobRunCleaned(run.projectId, runId);
+    return true;
+  }
+  jobs.markVaultJobRunFailed(run.projectId, runId);
+  retainVaultSecretDirectory();
+  return false;
+}
+
 /** Return immutable tracking evidence for a run while teardown remains unverified. */
 export function getOwnedDetachedRunDiagnosticForTesting(runId: string): OwnedDetachedRunDiagnostic | undefined {
   const tracked = ownedDetachedRuns.get(runId);
   if (!tracked) return undefined;
   return {
     runId: tracked.runId,
-    runNonce: tracked.runNonce,
+    runNonceHash: tracked.runNonceHash,
     processGroupId: tracked.processGroupId,
     leader: tracked.leader ? cloneIdentity(tracked.leader) : null,
     initialGroupMembers: tracked.initialGroupMembers.map(cloneIdentity),
@@ -269,6 +1030,7 @@ export function getOwnedDetachedRunDiagnosticForTesting(runId: string): OwnedDet
 export function resetJobRunnerForTesting(): void {
   for (const timer of forceKillTimers.values()) clearTimeout(timer);
   for (const timer of groupRecoveryTimers.values()) clearTimeout(timer);
+  for (const runId of vaultSecretRuns.keys()) cleanupVaultSecretRun(runId);
   activeRunCount = 0;
   runningProcesses.clear();
   runProjects.clear();
@@ -278,7 +1040,11 @@ export function resetJobRunnerForTesting(): void {
   terminationCompletions.clear();
   resolveEscalations.clear();
   groupRecoveryTimers.clear();
+  teardownAttempts.clear();
+  vaultRedactionRuns.clear();
   ownedDetachedRuns.clear();
+  recoveredVaultRuns.clear();
+  vaultRecoveryInFlight = null;
   jobRunnerRuntime = defaultJobRunnerRuntime;
 }
 
@@ -311,11 +1077,14 @@ function matchesIdentity(actual: JobProcessIdentity, expected: JobProcessIdentit
     && actual.sessionId === expected.sessionId
     && actual.startTime === expected.startTime
     && actual.executable === expected.executable
-    && actual.runNonce === expected.runNonce;
+    && hashNonce(actual.runNonce) === hashNonce(expected.runNonce);
 }
 
 function hasExpectedNonce(member: JobProcessIdentity, tracked: OwnedDetachedRun): boolean {
-  return member.processGroupId === tracked.processGroupId && member.runNonce === tracked.runNonce;
+  return member.processGroupId === tracked.processGroupId
+    && member.sessionId === tracked.leader?.sessionId
+    && member.ownerId === tracked.leader?.ownerId
+    && hashNonce(member.runNonce) === tracked.runNonceHash;
 }
 
 type OwnedGroupVerification =
@@ -391,6 +1160,7 @@ function verifyOwnedGroupTeardown(tracked: OwnedDetachedRun): boolean {
     recordTrackingEvent(tracked, "teardown-verified", "owned-group-empty");
     clearGroupRecoveryTimer(tracked.runId);
     ownedDetachedRuns.delete(tracked.runId);
+    finalizeVaultRunAfterVerifiedTeardown(tracked.runId);
     return true;
   }
 
@@ -404,9 +1174,11 @@ function verifyOwnedGroupTeardown(tracked: OwnedDetachedRun): boolean {
 
 function trackDetachedProcess(runId: string, processId: number, runNonce: string): void {
   const leader = jobRunnerRuntime.processInspector.inspectProcess(processId);
+  const runNonceHash = hashNonce(runNonce);
+  if (!runNonceHash) throw new VaultSecretStorageError();
   const tracked: OwnedDetachedRun = {
     runId,
-    runNonce,
+    runNonceHash,
     processGroupId: processId,
     leader: null,
     initialGroupMembers: [],
@@ -415,7 +1187,7 @@ function trackDetachedProcess(runId: string, processId: number, runNonce: string
     events: [],
   };
 
-  if (!leader || leader.processGroupId !== processId || leader.runNonce !== runNonce) {
+  if (!leader || leader.processGroupId !== processId || hashNonce(leader.runNonce) !== runNonceHash) {
     recordTrackingEvent(tracked, "identity-unverified", "leader-identity-unavailable-or-mismatched");
     ownedDetachedRuns.set(runId, tracked);
     scheduleGroupRecovery(tracked);
@@ -444,6 +1216,323 @@ function trackDetachedProcess(runId: string, processId: number, runNonce: string
   ownedDetachedRuns.set(runId, tracked);
 }
 
+type NonceRecoverySelection =
+  | { status: "absent" }
+  | { status: "ambiguous" }
+  | { status: "trusted"; leader: JobProcessIdentity };
+
+/**
+ * A nonce is inherited by descendants, so a crash-gap scan normally returns a
+ * complete process group rather than one process. Accept only one owned
+ * PGID/session with exactly one live group leader; later group inspection
+ * validates every member immediately before signalling.
+ */
+function selectNonceRecoveryGroup(
+  candidates: readonly JobProcessIdentity[],
+  nonceHash: string,
+): NonceRecoverySelection {
+  if (candidates.length === 0) return { status: "absent" };
+
+  let runnerOwnerId: number;
+  try {
+    runnerOwnerId = processOwnerId();
+  } catch {
+    return { status: "ambiguous" };
+  }
+
+  const groups = new Map<string, JobProcessIdentity[]>();
+  const processIds = new Set<number>();
+  for (const candidate of candidates) {
+    if (
+      candidate.ownerId !== runnerOwnerId
+      || !Number.isSafeInteger(candidate.processId)
+      || candidate.processId <= 0
+      || !Number.isSafeInteger(candidate.processGroupId)
+      || candidate.processGroupId <= 0
+      || !Number.isSafeInteger(candidate.sessionId)
+      || candidate.sessionId <= 0
+      || !candidate.startTime
+      || !candidate.executable
+      || hashNonce(candidate.runNonce) !== nonceHash
+      || processIds.has(candidate.processId)
+    ) {
+      return { status: "ambiguous" };
+    }
+    processIds.add(candidate.processId);
+    const groupKey = `${candidate.processGroupId}:${candidate.sessionId}`;
+    const group = groups.get(groupKey) ?? [];
+    group.push(candidate);
+    groups.set(groupKey, group);
+  }
+  if (groups.size !== 1) return { status: "ambiguous" };
+
+  const group = groups.values().next().value;
+  if (!group) return { status: "ambiguous" };
+  const leaders = group.filter((candidate) => candidate.processId === candidate.processGroupId);
+  const [leader] = leaders;
+  if (leaders.length !== 1 || !leader) return { status: "ambiguous" };
+  return { status: "trusted", leader: cloneIdentity(leader) };
+}
+
+/** Recover tracking only after nonce descendants resolve to one verified group leader. */
+function trackRecoveredDetachedProcess(
+  recovery: jobs.VaultSecretRunRecovery,
+  leader: JobProcessIdentity,
+): OwnedDetachedRun | undefined {
+  if (hashNonce(leader.runNonce) !== recovery.processNonceHash) return undefined;
+  const tracked: OwnedDetachedRun = {
+    runId: recovery.runId,
+    runNonceHash: recovery.processNonceHash,
+    processGroupId: leader.processGroupId,
+    leader: cloneIdentity(leader),
+    initialGroupMembers: [],
+    lastObservedGroupMembers: [],
+    knownMembers: new Map([[leader.processId, cloneIdentity(leader)]]),
+    events: [],
+  };
+  const verification = revalidateOwnedGroup(tracked);
+  if (verification.status !== "trusted") return undefined;
+  tracked.initialGroupMembers = verification.members.map(cloneIdentity);
+  recordTrackingEvent(tracked, "identity-recovered", "nonce-hash-and-group-validated");
+  ownedDetachedRuns.set(recovery.runId, tracked);
+  return tracked;
+}
+
+function markVaultRunTeardownPending(runId: string): void {
+  const live = vaultSecretRuns.get(runId);
+  const recovery = live ? undefined : recoveredVaultRuns.get(runId);
+  const projectId = live?.projectId ?? recovery?.projectId;
+  if (projectId) jobs.markVaultJobRunTeardownPending(projectId, runId);
+}
+
+function finalizeVaultRunAfterVerifiedTeardown(runId: string): void {
+  const live = vaultSecretRuns.get(runId);
+  if (live) {
+    cleanupVaultSecretRun(runId);
+    return;
+  }
+  const recovery = recoveredVaultRuns.get(runId);
+  if (!recovery) return;
+  try {
+    const root = assertVaultSecretRoot();
+    if (removeSafeVaultSecretDirectory(root, runId, recovery.itemSnapshots.map((item) => item.itemId))) {
+      jobs.markVaultJobRunCleaned(recovery.projectId, runId);
+      recoveredVaultRuns.delete(runId);
+      return;
+    }
+  } catch {
+    // A tampered, unavailable, or absent root is retained for the next bounded retry.
+  }
+  jobs.markVaultJobRunFailed(recovery.projectId, runId);
+  retainVaultSecretDirectory();
+}
+
+function cleanupVaultSecretRunAfterTeardown(runId: string): void {
+  const tracked = ownedDetachedRuns.get(runId);
+  if (tracked) {
+    markVaultRunTeardownPending(runId);
+    if (!verifyOwnedGroupTeardown(tracked)) scheduleGroupRecovery(tracked);
+    return;
+  }
+  cleanupVaultSecretRun(runId);
+}
+
+function persistedIdentityMatches(
+  recovery: jobs.VaultSecretRunRecovery,
+  identity: JobProcessIdentity,
+): boolean {
+  const persisted = recovery.processIdentity;
+  return !!persisted
+    && identity.processId === persisted.processId
+    && identity.processGroupId === persisted.processGroupId
+    && identity.startTime === persisted.processStartTime
+    && identity.executable === persisted.processExecutable
+    && hashNonce(identity.runNonce) === recovery.processNonceHash;
+}
+
+function runDirectoryState(root: string, recovery: jobs.VaultSecretRunRecovery): VaultRunDirectoryState {
+  return inspectVaultSecretDirectory(root, recovery.runId, new Set(recovery.itemSnapshots.map((item) => item.itemId))).state;
+}
+
+function markRunFailedIfActive(recovery: jobs.VaultSecretRunRecovery): void {
+  const run = jobs.getJobRun(recovery.projectId, recovery.runId);
+  if (run?.status === "running" || run?.status === "queued") {
+    jobs.finishJobRun(recovery.projectId, recovery.runId, "failed", -1);
+  }
+}
+
+function retainVaultRunRecovery(recovery: jobs.VaultSecretRunRecovery): void {
+  if (recovery.state !== "failed") jobs.markVaultJobRunTeardownPending(recovery.projectId, recovery.runId);
+  retainVaultSecretDirectory();
+}
+
+/** A spawned run needs both a dead leader PID and an empty, readable owned group. */
+function hasVerifiedPersistedGroupAbsence(recovery: jobs.VaultSecretRunRecovery): boolean {
+  const persisted = recovery.processIdentity;
+  if (!persisted || process.platform !== "linux" || existsSync(`/proc/${persisted.processId}`)) return false;
+  const group = jobRunnerRuntime.processInspector.inspectGroup(persisted.processGroupId);
+  return !!group && group.processGroupId === persisted.processGroupId && group.members.length === 0;
+}
+
+/** Re-scan immediately before deletion so a crash-window process race retains files. */
+function preparedRunRemainsAbsent(recovery: jobs.VaultSecretRunRecovery): boolean {
+  try {
+    const candidates = jobRunnerRuntime.findProcessesByNonceHash(recovery.processNonceHash);
+    return !!candidates && selectNonceRecoveryGroup(candidates, recovery.processNonceHash).status === "absent";
+  } catch {
+    return false;
+  }
+}
+
+function cleanupPreparedVaultDirectory(
+  root: string,
+  recovery: jobs.VaultSecretRunRecovery,
+  directoryState: Exclude<VaultRunDirectoryState, "unsafe">,
+): void {
+  markRunFailedIfActive(recovery);
+  if (directoryState === "absent") {
+    jobs.markVaultJobRunCleaned(recovery.projectId, recovery.runId);
+    return;
+  }
+  let processRescanCompleted = false;
+  let processStillAbsent = false;
+  if (removeSafeVaultSecretDirectory(
+    root,
+    recovery.runId,
+    recovery.itemSnapshots.map((item) => item.itemId),
+    () => {
+      processRescanCompleted = true;
+      processStillAbsent = preparedRunRemainsAbsent(recovery);
+      return processStillAbsent;
+    },
+  )) {
+    jobs.markVaultJobRunCleaned(recovery.projectId, recovery.runId);
+    return;
+  }
+  if (processRescanCompleted && !processStillAbsent) {
+    retainVaultRunRecovery(recovery);
+    return;
+  }
+  jobs.markVaultJobRunFailed(recovery.projectId, recovery.runId);
+  retainVaultSecretDirectory();
+}
+
+async function waitForOwnedGroupTeardown(tracked: OwnedDetachedRun, attempts = 5): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (verifyOwnedGroupTeardown(tracked)) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, JOB_GROUP_RECOVERY_INTERVAL_MS));
+  }
+  return false;
+}
+
+async function terminateRecoveredOwnedGroup(tracked: OwnedDetachedRun): Promise<void> {
+  markVaultRunTeardownPending(tracked.runId);
+  signalOwnedGroup(tracked.runId, "SIGTERM");
+  if (await waitForOwnedGroupTeardown(tracked, 1)) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, JOB_TERMINATION_GRACE_MS));
+  if (verifyOwnedGroupTeardown(tracked)) return;
+  signalOwnedGroup(tracked.runId, "SIGKILL");
+  if (!await waitForOwnedGroupTeardown(tracked)) {
+    markVaultRunTeardownPending(tracked.runId);
+    scheduleGroupRecovery(tracked);
+  }
+}
+
+/** Startup/scheduler recovery uses only immutable run snapshots and nonce hashes. */
+async function recoverVaultSecretRunDirectoriesImpl(): Promise<void> {
+  let root: string;
+  try {
+    root = assertVaultSecretRoot();
+  } catch {
+    return;
+  }
+  let recoveries: jobs.VaultSecretRunRecovery[];
+  try {
+    recoveries = jobs.listVaultSecretRunsForRecovery();
+  } catch {
+    return;
+  }
+  const expectedRunIds = new Set(recoveries.map((recovery) => recovery.runId));
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !RUN_UUID_PATTERN.test(entry.name) || !expectedRunIds.has(entry.name)) retainVaultSecretDirectory();
+    }
+  } catch {
+    return;
+  }
+
+  for (const recovery of recoveries) {
+    const directoryState = runDirectoryState(root, recovery);
+    if (directoryState === "unsafe") {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    let candidates: JobProcessIdentity[] | null;
+    try {
+      candidates = jobRunnerRuntime.findProcessesByNonceHash(recovery.processNonceHash);
+    } catch {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    if (!candidates) {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    const selection = selectNonceRecoveryGroup(candidates, recovery.processNonceHash);
+    if (selection.status === "ambiguous") {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    if (selection.status === "absent") {
+      if (recovery.state === "prepared" && recovery.processIdentity === null) {
+        cleanupPreparedVaultDirectory(root, recovery, directoryState);
+      } else if (directoryState === "absent" && (
+        (recovery.state === "failed" && recovery.processIdentity === null)
+        || hasVerifiedPersistedGroupAbsence(recovery)
+      )) {
+        jobs.markVaultJobRunCleaned(recovery.projectId, recovery.runId);
+      } else {
+        retainVaultRunRecovery(recovery);
+      }
+      continue;
+    }
+    const leader = selection.leader;
+    if (recovery.processIdentity && !persistedIdentityMatches(recovery, leader)) {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    const persisted = recovery.processIdentity ? recovery : jobs.recordVaultJobRunProcessIdentity(recovery.projectId, recovery.runId, {
+      processId: leader.processId,
+      processGroupId: leader.processGroupId,
+      processStartTime: leader.startTime,
+      processExecutable: leader.executable,
+    });
+    if (!persisted) {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    recoveredVaultRuns.set(recovery.runId, persisted);
+    const tracked = trackRecoveredDetachedProcess(persisted, leader);
+    if (!tracked) {
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
+    await terminateRecoveredOwnedGroup(tracked);
+  }
+}
+
+export function recoverVaultSecretRunDirectories(): Promise<void> {
+  if (vaultRecoveryInFlight) return vaultRecoveryInFlight;
+  const recovery = recoverVaultSecretRunDirectoriesImpl();
+  vaultRecoveryInFlight = recovery;
+  void recovery.then(() => {
+    if (vaultRecoveryInFlight === recovery) vaultRecoveryInFlight = null;
+  }, () => {
+    if (vaultRecoveryInFlight === recovery) vaultRecoveryInFlight = null;
+  });
+  return recovery;
+}
+
 function noteLeaderClosed(runId: string): void {
   const tracked = ownedDetachedRuns.get(runId);
   if (!tracked) return;
@@ -451,31 +1540,40 @@ function noteLeaderClosed(runId: string): void {
   if (!verifyOwnedGroupTeardown(tracked)) scheduleGroupRecovery(tracked);
 }
 
-function signalOwnedProcess(runId: string, proc: ChildProcess, signal: NodeJS.Signals): void {
-  if (supportsOwnedProcessGroups) {
-    const tracked = ownedDetachedRuns.get(runId);
-    if (!tracked) return;
+function signalOwnedGroup(runId: string, signal: NodeJS.Signals): void {
+  const tracked = ownedDetachedRuns.get(runId);
+  if (!tracked) return;
 
-    const verification = revalidateOwnedGroup(tracked);
-    if (verification.status !== "trusted") {
-      recordTrackingEvent(
-        tracked,
-        "signal-suppressed",
-        verification.status === "empty" ? "owned-group-empty" : verification.reason,
-      );
-      if (verification.status !== "empty") scheduleGroupRecovery(tracked);
-      return;
-    }
-
-    try {
-      jobRunnerRuntime.signalProcessGroup(tracked.processGroupId, signal);
-      recordTrackingEvent(tracked, "group-signalled", signal);
-    } catch {
-      // ESRCH and permission failures are not an invitation to fall back to a
-      // numeric PID. That PID/PGID may already belong to another process.
-      recordTrackingEvent(tracked, "group-signal-failed", signal);
+  const verification = revalidateOwnedGroup(tracked);
+  if (verification.status !== "trusted") {
+    recordTrackingEvent(
+      tracked,
+      "signal-suppressed",
+      verification.status === "empty" ? "owned-group-empty" : verification.reason,
+    );
+    if (verification.status === "empty") finalizeVaultRunAfterVerifiedTeardown(runId);
+    else {
+      markVaultRunTeardownPending(runId);
       scheduleGroupRecovery(tracked);
     }
+    return;
+  }
+
+  try {
+    jobRunnerRuntime.signalProcessGroup(tracked.processGroupId, signal);
+    recordTrackingEvent(tracked, "group-signalled", signal);
+  } catch {
+    // ESRCH and permission failures are not an invitation to fall back to a
+    // numeric PID. That PID/PGID may already belong to another process.
+    recordTrackingEvent(tracked, "group-signal-failed", signal);
+    markVaultRunTeardownPending(runId);
+    scheduleGroupRecovery(tracked);
+  }
+}
+
+function signalOwnedProcess(runId: string, proc: ChildProcess, signal: NodeJS.Signals): void {
+  if (supportsOwnedProcessGroups) {
+    signalOwnedGroup(runId, signal);
     return;
   }
 
@@ -502,6 +1600,10 @@ function terminateProcess(runId: string, proc: ChildProcess): Promise<void> {
     resolveEscalation = resolve;
   });
   resolveEscalations.set(runId, resolveEscalation!);
+  teardownAttempts.set(runId, escalation);
+  void escalation.finally(() => {
+    if (teardownAttempts.get(runId) === escalation) teardownAttempts.delete(runId);
+  });
 
   const closed = closePromises.get(runId) ?? Promise.resolve();
   const completion = Promise.all([closed, escalation]).then(() => undefined);
@@ -516,15 +1618,41 @@ function terminateProcess(runId: string, proc: ChildProcess): Promise<void> {
   signalOwnedProcess(runId, proc, "SIGTERM");
   const timer = setTimeout(() => {
     forceKillTimers.delete(runId);
-    signalOwnedProcess(runId, proc, "SIGKILL");
-    const tracked = ownedDetachedRuns.get(runId);
-    if (tracked && !verifyOwnedGroupTeardown(tracked)) scheduleGroupRecovery(tracked);
-    const resolve = resolveEscalations.get(runId);
-    resolveEscalations.delete(runId);
-    resolve?.();
+    void (async () => {
+      const beforeKill = ownedDetachedRuns.get(runId);
+      if (beforeKill && verifyOwnedGroupTeardown(beforeKill)) {
+        // SIGTERM removed the whole owned group; a SIGKILL would be unnecessary.
+      } else {
+        signalOwnedProcess(runId, proc, "SIGKILL");
+        const tracked = ownedDetachedRuns.get(runId);
+        if (tracked && !(await waitForOwnedGroupTeardown(tracked))) {
+          markVaultRunTeardownPending(runId);
+          scheduleGroupRecovery(tracked);
+        }
+      }
+      const resolve = resolveEscalations.get(runId);
+      resolveEscalations.delete(runId);
+      resolve?.();
+    })();
   }, JOB_TERMINATION_GRACE_MS);
   forceKillTimers.set(runId, timer);
   return completion;
+}
+
+function completeJobSpawnFailure(
+  projectId: string,
+  eventContext: EventExecutionContext,
+  runId: string,
+  vaultEnabled: boolean,
+): void {
+  jobEventDeliveries.completeJobEventDelivery(projectId, {
+    ...eventContext,
+    runId,
+    outcome: "failed",
+    exitCode: -1,
+    errorCode: vaultEnabled ? VAULT_UNAVAILABLE_CODE : "process_failure",
+    errorMessage: vaultEnabled ? VAULT_UNAVAILABLE_MESSAGE : "Unable to start the OpenCode process.",
+  });
 }
 
 /**
@@ -576,30 +1704,100 @@ export async function executeJobRun(
     return;
   }
 
-  // Default 30-minute timeout prevents runaway agents from consuming resources indefinitely.
-  // The timeout is generous — typical agent runs finish in 2-10 minutes — because the
-  // opencode CLI may include LLM inference time, tool calls, and user-facing confirmations.
   const timeoutMinutes = job.timeout_minutes > 0 ? job.timeout_minutes : 30;
-  const timeoutMs = timeoutMinutes * 60 * 1000;
+  let vaultRunFiles: VaultSecretRunFiles | undefined;
+  let vaultResolution: vault.VaultJobSecretsResolution | null = null;
+  const runNonce = jobRunnerRuntime.createRunNonce();
+  const runNonceHash = hashNonce(runNonce);
+  try {
+    // Authorization, freshness, version matching, decryption, and expiry are
+    // resolved in core immediately before this process can be spawned.
+    vaultResolution = vault.resolveJobVaultSecrets(job.project_id, job.id, runId);
+    if (vaultResolution) {
+      if (!supportsOwnedProcessGroups || !runNonceHash) throw new VaultSecretStorageError();
+      const prepared = jobs.prepareVaultJobRun(job.project_id, {
+        runId,
+        jobId: job.id,
+        deadlineAt: vaultResolution.deadlineAt,
+        processNonceHash: runNonceHash,
+        itemSnapshots: vaultResolution.secrets.map((secret) => ({
+          itemId: secret.itemId,
+          authorizedItemVersion: secret.authorizedItemVersion,
+        })),
+      });
+      if (!prepared) throw new VaultSecretStorageError();
+      // Resolution and persistence can race expiry. No filesystem state or child
+      // is created once the effective deadline has elapsed.
+      if (vaultResolution.deadlineAt <= Date.now()) {
+        vaultResolution.release();
+        jobs.markVaultJobRunFailed(job.project_id, runId);
+        jobs.markVaultJobRunCleaned(job.project_id, runId);
+        throw new VaultSecretStorageError();
+      }
+      vaultRunFiles = createVaultSecretRunFiles(job.project_id, runId, vaultResolution);
+      // Recheck after sensitive files/configuration are materialized and before
+      // spawn, then remove the exact run directory if expiry won the race.
+      if (vaultResolution.deadlineAt <= Date.now()) {
+        cleanupVaultSecretRun(runId);
+        throw new VaultSecretStorageError();
+      }
+    }
+  } catch {
+    vaultResolution?.release();
+    jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
+    if (eventContext) {
+      jobEventDeliveries.completeJobEventDelivery(job.project_id, {
+        ...eventContext,
+        runId,
+        outcome: "failed",
+        exitCode: -1,
+        errorCode: VAULT_UNAVAILABLE_CODE,
+        errorMessage: VAULT_UNAVAILABLE_MESSAGE,
+      });
+    } else {
+      jobs.finishJobRun(job.project_id, runId, "failed", -1);
+    }
+    activeRunCount = Math.max(0, activeRunCount - 1);
+    return;
+  }
+
+  const deadlineAt = vaultResolution?.deadlineAt ?? Date.now() + timeoutMinutes * 60_000;
+  const timeoutMs = Math.max(0, deadlineAt - Date.now());
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-  const args = ["run", prompt, "--agent", job.agent, "--auto"];
-  const runNonce = jobRunnerRuntime.createRunNonce();
+  const args = vaultRunFiles
+    ? ["run", prompt, "--agent", job.agent, "--auto", "--pure", "--dir", "/workspace"]
+    : ["run", prompt, "--agent", job.agent, "--auto"];
 
   // Prompts are user-authored and can contain credentials. Do not log the CLI
   // arguments or rendered template, even at debug level.
   logger.info("job-runner", `Starting OpenCode process for run ${runId} (agent: ${safeJobLogText(job.agent, 128)})`);
 
-  // cwd: "/workspace" matches the Docker bind mount so the agent sees the host's repos.
-  // HOME is set explicitly because the Docker container's appuser may not inherit the
-  // expected home directory through the spawn() environment merge.
-  const proc = spawn("opencode", args, {
-    cwd: "/workspace",
-    env: buildJobProcessEnvironment(job.project_id, runNonce),
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: supportsOwnedProcessGroups,
-  });
+  // Vault runs start from their tmpfs home and use the supported --dir option for
+  // workspace access. --pure prevents project/global plugins from sending a
+  // vault session to persistent OpenCode, API, or MCP state.
+  let proc: ChildProcess;
+  try {
+    proc = spawn("opencode", args, {
+      cwd: vaultRunFiles?.runtime.home ?? "/workspace",
+      env: buildJobProcessEnvironment(
+        job.project_id,
+        runNonce,
+        vaultRunFiles ? vaultSecretFileMap(vaultRunFiles) : undefined,
+        vaultRunFiles?.runtime,
+      ),
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: supportsOwnedProcessGroups,
+    });
+  } catch {
+    if (vaultRunFiles) cleanupVaultSecretRun(runId);
+    if (vaultResolution) jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
+    if (eventContext) completeJobSpawnFailure(job.project_id, eventContext, runId, !!vaultResolution);
+    else jobs.finishJobRun(job.project_id, runId, "failed", -1);
+    activeRunCount = Math.max(0, activeRunCount - 1);
+    return;
+  }
 
   runningProcesses.set(runId, proc);
   runProjects.set(runId, job.project_id);
@@ -614,6 +1812,25 @@ export async function executeJobRun(
   let finalized = false;
   let activeSlotReleased = false;
   let eventHeartbeat: ReturnType<typeof setInterval> | null = null;
+  const spawnedIdentity = supportsOwnedProcessGroups && typeof proc.pid === "number"
+    ? jobRunnerRuntime.processInspector.inspectProcess(proc.pid)
+    : null;
+  const tracking = getOwnedDetachedRunDiagnosticForTesting(runId);
+  const vaultIdentityPersisted = !vaultRunFiles || !!(
+    spawnedIdentity
+    && spawnedIdentity.processId === proc.pid
+    && spawnedIdentity.processGroupId === proc.pid
+    && hashNonce(spawnedIdentity.runNonce) === runNonceHash
+    && tracking?.events.some((event) => event.event === "identity-captured")
+    && jobs.recordVaultJobRunProcessIdentity(job.project_id, runId, {
+      processId: spawnedIdentity.processId,
+      processGroupId: spawnedIdentity.processGroupId,
+      processStartTime: spawnedIdentity.startTime,
+      processExecutable: spawnedIdentity.executable,
+    })
+  );
+  if (!vaultIdentityPersisted) jobs.markVaultJobRunTeardownPending(job.project_id, runId);
+  let provenanceFailure = !vaultIdentityPersisted;
 
   const completeEvent = (
     outcome: "success" | "failed" | "timeout" | "cancelled",
@@ -632,9 +1849,21 @@ export async function executeJobRun(
     });
   };
 
+  let vaultRedactionWritten = false;
+  const recordVaultRedaction = () => {
+    if (!vaultResolution || vaultRedactionWritten || vaultRedactionRuns.has(runId)) return;
+    vaultRedactionWritten = true;
+    vaultRedactionRuns.add(runId);
+    jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
+  };
+
   // Trusted event payloads are intentionally never interpolated into prompts.
   // Do not turn a downstream agent echo into a durable payload/prompt leak.
   const appendOutputLog = (stream: "stdout" | "stderr", line: string) => {
+    if (vaultResolution) {
+      recordVaultRedaction();
+      return;
+    }
     jobs.appendRunLog(
       job.project_id,
       runId,
@@ -654,33 +1883,30 @@ export async function executeJobRun(
       if (!renewed) {
         logger.warn("job-runner", `Event lease heartbeat lost for run ${runId}`);
         void terminateProcess(runId, proc);
+        cleanupVaultSecretRunAfterTeardown(runId);
       }
     }, Math.floor(jobEventDeliveries.JOB_EVENT_DELIVERY_LEASE_MS / 3));
     eventHeartbeat.unref?.();
   }
 
   if (eventContext) {
-    const identity = supportsOwnedProcessGroups && typeof proc.pid === "number"
-      ? jobRunnerRuntime.processInspector.inspectProcess(proc.pid)
-      : null;
-    const tracking = getOwnedDetachedRunDiagnosticForTesting(runId);
-    const persisted = identity
-      && identity.processId === proc.pid
-      && identity.processGroupId === proc.pid
-      && identity.runNonce === runNonce
+    const persisted = spawnedIdentity
+      && spawnedIdentity.processId === proc.pid
+      && spawnedIdentity.processGroupId === proc.pid
+      && hashNonce(spawnedIdentity.runNonce) === runNonceHash
       && tracking?.events.some((event) => event.event === "identity-captured")
       && jobEventDeliveries.persistJobEventAttemptProcessIdentity(job.project_id, {
         ...eventContext,
         runId,
-        processId: identity.processId,
-        processGroupId: identity.processGroupId,
-        processStartTime: identity.startTime,
-        processExecutable: identity.executable,
+        processId: spawnedIdentity.processId,
+        processGroupId: spawnedIdentity.processGroupId,
+        processStartTime: spawnedIdentity.startTime,
+        processExecutable: spawnedIdentity.executable,
         processNonce: runNonce,
       });
     if (!persisted) {
+      provenanceFailure = true;
       completeEvent("failed", -1, "provenance_conflict", "Spawned process identity could not be verified.");
-      void terminateProcess(runId, proc);
     }
   }
 
@@ -714,17 +1940,25 @@ export async function executeJobRun(
   // Timeout handler — SIGTERM first with a 5s grace period, then SIGKILL.
   // This two-phase kill gives the opencode process time to flush logs and clean up
   // child processes (e.g., LLM subprocesses) before a hard kill.
-  timeoutHandle = setTimeout(() => {
+  if (!provenanceFailure) timeoutHandle = setTimeout(() => {
     if (finalized) return;
     timedOut = true;
     logger.warn("job-runner", `Run ${runId} timed out after ${timeoutMs}ms — killing process.`);
     const termination = terminateProcess(runId, proc);
-    jobs.appendRunLog(job.project_id, runId, "stderr", `Job timed out after ${timeoutMinutes} minutes.`);
+    if (vaultResolution) recordVaultRedaction();
+    else jobs.appendRunLog(job.project_id, runId, "stderr", `Job timed out after ${timeoutMinutes} minutes.`);
+    cleanupVaultSecretRunAfterTeardown(runId);
     if (eventContext) {
       void termination.then(() => {
         const ambiguous = ownedDetachedRuns.has(runId);
-        completeEvent("timeout", -1, ambiguous ? "ambiguous_process_ownership" : "timeout",
-          ambiguous ? "Timed-out process ownership could not be revalidated." : "Job timed out.");
+        completeEvent(
+          "timeout",
+          -1,
+          vaultResolution ? VAULT_UNAVAILABLE_CODE : ambiguous ? "ambiguous_process_ownership" : "timeout",
+          vaultResolution ? VAULT_UNAVAILABLE_MESSAGE : ambiguous
+            ? "Timed-out process ownership could not be revalidated."
+            : "Job timed out.",
+        );
       });
     } else {
       jobs.finishJobRun(job.project_id, runId, "timeout", -1);
@@ -733,6 +1967,10 @@ export async function executeJobRun(
 
   let stdoutBuffer = "";
   proc.stdout?.on("data", (chunk: Buffer) => {
+    if (vaultResolution) {
+      recordVaultRedaction();
+      return;
+    }
     stdoutBuffer += chunk.toString("utf-8");
     const lines = stdoutBuffer.split("\n");
     // Keep the last incomplete line in the buffer (stream may end mid-line)
@@ -746,6 +1984,10 @@ export async function executeJobRun(
 
   let stderrBuffer = "";
   proc.stderr?.on("data", (chunk: Buffer) => {
+    if (vaultResolution) {
+      recordVaultRedaction();
+      return;
+    }
     stderrBuffer += chunk.toString("utf-8");
     const lines = stderrBuffer.split("\n");
     stderrBuffer = lines.pop() ?? "";
@@ -766,6 +2008,7 @@ export async function executeJobRun(
     }
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (vaultResolution) recordVaultRedaction();
 
     const wasTerminated = terminationCompletions.has(runId);
     if (!timedOut && !wasTerminated && finalize()) {
@@ -781,10 +2024,17 @@ export async function executeJobRun(
       }
     }
 
+    noteLeaderClosed(runId);
+    // A successful leader exit does not prove a detached descendant is gone.
+    // Vault files remain until a verified teardown attempt has run.
+    if (vaultResolution && ownedDetachedRuns.has(runId) && !terminationCompletions.has(runId)) {
+      void terminateProcess(runId, proc);
+    }
     finalize();
+    cleanupVaultSecretRunAfterTeardown(runId);
     closePromises.delete(runId);
     resolveClose?.();
-    noteLeaderClosed(runId);
+    vaultRedactionRuns.delete(runId);
     logger.info("job-runner", `Run ${runId} cleaned up (active: ${activeRunCount}/${MAX_CONCURRENT_RUNS})`);
   });
 
@@ -799,14 +2049,26 @@ export async function executeJobRun(
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
     logger.error("job-runner", `Run ${runId} failed to start`, { name: safeJobLogText(err.name, 64) });
-    if (eventContext) completeEvent("failed", -1, "process_failure", "Unable to start the OpenCode process.");
+    if (vaultResolution) recordVaultRedaction();
+    if (eventContext) {
+      if (vaultResolution) completeEvent("failed", -1, VAULT_UNAVAILABLE_CODE, VAULT_UNAVAILABLE_MESSAGE);
+      else completeEvent("failed", -1, "process_failure", "Unable to start the OpenCode process.");
+    }
     else jobs.finishJobRun(job.project_id, runId, "failed", -1);
-    jobs.appendRunLog(job.project_id, runId, "stderr", "Unable to start the OpenCode process.");
+    if (!vaultResolution) jobs.appendRunLog(job.project_id, runId, "stderr", "Unable to start the OpenCode process.");
 
     finalize();
+    cleanupVaultSecretRun(runId);
     closePromises.delete(runId);
     resolveClose?.();
+    vaultRedactionRuns.delete(runId);
   });
+
+  if (provenanceFailure) {
+    if (vaultResolution) recordVaultRedaction();
+    void terminateProcess(runId, proc);
+    cleanupVaultSecretRunAfterTeardown(runId);
+  }
 }
 
 /**
@@ -820,6 +2082,7 @@ export function killRunProcess(projectId: string, runId: string): boolean {
 
   logger.info("job-runner", `Killing process for run ${runId}`);
   terminateProcess(runId, proc);
+  cleanupVaultSecretRunAfterTeardown(runId);
   return true;
 }
 
@@ -839,11 +2102,17 @@ export async function stopAllJobRuns(): Promise<void> {
     const eventContext = eventRunContexts.get(runId);
     try {
       if (!eventContext) jobs.cancelJobRun(projectId, runId);
-      jobs.appendRunLog(projectId, runId, "stderr", "Job cancelled because the API is shutting down.");
+      if (vaultSecretRuns.has(runId) && !vaultRedactionRuns.has(runId)) {
+        vaultRedactionRuns.add(runId);
+        jobs.appendRunLog(projectId, runId, "stderr", VAULT_OUTPUT_REDACTION);
+      }
+      else jobs.appendRunLog(projectId, runId, "stderr", "Job cancelled because the API is shutting down.");
     } catch {
       logger.warn("job-runner", `Could not persist shutdown state for run ${runId}`);
     }
-    completions.push(terminateProcess(runId, proc).then(() => ({ runId, projectId, eventContext })));
+    const termination = terminateProcess(runId, proc);
+    cleanupVaultSecretRunAfterTeardown(runId);
+    completions.push(termination.then(() => ({ runId, projectId, eventContext })));
   }
 
   const settled = await Promise.allSettled(completions);
@@ -883,16 +2152,32 @@ async function waitForVerifiedGroupTeardown(processGroupId: number, attempts = 5
  */
 export async function recoverExpiredEventAttempt(lease: jobEventDeliveries.ExpiredJobEventLease): Promise<void> {
   const resolve = (resolution: "retry" | "dead_letter", errorCode: string, errorMessage: string) => {
-    jobEventDeliveries.resolveExpiredJobEventLease(lease.projectId, {
-      deliveryId: lease.deliveryId,
-      leaseRevision: lease.leaseRevision,
-      attemptNumber: lease.attemptNumber,
-      runId: lease.runId,
-      resolution,
-      errorCode,
-      errorMessage,
-    });
+    try {
+      jobEventDeliveries.resolveExpiredJobEventLease(lease.projectId, {
+        deliveryId: lease.deliveryId,
+        leaseRevision: lease.leaseRevision,
+        attemptNumber: lease.attemptNumber,
+        runId: lease.runId,
+        resolution,
+        errorCode,
+        errorMessage,
+      });
+    } finally {
+      // Vault-run cleanup is driven by its immutable snapshot, never by mutable
+      // event-delivery state or the current job reference set.
+    }
   };
+  const vaultRun = jobs.getVaultSecretRunRecovery(lease.runId);
+  if (vaultRun) {
+    await recoverVaultSecretRunDirectories();
+    const recovered = jobs.getVaultSecretRunRecovery(lease.runId);
+    if (recovered?.state === "cleaned") {
+      resolve("retry", "process_absent", "Verified vault event process is absent after lease expiry.");
+    } else {
+      resolve("dead_letter", "ambiguous_process_ownership", "Vault event process cleanup could not be verified after lease expiry.");
+    }
+    return;
+  }
   if (lease.processId === null || lease.processGroupId === null || !lease.processStartTime
     || !lease.processExecutable || !lease.processNonceHash) {
     resolve("dead_letter", "ambiguous_process_identity", "Lease expired without complete process identity evidence.");

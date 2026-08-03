@@ -1999,21 +1999,22 @@ server.registerTool(
 server.registerTool(
   "job_update",
   {
-    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes, vault_item_ids). Omit vault_item_ids to preserve references; [] revokes all.",
+    description: "CAS-update job fields with required expected_revision. Omit vault_item_ids to preserve references; [] revokes all.",
     inputSchema: {
       project: projectParam,
       job_id: z.string(),
       fields: jobUpdateFieldsParam,
+      expected_revision: z.number().int().nonnegative(),
     },
   },
-  wrapHandler(C("job_update"), async ({ project, job_id, fields }) =>
-    jobTools.jobUpdate(project, job_id, fields)),
+  wrapHandler(C("job_update"), async ({ project, job_id, fields, expected_revision }) =>
+    jobTools.jobUpdate(project, job_id, fields, expected_revision)),
 );
 
 server.registerTool(
   "job_delete",
-  { description: "Delete a job by ID.", inputSchema: { project: projectParam, job_id: z.string() } },
-  wrapHandler(C("job_delete"), async ({ project, job_id }) => jobTools.jobDelete(project, job_id)),
+  { description: "Soft-delete a job by ID with required expected_revision.", inputSchema: { project: projectParam, job_id: z.string(), expected_revision: z.number().int().nonnegative() } },
+  wrapHandler(C("job_delete"), async ({ project, job_id, expected_revision }) => jobTools.jobDelete(project, job_id, expected_revision)),
 );
 
 server.registerTool(
@@ -2782,31 +2783,83 @@ server.registerTool(
 server.registerTool(
   "backup_restore_preview",
   {
-    description: "Preview what a restore would do without executing it.",
-    inputSchema: { project: projectParam, backupId: z.string() },
+    description: "Create or replay a durable dry-run restore plan without executing it.",
+    inputSchema: { project: projectParam, backupId: z.string().uuid(), dryRun: z.literal(true), idempotencyKey: z.string().min(1).max(128) },
   },
-  wrapHandler(C("backup_restore_preview"), async ({ project, backupId }) =>
-    backupTools.backupRestorePreview(project, backupId)),
+  wrapHandler(C("backup_restore_preview"), async ({ project, backupId, dryRun, idempotencyKey }) =>
+    backupTools.backupRestorePreview(project, backupId, dryRun, idempotencyKey)),
+);
+
+server.registerTool(
+  "backup_restore_authorize",
+  {
+    description: "Issue a one-time confirmation token for a previewed restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid(), expectedRevision: z.number().int().nonnegative() },
+  },
+  wrapHandler(C("backup_restore_authorize"), async ({ project, planId, expectedRevision }) =>
+    backupTools.backupRestoreAuthorize(project, planId, expectedRevision)),
 );
 
 server.registerTool(
   "backup_restore_start",
   {
-    description: "Start a restore operation. Requires confirm=true to proceed.",
-    inputSchema: { project: projectParam, backupId: z.string() },
+    description: "Confirm a restore plan, stage verified tamper-evident copies, and make it ready for an external executor without applying data.",
+    inputSchema: {
+      project: projectParam,
+      planId: z.string().uuid(),
+      expectedRevision: z.number().int().nonnegative(),
+      confirmationToken: z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/),
+      idempotencyKey: z.string().min(1).max(128),
+    },
   },
-  wrapHandler(C("backup_restore_start"), async ({ project, backupId }) =>
-    backupTools.backupRestoreStart(project, backupId)),
+  wrapHandler(C("backup_restore_start"), async ({ project, planId, expectedRevision, confirmationToken, idempotencyKey }) =>
+    backupTools.backupRestoreStart(project, planId, expectedRevision, confirmationToken, idempotencyKey)),
+);
+
+server.registerTool(
+  "backup_restore_execution_authorize",
+  {
+    description: "Issue a one-time 15 minute execution token for a ready restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid(), expectedRevision: z.number().int().nonnegative() },
+  },
+  wrapHandler(C("backup_restore_execution_authorize"), async ({ project, planId, expectedRevision }) =>
+    backupTools.backupRestoreExecutionAuthorize(project, planId, expectedRevision)),
+);
+
+server.registerTool(
+  "backup_restore_execute",
+  {
+    description: "Consume an execution token and queue the fixed restore maintenance program.",
+    inputSchema: {
+      project: projectParam,
+      planId: z.string().uuid(),
+      expectedRevision: z.number().int().nonnegative(),
+      executionToken: z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/),
+      idempotencyKey: z.string().min(1).max(128),
+    },
+  },
+  wrapHandler(C("backup_restore_execute"), async ({ project, planId, expectedRevision, executionToken, idempotencyKey }) =>
+    backupTools.backupRestoreExecute(project, planId, expectedRevision, executionToken, idempotencyKey)),
 );
 
 server.registerTool(
   "backup_restore_status",
   {
-    description: "Get the status of a restore operation by job ID.",
-    inputSchema: { project: projectParam, jobId: z.string() },
+    description: "Get the content-free current state of a restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid() },
   },
-  wrapHandler(C("backup_restore_status"), async ({ project, jobId }) =>
-    backupTools.backupRestoreStatus(project, jobId)),
+  wrapHandler(C("backup_restore_status"), async ({ project, planId }) =>
+    backupTools.backupRestoreStatus(project, planId)),
+);
+
+server.registerTool(
+  "backup_restore_audit_list",
+  {
+    description: "List bounded immutable, content-free audit evidence for a restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional() },
+  },
+  wrapHandler(C("backup_restore_audit_list"), async ({ project, planId, limit }) =>
+    backupTools.backupRestoreAuditList(project, planId, limit)),
 );
 
 server.registerTool(

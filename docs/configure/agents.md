@@ -11,6 +11,24 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
+### Verification scope
+
+Ordinary writer work uses only the affected workspace typecheck/lint when
+relevant and directly affected test file(s), optionally narrowed by test name.
+Focused Playwright work targets the affected file and may use `--grep`; a
+fixture-backed run is followed by `npx tsx tests/suite-containment-audit.ts --strict`.
+Root `npm test`, entire Playwright configs, and Docker/provider/mail/
+route-parity/manual suites require an explicitly declared `FULL_ACCEPTANCE`,
+release, or cross-cutting acceptance gate. `FULL_ACCEPTANCE` means the declared
+acceptance checks, not automatically every repository test.
+
+Before source edits, both software-engineer writers read
+`.opencode/skills/development-conventions/references/useful-comments/guidelines.md`.
+They keep code self-explanatory and add comments only for non-obvious
+why/constraints, not to narrate what, record history, decorate sections, or
+preserve commented-out code. QA inspects changed comments only within its
+already-declared changed-file review; it does not add a broad comment pass.
+
 ### Documentation authority
 
 Repository Markdown under `docs/**/*.md` is the normal documentation authority, and

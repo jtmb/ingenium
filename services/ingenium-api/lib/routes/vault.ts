@@ -86,10 +86,18 @@ function serializeItem(item: any): object {
     }
   };
   return {
-    ...item,
+    id: item.id,
+    name: item.name,
+    type: item.type,
     folder_id: item.folderId ?? item.folder_id ?? null,
     tags: parseList(item.tags),
     urls: parseList(item.urls),
+    username: item.username ?? null,
+    version: item.version,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    last_accessed_at: item.last_accessed_at ?? null,
+    access_count: item.access_count,
   };
 }
 

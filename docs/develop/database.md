@@ -86,13 +86,13 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–080)
+### Feature Migrations (045–083)
 
 | # | File | Purpose |
 |---|------|---------|
 | 045 | `045_pipeline_event_types.sql` | Adds `skill_created`, `skill_updated`, and proposal event types to `pipeline_events` CHECK constraint |
 | 046 | `046_vault.sql` | Creates `vault_config`, `vault_folders`, `vault_items`, and `vault_audit_log` — encrypted secrets vault with scrypt key derivation, AES-256-GCM envelope encryption, and full audit trail |
-| 047 | `047_backups.sql` | Creates `backup_records` and `backup_restore_jobs` — dual-snapshot (Ingenium + OpenCode DB) backup/restore with SHA-256 manifest validation and migration-compatibility checks |
+| 047 | `047_backups.sql` | Creates the legacy `backup_records` and `backup_restore_jobs` storage. RESTORE-100's signed v2 compatibility and immutable approval flow are defined by migration 083, not this legacy inventory. |
 | 048 | `048_docs_rag.sql` | Creates the original RAG tables, FTS5 index, embeddings, ingestion state, and a legacy import checkpoint table |
 | 049 | `049_workspace_project_migration.sql` | Creates `project_migration_manifests` audit table — transactional DB-only migration of historical `/workspace` project into `global-default` with hash verification, child row protection, and rollback safety |
 | 050 | `050_context_rag_phase3.sql` | Adds `source`, `metadata`, `updated_at` to `context_entries` with source CHECK constraint and index; adds unique index `idx_rag_sources_project_path` for canonical path-based idempotency in `rag_sources` — Phase 3 context/RAG ingestion and validation |
@@ -116,6 +116,10 @@ another Compose project volume.
 | 078 | `078_usage_advisory_thresholds.sql` | Creates one restrictive-FK, project-scoped advisory threshold row with nullable request, total-token, provider-reported-cost, and cache-token thresholds plus CAS revision and UTC audit timestamps. SQL checks reject negative, non-numeric, non-finite, and unsafe values. Thresholds contain no provider, currency, price, or time-window data and do not enforce usage routing or execution. There is no public delete operation: setting every threshold to `null` retains the row and its audit/revision history. |
 | 079 | `079_usage_attention_items.sql` | Creates project-scoped, all-history usage attention lifecycle items and immutable transition events. The five fixed condition keys cover request count, total tokens, provider-reported cost, cache-read tokens, and cache-write tokens. Rows retain only bounded advisory metadata, fixed message codes, CAS revisions, UTC lifecycle timestamps, and a fixed `NULL` all-history range; they contain no provider, source, payload, free-text, or JSON fields. |
 | 080 | `080_job_vault_references.sql` | Creates metadata-only job-to-vault authorization references and immutable authorization/revocation audit rows. References are project-scoped composite keys, target only active same-project vault items, are capped at 16 authorized items per job, and remain available as provenance when a job or vault item is soft-deleted. |
+| 081 | `081_vault_job_runs.sql` | Creates metadata-only durable vault-job run provenance and immutable item snapshots. It persists only project/job/run identifiers, a deadline, nonce hash, verified process identity, state/CAS revision, and authorization versions—never secret values, paths, config, or plaintext nonces. |
+| 082 | `082_job_vault_revision_audit.sql` | Adds default-zero, strictly monotonic job revisions for CAS updates and immutable, exact project/job/run-linked vault runtime audit rows. The runtime audit records only fixed action/category/ID/version/timestamp metadata; it has no names, detail, plaintext, configuration, or actor-string linkage. |
+| 083 | `083_restore_plans.sql` | Creates RESTORE-100's immutable server-global plan identities, append-only transition revisions, one-time hash-only confirmation authorizations, append-only stage records/events, and bounded idempotency receipts. SQL triggers enforce preview → authorize → confirm → ready plus the stage-integrity failure path; ready requires a consumed authorization and a component-hash-bound verified stage. Restrictive composite foreign keys prevent deleting a planned source bundle. No trigger or table authorizes active-database replacement; execution is RESTORE-101 scope. |
+| 084 | `084_restore_executor.sql` | Adds RESTORE-101's separately authorized 15-minute execution token, queued run/item ledger, hash-only owner/fence evidence, phase-CAS state graph, bounded idempotency receipts, immutable execution audit, and the RESTORE-100 authorization-ID immutability correction. It is all-or-nothing at startup; partial execution inventory fails closed. |
 
 Migration 078 adds `usage_advisory_thresholds`, keyed one-to-one by
 `project_id` with `ON DELETE RESTRICT`. Its five nullable fields are
@@ -212,7 +216,8 @@ Migration 080 stores `job_vault_references` as a normalized `(project_id,
 job_id, item_id)` authorization record. Runtime and SQL triggers limit each job
 to 16 authorized vault items and reject missing, foreign-project, or soft-deleted
 items. The reference DTO is metadata-only: item ID, authorization timestamp,
-authorized item version, and availability. It never joins encrypted vault
+ authorized item version, and a sealed-independent `authorized`,
+ `version_stale`, or `unavailable` status. It never joins encrypted vault
 material or user-controlled vault metadata.
 
 `job_vault_reference_audit` is append-only UUID provenance for only
@@ -222,10 +227,85 @@ has no free-text, JSON, item-name, or ciphertext columns. Vault deletion remains
 a source-aligned soft delete, so references and audit evidence are retained and
 the reference is reported unavailable rather than cascaded away.
 
+The runtime contract accepts optional `vault_item_ids` on job create/update:
+omission means no references on create and preserves the set on update, a list
+replaces the set, and an empty list revokes all. SQL and core validation cap the
+set at 16 unique IDs and require active same-project vault items. Resolution is
+metadata-only and remains available while sealed; the reference projection is
+ limited to item ID, `status`, authorization timestamp, and
+ `authorized_item_version`
+captured at authorization. No encrypted value, vault metadata, decrypt/unseal
+operation, runner input, or log secret is involved.
+
+### Vault Job Run Migration (081)
+
+Migration 081 records a vault-backed run before tmpfs files or a child process
+are created. `job_vault_runs` is a constrained state machine
+(`prepared → spawned → teardown_pending → cleaned|failed`) with a monotonically
+advancing revision; a retained failed run may return to `teardown_pending` for a
+later cleanup attempt. Process identity is write-once after capture, while
+`job_vault_run_items` snapshots the exact authorized item IDs and versions
+immutably. Recovery uses these snapshots rather than current mutable job
+references.
+
+The schema intentionally contains no plaintext secret, filesystem-path,
+OpenCode-configuration, or plaintext-nonce column. A SHA-256 nonce hash is the
+only nonce evidence. The API runner verifies tmpfs teardown before marking a run
+cleaned; an unsafe or ambiguous directory/process state remains retained for a
+subsequent startup or scheduler retry.
+
+### Job Vault Revision and Audit Migration (082)
+
+Migration 082 gives every existing and new job revision `0` and requires every
+direct SQL update to advance that revision by exactly one. The core PATCH path
+matches the caller's expected revision, changes ordinary job fields and any
+reference replacement in one transaction, then returns either the updated job
+or a typed current-revision conflict. Soft deletion remains an in-place,
+revisioned history-preserving transition. The dashboard preserves its draft on
+`JOB_REVISION_CONFLICT` and only replaces it after an explicit reload.
+
+`job_vault_runtime_audit` separates runtime evidence from the general vault
+audit log. It accepts only `secret_read` with an item/version or
+`access_denied` without one, and its foreign keys plus exact-match trigger
+require the same project, job, and run. The combined job audit projection is a
+bounded keyset page with only ID, job ID, nullable item ID, action, actor
+category, nullable run ID, nullable version, and timestamp. It stores and
+returns no names, free text, ciphertext, plaintext, or parsed actor strings.
+Authorization and revocation remain immutable metadata-only audit actions from
+the normalized reference audit.
+
 Migration 074 is a transactional legacy quarantine, not a token recovery path:
 reservation tokens are caller-held opaque values, and only their SHA-256 hashes
 are persisted. The coordination boundary does not promise protection from manual
 editor or external-process writes.
+
+### Restore executor migration (084)
+
+Migration 084 does not alter migration 083's source file or make a legacy
+confirmation token executable. It adds a separate `execute_restore`
+authorization bound to the ready plan revision, manifest hash, plan hash, and
+stage hash. The token is stored only as a hash, is consumed once, and expires in
+15 minutes. Consumption creates a queued run; it does not replace either active
+database.
+
+Runs retain only IDs, hashes, bounded state/error codes, timestamps, and an
+optional pre-restore safety-backup ID. Items record expected and write-once
+pre/post hashes. SQL enforces phase revision CAS, one run per plan, immutable
+identity/receipts/events, owner/fence hashes after claim, and the fixed graph
+from queued through completion or rollback, including terminal
+`executor_start_failed` for a rejected Supervisor handoff. Existing restore
+authorization IDs are now immutable during their sole allowed `consumed_at`
+update. Queue insertion requires an unexpired, consumed authorization bound to
+the plan revision, manifest hash, plan hash, and verified stage hash; swapping
+requires both pre-hashes and completion requires both post-hashes.
+
+The compiled static `restore-maintenance` supervisor program is the only
+executor. It runs as root and uses a separate root-only HMAC journal key and
+mode-`0700` maintenance root, while the API only persists queue/start outcomes.
+It verifies descriptor holders by device/inode after all users stop, locks both
+target parent directories during the swap, snapshots the current pair before
+replacement, and archives terminal signed journals. A partial 084 schema is
+refused at startup rather than resumed or repaired by a live service.
 
 Migration 075 is guarded as none/all/partial: when no coordination components
 exist, the migration runs transactionally; when the complete schema exists, it
@@ -382,3 +462,19 @@ PRAGMA foreign_key_check;
 ---
 
 *See also: `packages/ingenium-core/lib/db.ts`, `packages/ingenium-core/data/migrations/`*
+
+### VAULT-101 deployed schema and cleanup evidence
+
+The deployed migration-081 schema evidence is **2 tables, 2 indexes, and 8
+triggers**: five run-state/provenance triggers and three item-snapshot
+triggers. `PRAGMA foreign_key_check` returned zero violations. The run metadata
+cleanup path removes only proven run-owned state; partial cleanup is resumable,
+while an unsafe directory or nonce race is retained for bounded recovery. A
+process-group recovery path handles descendants during crash and shutdown
+cleanup, but same-UID external processes remain outside the guarantee.
+
+VAULT-101 authorization is one-attempt and fresh-on-retry. Sealed, missing,
+deleted, foreign, revoked, expired, or version-stale references fail closed
+before spawn. The schema stores no secret value, path, OpenCode config, or
+plaintext nonce; secret files are ephemeral UUID files on protected tmpfs and
+the ID-to-path map is non-secret.

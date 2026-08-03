@@ -105,7 +105,7 @@ describe("JOB-101 trusted event delivery queue", () => {
     createJob(first.id, "disabled", undefined, "agent", "prompt", undefined, "context.conversation.archived");
     const disabled = createJob(first.id, "also disabled", undefined, "agent", "prompt", undefined, "context.conversation.archived");
     createJob(second.id, "foreign", undefined, "agent", "prompt", undefined, "context.conversation.archived");
-    getDb().prepare("UPDATE jobs SET enabled = 0 WHERE id = ?").run(disabled.id);
+    getDb().prepare("UPDATE jobs SET enabled = 0, revision = revision + 1 WHERE id = ?").run(disabled.id);
     emitAllTrustedEvents(first.id);
 
     expect(snapshotTrustedJobEvents(first.id)).toEqual({ snapshottedEvents: 3, createdDeliveries: 4 });
@@ -142,7 +142,7 @@ describe("JOB-101 trusted event delivery queue", () => {
     snapshotTrustedJobEvents(first.id);
     const claim = claimJobEventDelivery(first.id)!;
 
-    expect(deleteJob(first.id, job.id)).toEqual({ status: "active_delivery" });
+    expect(deleteJob(first.id, job.id, job.revision)).toEqual({ status: "active_delivery" });
     expect(getJobEventDelivery(first.id, claim.delivery.id)).toMatchObject({ state: "leased" });
     expect(getDb().prepare("SELECT enabled, deleted_at FROM jobs WHERE id = ?").get(job.id)).toMatchObject({ enabled: 1, deleted_at: null });
 
@@ -158,7 +158,7 @@ describe("JOB-101 trusted event delivery queue", () => {
       errorMessage: "Attempt cancelled before deletion.",
     })?.state).toBe("retry_wait");
 
-    expect(deleteJob(first.id, job.id)).toEqual({ status: "deleted" });
+    expect(deleteJob(first.id, job.id, job.revision)).toEqual({ status: "deleted" });
     const delivery = listJobEventDeliveries(first.id, { limit: 100 }).data.find((item) => item.job_id === job.id)!;
     expect(delivery).toMatchObject({ state: "dead_letter", attempt_count: 1, last_error_code: "job_deleted" });
     expect(getDb().prepare("SELECT enabled, deleted_at FROM jobs WHERE id = ?").get(job.id)).toMatchObject({ enabled: 0 });

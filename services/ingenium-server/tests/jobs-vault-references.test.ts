@@ -28,21 +28,21 @@ describe("VAULT-100 MCP job forwarding", () => {
     );
   });
 
-  it("forwards generic job_update fields without resolving vault item metadata", async () => {
+  it("forwards generic job_update fields with a required revision without resolving vault item metadata", async () => {
     api.patch.mockResolvedValue({ data: { data: { vault_references: [{ item_id: "id" }] } } });
 
-    await jobTools.jobUpdate("project", "job-id", { vault_item_ids: [] });
+    await jobTools.jobUpdate("project", "job-id", { vault_item_ids: [] }, 4);
 
-    expect(api.patch).toHaveBeenCalledWith("/jobs/job-id", { vault_item_ids: [] }, { project: "project" });
+    expect(api.patch).toHaveBeenCalledWith("/jobs/job-id", { vault_item_ids: [], expected_revision: 4 }, { project: "project" });
   });
 
   it("keeps the existing two job tools while exposing strict UUID-list schema and parity documentation", () => {
     expect(serverSource).toMatch(/const jobVaultItemIdsParam = z\.array\(z\.string\(\)\.uuid\(\)\)\.max\(16\)/);
     expect(serverSource).toMatch(/"job_create"[\s\S]*?vault_item_ids: jobVaultItemIdsParam\.optional\(\)/);
-    expect(serverSource).toMatch(/"job_update"[\s\S]*?fields: jobUpdateFieldsParam/);
+    expect(serverSource).toMatch(/"job_update"[\s\S]*?fields: jobUpdateFieldsParam[\s\S]*?expected_revision: z\.number\(\)\.int\(\)\.nonnegative\(\)/);
     expect(serverSource.match(/server\.registerTool\(\s*"job_create"/g)).toHaveLength(1);
     expect(serverSource.match(/server\.registerTool\(\s*"job_update"/g)).toHaveLength(1);
     expect(catalogSource).toContain("metadata-only vault_item_ids authorization");
-    expect(catalogSource).toContain("Omit vault_item_ids to preserve references; [] revokes all.");
+    expect(catalogSource).toContain("CAS-update job fields with required expected_revision.");
   });
 });

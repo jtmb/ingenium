@@ -7,6 +7,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 sh "$REPO_ROOT/scripts/validate-deployment-config.sh" "$REPO_ROOT"
+bash "$REPO_ROOT/tests/test-vault-job-secret-root.sh"
 bash "$REPO_ROOT/tests/test-vscode-extension.sh"
 bash "$REPO_ROOT/tests/test-opencode-global-agent-profiles.sh"
 printf 'PASS: deployment, gateway, and agent projection contracts\n'

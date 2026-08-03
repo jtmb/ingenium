@@ -99,6 +99,9 @@ RUN curl -fsSL -o /tmp/ttyd.x86_64 "https://github.com/tsl0922/ttyd/releases/dow
     ttyd --version && \
     rm /tmp/ttyd.x86_64 2>/dev/null || true
 RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appuser && \
+    install -d -o root -g root -m 0755 /usr/local/share/ingenium && \
+    id -u appuser > /usr/local/share/ingenium/appuser-uid && id -g appuser > /usr/local/share/ingenium/appuser-gid && \
+    chown root:root /usr/local/share/ingenium/appuser-uid /usr/local/share/ingenium/appuser-gid && chmod 0444 /usr/local/share/ingenium/appuser-uid /usr/local/share/ingenium/appuser-gid && \
     runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
 
 WORKDIR /app
@@ -155,7 +158,12 @@ RUN chmod 0555 /app/packages/ingenium-extension/dist/scripts/init-project.js && 
 # copy only their declared scripts instead of retaining the builder source tree.
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
 COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
-COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/
+# `/dev/shm` is a container-runtime tmpfs. Do not create this VAULT-101 root at
+# build time: the entrypoint provisions and validates it on every container start.
+COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/
+COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf
+COPY --chown=root:root --chmod=0555 scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/
+COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh ./scripts/validate-vault-job-secret-root.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
 # startup, so copy its primary configuration and declared include set together.
 COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf ./nginx/

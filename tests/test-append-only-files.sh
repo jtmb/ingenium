@@ -128,7 +128,7 @@ validate_roadmap_markers() {
         /^### Work marker log( \(continued\))?$/ { in_log=1; historical=0; next }
         /^### / { in_log=0; historical=0 }
         /<!--/ && !in_log { print "__MARKER_OUTSIDE_APPROVED_LOG__"; next }
-        in_log && !historical && /<!--/ { print }
+        in_log && !historical && /<!--/ { print NR "\t" $0 }
     ' "$file" || true)
     if [[ "$marker_lines" == *"__MARKER_OUTSIDE_APPROVED_LOG__"* ]]; then
         fail "ROADMAP.md — work marker is outside an approved marker-log heading"
@@ -136,19 +136,122 @@ validate_roadmap_markers() {
     fi
 
     local id_pattern='[A-Z][A-Z0-9]*-[0-9]{3}'
-    local marker_pattern="^<!-- \\(work-(started|complete)\\) ($id_pattern) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ([^[:space:]]+) -->$"
+    local timestamp_pattern='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
+    local marker_pattern="^<!-- \\(work-(started|complete)\\) ($id_pattern) ($timestamp_pattern) ([^[:space:]]+) -->$"
+    local supersession_pattern="^<!-- roadmap:supersede task=($id_pattern) kind=work-complete original=($timestamp_pattern) replacement=($timestamp_pattern) reason=clock-skew -->$"
     declare -A active_ids=()
     declare -A completed_ids=()
     declare -A evidence_ids=()
+    declare -A superseded_original_timestamps=()
+    declare -A superseded_replacement_timestamps=()
+    declare -A supersession_declaration_lines=()
+    declare -A completion_counts=()
+    declare -A completion_lines=()
+    declare -A start_timestamps=()
+    declare -A start_lines=()
     local evidence_pattern
     evidence_pattern="^Evidence ($id_pattern):[[:space:]]+.+$"
-    local line kind task timestamp actor
+    local line_with_number line_number line kind task timestamp actor
+    local original_timestamp replacement_timestamp completion_key completion_count
+
+    # Supersession declarations are pre-scanned so only the exact referenced
+    # completion can be ignored during the append-only state walk.
     if [[ -n "$marker_lines" ]]; then
-        while IFS= read -r line; do
-            if [[ ! "$line" =~ $marker_pattern ]]; then
+        while IFS= read -r line_with_number; do
+            line_number="${line_with_number%%$'\t'*}"
+            line="${line_with_number#*$'\t'}"
+            if [[ "$line" =~ $supersession_pattern ]]; then
+                task="${BASH_REMATCH[1]}"
+                original_timestamp="${BASH_REMATCH[2]}"
+                replacement_timestamp="${BASH_REMATCH[3]}"
+                if [[ -z "${known_ids[$task]+x}" ]]; then
+                    fail "ROADMAP.md — unknown supersession task ID: $task"
+                    return 1
+                fi
+                if [[ -n "${superseded_original_timestamps[$task]+x}" ]]; then
+                    fail "ROADMAP.md — duplicate supersession declaration: $task"
+                    return 1
+                fi
+                if [[ "$original_timestamp" == "$replacement_timestamp" ]]; then
+                    fail "ROADMAP.md — supersession must name distinct original and replacement timestamps: $task"
+                    return 1
+                fi
+                superseded_original_timestamps["$task"]="$original_timestamp"
+                superseded_replacement_timestamps["$task"]="$replacement_timestamp"
+                supersession_declaration_lines["$task"]="$line_number"
+            elif [[ ! "$line" =~ $marker_pattern ]]; then
                 fail "ROADMAP.md — malformed work marker: $line"
                 return 1
             fi
+        done <<<"$marker_lines"
+    fi
+
+    # Collect marker occurrences before applying state transitions. This makes
+    # missing, duplicate, cross-task, and out-of-order supersessions fail closed.
+    if [[ -n "$marker_lines" ]]; then
+        while IFS= read -r line_with_number; do
+            line_number="${line_with_number%%$'\t'*}"
+            line="${line_with_number#*$'\t'}"
+            if [[ ! "$line" =~ $marker_pattern ]]; then
+                continue
+            fi
+            kind="(work-${BASH_REMATCH[1]})"
+            task="${BASH_REMATCH[2]}"
+            timestamp="${BASH_REMATCH[3]}"
+            if [[ "$kind" == "(work-started)" ]]; then
+                if [[ -z "${start_timestamps[$task]+x}" ]]; then
+                    start_timestamps["$task"]="$timestamp"
+                    start_lines["$task"]="$line_number"
+                fi
+            else
+                completion_key="$task|$timestamp"
+                completion_count="${completion_counts[$completion_key]:-0}"
+                completion_counts["$completion_key"]=$((completion_count + 1))
+                completion_lines["$completion_key"]="$line_number"
+            fi
+        done <<<"$marker_lines"
+    fi
+
+    local superseded_task original_key replacement_key original_line replacement_line start_timestamp start_line
+    for superseded_task in "${!superseded_original_timestamps[@]}"; do
+        original_timestamp="${superseded_original_timestamps[$superseded_task]}"
+        replacement_timestamp="${superseded_replacement_timestamps[$superseded_task]}"
+        original_key="$superseded_task|$original_timestamp"
+        replacement_key="$superseded_task|$replacement_timestamp"
+        if [[ "${completion_counts[$original_key]:-0}" -ne 1 ]]; then
+            fail "ROADMAP.md — supersession original completion must exist exactly once: $superseded_task"
+            return 1
+        fi
+        if [[ "${completion_counts[$replacement_key]:-0}" -ne 1 ]]; then
+            fail "ROADMAP.md — supersession replacement completion must exist exactly once: $superseded_task"
+            return 1
+        fi
+        original_line="${completion_lines[$original_key]}"
+        replacement_line="${completion_lines[$replacement_key]}"
+        if [[ -z "${start_timestamps[$superseded_task]+x}" ]]; then
+            fail "ROADMAP.md — supersession task has no start marker: $superseded_task"
+            return 1
+        fi
+        start_timestamp="${start_timestamps[$superseded_task]}"
+        start_line="${start_lines[$superseded_task]}"
+        if [[ ! "$replacement_timestamp" > "$start_timestamp" ]]; then
+            fail "ROADMAP.md — supersession replacement timestamp must be after task start: $superseded_task"
+            return 1
+        fi
+        if (( original_line <= start_line || original_line >= replacement_line )); then
+            fail "ROADMAP.md — supersession completion order is invalid: $superseded_task"
+            return 1
+        fi
+        if (( ${supersession_declaration_lines[$superseded_task]} <= replacement_line )); then
+            fail "ROADMAP.md — supersession declaration must follow replacement completion: $superseded_task"
+            return 1
+        fi
+    done
+
+    if [[ -n "$marker_lines" ]]; then
+        while IFS= read -r line_with_number; do
+            line="${line_with_number#*$'\t'}"
+            [[ "$line" =~ $marker_pattern ]] || continue
             kind="(work-${BASH_REMATCH[1]})"
             task="${BASH_REMATCH[2]}"
             timestamp="${BASH_REMATCH[3]}"
@@ -172,6 +275,10 @@ validate_roadmap_markers() {
                 fi
                 active_ids[$task]=1
             else
+                if [[ -n "${superseded_original_timestamps[$task]+x}" ]] &&
+                    [[ "$timestamp" == "${superseded_original_timestamps[$task]}" ]]; then
+                    continue
+                fi
                 if [[ -z "${active_ids[$task]+x}" ]]; then
                     fail "ROADMAP.md — completion marker has no matching active start: $line"
                     return 1
@@ -305,6 +412,8 @@ test_roadmap_marker_parser_cases() {
 Evidence BUG-000: implementation tests passed'
     printf '%s\n' "$valid" >"$tmp/valid.md"
     if ! validate_roadmap_markers "$tmp/valid.md"; then fail "marker parser rejected valid pair"; return 1; fi
+    printf '#### BUG-000 — Clock-skew fixture\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2025-12-31T23:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2025-12-31T23:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: authoritative replacement implementation tests passed\n' >"$tmp/duplicate-clock-skew.md"
+    if ! validate_roadmap_markers "$tmp/duplicate-clock-skew.md"; then fail "marker parser rejected clock-skew completion supersession"; return 1; fi
     printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent name -->\n' >"$tmp/malformed.md"
     if validate_roadmap_markers "$tmp/malformed.md" >/dev/null 2>&1; then fail "marker parser accepted malformed marker"; return 1; fi
     printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/ordering.md"
@@ -321,6 +430,26 @@ Evidence BUG-000: implementation tests passed'
     if validate_roadmap_markers "$tmp/outside-heading.md" >/dev/null 2>&1; then fail "marker parser accepted marker outside approved heading"; return 1; fi
     printf '#### BUG-000 — Fixture task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Work marker log (continued)\n<!-- (work-started) BUG-000 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/restart.md"
     if validate_roadmap_markers "$tmp/restart.md" >/dev/null 2>&1; then fail "marker parser accepted restart after completion"; return 1; fi
+    printf '#### BUG-000 — Supersession abuse\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-started original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-start.md"
+    if validate_roadmap_markers "$tmp/supersede-start.md" >/dev/null 2>&1; then fail "marker parser accepted start supersession"; return 1; fi
+    printf '#### BUG-000 — Evidence supersession abuse\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=evidence original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-evidence.md"
+    if validate_roadmap_markers "$tmp/supersede-evidence.md" >/dev/null 2>&1; then fail "marker parser accepted evidence supersession"; return 1; fi
+    printf '#### BUG-000 — Missing replacement\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-missing.md"
+    if validate_roadmap_markers "$tmp/supersede-missing.md" >/dev/null 2>&1; then fail "marker parser accepted missing supersession replacement"; return 1; fi
+    printf '#### BUG-000 — Missing authoritative evidence\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\n' >"$tmp/supersede-no-evidence.md"
+    if validate_roadmap_markers "$tmp/supersede-no-evidence.md" >/dev/null 2>&1; then fail "marker parser accepted supersession without authoritative evidence"; return 1; fi
+    printf '#### BUG-000 — Mismatch task\n#### BUG-001 — Other task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-started) BUG-001 2026-01-01T00:30:00Z agent-name -->\n<!-- (work-complete) BUG-001 2026-01-01T02:00:00Z other-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\nEvidence BUG-001: implementation tests passed\n' >"$tmp/supersede-mismatch.md"
+    if validate_roadmap_markers "$tmp/supersede-mismatch.md" >/dev/null 2>&1; then fail "marker parser accepted cross-task supersession"; return 1; fi
+    printf '#### BUG-000 — Declaration order\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-order.md"
+    if validate_roadmap_markers "$tmp/supersede-order.md" >/dev/null 2>&1; then fail "marker parser accepted supersession declaration before replacement"; return 1; fi
+    printf '#### BUG-000 — Timestamp order\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T02:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T03:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T03:00:00Z replacement=2026-01-01T01:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-timestamp-order.md"
+    if validate_roadmap_markers "$tmp/supersede-timestamp-order.md" >/dev/null 2>&1; then fail "marker parser accepted replacement timestamp before task start"; return 1; fi
+    printf '#### BUG-000 — Duplicate declaration\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-duplicate.md"
+    if validate_roadmap_markers "$tmp/supersede-duplicate.md" >/dev/null 2>&1; then fail "marker parser accepted duplicate supersession declarations"; return 1; fi
+    printf '#### BUG-000 — Malformed declaration\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-000 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=manual -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-malformed.md"
+    if validate_roadmap_markers "$tmp/supersede-malformed.md" >/dev/null 2>&1; then fail "marker parser accepted non-allowlisted supersession reason"; return 1; fi
+    printf '#### BUG-000 — Unknown declaration task\n### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T02:00:00Z replacement-agent -->\n<!-- roadmap:supersede task=BUG-999 kind=work-complete original=2026-01-01T01:00:00Z replacement=2026-01-01T02:00:00Z reason=clock-skew -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/supersede-unknown.md"
+    if validate_roadmap_markers "$tmp/supersede-unknown.md" >/dev/null 2>&1; then fail "marker parser accepted unknown supersession task"; return 1; fi
     printf '#### DOC-100 — Validator coverage\n### Work marker log\n<!-- (work-started) DOC-100 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) DOC-100 2026-01-01T01:00:00Z agent-name -->\nEvidence DOC-100: validator tests passed\n' >"$tmp/doc-100.md"
     if ! validate_roadmap_markers "$tmp/doc-100.md"; then fail "marker parser rejected DOC-100"; return 1; fi
     printf '#### DOC-100 — First title\n#### DOC-100 — Duplicate title\n' >"$tmp/duplicate-heading.md"
@@ -333,7 +462,7 @@ Evidence BUG-000: implementation tests passed'
     printf '#### ARCHIVE-001 — Archived-only task\n' >"$tmp/archive/ROADMAP-2026-07-31-phase-0.md"
     printf '#### DOC-100 — Current task\n### Work marker log\n<!-- (work-started) ARCHIVE-001 2026-01-01T00:00:00Z agent-name -->\n' >"$tmp/archive-only.md"
     if validate_roadmap_markers "$tmp/archive-only.md" >/dev/null 2>&1; then fail "marker parser accepted ID defined only in the archive"; return 1; fi
-    pass "Marker parser accepts valid/parallel/continued/DOC-100 pairs and rejects malformed, ordering, duplicate, restart, unknown, duplicate-heading, and archive-only cases"
+    pass "Marker parser accepts valid/parallel/continued/DOC-100/clock-skew fixtures and rejects malformed, abuse, missing, mismatch, ordering, duplicate, restart, unknown, duplicate-heading, and archive-only cases"
 }
 
 run_all_tests() {

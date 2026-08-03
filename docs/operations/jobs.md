@@ -24,6 +24,40 @@ Job editing uses an exact Select containing **No event** and the three cataloged
 - From the **Detail View**, click the **Edit** button to open the form overlay
 - Change any field and click **Update Job** to save
 
+### Optional vault item references (VAULT-100)
+
+Jobs can opt in to references for up to 16 active vault item IDs in the same
+project. References are authorization metadata only; they do not retrieve,
+decrypt, unseal, inject, or log a secret. Returned `vault_references` entries
+contain only `item_id`, `status`, `authorized_item_version`, and
+`authorized_at`; `status` is `authorized`, `version_stale`, or `unavailable`,
+and is safe to read while the vault is sealed.
+
+- Omit `vault_item_ids` on create for no references, or on update to preserve
+  existing references.
+- Supply a non-empty list to replace the authorized set. Each ID must be a
+  unique UUID and resolve to an active same-project item.
+- Supply `vault_item_ids: []` to revoke all current references.
+
+Missing, foreign-project, deleted, or otherwise unavailable IDs use the same
+generic `422 VAULT_ITEM_NOT_FOUND` response. Malformed, duplicate, or over-limit
+lists use `422 VALIDATION_ERROR`. Authorization and revocation are recorded in
+an immutable audit trail with actor `authenticated_api`; runners and logs do not
+receive vault values.
+
+The job detail view shows a metadata-only audit list through
+`GET /api/v1/jobs/:id/vault-audit`. It can show `authorized`, `revoked`,
+`secret_read`, and `access_denied` actions with bounded actor category,
+item/run identifier, version when applicable, and timestamp. It never shows
+values or ciphertext.
+
+Reference changes in the existing create/edit form require explicit
+confirmation showing Authorize, Refresh, and Revoke rows. While the vault is
+unsealed, the picker can select active item metadata; while sealed, adding or
+refreshing is disabled but existing references may still be revoked. Updates
+use the job revision CAS; on `JOB_REVISION_CONFLICT`, the current draft remains
+open and the user must explicitly reload before trying again.
+
 ### Creating a Job with the Magic-Wand Button
 When creating or editing a job, a magic-wand button (✨ icon labeled "Auto-generate") can derive job configuration from a free-text description:
 
@@ -43,6 +77,7 @@ When creating or editing a job, a magic-wand button (✨ icon labeled "Auto-gene
 - `GET /api/v1/jobs/event-deliveries/:deliveryId?project=<name>` — get one delivery
 - `POST /api/v1/jobs/runs/:runId/cancel?project=<name>` — cancel a project-owned run
 - `GET /api/v1/jobs/runs/:runId/logs?project=<name>&after=` — read redacted project-owned logs
+- `GET /api/v1/jobs/:id/vault-audit?project=<name>&limit=&cursor=` — bounded job-scoped vault authorization/runtime audit metadata
 
 ## Trusted Events and Delivery (JOB-100/JOB-101)
 
@@ -86,3 +121,20 @@ and retain its delivery history instead.
 - [Logs](logs.md) — Structured logging and event viewer
 - [Status](status.md) — Service status page
 - [Synthesis Configuration](../configure/synthesis.md)
+
+## Vault-backed runner attempts (VAULT-101)
+
+When a job uses vault references, the runner makes one explicit authorization
+decision per attempt immediately before spawn. Sealed, missing, deleted,
+foreign-project, revoked, expired, or version-stale references fail closed and
+do not start a child. Retries do not reuse authorization: each attempt resolves
+fresh metadata and authorization, and no automatic unseal is performed.
+
+The runner creates a run-owned `0700` tmpfs directory and `0600` UUID-named
+secret files. It passes only the non-secret
+`INGENIUM_VAULT_SECRET_FILES` ID-to-path map; values never appear in the
+environment, argv, prompt, logs, API/MCP output, or durable database. Output is
+fully redacted for vault-enabled runs. Process-group recovery and shutdown
+cleanup cover successful, partial, crash, unsafe-directory, and nonce-race
+paths. Unsafe or ambiguous residue is retained and fails closed rather than
+being force-deleted. Same-UID processes are outside this boundary.

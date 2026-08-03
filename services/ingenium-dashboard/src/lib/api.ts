@@ -32,12 +32,24 @@ export class ApiError extends Error {
   status: number;
   /** Seconds to wait before retrying, parsed from the `Retry-After` header (capped at 60). */
   retryAfterSeconds: number | null;
+  /** Bounded server error code; never includes response details. */
+  code: string | null;
+  /** Present only for safe optimistic-concurrency conflicts. */
+  currentRevision: number | null;
 
-  constructor(status: number, message: string, retryAfterSeconds: number | null) {
+  constructor(
+    status: number,
+    message: string,
+    retryAfterSeconds: number | null,
+    code: string | null = null,
+    currentRevision: number | null = null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.code = code;
+    this.currentRevision = currentRevision;
   }
 }
 
@@ -139,7 +151,15 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
   if (!res.ok) {
     const retryAfter = parseRetryAfter(res.headers?.get?.("Retry-After") ?? null);
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    throw new ApiError(res.status, err.error?.message ?? res.statusText, retryAfter);
+    const code = typeof err.error?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(err.error.code)
+      ? err.error.code
+      : null;
+    const currentRevision = typeof err.error?.currentRevision === "number"
+      && Number.isSafeInteger(err.error.currentRevision)
+      && err.error.currentRevision >= 0
+      ? err.error.currentRevision
+      : null;
+    throw new ApiError(res.status, err.error?.message ?? res.statusText, retryAfter, code, currentRevision);
   }
   // 204 No Content — returned by DELETE endpoints; no body to parse
   if (res.status === 204) return undefined as T;
@@ -724,8 +744,32 @@ export type Job = {
    */
   enabled: boolean;
   timeout_minutes: number;
+  revision: number;
+  vault_references: JobVaultReference[];
   created_at: string;
   updated_at: string;
+};
+
+export type JobVaultReferenceStatus = "authorized" | "version_stale" | "unavailable";
+
+/** Safe job authorization projection: no item names, values, or current versions. */
+export type JobVaultReference = {
+  item_id: string;
+  status: JobVaultReferenceStatus;
+  authorized_item_version: number;
+  authorized_at: string;
+};
+
+/** Fixed-shape metadata-only audit entry for one job's vault access boundary. */
+export type JobVaultAuditEntry = {
+  id: string;
+  job_id: string;
+  item_id: string | null;
+  action: "authorized" | "revoked" | "secret_read" | "access_denied";
+  actor_category: "authenticated_api" | "job_run";
+  run_id: string | null;
+  version: number | null;
+  timestamp: string;
 };
 
 /** The only event types that a new job may subscribe to. */
@@ -886,6 +930,86 @@ function jobDeliveryState(value: unknown): JobEventDeliveryState {
   return value;
 }
 
+function jobVaultReferenceStatus(value: unknown): JobVaultReferenceStatus {
+  if (value !== "authorized" && value !== "version_stale" && value !== "unavailable") {
+    throw new Error("Invalid vault reference status in job response.");
+  }
+  return value;
+}
+
+export function normalizeJobVaultReference(value: unknown): JobVaultReference {
+  const record = jobRecord(value, "Invalid vault reference response.");
+  return {
+    item_id: jobId(record.item_id, "vault item ID"),
+    status: jobVaultReferenceStatus(record.status),
+    authorized_item_version: jobInteger(record.authorized_item_version, "authorized item version", 1, Number.MAX_SAFE_INTEGER),
+    authorized_at: jobTimestamp(record.authorized_at, "vault authorization timestamp"),
+  };
+}
+
+/** Drop every non-contract job field before it can reach dashboard state or the DOM. */
+export function normalizeJob(value: unknown): Job {
+  const record = jobRecord(value);
+  if (typeof record.name !== "string" || record.name.length < 1 || record.name.length > 512
+    || typeof record.agent !== "string" || record.agent.length < 1 || record.agent.length > 256
+    || typeof record.prompt_template !== "string" || record.prompt_template.length > 262_144
+    || (record.description !== null && record.description !== undefined && typeof record.description !== "string")
+    || (record.schedule_cron !== null && record.schedule_cron !== undefined && typeof record.schedule_cron !== "string")
+    || (record.trigger_event !== null && record.trigger_event !== undefined && typeof record.trigger_event !== "string")
+    || !Array.isArray(record.vault_references)) {
+    throw new Error("Invalid job response.");
+  }
+  if (record.enabled !== true && record.enabled !== false && record.enabled !== 0 && record.enabled !== 1) {
+    throw new Error("Invalid enabled in job response.");
+  }
+  return {
+    id: jobId(record.id, "job ID"),
+    project_id: jobId(record.project_id, "project ID"),
+    name: sanitizeJobDisplayText(record.name, "Unnamed job", { maxBytes: 512, maxLines: 2 }),
+    description: record.description === null || record.description === undefined
+      ? null
+      : sanitizeJobDisplayText(record.description, "", { maxBytes: 4_096, maxLines: 16 }),
+    agent: sanitizeJobDisplayText(record.agent, "Unknown agent", { maxBytes: 256, maxLines: 2 }),
+    prompt_template: record.prompt_template,
+    schedule_cron: record.schedule_cron === null || record.schedule_cron === undefined ? null : record.schedule_cron,
+    trigger_event: record.trigger_event === null || record.trigger_event === undefined ? null : record.trigger_event,
+    enabled: record.enabled === true || record.enabled === 1,
+    timeout_minutes: jobInteger(record.timeout_minutes, "job timeout", 1, 1_440),
+    revision: jobInteger(record.revision, "job revision", 0, Number.MAX_SAFE_INTEGER),
+    vault_references: record.vault_references.map(normalizeJobVaultReference),
+    created_at: jobTimestamp(record.created_at, "job creation timestamp"),
+    updated_at: jobTimestamp(record.updated_at, "job update timestamp"),
+  };
+}
+
+export function normalizeJobVaultAuditEntry(value: unknown): JobVaultAuditEntry {
+  const record = jobRecord(value, "Invalid job vault audit response.");
+  if ((record.action !== "authorized" && record.action !== "revoked" && record.action !== "secret_read" && record.action !== "access_denied")
+    || (record.actor_category !== "authenticated_api" && record.actor_category !== "job_run")
+    || (record.item_id !== null && typeof record.item_id !== "string")
+    || (record.run_id !== null && typeof record.run_id !== "string")
+    || (record.version !== null && (typeof record.version !== "number" || !Number.isSafeInteger(record.version) || record.version < 1))) {
+    throw new Error("Invalid job vault audit response.");
+  }
+  const runtime = record.action === "secret_read" || record.action === "access_denied";
+  if ((runtime && (record.actor_category !== "job_run" || record.run_id === null))
+    || (!runtime && (record.actor_category !== "authenticated_api" || record.run_id !== null || record.item_id === null || record.version === null))
+    || (record.action === "secret_read" && (record.item_id === null || record.version === null))
+    || (record.action === "access_denied" && (record.item_id !== null || record.version !== null))) {
+    throw new Error("Invalid job vault audit response.");
+  }
+  return {
+    id: jobId(record.id, "job vault audit ID"),
+    job_id: jobId(record.job_id, "job ID"),
+    item_id: record.item_id === null ? null : jobId(record.item_id, "vault item ID"),
+    action: record.action,
+    actor_category: record.actor_category,
+    run_id: record.run_id === null ? null : jobId(record.run_id, "run ID"),
+    version: record.version,
+    timestamp: jobTimestamp(record.timestamp, "job vault audit timestamp"),
+  };
+}
+
 export function normalizeTrustedJobEvent(value: unknown): TrustedJobEvent {
   const record = jobRecord(value, "Invalid trusted event response.");
   return {
@@ -996,6 +1120,8 @@ async function jobsRequest<T>(path: string, options?: RequestInit): Promise<T> {
       apiError?.status ?? 0,
       sanitizeJobDisplayText(error instanceof Error ? error.message : undefined, "Job request failed.", { maxBytes: 512, maxLines: 8 }),
       apiError?.retryAfterSeconds ?? null,
+      apiError?.code ?? null,
+      apiError?.currentRevision ?? null,
     );
   }
 }
@@ -1055,6 +1181,7 @@ export interface VaultItem {
   username?: string;
   urls?: string;
   tags?: string;
+  version: number;
   created_at: string;
   updated_at: string;
 }
@@ -2262,9 +2389,9 @@ export const api = {
   },
   jobs: {
     list: (project: string) =>
-      request<{ data: Job[]; total: number }>(`/jobs?${jobsQuery(project)}`),
+      normalizedJobsRequest(`/jobs?${jobsQuery(project)}`, (value) => normalizeJobCollection(value, normalizeJob)),
     get: (jobId: string, project: string) =>
-      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`),
+      normalizedJobsRequest(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, (value) => normalizeJobData(value, normalizeJob)),
     create: (data: {
       name: string;
       description?: string;
@@ -2273,8 +2400,9 @@ export const api = {
       schedule_cron?: string;
       trigger_event?: TrustedJobEventType | null;
       timeout_minutes?: number;
+      vault_item_ids?: string[];
     }, project: string) =>
-      request<{ data: Job }>(`/jobs?${jobsQuery(project)}`, {
+      normalizedJobsRequest(`/jobs?${jobsQuery(project)}`, (value) => normalizeJobData(value, normalizeJob), {
         method: "POST", body: JSON.stringify(data),
       }),
     update: (jobId: string, data: Partial<{
@@ -2286,14 +2414,28 @@ export const api = {
       trigger_event: TrustedJobEventType | null;
       enabled: boolean;
       timeout_minutes: number;
-    }>, project: string) =>
-      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, {
+      vault_item_ids: string[];
+    }> & { expected_revision: number }, project: string) => {
+      if (!Number.isSafeInteger(data.expected_revision) || data.expected_revision < 0) {
+        throw new Error("Job expected revision must be a nonnegative integer.");
+      }
+      return normalizedJobsRequest(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, (value) => normalizeJobData(value, normalizeJob), {
         method: "PATCH", body: JSON.stringify(data),
-      }),
-    delete: (jobId: string, project: string) =>
-      request(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, {
-        method: "DELETE",
-      }),
+      });
+    },
+    delete: (jobId: string, expectedRevision: number, project: string) => {
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new Error("Job expected revision must be a nonnegative integer.");
+      }
+      return jobsRequest(`/jobs/${encodeURIComponent(jobId)}?${jobsQuery(project)}`, {
+        method: "DELETE", body: JSON.stringify({ expected_revision: expectedRevision }),
+      });
+    },
+    vaultAudit: (jobId: string, project: string, options: { limit?: number; cursor?: string } = {}) =>
+      normalizedJobsRequest(
+        `/jobs/${encodeURIComponent(jobId)}/vault-audit?${jobsQuery(project, options)}`,
+        (value) => normalizeJobPage(value, normalizeJobVaultAuditEntry),
+      ),
     run: (jobId: string, project: string) =>
       normalizedJobsRequest(
         `/jobs/${encodeURIComponent(jobId)}/run?${jobsQuery(project)}`,

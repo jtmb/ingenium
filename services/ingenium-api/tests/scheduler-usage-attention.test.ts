@@ -33,7 +33,11 @@ const email = vi.hoisted(() => ({
 
 vi.mock("ingenium-core", () => core);
 vi.mock("ingenium-email", () => email);
-vi.mock("../lib/job-runner.js", () => ({ executeJobRun: vi.fn(), recoverExpiredEventAttempt: vi.fn() }));
+vi.mock("../lib/job-runner.js", () => ({
+  executeJobRun: vi.fn(),
+  recoverExpiredEventAttempt: vi.fn(),
+  recoverVaultSecretRunDirectories: vi.fn(() => Promise.resolve()),
+}));
 vi.mock("../lib/usage-sync.js", () => usageSync);
 
 import { startScheduler, stopScheduler } from "../lib/scheduler.js";

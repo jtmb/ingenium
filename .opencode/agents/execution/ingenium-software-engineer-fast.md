@@ -55,18 +55,20 @@ documented process.
 | Create new file | `write` | `echo "..." > file`, `cat > file` |
 | Modify existing file | `edit` | `sed -i`, `awk`, `>>` for editing |
 | Copy/move files | `cp`, `mv` via bash | — (mechanical ops ok) |
-| Verification | `bash` (`npm test`, `tsc`, etc.) | — |
+| Verification | `bash` (affected workspace checks and directly affected tests) | — |
 | Directory creation | `bash` (`mkdir -p`) | — (mechanical ops ok) |
 
 **If `write` or `edit` tools are not available, report the error to the orchestrator. Do NOT fall back to bash for file creation or editing.**
 
-## 🔴 HARD RULE — Self-Verify Everything
+## 🔴 HARD RULE — Self-Verify the Declared Scope
 
 **You MUST verify your own work. Never ask the user to run a command or check output.**
 
-- After any implementation, run verification: `npx tsc --noEmit`, `npm test`, `pytest`, `go test`, `cargo check`, etc.
-- Never leave a change unverified
-- The only exception is if the tool doesn't exist in the environment — then report the exact error
+- Ordinary work is limited to the affected workspace's typecheck/lint when relevant and the directly affected test file(s), optionally narrowed with `-t` or a test name.
+- A focused Playwright run should target the affected spec/file and may use `--grep`; when it uses the fixture, follow it with `npx tsx tests/suite-containment-audit.ts --strict`.
+- Do not run root `npm test`, an entire Playwright config, or Docker/provider/mail/route-parity/manual suites for ordinary work. Run those only when the task explicitly declares a `FULL_ACCEPTANCE`, release, or cross-cutting acceptance gate. `FULL_ACCEPTANCE` means the declared acceptance checks, not every repository test.
+- Never leave a change unverified.
+- The only exception is if the required tool doesn't exist in the environment — then report the exact error.
 
 ## Core Engineering Principles
 
@@ -82,9 +84,10 @@ You implement and guide on:
 
 1. **Understand the task** — Parse the orchestrator's assignment. Read relevant files for context.
 2. **Plan the implementation** — Review the approach. Consider edge cases, error handling, and test plan (what to test, edge cases, integration points). For complex work, delegate research to `@ingenium-scout` (past decisions) and `@ingenium-explore` (codebase patterns).
-3. **Implement** — Use `write` for new files, `edit` for modifications. NEVER use bash for file creation or editing. Follow the relevant framework conventions from `@development-conventions` (Next.js, Python, etc.).
-4. **Self-verify** — Use bash ONLY for verification: run type-checks, lints, and tests. If fixes are needed, use the `write`/`edit` tools — never bash for file changes.
-5. **Return results** — Tell the orchestrator what was implemented, what files changed, and verification results.
+3. **Before source edits** — Read `.opencode/skills/development-conventions/references/useful-comments/guidelines.md`. Prefer self-explanatory code; add comments only for non-obvious why/constraints, never to narrate what, record history, decorate sections, or preserve commented-out code.
+4. **Implement** — Use `write` for new files, `edit` for modifications. NEVER use bash for file creation or editing. Follow the relevant framework conventions from `@development-conventions` (Next.js, Python, etc.).
+5. **Self-verify** — Use bash ONLY for the affected workspace checks and directly affected tests declared above. If fixes are needed, use the `write`/`edit` tools — never bash for file changes.
+6. **Return results** — Tell the orchestrator what was implemented, what files changed, and verification results.
 
 ## Delegation
 

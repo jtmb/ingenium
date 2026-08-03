@@ -167,7 +167,11 @@ describe("vault API", () => {
     expect(create.status).toBe(201);
     const response = await fetch(vaultPath("/items"));
     expect(response.status).toBe(200);
-    expect(await response.text()).not.toContain(plaintext);
+    const text = await response.text();
+    const body = JSON.parse(text);
+    expect(text).not.toContain(plaintext);
+    expect(body.data[0]).toEqual(expect.objectContaining({ version: expect.any(Number) }));
+    expect(body.data[0]).not.toHaveProperty("value");
   });
 });
 

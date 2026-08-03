@@ -1,5 +1,5 @@
 import { settings, projects, logger, extraction, synthesis, jobs, jobEventDeliveries, maintenanceLocks, checkpointAfterWrite, usage } from "ingenium-core";
-import { executeJobRun, recoverExpiredEventAttempt } from "./job-runner.js";
+import { executeJobRun, recoverExpiredEventAttempt, recoverVaultSecretRunDirectories } from "./job-runner.js";
 import { getUsageSyncInterval, syncUsageFromOpenCode } from "./usage-sync.js";
 import {
   getEmailEncryptionDiagnostics,
@@ -399,6 +399,9 @@ function matchField(pattern: string, value: number, _min: number, _max: number):
 
 function runJobScheduler(generation: number): void {
   if (!isSchedulerActive(generation)) return;
+  void recoverVaultSecretRunDirectories().catch(() => {
+    logger.warn("job-scheduler", "Vault job recovery retained unresolved evidence");
+  });
   try {
     const allProjects = projects.listProjects();
     const activeProjects = allProjects.filter(p => !p.archived_at);

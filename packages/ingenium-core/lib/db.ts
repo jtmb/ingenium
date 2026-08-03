@@ -161,6 +161,30 @@ interface JobVaultReferencesMigrationState {
   missing: string[];
 }
 
+interface VaultJobRunsMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface JobVaultRevisionAuditMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface RestorePlansMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface RestoreExecutorMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -1163,6 +1187,306 @@ function inspectJobVaultReferencesMigration(db: Database.Database): JobVaultRefe
   return { any, complete: missing.length === 0, missing };
 }
 
+/** VAULT-101 run provenance must be complete before the runner can recover it. */
+function inspectVaultJobRunsMigration(db: Database.Database): VaultJobRunsMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    job_vault_runs: [
+      "run_id", "project_id", "job_id", "state", "deadline_at", "process_nonce_hash",
+      "process_id", "process_group_id", "process_start_time", "process_executable", "revision",
+      "prepared_at", "spawned_at", "teardown_started_at", "cleaned_at", "failed_at", "updated_at",
+    ],
+    job_vault_run_items: ["project_id", "run_id", "job_id", "item_id", "authorized_item_version", "created_at"],
+  };
+  const requiredSql: Record<string, string[]> = {
+    job_vault_runs: [
+      "state IN ('prepared', 'spawned', 'teardown_pending', 'cleaned', 'failed')",
+      "FOREIGN KEY(project_id, job_id) REFERENCES jobs(project_id, id) ON DELETE RESTRICT",
+      "FOREIGN KEY(project_id, run_id) REFERENCES job_runs(project_id, id) ON DELETE RESTRICT",
+    ],
+    job_vault_run_items: [
+      "PRIMARY KEY(project_id, run_id, item_id)",
+      "FOREIGN KEY(project_id, run_id) REFERENCES job_vault_runs(project_id, run_id) ON DELETE RESTRICT",
+      "FOREIGN KEY(project_id, item_id) REFERENCES vault_items(project_id, id) ON DELETE RESTRICT",
+    ],
+  };
+  const indexes = ["idx_job_vault_runs_recovery", "idx_job_vault_run_items_project_run"];
+  const triggers = [
+    "job_vault_runs_identity_immutable_update",
+    "job_vault_runs_process_identity_immutable_update",
+    "job_vault_runs_state_transition_update",
+    "job_vault_runs_spawn_requires_identity",
+    "job_vault_runs_revision_cas_update",
+    "job_vault_run_items_immutable_update",
+    "job_vault_run_items_immutable_delete",
+    "job_vault_run_items_matches_run",
+  ];
+  const missing: string[] = [];
+  let any = false;
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || !requiredSql[table]!.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_runs", "jobs", ["project_id", "job_id"])) {
+    missing.push("job_vault_runs → jobs composite foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_runs", "job_runs", ["project_id", "run_id"])) {
+    missing.push("job_vault_runs → job_runs composite foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_run_items", "job_vault_runs", ["project_id", "run_id"])) {
+    missing.push("job_vault_run_items → job_vault_runs composite foreign key");
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** VAULT-102 requires CAS revisions and structured, immutable runtime audit rows. */
+function inspectJobVaultRevisionAuditMigration(db: Database.Database): JobVaultRevisionAuditMigrationState {
+  const jobsRevision = db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('jobs') WHERE name = 'revision'",
+  ).get() as { count: number };
+  const auditExists = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'job_vault_runtime_audit'",
+  ).get() as { count: number };
+  const any = jobsRevision.count > 0 || auditExists.count > 0;
+  const missing: string[] = [];
+  if (jobsRevision.count === 0) missing.push("jobs revision column");
+  if (auditExists.count === 0) {
+    missing.push("job_vault_runtime_audit table");
+    return { any, complete: false, missing };
+  }
+
+  const requiredColumns = [
+    "id", "project_id", "job_id", "item_id", "action", "run_id", "authorized_item_version", "created_at",
+  ];
+  if (!hasContextConversationColumns(db, "job_vault_runtime_audit", requiredColumns)) {
+    missing.push("job_vault_runtime_audit required columns");
+  }
+  const tableSql = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'job_vault_runtime_audit'",
+  ).get() as { sql?: string } | undefined;
+  if (!tableSql?.sql || ![
+    "action IN ('secret_read', 'access_denied')",
+    "FOREIGN KEY(project_id, job_id) REFERENCES jobs(project_id, id) ON DELETE RESTRICT",
+    "FOREIGN KEY(project_id, run_id) REFERENCES job_runs(project_id, id) ON DELETE RESTRICT",
+    "FOREIGN KEY(project_id, item_id) REFERENCES vault_items(project_id, id) ON DELETE RESTRICT",
+  ].every((fragment) => tableSql.sql!.includes(fragment))) {
+    missing.push("job_vault_runtime_audit constraints");
+  }
+  for (const index of ["idx_job_vault_runtime_audit_project_job_created"]) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of [
+    "jobs_revision_monotonic_update",
+    "job_vault_runtime_audit_run_matches_job",
+    "job_vault_runtime_audit_immutable_update",
+    "job_vault_runtime_audit_immutable_delete",
+  ]) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_runtime_audit", "jobs", ["project_id", "job_id"])) {
+    missing.push("job_vault_runtime_audit → jobs composite foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_runtime_audit", "job_runs", ["project_id", "run_id"])) {
+    missing.push("job_vault_runtime_audit → job_runs composite foreign key");
+  }
+  if (!hasCompositeForeignKey(db, "job_vault_runtime_audit", "vault_items", ["project_id", "item_id"])) {
+    missing.push("job_vault_runtime_audit → vault_items composite foreign key");
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** RESTORE-100 is an all-or-nothing approval boundary. Partial plans must not resume. */
+function inspectRestorePlansMigration(db: Database.Database): RestorePlansMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    backup_restore_plans: [
+      "id", "project_id", "backup_id", "dry_run", "manifest_hash", "plan_hash", "components_json",
+      "blockers_json", "warnings_json", "created_at",
+    ],
+    backup_restore_plan_revisions: [
+      "id", "project_id", "plan_id", "backup_id", "revision", "from_state", "to_state", "stage_hash", "created_at",
+    ],
+    backup_restore_authorizations: [
+      "id", "project_id", "plan_id", "backup_id", "operation", "plan_revision", "manifest_hash",
+      "token_hash", "expires_at", "consumed_at", "created_at",
+    ],
+    backup_restore_stages: [
+      "id", "project_id", "plan_id", "backup_id", "manifest_hash", "plan_hash",
+      "ingenium_sha256", "ingenium_size_bytes", "opencode_sha256", "opencode_size_bytes", "stage_hash", "created_at",
+    ],
+    backup_restore_events: [
+      "id", "project_id", "plan_id", "backup_id", "event_type", "from_state", "to_state", "revision",
+      "manifest_hash", "plan_hash", "metadata", "created_at",
+    ],
+    backup_restore_receipts: [
+      "id", "project_id", "plan_id", "operation", "idempotency_key", "request_hash", "result_json", "created_at",
+    ],
+  };
+  const indexes = [
+    "idx_backup_records_project_id_id",
+    "idx_backup_restore_plans_project_created",
+    "idx_backup_restore_revisions_project_plan",
+    "idx_backup_restore_events_project_plan",
+    "idx_backup_restore_authorizations_plan_expiry",
+    "idx_backup_restore_receipts_project_created",
+  ];
+  const triggers = [
+    "backup_restore_plans_global_project_insert",
+    "backup_restore_plan_revisions_global_project_insert",
+    "backup_restore_authorizations_global_project_insert",
+    "backup_restore_stages_global_project_insert",
+    "backup_restore_events_global_project_insert",
+    "backup_restore_receipts_global_project_insert",
+    "backup_restore_events_immutable_update",
+    "backup_restore_events_immutable_delete",
+    "backup_restore_receipts_immutable_update",
+    "backup_restore_receipts_immutable_delete",
+    "backup_restore_plans_immutable_update",
+    "backup_restore_plans_immutable_delete",
+    "backup_restore_plan_revisions_immutable_update",
+    "backup_restore_plan_revisions_immutable_delete",
+    "backup_restore_plan_revisions_validate_insert",
+    "backup_restore_plan_revisions_create_event",
+    "backup_restore_stages_immutable_update",
+    "backup_restore_stages_immutable_delete",
+    "backup_restore_stages_validate_insert",
+    "backup_restore_authorizations_validate_insert",
+    "backup_restore_authorizations_immutable_delete",
+    "backup_restore_authorizations_consume_once",
+  ];
+  const missing: string[] = [];
+  let any = false;
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  for (const [table, reference, columns] of [
+    ["backup_restore_plans", "backup_records", ["project_id", "backup_id"]],
+    ["backup_restore_plan_revisions", "backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_restore_plan_revisions", "backup_records", ["project_id", "backup_id"]],
+    ["backup_restore_authorizations", "backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_restore_authorizations", "backup_records", ["project_id", "backup_id"]],
+    ["backup_restore_stages", "backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_restore_stages", "backup_records", ["project_id", "backup_id"]],
+    ["backup_restore_events", "backup_restore_plan_revisions", ["project_id", "plan_id", "revision"]],
+    ["backup_restore_events", "backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_restore_events", "backup_records", ["project_id", "backup_id"]],
+    ["backup_restore_receipts", "backup_restore_plans", ["project_id", "plan_id"]],
+  ] as Array<[string, string, string[]]>) {
+    if (!hasCompositeForeignKey(db, table, reference, columns)) {
+      missing.push(`${table} → ${reference} composite foreign key`);
+    }
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** RESTORE-101's executor ledger is inseparable: partial state must never run. */
+function inspectRestoreExecutorMigration(db: Database.Database): RestoreExecutorMigrationState {
+  const tables: Record<string, string[]> = {
+    backup_restore_execution_authorizations: ["id", "project_id", "plan_id", "backup_id", "operation", "plan_revision", "manifest_hash", "plan_hash", "stage_hash", "token_hash", "expires_at", "consumed_at", "created_at"],
+    backup_restore_execution_runs: ["id", "project_id", "plan_id", "backup_id", "authorization_id", "plan_revision", "manifest_hash", "plan_hash", "stage_hash", "state", "phase", "revision", "owner_hash", "fence_hash", "deadline_at", "safety_backup_id", "error_code", "created_at", "updated_at", "completed_at"],
+    backup_restore_execution_items: ["id", "project_id", "run_id", "component", "expected_sha256", "size_bytes", "pre_hash", "post_hash", "created_at"],
+    backup_restore_executor_plan_revisions: ["id", "project_id", "plan_id", "backup_id", "revision", "from_state", "to_state", "execution_run_id", "stage_hash", "created_at"],
+    backup_restore_execution_events: ["id", "project_id", "plan_id", "backup_id", "run_id", "revision", "event_code", "from_state", "to_state", "manifest_hash", "plan_hash", "stage_hash", "metadata", "created_at"],
+    backup_restore_execution_receipts: ["id", "project_id", "plan_id", "operation", "idempotency_key", "request_hash", "result_json", "created_at"],
+  };
+  const indexes = ["idx_backup_restore_execution_authorizations_plan_expiry", "idx_backup_restore_execution_runs_claim", "idx_backup_restore_execution_events_plan", "idx_backup_restore_execution_receipts_project_created"];
+  const triggers = [
+    "backup_restore_authorizations_consume_once", "backup_restore_execution_authorizations_validate_insert",
+    "backup_restore_execution_authorizations_consume_once", "backup_restore_execution_authorizations_immutable_delete",
+    "backup_restore_execution_runs_validate_insert", "backup_restore_execution_runs_update", "backup_restore_execution_runs_immutable_delete",
+    "backup_restore_execution_items_validate_insert", "backup_restore_execution_items_hashes_write_once", "backup_restore_execution_items_immutable_delete",
+    "backup_restore_executor_plan_revisions_validate_insert", "backup_restore_executor_plan_revisions_create_event",
+    "backup_restore_executor_plan_revisions_immutable_update", "backup_restore_executor_plan_revisions_immutable_delete",
+    "backup_restore_execution_events_immutable_update", "backup_restore_execution_events_immutable_delete",
+    "backup_restore_execution_receipts_immutable_update", "backup_restore_execution_receipts_immutable_delete",
+  ];
+  const missing: string[] = [];
+  let any = false;
+  for (const [table, columns] of Object.entries(tables)) {
+    const exists = (db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${table} table`);
+    else if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?").get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(trigger) as { count: number }).count > 0;
+    if (trigger !== "backup_restore_authorizations_consume_once") any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  const authorizationGuard = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'backup_restore_authorizations_consume_once'")
+    .get() as { sql?: string } | undefined;
+  if (any && !authorizationGuard?.sql?.includes("NEW.id IS NOT OLD.id")) missing.push("backup_restore_authorizations identity guard");
+  for (const [table, reference, columns] of [
+    ["backup_restore_execution_authorizations", "backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_restore_execution_runs", "backup_restore_execution_authorizations", ["project_id", "authorization_id"]],
+    ["backup_restore_execution_items", "backup_restore_execution_runs", ["project_id", "run_id"]],
+    ["backup_restore_executor_plan_revisions", "backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_restore_execution_events", "backup_restore_executor_plan_revisions", ["project_id", "plan_id", "revision"]],
+    ["backup_restore_execution_receipts", "backup_restore_plans", ["project_id", "plan_id"]],
+  ] as Array<[string, string, string[]]>) {
+    if (!hasCompositeForeignKey(db, table, reference, columns)) missing.push(`${table} → ${reference} composite foreign key`);
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
 function contextRepairError(message: string): Error {
   return new Error(`Migration 067 context repair preflight refused: ${message}`);
 }
@@ -1997,7 +2321,14 @@ export function getDb(dbPath?: string): Database.Database {
   db.pragma("busy_timeout = 5000");
   db.pragma("foreign_keys = ON");
 
-  runMigrations(db);
+  // The fixed root restore executor must inspect the live database before it
+  // stops appuser processes. Running schema migrations at that point can
+  // rebuild a table while those processes still hold the database open. The
+  // executor swaps a previously validated snapshot; the restarted API applies
+  // any pending migrations as appuser after the swap.
+  const isRootRestoreMaintenance = process.env.INGENIUM_RESTORE_MAINTENANCE_MODE === "execute"
+    && typeof process.getuid === "function" && process.getuid() === 0;
+  if (!isRootRestoreMaintenance) runMigrations(db);
   return db;
 }
 
@@ -2044,6 +2375,11 @@ function runMigrations(db: Database.Database): void {
         "078_usage_advisory_thresholds.sql",
         "079_usage_attention_items.sql",
         "080_job_vault_references.sql",
+        "081_vault_job_runs.sql",
+        "082_job_vault_revision_audit.sql",
+        "083_restore_plans.sql",
+        "084_restore_executor.sql",
+        "085_restore_executor_phase_events.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -3039,6 +3375,66 @@ function runMigrations(db: Database.Database): void {
     logger.info("db", "Applied migration 080_job_vault_references.sql");
   }
 
+  const vaultJobRunsMigration = inspectVaultJobRunsMigration(db);
+  if (vaultJobRunsMigration.any && !vaultJobRunsMigration.complete) {
+    throw new Error(
+      "Migration 081 is in a PARTIAL state. Missing required components: "
+      + vaultJobRunsMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!vaultJobRunsMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "081_vault_job_runs.sql"), "utf-8"));
+    logger.info("db", "Applied migration 081_vault_job_runs.sql");
+  }
+
+  const jobVaultRevisionAuditMigration = inspectJobVaultRevisionAuditMigration(db);
+  if (jobVaultRevisionAuditMigration.any && !jobVaultRevisionAuditMigration.complete) {
+    throw new Error(
+      "Migration 082 is in a PARTIAL state. Missing required components: "
+      + jobVaultRevisionAuditMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!jobVaultRevisionAuditMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "082_job_vault_revision_audit.sql"), "utf-8"));
+    logger.info("db", "Applied migration 082_job_vault_revision_audit.sql");
+  }
+
+  const restorePlansMigration = inspectRestorePlansMigration(db);
+  if (restorePlansMigration.any && !restorePlansMigration.complete) {
+    throw new Error(
+      "Migration 083 is in a PARTIAL state. Missing required components: "
+      + restorePlansMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!restorePlansMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "083_restore_plans.sql"), "utf-8"));
+    logger.info("db", "Applied migration 083_restore_plans.sql");
+  }
+
+  const restoreExecutorMigration = inspectRestoreExecutorMigration(db);
+  if (restoreExecutorMigration.any && !restoreExecutorMigration.complete) {
+    throw new Error(
+      "Migration 084 is in a PARTIAL state. Missing required components: "
+      + restoreExecutorMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!restoreExecutorMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "084_restore_executor.sql"), "utf-8"));
+    logger.info("db", "Applied migration 084_restore_executor.sql");
+  }
+
+  const phaseEventsTable = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'backup_restore_execution_phase_events'",
+  ).get() as { count: number };
+  if (phaseEventsTable.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "085_restore_executor_phase_events.sql"), "utf-8"));
+    logger.info("db", "Applied migration 085_restore_executor_phase_events.sql");
+  }
+
   enforceReservedBrokerInvariant(db);
 }
 
@@ -3204,15 +3600,20 @@ export function checkpointAfterWrite(): void {
   }
 }
 
+/** Close the singleton before RESTORE-101 scans for database holders. */
+export function closeDbForMaintenance(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
+  writeCount = 0;
+}
+
 /**
  * Reset the singleton database connection.
  * For test use only — closes the current connection and clears the singleton
  * so the next getDb() call creates a fresh connection to a new path.
  */
 export function resetDbForTest(): void {
-  if (db) {
-    db.close();
-    db = null;
-  }
-  writeCount = 0;
+  closeDbForMaintenance();
 }

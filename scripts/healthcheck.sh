@@ -38,6 +38,24 @@ require_api_ok() {
   fi
 }
 
+require_vault_job_secret_root() {
+  if ! /app/scripts/validate-vault-job-secret-root.sh verify; then
+    echo "ERROR: vault job secret root validation failed"
+    exit 1
+  fi
+}
+
+require_restore_maintenance_safe() {
+  status="$(supervisorctl status restore-maintenance || true)"
+  case "$status" in
+    *RUNNING*|*STOPPED*|*EXITED*) ;;
+    *)
+      echo "ERROR: restore maintenance supervisor state is unsafe: $status"
+      exit 1
+      ;;
+  esac
+}
+
 require_http_ok() {
   name="$1"
   url="$2"
@@ -92,6 +110,8 @@ for program in ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-ga
   require_running "$program"
 done
 
+require_restore_maintenance_safe
+require_vault_job_secret_root
 require_api_ok
 require_http_ok "dashboard" "http://127.0.0.1:3001/"
 require_http_ok "OpenCode Web" "http://127.0.0.1:4098/"

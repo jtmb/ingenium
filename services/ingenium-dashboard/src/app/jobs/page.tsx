@@ -9,10 +9,12 @@ import {
   ApiError,
   type Agent,
   type Job,
+  type JobVaultAuditEntry,
   type JobEventDelivery,
   type JobEventDeliveryState,
   type JobRun,
   type JobRunLog,
+  type VaultItem,
   sanitizeJobDisplayText,
   TRUSTED_JOB_EVENT_TYPES,
   type TrustedJobEvent,
@@ -35,6 +37,21 @@ type JobFormData = {
   schedule_cron: string;
   trigger_event: string;
   timeout_minutes: number;
+};
+
+type JobSaveData = {
+  name: string;
+  description?: string;
+  agent: string;
+  prompt_template: string;
+  schedule_cron?: string;
+  timeout_minutes: number;
+  trigger_event?: TrustedJobEventType | null;
+};
+
+type VaultReferenceConfirmation = {
+  data: JobSaveData;
+  includeReferences: boolean;
 };
 
 const EMPTY_FORM: JobFormData = {
@@ -157,6 +174,57 @@ function EventTypeText({ eventType }: { eventType: TrustedJobEventType }) {
   return <span title={eventType}>{eventLabel(eventType)} <span className="text-xs text-[var(--color-text-muted)]">({eventType})</span></span>;
 }
 
+function vaultReferenceLabel(reference: Job["vault_references"][number]): string {
+  return reference.status === "authorized"
+    ? "Authorized"
+    : reference.status === "version_stale"
+      ? "Version stale"
+      : "Unavailable";
+}
+
+function vaultReferenceTone(status: Job["vault_references"][number]["status"]): string {
+  return badgeTones(status === "authorized" ? "success" : status === "version_stale" ? "amber" : "error");
+}
+
+function VaultReferenceAudit({ job, project }: { job: Job; project: string }) {
+  const [entries, setEntries] = useState<JobVaultAuditEntry[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (nextCursor?: string) => {
+    try {
+      const response = await api.jobs.vaultAudit(job.id, project, { limit: PAGE_LIMIT, ...(nextCursor ? { cursor: nextCursor } : {}) });
+      setEntries((current) => nextCursor ? [...current, ...response.data.filter((entry) => !current.some((known) => known.id === entry.id))] : response.data);
+      setCursor(response.nextCursor);
+      setError(null);
+    } catch (failure: unknown) {
+      setError(`Vault audit could not be loaded: ${jobErrorText(failure, "Try again shortly.")}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [job.id, project]);
+
+  useEffect(() => {
+    setEntries([]);
+    setCursor(null);
+    setLoading(true);
+    void load();
+  }, [load]);
+
+  return <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow" aria-label="Vault authorization audit">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Vault authorization audit</h2><span className="text-xs text-[var(--color-text-muted)]">Metadata only</span></div>
+    {loading && entries.length === 0 && <p role="status" className="mt-3 text-sm text-[var(--color-text-muted)]">Loading vault audit…</p>}
+    {error && <p role="alert" className="mt-3 text-sm text-[var(--color-error-text)]">{error}</p>}
+    {!loading && !error && entries.length === 0 && <p className="mt-3 text-sm text-[var(--color-text-muted)]">No vault authorization activity.</p>}
+    {entries.length > 0 && <ol className="mt-3 space-y-2 text-xs">{entries.map((entry) => <li key={entry.id} className="min-w-0 rounded border border-[var(--color-border-muted)] p-2">
+      <div className="flex flex-wrap items-center gap-2"><span className={`${BADGE_BASE} ${badgeTones(entry.action === "access_denied" ? "error" : entry.action === "revoked" ? "amber" : "blue")}`}>{entry.action.replace("_", " ")}</span><span>{entry.actor_category}</span><Timestamp value={entry.timestamp} /></div>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[var(--color-text-muted)]">{entry.item_id && <span>Item <Identifier value={entry.item_id} label="Vault item ID" /></span>}{entry.run_id && <span>Run <Identifier value={entry.run_id} label="Run ID" /></span>}{entry.version !== null && <span>Version {entry.version}</span>}</div>
+    </li>)}</ol>}
+    {cursor && <button type="button" onClick={() => void load(cursor)} className="mt-3 rounded border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-hover)]">Load more</button>}
+  </section>;
+}
+
 function JobFormOverlay({
   isOpen,
   onClose,
@@ -172,15 +240,25 @@ function JobFormOverlay({
   project: string;
   onSaved: (savedJob?: Job) => void;
 }) {
+  const [baseJob, setBaseJob] = useState<Job | undefined>(initial);
   const [form, setForm] = useState<JobFormData>(EMPTY_FORM);
+  const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
+  const [vaultStatus, setVaultStatus] = useState<{ sealed: boolean; initialized: boolean } | null>(null);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [vaultItemIds, setVaultItemIds] = useState<string[]>([]);
+  const [referencesTouched, setReferencesTouched] = useState(false);
+  const [refreshRequested, setRefreshRequested] = useState(false);
+  const [confirmation, setConfirmation] = useState<VaultReferenceConfirmation | null>(null);
+  const [conflictRevision, setConflictRevision] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
-  const legacyTrigger = initial?.trigger_event && !isTrustedEventType(initial.trigger_event) ? initial.trigger_event : null;
+  const legacyTrigger = baseJob?.trigger_event && !isTrustedEventType(baseJob.trigger_event) ? baseJob.trigger_event : null;
 
   useEffect(() => {
+    setBaseJob(initial);
     setForm(initial ? {
       name: initial.name,
       description: initial.description ?? "",
@@ -190,10 +268,38 @@ function JobFormOverlay({
       trigger_event: initial.trigger_event ?? "",
       timeout_minutes: initial.timeout_minutes,
     } : EMPTY_FORM);
+    setVaultItemIds(initial?.vault_references.map((reference) => reference.item_id) ?? []);
+    setReferencesTouched(false);
+    setRefreshRequested(false);
+    setConfirmation(null);
+    setConflictRevision(null);
     setError(null);
     setSuggestionError(null);
     setSuggesting(false);
   }, [initial, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setVaultStatus(null);
+    setVaultItems([]);
+    setVaultError(null);
+    void api.vault.status(project).then(async (response) => {
+      if (cancelled) return;
+      const status = response.data;
+      setVaultStatus({ sealed: status.sealed, initialized: status.initialized });
+      if (status.sealed || !status.initialized) return;
+      try {
+        const items = await api.vault.items.list(undefined, project);
+        if (!cancelled) setVaultItems(items.data);
+      } catch (failure: unknown) {
+        if (!cancelled) setVaultError(`Vault metadata could not be loaded: ${jobErrorText(failure, "Adding references is unavailable.")}`);
+      }
+    }).catch((failure: unknown) => {
+      if (!cancelled) setVaultError(`Vault status could not be loaded: ${jobErrorText(failure, "Adding references is unavailable.")}`);
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, project]);
 
   const update = (field: keyof JobFormData, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -223,12 +329,40 @@ function JobFormOverlay({
     }
   };
 
+  const submit = async (data: VaultReferenceConfirmation["data"], includeReferences: boolean) => {
+    const activeJob = baseJob;
+    setSaving(true);
+    setError(null);
+    setConflictRevision(null);
+    try {
+      const response = activeJob
+        ? await api.jobs.update(activeJob.id, {
+          ...data,
+          ...(includeReferences ? { vault_item_ids: vaultItemIds } : {}),
+          expected_revision: activeJob.revision,
+        }, project)
+        : await api.jobs.create({ ...data, ...(includeReferences ? { vault_item_ids: vaultItemIds } : {}) }, project);
+      onSaved(response.data);
+      onClose();
+    } catch (saveFailure: unknown) {
+      if (saveFailure instanceof ApiError && saveFailure.code === "JOB_REVISION_CONFLICT") {
+        setConflictRevision(saveFailure.currentRevision);
+        setConfirmation(null);
+        setError("This job changed while you were editing. Your draft is still open; reload explicitly before saving again.");
+      } else {
+        setError(`Job could not be saved: ${jobErrorText(saveFailure, "Save failed.")}`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const save = async () => {
     if (!form.name.trim() || !form.agent || !form.prompt_template.trim()) {
       setError("Name, agent, and prompt template are required.");
       return;
     }
-    const triggerChanged = form.trigger_event !== (initial?.trigger_event ?? "");
+    const triggerChanged = form.trigger_event !== (baseJob?.trigger_event ?? "");
     const trigger = isTrustedEventType(form.trigger_event) ? form.trigger_event : null;
     const data = {
       name: form.name.trim(),
@@ -239,25 +373,67 @@ function JobFormOverlay({
       timeout_minutes: form.timeout_minutes,
       ...(!legacyTrigger || triggerChanged ? { trigger_event: trigger } : {}),
     };
-    setSaving(true);
-    setError(null);
+    if (referencesTouched) {
+      setConfirmation({ data, includeReferences: true });
+      return;
+    }
+    await submit(data, false);
+  };
+
+  const reloadAfterConflict = async () => {
+    if (!baseJob) return;
     try {
-      const response = initial
-        ? await api.jobs.update(initial.id, data, project)
-        : await api.jobs.create(data, project);
-      onSaved(response.data);
-      onClose();
-    } catch (saveFailure: unknown) {
-      setError(`Job could not be saved: ${jobErrorText(saveFailure, "Save failed.")}`);
-    } finally {
-      setSaving(false);
+      const response = await api.jobs.get(baseJob.id, project);
+      const latest = response.data;
+      setBaseJob(latest);
+      setForm({
+        name: latest.name,
+        description: latest.description ?? "",
+        agent: latest.agent,
+        prompt_template: latest.prompt_template,
+        schedule_cron: latest.schedule_cron ?? "",
+        trigger_event: latest.trigger_event ?? "",
+        timeout_minutes: latest.timeout_minutes,
+      });
+      setVaultItemIds(latest.vault_references.map((reference) => reference.item_id));
+      setReferencesTouched(false);
+      setRefreshRequested(false);
+      setConflictRevision(null);
+      setError(null);
+    } catch (reloadFailure: unknown) {
+      setError(`Current job could not be reloaded: ${jobErrorText(reloadFailure, "Try again shortly.")}`);
     }
   };
 
+  const existingReferences = baseJob?.vault_references ?? [];
+  const existingIds = new Set(existingReferences.map((reference) => reference.item_id));
+  const itemById = new Map(vaultItems.map((item) => [item.id, item]));
+  const canAddReferences = vaultStatus?.initialized === true && vaultStatus.sealed === false && vaultError === null;
+  const changeReference = (itemId: string, checked: boolean) => {
+    setVaultItemIds((current) => checked ? [...current, itemId].slice(0, 16) : current.filter((id) => id !== itemId));
+    setReferencesTouched(true);
+    setRefreshRequested(false);
+  };
+  const staleReferences = existingReferences.filter((reference) => reference.status === "version_stale");
+  const confirmationRows = vaultItemIds.map((itemId) => ({ itemId, name: itemById.get(itemId)?.name }));
+  const authorizedRows = confirmationRows.filter(({ itemId }) => !existingIds.has(itemId));
+  const revokedRows = existingReferences.filter((reference) => !vaultItemIds.includes(reference.item_id)).map((reference) => ({ itemId: reference.item_id, name: itemById.get(reference.item_id)?.name }));
+  const refreshRows = confirmationRows.filter(({ itemId }) => existingIds.has(itemId) && (refreshRequested || staleReferences.some((reference) => reference.item_id === itemId)));
+
   return (
-    <Overlay isOpen={isOpen} onClose={onClose} title={initial ? `Edit Job: ${initial.name}` : "Create Job"} subtitle="Configure a scheduled or trusted-event job">
+    <Overlay isOpen={isOpen} onClose={onClose} title={baseJob ? `Edit Job: ${baseJob.name}` : "Create Job"} subtitle="Configure a scheduled or trusted-event job">
       <div className="space-y-4">
         {error && <Alert>{error}</Alert>}
+        {conflictRevision !== null && <p role="status" className="text-sm text-[var(--color-warning-text)]">Current revision: {conflictRevision}</p>}
+        {confirmation ? <section className="space-y-4 rounded-lg border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] p-4" aria-label="Confirm vault references">
+          <div><h3 className="font-semibold text-[var(--color-text-primary)]">Confirm vault references</h3><p className="mt-1 text-sm text-[var(--color-text-secondary)]">Authorized items are available only to this bounded job runtime. This never reveals a vault value.</p></div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div><h4 className="text-sm font-medium">Authorize</h4>{authorizedRows.length === 0 ? <p className="text-xs text-[var(--color-text-muted)]">None</p> : <ul className="mt-1 space-y-1 text-xs">{authorizedRows.map((row) => <li key={row.itemId} className="break-all">{canAddReferences && row.name ? `${row.name} · ` : ""}{row.itemId}</li>)}</ul>}</div>
+            <div><h4 className="text-sm font-medium">Refresh</h4>{refreshRows.length === 0 ? <p className="text-xs text-[var(--color-text-muted)]">None</p> : <ul className="mt-1 space-y-1 text-xs">{refreshRows.map((row) => <li key={row.itemId} className="break-all">{canAddReferences && row.name ? `${row.name} · ` : ""}{row.itemId}</li>)}</ul>}</div>
+            <div><h4 className="text-sm font-medium">Revoke</h4>{revokedRows.length === 0 ? <p className="text-xs text-[var(--color-text-muted)]">None</p> : <ul className="mt-1 space-y-1 text-xs">{revokedRows.map((row) => <li key={row.itemId} className="break-all">{canAddReferences && row.name ? `${row.name} · ` : ""}{row.itemId}</li>)}</ul>}</div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setConfirmation(null)} disabled={saving} className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-hover)]">Back</button><button type="button" onClick={() => void submit(confirmation.data, confirmation.includeReferences)} disabled={saving} className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Saving…" : "Confirm references"}</button></div>
+        </section> : <>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="space-y-4">
             <div>
@@ -302,6 +478,17 @@ function JobFormOverlay({
               <p id="job-trigger-help" className="mt-1 text-xs text-[var(--color-text-muted)]">Only trusted context maintenance events can start event-driven jobs. Run Now always starts a fresh manual run; it never replays an event delivery.</p>
               {legacyTrigger && <p id="job-trigger-legacy" className="mt-1 text-xs text-[var(--color-warning-text)]">Legacy trigger preserved. Choose No event or a trusted event to replace it; legacy values cannot be selected for new jobs.</p>}
             </div>
+            <fieldset className="rounded border border-[var(--color-border)] p-3" aria-describedby="job-vault-reference-help">
+              <legend className="px-1 text-sm font-medium">Vault references ({vaultItemIds.length}/16)</legend>
+              <p id="job-vault-reference-help" className="text-xs text-[var(--color-text-muted)]">Metadata-only authorization. No value is loaded into this form.</p>
+              {vaultStatus === null && <p role="status" className="mt-2 text-xs text-[var(--color-text-muted)]">Checking vault status…</p>}
+              {vaultStatus?.sealed && <p className="mt-2 text-xs text-[var(--color-warning-text)]">Vault is sealed. Adding references is disabled; existing references can still be revoked.</p>}
+              {vaultStatus && !vaultStatus.initialized && <p className="mt-2 text-xs text-[var(--color-warning-text)]">Vault is unavailable. Adding references is disabled.</p>}
+              {vaultError && <p role="alert" className="mt-2 text-xs text-[var(--color-warning-text)]">{vaultError}</p>}
+              {existingReferences.length > 0 && <div className="mt-3 space-y-2"><p className="text-xs font-medium">Current references</p>{existingReferences.map((reference) => <label key={reference.item_id} className="flex min-w-0 items-start gap-2 text-xs"><input type="checkbox" checked={vaultItemIds.includes(reference.item_id)} onChange={(event) => changeReference(reference.item_id, event.target.checked)} /><span className="min-w-0 break-all"><Identifier value={reference.item_id} label="Vault item ID" /> <span className={`${BADGE_BASE} ${vaultReferenceTone(reference.status)}`}>{vaultReferenceLabel(reference)}</span> · authorized version {reference.authorized_item_version}</span></label>)}</div>}
+              {canAddReferences && <div className="mt-3 space-y-2"><p className="text-xs font-medium">Available metadata</p>{vaultItems.filter((item) => !existingIds.has(item.id)).map((item) => <label key={item.id} className="flex min-w-0 items-start gap-2 text-xs"><input type="checkbox" checked={vaultItemIds.includes(item.id)} disabled={!vaultItemIds.includes(item.id) && vaultItemIds.length >= 16} onChange={(event) => changeReference(item.id, event.target.checked)} /><span className="min-w-0 break-words">{item.name} · {item.type} · <Identifier value={item.id} label="Vault item ID" /> · version {item.version}</span></label>)}{vaultItems.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No active vault item metadata.</p>}</div>}
+              {staleReferences.length > 0 && <button type="button" onClick={() => { setReferencesTouched(true); setRefreshRequested(true); }} className="mt-3 rounded border border-[var(--color-warning-border)] px-2 py-1 text-xs text-[var(--color-warning-text)] hover:bg-[var(--color-warning-bg)]">Refresh stale references</button>}
+            </fieldset>
           </div>
           <div>
             <label htmlFor="job-prompt" className="mb-1 block text-sm font-medium">Prompt Template *</label>
@@ -310,8 +497,10 @@ function JobFormOverlay({
         </div>
         <div className="flex flex-wrap justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-hover)]">Cancel</button>
-          <button type="button" onClick={() => void save()} disabled={saving} className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Saving…" : initial ? "Update Job" : "Create Job"}</button>
+          {conflictRevision !== null && <button type="button" onClick={() => void reloadAfterConflict()} disabled={saving} className="rounded border border-[var(--color-warning-border)] px-3 py-1.5 text-sm text-[var(--color-warning-text)] hover:bg-[var(--color-warning-bg)]">Reload current job</button>}
+          <button type="button" onClick={() => void save()} disabled={saving} className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Saving…" : baseJob ? "Update Job" : "Create Job"}</button>
         </div>
+        </>}
       </div>
     </Overlay>
   );
@@ -405,6 +594,7 @@ function JobDetailView({
   const [selectedRun, setSelectedRun] = useState<JobRun | null>(null);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [vaultSealed, setVaultSealed] = useState<boolean | null>(null);
 
   const fetchRuns = useCallback(async () => {
     setLoadingRuns(true);
@@ -424,6 +614,16 @@ function JobDetailView({
   useEffect(() => { void fetchRuns(); }, [fetchRuns, refreshToken]);
 
   useEffect(() => {
+    let cancelled = false;
+    void api.vault.status(project).then((response) => {
+      if (!cancelled) setVaultSealed(response.data.sealed);
+    }).catch(() => {
+      if (!cancelled) setVaultSealed(null);
+    });
+    return () => { cancelled = true; };
+  }, [project]);
+
+  useEffect(() => {
     if (!activeRun || activeRun.status !== "running") return;
     const interval = window.setInterval(() => void fetchRuns(), 2_000);
     return () => window.clearInterval(interval);
@@ -441,6 +641,7 @@ function JobDetailView({
       setCancelling(false);
     }
   };
+  const activeVaultReferences = job.vault_references.filter((reference) => reference.status === "authorized").length;
 
   return (
     <div className="space-y-6" data-testid="job-detail">
@@ -469,7 +670,14 @@ function JobDetailView({
           <h2 className="mb-1 text-xs font-medium text-[var(--color-text-muted)]">Prompt Template</h2>
           <pre className="max-h-48 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 whitespace-pre-wrap break-words text-xs">{job.prompt_template}</pre>
         </div>
+        <div className="mt-4 rounded border border-[var(--color-border-muted)] p-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2"><h2 className="font-medium text-[var(--color-text-primary)]">Vault references</h2><span>{activeVaultReferences} active</span><span className={`${BADGE_BASE} ${badgeTones(vaultSealed === true ? "amber" : vaultSealed === false ? "success" : "gray")}`}>{vaultSealed === true ? "Vault sealed" : vaultSealed === false ? "Vault unsealed" : "Vault status unavailable"}</span></div>
+          {job.vault_references.length === 0 ? <p className="mt-2 text-[var(--color-text-muted)]">No vault references.</p> : <ul className="mt-2 space-y-1">{job.vault_references.map((reference) => <li key={reference.item_id} className="flex min-w-0 flex-wrap items-center gap-2"><Identifier value={reference.item_id} label="Vault item ID" /><span className={`${BADGE_BASE} ${vaultReferenceTone(reference.status)}`}>{vaultReferenceLabel(reference)}</span><span>authorized version {reference.authorized_item_version}</span></li>)}</ul>}
+          {job.vault_references.some((reference) => reference.status === "version_stale") && <p className="mt-2 text-[var(--color-warning-text)]">A reference version is stale. Edit this job and explicitly refresh it before a runtime can use it.</p>}
+          {job.vault_references.some((reference) => reference.status === "unavailable") && <p className="mt-2 text-[var(--color-error-text)]">A reference is unavailable. Remove or replace it explicitly.</p>}
+        </div>
       </section>
+      <VaultReferenceAudit job={job} project={project} />
       {activeRun && <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0"><h2 className="inline text-sm font-semibold text-[var(--color-text-primary)]">Run <Identifier value={activeRun.id} label="Run ID" /></h2> <RunStatusBadge status={activeRun.status} /> <RunDeliveryMetadata delivery={activeRun.event_delivery} /></div>
@@ -742,7 +950,7 @@ export default function JobsPage() {
   const toggleJob = useCallback(async (job: Job) => {
     setError(null);
     try {
-      const response = await api.jobs.update(job.id, { enabled: !job.enabled }, project);
+      const response = await api.jobs.update(job.id, { enabled: !job.enabled, expected_revision: job.revision }, project);
       setJobs((current) => current.map((entry) => entry.id === job.id ? response.data : entry));
       setSelectedJob((current) => current?.id === job.id ? response.data : current);
     } catch (toggleFailure: unknown) {
@@ -764,7 +972,7 @@ export default function JobsPage() {
     if (!window.confirm(`Delete job "${job.name}"? This cannot be undone.`)) return;
     setError(null);
     try {
-      await api.jobs.delete(job.id, project);
+      await api.jobs.delete(job.id, job.revision, project);
       setSelectedJob(null);
       await fetchJobs();
     } catch (deleteFailure: unknown) {

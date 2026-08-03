@@ -365,7 +365,16 @@ Use a deep link such as `/?settings=providers`. Route-linked panels intentionall
   - **Match + valid**: When both match and length ≥ 12, shows a green checkmark and "Passphrases match"
   - **Checkbox gated**: Submit button remains disabled until the acknowledgement is checked AND passphrases are valid
 
-**API**: `GET /api/v1/vault/status`, `POST /api/v1/vault/initialize`, `POST /api/v1/vault/unseal`, `POST /api/v1/vault/seal`, `GET /api/v1/vault/folders`, `GET /api/v1/vault/items`, `POST /api/v1/vault/items`, `PATCH /api/v1/vault/items/:id`, `DELETE /api/v1/vault/items/:id`, `POST /api/v1/vault/folders`, `DELETE /api/v1/vault/folders/:id`
+**API**: `GET /api/v1/vault/status`, `POST /api/v1/vault/initialize`, `POST /api/v1/vault/unseal`, `POST /api/v1/vault/seal`, `GET /api/v1/vault/folders`, `GET /api/v1/vault/items`, `POST /api/v1/vault/items`, `PATCH /api/v1/vault/items/:id`, `DELETE /api/v1/vault/items/:id`, `POST /api/v1/vault/folders`, `DELETE /api/v1/vault/folders/:id`, and the Jobs page's `GET /api/v1/jobs/:id/vault-audit`. Status is sealed-safe and never unseals.
+
+Jobs can opt into up to 16 same-project vault item references from the existing
+create/edit form. The picker shows only metadata and uses `status` plus
+`authorized_item_version`; it never loads a value. Unsealed vaults allow adding
+and refreshing, while sealed vaults allow revoking existing references only.
+Reference changes and refresh require explicit confirmation. If the job
+revision CAS conflicts, the draft remains open until the user explicitly reloads
+the current job. The detail view shows bounded `authorized`, `revoked`,
+`secret_read`, and `access_denied` audit actions without values.
 
 ---
 

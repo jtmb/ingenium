@@ -15,6 +15,7 @@ opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.m
 vscode_runner="${repo_root}/scripts/start-vscode.sh"
 vscode_theme_manifest="${repo_root}/config/vscode-extensions/ingenium.system-theme-defaults/package.json"
 vscode_proxy="${repo_root}/nginx/proxy-vscode.conf"
+vault_secret_root_validator="${repo_root}/scripts/validate-vault-job-secret-root.sh"
 
 require_file() {
   path="$1"
@@ -71,7 +72,7 @@ reject_path() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy" "$vault_secret_root_validator"; do
   require_file "$path"
 done
 
@@ -133,6 +134,10 @@ require_literal "$dockerfile" 'fs.readdirSync(require("path").dirname(manifestPa
 reject_literal "$dockerfile" "ensure-vscode-settings"
 require_literal "$dockerfile" "nginx/proxy-vscode.conf"
 require_literal "$dockerfile" "EXPOSE 3000 4097 1455"
+require_literal "$dockerfile" "validate-vault-job-secret-root.sh"
+require_literal "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh ./scripts/validate-vault-job-secret-root.sh"
+require_literal "$dockerfile" '`/dev/shm` is a container-runtime tmpfs'
+reject_pattern "$dockerfile" 'RUN[[:space:]].*(mkdir|install).*/dev/shm/ingenium-job-secrets'
 reject_literal "$dockerfile" "3002"
 reject_pattern "$dockerfile" '^EXPOSE .*4100'
 # OpenCode loads the configured TypeScript plugins from source paths. Keep the
@@ -185,12 +190,19 @@ reject_literal "$entrypoint" "htpasswd"
 require_literal "$entrypoint" "API token must contain 32 to 128 base64url characters"
 require_literal "$entrypoint" "unset INGENIUM_API_TOKEN"
 require_literal "$entrypoint" "RUNTIME_API_TOKEN_FILE=\"\${RUNTIME_SECRET_DIR}/api-token\""
+require_literal "$entrypoint" 'validate-vault-job-secret-root.sh provision'
+require_literal "$entrypoint" 'vault job secret root provisioning requires root'
+require_line_before "$entrypoint" 'validate-vault-job-secret-root.sh provision' 'OPENCODE_SERVER_PASSWORD environment variable is required'
+reject_literal "$entrypoint" 'rm -rf /dev/shm/ingenium-job-secrets'
+require_literal "$entrypoint" 'OC_AUTH="/home/appuser/.local/share/opencode/auth.json"'
+require_literal "$entrypoint" 'chmod 0600 "$OC_CONFIG"'
+require_literal "$entrypoint" 'chmod 0600 "$OC_AUTH"'
 require_literal "$env_example" "INGENIUM_API_TOKEN="
 require_literal "$env_example" "INGENIUM_API_TOKEN_FILE=/run/secrets/ingenium-api-token"
 reject_literal "$env_example" "INGENIUM_GATEWAY_PASSWORD"
 reject_literal "$env_example" "INGENIUM_GATEWAY_BCRYPT_COST"
 
-for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh run-init-project.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
+for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh run-restore-maintenance.sh recover-restore-maintenance.sh run-init-project.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
   require_file "${repo_root}/scripts/${script}"
   require_literal "${repo_root}/scripts/${script}" "exec env -i"
 done
@@ -210,6 +222,13 @@ require_literal "$supervisor_config" "command=/app/scripts/start-opencode-web.sh
 require_literal "$supervisor_config" "command=/app/scripts/start-ttyd.sh"
 require_literal "$supervisor_config" "[program:vscode]"
 require_literal "$supervisor_config" "command=/app/scripts/start-vscode.sh"
+require_literal "$supervisor_config" "[program:restore-maintenance]"
+require_literal "$supervisor_config" "command=/app/scripts/run-restore-maintenance.sh"
+require_literal "$supervisor_config" "user=root"
+require_literal "$supervisor_config" "autostart=false"
+require_literal "$supervisor_config" "stopasgroup=true"
+require_literal "$dockerfile" "scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh"
+require_literal "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/"
 reject_literal "$supervisor_config" "environment="
 require_literal "$dockerfile" "scripts/project-opencode-global-config.mjs"
 require_literal "$dockerfile" "scripts/run-init-project.sh"
@@ -318,13 +337,28 @@ done
 
 require_literal "${repo_root}/scripts/healthcheck.sh" "exec runuser -u appuser -- env -i"
 require_literal "${repo_root}/scripts/healthcheck.sh" "node /app/scripts/probe-api.mjs"
+require_literal "${repo_root}/scripts/healthcheck.sh" "validate-vault-job-secret-root.sh verify"
 require_literal "${repo_root}/scripts/healthcheck.sh" "ttyd-opencode vscode; do"
+require_literal "${repo_root}/scripts/healthcheck.sh" "require_restore_maintenance_safe"
+require_literal "$entrypoint" "recover-restore-maintenance.sh"
+require_literal "$dockerfile" "appuser-gid"
+require_literal "$entrypoint" "TRUSTED_ARTIFACT_GID_FILE"
+require_literal "${repo_root}/scripts/run-api.sh" "INGENIUM_TRUSTED_ARTIFACT_GID"
+require_literal "${repo_root}/scripts/run-restore-maintenance.sh" "INGENIUM_TRUSTED_ARTIFACT_GID"
+require_literal "$entrypoint" "RESTORE_JOURNAL_KEY_FILE=\"/app/.ingenium/restore-journal-key\""
+require_literal "$entrypoint" "restore journal key must be root-owned mode 0600"
+require_literal "$entrypoint" "chown root:root \"\$RESTORE_MAINTENANCE_DIR\""
 require_literal "${repo_root}/scripts/healthcheck.sh" "http://127.0.0.1:4100/healthz"
 require_literal "${repo_root}/scripts/healthcheck.sh" '"VS Code gateway root" "vscode.localhost" "/" "302"'
 require_literal "${repo_root}/scripts/healthcheck.sh" '"VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"'
 require_literal "${repo_root}/scripts/healthcheck.sh" "Content-Security-Policy: frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000"
 reject_literal "${repo_root}/scripts/healthcheck.sh" '"3002"'
 reject_literal "${repo_root}/scripts/healthcheck.sh" "Authorization: Bearer \${INGENIUM_API_TOKEN"
+require_literal "$vault_secret_root_validator" '/dev/shm/ingenium-job-secrets'
+require_literal "$vault_secret_root_validator" "stat -fc '%T' /dev/shm"
+require_literal "$vault_secret_root_validator" 'chown "${owner_uid}:${owner_gid}" "$root"'
+require_literal "$vault_secret_root_validator" 'chmod 0700 "$root"'
+reject_literal "$vault_secret_root_validator" 'rm -rf'
 require_literal "${repo_root}/scripts/wait-for-opencode.sh" "exec env -i"
 
 for pattern in .git/ '**/.git/' .env '*.key' '*.pem' credentials.json .ssh/ .aws/ .ingenium/ '*.db' '*.sqlite' '**/node_modules/' '**/dist/' '**/.next/' '**/coverage/' '**/.cache/'; do

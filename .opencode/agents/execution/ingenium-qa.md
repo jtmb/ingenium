@@ -43,8 +43,9 @@ Accept work only with the parent task's `IN_SCOPE`, `OUT_OF_SCOPE`, acceptance c
 1. Run **one** targeted QA invocation after an implementation wave. Run only the checks named in the contract.
 2. Do not substitute a broad suite for a declared focused check. A later run must be the minimum targeted regression for a named causal remediation, or the original declared QA check when that remediation changed QA’s review boundary.
 3. Review changed files only for the applicable correctness, security, performance, readability, and test concerns. Do not convert suggestions into new work.
-4. `@ingenium-qa` is the sole owner of a declared full E2E or container suite. Run it only when it is explicitly declared in the verification plan; the orchestrator must not duplicate that suite.
-5. Return findings; never dispatch remediation, Docs, another QA pass, or a visual gate. The orchestrator automatically remediates a reproducible in-scope BLOCKING root cause and runs its minimum targeted regression without creating a reviewer chain.
+4. During that existing changed-file review only, check changed comments against `.opencode/skills/development-conventions/references/useful-comments/guidelines.md`: prefer self-explanatory code; comments explain non-obvious why/constraints; reject what-narration, history, decorative, and commented-out code. This comment check is not a separate or broad pass.
+5. `@ingenium-qa` is the sole owner of a declared full E2E or container suite. Run it only when it is explicitly declared in the verification plan; the orchestrator must not duplicate that suite.
+6. Return findings; never dispatch remediation, Docs, another QA pass, or a visual gate. The orchestrator automatically remediates a reproducible in-scope BLOCKING root cause and runs its minimum targeted regression without creating a reviewer chain.
 
 ## Finding Classification
 

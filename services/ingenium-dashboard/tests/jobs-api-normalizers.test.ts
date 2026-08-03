@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   normalizeJobEventDelivery,
+  normalizeJob,
+  normalizeJobVaultAuditEntry,
   normalizeJobPage,
   normalizeJobRun,
   normalizeJobRunLog,
@@ -36,6 +38,41 @@ const delivery = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Jobs response allowlisting", () => {
+  it("normalizes revisioned vault references and drops malicious job/audit fields", () => {
+    const job = normalizeJob({
+      id: "job-00000000-0000-0000-0000-000000000001",
+      project_id: "project-00000000-0000-0000-0000-000000000001",
+      name: "Vault job",
+      description: null,
+      agent: "agent",
+      prompt_template: "safe prompt",
+      schedule_cron: null,
+      trigger_event: null,
+      enabled: 1,
+      timeout_minutes: 30,
+      revision: 2,
+      vault_references: [{ item_id: "item-00000000-0000-0000-0000-000000000001", status: "version_stale", authorized_item_version: 2, authorized_at: timestamp, value: "must-not-survive", name: "must-not-survive" }],
+      created_at: timestamp,
+      updated_at: timestamp,
+      encrypted: "must-not-survive",
+    });
+    const audit = normalizeJobVaultAuditEntry({
+      id: "audit-00000000-0000-0000-0000-000000000001",
+      job_id: job.id,
+      item_id: null,
+      action: "access_denied",
+      actor_category: "job_run",
+      run_id: "run-00000000-0000-0000-0000-000000000001",
+      version: null,
+      timestamp,
+      details: "must-not-survive",
+    });
+
+    expect(job).toMatchObject({ revision: 2, enabled: true, vault_references: [{ status: "version_stale", authorized_item_version: 2 }] });
+    expect(JSON.stringify({ job, audit })).not.toContain("must-not-survive");
+    expect(Object.keys(audit).sort()).toEqual(["action", "actor_category", "id", "item_id", "job_id", "run_id", "timestamp", "version"]);
+  });
+
   it("keeps only exact trusted-event and delivery fields", () => {
     const normalizedEvent = normalizeTrustedJobEvent({
       ...event,

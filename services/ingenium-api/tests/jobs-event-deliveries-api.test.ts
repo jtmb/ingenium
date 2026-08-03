@@ -111,7 +111,11 @@ describe("JOB-101 REST visibility and project isolation", () => {
 
   it("rejects deletion while an event attempt is leased, then permits terminal cleanup", async () => {
     const claim = jobEventDeliveries.claimJobEventDelivery(firstProjectId)!;
-    const blocked = await fetch(`${baseUrl}/api/v1/jobs/${eventJobId}?project=${firstProject}`, { method: "DELETE" });
+    const blocked = await fetch(`${baseUrl}/api/v1/jobs/${eventJobId}?project=${firstProject}`, {
+      method: "DELETE",
+      body: JSON.stringify({ expected_revision: 0 }),
+      headers: { "content-type": "application/json" },
+    });
     expect(blocked.status).toBe(409);
     expect(await blocked.json()).toEqual({
       error: { code: "JOB_ACTIVE_DELIVERY", message: "Job has an active event delivery" },
@@ -129,7 +133,11 @@ describe("JOB-101 REST visibility and project isolation", () => {
       errorCode: "cancelled",
       errorMessage: "Cancelled before delete.",
     });
-    expect((await fetch(`${baseUrl}/api/v1/jobs/${eventJobId}?project=${firstProject}`, { method: "DELETE" })).status).toBe(204);
+    expect((await fetch(`${baseUrl}/api/v1/jobs/${eventJobId}?project=${firstProject}`, {
+      method: "DELETE",
+      body: JSON.stringify({ expected_revision: 0 }),
+      headers: { "content-type": "application/json" },
+    })).status).toBe(204);
     expect(jobEventDeliveries.getJobEventDelivery(firstProjectId, claim.delivery.id)).toMatchObject({ state: "dead_letter" });
   });
 });

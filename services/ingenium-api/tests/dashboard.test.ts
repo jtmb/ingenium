@@ -212,7 +212,7 @@ describe("GET /api/v1/dashboard/summary", () => {
 
     // Create a disabled job — should NOT appear in failedRecently
     const disabledJob = jobsModule.createJob(projectId, "Disabled Job", "test", "agent", "prompt");
-    jobsModule.updateJob(projectId, disabledJob.id, { enabled: 0 } as any);
+    jobsModule.updateJob(projectId, disabledJob.id, { enabled: 0 } as any, disabledJob.revision);
 
     const res = await fetch(`${baseUrl}/api/v1/dashboard/summary?project=${projectName}`);
     expect(res.status).toBe(200);

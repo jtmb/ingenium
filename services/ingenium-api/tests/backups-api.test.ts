@@ -1,383 +1,234 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
-import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
-import { getDb } from "../../../packages/ingenium-core/lib/db.js";
+import { join } from "node:path";
 import Database from "better-sqlite3";
+import { getDb, resetDbForTest } from "../../../packages/ingenium-core/lib/db.js";
+import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import { backupsRouter } from "../lib/routes/backups.js";
 
-// Override paths for test isolation
-const tempDir = mkdtempSync(join(tmpdir(), "ingenium-backup-api-"));
-const coreDbPath = join(tempDir, "data.db");
+const tempDir = mkdtempSync(join(tmpdir(), "ingenium-restore-api-"));
+const coreDbPath = join(tempDir, "data");
 const backupsDir = join(tempDir, "backups");
-const overrideBackupsDir = join(tempDir, "override-backups");
 const opencodeDbPath = join(tempDir, "opencode.db");
+const signingKeyPath = join(tempDir, "backup-signing-key");
 
-// Set env before any module initialization
 process.env.INGENIUM_CORE_DB_PATH = coreDbPath;
 process.env.INGENIUM_BACKUPS_DIR = backupsDir;
 process.env.OPENCODE_DB_PATH = opencodeDbPath;
-
-// ── Test setup ──────────────────────────────────────────────────────────────────
+process.env.INGENIUM_BACKUP_SIGNING_KEY_FILE = signingKeyPath;
+process.env.INGENIUM_TRUSTED_ARTIFACT_UID = String(process.getuid?.() ?? 0);
+process.env.INGENIUM_TRUSTED_ARTIFACT_GID = String(process.getgid?.() ?? 0);
 
 let server: Server;
 let baseUrl: string;
-const projectName = "backup-api-test";
-let projectId: string;
-let globalProjectId: string;
 
-function url(path: string): string {
-  return `${baseUrl}/api/v1/backups${path}?project=${projectName}`;
+function url(path: string, project = "external-project"): string {
+  return `${baseUrl}/api/v1/backups${path}?project=${project}`;
+}
+
+async function createBackup(): Promise<any> {
+  const response = await fetch(url(""), { method: "POST", headers: { "Content-Type": "application/json" } });
+  expect(response.status).toBe(201);
+  return (await response.json()).data;
 }
 
 beforeAll(async () => {
-  // Initialize DB and create the test project
+  writeFileSync(signingKeyPath, Buffer.alloc(32, 3), { mode: 0o600 });
+  chmodSync(signingKeyPath, 0o600);
   getDb(coreDbPath);
-  mkdirSync(backupsDir, { recursive: true });
-
-  // Create a valid SQLite OpenCode DB for snapshot tests.
-  const opencodeDb = new Database(opencodeDbPath);
-  opencodeDb.exec("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY)");
-  opencodeDb.close();
-
-  globalProjectId = createProject("global-default", true).id;
-  projectId = createProject(projectName).id;
+  const opencode = new Database(opencodeDbPath);
+  opencode.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY)");
+  opencode.close();
+  createProject("global-default", true);
+  createProject("external-project");
 
   const app = express();
   app.use(express.json());
   app.use("/api/v1/backups", backupsRouter);
   server = createServer(app);
-
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => {
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    resolve();
+  }));
 });
 
 afterAll(async () => {
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-  rmSync(tempDir, { recursive: true, force: true });
+  resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   delete process.env.INGENIUM_BACKUPS_DIR;
   delete process.env.OPENCODE_DB_PATH;
+  delete process.env.INGENIUM_BACKUP_SIGNING_KEY_FILE;
+  delete process.env.INGENIUM_TRUSTED_ARTIFACT_UID;
+  delete process.env.INGENIUM_TRUSTED_ARTIFACT_GID;
+  const stagingRoot = join(tempDir, "restore-staging");
+  if (existsSync(stagingRoot)) {
+    for (const entry of readdirSync(stagingRoot)) chmodSync(join(stagingRoot, entry), 0o700);
+  }
+  rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── Tests ───────────────────────────────────────────────────────────────────────
+describe("RESTORE-100 backup API", () => {
+  it("uses the active global project consistently and exposes only content-free v2 backup metadata", async () => {
+    const backup = await createBackup();
+    expect(backup).toMatchObject({ id: expect.any(String), filename: backup.id, status: "completed" });
+    const foreign = await fetch(url(""));
+    const unknown = await fetch(url("", "does-not-exist"));
+    expect(foreign.status).toBe(200);
+    expect(unknown.status).toBe(200);
+    expect(JSON.stringify(await foreign.json())).not.toContain(tempDir);
+    expect(JSON.stringify(backup)).not.toMatch(/signature|components|manifest/i);
+  });
 
-describe("POST /api/v1/backups — create backup", () => {
-  it("creates a backup and returns 201 with the record", async () => {
-    const res = await fetch(url(""), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+  it("requires the exact preview contract and makes the plan durable/idempotent", async () => {
+    const backup = await createBackup();
+    const invalid = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ backupId: backup.id }),
     });
-    expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.data).toBeDefined();
-    expect(body.data.id).toBeTruthy();
-    expect(body.data.type).toBe("manual");
-    expect(body.data.status).toBe("completed");
-    expect(body.data.created_at).toBeTruthy();
-    expect(body.data.filename).toMatch(/\.db$/);
-    expect(body.data.size).toBeGreaterThan(0);
+    expect(invalid.status).toBe(422);
+    const first = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId: backup.id, dryRun: true, idempotencyKey: "api-preview" }),
+    });
+    expect(first.status).toBe(201);
+    const plan = (await first.json()).data;
+    expect(plan).toMatchObject({ backupId: backup.id, state: "previewed", revision: 0, dryRun: true, blockers: [] });
+    expect(JSON.stringify(plan)).not.toMatch(/token|signature|components|path/i);
+    const replay = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId: backup.id, dryRun: true, idempotencyKey: "api-preview" }),
+    });
+    expect((await replay.json()).data.id).toBe(plan.id);
+    const distinct = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId: backup.id, dryRun: true, idempotencyKey: "api-preview-distinct" }),
+    });
+    expect((await distinct.json()).data.id).not.toBe(plan.id);
+    const fetched = await fetch(url(`/restore/${plan.id}`));
+    expect((await fetched.json()).data).toMatchObject({ id: plan.id, state: "previewed" });
   });
-});
 
-describe("GET /api/v1/backups — list backups", () => {
-  it("returns created backups", async () => {
-    const res = await fetch(url(""));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body.data)).toBe(true);
-    expect(body.data.length).toBeGreaterThanOrEqual(1);
-    expect(body.data[0].type).toBe("manual");
-    expect(body.total).toBeGreaterThanOrEqual(1);
+  it("requires a distinct execution authorization, queues a fixed executor, and never exposes runtime internals", async () => {
+    const backup = await createBackup();
+    const preview = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId: backup.id, dryRun: true, idempotencyKey: "api-confirm-preview" }),
+    });
+    const plan = (await preview.json()).data;
+    const legacy = await fetch(url("/restore"), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ backupId: backup.id, confirm: true }),
+    });
+    expect(legacy.status).toBe(410);
+    expect((await legacy.json()).error.code).toBe("RESTORE_MIGRATION_REQUIRED");
+
+    const authorized = await fetch(url(`/restore/${plan.id}/authorize`), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: 0 }),
+    });
+    expect(authorized.status).toBe(200);
+    const authorization = (await authorized.json()).data;
+    expect(authorization.plan).toMatchObject({ state: "authorized", revision: 1 });
+    expect(authorization.confirmationToken).toMatch(/^[A-Za-z0-9_-]{32,}$/);
+
+    const status = await fetch(url(`/restore/${plan.id}`));
+    expect(JSON.stringify(await status.json())).not.toContain(authorization.confirmationToken);
+    const confirmed = await fetch(url(`/restore/${plan.id}/confirm`), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmationToken: authorization.confirmationToken,
+        expectedRevision: authorization.plan.revision,
+        idempotencyKey: "api-confirm",
+      }),
+    });
+    expect(confirmed.status).toBe(200);
+    expect((await confirmed.json()).data).toMatchObject({ state: "ready_for_executor", revision: 3 });
+    const executionAuthorization = await fetch(url(`/restore/${plan.id}/execution/authorize`), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: 3 }),
+    });
+    expect(executionAuthorization.status).toBe(200);
+    const execution = (await executionAuthorization.json()).data;
+    expect(execution).toMatchObject({ plan: { state: "execution_authorized", revision: 4 }, executionToken: expect.stringMatching(/^[A-Za-z0-9_-]{32,}$/) });
+    expect(JSON.stringify(execution.plan)).not.toContain(execution.executionToken);
+    const executor = await fetch(url(`/restore/${plan.id}/execute`), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ executionToken: execution.executionToken, expectedRevision: execution.plan.revision, idempotencyKey: "api-execute" }),
+    });
+    // No Supervisor is listening in this API-only test. The route must not
+    // acknowledge work that no static maintenance process can consume.
+    expect(executor.status).toBe(503);
+    expect((await executor.json()).error).toMatchObject({ code: "SUPERVISOR_FAILED" });
+    const audit = await fetch(`${baseUrl}/api/v1/backups/restore/${plan.id}/audit?project=external-project&limit=100`);
+    expect((await audit.json()).data.map((event: { toState: string }) => event.toState).reverse())
+      .toEqual(["previewed", "authorized", "confirmed", "ready_for_executor", "execution_authorized", "queued", "executor_start_failed"]);
   });
 
-  it("ignores an external or unknown URL project context and resolves the global owner", async () => {
-    const res = await fetch(`${baseUrl}/api/v1/backups?project=nonexistent`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.every((backup: { id: string }) => backup.id)).toBe(true);
+  it("fails content-free status and confirm replay after same-UID staged-file tampering", async () => {
+    const backup = await createBackup();
+    const preview = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId: backup.id, dryRun: true, idempotencyKey: "api-stage-tamper-preview" }),
+    });
+    const plan = (await preview.json()).data;
+    const authorized = await fetch(url(`/restore/${plan.id}/authorize`), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: plan.revision }),
+    });
+    const authorization = (await authorized.json()).data;
+    const confirmBody = {
+      confirmationToken: authorization.confirmationToken,
+      expectedRevision: authorization.plan.revision,
+      idempotencyKey: "api-stage-tamper-confirm",
+    };
+    expect((await fetch(url(`/restore/${plan.id}/confirm`), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(confirmBody),
+    })).status).toBe(200);
+
+    const stagedIngenium = join(tempDir, "restore-staging", plan.id, "ingenium.db");
+    chmodSync(stagedIngenium, 0o600);
+    writeFileSync(stagedIngenium, "same-uid tamper");
+    chmodSync(stagedIngenium, 0o444);
+
+    const status = await fetch(url(`/restore/${plan.id}`));
+    const statusBody = await status.json();
+    expect(status.status).toBe(200);
+    expect(statusBody.data).toMatchObject({ state: "failed", revision: 4 });
+    expect(JSON.stringify(statusBody)).not.toMatch(/path|stage_hash|components|token/i);
+    const replay = await fetch(url(`/restore/${plan.id}/confirm`), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(confirmBody),
+    });
+    expect((await replay.json()).data).toMatchObject({ state: "failed", revision: 4 });
+    const audit = await fetch(`${baseUrl}/api/v1/backups/restore/${plan.id}/audit?project=external-project&limit=100`);
+    expect((await audit.json()).data.filter((event: { eventType: string }) => event.eventType === "stage_integrity_failed"))
+      .toHaveLength(1);
   });
-});
 
-describe("backup directory resolution", () => {
-  it("uses one contained directory for create, list, download, and restore preview", async () => {
-    const defaultDirectory = resolve(tempDir, "backups");
-    const relativeOverride = relative(process.cwd(), overrideBackupsDir);
-    const scenarios: Array<{ configuredDirectory: string | undefined; expectedDirectory: string }> = [
-      { configuredDirectory: undefined, expectedDirectory: defaultDirectory },
-      { configuredDirectory: "", expectedDirectory: defaultDirectory },
-      { configuredDirectory: " \t ", expectedDirectory: defaultDirectory },
-      { configuredDirectory: relativeOverride, expectedDirectory: resolve(overrideBackupsDir) },
-    ];
-    const previous = process.env.INGENIUM_BACKUPS_DIR;
-    let canonicalSnapshot: { backupId: string; filename: string } | undefined;
-
+  it("downloads only a verified in-memory buffer with fixed metadata and wipes it after response", async () => {
+    const backup = await createBackup();
+    const fill = vi.spyOn(Buffer.prototype, "fill");
     try {
-      for (const { configuredDirectory, expectedDirectory } of scenarios) {
-        if (configuredDirectory === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
-        else process.env.INGENIUM_BACKUPS_DIR = configuredDirectory;
-
-        const created = await fetch(url(""), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-        expect(created.status).toBe(201);
-        const createdBody = await created.json();
-        const backupId = createdBody.data.id as string;
-        const filename = createdBody.data.filename as string;
-        if (expectedDirectory === defaultDirectory && !canonicalSnapshot) {
-          canonicalSnapshot = { backupId, filename };
-        }
-        const existingSnapshot = expectedDirectory === defaultDirectory
-          ? canonicalSnapshot!
-          : { backupId, filename };
-
-        expect(existsSync(join(expectedDirectory, existingSnapshot.filename))).toBe(true);
-
-        const listed = await fetch(url(""));
-        expect(listed.status).toBe(200);
-        const listedBody = await listed.json();
-        expect(listedBody.data.some((record: { id: string }) => record.id === backupId)).toBe(true);
-
-        const downloaded = await fetch(url(`/${existingSnapshot.backupId}/download`));
-        expect(downloaded.status).toBe(200);
-        expect((await downloaded.arrayBuffer()).byteLength).toBeGreaterThan(0);
-
-        const preview = await fetch(url("/restore/preview"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ backupId: existingSnapshot.backupId }),
-        });
-        expect(preview.status).toBe(200);
-        expect((await preview.json()).data).toMatchObject({ valid: true, errors: [] });
-      }
+      const response = await fetch(url(`/${backup.id}/download`));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/vnd.sqlite3");
+      expect(response.headers.get("content-disposition")).toBe('attachment; filename="ingenium.db"');
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      expect(fill).toHaveBeenCalledWith(0);
     } finally {
-      if (previous === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
-      else process.env.INGENIUM_BACKUPS_DIR = previous;
+      fill.mockRestore();
     }
   });
-});
 
-describe("global backup ownership", () => {
-  it("stores a backup created from an external URL context under the active global project", async () => {
-    const res = await fetch(url(""), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+  it("rejects source-bundle deletion after any durable restore plan", async () => {
+    const backup = await createBackup();
+    const preview = await fetch(url("/restore/preview"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId: backup.id, dryRun: true, idempotencyKey: "api-delete-preview" }),
     });
-    expect(res.status).toBe(201);
-    const body = await res.json();
-    const record = getDb(coreDbPath)
-      .prepare("SELECT project_id FROM backup_records WHERE id = ?")
-      .get(body.data.id) as { project_id: string };
-    expect(record.project_id).toBe(globalProjectId);
-    expect(record.project_id).not.toBe(projectId);
-  });
-});
-
-describe("GET /api/v1/backups/:id — get backup metadata", () => {
-  let backupId: string;
-
-  beforeAll(async () => {
-    const res = await fetch(url(""), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const body = await res.json();
-    backupId = body.data.id;
-  });
-
-  it("returns a single backup record", async () => {
-    const res = await fetch(url(`/${backupId}`));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.id).toBe(backupId);
-    expect(body.data.type).toBe("manual");
-  });
-
-  it("returns 404 for non-existent backup", async () => {
-    const res = await fetch(url("/00000000-0000-0000-0000-000000000000"));
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("DELETE /api/v1/backups/:id — remove backup", () => {
-  let backupId: string;
-
-  beforeAll(async () => {
-    const res = await fetch(url(""), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const body = await res.json();
-    backupId = body.data.id;
-  });
-
-  it("deletes a backup and returns the record", async () => {
-    const delRes = await fetch(url(`/${backupId}`), { method: "DELETE" });
-    expect(delRes.status).toBe(200);
-    const body = await delRes.json();
-    expect(body.data.deleted).toBe(true);
-    expect(body.data.id).toBe(backupId);
-
-    // Verify it's gone
-    const getRes = await fetch(url(`/${backupId}`));
-    expect(getRes.status).toBe(404);
-  });
-
-  it("returns 404 when deleting a non-existent backup", async () => {
-    const res = await fetch(url("/00000000-0000-0000-0000-000000000000"), { method: "DELETE" });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("POST /api/v1/backups/restore/preview — validate", () => {
-  let backupId: string;
-
-  beforeAll(async () => {
-    const res = await fetch(url(""), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const body = await res.json();
-    backupId = body.data.id;
-  });
-
-  it("returns preview for an existing backup", async () => {
-    const res = await fetch(url("/restore/preview"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backupId }),
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.backup).toBeDefined();
-    expect(body.data.backup.id).toBe(backupId);
-    expect(body.data.warnings.length).toBeGreaterThan(0);
-    expect(body.data.warnings.some((warning: string) => warning.includes("does not replace active databases"))).toBe(true);
-    expect(body.data.valid).toBe(true);
-  });
-
-  it("returns 422 when backupId is missing", async () => {
-    const res = await fetch(url("/restore/preview"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(res.status).toBe(422);
-  });
-
-  it("returns 404 for a non-existent backup id", async () => {
-    const res = await fetch(url("/restore/preview"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backupId: "00000000-0000-0000-0000-000000000000" }),
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("POST /api/v1/backups/restore — confirmation safety", () => {
-  let backupId: string;
-
-  beforeAll(async () => {
-    const res = await fetch(url(""), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const body = await res.json();
-    backupId = body.data.id;
-  });
-
-  it("rejects missing confirmation and only creates a non-applying confirmed job", async () => {
-    const rejected = await fetch(url("/restore"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backupId, confirm: false }),
-    });
-    expect(rejected.status).toBe(422);
-
-    const started = await fetch(url("/restore"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backupId, confirm: true }),
-    });
-    expect(started.status).toBe(202);
-    const startedBody = await started.json();
-    expect(startedBody.data.status).toBe("confirmed");
-    expect(startedBody.data.restartRequired).toBe(true);
-
-    const status = await fetch(url(`/restore/${startedBody.data.jobId}`));
-    expect(status.status).toBe(200);
-    const statusBody = await status.json();
-    expect(statusBody.data.status).toBe("confirmed");
-  });
-});
-
-describe("GET /api/v1/backups/schedule — get schedule config", () => {
-  it("returns default schedule config", async () => {
-    const res = await fetch(`${baseUrl}/api/v1/backups/schedule?project=${projectName}`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data).toBeDefined();
-    expect(body.data.hourly.enabled).toBe(false);
-    expect(body.data.hourly.retention).toBe(24);
-    expect(body.data.daily.enabled).toBe(false);
-    expect(body.data.daily.retention).toBe(7);
-    expect(body.data.manual_retention).toBe(10);
-  });
-});
-
-describe("PUT /api/v1/backups/schedule — set schedule config", () => {
-  it("updates and returns the schedule config", async () => {
-    const newConfig = {
-      hourly: { enabled: true, retention: 12 },
-      daily: { enabled: true, retention: 30 },
-      manual_retention: 20,
-    };
-
-    const res = await fetch(`${baseUrl}/api/v1/backups/schedule?project=${projectName}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newConfig),
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.hourly.enabled).toBe(true);
-    expect(body.data.hourly.retention).toBe(12);
-    expect(body.data.daily.enabled).toBe(true);
-    expect(body.data.daily.retention).toBe(30);
-    expect(body.data.manual_retention).toBe(20);
-  });
-
-  it("persists the schedule and returns it on subsequent GET", async () => {
-    const res = await fetch(`${baseUrl}/api/v1/backups/schedule?project=${projectName}`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.hourly.enabled).toBe(true);
-    expect(body.data.hourly.retention).toBe(12);
-    expect(body.data.daily.enabled).toBe(true);
-    expect(body.data.daily.retention).toBe(30);
-    expect(body.data.manual_retention).toBe(20);
-  });
-
-  it("accepts partial updates without resetting existing values", async () => {
-    const res = await fetch(`${baseUrl}/api/v1/backups/schedule?project=${projectName}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hourly: { enabled: false } }),
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.hourly.enabled).toBe(false);
-    expect(body.data.daily.retention).toBe(30);
-    expect(body.data.manual_retention).toBe(20);
+    expect(preview.status).toBe(201);
+    const deleted = await fetch(url(`/${backup.id}`), { method: "DELETE" });
+    expect(deleted.status).toBe(409);
+    expect((await deleted.json()).error.code).toBe("BACKUP_REFERENCED");
   });
 });

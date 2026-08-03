@@ -307,6 +307,32 @@ interpolated, and no manual replay endpoint exists.
 | POST | `/api/v1/jobs/runs/:runId/cancel?project=<name>` | Cancel a project-owned run |
 | GET | `/api/v1/jobs/runs/:runId/logs?project=<name>&after=` | Read project-owned run logs with redaction |
 
+#### Job vault references (VAULT-100)
+
+`POST /api/v1/jobs` and `PATCH /api/v1/jobs/:id` accept optional
+`vault_item_ids`, an array of at most 16 unique UUIDs. On create, omission means
+no references. On update, omission preserves the current set; a supplied list
+replaces it and `[]` revokes all references. Every ID must identify an active
+vault item in the requested project. Missing, foreign-project, deleted, or
+otherwise unavailable items return the same generic `422 VAULT_ITEM_NOT_FOUND`;
+malformed, duplicate, or over-limit arrays return `422 VALIDATION_ERROR`.
+
+Job responses expose `vault_references` as metadata only: `item_id`,
+`status`, `authorized_item_version`, and `authorized_at`. `status` is one of
+`authorized`, `version_stale`, or `unavailable`. This projection is the
+same while the vault is sealed or unsealed and never decrypts or unseals the
+vault. Item versions are captured at authorization, so stable item IDs and
+revision provenance remain visible without exposing names, values, ciphertext,
+or user-controlled vault metadata. Authorization/revocation rows are immutable
+and record actor `authenticated_api`; no runner, log, or MCP response contains
+a secret value.
+
+Job updates require `expected_revision`. Migration 082 initializes revisions at
+`0`, advances them exactly once per direct SQL update, and returns
+`409 JOB_REVISION_CONFLICT` with the current revision when the caller is stale.
+The dashboard keeps the unsaved draft on this conflict until the user explicitly
+reloads the current job.
+
 ### Task coordination (COORD-100)
 
 Task coordination is a cooperative boundary for managed agents operating in the
@@ -457,6 +483,14 @@ All routes prefixed with `/api/v1/vault`.
 | POST | `/password/generate` | Dashboard-compatible password generation alias |
 | GET | `/audit` | List redacted audit event metadata; no audit details or secret material are returned |
 
+`GET /api/v1/vault/status` is safe while sealed and returns only sealed and
+initialized state plus `nextAction`; it never unseals the vault. Job-scoped
+vault evidence is available at `GET /api/v1/jobs/:id/vault-audit?project=<name>&limit=&cursor=`.
+That bounded endpoint returns only job/item/run identifiers, `authorized`,
+`revoked`, `secret_read`, or `access_denied` actions, actor category, version,
+and timestamp. It returns no names, values, ciphertext, free text, or parsed
+actor strings.
+
 ### Backups
 All routes prefixed with `/api/v1/backups`.
 
@@ -467,11 +501,26 @@ All routes prefixed with `/api/v1/backups`.
 | GET | `/:id` | Get a single backup record |
 | GET | `/:id/download` | Download backup snapshot files |
 | DELETE | `/:id` | Delete a backup and its snapshot files |
-| POST | `/restore/preview` | Validate and preview a restore (`backupId` in body) |
-| POST | `/restore` | Confirm a validated restore job (`backupId`, `confirm: true`) |
-| GET | `/restore/:jobId` | Get restore job status |
+| POST | `/restore/preview` | Create or replay a dry-run-only plan (`{ backupId, dryRun: true, idempotencyKey }`) |
+| POST | `/restore/:planId/authorize` | Issue a one-time confirmation token for a previewed plan (`{ expectedRevision }`) |
+| POST | `/restore/:planId/confirm` | Consume the token (`{ confirmationToken, expectedRevision, idempotencyKey }`) and advance only to `ready_for_executor` |
+| GET | `/restore/:planId` | Get content-free restore-plan state |
+| GET | `/restore/:planId/audit` | List bounded immutable, content-free plan transition evidence (`?limit=1..100`) |
+| POST | `/restore` | Legacy confirmation route; always returns `410 RESTORE_MIGRATION_REQUIRED` |
 | GET | `/schedule` | Get backup schedule configuration |
 | PUT | `/schedule` | Set backup schedule configuration |
+
+Restore-plan endpoints require the active global project and never apply a source
+backup; confirmation stores descriptor-verified read-only staged copies before a
+plan can become `ready_for_executor`. Execution remains unavailable through the API.
+The v2 bundle contract is fixed-name and signed; preview validates the manifest,
+component hashes, SQLite integrity, and both schema fingerprints. Legacy records
+are preview-only. The legacy boolean-confirm `POST /restore` path returns `410
+RESTORE_MIGRATION_REQUIRED`; it cannot bypass authorization. Authorization is a
+short-lived one-time capability, and plan revisions, audit events, stages, and
+idempotency receipts are immutable under migration 083. Confirmed stages are
+revalidated and handed off only as bounded in-process buffers; source files and
+active databases are never replaced by these routes.
 
 ### Context — Canonical Agent Memory
 All routes prefixed with `/api/v1/context`. Project-scoped entries persist working context across sessions. FTS5-backed search. Backward-compatible with `plan_*` tools.

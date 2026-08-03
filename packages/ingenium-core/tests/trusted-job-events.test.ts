@@ -243,9 +243,9 @@ describe("migration 076 trusted job events", () => {
        (id, project_id, name, agent, prompt_template, trigger_event, enabled, timeout_minutes, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'unknown.event', 1, 30, ?, ?)`,
     ).run(randomUUID(), projectId, "Unknown", "agent", "prompt", createdAt, createdAt)).toThrow(/trigger_event/);
-    expect(() => upgraded.prepare("UPDATE jobs SET trigger_event = 'unknown.event' WHERE id = ?").run(legacyJob.id)).toThrow(/trigger_event/);
-    expect(upgraded.prepare("UPDATE jobs SET name = ? WHERE id = ?").run("Legacy job renamed", legacyJob.id).changes).toBe(1);
-    expect(upgraded.prepare("UPDATE jobs SET trigger_event = NULL WHERE id = ?").run(legacyJob.id).changes).toBe(1);
+    expect(() => upgraded.prepare("UPDATE jobs SET trigger_event = 'unknown.event', revision = revision + 1 WHERE id = ?").run(legacyJob.id)).toThrow(/trigger_event/);
+    expect(upgraded.prepare("UPDATE jobs SET name = ?, revision = revision + 1 WHERE id = ?").run("Legacy job renamed", legacyJob.id).changes).toBe(1);
+    expect(upgraded.prepare("UPDATE jobs SET trigger_event = NULL, revision = revision + 1 WHERE id = ?").run(legacyJob.id).changes).toBe(1);
   });
 });
 

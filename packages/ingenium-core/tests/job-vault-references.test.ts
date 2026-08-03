@@ -140,20 +140,29 @@ describe("VAULT-100 core job authorization", () => {
     expect(db.prepare("SELECT action FROM job_vault_reference_audit WHERE job_id = ? ORDER BY rowid").all(job.id))
       .toEqual([{ action: "authorized" }, { action: "authorized" }]);
 
-    const preserved = updateJob(first.id, job.id, { name: "Renamed" })!;
+    const preservedResult = updateJob(first.id, job.id, { name: "Renamed" }, job.revision);
+    expect(preservedResult.status).toBe("updated");
+    if (preservedResult.status !== "updated") throw new Error("expected updated job");
+    const preserved = preservedResult.job;
     expect(preserved.vault_references).toHaveLength(2);
     expect(db.prepare("SELECT count(*) AS count FROM job_vault_reference_audit WHERE job_id = ?").get(job.id))
       .toEqual({ count: 2 });
 
-    expect(updateJob(first.id, job.id, { vault_item_ids: [] })!.vault_references).toEqual([]);
+    const revokedResult = updateJob(first.id, job.id, { vault_item_ids: [] }, preserved.revision);
+    expect(revokedResult.status).toBe("updated");
+    if (revokedResult.status !== "updated") throw new Error("expected revoked job");
+    expect(revokedResult.job.vault_references).toEqual([]);
     expect(db.prepare("SELECT action FROM job_vault_reference_audit WHERE job_id = ? ORDER BY rowid").all(job.id))
       .toEqual([
         { action: "authorized" }, { action: "authorized" }, { action: "revoked" }, { action: "revoked" },
       ]);
 
-    const reauthorized = updateJob(first.id, job.id, { vault_item_ids: [secondItem] })!;
+    const reauthorizedResult = updateJob(first.id, job.id, { vault_item_ids: [secondItem] }, revokedResult.job.revision);
+    expect(reauthorizedResult.status).toBe("updated");
+    if (reauthorizedResult.status !== "updated") throw new Error("expected reauthorized job");
+    const reauthorized = reauthorizedResult.job;
     expect(reauthorized.vault_references).toHaveLength(1);
-    expect(reauthorized.vault_references[0]).toMatchObject({ item_id: secondItem, availability: "available", item_version: 1 });
+    expect(reauthorized.vault_references[0]).toMatchObject({ item_id: secondItem, status: "authorized", authorized_item_version: 1 });
     const audit = db.prepare("SELECT id FROM job_vault_reference_audit WHERE job_id = ? ORDER BY rowid").all(job.id) as Array<{ id: string }>;
     expect(audit).toHaveLength(5);
     expect(() => db.prepare("UPDATE job_vault_reference_audit SET action = 'revoked' WHERE id = ?").run(audit[0]!.id)).toThrow(/immutable/);
@@ -164,21 +173,21 @@ describe("VAULT-100 core job authorization", () => {
     const { db, first } = setup();
     const vaultItem = item(first.id, "versioned", "canary-vault-secret");
     const job = createJob(first.id, "Sealed", undefined, "agent", "prompt", undefined, undefined, undefined, [vaultItem]);
-    expect(job.vault_references[0]).toMatchObject({ item_id: vaultItem, item_version: 1, availability: "available" });
+    expect(job.vault_references[0]).toMatchObject({ item_id: vaultItem, authorized_item_version: 1, status: "authorized" });
 
     updateItem(first.id, vaultItem, "rotated-canary-vault-secret");
-    expect(getJob(first.id, job.id)!.vault_references[0]).toMatchObject({ item_version: 1, availability: "available" });
+    expect(getJob(first.id, job.id)!.vault_references[0]).toMatchObject({ authorized_item_version: 1, status: "version_stale" });
 
     sealVault();
     expect(createJob(first.id, "Still sealed", undefined, "agent", "prompt", undefined, undefined, undefined, [vaultItem]).vault_references)
-      .toEqual([expect.objectContaining({ item_id: vaultItem, item_version: 2, availability: "available" })]);
+      .toEqual([expect.objectContaining({ item_id: vaultItem, authorized_item_version: 2, status: "authorized" })]);
     expect(listJobs(first.id).find((candidate) => candidate.id === job.id)?.vault_references[0]?.item_id).toBe(vaultItem);
 
     expect(unsealVault(first.id, passphrase).ok).toBe(true);
     deleteItem(first.id, vaultItem);
-    expect(getJob(first.id, job.id)!.vault_references[0]).toMatchObject({ item_id: vaultItem, availability: "unavailable", item_version: 1 });
+    expect(getJob(first.id, job.id)!.vault_references[0]).toMatchObject({ item_id: vaultItem, status: "unavailable", authorized_item_version: 1 });
     expect(() => db.prepare("DELETE FROM vault_items WHERE project_id = ? AND id = ?").run(first.id, vaultItem)).toThrow(/FOREIGN KEY/);
-    expect(deleteJob(first.id, job.id)).toEqual({ status: "deleted" });
+    expect(deleteJob(first.id, job.id, job.revision)).toEqual({ status: "deleted" });
     expect(db.prepare("SELECT count(*) AS count FROM job_vault_references WHERE job_id = ?").get(job.id)).toEqual({ count: 1 });
     expect(db.prepare("SELECT count(*) AS count FROM job_vault_reference_audit WHERE job_id = ?").get(job.id)).toEqual({ count: 1 });
     const persisted = JSON.stringify({
@@ -191,5 +200,40 @@ describe("VAULT-100 core job authorization", () => {
       ).all(job.id),
     });
     expect(persisted).not.toContain("canary-vault-secret");
+  });
+
+  it("refreshes a rotated authorization only when the same ID is explicitly supplied", () => {
+    const { db, first } = setup();
+    const vaultItem = item(first.id, "refresh", "refresh-canary");
+    const job = createJob(first.id, "Refresh", undefined, "agent", "prompt", undefined, undefined, undefined, [vaultItem]);
+    updateItem(first.id, vaultItem, "rotated-refresh-canary");
+
+    const omitted = updateJob(first.id, job.id, { name: "No refresh" }, job.revision);
+    expect(omitted.status).toBe("updated");
+    if (omitted.status !== "updated") throw new Error("expected omitted update");
+    expect(omitted.job.vault_references[0]).toMatchObject({ authorized_item_version: 1, status: "version_stale" });
+    const refreshed = updateJob(first.id, job.id, { vault_item_ids: [vaultItem] }, omitted.job.revision);
+    expect(refreshed.status).toBe("updated");
+    if (refreshed.status !== "updated") throw new Error("expected refreshed update");
+    expect(refreshed.job.vault_references[0]).toMatchObject({ authorized_item_version: 2, status: "authorized" });
+    expect(db.prepare(
+      "SELECT action, authorized_item_version FROM job_vault_reference_audit WHERE job_id = ? ORDER BY rowid",
+    ).all(job.id)).toEqual([
+      { action: "authorized", authorized_item_version: 1 },
+      { action: "authorized", authorized_item_version: 2 },
+    ]);
+  });
+
+  it("audits an explicit same-ID reauthorization even without a rotation", () => {
+    const { db, first } = setup();
+    const vaultItem = item(first.id, "same-id-refresh");
+    const job = createJob(first.id, "Same ID refresh", undefined, "agent", "prompt", undefined, undefined, undefined, [vaultItem]);
+    expect(updateJob(first.id, job.id, { vault_item_ids: [vaultItem] }, job.revision).status).toBe("updated");
+    expect(db.prepare(
+      "SELECT action, authorized_item_version FROM job_vault_reference_audit WHERE job_id = ? ORDER BY rowid",
+    ).all(job.id)).toEqual([
+      { action: "authorized", authorized_item_version: 1 },
+      { action: "authorized", authorized_item_version: 1 },
+    ]);
   });
 });

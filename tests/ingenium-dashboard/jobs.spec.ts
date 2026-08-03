@@ -37,6 +37,8 @@ const baseJob = {
   trigger_event: "context.conversation.archived",
   enabled: true,
   timeout_minutes: 30,
+  revision: 0,
+  vault_references: [],
   created_at: "2026-08-02T00:00:00.000Z",
   updated_at: "2026-08-02T00:00:00.000Z",
 };
@@ -102,6 +104,8 @@ async function installJobsFixture(page: Page, options: FixtureOptions = {}) {
 
   await page.route("**/api/v1/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: projectRows(project) }) }));
   await page.route("**/api/v1/agents**", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: [{ id: "agent-1", name: "ingenium-orchestrator", description: "Fixture agent", category: "primary", mode: "primary", content: "", enabled: true, created_at: "2026-08-02T00:00:00.000Z", updated_at: "2026-08-02T00:00:00.000Z" }] }) }));
+  await page.route("**/api/v1/vault/status**", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: { sealed: true, initialized: true } }) }));
+  await page.route("**/api/v1/vault/items**", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: [], total: 0 }) }));
   await page.route("**/api/v1/jobs**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -162,6 +166,10 @@ async function installJobsFixture(page: Page, options: FixtureOptions = {}) {
     if (/\/jobs\/[^/]+\/runs$/.test(path)) {
       calls.runs += 1;
       await reply(200, { data: [{ id: "run-event-00000000-0000-0000-0000-000000000001", job_id: baseJob.id, status: "running", trigger: "event", started_at: "2026-08-02T00:00:00.000Z", created_at: "2026-08-02T00:00:00.000Z", event_delivery: { delivery_id: deliveriesFor(selectedProject)[0].id, trusted_event_id: deliveriesFor(selectedProject)[0].trusted_event_id, attempt_number: 2, delivery_state: "leased", ...(options.malicious ? { lease_owner_hash: "lease-owner-must-not-survive" } : {}) }, ...(options.malicious ? { payload: "payload-must-not-survive", prompt_template: "prompt-must-not-survive", environment: { AWS_SECRET_ACCESS_KEY: "dom-secret" }, process_id: 7331 } : {}) }, { id: "run-manual-00000000-0000-0000-0000-000000000002", job_id: baseJob.id, status: "success", trigger: "manual", started_at: "2026-08-01T00:00:00.000Z", finished_at: "2026-08-01T00:01:00.000Z", created_at: "2026-08-01T00:00:00.000Z", event_delivery: null }], total: 2 });
+      return;
+    }
+    if (/\/jobs\/[^/]+\/vault-audit$/.test(path)) {
+      await reply(200, { data: [], nextCursor: null });
       return;
     }
     if (/\/jobs\/[^/]+\/run$/.test(path) && method === "POST") {
@@ -245,6 +253,21 @@ test.describe("Jobs dashboard", () => {
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.getByRole("option", { name: "Legacy value preserved: legacy.webhook" })).toBeDisabled();
     await expect(page.getByText(/Legacy trigger preserved/)).toBeVisible();
+  });
+
+  test("keeps sealed vault reference controls metadata-only, keyboard reachable, and mobile-safe", async ({ page }) => {
+    await installJobsFixture(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/jobs", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Create Job" }).click();
+
+    await expect(page.getByText(/Vault is sealed. Adding references is disabled/)).toBeVisible();
+    await expect(page.getByText(/No value is loaded into this form/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /reveal|unseal|password/i })).toHaveCount(0);
+    await page.getByLabel("Name *").focus();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(":focus")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
   test("renders all delivery states and bounded metadata without sensitive fields or delivery controls", async ({ page }) => {

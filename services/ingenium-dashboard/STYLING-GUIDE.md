@@ -748,6 +748,16 @@ views use `md:hidden` token-based cards. Keep action rows `flex-wrap` so Run,
 Edit, and Delete do not clip at 390px. Trusted-event cards and tables render
 metadata only; they never render event payloads, lease ownership, or process data.
 
+Job vault references use native labelled checkboxes in the edit overlay (never
+a password/reveal control). The metadata picker is capped at 16 entries and is
+disabled while the vault is sealed or unavailable, while existing reference
+checkboxes remain available for explicit removal. Reference changes open a
+token-surface confirmation view with stacked `sm:grid-cols-3` authorize,
+refresh, and revoke summaries; names are shown only while unsealed. Detail and
+audit cards use wrapping IDs, text-labelled status badges, bounded “Load more”,
+and `hover:shadow-md transition-shadow`; at 390px they remain one-column with
+no document overflow.
+
 ---
 
 ## Grid Exceptions

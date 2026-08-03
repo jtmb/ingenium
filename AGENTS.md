@@ -62,7 +62,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 
 | You're about to... | Check this skill |
 |-------------------|-----------------|
-| Edit a source file | `development-conventions` (framework conventions) |
+| Edit a source file | `development-conventions` (framework conventions); writers and reviewers must read `.opencode/skills/development-conventions/references/useful-comments/guidelines.md` |
 | Run a terminal command | `local-models` — **no `&`, no infinite-wait** |
 | Create a new file/service | `development-conventions` (project structure patterns) |
 | Write/run tests | `development-conventions` (testing patterns) |
@@ -429,7 +429,34 @@ docker compose exec ingenium npm run test   # Execute inside container
 
 ## Testing
 
-The default Playwright command is the deterministic Phase 5E fixture E2E run:
+### Affected-feature verification (ordinary work)
+
+Start with the smallest checks that prove the changed behavior. Run the affected
+workspace typecheck or lint when relevant, then the directly affected test file;
+use `-t` to narrow a test name when useful. For browser behavior, target the
+affected Playwright file and optional `--grep` expression:
+
+```bash
+npm run typecheck --workspace=packages/ingenium-core
+npm run lint --workspace=services/ingenium-api -- lib/routes/feature.ts
+npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts
+npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts -t "handles the changed case"
+npx playwright test tests/dashboard/feature.spec.ts --grep "changed behavior"
+```
+
+When a focused Playwright run uses the fixture, follow it with
+`npx tsx tests/suite-containment-audit.ts --strict`; the audit is required to
+prove that the run-owned processes and ports were contained. Ordinary feature
+work must not expand into root tests or broad suites.
+
+### Explicit full/release/cross-cutting acceptance gates
+
+Declare the acceptance checks before running them. `FULL_ACCEPTANCE` means that
+declared set, not automatically every repository test. Root `npm test`, an
+entire Playwright config, and Docker/provider/mail/route-parity/manual suites
+are reserved for explicitly declared full, release, or cross-cutting gates.
+
+The fixture Playwright command below is the deterministic Phase 5E fixture E2E run:
 it starts production-mode API/dashboard processes and the chat fixture with a
 run-owned temporary DB/project, validated manifest, and isolated high-port
 block. Phase 5E also requires allowlisted child environments, API-only test
@@ -454,11 +481,11 @@ bash tests/test-append-only-files.sh     # Verify append-only file constraints
 npm run test --workspace=packages/ingenium-core          # Unit tests
 npm run test --workspace=packages/ingenium-extension     # Extension package tests (vitest)
 npm run typecheck --workspace=packages/ingenium-extension # Extension type checking (tsc --noEmit)
-npx playwright test --config=tests/playwright.config.ts                             # Default fixture E2E (production mode)
+npx playwright test --config=tests/playwright.config.ts                             # Declared fixture acceptance gate (production mode)
 npm test                                                  # All tests
 ```
 
-Explicit suites:
+Explicit full/release/cross-cutting suites:
 
 ```bash
 RUN_DASHBOARD_DOCKER=1 npx playwright test --config=tests/playwright.docker.config.ts

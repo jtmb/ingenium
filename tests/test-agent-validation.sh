@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
 CONFIG="$REPO_ROOT/opencode.json"
+QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
 EXPECTED_LOGICAL_AGENT_COUNT=12
 MAX_ACTIVE_SUBAGENTS=6
 MAX_CONCURRENT_WRITERS=3
@@ -930,6 +931,62 @@ check_normalized_policy_pattern() {
     policy_errors=1
   fi
 }
+
+# Broad suites are safe only when the task names their acceptance role; these
+# guards keep routine writer verification tied to the changed feature.
+WRITER_VERIFICATION_PROFILES=(
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-fast.md"
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+)
+for writer_profile in "${WRITER_VERIFICATION_PROFILES[@]}"; do
+  writer_label="$(basename "$writer_profile")"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    '[Oo]rdinary work.*affected workspace.*typecheck/lint.*directly affected test file' \
+    "affected-work verification scope"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'FULL_ACCEPTANCE.*declared acceptance checks.*not every repository test' \
+    "explicit full-acceptance boundary"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    '[Aa] focused Playwright.*fixture.*(containment[[:space:]-]+audit|suite-containment-audit)' \
+    "fixture containment audit requirement"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'Before source edits.*useful-comments/guidelines\.md' \
+    "useful-comments guideline read requirement"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'self-explanatory code.*comments only for non-obvious why/constraints' \
+    "why-focused comment policy"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'never to narrate what.*record history.*commented-out code' \
+    "comment anti-pattern policy"
+  if grep -Eqi 'after[[:space:]]+(any|every)[[:space:]]+implementation.*npm test' "$writer_profile"; then
+    fail "$writer_label prescribes root npm test after implementation"
+    policy_errors=1
+  else
+    pass "$writer_label does not prescribe root npm test after implementation"
+  fi
+done
+
+check_policy_pattern "$QA_PROFILE" "QA profile" \
+  'Review changed files only' \
+  "changed-file-only review boundary"
+check_policy_pattern "$QA_PROFILE" "QA profile" \
+  '\.opencode/skills/development-conventions/references/useful-comments/guidelines\.md' \
+  "useful-comments guideline path"
+check_policy_pattern "$QA_PROFILE" "QA profile" \
+  'not a separate or broad pass' \
+  "no separate or broad comment pass"
+check_policy_pattern "$REPO_ROOT/AGENTS.md" "AGENTS.md" \
+  'writers and reviewers must read .*\.opencode/skills/development-conventions/references/useful-comments/guidelines\.md' \
+  "useful-comments pre-flight reference for writers and reviewers"
+
+# FULL_ACCEPTANCE must remain a named contract of checks, not a trigger for a
+# repository-wide test sweep that ordinary feature work can inherit.
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'FULL_ACCEPTANCE.*declared acceptance checks.*not automatically all repository tests' \
+  "declared-acceptance-not-all-tests rule"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'Ordinary feature work must not expand into broad suites' \
+  "ordinary-work broad-suite prohibition"
 
 # Orchestration is non-interactive: it remediates reproducible in-scope defects
 # autonomously and returns ESCALATE_USER only for the permitted hard boundaries.

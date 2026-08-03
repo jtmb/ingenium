@@ -5,6 +5,26 @@ description: Test-suite selection, isolated E2E runs, and external-suite safegua
 
 # Testing Guide
 
+## Affected-feature verification (ordinary work)
+
+Start with the smallest checks that prove the changed behavior. Run the affected
+workspace typecheck or lint when relevant, then the directly affected test file;
+use `-t` to narrow a test name when useful. For browser behavior, target the
+affected Playwright file and optional `--grep` expression:
+
+```bash
+npm run typecheck --workspace=packages/ingenium-core
+npm run lint --workspace=services/ingenium-api -- lib/routes/feature.ts
+npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts
+npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts -t "handles the changed case"
+npx playwright test tests/dashboard/feature.spec.ts --grep "changed behavior"
+```
+
+When a focused Playwright run uses the fixture, follow it with
+`npx tsx tests/suite-containment-audit.ts --strict`; the audit is required to
+prove that the run-owned processes and ports were contained. Ordinary feature
+work must not expand into root tests or broad suites.
+
 ## Context-native upload verification
 
 The final Context-native upload implementation is covered by focused tests for
@@ -24,9 +44,16 @@ descriptor-bound read. The transport-parity check
 also verifies `ingenium_context_upload_file` and the **275-tool** inventory
 (266 server registrations plus 2 extension tools).
 
-## Default test run
+## Explicit full/release/cross-cutting acceptance gates
 
-The default Playwright configuration is the deterministic Phase 5 fixture E2E
+Declare the acceptance checks before running them. `FULL_ACCEPTANCE` means that
+declared set, not automatically every repository test. Root `npm test`, an
+entire Playwright config, and Docker/provider/mail/route-parity/manual suites
+are reserved for explicitly declared full, release, or cross-cutting gates.
+
+## Fixture acceptance gate (declared explicitly)
+
+The fixture Playwright configuration is the deterministic Phase 5 fixture E2E
 run. It starts the production-mode API and dashboard processes plus the chat
 fixture, uses a per-run temporary database/project, allocates a distinct
 high-port block, and cleans up the exact manifest-owned run directory during

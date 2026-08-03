@@ -33,15 +33,20 @@ export async function jobCreate(
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Update an existing job's fields. */
-export async function jobUpdate(project: string, jobId: string, fields: Record<string, unknown>) {
-  const res = await api.patch(`/jobs/${jobId}`, fields, { project });
+/** Update an existing job's fields with an explicit revision CAS. */
+export async function jobUpdate(
+  project: string,
+  jobId: string,
+  fields: Record<string, unknown>,
+  expectedRevision: number,
+) {
+  const res = await api.patch(`/jobs/${jobId}`, { ...fields, expected_revision: expectedRevision }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
 /** Delete a job by ID. */
-export async function jobDelete(project: string, jobId: string) {
-  await api.del(`/jobs/${jobId}`, { project });
+export async function jobDelete(project: string, jobId: string, expectedRevision: number) {
+  await api.del(`/jobs/${jobId}`, { project }, { expected_revision: expectedRevision });
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: jobId }) }] };
 }
 

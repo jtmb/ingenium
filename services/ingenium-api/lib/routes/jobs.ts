@@ -51,6 +51,30 @@ function sendVaultReferenceNotFound(res: import("express").Response): void {
   });
 }
 
+function parseExpectedRevision(body: unknown): number | null {
+  if (!body || typeof body !== "object" || !Object.prototype.hasOwnProperty.call(body, "expected_revision")) {
+    return null;
+  }
+  const value = (body as Record<string, unknown>).expected_revision;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function sendExpectedRevisionValidation(res: import("express").Response): void {
+  res.status(422).json({
+    error: { code: "VALIDATION_ERROR", message: "expected_revision must be a nonnegative integer" },
+  });
+}
+
+function sendRevisionConflict(res: import("express").Response, currentRevision: number): void {
+  res.status(409).json({
+    error: {
+      code: "JOB_REVISION_CONFLICT",
+      message: "Job has changed. Reload before saving.",
+      currentRevision,
+    },
+  });
+}
+
 function parseBoundedPage(req: import("express").Request, res: import("express").Response): { limit: number; cursor?: string } | null {
   const rawLimit = req.query.limit;
   const limit = rawLimit === undefined ? 20 : Number(rawLimit);
@@ -286,6 +310,24 @@ jobsRouter.get("/:id", (req, res) => {
   res.json({ data: job });
 });
 
+// GET /:id/vault-audit — bounded, metadata-only job authorization/runtime evidence.
+jobsRouter.get("/:id/vault-audit", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const options = parseBoundedPage(req, res);
+  if (!options) return;
+  try {
+    const page = jobs.listJobVaultAudit(projectId, req.params.id!, options);
+    if (!page) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+      return;
+    }
+    res.json(page);
+  } catch {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor is invalid" } });
+  }
+});
+
 // PATCH /:id — update a job
 // SECURITY: explicit field allowlist prevents mass-assignment attacks.
 // Only these fields are accepted; all other body properties are silently ignored.
@@ -294,6 +336,11 @@ jobsRouter.patch("/:id", (req, res) => {
   if (!projectId) return;
 
   const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+  const expectedRevision = parseExpectedRevision(body);
+  if (expectedRevision === null) {
+    sendExpectedRevisionValidation(res);
+    return;
+  }
   const allowedFields = ["name", "description", "agent", "prompt_template", "schedule_cron", "trigger_event", "enabled", "timeout_minutes", "vault_item_ids"];
   const fields: Record<string, unknown> = {};
   for (const key of allowedFields) {
@@ -316,7 +363,7 @@ jobsRouter.patch("/:id", (req, res) => {
 
   let updated;
   try {
-    updated = jobs.updateJob(projectId, req.params.id!, fields as any);
+    updated = jobs.updateJob(projectId, req.params.id!, fields as any, expectedRevision);
   } catch (error) {
     if (error instanceof jobs.JobTriggerEventError) {
       sendUnknownTriggerEvent(res);
@@ -329,11 +376,15 @@ jobsRouter.patch("/:id", (req, res) => {
     }
     throw error;
   }
-  if (!updated) {
+  if (updated.status === "not_found") {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
     return;
   }
-  res.json({ data: updated });
+  if (updated.status === "revision_conflict") {
+    sendRevisionConflict(res, updated.currentRevision);
+    return;
+  }
+  res.json({ data: updated.job });
 });
 
 // DELETE /:id — delete a job
@@ -341,7 +392,12 @@ jobsRouter.delete("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const deleted = jobs.deleteJob(projectId, req.params.id!);
+  const expectedRevision = parseExpectedRevision(req.body);
+  if (expectedRevision === null) {
+    sendExpectedRevisionValidation(res);
+    return;
+  }
+  const deleted = jobs.deleteJob(projectId, req.params.id!, expectedRevision);
   if (deleted.status === "not_found") {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
     return;
@@ -350,6 +406,10 @@ jobsRouter.delete("/:id", (req, res) => {
     res.status(409).json({
       error: { code: "JOB_ACTIVE_DELIVERY", message: "Job has an active event delivery" },
     });
+    return;
+  }
+  if (deleted.status === "revision_conflict") {
+    sendRevisionConflict(res, deleted.currentRevision);
     return;
   }
   res.status(204).send();

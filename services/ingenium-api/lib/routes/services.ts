@@ -38,6 +38,7 @@ type OverallHealth = "healthy" | "degraded" | "down";
 const SUPERVISOR_RPC = "http://127.0.0.1:9001/RPC2";
 
 const PORT_MAP: Record<string, number> = {
+  "restore-maintenance": 0,
   "ingenium-api": 4097,
   "ingenium-dashboard": 3000,
   "opencode-web": 4098,
@@ -46,6 +47,7 @@ const PORT_MAP: Record<string, number> = {
 };
 
 const DESCRIPTION_MAP: Record<string, string> = {
+  "restore-maintenance": "One-shot restore maintenance executor",
   "ingenium-api": "REST API Gateway (sole DB authority)",
   "ingenium-dashboard": "Next.js Dashboard UI",
   "opencode-web": "OpenCode Web Server",
@@ -313,8 +315,10 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
       stop: proc.stop || undefined,
     }));
 
-    const runningCount = services.filter((s) => s.state === "running").length;
-    const totalCount = services.length;
+    const requiredServices = services.filter((service) => service.name !== "restore-maintenance");
+    const runningCount = requiredServices.filter((s) => s.state === "running").length;
+    const totalCount = requiredServices.length;
+    const maintenance = services.find((service) => service.name === "restore-maintenance");
     let overall: OverallHealth;
     if (totalCount === 0) {
       overall = "down";
@@ -325,6 +329,10 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
     } else {
       overall = "degraded";
     }
+    // A static one-shot program is healthy while STOPPED; only a supervisor
+    // error is actionable. A RUNNING maintenance run remains part of normal
+    // restore state rather than degrading unrelated service health.
+    if (maintenance?.state === "error" && overall === "healthy") overall = "degraded";
 
     // In-process services do not appear in supervisord. Required application
     // failures must therefore participate in the same aggregate health result.

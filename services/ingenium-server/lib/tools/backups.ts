@@ -66,21 +66,72 @@ export async function backupDelete(project: string, backupId: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: backupId }) }] };
 }
 
-/** Preview what a restore would do without executing it. */
-export async function backupRestorePreview(project: string, backupId: string) {
-  const res = await api.post("/backups/restore/preview", { backupId }, { project });
+/** Create or replay a durable dry-run restore plan. */
+export async function backupRestorePreview(project: string, backupId: string, dryRun: true, idempotencyKey: string) {
+  const res = await api.post("/backups/restore/preview", { backupId, dryRun, idempotencyKey }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Start a restore operation. Requires confirm=true to proceed. */
-export async function backupRestoreStart(project: string, backupId: string) {
-  const res = await api.post("/backups/restore", { backupId, confirm: true }, { project });
+/** Issue one opaque confirmation token. This wrapper neither logs nor persists it. */
+export async function backupRestoreAuthorize(project: string, planId: string, expectedRevision: number) {
+  const res = await api.post(`/backups/restore/${encodeURIComponent(planId)}/authorize`, { expectedRevision }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Get the status of a restore operation by job ID. */
-export async function backupRestoreStatus(project: string, jobId: string) {
-  const res = await api.get(`/backups/restore/${jobId}`, { project });
+/** Confirm a plan; this advances only to ready_for_executor and never applies a backup. */
+export async function backupRestoreStart(
+  project: string,
+  planId: string,
+  expectedRevision: number,
+  confirmationToken: string,
+  idempotencyKey: string,
+) {
+  const res = await api.post(
+    `/backups/restore/${encodeURIComponent(planId)}/confirm`,
+    { expectedRevision, confirmationToken, idempotencyKey },
+    { project },
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Issue the distinct one-time maintenance execution token for a ready plan. */
+export async function backupRestoreExecutionAuthorize(project: string, planId: string, expectedRevision: number) {
+  const res = await api.post(
+    `/backups/restore/${encodeURIComponent(planId)}/execution/authorize`,
+    { expectedRevision },
+    { project },
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Queue a fixed maintenance executor. No process or path arguments are accepted. */
+export async function backupRestoreExecute(
+  project: string,
+  planId: string,
+  expectedRevision: number,
+  executionToken: string,
+  idempotencyKey: string,
+) {
+  const res = await api.post(
+    `/backups/restore/${encodeURIComponent(planId)}/execute`,
+    { expectedRevision, executionToken, idempotencyKey },
+    { project },
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Get a restore plan's content-free current state. */
+export async function backupRestoreStatus(project: string, planId: string) {
+  const res = await api.get(`/backups/restore/${encodeURIComponent(planId)}`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** List bounded immutable restore-plan audit evidence. */
+export async function backupRestoreAuditList(project: string, planId: string, limit?: number) {
+  const res = await api.get(`/backups/restore/${encodeURIComponent(planId)}/audit`, {
+    project,
+    ...(limit === undefined ? {} : { limit: String(limit) }),
+  });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 

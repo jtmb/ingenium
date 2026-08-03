@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 275-tool built-in Ingenium MCP catalog across 29 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 279-tool built-in Ingenium MCP catalog across 29 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **275 tools** across **29 baseline categories**:
-273 tools registered by stdio and 2 extension tools. A project-scoped
+The built-in catalog contains **279 tools** across **29 baseline categories**:
+275 tools registered by stdio and 2 extension tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** name (except where noted).
@@ -369,7 +369,7 @@ not expect them in audit responses.
 | `ingenium_vault_password_gen` | Generate a secure random password |
 | `ingenium_vault_audit_list` | List vault audit log entries |
 
-## BACKUPS — Database snapshots and restore (10 tools)
+## BACKUPS — Database snapshots and restore (12 tools)
 
 | Tool | What it does |
 |------|-------------|
@@ -378,11 +378,24 @@ not expect them in audit responses.
 | `ingenium_backup_get` | Get a single backup record by ID |
 | `ingenium_backup_download` | Download a backup archive to a validated path |
 | `ingenium_backup_delete` | Delete a backup by ID |
-| `ingenium_backup_restore_preview` | Preview what a restore would do without executing |
-| `ingenium_backup_restore_start` | Start a restore operation (requires `confirm=true`) |
-| `ingenium_backup_restore_status` | Get the current status of a restore job |
+| `ingenium_backup_restore_preview` | Create or replay a durable dry-run restore plan |
+| `ingenium_backup_restore_authorize` | Issue the plan's one-time confirmation token |
+| `ingenium_backup_restore_start` | Confirm a plan, atomically stage verified tamper-evident copies, and advance it to external-executor readiness without applying data |
+| `ingenium_backup_restore_status` | Get the current content-free restore-plan state |
+| `ingenium_backup_restore_audit_list` | List bounded immutable restore-plan audit evidence |
+| `ingenium_backup_restore_execution_authorize` | Issue the distinct one-time RESTORE-101 execution token for a ready plan |
+| `ingenium_backup_restore_execute` | Consume the execution token, queue the fixed maintenance executor, and return `202` without applying bytes |
 | `ingenium_backup_schedule_get` | Get the current backup schedule configuration |
 | `ingenium_backup_schedule_set` | Set/update the backup schedule configuration |
+
+Restore is a RESTORE-100/101 contract: the server-global v2 bundle is
+validated, legacy bundles are preview-only, and confirmation reaches
+`ready_for_executor` without applying data. A separate 15-minute one-time
+execution token can only queue the static Supervisor executor; it returns
+`202` and never exposes paths, buffers, ownership values, or process controls.
+The source is preserved, status and audit are content-free, and idempotency/CAS
+conflicts fail closed. The old `confirm: true` path is unavailable (`410
+RESTORE_MIGRATION_REQUIRED`).
 
 ## RAG — Retrieval-Augmented Generation index (8 tools)
 
@@ -426,6 +439,14 @@ environment references. Discovered child tools use exactly one lowercase
 
 10 tools: list, create, update, delete, run, runs, run_logs, run_cancel, get, suggest.
 
+`job_create` accepts optional `vault_item_ids` (up to 16 unique UUIDs) for
+metadata-only authorization of active same-project vault items. `job_update`
+omits the field to preserve references, replaces with a supplied list, and
+revokes all with `[]`. Job responses expose only item ID, availability,
+authorization timestamp, and item version; no MCP job tool reveals, decrypts, or
+unseals a vault value. This extends the existing job tools; no new MCP tool is
+added.
+
 ## DOCUMENTATION — Full docs workspace (48 tools)
 
 All tools use the `ingenium_docs_` prefix. Categories: Spaces (5), Pages & Tree (6), Page Actions (6), Versions (3), Search (1), Tags (4), Backlinks (1), Comments (4), Attachments (3), Templates (5), Project Links (3), Favorites (2), Trash (2), Import/Export (2), Stats (1).
@@ -434,6 +455,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 275 tools across 29 categories (273 stdio + 2 extension).** Project-scoped child
+**Built-in baseline: 279 tools across 29 categories (277 stdio + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

@@ -24,6 +24,7 @@ const nativeFetch = globalThis.fetch;
 
 function supervisorResponse(): string {
   return [
+    "restore-maintenance",
     "ingenium-api",
     "ingenium-api-boundary",
     "ingenium-dashboard",
@@ -32,7 +33,7 @@ function supervisorResponse(): string {
     "ttyd-opencode",
     "vscode",
   ]
-    .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>RUNNING</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`)
+    .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>${name === "restore-maintenance" ? "STOPPED" : "RUNNING"}</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`)
     .join("");
 }
 
@@ -92,15 +93,17 @@ afterAll(async () => {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("GET /api/v1/services/status — applications", () => {
-  it("reports all seven required supervised processes, including VS Code", async () => {
+  it("reports seven running processes plus a safe stopped restore-maintenance program", async () => {
     const res = await fetch(`${baseUrl}/api/v1/services/status`);
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    expect(body.data.services).toHaveLength(7);
+    expect(body.data.services).toHaveLength(8);
     expect(body.data.services).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "VS Code", state: "running", port: 4100 }),
+      expect.objectContaining({ name: "restore-maintenance", state: "stopped", port: 0 }),
     ]));
+    expect(body.data.overall).toBe("healthy");
   });
 
   it("returns all 4 applications in the response", async () => {

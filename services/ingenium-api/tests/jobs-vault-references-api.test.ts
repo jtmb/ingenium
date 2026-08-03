@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resetDbForTest } from "ingenium-core";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
-import { createItem, deleteItem, initVault, sealVault, unsealVault } from "../../../packages/ingenium-core/lib/tools/vault.js";
+import { createItem, deleteItem, initVault, sealVault, unsealVault, updateItem } from "../../../packages/ingenium-core/lib/tools/vault.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 
 const passphrase = "jobs API vault reference passphrase";
@@ -74,10 +74,11 @@ describe("VAULT-100 jobs API", () => {
     jobId = body.data.id;
 
     expect(response.status).toBe(201);
+    expect(body.data.revision).toBe(0);
     expect(body.data.vault_references).toEqual([
-      expect.objectContaining({ item_id: firstItemId, availability: "available", item_version: 1 }),
+      expect.objectContaining({ item_id: firstItemId, status: "authorized", authorized_item_version: 1 }),
     ]);
-    expect(Object.keys(body.data.vault_references[0]).sort()).toEqual(["authorized_at", "availability", "item_id", "item_version"]);
+    expect(Object.keys(body.data.vault_references[0]).sort()).toEqual(["authorized_at", "authorized_item_version", "item_id", "status"]);
     expect(text).not.toContain(canary);
     expect(text).not.toContain("api-reference");
     expect(text).not.toContain("encrypted");
@@ -98,14 +99,15 @@ describe("VAULT-100 jobs API", () => {
     const preserved = await request(`/${jobId}`, "jobs-vault-api-first", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Renamed vault job" }),
+      body: JSON.stringify({ name: "Renamed vault job", expected_revision: beforeSealBody.data.revision }),
     });
-    expect((await preserved.json()).data.vault_references).toHaveLength(1);
+    const preservedBody = await preserved.json();
+    expect(preservedBody.data.vault_references).toHaveLength(1);
 
     const revoked = await request(`/${jobId}`, "jobs-vault-api-first", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vault_item_ids: [] }),
+      body: JSON.stringify({ vault_item_ids: [], expected_revision: preservedBody.data.revision }),
     });
     expect(revoked.status).toBe(200);
     expect((await revoked.json()).data.vault_references).toEqual([]);
@@ -145,5 +147,67 @@ describe("VAULT-100 jobs API", () => {
     expect(response.status).toBe(422);
     expect((await response.json()).error.code).toBe("VALIDATION_ERROR");
     expect((await request(`/items/${firstItemId}`, "jobs-vault-api-first")).status).toBe(404);
+  });
+
+  it("refreshes an authorization version only when the current same-ID list is explicitly PATCHed", async () => {
+    const created = await request("/", "jobs-vault-api-first", json({
+      name: "Refresh vault job",
+      agent: "agent",
+      prompt_template: "prompt",
+      vault_item_ids: [firstItemId],
+    }));
+    const freshJobId = (await created.json()).data.id as string;
+    updateItem(firstProjectId, firstItemId, "rotated-api-job-vault-canary-secret");
+
+    const omitted = await request(`/${freshJobId}`, "jobs-vault-api-first", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Still stale", expected_revision: 0 }),
+    });
+    const omittedBody = await omitted.json();
+    expect(omittedBody.data.vault_references[0]).toMatchObject({ authorized_item_version: 1, status: "version_stale" });
+
+    const refreshed = await request(`/${freshJobId}`, "jobs-vault-api-first", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vault_item_ids: [firstItemId], expected_revision: omittedBody.data.revision }),
+    });
+    expect((await refreshed.json()).data.vault_references[0]).toMatchObject({ authorized_item_version: 2, status: "authorized" });
+  });
+
+  it("requires expected_revision, returns a bounded CAS conflict, and exposes fixed-shape vault audit pages", async () => {
+    const missing = await request(`/${jobId}`, "jobs-vault-api-first", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "missing revision" }),
+    });
+    expect(missing.status).toBe(422);
+    expect((await missing.json()).error.code).toBe("VALIDATION_ERROR");
+
+    const current = await request(`/${jobId}`, "jobs-vault-api-first");
+    const revision = (await current.json()).data.revision as number;
+    const updated = await request(`/${jobId}`, "jobs-vault-api-first", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "CAS update", expected_revision: revision }),
+    });
+    expect(updated.status).toBe(200);
+    const conflict = await request(`/${jobId}`, "jobs-vault-api-first", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "stale", expected_revision: revision }),
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({
+      error: { code: "JOB_REVISION_CONFLICT", message: "Job has changed. Reload before saving.", currentRevision: revision + 1 },
+    });
+
+    const audit = await request(`/${jobId}/vault-audit?limit=1`, "jobs-vault-api-first");
+    expect(audit.status).toBe(200);
+    const body = await audit.json();
+    expect(body.data).toHaveLength(1);
+    expect(Object.keys(body.data[0]).sort()).toEqual(["action", "actor_category", "id", "item_id", "job_id", "run_id", "timestamp", "version"]);
+    expect(JSON.stringify(body)).not.toContain(canary);
+    expect(JSON.stringify(body)).not.toContain("api-reference");
   });
 });

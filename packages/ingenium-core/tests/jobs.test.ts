@@ -115,27 +115,28 @@ describe("jobs — CRUD", () => {
 
   it("updates a job with partial fields", () => {
     const job = createJob(projectId, "Update Me", undefined, "ingenium-qa", "test");
-    const updated = updateJob(projectId, job.id, {
+    const result = updateJob(projectId, job.id, {
       name: "Updated Name",
       enabled: false,
       timeout_minutes: 15,
-    });
+    }, job.revision);
 
-    expect(updated).not.toBeUndefined();
-    expect(updated!.name).toBe("Updated Name");
-    expect(updated!.enabled).toBe(0); // SQLite uses 0/1 for booleans
-    expect(updated!.timeout_minutes).toBe(15);
-    expect(updated!.agent).toBe("ingenium-qa"); // unchanged
+    expect(result.status).toBe("updated");
+    if (result.status !== "updated") throw new Error("expected job update");
+    expect(result.job.name).toBe("Updated Name");
+    expect(result.job.enabled).toBe(0); // SQLite uses 0/1 for booleans
+    expect(result.job.timeout_minutes).toBe(15);
+    expect(result.job.agent).toBe("ingenium-qa"); // unchanged
+    expect(result.job.revision).toBe(1);
   });
 
   it("updating nonexistent job returns undefined", () => {
-    const updated = updateJob(projectId, "nonexistent", { name: "nope" });
-    expect(updated).toBeUndefined();
+    expect(updateJob(projectId, "nonexistent", { name: "nope" }, 0)).toEqual({ status: "not_found" });
   });
 
   it("deletes a job", () => {
     const job = createJob(projectId, "Delete Me", undefined, "ingenium-qa", "test");
-    const deleted = deleteJob(projectId, job.id);
+    const deleted = deleteJob(projectId, job.id, job.revision);
     expect(deleted).toEqual({ status: "deleted" });
 
     const found = getJob(projectId, job.id);
@@ -143,7 +144,7 @@ describe("jobs — CRUD", () => {
   });
 
   it("deleting nonexistent job returns false", () => {
-    const deleted = deleteJob(projectId, "nonexistent");
+    const deleted = deleteJob(projectId, "nonexistent", 0);
     expect(deleted).toEqual({ status: "not_found" });
   });
 });

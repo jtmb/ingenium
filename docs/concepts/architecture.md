@@ -162,8 +162,25 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **273 built-in registered tools** across **29 baseline categories**. Two extension-registered tools bring the built-in catalog to **275**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **277 built-in registered tools** across **29 baseline categories**. Two extension-registered tools bring the built-in catalog to **279**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+
+## Restore Plan and Executor Boundary (RESTORE-100/101)
+
+Backups are server-global and use signed v2 fixed-name bundles for the Ingenium
+and OpenCode databases. The manifest binds component hashes, sizes, required
+tables, schema fingerprints, and SQLite versions; a persistent owner-only HMAC
+key file is kept outside the bundle directory. Migration 083 provides immutable
+plan/revision identity, one-time authorization, append-only audit, stage
+integrity, and idempotency receipts. RESTORE-101 adds a distinct one-time
+15-minute execution authorization, an append-only fenced run ledger, and a
+fixed one-shot Supervisor program. API and MCP can only authorize and queue
+that static executor; they never apply database bytes. The executor stops DB
+users, verifies holders and both databases, creates a `pre_restore` snapshot,
+performs the journaled two-file swap, rehydrates the approval ledger, and
+restarts healthy users. Its root-only maintenance root and separate root-only
+HMAC journal key drive crash recovery and fail-closed rollback; API/MCP never
+read either. UI, off-host, and other-resource restores remain out of scope.
 
 ## Task and Session Coordination Boundary (COORD-100/101)
 
@@ -459,6 +476,25 @@ Dashboard /config page  ──HTTP──▶  API (PUT /api/v1/config)
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/api/v1/dashboard/summary` | Aggregated home dashboard endpoint — returns learning stats, task counts, job counts, and mail status in a single response. Each module is independently resolved; failed modules appear in `unavailable[]`. Returns 200 with partial data unless ALL modules fail (500). |
+
+### Vault-backed job execution (VAULT-101)
+
+Vault references are reauthorized immediately before each individual child
+attempt. Sealed, missing, deleted, foreign-project, revoked, expired, or
+version-stale authorization fails closed before spawn; retries resolve fresh
+authorization and never auto-unseal. Secret values cross the runner boundary
+only as run-owned UUID files in protected tmpfs (`0700` directory, `0600`
+files), accompanied by the non-secret `INGENIUM_VAULT_SECRET_FILES` ID-to-path
+map. Values are absent from environment variables, argv, prompts, logs,
+database, API, MCP, and output surfaces.
+
+OpenCode-backed execution uses ephemeral state: a run-owned HOME/XDG tree and
+pure state are discarded with the run rather than shared with the service or
+persisted in the database. Cleanup verifies ownership and emptiness before
+removing files; process-group recovery covers descendants. Partial cleanup,
+unsafe directories, stale/expired/revoked authorization, and nonce races fail
+closed and retain bounded recovery metadata. Same-UID external processes are
+outside the isolation guarantee.
 
 ## Jobs API
 

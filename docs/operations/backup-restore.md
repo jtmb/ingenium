@@ -7,7 +7,25 @@ description: Database backup and restore procedures, automated backup scheduling
 
 This document covers backup and restore procedures for the Ingenium SQLite database and associated data.
 
-The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by SHA-256 manifest verification and a restore-job lifecycle.
+The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by signed v2 manifests and a dry-run-only restore-plan lifecycle. RESTORE-100 does not apply data to active databases; it prepares the validated handoff consumed only by the fixed RESTORE-101 executor.
+
+## RESTORE-100 Contract
+
+RESTORE-100 is operator-command-first and server-global. A supported bundle is a
+fixed-name directory containing exactly `manifest.json`, `ingenium.db`, and
+`opencode.db`. The v2 manifest is HMAC-SHA256 signed and binds each component's
+filename, byte size, SHA-256, required-table list, schema fingerprint, and
+SQLite `user_version`; it also records `restore_min_migration: 83` and a `key_id`.
+The signing key is a persistent owner-only file, never part of a bundle or API
+response. Legacy backup records remain preview-only and cannot be authorized or
+confirmed.
+
+Migration 083 stores immutable plan identities, append-only revisions and audit
+events, one-time hash-only authorizations, tamper-evident stages, and bounded
+idempotency receipts. The only successful terminal preparation state is
+`ready_for_executor`. The source backup remains preserved and referenced; there
+is no active DB replacement, WAL operation, executor process, rollback action, or
+off-host/resource restore in this contract.
 
 ---
 
@@ -20,6 +38,9 @@ A background scheduler (`backup-scheduler.ts`) creates consistent snapshots on a
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | Directory for backup snapshot files. Empty or whitespace-only values are treated as unset. |
+| `INGENIUM_RESTORE_STAGING_DIR` | `/app/.ingenium/restore-staging` | Separate owner-only root for plan-addressed, tamper-evident staged copies. |
+| `INGENIUM_BACKUP_DOWNLOAD_MAX_BYTES` | `268435456` | Maximum verified backup-component download buffered in memory. Oversize components are rejected. |
+| `INGENIUM_RESTORE_HANDOFF_MAX_BYTES` | `268435456` | Maximum total verified staged bytes returned to the future in-process executor handoff. |
 
 Schedule configuration is managed via:
 
@@ -38,15 +59,17 @@ Schedule configuration is managed via:
 
 ### Backup Storage
 
-Each backup creates two files in `INGENIUM_BACKUPS_DIR`:
+Each backup is atomically published as a fixed-name directory in `INGENIUM_BACKUPS_DIR`:
 
 ```text
 .backups/
-├── <uuid>.db               # Ingenium core DB snapshot
-└── <uuid>.opencode.db       # OpenCode session DB snapshot
+└── <uuid>/
+    ├── manifest.json        # Canonical signed v2 manifest
+    ├── ingenium.db          # Ingenium core DB snapshot
+    └── opencode.db          # OpenCode session DB snapshot
 ```
 
-A `backup_records` DB table stores metadata: SHA-256 hashes, backup type, component manifest, and status. The manifest JSON includes `schema_version`, `ingenium` component (filename, sha256, size_bytes), and `opencode` component.
+A `backup_records` DB table stores metadata: manifest SHA-256, backup type, and status. The signed manifest fixes both component names, hashes, sizes, current schema fingerprints, required table metadata, and SQLite `user_version` for both snapshots.
 
 The backup resolver normalizes the configured directory once for snapshot creation,
 downloads, and restore previews. When `INGENIUM_BACKUPS_DIR` is unset, empty, or
@@ -116,37 +139,46 @@ const result = await ingenium_backup_create({
 const backups = await ingenium_backup_list({ project: "global-default" });
 
 // Get a specific backup
-const backup = await ingenium_backup_get({ project: "global-default", backup_id: "<uuid>" });
+const backup = await ingenium_backup_get({ project: "global-default", backupId: "<uuid>" });
 ```
 
-### Restore Preview & Confirmation
+### Restore Preview, Authorization, and Confirmation
 
 ```typescript
-// Preview what would be restored
-const preview = await ingenium_backup_restore_preview({ backup_id: "<uuid>" });
-
-// Confirm a validated restore job (requires explicit confirmation)
-const job = await ingenium_backup_restore_start({
-  project: "global-default",
-  backup_id: "<uuid>",
-  confirm: true,
+const preview = await ingenium_backup_restore_preview({
+  project: "global-default", backupId: "<uuid>", dryRun: true, idempotencyKey: "preview-20260803",
 });
 
-// Check restore status
-const status = await ingenium_backup_restore_status({ job_id: "<job-uuid>" });
+const authorization = await ingenium_backup_restore_authorize({
+  project: "global-default", planId: preview.id, expectedRevision: preview.revision,
+});
+
+const ready = await ingenium_backup_restore_start({
+  project: "global-default", planId: preview.id, expectedRevision: authorization.plan.revision,
+  confirmationToken: authorization.confirmationToken, idempotencyKey: "confirm-20260803",
+});
 ```
 
-The API currently records a confirmed restore job and returns
-`restartRequired: true`; it does **not** replace either active database. Applying
-a confirmed snapshot remains an operator-controlled maintenance action outside
-the API contract. The supported restore workflow is therefore limited to
-preflight, explicit confirmation, job-status tracking, and an operator-led
-isolated maintenance restore. It does not claim or apply unsupported
-destructive restoration of arbitrary project data. The restore preflight validates:
-1. Backup record exists in DB
-2. Component files exist on disk with matching SHA-256
-3. Ingenium snapshot passes `PRAGMA integrity_check`
-4. Snapshot has migration 047 schema (`backup_records` table exists)
+Confirmation consumes the one-time authorization and copies both components into
+a read-only (`0444` files under an owner-only directory), plan-ID-addressed staging
+directory using verified file descriptors. File permissions are **not** treated as
+filesystem immutability: every confirmed/ready status check and future executor
+handoff reopens the fixed files without following symlinks, then rechecks hashes,
+sizes, SQLite integrity, and signed schema compatibility. A mismatch appends the
+content-free `stage_integrity_failed` audit event and moves the plan to `failed`.
+The future executor receives only bounded verified in-memory buffers through a
+trusted in-process Core handoff; buffers contain no file descriptor or pathname
+and must be released (zeroed) after use. Neither REST nor MCP serializes them.
+The plan becomes `ready_for_executor` only after the staged hashes match the
+component hashes bound into its plan hash. The API never replaces active database
+files and exposes no executor route. The preflight validates the signed manifest,
+component hashes, SQLite integrity, and exact current schema compatibility for
+both snapshots.
+
+Downloads are copied from a verified descriptor into a bounded in-memory buffer,
+hashed again, and unlinked before the HTTP response begins. The response buffer is
+wiped on finish, close, or error; no live file descriptor or `/proc/.../fd` path is
+streamed to clients.
 
 ### Hot Backup (WAL Mode)
 
@@ -216,35 +248,29 @@ docker compose down
 docker compose up --build -d
 ```
 
-If data must also be reverted, use the restore preview/job workflow below; do not
+If data must also be reverted, use the restore preview/authorization workflow below; do not
 replace active database files while the service is running. After restoring, restart
 the container and verify API health and both local gateway roots.
 
-### Standard Restore
+### Standard Restore (not RESTORE-100)
 
-```bash
-# 1. Stop the API service
-docker compose stop ingenium
+Active database replacement is not available in RESTORE-100. Do not copy
+snapshot files over the live database or remove WAL/SHM files as part of a
+restore plan. Use preview → authorize → confirm above, then stop at
+`ready_for_executor`; active apply belongs to RESTORE-101.
 
-# 2. Restore from snapshot
-cp data.snapshot /app/.ingenium/data
+### Restore from Docker Backup (RESTORE-101)
 
-# 3. Remove stale WAL/SHM files (they may contain conflicting state)
-rm -f /app/.ingenium/data-wal /app/.ingenium/data-shm
-
-# 4. Start the service
-docker compose start ingenium
-```
-
-### Restore from Docker Backup
-
-```bash
-# 1. Copy backup into container
-docker compose cp ./data.snapshot ingenium:/app/.ingenium/data
-
-# 2. Restart to force re-read
-docker compose restart ingenium
-```
+Never copy bundle files over the live databases. After a plan reaches
+`ready_for_executor`, issue the separate execution authorization and submit its
+one-time token to the RESTORE-101 execute endpoint or MCP tool. It returns
+`202` only after the fixed root-only Supervisor executor accepts the handoff;
+an unavailable Supervisor produces a durable terminal `SUPERVISOR_FAILED`
+outcome and a `503` response rather than a stranded queue. The request never
+accepts a file path, command, or target override. The executor creates a safety
+snapshot, performs the verified paired swap, or rolls back before normal
+services restart. Preserve the source bundle throughout; container-start
+recovery consumes signed journals before Supervisor can start database users.
 
 ---
 

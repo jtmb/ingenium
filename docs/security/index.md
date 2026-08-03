@@ -162,3 +162,69 @@ log, and cancel access. Job deletion is blocked with `409` during an active
 delivery and otherwise preserves historical delivery evidence. Child job
 processes receive only an allowlisted environment and never inherit API or
 provider credentials.
+
+## Restore Plan and Executor Security Boundary (RESTORE-100/101)
+
+Restore plans are restricted to the active server-global project. Supported
+bundles are signed v2 fixed-name directories; HMAC verification, exact component
+hash/size checks, SQLite integrity, required-table metadata, schema fingerprints,
+and `user_version` compatibility are checked before staging. The signing key is
+a persistent owner-only file outside the backup directory and is never exposed.
+
+Migration 083 makes plan identities, revisions, stages, events, and receipts
+append-only. Authorization stores only a token hash, is short-lived and
+one-time, and is bound to the plan revision and manifest. Same-UID stage
+tampering is detected by reopening fixed paths without symlink following;
+failure records `stage_integrity_failed` and fails the plan closed. Confirmed
+content is passed only as bounded, independently verified in-process buffers,
+which must be released/zeroed. REST/MCP never serializes those buffers, replaces
+active databases, or deletes the source backup. Legacy confirmation is rejected
+with `410 RESTORE_MIGRATION_REQUIRED`; executor processes, rollback, UI, and
+off-host restore are outside RESTORE-100.
+
+Migration 084 adds a second short-lived, one-time execution token bound to the
+ready stage plus an immutable, phase-CAS execution ledger. API and MCP only
+queue the fixed `restore-maintenance` Supervisor program; no request can choose
+a command, argument, path, or environment. That process uses a separate
+root-owned HMAC journal key and root:root `0700` journal/buffer root, stops
+every database user, rejects open holders by device/inode, locks target parents
+during the swap, verifies each target, and zeroes transient buffers. The API
+does not read journal key material or journal contents. Interrupted runs either
+rehydrate and record rollback or keep startup blocked with a bounded
+`rollback_failed` outcome; terminal signed journals are archived before their
+active journal and lock are removed. Tokens and owner/fence values are stored
+only as hashes.
+
+## Job vault-reference boundary (VAULT-100)
+
+Vault references are opt-in authorization metadata, not secret access. A job may
+name at most 16 unique active vault item IDs from its own project. Omitted
+`vault_item_ids` means no references on create and preserves existing references
+on update; a supplied list replaces the set, while `[]` revokes all. Missing,
+foreign-project, deleted, and otherwise unavailable items share a generic
+fail-closed error.
+
+The API and MCP job projections return only stable item IDs, `status`,
+authorization timestamps, and `authorized_item_version` captured at
+authorization. `status` is limited to `authorized`, `version_stale`, and
+`unavailable`. This
+metadata is safe while the vault is sealed and does not decrypt or unseal it.
+Authorize/revoke transitions are immutable and record the fixed actor
+`authenticated_api`. VAULT-100 does not inject values into runners or expose
+them through MCP, job prompts, or logs; runner injection belongs to VAULT-101.
+
+### VAULT-101 runner injection boundary
+
+VAULT-101 explicitly reauthorizes every referenced item for one attempt only. A
+sealed vault, missing/deleted/foreign/revoked item, expired authorization, or
+version-stale authorization fails closed before the child is spawned; the runner
+never auto-unseals. Each retry performs a fresh authorization resolution.
+
+Secret material is written only to run-owned UUID files under a protected tmpfs
+directory (`0700` directory, `0600` files). The child receives only the
+non-secret `INGENIUM_VAULT_SECRET_FILES` ID-to-path map. Values are never placed
+in environment variables, argv, prompts, logs, the database, API responses, or
+MCP responses. Vault-enabled output is wholly redacted. Cleanup and zeroization
+cover normal completion, partial cleanup, unsafe-directory retention, nonce
+races, crashes, and shutdown; retained unsafe state fails closed for later
+recovery. The implementation does not promise isolation from a same-UID process.

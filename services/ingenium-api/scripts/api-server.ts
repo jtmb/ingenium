@@ -57,10 +57,12 @@ import {
 } from "../lib/mcp-launcher.js";
 import { projects as projectsDb, protectedSettings, servers } from "ingenium-core";
 import { startScheduler } from "../lib/scheduler.js";
+import { recoverVaultSecretRunDirectories } from "../lib/job-runner.js";
 import { startBackupScheduler } from "../lib/backup-scheduler.js";
 import { createApiLifecycle, installShutdownSignalHandlers, type ApiLifecycle } from "../lib/lifecycle.js";
 import { startMailMaintenance } from "../lib/mail-maintenance.js";
 import { shouldStartBackgroundSchedulers, shouldStartMailMaintenance } from "../lib/runtime-mode.js";
+import { startRestoreMaintenance } from "../lib/restore-supervisor.js";
 
 /**
  * Ensure the global-default project exists at startup.
@@ -185,7 +187,27 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   // records are not stranded in an external namespace.
   if (globalProjectId) {
     backups.migrateLegacyBackupOwnership(globalProjectId);
+    // The API never reads restore journals or database bytes. It only retries
+    // fixed Supervisor handoff for durable queued ledger rows after an API
+    // restart, recording a deterministic terminal failure when that handoff is
+    // unavailable.
+    for (const run of backups.listQueuedRestoreExecutions(globalProjectId)) {
+      void startRestoreMaintenance().catch(() => {
+        try {
+          backups.failRestoreExecutionStart(globalProjectId, run.id, run.revision);
+          logger.warn("api", "Queued restore executor start failed", { code: "SUPERVISOR_FAILED", runId: run.id });
+        } catch {
+          logger.warn("api", "Queued restore executor reconciliation raced another owner", { runId: run.id });
+        }
+      });
+    }
   }
+
+  // The tmpfs is empty after a container restart. This only handles an API
+  // process restart, retaining any unknown or tampered directory untouched.
+  void recoverVaultSecretRunDirectories().catch(() => {
+    logger.warn("api", "Vault job run recovery could not complete; retained evidence will be retried by the scheduler");
+  });
 
   if (shouldStartBackgroundSchedulers()) {
     startScheduler(config.port);

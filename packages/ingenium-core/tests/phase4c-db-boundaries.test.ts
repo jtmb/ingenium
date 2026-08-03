@@ -101,7 +101,8 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const expected = Array.from({ length: 80 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const latestMigration = "084_restore_executor.sql";
+    const expected = Array.from({ length: 84 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
@@ -141,9 +142,15 @@ describe("Phase 4C core database boundaries", () => {
     expect(expected).toContain("075_coordination_registry.sql");
     expect(expected).toContain("076_trusted_job_events.sql");
     expect(expected).toContain("077_job_event_deliveries.sql");
+    expect(expected).toContain("083_restore_plans.sql");
     expect(expected).toContain("078_usage_advisory_thresholds.sql");
     expect(expected).toContain("079_usage_attention_items.sql");
     expect(expected).toContain("080_job_vault_references.sql");
+    expect(expected).toContain("081_vault_job_runs.sql");
+    expect(expected).toContain("082_job_vault_revision_audit.sql");
+    expect(expected).toContain("084_restore_executor.sql");
+    expect(expected.at(-1)).toBe(latestMigration);
+    expect(expected).toContain(latestMigration);
 
     const coordinationMigration = readFileSync(
       join(migrationDir, "075_coordination_registry.sql"),
@@ -157,8 +164,18 @@ describe("Phase 4C core database boundaries", () => {
     expect(coordinationMigration).toContain("FOREIGN KEY(project_id, worktree_id)");
 
     const dbSource = readFileSync(resolve(__dirname, "../lib/db.ts"), "utf8");
-    for (const migration of expected) {
-      expect(dbSource, `fresh-database runner must list ${migration}`).toContain(`"${migration}"`);
-    }
+    const freshRegistration = dbSource.match(
+      /if \(tableCount\.count === 0\) \{([\s\S]*?)\n\s*\} else \{/,
+    );
+    expect(freshRegistration?.[1]).toBeDefined();
+    expect(freshRegistration?.[1]?.match(/"\d{3}_[^"]+\.sql"/g))
+      .toEqual(expected.map((migration) => `"${migration}"`));
+
+    const upgradeRegistration = dbSource.match(
+      /const restoreExecutorMigration = inspectRestoreExecutorMigration\(db\);[\s\S]*?if \(!restoreExecutorMigration\.complete\) \{([\s\S]*?)\n\s*\}/,
+    );
+    expect(upgradeRegistration?.[1]).toContain(
+      `readFileSync(resolve(migrationsDir, "${latestMigration}"), "utf-8")`,
+    );
   });
 });

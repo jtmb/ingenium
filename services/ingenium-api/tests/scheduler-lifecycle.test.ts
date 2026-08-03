@@ -41,7 +41,7 @@ const email = vi.hoisted(() => ({
 
 vi.mock("ingenium-core", () => core);
 vi.mock("ingenium-email", () => email);
-vi.mock("../lib/job-runner.js", () => ({ executeJobRun: vi.fn() }));
+vi.mock("../lib/job-runner.js", () => ({ executeJobRun: vi.fn(), recoverVaultSecretRunDirectories: vi.fn(() => Promise.resolve()) }));
 
 import { isSchedulerRunning, startScheduler, stopScheduler } from "../lib/scheduler.js";
 import {

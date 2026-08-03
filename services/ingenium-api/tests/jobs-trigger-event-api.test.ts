@@ -105,7 +105,7 @@ describe("job trigger event API contract", () => {
     const unrelated = await fetch(`${baseUrl}/api/v1/jobs/${legacyJobId}?project=${projectName}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Renamed legacy event job" }),
+      body: JSON.stringify({ name: "Renamed legacy event job", expected_revision: 0 }),
     });
     expect(unrelated.status).toBe(200);
     expect((await unrelated.json()).data).toMatchObject({
@@ -116,7 +116,7 @@ describe("job trigger event API contract", () => {
     const rejected = await fetch(`${baseUrl}/api/v1/jobs/${legacyJobId}?project=${projectName}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ trigger_event: "unknown.event" }),
+      body: JSON.stringify({ trigger_event: "unknown.event", expected_revision: 1 }),
     });
     expect(rejected.status).toBe(400);
     expect((await rejected.json()).error.code).toBe("UNKNOWN_TRIGGER_EVENT");

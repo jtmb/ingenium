@@ -5,11 +5,23 @@ set -eu
 
 token_file="${INGENIUM_API_TOKEN_FILE:-/run/ingenium-secrets/api-token}"
 backup_dir="${INGENIUM_BACKUPS_DIR:-}"
+backup_signing_key_file="${INGENIUM_BACKUP_SIGNING_KEY_FILE:-/app/.ingenium/backup-signing-key}"
+restore_staging_dir="${INGENIUM_RESTORE_STAGING_DIR:-}"
+trusted_artifact_uid="$(cat /usr/local/share/ingenium/appuser-uid)"
+trusted_artifact_gid="$(cat /usr/local/share/ingenium/appuser-gid)"
+
+case "$trusted_artifact_uid:$trusted_artifact_gid" in
+  *[!0-9:]*|:*|*:) exit 64 ;;
+esac
 
 # An empty Compose interpolation or whitespace-only operator override is unset.
 case "$backup_dir" in
   *[![:space:]]*) ;;
   *) backup_dir="/app/.ingenium/backups" ;;
+esac
+case "$restore_staging_dir" in
+  *[![:space:]]*) ;;
+  *) restore_staging_dir="/app/.ingenium/restore-staging" ;;
 esac
 
 exec env -i \
@@ -22,6 +34,10 @@ exec env -i \
   INGENIUM_GLOBAL_CONFIG_PATH="/home/appuser/.config/opencode" \
   INGENIUM_DOCS_ROOT="${INGENIUM_DOCS_ROOT:-}" \
   INGENIUM_BACKUPS_DIR="$backup_dir" \
+  INGENIUM_BACKUP_SIGNING_KEY_FILE="$backup_signing_key_file" \
+  INGENIUM_RESTORE_STAGING_DIR="$restore_staging_dir" \
+  INGENIUM_TRUSTED_ARTIFACT_UID="$trusted_artifact_uid" \
+  INGENIUM_TRUSTED_ARTIFACT_GID="$trusted_artifact_gid" \
   INGENIUM_API_PORT="${INGENIUM_API_PORT:-4097}" \
   INGENIUM_API_RATE_LIMIT="${INGENIUM_API_RATE_LIMIT:-100}" \
   DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}" \
