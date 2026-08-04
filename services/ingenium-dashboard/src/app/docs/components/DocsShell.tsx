@@ -3,6 +3,7 @@
 import { useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import WorkspaceControl from "../../components/WorkspaceControl";
 import Select from "../../components/Select";
+import EdgeDrawer from "../../components/EdgeDrawer";
 import type { DocSpace } from "@/lib/api";
 
 /** Inline SVG icon components — kept local to avoid external icon library dependency. */
@@ -284,34 +285,19 @@ export default function DocsShell({
         )}
       </div>
 
-      <div
-        className={`lg:hidden fixed inset-0 z-40 transition-opacity duration-200 ${
-          treeDrawerOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
-        aria-hidden={!treeDrawerOpen}
+      <EdgeDrawer
+        open={treeDrawerOpen}
+        side="left"
+        className="lg:hidden fixed inset-0 z-40"
+        outerProps={{ "aria-hidden": !treeDrawerOpen }}
+        panelClassName="absolute top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-[var(--color-surface)] border-r border-[var(--color-border)] overflow-y-auto"
+        panelProps={{
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "Page tree",
+        }}
+        onBackdropClick={() => setTreeDrawerOpen(false)}
       >
-        {/* Backdrop */}
-        <div
-          className="absolute inset-0 bg-black/50"
-          onClick={() => setTreeDrawerOpen(false)}
-          aria-hidden="true"
-        />
-
-        {/* Slide-out panel */}
-        <div
-          className={`
-            absolute top-0 left-0 bottom-0
-            w-72 max-w-[85vw]
-            bg-[var(--color-surface)]
-            border-r border-[var(--color-border)]
-            overflow-y-auto
-            transition-transform duration-200 ease-in-out
-            ${treeDrawerOpen ? "translate-x-0" : "-translate-x-full"}
-          `}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Page tree"
-        >
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--color-border)]">
             <span className="text-sm font-semibold text-[var(--color-text-primary)]">
               {selectedSpace?.name ?? "Pages"}
@@ -328,38 +314,22 @@ export default function DocsShell({
           </div>
           {/* Only actual page selection closes the drawer; actions and expanders stay usable. */}
           <div onClick={handleTreeDrawerClick}>{tree}</div>
-        </div>
-      </div>
+      </EdgeDrawer>
 
       {sidebar && (
-        <div
-          className={`lg:hidden fixed inset-0 z-40 transition-opacity duration-200 ${
-            rightPanelOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-          }`}
-          aria-hidden={!rightPanelOpen}
+        <EdgeDrawer
+          open={rightPanelOpen}
+          side="right"
+          className="lg:hidden fixed inset-0 z-40"
+          outerProps={{ "aria-hidden": !rightPanelOpen }}
+          panelClassName="absolute top-0 right-0 bottom-0 w-80 max-w-[85vw] bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto"
+          panelProps={{
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Page details",
+          }}
+          onBackdropClick={() => setRightPanelOpen(false)}
         >
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setRightPanelOpen(false)}
-            aria-hidden="true"
-          />
-
-          {/* Slide-out panel */}
-          <div
-            className={`
-              absolute top-0 right-0 bottom-0
-              w-80 max-w-[85vw]
-              bg-[var(--color-surface)]
-              border-l border-[var(--color-border)]
-              overflow-y-auto
-              transition-transform duration-200 ease-in-out
-              ${rightPanelOpen ? "translate-x-0" : "translate-x-full"}
-            `}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Page details"
-          >
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--color-border)]">
               <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                 Details
@@ -375,8 +345,7 @@ export default function DocsShell({
               </button>
             </div>
             {sidebar}
-          </div>
-        </div>
+        </EdgeDrawer>
       )}
     </div>
   );

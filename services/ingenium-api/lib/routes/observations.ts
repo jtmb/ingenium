@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { observations, synthesisLlm, logger } from "ingenium-core";
+import { observations, synthesisLlm, logger, ObservationSourceSchema } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 /** Handles /api/v1/observations — CRUD for self-learning observations with FTS5 search and LLM enrichment. */
@@ -41,7 +41,12 @@ observationsRouter.post("/", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "observation_type and content are required" } });
     return;
   }
-  const entry = observations.storeObservation(projectId, observation_type, content, importance, source, context, session_id);
+  const parsedSource = ObservationSourceSchema.safeParse(source ?? "agent");
+  if (!parsedSource.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid observation source" } });
+    return;
+  }
+  const entry = observations.storeObservation(projectId, observation_type, content, importance, parsedSource.data, context, session_id);
   res.status(201).json({ data: entry });
 });
 

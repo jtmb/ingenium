@@ -7,6 +7,7 @@ import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput, { type Attachment } from "./ChatInput";
 import ActivityDrawer from "./ActivityDrawer";
+import EdgeDrawer from "../../components/EdgeDrawer";
 import type { ActivitySelection } from "./chat-activity";
 import MCPDrawer from "./MCPDrawer";
 import {
@@ -45,6 +46,7 @@ export default function ChatShell() {
   /* ---- Layout state ---- */
   const [collapsed, setCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const mobileDrawerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [contextSearchError, setContextSearchError] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -80,6 +82,26 @@ export default function ChatShell() {
   /* ---- Activity drawer state ---- */
   const [activityOpen, setActivityOpen] = useState(false);
   const [activitySelection, setActivitySelection] = useState<ActivitySelection | null>(null);
+
+  const handleMobileMenuOpen = useCallback((trigger: HTMLButtonElement) => {
+    mobileDrawerTriggerRef.current = trigger;
+    setMobileDrawerOpen(true);
+  }, []);
+
+  const handleMobileDrawerClosed = useCallback(() => {
+    const trigger = mobileDrawerTriggerRef.current;
+    mobileDrawerTriggerRef.current = null;
+    if (!trigger?.isConnected) return;
+
+    const activeElement = document.activeElement;
+    const drawer = drawerRef.current;
+    const focusMovedOutside = activeElement
+      && activeElement !== document.body
+      && !drawer?.contains(activeElement);
+    if (focusMovedOutside) return;
+
+    trigger.focus();
+  }, []);
 
   /* ---- OpenCode hooks ---- */
   const {
@@ -421,15 +443,15 @@ export default function ChatShell() {
   /** Auto-focus the first focusable element in the mobile drawer when it opens. */
   useEffect(() => {
     if (!mobileDrawerOpen) return;
-    const timer = setTimeout(() => {
+    const frame = window.requestAnimationFrame(() => {
       const drawer = drawerRef.current;
       if (!drawer) return;
       const firstFocusable = drawer.querySelector<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
       firstFocusable?.focus();
-    }, 0);
-    return () => clearTimeout(timer);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [mobileDrawerOpen]);
 
   /* ---- Session handlers ---- */
@@ -651,35 +673,34 @@ export default function ChatShell() {
       </div>
 
       {/* Mobile drawer overlay */}
-      {mobileDrawerOpen && (
-        <div
-          ref={drawerRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Chat sessions"
-          className="md:hidden fixed inset-0 z-40 flex"
-        >
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setMobileDrawerOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="relative z-50 w-[280px] h-full bg-[var(--color-nav-bg)] shadow-xl">
-            <ChatSessionSidebar
-              sessions={sidebarSessions}
-              activeId={activeId}
-              onSelect={handleSelect}
-              onDelete={handleDelete}
-              onNew={handleNew}
-              collapsed={false}
-              onToggle={() => setMobileDrawerOpen(false)}
-              isDrawer
-              isLoading={sessionsLoading}
-              sessionsError={sessionsError}
-            />
-          </div>
-        </div>
-      )}
+      <EdgeDrawer
+        open={mobileDrawerOpen}
+        side="left"
+        className="md:hidden fixed inset-0 z-40 flex"
+        panelRef={drawerRef}
+        panelClassName="relative z-50 w-[280px] h-full bg-[var(--color-nav-bg)] shadow-xl"
+        panelProps={{
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "Chat sessions",
+        }}
+        backdropProps={{ "data-testid": "chat-session-drawer-backdrop" }}
+        onBackdropClick={() => setMobileDrawerOpen(false)}
+        onClosed={handleMobileDrawerClosed}
+      >
+        <ChatSessionSidebar
+          sessions={sidebarSessions}
+          activeId={activeId}
+          onSelect={handleSelect}
+          onDelete={handleDelete}
+          onNew={handleNew}
+          collapsed={false}
+          onToggle={() => setMobileDrawerOpen(false)}
+          isDrawer={mobileDrawerOpen}
+          isLoading={sessionsLoading}
+          sessionsError={sessionsError}
+        />
+      </EdgeDrawer>
 
       {/* Main chat area */}
       <div className="flex-1 flex-col min-w-0 min-h-0 flex">
@@ -703,7 +724,7 @@ export default function ChatShell() {
           isBusy={chat.isStreaming || chat.isLoading}
           disabled={selectorsDisabled}
           modelDisabled={!hasSelectableModel}
-          onMobileMenuOpen={() => setMobileDrawerOpen(true)}
+          onMobileMenuOpen={handleMobileMenuOpen}
           onMcpOpen={handleMcpOpen}
           permissionCount={chat.permissions.length}
           onCreateTask={handleCreateTask}

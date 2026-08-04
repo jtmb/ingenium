@@ -125,43 +125,92 @@
   }
 }
 
-/* The external navigation prepaint script sets this before React hydrates.
-   Keeping the compact visual rules here means React can safely adopt the
-   persisted value after hydration without changing the server-rendered tree. */
+:root {
+  --edge-drawer-duration: 240ms;
+  --edge-drawer-easing: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The prepaint script sets the root attribute before hydration. The rail
+   remains a real flex item, so content follows its width instead of being
+   moved by a transform and flashing at the end of the transition. */
 html[data-nav-compact="true"] .desktop-navigation {
   width: 3.5rem;
 }
 
-html[data-nav-compact="true"] .desktop-navigation .nav-item-link,
-html[data-nav-compact="true"] .desktop-navigation .nav-group-control {
+.desktop-navigation {
+  transition-property: width;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.desktop-navigation .desktop-nav-item {
+  transition-property: color, gap, padding-inline;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.desktop-navigation .desktop-nav-group-control {
+  transition-property: color, justify-content, padding-inline;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.desktop-navigation .nav-label,
+.desktop-navigation .nav-badge {
+  max-width: 16rem;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition-property: max-width, opacity;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+html[data-nav-compact="true"] .desktop-navigation .desktop-nav-item {
   justify-content: center;
   gap: 0;
-  padding-left: 0;
-  padding-right: 0;
+  padding-inline: 0;
 }
 
-html[data-nav-compact="true"] .desktop-navigation .nav-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+html[data-nav-compact="true"] .desktop-navigation .desktop-nav-group-control {
+  justify-content: center;
+  padding-inline: 0;
 }
 
+html[data-nav-compact="true"] .desktop-navigation .nav-label,
 html[data-nav-compact="true"] .desktop-navigation .nav-badge {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  max-width: 0;
+  opacity: 0;
+}
+
+.edge-drawer-panel {
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  transition-property: transform;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.edge-drawer-panel[data-edge-drawer-state="opening"][data-edge-drawer-side="left"],
+.edge-drawer-panel[data-edge-drawer-state="closing"][data-edge-drawer-side="left"] {
+  transform: translate3d(-100%, 0, 0);
+}
+
+.edge-drawer-panel[data-edge-drawer-state="opening"][data-edge-drawer-side="right"],
+.edge-drawer-panel[data-edge-drawer-state="closing"][data-edge-drawer-side="right"] {
+  transform: translate3d(100%, 0, 0);
+}
+
+.edge-drawer-backdrop {
+  opacity: 1;
+  transition-property: opacity;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.edge-drawer-backdrop[data-edge-drawer-state="opening"],
+.edge-drawer-backdrop[data-edge-drawer-state="closing"] {
+  opacity: 0;
 }
 
 html[data-nav-compact="true"] .desktop-navigation .nav-divider {
@@ -171,8 +220,14 @@ html[data-nav-compact="true"] .desktop-navigation .nav-divider {
 
 @media (prefers-reduced-motion: reduce) {
   .desktop-navigation,
+  .desktop-navigation .desktop-nav-item,
+  .desktop-navigation .desktop-nav-group-control,
+  .desktop-navigation .nav-label,
+  .desktop-navigation .nav-badge,
   .nav-group-items,
-  .mobile-navigation-drawer {
+  .mobile-navigation-drawer,
+  .edge-drawer-panel,
+  .edge-drawer-backdrop {
     transition: none;
   }
 }

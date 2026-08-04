@@ -75,7 +75,7 @@ describe("ActivityDrawer", () => {
 
   it("traps focus, closes on Escape/backdrop, and restores the trigger focus", () => {
     const onClose = vi.fn();
-    const { rerender } = render(
+    const { container, rerender } = render(
       <>
         <button type="button">Web Search trigger</button>
         <ActivityDrawer
@@ -121,6 +121,10 @@ describe("ActivityDrawer", () => {
       </>,
     );
     expect(document.body.style.overflow).toBe("");
+    const retainedPanel = container.querySelector("[data-edge-drawer-panel]");
+    expect(retainedPanel).not.toBeNull();
+    fireEvent.transitionEnd(retainedPanel!, { propertyName: "transform" });
+    expect(container.querySelector("[data-edge-drawer-panel]")).toBeNull();
 
     const restoredTrigger = screen.getByRole("button", { name: "Web Search trigger" });
     expect(document.activeElement).toBe(restoredTrigger);

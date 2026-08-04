@@ -62,6 +62,12 @@ function installMatchMedia() {
   };
 }
 
+function finishMobileDrawerExit(container: HTMLElement) {
+  const panel = container.querySelector("#mobile-navigation-dialog");
+  expect(panel).not.toBeNull();
+  fireEvent.transitionEnd(panel!, { propertyName: "transform" });
+}
+
 describe("UI-103 application shell navigation", () => {
   beforeEach(() => {
     pathname.current = "/";
@@ -192,11 +198,16 @@ describe("UI-103 application shell navigation", () => {
     expect(navigation).toContain("flex items-center py-2 text-sm transition-colors motion-reduce:transition-none");
     expect(navigation).toContain("transition-transform duration-200 motion-reduce:transition-none");
     expect(navigation).toContain("transition-[max-height,opacity] duration-200 ease-in-out motion-reduce:transition-none");
-    expect(navigation).toContain("transition-[width] duration-200 motion-reduce:transition-none");
+    expect(navigation).toContain("transition-[width] motion-reduce:transition-none");
     expect(navigation).toContain("mobile-navigation-drawer");
-    expect(navigation).toContain("transition-transform duration-200 ease-out motion-reduce:transition-none");
+    expect(navigation).toContain("<EdgeDrawer");
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(styles).toContain(".mobile-navigation-drawer");
+    expect(styles).toContain(".edge-drawer-panel");
+    expect(styles).toMatch(/html\[data-nav-compact="true"\] \.desktop-navigation \.desktop-nav-item \{\s*justify-content: center;\s*gap: 0;\s*padding-inline: 0;\s*\}/);
+    expect(styles).toMatch(/html\[data-nav-compact="true"\] \.desktop-navigation \.desktop-nav-group-control \{\s*justify-content: center;\s*padding-inline: 0;\s*\}/);
+    expect(styles).toContain("transition-property: color, gap, padding-inline;");
+    expect(styles).toContain("transition-property: color, justify-content, padding-inline;");
+    expect(styles).toMatch(/\.desktop-navigation \.desktop-nav-item,[\s\S]*\.desktop-navigation \.desktop-nav-group-control,[\s\S]*transition: none;/);
   });
 
   it("mounts only the mobile dialog and restores focus for escape and backdrop closes", async () => {
@@ -228,6 +239,7 @@ describe("UI-103 application shell navigation", () => {
     expect(document.activeElement).toBe(first);
 
     fireEvent.keyDown(dialog, { key: "Escape" });
+    finishMobileDrawerExit(container);
     await waitFor(() => {
       expect(container.querySelector("#mobile-navigation-dialog")).toBeNull();
       expect(document.body.style.overflow).toBe("");
@@ -236,6 +248,7 @@ describe("UI-103 application shell navigation", () => {
 
     fireEvent.click(mobileTrigger);
     fireEvent.click(container.querySelector('[data-nav-mode="mobile"] > [aria-hidden="true"]')!);
+    finishMobileDrawerExit(container);
     await waitFor(() => expect(container.querySelector("#mobile-navigation-dialog")).toBeNull());
     expect(document.activeElement).toBe(mobileTrigger);
   });
@@ -252,6 +265,7 @@ describe("UI-103 application shell navigation", () => {
     expect(background.inert).toBe(true);
 
     fireEvent.click(within(dialog).getByRole("link", { name: "Tasks" }));
+    finishMobileDrawerExit(container);
 
     await waitFor(() => {
       expect(container.querySelector("#mobile-navigation-dialog")).toBeNull();
@@ -270,6 +284,7 @@ describe("UI-103 application shell navigation", () => {
     fireEvent.click(mobileTrigger);
     const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
     fireEvent.click(within(dialog).getByRole("link", { name: "Tasks" }));
+    finishMobileDrawerExit(container);
 
     pathname.current = "/tasks";
     rerender(
@@ -308,6 +323,7 @@ describe("UI-103 application shell navigation", () => {
     await waitFor(() => expect(document.activeElement).toBe(closeButton));
 
     fireEvent.keyDown(dialog, { key: "Escape" });
+    finishMobileDrawerExit(container);
     await waitFor(() => {
       expect(container.querySelector("#mobile-navigation-dialog")).toBeNull();
       expect(document.body.style.overflow).toBe("");
@@ -334,6 +350,8 @@ describe("UI-103 application shell navigation", () => {
         <Navigation />
       </NavigationProvider>,
     );
+    await waitFor(() => expect(container.querySelector("#mobile-navigation-dialog")?.getAttribute("aria-hidden")).toBe("true"));
+    finishMobileDrawerExit(container);
 
     await waitFor(() => {
       expect(container.querySelector("#mobile-navigation-dialog")).toBeNull();
@@ -353,6 +371,7 @@ describe("UI-103 application shell navigation", () => {
     expect(background.inert).toBe(true);
 
     media.setDesktop(true);
+    finishMobileDrawerExit(container);
     await waitFor(() => {
       expect(container.querySelector("#mobile-navigation-dialog")).toBeNull();
       expect(document.body.style.overflow).toBe("");

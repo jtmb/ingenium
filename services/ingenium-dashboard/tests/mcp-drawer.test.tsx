@@ -64,7 +64,7 @@ describe("MCPDrawer status contract", () => {
     trigger.focus();
     const onClose = vi.fn();
     const server = normalizeMcpServer("alpha", { status: "disabled" });
-    const { rerender } = render(
+    const { container, rerender } = render(
       <MCPDrawer
         isOpen
         onClose={onClose}
@@ -101,6 +101,10 @@ describe("MCPDrawer status contract", () => {
         onDisconnect={vi.fn()}
       />,
     );
+    const retainedPanel = container.querySelector("[data-edge-drawer-panel]");
+    expect(retainedPanel).not.toBeNull();
+    fireEvent.transitionEnd(retainedPanel!, { propertyName: "transform" });
+    expect(container.querySelector("[data-edge-drawer-panel]")).toBeNull();
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
   });

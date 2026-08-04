@@ -42,6 +42,39 @@ async function startLearningRoutes(): Promise<string> {
 }
 
 describe("learning route ownership", () => {
+  it("rejects unsupported observation sources before persistence and accepts valid sources", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-observation-source-route-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
+    const project = projects.createProject("observation-source-route-project");
+    const baseUrl = await startLearningRoutes();
+
+    const invalid = await fetch(`${baseUrl}/observations?project=${project.name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        observation_type: "correction",
+        content: "Reject invalid provenance",
+        source: "explicit-user-correction",
+      }),
+    });
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    expect(observations.getObservations(project.id)).toHaveLength(0);
+
+    const valid = await fetch(`${baseUrl}/observations?project=${project.name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        observation_type: "correction",
+        content: "Keep valid provenance",
+        source: "manual",
+      }),
+    });
+    expect(valid.status).toBe(201);
+    await expect(valid.json()).resolves.toMatchObject({ data: { source: "manual" } });
+    expect(observations.getObservations(project.id)).toHaveLength(1);
+  });
+
   it("does not expose or mutate observations and traits from another project", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "ingenium-learning-ownership-"));
     process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");

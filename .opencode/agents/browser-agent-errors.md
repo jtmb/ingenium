@@ -1,3 +1,23 @@
+## drawer-motion — 2026-08-03T11:20:00Z (deployed drawer-motion acceptance, PASS_WITH_FOLLOWUPS)
+
+| # | Step | Error | Attempt | Resolution |
+|---|------|-------|---------|------------|
+| 1 | First wrapper invocation after cold Chrome launch | dev-browser connect hung past 90s tool window (first-launch race) | 1/2 | Retry after launch; wrapper reuses running Chrome and works |
+| 2 | Synthetic `new KeyboardEvent("Escape")` dispatch | Did NOT close any edge-drawer (home nav, docs tree) — synthetic key events don't trigger product Escape handlers | 2/2 | Use real `page.keyboard.press("Escape")` — closes app-nav/session/MCP/activity drawers |
+| 3 | CDP `Network.responseReceived` handler | `evt.params.response` undefined — dev-browser CDP events pass payload DIRECTLY (`evt.response`, `evt.entry`, `evt.exceptionDetails`) | 1/1 | Use direct event keys; wrap handlers in try/catch so one bad event doesn't kill the script |
+| 4 | rAF sampling loop on cold /chat | First rAF tick delayed 800ms+; repeated sampling returned stale panel geometry while single-shot probes showed live values — main-thread starvation on session-list load | 3/3 | Prefer single-shot evaluate probes; wait for data-settled state before motion sampling; if repeated cycles on one tab corrupt state, use a FRESH page for definitive checks |
+| 5 | Session drawer entry capture | Drawer open is gated on `/api/v1/opencode/sessions` fetch; cold clicks can land before hydration → no-op or stale states | 2/3 | Settle ≥3.5s after goto; verify with single-shot probe before sampling; warm page + fresh page both reliable |
+
+### Working recipe knowledge (verified 2026-08-03, deployed drawers)
+- **edge-drawer component** (shared by app nav, /docs tree+details, /chat session/MCP/activity): container `div.edge-drawer` (mobile `md:hidden` or `lg:hidden`, `fixed inset-0 z-40`), backdrop `div.edge-drawer-backdrop` (`bg-black/50`, `transition: opacity 0.24s cubic-bezier(0.22,1,0.36,1)`), panel `div.edge-drawer-panel` (role=dialog, aria-modal=true, `transition: transform 0.24s cubic-bezier(0.22,1,0.36,1)`; left drawers w-64/72/280, right w-80/360). Close lifecycle: `aria-hidden=true` set immediately, transform animates, then **unmounts** — EXCEPT the /chat session drawer which stays mounted at translateX(-280) in some repeated-cycle states (fresh page unmounts cleanly; treat fresh-page result as canonical).
+- App nav drawer (mobile /): open btn `[aria-label="Open navigation menu"]`, panel `.mobile-navigation-drawer`, close `[aria-label="Close navigation"]`. Moves focus into drawer on open; restores focus to trigger on every close path. PASS.
+- Desktop sidebar: `aside.desktop-navigation` `w-56↔w-14`, `transition-[width] motion-reduce:transition-none`, toggle `[aria-label="Collapse navigation"]`/`[aria-label="Expand navigation"]`, labels `.nav-label` fade via opacity. Main content offset tracks sidebar width exactly.
+- /docs drawers: `[aria-label="Open page tree"]` (w-72 left, close `[aria-label="Close tree"]`), `[aria-label="Open details panel"]` (w-80 right, close `[aria-label="Close panel"]`). **a11y gaps (FOLLOW_UP F2/F3): no focus move on open, no focus trap (background tabbable), no Escape close, focus ends on BODY.**
+- /chat drawers: session `[aria-label="Open sessions"]` (w-280 left, close `[aria-label="Collapse sidebar"]` — NOTE: same label as desktop sidebar toggle; only one visible at a time), MCP `[aria-label="MCP servers"]` (right 360, close `[aria-label="Close MCP drawer"]`), activity `[aria-label^="Open Web Search activity"]` (tool-call chip in transcript; full-screen `.activity-drawer-panel`, close `[aria-label="Close activity drawer"]`). **BLOCKING F1: session drawer never restores focus to trigger (BODY on Escape/button/backdrop); MCP + activity restore correctly.**
+- prefers-reduced-motion: CDP `Emulation.setEmulatedMedia({features:[{name:"prefers-reduced-motion",value:"reduce"}]})`; both desktop nav and edge-drawer panels compute `transition: none` → instant geometry jump, lifecycle/focus unchanged.
+- Console/network: 0 errors across /, /chat, /docs incl. drawer interactions. First-party endpoints all 200 (see interaction.json).
+- Test caveats: real key events for Escape; direct CDP event keys; single-shot probes over sampling loops; fresh page for canonical drawer-state checks; evidence in `tests/artifacts/visual-qa/run-20260803-drawer-motion/`.
+
 ## job-102 — 2026-08-02T09:40:00Z (deployed /jobs acceptance, PASS)
 
 | # | Step | Error | Attempt | Resolution |
@@ -111,3 +131,23 @@ The BLOCKING row above was re-verified against the deployed `/docs` at 390x844 a
 - Mobile 390px: wrapper nav via `[aria-label="Open navigation menu"]` / `[aria-label="Close navigation"]`; workbench keeps activity bar LEFT (48px), sidebar 170px; no horizontal overflow.
 - Known console noise (product defects, see interaction.json): vsda.js/wasm 404; CSP frame-ancestors blocks webWorkerExtensionHostIframe (chrome-error frame persists); open-vsx copilot-chat 404.
 - Test caveats: use `browser.getPage(id)` for unnamed popups; never `${}` template literals inside evaluate; split scripts < 30s; clicks on workbench elements sometimes need programmatic el.click().
+
+## compact-nav-highlight — 2026-08-03T14:15:00Z (deployed compact sidebar tab-highlight acceptance — PASS, 0 BLOCKING)
+
+| # | Step | Error | Attempt | Resolution |
+|---|------|-------|---------|------------|
+| 1 | Save screenshots | `saveScreenshot(buf, name)` and `p.screenshot({encoding:'base64'})` hang until the 30s wrapper timeout on this dev-browser build | 2/3 | Use CDP `p.context().newCDPSession(p)` → `Page.captureScreenshot` (clip for element-only) → prints base64 → decode on WSL into `tests/artifacts/visual-qa/`. `p.screenshot()` no-arg returns a raw binary string (works, but not WSL-transferable) |
+| 2 | Sample collapse transition | Width snapped 224→56 in one frame (no intermediates) → looked like a transition regression | 1/2 | Root cause: Chrome window occluded/minimized → CSS transitions collapse on forced layout. Call `cdp.send('Page.bringToFront')` before any transition sampling; with the window active the 0.24s ease runs fluidly (20–21 distinct widths, settle ~171–192ms). Also skip first 2 rAF frames to avoid click→flush lag inflating maxFrameJump |
+| 3 | CDP `Input.enable` | Protocol error: 'Input.enable' wasn't found | 1/1 | Input domain needs no enable; `Input.dispatchMouseEvent` works directly |
+| 4 | Evaluate with args | `p.evaluate((dir) => ..., dir)` — bridge drops the arg; `dir` undefined → null.click() TypeError | 1/1 | Duplicate the evaluate with hardcoded selectors per direction (never rely on evaluate arguments on this bridge) |
+| 5 | Sweep loop measure | `const m = measure()` missing await → Promise serializes to `{}` in JSON | 1/1 | `await measure()`. (All sweep JSON keys that came back `{}` were unresolved promises, not real data) |
+| 6 | Rapid route sweep | Nginx 429 Too Many Requests (30r/s, burst 60) on project/chat data APIs → /plugins and /mcp-servers nav not rendered during bootstrap API gate | 1/2 | Pace loads ≥12s apart (same artifact as ui-102); re-verified all affected routes clean. Nav/shell unaffected where measured |
+| 7 | No-snap verification | maxFrameJump 21–28px triggered a naive `anySnap` flag | — | True snap would show 2 distinct widths; observed 20–21 distinct monotonic widths over ~180ms = real CSS transition. Report distinct-width count + per-frame delta with fps context instead of a fixed threshold |
+
+### Working recipe knowledge (dev-browser bridge, verified 2026-08-03)
+- Screenshot pipeline that works: CDP `Page.captureScreenshot` with `clip` → base64 on stdout (`B64:` line) → `base64 -d` on WSL. Never hand-copy base64.
+- Desktop compact rail: `aside.desktop-navigation`; compact CSS driven by `html[data-nav-compact="true"]` (width 3.5rem; `.desktop-nav-item { justify-content:center; gap:0; padding-inline:0 }`; `.nav-label { opacity:0; max-width:0 }`); transition `width var(--edge-drawer-duration) var(--edge-drawer-easing)` (0.24s cubic-bezier(0.22,1,0.36,1)); state persisted in `localStorage["ingenium-nav-compact"]` (restores across full reloads).
+- Selected nav link classes: `bg-[var(--color-surface-selected)] text-[var(--color-nav-text-active)] border-l-2 border-[var(--color-text-link)]` → computed bg `rgb(239,246,255)`, border-left `2px solid rgb(37,99,235)`. Inactive: `border-l-2 border-transparent`. Hover: `hover:bg-[var(--color-surface-hover)]` = `rgb(243,244,246)`.
+- Compact icon center delta settles at exactly 1.00px (link 29px = 2px left border + 27px content; 16px icon centered in content) — structural, within the ≤1px acceptance bound.
+- Mobile drawer: `.edge-drawer-panel.mobile-navigation-drawer` (w-64 256px) + `button[aria-label='Open navigation menu']`; desktop rail `display:none` below md; drawer items keep normal px-3/10px-gap (no compact leak).
+- `p.evaluate` works with zero-arg arrow functions; evaluate ARGS are not passed by this bridge.

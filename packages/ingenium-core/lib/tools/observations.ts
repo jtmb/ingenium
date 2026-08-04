@@ -9,7 +9,7 @@
  */
 
 import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
-import { Observation } from "../schema.js";
+import { Observation, ObservationSourceSchema } from "../schema.js";
 import { logEvent } from "./pipeline-events.js";
 
 /**
@@ -31,6 +31,7 @@ export function storeObservation(
   context?: string,
   sessionId?: string,
 ): Observation {
+  const storedSource = ObservationSourceSchema.parse(source ?? "agent");
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
@@ -42,7 +43,7 @@ export function storeObservation(
       observationType,
       content,
       importance ?? 5,
-      source ?? "agent",
+      storedSource,
       context ?? null,
       sessionId ?? null,
       now,
@@ -57,10 +58,10 @@ export function storeObservation(
     logEvent(
       projectId,
       "observation_created",
-      (source as string) === "agent" ? "agent" : "plugin",
+      storedSource === "agent" ? "agent" : "plugin",
       `Agent observed: ${content.substring(0, 80)}`,
       content,
-      { observation_type: observationType, importance: importance ?? 5, source },
+      { observation_type: observationType, importance: importance ?? 5, source: storedSource },
       undefined,
       sessionId,
       importance ?? 5,

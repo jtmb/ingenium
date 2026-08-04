@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef } from "react";
 import type { ChatMessage } from "./ChatMessages";
+import EdgeDrawer from "../../components/EdgeDrawer";
 import {
   buildActivityTimeline,
   type ActivityEvent,
@@ -188,25 +189,24 @@ export default function ActivityDrawer({
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end" data-testid="chat-activity-drawer">
-      <div
-        className="activity-drawer-backdrop absolute inset-0 bg-black/50"
-        onClick={(event) => {
-          if (event.target === event.currentTarget) onClose();
-        }}
-        aria-hidden="true"
-        data-testid="chat-activity-backdrop"
-      />
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={dialogId}
-        className="activity-drawer-panel relative z-10 flex h-full w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl md:w-[400px]"
-      >
+    <EdgeDrawer
+      open={isOpen}
+      side="right"
+      className="fixed inset-0 z-[70] flex justify-end"
+      outerProps={{ "data-testid": "chat-activity-drawer" }}
+      panelRef={dialogRef}
+      panelClassName="activity-drawer-panel relative z-10 flex h-full w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl md:w-[400px]"
+      panelProps={{
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-labelledby": dialogId,
+      }}
+      backdropProps={{ "data-testid": "chat-activity-backdrop" }}
+      onBackdropClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
         <header className="flex min-h-[64px] shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2.5">
           <h2 id={dialogId} className="text-base font-semibold text-[var(--color-text-primary)]">
             Activity
@@ -237,29 +237,6 @@ export default function ActivityDrawer({
             </p>
           )}
         </div>
-      </div>
-      <style>{`
-        .activity-drawer-panel {
-          animation: activity-drawer-in 180ms ease-out both;
-        }
-        .activity-drawer-backdrop {
-          animation: activity-drawer-backdrop-in 180ms ease-out both;
-        }
-        @keyframes activity-drawer-in {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
-        }
-        @keyframes activity-drawer-backdrop-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .activity-drawer-panel,
-          .activity-drawer-backdrop {
-            animation: none;
-          }
-        }
-      `}</style>
-    </div>
+    </EdgeDrawer>
   );
 }

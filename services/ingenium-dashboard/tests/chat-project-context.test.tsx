@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import {
   CHAT_CONTEXT_BEGIN_DELIMITER,
@@ -316,5 +316,49 @@ describe("CHAT-100 project context sends", () => {
     expect(contextButton.getAttribute("aria-label")).toBe(`Use project context: ${mocks.selectedProject}`);
     expect(screen.getByTestId("chat-context-project").textContent).toBe(mocks.selectedProject);
     expect(screen.getByTestId("chat-context-project").className).toContain("truncate");
+  });
+
+  it.each(["escape", "close", "backdrop"] as const)(
+    "restores the Open sessions trigger after a mobile drawer %s close",
+    async (closePath) => {
+      const view = await renderReady();
+      const trigger = screen.getByTestId("chat-header-hamburger");
+      trigger.focus();
+      fireEvent.click(trigger);
+      const dialog = await screen.findByRole("dialog", { name: "Chat sessions" });
+
+      if (closePath === "escape") {
+        fireEvent.keyDown(document, { key: "Escape" });
+      } else if (closePath === "close") {
+        fireEvent.click(within(dialog).getByRole("button", { name: "Collapse sidebar" }));
+      } else {
+        fireEvent.click(screen.getByTestId("chat-session-drawer-backdrop"));
+      }
+
+      fireEvent.transitionEnd(dialog, { propertyName: "transform" });
+
+      expect(view.container.querySelector("[data-edge-drawer-panel]")).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    },
+  );
+
+  it("does not replace an intentional focus target when the drawer closes", async () => {
+    const view = await renderReady();
+    const trigger = screen.getByTestId("chat-header-hamburger");
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "Chat sessions" });
+    const intentionalTarget = document.createElement("button");
+    intentionalTarget.type = "button";
+    intentionalTarget.textContent = "Intentional target";
+    document.body.append(intentionalTarget);
+    intentionalTarget.focus();
+
+    fireEvent.click(screen.getByTestId("chat-session-drawer-backdrop"));
+    fireEvent.transitionEnd(dialog, { propertyName: "transform" });
+
+    expect(view.container.querySelector("[data-edge-drawer-panel]")).toBeNull();
+    expect(document.activeElement).toBe(intentionalTarget);
+    intentionalTarget.remove();
   });
 });

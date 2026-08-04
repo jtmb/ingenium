@@ -17,6 +17,25 @@ An immersive 3-pane docs workspace at `/docs` for creating, editing, and managin
 4. The **right sidebar** has 8 tabbed panels: Info, Tags, Backlinks, Comments, History, Linked (project links), Files (attachments), Trash
 5. Use the **top toolbar** to: create a new page, publish a draft, archive a page, search (FTS5), create from template, import/export
 
+### Responsive panes
+
+The docs workspace keeps the center editor inline. On smaller screens, the left
+page tree opens as a left edge drawer; the right details panel opens as a right
+edge drawer (the details panel remains inline at `lg` and above). Both use the
+shared edge-drawer pattern: the panel translates from its edge while the
+backdrop fades over `240ms` with `cubic-bezier(0.22, 1, 0.36, 1)`. Closing
+retains the panel until its transform transition ends, allowing a rapid reopen
+to reverse the same mounted panel. The tree closes when a page is selected or
+when the backdrop is clicked; the details panel closes from its close control or
+the backdrop. Panels retained only for exit are `aria-hidden` and inert.
+
+Reduced-motion preferences disable the transition and apply open/close
+immediately. These responsive drawers are separate from the inline desktop
+tree/editor/details panes and from centered modals, dropdowns, and disclosures;
+those surfaces do not use the edge-drawer motion pattern. The docs drawers do
+not add the navigation/chat focus trap or Escape handling; their existing
+close-control and backdrop behavior is unchanged.
+
 ### Actions
 
 | Action | How To |

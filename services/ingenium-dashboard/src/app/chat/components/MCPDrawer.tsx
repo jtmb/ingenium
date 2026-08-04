@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import Link from "next/link";
+import EdgeDrawer from "../../components/EdgeDrawer";
 import {
   getMcpServersHref,
   getMcpStatusLabel,
@@ -99,6 +100,7 @@ export default function MCPDrawer({
       ? document.activeElement
       : null;
     closeButtonRef.current?.focus();
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -128,34 +130,30 @@ export default function MCPDrawer({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown);
       const trigger = previouslyFocusedElementRef.current;
       if (trigger?.isConnected) trigger.focus();
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   const mcpServersHref = getMcpServersHref(project);
 
   return (
-    <div className="fixed inset-0 z-40">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={onClose}
-        aria-hidden="true"
-        data-testid="mcp-drawer-backdrop"
-      />
-
-      {/* Panel */}
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={dialogId}
-        className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[360px] sm:w-[360px] bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-2xl flex flex-col"
-      >
+    <EdgeDrawer
+      open={isOpen}
+      side="right"
+      className="fixed inset-0 z-40"
+      panelRef={dialogRef}
+      panelClassName="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[360px] sm:w-[360px] bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-2xl flex flex-col"
+      panelProps={{
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-labelledby": dialogId,
+      }}
+      backdropProps={{ "data-testid": "mcp-drawer-backdrop" }}
+      onBackdropClick={onClose}
+    >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--color-border)] shrink-0">
           <div className="flex items-center gap-2.5">
@@ -380,7 +378,6 @@ export default function MCPDrawer({
             {isRefreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
-      </div>
-    </div>
+    </EdgeDrawer>
   );
 }

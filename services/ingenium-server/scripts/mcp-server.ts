@@ -61,6 +61,17 @@ import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
 
 const projectStateAttestor = new ProjectStateAttestor();
+const observationSourceSchema = z.enum([
+  "agent",
+  "email",
+  "chat",
+  "document",
+  "calendar",
+  "synthesis",
+  "import",
+  "manual",
+  "auto-observer",
+]);
 
 /**
  * Checks whether a tool is enabled for the given project via the API. A state
@@ -517,7 +528,7 @@ server.registerTool(
       observation_type: z.string(),
       content: z.string(),
       importance: z.number().optional(),
-      source: z.string().optional(),
+      source: observationSourceSchema.optional(),
       context: z.string().optional(),
     },
   },

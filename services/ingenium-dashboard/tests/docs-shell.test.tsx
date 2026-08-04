@@ -47,7 +47,7 @@ describe("DocsShell space selector", () => {
   });
 
   it("closes the mobile drawer only for page selection, not expanders or actions", () => {
-    render(
+    const { container } = render(
       <DocsShell
         spaces={[{ id: 1, name: "Docs" }]}
         selectedSpaceId={1}
@@ -72,5 +72,11 @@ describe("DocsShell space selector", () => {
 
     fireEvent.click(within(drawer).getByRole("button", { name: "Select page" }));
     expect(screen.queryByRole("dialog", { name: "Page tree" })).toBeNull();
+    const retainedPanel = container.querySelector("[data-edge-drawer-panel]");
+    expect(retainedPanel).not.toBeNull();
+    expect(retainedPanel?.getAttribute("aria-hidden")).toBe("true");
+    expect(retainedPanel?.hasAttribute("inert")).toBe(true);
+    fireEvent.transitionEnd(retainedPanel!, { propertyName: "transform" });
+    expect(container.querySelector("[data-edge-drawer-panel]")).toBeNull();
   });
 });

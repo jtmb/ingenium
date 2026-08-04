@@ -96,7 +96,7 @@ The left sidebar lists all chat sessions. Sessions are loaded from OpenCode via 
 
 ### Mobile Responsiveness
 
-On screens narrower than 1280px, the sidebar auto-collapses. On mobile (<768px), the sidebar becomes an overlay drawer triggered by a hamburger button in the header.
+On screens narrower than 1280px, the sidebar auto-collapses. On mobile (<768px), the sidebar becomes the shared left edge-drawer pattern, triggered by a hamburger button in the header. The panel translates from the edge and the backdrop fades using `240ms` with `cubic-bezier(0.22, 1, 0.36, 1)`. Closing retains the panel through its transform transition so a rapid reopen reverses the same mounted drawer instead of restarting from a removed panel. The session drawer is inert and `aria-hidden` while retained only for exit; its existing mobile focus behavior remains in place.
 
 ### Create a Task from Chat
 
@@ -201,11 +201,16 @@ the query and validated `http`/`https` sites grouped as **Visited**, **Results**
 or **Sites**; it does not expose arbitrary provider payloads. The Web Search row
 does not render those details inline.
 
-The drawer is a modal dialog. It traps `Tab` focus, moves focus to its close
-button when opened, restores the previously focused element when closed, and
-closes with the close button, backdrop, or `Escape`. It disables body scrolling
-while open and uses a full-width panel on small screens and a 400px panel on
-larger screens. Reduced-motion preferences disable its entrance animation.
+The drawer is a right edge-mounted modal dialog using the shared edge-drawer
+motion pattern: the panel transforms and the backdrop opacity changes over
+`240ms` with `cubic-bezier(0.22, 1, 0.36, 1)`. Exit presence is retained until
+the panel transform ends, so rapid reversal reopens the mounted panel. It traps
+`Tab` focus, moves focus to its close button when opened, restores the
+previously focused element when closed, and closes with the close button,
+backdrop, or `Escape`. It disables body scrolling while open and uses a
+full-width panel on small screens and a 400px panel on larger screens. A panel
+retained only for exit is `aria-hidden` and inert. Reduced-motion preferences
+disable the transition and close/open immediately.
 
 ### Action Row
 Each assistant message has an action row beneath it with:
@@ -252,6 +257,19 @@ actionable errors (`TOOL_DISABLED`, `TOOL_STATE_UNAVAILABLE`, or
 `PROJECT_IDENTITY_REQUIRED`) and links to **MCP Servers** when the project is
 known. The statically registered extension tools are the exception: they remain
 visible, but their execution is still project-state-gated and fails closed.
+
+The MCP status panel is a right edge drawer using the same `240ms`
+`cubic-bezier(0.22, 1, 0.36, 1)` panel-transform/backdrop-opacity contract as
+the session and Activity drawers. It remains mounted through exit and reverses
+cleanly if reopened during that transition. While open it traps `Tab`, focuses
+the close button, closes on the close button, backdrop, or `Escape`, and
+restores focus to the trigger on close. The exiting panel is `aria-hidden` and
+inert; reduced motion removes the transition and applies state changes
+immediately.
+
+These edge drawers are distinct from Chat's inline desktop panes and from
+centered modals, dropdowns, and disclosures, which do not use this motion
+primitive.
 
 ## API
 

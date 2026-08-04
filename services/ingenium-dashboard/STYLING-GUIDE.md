@@ -223,9 +223,9 @@ drawer; they are not duplicated in the top bar.
 |----------|-------|----------|
 | Background | Surface token | `bg-[var(--color-surface)]` |
 | Bottom Border | 1px token border | `border-b border-[var(--color-border)]` |
-| Desktop rail | Full `w-56`, compact `w-14` | `transition-[width] motion-reduce:transition-none` |
+| Desktop rail | Full `w-56`, compact `w-14`; real flex layout item | `transition-[width] motion-reduce:transition-none` |
 | Compact links | Icon-only, labelled native tooltip | `aria-label` + `title` |
-| Mobile navigation | Modal `w-64 max-w-[85vw]` drawer, mounted only while open | `md:hidden fixed inset-0` |
+| Mobile navigation | Modal `w-64 max-w-[85vw]` drawer with exit presence | `md:hidden fixed inset-0` |
 | Settings Gear | Far-right control after ProjectDropdown | `ml-auto` |
 
 ### Left navigation scrollbar
@@ -256,6 +256,33 @@ The shell has three responsive zones:
 The mobile drawer is a labelled modal. It traps and redirects focus, closes on Escape or backdrop, restores focus to its trigger for user-initiated closes, and locks body scroll while mounted. Route and desktop-breakpoint closes do not restore focus to the hidden mobile trigger. The top bar and main content use `data-nav-background` and become inert with `aria-hidden="true"` while the drawer is open; their exact prior states are restored on close.
 
 Collapsed navigation groups retain their height/opacity transition but add `inert` and `aria-hidden` immediately, so hidden links never remain keyboard or screen-reader reachable. Rail, group, chevron, and drawer transitions use `motion-reduce:transition-none` and the reduced-motion CSS fallback.
+
+### Edge-drawer motion contract
+
+The dependency-free `EdgeDrawer` primitive is the canonical presence and motion
+mechanism for these actual edge overlays: main mobile Navigation, DocsShell's
+mobile/tablet page-tree and details drawers, ChatShell's mobile session drawer,
+MCPDrawer, and ActivityDrawer. It does **not** cover desktop Docs/Chat/Mail
+inline rails, centered modals, dropdowns, disclosures, or the Settings overlay.
+
+- **Timing:** entry and exit use `240ms` with the decelerating
+  `cubic-bezier(0.22, 1, 0.36, 1)` easing.
+- **Motion:** only the panel's `transform` transitions, using
+  `translate3d`; the backdrop transitions `opacity` with the same timing.
+- **Presence:** close changes the panel to its off-screen state and retains it
+  until its `transform` `transitionend`; reopening during exit reverses the
+  same mounted instance. No fixed exit delay is used.
+- **Reduced motion:** `prefers-reduced-motion: reduce` disables transitions and
+  deterministically mounts open drawers or unmounts closed drawers immediately.
+- **Accessibility:** open drawers retain their existing surface dimensions,
+  z-index, scrolling, focus, Escape, backdrop, and route behavior. A drawer
+  retained only for exit is `aria-hidden` and `inert`, so its controls cannot be
+  reached while it is visually closing.
+- **Desktop rail:** the main Navigation rail reserves layout width and
+  transitions `224px` ↔ `56px` as a flex item. Labels, badges, gaps, and the
+  content offset follow the width transition; the rail itself is never
+  transformed. Prepaint persistence still sets the compact root attribute
+  before hydration.
 
 ### Removed from Nav
 

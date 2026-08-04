@@ -940,6 +940,21 @@ export interface ChildMcpDiscoveredTool {
   discovered_at: string;
 }
 
+/** Observation provenance values accepted by the persistence constraint. */
+export const OBSERVATION_SOURCES = [
+  "agent",
+  "email",
+  "chat",
+  "document",
+  "calendar",
+  "synthesis",
+  "import",
+  "manual",
+  "auto-observer",
+] as const;
+export const ObservationSourceSchema = z.enum(OBSERVATION_SOURCES);
+export type ObservationSource = z.infer<typeof ObservationSourceSchema>;
+
 /** An observation about user behavior — the raw input to the self-learning pipeline. */
 export interface Observation {
   id: number;
@@ -947,7 +962,7 @@ export interface Observation {
   observation_type: "correction" | "preference" | "pattern" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "error" | "goal";
   content: string;
   importance: number;
-  source: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | "auto-observer";
+  source: ObservationSource;
   context?: string;
   status: "pending" | "processed" | "skipped" | "failed";
   session_id?: string;

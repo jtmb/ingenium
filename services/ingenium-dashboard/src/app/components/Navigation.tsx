@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import EdgeDrawer from "./EdgeDrawer";
 
 // ---------------------------------------------------------------------------
 // Inline SVG icon components (16×16 viewBox)
@@ -603,10 +604,11 @@ export default function Navigation() {
       if (drawer && event.target instanceof Node && !drawer.contains(event.target)) focusDrawer();
     };
     document.addEventListener("focusin", onDocumentFocusIn);
-    const first = sidebarRef.current?.querySelector<HTMLElement>("[data-nav-initial-focus]");
-    first?.focus();
+    focusDrawer();
+    const initialFocusFrame = window.requestAnimationFrame(focusDrawer);
 
     return () => {
+      window.cancelAnimationFrame(initialFocusFrame);
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("focusin", onDocumentFocusIn);
       for (const state of backgroundState) {
@@ -638,9 +640,11 @@ export default function Navigation() {
   }
 
   const renderSidebarContent = (mode: "desktop" | "mobile", compact: boolean) => {
-    const itemLinkBaseClasses = `flex items-center py-2 text-sm transition-colors motion-reduce:transition-none ${
-      compact ? "justify-center gap-0 px-0" : "gap-2.5 px-3"
-    }`;
+    const itemLinkBaseClasses = mode === "desktop"
+      ? "flex items-center py-2 text-sm transition-colors motion-reduce:transition-none desktop-nav-item gap-2.5 px-3"
+      : `flex items-center py-2 text-sm transition-colors motion-reduce:transition-none ${
+          compact ? "justify-center gap-0 px-0" : "gap-2.5 px-3"
+        }`;
     const contentPrefix = mode === "desktop" ? "desktop" : "mobile";
     const mobileLinkCloseProps = (href: string) =>
       mode === "mobile" ? { onClick: () => closeMobile(pathname === href) } : {};
@@ -677,7 +681,7 @@ export default function Navigation() {
             <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-text-secondary)]">
               {HOME_ITEM.icon}
             </span>
-            <span className={`nav-label ${compact ? "sr-only" : "truncate"}`}>Home</span>
+            <span className={`nav-label ${mode === "desktop" || !compact ? "truncate" : "sr-only"}`}>Home</span>
           </Link>
         </div>
 
@@ -691,13 +695,13 @@ export default function Navigation() {
               <div key={group.id}>
                 <button
                   type="button"
-                  className={`${groupHeaderClasses} nav-group-control ${compact ? "justify-center px-0" : ""}`}
+                  className={`${groupHeaderClasses} nav-group-control ${mode === "desktop" ? "desktop-nav-group-control" : compact ? "justify-center px-0" : ""}`}
                   onClick={() => toggleGroup(group.id)}
                   aria-expanded={isOpen}
                   aria-controls={groupId}
                   {...(compact ? { "aria-label": `${group.label} navigation group`, title: group.label } : {})}
                 >
-                  <span className={`nav-label ${compact ? "sr-only" : ""}`}>{group.label}</span>
+                  <span className={`nav-label ${mode === "desktop" || !compact ? "" : "sr-only"}`}>{group.label}</span>
                   <ChevronDown open={isOpen} />
                 </button>
 
@@ -728,11 +732,11 @@ export default function Navigation() {
                           <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-text-secondary)]">
                             {item.icon}
                           </span>
-                          <span className={`nav-label flex-1 ${compact ? "sr-only" : "truncate"}`}>{item.label}</span>
+                          <span className={`nav-label flex-1 ${mode === "desktop" || !compact ? "truncate" : "sr-only"}`}>{item.label}</span>
                           {item.badge && (
                             <span
                               id={badgeId}
-                              className={`nav-badge shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] ${compact ? "sr-only" : ""}`}
+                              className={`nav-badge shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] ${mode === "desktop" || !compact ? "" : "sr-only"}`}
                             >
                               {item.badge}
                             </span>
@@ -783,28 +787,30 @@ export default function Navigation() {
            bg-[var(--color-nav-bg)]
            nav-scroll-area
            overflow-y-auto
-           transition-[width] duration-200 motion-reduce:transition-none`}
+           transition-[width] motion-reduce:transition-none`}
+        data-nav-compact={desktopCompact}
       >
         {renderSidebarContent("desktop", desktopCompact)}
       </aside>
 
-      {mobileOpen && (
-        <div className="md:hidden fixed inset-0 z-40" data-nav-mode="mobile">
-          <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={() => closeMobile()} />
-
-          <div
-            ref={sidebarRef}
-            id={MOBILE_DIALOG_ID}
-            className="mobile-navigation-drawer absolute top-0 left-0 bottom-0 flex w-64 max-w-[85vw] flex-col bg-[var(--color-nav-bg)] border-r border-[var(--color-nav-border)] nav-scroll-area overflow-y-auto transition-transform duration-200 ease-out motion-reduce:transition-none"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mobile-navigation-title"
-            onKeyDown={trapDrawerTab}
-          >
-            {renderSidebarContent("mobile", false)}
-          </div>
-        </div>
-      )}
+      <EdgeDrawer
+        open={mobileOpen}
+        side="left"
+        className="md:hidden fixed inset-0 z-40"
+        outerProps={{ "data-nav-mode": "mobile" }}
+        panelRef={sidebarRef}
+        panelClassName="mobile-navigation-drawer absolute top-0 left-0 bottom-0 flex w-64 max-w-[85vw] flex-col bg-[var(--color-nav-bg)] border-r border-[var(--color-nav-border)] nav-scroll-area overflow-y-auto"
+        panelProps={{
+          id: MOBILE_DIALOG_ID,
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": "mobile-navigation-title",
+          onKeyDown: trapDrawerTab,
+        }}
+        onBackdropClick={() => closeMobile()}
+      >
+        {renderSidebarContent("mobile", false)}
+      </EdgeDrawer>
     </>
   );
 }

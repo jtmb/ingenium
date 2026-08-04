@@ -40,7 +40,7 @@ interface ChatHeaderProps {
   agents: Agent[];
   availableModels: Model[];
   isBusy: boolean;
-  onMobileMenuOpen: () => void;
+  onMobileMenuOpen: (trigger: HTMLButtonElement) => void;
   /** MCP drawer trigger. */
   onMcpOpen?: () => void;
   /** Number of pending permission requests (badge). */
@@ -127,7 +127,7 @@ export default function ChatHeader({
       {/* Mobile hamburger — hidden from keyboard focus on desktop */}
       <button
         type="button"
-        onClick={onMobileMenuOpen}
+        onClick={(event) => onMobileMenuOpen(event.currentTarget)}
         className="md:hidden p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors shrink-0"
         aria-label="Open sessions"
         data-testid="chat-header-hamburger"
