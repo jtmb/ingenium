@@ -2312,9 +2312,7 @@ export function getDb(dbPath?: string): Database.Database {
   const resolvedDbPath = resolveCoreDbPath(dbPath);
 
   const dir = dirname(resolvedDbPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
+  mkdirSync(dir, { recursive: true });
 
   db = new Database(resolvedDbPath);
   db.pragma("journal_mode = WAL");

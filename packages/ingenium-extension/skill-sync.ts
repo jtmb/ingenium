@@ -13,38 +13,26 @@ export const SkillSyncPlugin = async (ctx: { worktree: string; client: any }) =>
 
   return {
     event: async ({ event }: { event: any }) => {
-      if (event.type === "session.created") {
-        try {
-          const result = await skillsOnlySync(worktree);
-          if (result.synced > 0) {
-            await ctx.client.app.log({
-              body: {
-                service: "skill-sync",
-                level: "info",
-                message: `Synced ${result.synced} skill(s) from API to .opencode/skills/ (${result.skipped} already present)`,
-              },
-            });
-          }
-        } catch {
-          /* non-fatal — sync failures must never break session startup */
-        }
-      }
+      const logSuffix = event.type === "session.created"
+        ? " from API to .opencode/skills/"
+        : event.type === "session.idle"
+          ? " from API"
+          : null;
+      if (logSuffix === null) return;
 
-      if (event.type === "session.idle") {
-        try {
-          const result = await skillsOnlySync(worktree);
-          if (result.synced > 0) {
-            await ctx.client.app.log({
-              body: {
-                service: "skill-sync",
-                level: "info",
-                message: `Synced ${result.synced} skill(s) from API (${result.skipped} already present)`,
-              },
-            });
-          }
-        } catch {
-          /* non-fatal */
+      try {
+        const result = await skillsOnlySync(worktree);
+        if (result.synced > 0) {
+          await ctx.client.app.log({
+            body: {
+              service: "skill-sync",
+              level: "info",
+              message: `Synced ${result.synced} skill(s)${logSuffix} (${result.skipped} already present)`,
+            },
+          });
         }
+      } catch {
+        /* non-fatal — sync failures must never break lifecycle events */
       }
     },
   };

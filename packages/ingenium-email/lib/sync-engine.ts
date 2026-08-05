@@ -107,8 +107,6 @@ interface AccountWorker {
   folderStates: Map<string, FolderEngineState>;
   /** Folders boosted by boostFolder() — cleared after sync. */
   boostedFolders: Set<string>;
-  /** Specific UIDs boosted by boostBody() — front-loaded in body backfill. */
-  boostedBodyUids: Map<string, Set<string>>; // key: folder
   /** The worker's async loop promise (used for stop). */
   loopPromise: Promise<void> | null;
   /** AbortController for stopping the loop. */
@@ -986,7 +984,6 @@ async function spawnWorkers(): Promise<void> {
       taskQueue: [],
       folderStates: new Map(),
       boostedFolders: new Set(),
-      boostedBodyUids: new Map(),
       loopPromise: null,
       abortController: new AbortController(),
       needsCredentialUpdate: false,
@@ -1087,13 +1084,6 @@ export function boostBody(accountId: string, folder: string, uid: string): void 
     logger.warn("sync-engine", `boostBody: no worker for ${accountId}`);
     return;
   }
-
-  let uidSet = worker.boostedBodyUids.get(folder);
-  if (!uidSet) {
-    uidSet = new Set();
-    worker.boostedBodyUids.set(folder, uidSet);
-  }
-  uidSet.add(uid);
 
   // Immediately enqueue a backfill task with the boosted UID
   enqueueTask(worker, {

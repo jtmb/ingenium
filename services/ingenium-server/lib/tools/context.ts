@@ -4,7 +4,6 @@
  * Supports saving context entries with tags/priority and full-text search.
  */
 import { api } from "../client.js";
-import { uploadContextFile, type ContextUploadFileOptions } from "./context-upload.js";
 
 /** Save a context entry with optional tags and priority. */
 export async function planSave(project: string, content: string, tags?: string, priority?: number) {
@@ -236,15 +235,4 @@ export async function contextCheckpointAuditList(project: string, conversationId
     { project, ...(limit === undefined ? {} : { limit: String(limit) }) },
   );
   return textResult(res.data);
-}
-
-/** Import one descriptor-read file snapshot through the protected API boundary. */
-export async function contextUploadFile(
-  project: string,
-  session: string,
-  filePath: string,
-  options: ContextUploadFileOptions,
-  launcherProject: string | null,
-) {
-  return uploadContextFile(project, session, filePath, options, launcherProject);
 }

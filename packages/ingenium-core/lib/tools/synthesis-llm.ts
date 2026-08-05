@@ -3,6 +3,7 @@ import { getSetting } from "./settings.js";
 import { getGlobalProject } from "./projects.js";
 import { logger } from "../logger.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
+import { tryParseJSON } from "./llm-json.js";
 
 /**
  * Structured response from the LLM synthesis engine.
@@ -361,31 +362,6 @@ export async function callSynthesisLLMWithExecutor(
     }
   }
   return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis unavailable" };
-}
-
-/**
- * Attempt to parse JSON from an LLM response, handling both raw JSON and
- * markdown-wrapped JSON (```json ... ```). Returns null if all strategies fail.
- *
- * TODO: Deduplicate — this logic is duplicated in `callConsolidationLLM`.
- *       Extract to a shared utility.
- */
-function tryParseJSON(text: string): any {
-  try {
-    // Strip markdown code blocks if present
-    let cleaned = text.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-    }
-    return JSON.parse(cleaned);
-  } catch {
-    // Try to extract JSON from markdown — LLMs sometimes wrap even when told not to
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return null;
-  }
 }
 
 // ── LLM Config Resolution ──────────────────────────────────

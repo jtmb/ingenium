@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isMcpReportMode } from "../lib/mcp-report-mode.js";
 
 const SERVER_SOURCE_PATH = fileURLToPath(new URL("../scripts/mcp-server.ts", import.meta.url));
 
@@ -23,10 +22,7 @@ describe("MCP server startup", () => {
   it("uses exact report mode and skips child gateway lifecycle side effects", () => {
     const source = readFileSync(SERVER_SOURCE_PATH, "utf8");
 
-    expect(isMcpReportMode("1")).toBe(true);
-    expect(isMcpReportMode("true")).toBe(false);
-    expect(isMcpReportMode("01")).toBe(false);
-    expect(isMcpReportMode(undefined)).toBe(false);
+    expect(source).toContain('const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";');
     expect(source).toContain("const childGateway = mcpReportMode ? null : new ChildMcpGateway(");
     expect(source).toContain("if (childGateway) await childGateway.start();");
     expect(source).toContain("if (childGateway) await childGateway.shutdown();");

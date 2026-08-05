@@ -29,12 +29,12 @@ import {
   resolveChildMcpProjectIdentity,
   type ChildMcpToolHost,
 } from "../lib/child-mcp-gateway.js";
-import { isMcpReportMode } from "../lib/mcp-report-mode.js";
 
 import * as skillTools from "../lib/tools/skills.js";
 import * as taskTools from "../lib/tools/tasks.js";
 import * as coordinationTools from "../lib/tools/coordination.js";
 import * as contextTools from "../lib/tools/context.js";
+import { uploadContextFile } from "../lib/tools/context-upload.js";
 import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
@@ -200,7 +200,7 @@ const jobUpdateFieldsParam = z.record(z.unknown()).superRefine((fields, context)
   if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "vault_item_ids must be an array of up to 16 unique UUIDs" });
 });
 const launcherProject = resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT);
-const mcpReportMode = isMcpReportMode(process.env.INGENIUM_MCP_REPORT_MODE);
+const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";
 
 const server = new McpServer(
   { name: config.mcpName, version: config.mcpVersion },
@@ -1209,7 +1209,7 @@ server.registerTool(
       priority: z.number().int().min(0).max(10).optional(),
     },
   },
-  wrapLauncherBoundHandler(C("context_upload_file"), launcherProject, async (args) => contextTools.contextUploadFile(
+  wrapLauncherBoundHandler(C("context_upload_file"), launcherProject, async (args) => uploadContextFile(
     args.project,
     args.session,
     args.file_path,

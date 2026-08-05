@@ -24,7 +24,6 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 
 const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
-const MAX_STDERR_BYTES = 8 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MIN_TIMEOUT_MS = 50;
 const MAX_TIMEOUT_MS = 5 * 60_000;
@@ -273,7 +272,7 @@ function runExport(worktree, session, descriptor, timeoutMs) {
         detached: process.platform !== "win32",
         // Keep session arguments literal and stream stdout to the validated file.
         shell: false,
-        stdio: ["ignore", descriptor, "pipe"],
+        stdio: ["ignore", descriptor, "ignore"],
         // This non-interactive helper must not open a console window on Windows.
         windowsHide: true,
       });
@@ -284,7 +283,6 @@ function runExport(worktree, session, descriptor, timeoutMs) {
 
     let settled = false;
     let timedOut = false;
-    let stderrBytes = 0;
     let forceKillTimer;
     const settle = (result) => {
       if (settled) return;
@@ -301,10 +299,6 @@ function runExport(worktree, session, descriptor, timeoutMs) {
       forceKillTimer = setTimeout(() => terminateProcessGroup(child, "SIGKILL"), PROCESS_GROUP_KILL_GRACE_MS);
     }, timeoutMs);
 
-    child.stderr.on("data", (chunk) => {
-      const bytes = Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(chunk);
-      stderrBytes = Math.min(MAX_STDERR_BYTES, stderrBytes + bytes);
-    });
     child.once("error", () => settle({ code: null, signal: null, spawned: false, timedOut }));
     child.once("close", (code, signal) => settle({ code, signal, spawned: true, timedOut }));
   });

@@ -1,9 +1,6 @@
-import { Children, forwardRef, useId, type SelectHTMLAttributes } from "react";
+import { forwardRef, type SelectHTMLAttributes } from "react";
 
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
-  emptyLabel?: string;
-  error?: string;
-  loading?: boolean;
   wrapperClassName?: string;
 };
 
@@ -25,37 +22,22 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
     children,
     className,
     disabled,
-    emptyLabel,
-    error,
-    loading,
     multiple,
     wrapperClassName,
-    "aria-busy": ariaBusy,
-    "aria-describedby": ariaDescribedBy,
-    "aria-invalid": ariaInvalid,
     ...props
   },
   ref,
 ) {
-  const descriptionId = `select-description-${useId()}`;
-  const state = error ? "error" : loading ? "loading" : Children.toArray(children).length === 0 ? "empty" : null;
-  const fallbackLabel = state === "error" ? error : state === "loading" ? "Loading…" : emptyLabel ?? "No options available";
-  const describedBy = state ? [ariaDescribedBy, descriptionId].filter(Boolean).join(" ") : ariaDescribedBy;
-  const stateDisabled = state !== null;
-
   return (
     <div className={["relative", wrapperClassName].filter(Boolean).join(" ")}>
       <select
         {...props}
         ref={ref}
-        aria-busy={loading ? true : ariaBusy}
-        aria-describedby={describedBy || undefined}
-        aria-invalid={error ? true : ariaInvalid}
-        disabled={disabled || stateDisabled}
+        disabled={disabled}
         multiple={multiple}
         className={[selectClassName, className].filter(Boolean).join(" ")}
       >
-        {state ? <option disabled value="">{fallbackLabel}</option> : children}
+        {children}
       </select>
       {!multiple && (
         <svg
@@ -69,11 +51,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
         >
           <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-      )}
-      {state && (
-        <span id={descriptionId} className="sr-only" role={state === "error" ? "alert" : "status"}>
-          {fallbackLabel}
-        </span>
       )}
     </div>
   );

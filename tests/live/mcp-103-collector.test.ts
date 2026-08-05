@@ -75,15 +75,7 @@ function createFixtureRepository(config: unknown): string {
   return repository;
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 3_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() >= deadline) throw new Error("bounded test wait expired");
-    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
-  }
-}
-
-async function waitForAsync(check: () => Promise<boolean>, timeoutMs = 3_000): Promise<void> {
+async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 3_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await check())) {
     if (Date.now() >= deadline) throw new Error("bounded test wait expired");
@@ -320,7 +312,7 @@ describe("MCP-103 usefulness collector", () => {
       expect(await portListening(processInfo.port)).toBe(true);
       await connection.close();
       closed = true;
-      await waitForAsync(async () => !(await portListening(processInfo.port)));
+      await waitFor(async () => !(await portListening(processInfo.port)));
       expect(() => process.kill(processInfo.pid, 0)).toThrow();
     } finally {
       if (!closed) await connection.close().catch(() => undefined);

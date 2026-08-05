@@ -1670,25 +1670,8 @@ async function pushAgentToApi(worktree: string, project: string, name: string, c
     // Runtime config is the only model source. Legacy markdown model metadata
     // must not be pushed back into the API or reintroduced on a later sync.
     const model = configuredAgentModel(worktree, name) || "";
-    const permissions = isReservedBroker(name)
-      ? LLM_BROKER_PERMISSIONS
-      : JSON.stringify(parseAgentPermissionFrontmatter(rawContent));
-    const metadata = isReservedBroker(name)
-      ? LLM_BROKER_METADATA
-      : JSON.stringify(parseAgentMetadata(frontmatter));
-    if (isReservedBroker(name)) {
-      // A local file is untrusted input. Rewrite it before the API import so a
-      // root-level allow cannot briefly evaluate a stale permissive profile.
-      writeAgentToDisk(worktree, {
-        name,
-        content: body,
-        description,
-        category,
-        mode,
-        permissions,
-        metadata,
-      });
-    }
+    const permissions = JSON.stringify(parseAgentPermissionFrontmatter(rawContent));
+    const metadata = JSON.stringify(parseAgentMetadata(frontmatter));
     const res = await fetch(`${API_BASE}/agents?${encodeProject(project)}`, {
       method: "POST",
       headers: apiHeaders(worktree),
@@ -1701,8 +1684,6 @@ async function pushAgentToApi(worktree: string, project: string, name: string, c
         category,
         mode,
         model,
-        // Preserve frontmatter state for ordinary agents. The reserved broker
-        // uses its canonical values above regardless of disk input.
         permissions,
         metadata,
         enabled: false,
@@ -1968,7 +1949,6 @@ function hashAgentDefinition(content: string, permissions: string, metadata: str
  * - No changes → skip
  */
 async function resolveResource(
-  _name: string,
   apiHash: string | undefined,
   diskHash: string | undefined,
   baselineHash: string | undefined,
@@ -1976,7 +1956,6 @@ async function resolveResource(
     writeToDisk: () => boolean;
     removeFromDisk: () => void;
     pushToApi: () => Promise<boolean>;
-    changedLabel: string;
   },
   result: SyncResult,
 ): Promise<void> {
@@ -2197,7 +2176,6 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
       const conflictsBefore = result.conflicts;
 
       await resolveResource(
-        name,
         apiHash,
         diskHash,
         baselineHash,
@@ -2208,7 +2186,6 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
           },
           removeFromDisk: () => removeSkillFromDisk(worktree, name),
           pushToApi: async () => pushSkillToApi(worktree, project, name, lockToken),
-          changedLabel: "skills",
         },
         result,
       );
@@ -2377,7 +2354,6 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
     const conflictsBefore = result.conflicts;
 
     await resolveResource(
-      name,
       apiHash,
       diskHash,
       baselineHash,
@@ -2388,7 +2364,6 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
           const category = findAgentCategory(worktree, name);
           return category ? pushAgentToApi(worktree, project, name, category) : false;
         },
-        changedLabel: "agents",
       },
       result,
     );
@@ -2468,7 +2443,6 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
     const conflictsBefore = result.conflicts;
 
     await resolveResource(
-      name,
       apiHash,
       diskHash,
       baselineHash,
@@ -2479,7 +2453,6 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
         },
         removeFromDisk: () => removePluginFromDisk(worktree, `.opencode/plugins/${name}.ts`),
         pushToApi: async () => pushPluginToApi(worktree, project, name, `.opencode/plugins/${name}.ts`),
-        changedLabel: "plugins",
       },
       result,
     );
@@ -2565,7 +2538,6 @@ export async function syncCommands(worktree: string, project: string, manifest: 
     const conflictsBefore = result.conflicts;
 
     await resolveResource(
-      name,
       apiHash,
       diskHash,
       baselineHash,
@@ -2576,7 +2548,6 @@ export async function syncCommands(worktree: string, project: string, manifest: 
         },
         removeFromDisk: () => removeCommandFromDisk(worktree, `.opencode/commands/${name}.md`),
         pushToApi: async () => pushCommandToApi(worktree, project, name, `.opencode/commands/${name}.md`),
-        changedLabel: "commands",
       },
       result,
     );
@@ -2644,7 +2615,6 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
   const conflictsBefore = result.conflicts;
 
   await resolveResource(
-    "config",
     apiHash,
     diskHash ?? undefined,
     baselineHash,
@@ -2655,7 +2625,6 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
       },
       removeFromDisk: () => { /* never remove config */ },
       pushToApi: async () => pushConfigToApi(worktree, project),
-      changedLabel: "config",
     },
     result,
   );

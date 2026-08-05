@@ -13,7 +13,7 @@ import { logger } from "../logger.js";
 import { Project } from "../schema.js";
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import * as skills from "./skills.js";
 
@@ -68,9 +68,7 @@ export function createProject(name: string, isGlobal = false): Project {
     const now = new Date().toISOString();
     const id = randomUUID();
     const projectPath = projectDirectory(name);
-    if (!existsSync(projectPath)) {
-      mkdirSync(projectPath, { recursive: true });
-    }
+    mkdirSync(projectPath, { recursive: true });
     if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL").run(now);
     db.prepare(
       `INSERT INTO projects (id, name, path, is_global, created_at, updated_at)

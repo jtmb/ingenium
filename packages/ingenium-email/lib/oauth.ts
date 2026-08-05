@@ -16,30 +16,19 @@ import { ProviderOperationError, sanitizeProviderError } from "./provider-errors
  * The dual resolution (settings → env var) allows per-instance configuration
  * via the Dashboard UI (settings) while still supporting container-level env
  * overrides for production deployments.
- *
- * When projectId is omitted, only env vars are checked (used during initial
- * setup before a global project exists).
  */
 function getOAuthCreds(
   provider: Extract<EmailProvider, "gmail" | "outlook">,
-  projectId?: string,
+  projectId: string,
 ): { clientId: string; clientSecret: string } {
   if (provider === "gmail") {
-    const clientId = projectId
-      ? (settings.getSetting(projectId, "oauth_gmail_client_id") || process.env.GOOGLE_OAUTH_CLIENT_ID || "")
-      : (process.env.GOOGLE_OAUTH_CLIENT_ID ?? "");
-    const clientSecret = projectId
-      ? (settings.getSetting(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "")
-      : (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "");
+    const clientId = settings.getSetting(projectId, "oauth_gmail_client_id") || process.env.GOOGLE_OAUTH_CLIENT_ID || "";
+    const clientSecret = settings.getSetting(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "";
     return { clientId, clientSecret };
   }
   // outlook
-  const clientId = projectId
-    ? (settings.getSetting(projectId, "oauth_outlook_client_id") || process.env.MS_OAUTH_CLIENT_ID || "")
-    : (process.env.MS_OAUTH_CLIENT_ID ?? "");
-  const clientSecret = projectId
-    ? (settings.getSetting(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "")
-    : (process.env.MS_OAUTH_CLIENT_SECRET ?? "");
+  const clientId = settings.getSetting(projectId, "oauth_outlook_client_id") || process.env.MS_OAUTH_CLIENT_ID || "";
+  const clientSecret = settings.getSetting(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "";
   return { clientId, clientSecret };
 }
 
@@ -99,68 +88,24 @@ function getRedirectUri(): string {
   return process.env.OAUTH_REDIRECT_URI ?? "http://localhost:3000/mail/oauth/callback";
 }
 
-/**
- * Singleton cache for the default Gmail OAuth2 client.
- *
- * Cached only for the env-based path (no projectId) to avoid re-initializing
- * the google-auth-library on every call.  Project-specific credentials are
- * short-lived and not cached — they're used during multi-tenant setup flows.
- */
-let _googleOAuthClient: Awaited<ReturnType<typeof cachedGoogleClient>>["client"] | undefined;
-
-async function cachedGoogleClient(projectId?: string): Promise<{ client: import("google-auth-library").OAuth2Client }> {
+async function getGoogleClient(projectId: string): Promise<import("google-auth-library").OAuth2Client> {
   const { clientId, clientSecret } = getOAuthCreds("gmail", projectId);
-
-  // Use cache only for the env-based default path (no projectId override)
-  if (!projectId && _googleOAuthClient) {
-    return { client: _googleOAuthClient };
-  }
-
   const mod = await import("google-auth-library");
-  const client = new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
-
-  // Cache only the env-default client; project-specific clients are ephemeral
-  if (!projectId) {
-    _googleOAuthClient = client;
-  }
-
-  return { client };
+  return new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
 }
 
 // ── Microsoft OAuth2 ──────────────────────────────────────────────────────
 
-/**
- * Singleton cache for the default MSAL ConfidentialClientApplication.
- *
- * Same caching strategy as Google: env-based default is cached; project-specific
- * instances are ephemeral.  Authority uses "common" endpoint for multi-tenant
- * support (any Microsoft account or Azure AD tenant).
- */
-let _msalApp: import("@azure/msal-node").ConfidentialClientApplication | undefined;
-
-async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
+async function getMsalApp(projectId: string): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
   const { clientId, clientSecret } = getOAuthCreds("outlook", projectId);
-
-  // Use cache only for the env-based default path (no projectId override)
-  if (!projectId && _msalApp) {
-    return _msalApp;
-  }
-
   const msal = await import("@azure/msal-node");
-  const app = new msal.ConfidentialClientApplication({
+  return new msal.ConfidentialClientApplication({
     auth: {
       clientId,
       clientSecret,
       authority: "https://login.microsoftonline.com/common",
     },
   });
-
-  // Cache only the env-default client; project-specific clients are ephemeral
-  if (!projectId) {
-    _msalApp = app;
-  }
-
-  return app;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -185,7 +130,7 @@ export async function getOAuthUrl(
     settings.setSetting(pid, `oauth_state_${provider}`, state);
 
     if (provider === "gmail") {
-      const { client: gClient } = await cachedGoogleClient(pid);
+      const gClient = await getGoogleClient(pid);
       const url = gClient.generateAuthUrl({
         access_type: "offline",
         prompt: "consent",
@@ -250,7 +195,7 @@ export async function exchangeCode(
     const resolvedRedirectUri = redirectUri ?? getRedirectUri();
 
     if (provider === "gmail") {
-      const { client: gClient } = await cachedGoogleClient(pid);
+      const gClient = await getGoogleClient(pid);
       const { tokens } = await gClient.getToken({ code, redirect_uri: resolvedRedirectUri });
       // Extract email from id_token JWT (unverified decode — standard for getting email claim)
       let email: string | undefined;
@@ -322,7 +267,7 @@ export async function refreshAccessToken(
     const projectId = getGlobalProjectId();
 
     if (provider === "gmail") {
-      const { client: gClient } = await cachedGoogleClient(projectId);
+      const gClient = await getGoogleClient(projectId);
       gClient.setCredentials({ refresh_token: refreshToken });
       const { credentials } = await gClient.refreshAccessToken();
       return {

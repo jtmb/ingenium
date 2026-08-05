@@ -139,15 +139,6 @@ function timeoutOptions(timeouts: ChildMcpTimeouts): NormalizedTimeouts {
   };
 }
 
-function cloneDefinition(definition: ChildMcpRuntimeDefinition): ChildMcpRuntimeDefinition {
-  return {
-    name: definition.name,
-    executable: definition.executable,
-    args: [...definition.args],
-    environment: definition.environment ? { ...definition.environment } : undefined,
-  };
-}
-
 function validateDefinition(definition: ChildMcpRuntimeDefinition): void {
   if (!CHILD_SERVER_NAME_PATTERN.test(definition.name) || definition.name === "thread") {
     throw new ChildMcpRuntimeError("CHILD_MCP_CONFIG_INVALID");
@@ -545,7 +536,7 @@ export class ChildMcpRuntimeManager {
       throw new ChildMcpRuntimeError("CHILD_MCP_NOT_READY");
     }
     this.servers.set(definition.name, {
-      definition: cloneDefinition(definition),
+      definition: structuredClone(definition),
       state: "registered",
       diagnostic: null,
       client: null,

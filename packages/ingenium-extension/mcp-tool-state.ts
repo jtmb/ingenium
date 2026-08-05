@@ -36,10 +36,10 @@ function isExactEnabledState(
   value: unknown,
   toolName: string,
   project: string,
-): value is { tool_name: string; enabled: true } {
+): value is { tool_name: string; enabled: boolean } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const state = value as Record<string, unknown>;
-  if (state.tool_name !== toolName || state.enabled !== true) return false;
+  if (state.tool_name !== toolName || typeof state.enabled !== "boolean") return false;
 
   // Newer API responses may echo the resolved project. If present, it is an
   // authority check, not a hint; never execute against a mismatched snapshot.
@@ -93,15 +93,10 @@ export async function assertExtensionToolEnabled(
   const bodyRecord = body as Record<string, unknown>;
   if (bodyRecord.project !== undefined && bodyRecord.project !== project) throw unavailable();
   const data = bodyRecord.data;
-  if (typeof data !== "object" || data === null || Array.isArray(data)) throw unavailable();
-
-  const state = data as Record<string, unknown>;
-  if (state.tool_name !== toolName) throw unavailable();
-  if (state.project !== undefined && state.project !== project) throw unavailable();
-  if (state.enabled === false) {
+  if (!isExactEnabledState(data, toolName, project)) throw unavailable();
+  if (data.enabled === false) {
     throw new ExtensionToolStateError(EXTENSION_TOOL_STATE_ERRORS.disabled);
   }
-  if (!isExactEnabledState(data, toolName, project)) throw unavailable();
 
   return project;
 }

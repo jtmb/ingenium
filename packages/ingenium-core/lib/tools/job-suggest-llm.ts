@@ -2,6 +2,7 @@ import { logger } from "../logger.js";
 import type { LLMConfig, LLMTextExecutor } from "./synthesis-llm.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
 import { isTrustedJobTriggerEvent } from "./jobs.js";
+import { tryParseJSON } from "./llm-json.js";
 
 /** The result shape returned by generateJobConfig. All fields nullable on any error. */
 export interface JobSuggestResult {
@@ -41,31 +42,6 @@ User description: "${description}"
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 { "prompt_template": "string or null", "schedule_cron": "string or null", "trigger_event": "string or null" }`;
-}
-
-/**
- * Lenient JSON parser that handles common LLM output quirks:
- * - Code-fence wrapped JSON (```json ... ```)
- * - Response with trailing/garbage text (falls back to extracting the first `{...}` block)
- * - Returns `null` on any parse failure instead of throwing
- */
-function tryParseJSON(text: string): any {
-  try {
-    let cleaned = text.trim();
-    if (cleaned.startsWith("```")) {
-      // Strip markdown code fences — LLMs frequently wrap raw JSON in ```json ... ```
-      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-    }
-    return JSON.parse(cleaned);
-  } catch {
-    // Greedy fallback: extract the first braced block `{...}`
-    // This handles cases where the model wraps the JSON in explanatory text.
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return null;
-  }
 }
 
 function validateResult(raw: any): JobSuggestResult {
