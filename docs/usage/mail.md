@@ -390,11 +390,26 @@ when the cached message and body are still available.
 
 The IMAP IDLE watcher coalesces overlapping new-message events into one scan and
 tracks message UIDs already handled during the watcher lifetime. Repeated events
-therefore do not create duplicate triage or automatic drafts.
-Duplicate suppression is process-local: the watcher keeps a bounded 4,096-entry
-least-recently-used set, and those entries are lost when the API process restarts.
-It is not a durable marker; restart-surviving duplicate suppression would require
-an explicit persisted marker.
+therefore do not create duplicate triage or automatic drafts. Its hot
+least-recently-used cache is bounded at **4,096 entries** and is only an
+optimization; it is discarded when the process or watcher restarts.
+
+The authoritative duplicate-suppression marker is durable migration 092, keyed by
+`project_id`, `account_id`, `folder`, and `uid`. Each claim is an atomic database
+operation: exactly one concurrent claimant receives `newlyRecorded: true`, while
+duplicates receive `alreadyProcessed: true` and skip side effects. The database
+retains only the newest **4,096 markers per project/account/folder scope**; a
+duplicate refreshes its timestamp, and the oldest rows in that scope are pruned.
+Because the marker is durable, a fresh watcher after an API restart still suppresses
+work already claimed by the prior process. Within one process, concurrent starts
+for the same account share one startup promise, and overlapping `exists` events
+share one scan.
+
+If a durable marker claim fails, the watcher logs at most three bounded warnings and
+skips observation, suggestion, and draft side effects for that UID. The UID is not
+put in the hot cache, so a later scan retries the claim. Deleting an account stops
+its worker and watcher, clears all durable markers for the canonical project and
+account, then removes the account and its cached mail.
 
 ### Configuration
 

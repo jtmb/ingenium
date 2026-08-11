@@ -52,6 +52,11 @@ export type NativeProviderCredentialPersistenceStatus =
   | "vault_unavailable"
   | "global_unavailable";
 
+/** Limits are intentionally fixed so provider credentials cannot form an unbounded in-memory queue. */
+export const NATIVE_PROVIDER_MAX_WAITERS = 4;
+export const NATIVE_PROVIDER_QUEUE_WAIT_TIMEOUT_MS = 2_000;
+export const NATIVE_PROVIDER_OPERATION_TIMEOUT_MS = 5_000;
+
 interface StoredNativeProviderCredentialSnapshot {
   state: "stored";
   projectId: string;
@@ -75,13 +80,19 @@ type NativeProviderCredentialSnapshotResult =
   | { persistence: NativeProviderCredentialPersistenceStatus };
 
 export interface NativeProviderOpenCodeOperations {
-  apply: (key: string) => Promise<OpenCodeResult<unknown>>;
-  remove: () => Promise<OpenCodeResult<unknown>>;
-  status: () => Promise<OpenCodeResult<AuthStatusResponse>>;
+  apply: (key: string, signal: AbortSignal) => Promise<OpenCodeResult<unknown>>;
+  remove: (signal: AbortSignal) => Promise<OpenCodeResult<unknown>>;
+  status: (signal: AbortSignal) => Promise<OpenCodeResult<AuthStatusResponse>>;
+}
+
+export interface NativeProviderQueueRejected {
+  outcome: "queue_rejected";
+  retryable: true;
 }
 
 export type NativeProviderConnectSagaResult =
   | { outcome: "connected" }
+  | NativeProviderQueueRejected
   | {
     outcome: "persistence_failed";
     persistence: NativeProviderCredentialPersistenceStatus;
@@ -93,6 +104,7 @@ export type NativeProviderConnectSagaResult =
 
 export type NativeProviderDisconnectSagaResult =
   | { outcome: "disconnected" }
+  | NativeProviderQueueRejected
   | {
     outcome: "persistence_failed";
     persistence: NativeProviderCredentialPersistenceStatus;
@@ -103,7 +115,22 @@ export type NativeProviderDisconnectSagaResult =
     compensation: "restored" | "recoverable";
   };
 
-const nativeProviderSagas = new Map<string, Promise<void>>();
+interface NativeProviderSagaPermit {
+  release: () => void;
+}
+
+interface NativeProviderSagaWaiter {
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (value: NativeProviderSagaPermit | NativeProviderQueueRejected) => void;
+}
+
+interface NativeProviderSagaQueue {
+  active: boolean;
+  waiters: NativeProviderSagaWaiter[];
+}
+
+const nativeProviderSagas = new Map<string, NativeProviderSagaQueue>();
 
 export interface ProviderRecoveryResult {
   migratedSettings: number;
@@ -294,32 +321,92 @@ function restoreNativeProviderCredentialSnapshot(snapshot: NativeProviderCredent
   return writeNativeProviderCredential(snapshot, snapshot.value);
 }
 
-async function serializeNativeProviderSaga<T>(
-  providerId: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const previous = nativeProviderSagas.get(providerId) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  nativeProviderSagas.set(providerId, current);
-  await previous.catch(() => undefined);
-  try {
-    return await operation();
-  } finally {
-    release();
-    if (nativeProviderSagas.get(providerId) === current) nativeProviderSagas.delete(providerId);
-  }
+function queueRejected(): NativeProviderQueueRejected {
+  return { outcome: "queue_rejected", retryable: true };
 }
 
-async function callOpenCode<T>(
-  operation: () => Promise<OpenCodeResult<T>>,
+function isNativeProviderQueueRejected(
+  value: NativeProviderSagaPermit | NativeProviderQueueRejected,
+): value is NativeProviderQueueRejected {
+  return "outcome" in value;
+}
+
+function createNativeProviderSagaPermit(
+  providerId: string,
+  queue: NativeProviderSagaQueue,
+): NativeProviderSagaPermit {
+  let released = false;
+  return {
+    release: () => {
+      if (released) return;
+      released = true;
+      releaseNativeProviderSagaPermit(providerId, queue);
+    },
+  };
+}
+
+function releaseNativeProviderSagaPermit(providerId: string, queue: NativeProviderSagaQueue): void {
+  while (queue.waiters.length > 0) {
+    const waiter = queue.waiters.shift()!;
+    clearTimeout(waiter.timer);
+    if (waiter.expiresAt <= Date.now()) {
+      waiter.resolve(queueRejected());
+      continue;
+    }
+    waiter.resolve(createNativeProviderSagaPermit(providerId, queue));
+    return;
+  }
+  queue.active = false;
+  if (nativeProviderSagas.get(providerId) === queue) nativeProviderSagas.delete(providerId);
+}
+
+function acquireNativeProviderSagaPermit(
+  providerId: string,
+): Promise<NativeProviderSagaPermit | NativeProviderQueueRejected> {
+  const queue = nativeProviderSagas.get(providerId);
+  if (!queue) {
+    const created: NativeProviderSagaQueue = { active: true, waiters: [] };
+    nativeProviderSagas.set(providerId, created);
+    return Promise.resolve(createNativeProviderSagaPermit(providerId, created));
+  }
+  if (queue.waiters.length >= NATIVE_PROVIDER_MAX_WAITERS) return Promise.resolve(queueRejected());
+
+  return new Promise((resolve) => {
+    const expiresAt = Date.now() + NATIVE_PROVIDER_QUEUE_WAIT_TIMEOUT_MS;
+    const waiter = {
+      expiresAt,
+      timer: undefined as unknown as ReturnType<typeof setTimeout>,
+      resolve,
+    } satisfies NativeProviderSagaWaiter;
+    waiter.timer = setTimeout(() => {
+      const index = queue.waiters.indexOf(waiter);
+      if (index < 0) return;
+      queue.waiters.splice(index, 1);
+      waiter.resolve(queueRejected());
+    }, NATIVE_PROVIDER_QUEUE_WAIT_TIMEOUT_MS);
+    queue.waiters.push(waiter);
+  });
+}
+
+export async function callOpenCodeWithProviderDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<OpenCodeResult<T>>,
+  timeoutMs = NATIVE_PROVIDER_OPERATION_TIMEOUT_MS,
 ): Promise<OpenCodeResult<T>> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<OpenCodeResult<T>>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve({ error: { code: "OPENCODE_OPERATION_TIMEOUT", message: "OpenCode operation timed out" } });
+    }, timeoutMs);
+  });
+  const request = Promise.resolve()
+    .then(() => operation(controller.signal))
+    .catch(() => ({ error: { code: "OPENCODE_OPERATION_FAILED", message: "OpenCode operation failed" } }));
   try {
-    return await operation();
-  } catch {
-    return { error: { code: "OPENCODE_OPERATION_FAILED", message: "OpenCode operation failed" } };
+    return await Promise.race([request, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -335,7 +422,7 @@ async function getOpenCodeConnectionState(
   providerId: string,
   operations: NativeProviderOpenCodeOperations,
 ): Promise<"absent" | "connected" | "unknown"> {
-  const status = await callOpenCode(operations.status);
+  const status = await callOpenCodeWithProviderDeadline((signal) => operations.status(signal));
   if (isOpenCodeError(status)) return "unknown";
   return status.providers.some((provider) => provider.providerId === providerId && provider.connected)
     ? "connected"
@@ -348,11 +435,11 @@ async function compensateFailedNativeProviderConnect(
 ): Promise<boolean> {
   if (snapshot.state === "stored") {
     const vaultRestored = restoreNativeProviderCredentialSnapshot(snapshot);
-    const openCodeRestored = await callOpenCode(() => operations.apply(snapshot.value));
+    const openCodeRestored = await callOpenCodeWithProviderDeadline((signal) => operations.apply(snapshot.value, signal));
     return vaultRestored && !isOpenCodeError(openCodeRestored);
   }
 
-  const removed = await callOpenCode(operations.remove);
+  const removed = await callOpenCodeWithProviderDeadline((signal) => operations.remove(signal));
   const openCodeAbsent = !isOpenCodeError(removed)
     || isOpenCodeNotFound(removed)
     || await getOpenCodeConnectionState(snapshot.providerId, operations) === "absent";
@@ -364,7 +451,9 @@ export async function connectNativeProviderCredential(
   value: string,
   operations: NativeProviderOpenCodeOperations,
 ): Promise<NativeProviderConnectSagaResult> {
-  return serializeNativeProviderSaga(providerId, async () => {
+  const permit = await acquireNativeProviderSagaPermit(providerId);
+  if (isNativeProviderQueueRejected(permit)) return permit;
+  try {
     const snapshotResult = snapshotNativeProviderCredential(providerId);
     if ("persistence" in snapshotResult) {
       return { outcome: "persistence_failed", persistence: snapshotResult.persistence };
@@ -375,7 +464,7 @@ export async function connectNativeProviderCredential(
       return { outcome: "persistence_failed", persistence: "vault_unavailable" };
     }
 
-    const applied = await callOpenCode(() => operations.apply(value));
+    const applied = await callOpenCodeWithProviderDeadline((signal) => operations.apply(value, signal));
     if (!isOpenCodeError(applied)) return { outcome: "connected" };
 
     return {
@@ -384,20 +473,24 @@ export async function connectNativeProviderCredential(
         ? "restored"
         : "recoverable",
     };
-  });
+  } finally {
+    permit.release();
+  }
 }
 
 export async function disconnectNativeProviderCredential(
   providerId: string,
   operations: NativeProviderOpenCodeOperations,
 ): Promise<NativeProviderDisconnectSagaResult> {
-  return serializeNativeProviderSaga(providerId, async () => {
+  const permit = await acquireNativeProviderSagaPermit(providerId);
+  if (isNativeProviderQueueRejected(permit)) return permit;
+  try {
     const snapshotResult = snapshotNativeProviderCredential(providerId);
     if ("persistence" in snapshotResult) {
       return { outcome: "persistence_failed", persistence: snapshotResult.persistence };
     }
     const snapshot = snapshotResult.snapshot;
-    const removed = await callOpenCode(operations.remove);
+    const removed = await callOpenCodeWithProviderDeadline((signal) => operations.remove(signal));
     const openCodeState = !isOpenCodeError(removed) || isOpenCodeNotFound(removed)
       ? "absent"
       : await getOpenCodeConnectionState(providerId, operations);
@@ -406,14 +499,16 @@ export async function disconnectNativeProviderCredential(
     if (removeNativeProviderCredentialSnapshot(snapshot)) return { outcome: "disconnected" };
 
     const vaultRestored = restoreNativeProviderCredentialSnapshot(snapshot);
-    const openCodeRestored = await callOpenCode(() => operations.apply(snapshot.value));
+    const openCodeRestored = await callOpenCodeWithProviderDeadline((signal) => operations.apply(snapshot.value, signal));
     return {
       outcome: "vault_delete_failed",
       compensation: vaultRestored && !isOpenCodeError(openCodeRestored)
         ? "restored"
         : "recoverable",
     };
-  });
+  } finally {
+    permit.release();
+  }
 }
 
 export function storeNativeProviderCredential(providerId: string, value: string): NativeProviderCredentialPersistenceStatus {
@@ -493,6 +588,31 @@ function migrateProviderMetadata(
   if (changed) checkpointAfterWrite();
 }
 
+function rewriteMigratedManagedCredentialReference(
+  globalProjectId: string,
+  providerId: string,
+  sourceItemId: string,
+  destinationItemId: string,
+): boolean {
+  try {
+    const raw = settings.getSetting(globalProjectId, "llm_provider_configs");
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return false;
+    const matches = parsed.filter((provider): provider is { id?: unknown; credentialItemId?: unknown } =>
+      !!provider && typeof provider === "object" && (provider as { id?: unknown }).id === providerId,
+    );
+    if (matches.length !== 1) return false;
+    const provider = matches[0]!;
+    if (provider.credentialItemId !== undefined && provider.credentialItemId !== sourceItemId) return false;
+    provider.credentialItemId = destinationItemId;
+    settings.setSetting(globalProjectId, "llm_provider_configs", JSON.stringify(parsed));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function migrateProviderCredentials(
   globalProjectId: string,
   sourceProjectIds: string[],
@@ -536,6 +656,15 @@ function migrateProviderCredentials(
         result.conflicts++;
         continue;
       }
+      if (source.kind === "managed" && !rewriteMigratedManagedCredentialReference(
+        globalProjectId,
+        source.providerId,
+        source.id,
+        destination[0]!.id,
+      )) {
+        result.conflicts++;
+        continue;
+      }
       vault.deleteItem(source.projectId, source.id);
       result.migratedCredentials++;
       continue;
@@ -549,6 +678,16 @@ function migrateProviderCredentials(
     if (vault.decryptItem(globalProjectId, destinationId) !== sourceValue) {
       vault.deleteItem(globalProjectId, destinationId);
       result.skippedForVault = true;
+      continue;
+    }
+    if (source.kind === "managed" && !rewriteMigratedManagedCredentialReference(
+      globalProjectId,
+      source.providerId,
+      source.id,
+      destinationId,
+    )) {
+      vault.deleteItem(globalProjectId, destinationId);
+      result.conflicts++;
       continue;
     }
     vault.deleteItem(source.projectId, source.id);
@@ -630,7 +769,9 @@ export async function rehydrateServerGlobalProviderConnections(): Promise<Provid
       result.failed++;
       continue;
     }
-    const rehydrated = await opencodeClient.addAuth(candidate.providerId, { type: "api", key }, "/workspace");
+    const rehydrated = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.addAuth(candidate.providerId, { type: "api", key }, "/workspace", signal),
+    );
     if (isOpenCodeError(rehydrated)) {
       result.failed++;
       continue;

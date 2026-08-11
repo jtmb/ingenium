@@ -85,9 +85,18 @@ The typed HTTP client resolves only 2xx responses through its standard methods.
 Adapters that intentionally inspect non-2xx responses use the explicit
 `api.settled` namespace instead; this preserves status and bounded payload data
 for state, report, and child-runtime adapters without weakening the normal error
-boundary. Failed API payloads are capped at 8 KiB for error parsing, error codes
-are restricted to 64 safe uppercase characters, and messages are restricted to 256 UTF-8 bytes
-with control characters, paths, and credential-shaped text rejected.
+boundary.
+
+Every non-2xx error body is read from the response stream with a raw **8,192-byte
+(`8192`) cap**. Each chunk is checked against the remaining raw-byte budget before
+UTF-8 decoding, and JSON is parsed only after the bounded stream completes. A
+declared `Content-Length` at or above 8192 bytes is canceled without acquiring a
+reader. For chunked responses, a chunk that would reach or exceed the cap cancels
+the reader immediately; later data is not read. Fatal UTF-8, malformed JSON,
+interrupted, missing, or oversized bodies are discarded and become the fixed
+sanitized `API_REQUEST_FAILED` fallback rather than entering an MCP response. Valid
+error codes are limited to 64 safe uppercase characters and messages to 256 UTF-8
+bytes; control characters, paths, and credential-shaped text are rejected.
 
 At the MCP tool boundary, state-gated API failures are returned as
 `isError: true` results. Their serialized error text is capped at 512 bytes and

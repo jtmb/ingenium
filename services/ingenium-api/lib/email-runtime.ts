@@ -2,6 +2,7 @@ import {
   checkpointAfterWrite,
   emailCache,
   emailSuggestionQueue,
+  emailWatcherMarkers,
   execTransaction,
   getDb,
   logger,
@@ -83,6 +84,7 @@ const runtime: EmailRuntime = {
   },
   cache: emailCache,
   suggestionQueue: emailSuggestionQueue,
+  watcherMarkers: emailWatcherMarkers,
   llm: {
     isConfigured: synthesisLlm.isLLMSynthesisConfigured,
     resolveConfig: (projectId) => synthesisLlm.resolveLLMConfig(projectId),

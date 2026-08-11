@@ -11,6 +11,7 @@ import {
   removeAccount,
   storeAccount,
   getCredentials,
+  getEmailRuntime,
   storeCredentials,
   storeTokens,
   getGlobalProjectId,
@@ -326,6 +327,7 @@ emailsRouter.delete("/accounts/:id", async (req, res) => {
   // Stop the account's sync engine worker BEFORE deleting data
   stopAccountWorker(accountId);
   await stopWatcher(accountId).catch(() => undefined);
+  getEmailRuntime().watcherMarkers.clearAccount(resolveEmailProject(), accountId);
   removeAccount(accountId);
   // Also clear all cached emails, bodies, suggestions, summaries, and sync state for this account
   emailCache.clearCache(accountId);

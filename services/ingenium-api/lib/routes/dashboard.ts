@@ -272,7 +272,7 @@ async function fetchMail(): Promise<{
       mail: {
         accountCount,
         engineRunning: engine.running,
-        engineHealthy: engine.running && heartbeatAge !== null && heartbeatAge < 120_000,
+        engineHealthy: accountCount === 0 || (engine.running && heartbeatAge !== null && heartbeatAge < 120_000),
       },
       unavailable,
     };

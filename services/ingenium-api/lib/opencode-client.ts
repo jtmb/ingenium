@@ -467,6 +467,8 @@ export async function request<T>(
     method?: string;
     body?: unknown;
     query?: Record<string, string | number | undefined>;
+    /** Optional caller-owned cancellation propagated to the HTTP transport. */
+    signal?: AbortSignal;
     /** Route-owned failures must not log or return opaque upstream codes. */
     sanitizedUpstreamError?: OpenCodeErrorShape["error"];
   } = {},
@@ -481,7 +483,7 @@ export async function request<T>(
     };
   }
 
-  const { method = "GET", body, query, sanitizedUpstreamError } = opts;
+  const { method = "GET", body, query, signal, sanitizedUpstreamError } = opts;
 
   // Build URL with query params
   let url = `${config.opencodeUrl}${path}`;
@@ -505,7 +507,7 @@ export async function request<T>(
   }
 
   try {
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = { method, headers, signal };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
@@ -887,10 +889,15 @@ export const opencodeClient = {
       query: { "location.directory": directory },
     }),
 
-  connectIntegrationKey: (integrationID: string, key: string): Promise<OpenCodeResult<string>> =>
+  connectIntegrationKey: (
+    integrationID: string,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<string>> =>
     request<string>(`/api/integration/${pathSegment(integrationID)}/connect/key`, {
       method: "POST",
       body: { key },
+      signal,
     }),
 
   beginIntegrationOAuth: (
@@ -921,25 +928,33 @@ export const opencodeClient = {
     providerID: string,
     body: AuthRequestBody,
     directory?: string,
+    signal?: AbortSignal,
   ): Promise<OpenCodeResult<unknown>> =>
     request<unknown>(`/auth/${pathSegment(providerID)}`, {
       method: "POST",
       body,
       query: { directory },
+      signal,
     }),
 
   deleteAuth: (
     providerID: string,
     directory?: string,
+    signal?: AbortSignal,
   ): Promise<OpenCodeResult<unknown>> =>
     request<unknown>(`/auth/${pathSegment(providerID)}`, {
       method: "DELETE",
       query: { directory },
+      signal,
     }),
 
-  getAuthStatus: async (directory?: string): Promise<OpenCodeResult<AuthStatusResponse>> => {
+  getAuthStatus: async (
+    directory?: string,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<AuthStatusResponse>> => {
     const result = await request<V2Response<IntegrationInfo[]>>("/api/integration", {
       query: { "location.directory": directory },
+      signal,
     });
     if (isOpenCodeError(result)) return result;
     return {

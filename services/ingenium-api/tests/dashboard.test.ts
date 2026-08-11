@@ -8,6 +8,11 @@ import type { AddressInfo } from "node:net";
 import { projects } from "ingenium-core";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
 
+const emailMocks = vi.hoisted(() => ({
+  listAccounts: vi.fn(() => []),
+  getEngineStatus: vi.fn(() => ({ running: false, heartbeatAt: null, accounts: [] })),
+}));
+
 // ── Controlled failure flag for partial-failure test ─────────────────────────
 let throwTasksList = false;
 
@@ -27,6 +32,7 @@ vi.mock("ingenium-core", async (importOriginal) => {
     },
   };
 });
+vi.mock("ingenium-email", () => emailMocks);
 
 let tempDir: string;
 let projectId: string;
@@ -240,6 +246,18 @@ describe("GET /api/v1/dashboard/summary", () => {
       expect(typeof body.data.mail.engineRunning).toBe("boolean");
       expect(typeof body.data.mail.engineHealthy).toBe("boolean");
     }
+  });
+
+  it("does not mark unconfigured mail unhealthy", async () => {
+    const res = await fetch(`${baseUrl}/api/v1/dashboard/summary?project=${projectName}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.data.mail).toMatchObject({
+      accountCount: 0,
+      engineRunning: false,
+      engineHealthy: true,
+    });
   });
 
   it("partial failure: one module fails, others still populate", async () => {

@@ -3,6 +3,7 @@ import { settings, logger, projects, configs, getDb, execTransaction, checkpoint
 import * as core from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { opencodeClient, isOpenCodeError } from "../opencode-client.js";
+import { callOpenCodeWithProviderDeadline } from "../server-global-provider-persistence.js";
 
 /** Handles /api/v1/settings — per-project key-value settings with LLM test-connection proxy. */
 export const settingsRouter = Router();
@@ -116,7 +117,7 @@ settingsRouter.get("/", (req, res) => {
       : key === "synthesis_backup_api_key"
         ? settings.getSetting(projectId, "synthesis_backup_provider") || ""
         : "";
-    res.json({ data: { key, value: "", isSet: providerId ? hasVaultApiKey(projectId, providerId) : Boolean(value?.trim()) } });
+    res.json({ data: { key, value: "", isSet: providerId ? hasLegacyVaultApiKey(projectId, providerId) : Boolean(value?.trim()) } });
     return;
   }
   res.json({ data: { key, value } });
@@ -227,8 +228,26 @@ interface SynthesisSelection {
   modelId: string;
 }
 
-interface ManagedProvider extends Omit<ManagedProviderInput, "apiKey" | "role" | "roles"> {
+interface StoredManagedProvider extends Omit<ManagedProviderInput, "apiKey" | "role" | "roles"> {
   roles: ProviderRoles;
+  credentialItemId?: unknown;
+}
+
+interface StoredManagedProviderRecord {
+  id?: unknown;
+  name?: unknown;
+  npm?: unknown;
+  baseURL?: unknown;
+  models?: unknown;
+  defaultModel?: unknown;
+  roles?: unknown;
+  role?: unknown;
+  enabled?: unknown;
+  allowPrivateNetwork?: unknown;
+  credentialItemId?: unknown;
+}
+
+interface ManagedProvider extends Omit<StoredManagedProvider, "credentialItemId"> {
   apiKeySet: boolean;
 }
 
@@ -248,6 +267,9 @@ const ALLOWED_PROVIDER_PACKAGES = new Set([
   "@ai-sdk/amazon-bedrock",
   "@openrouter/ai-sdk-provider",
 ]);
+const DELETED_VAULT_POLICY = '{"mode":"deleted"}';
+const ACTIVE_VAULT_POLICY = '{"mode":"restricted"}';
+const VAULT_ITEM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type VaultItemReader = {
   isSealed(): boolean;
@@ -261,13 +283,13 @@ type VaultItemReader = {
 const vault = (core as unknown as { vault?: VaultItemReader }).vault;
 const LEGACY_PRIMARY_VAULT_KEY_NAME = "Synthesis Primary API Key";
 
-function vaultKeyName(providerId: string): string {
+function legacyVaultKeyName(providerId: string): string {
   return `Managed LLM API Key: ${providerId}`;
 }
 
-function getVaultApiKey(projectId: string, providerId: string): string | undefined {
+function getLegacyVaultApiKey(projectId: string, providerId: string): string | undefined {
   if (!vault || vault.isSealed()) return undefined;
-  const item = vault.listItems(projectId).find((candidate) => candidate.name === vaultKeyName(providerId));
+  const item = vault.listItems(projectId).find((candidate) => candidate.name === legacyVaultKeyName(providerId));
   return item?.id ? vault.decryptItem(projectId, item.id) ?? undefined : undefined;
 }
 
@@ -284,7 +306,7 @@ class VaultCredentialWriteError extends Error {
  * Vault items use their own transactions, so compensate successful earlier
  * writes if a later write fails.
  */
-function stageVaultApiKeyWrites(projectId: string, keys: Record<string, string | undefined>): VaultWriteRollback {
+function stageLegacyVaultApiKeyWrites(projectId: string, keys: Record<string, string | undefined>): VaultWriteRollback {
   if (!Object.values(keys).some((key) => key)) return () => {};
   if (!vault || vault.isSealed()) throw new VaultCredentialWriteError();
 
@@ -292,14 +314,14 @@ function stageVaultApiKeyWrites(projectId: string, keys: Record<string, string |
   try {
     for (const [providerId, key] of Object.entries(keys)) {
       if (!key) continue;
-      const item = vault.listItems(projectId).find((candidate) => candidate.name === vaultKeyName(providerId));
+      const item = vault.listItems(projectId).find((candidate) => candidate.name === legacyVaultKeyName(providerId));
       if (item?.id) {
         const previousValue = vault.decryptItem(projectId, item.id);
         if (previousValue === null) throw new VaultCredentialWriteError();
         vault.updateItem(projectId, item.id, key);
         rollbackSteps.push(() => vault.updateItem(projectId, item.id!, previousValue));
       } else {
-        const createdId = vault.createItem(projectId, vaultKeyName(providerId), "api_key", key);
+        const createdId = vault.createItem(projectId, legacyVaultKeyName(providerId), "api_key", key);
         if (!createdId || createdId === "Vault is sealed") throw new VaultCredentialWriteError();
         rollbackSteps.push(() => vault.deleteItem(projectId, createdId));
       }
@@ -333,13 +355,13 @@ function stageVaultApiKeyWrites(projectId: string, keys: Record<string, string |
   };
 }
 
-function hasVaultApiKey(projectId: string, providerId: string): boolean {
-  return Boolean(getVaultApiKey(projectId, providerId)?.trim());
+function hasLegacyVaultApiKey(projectId: string, providerId: string): boolean {
+  return Boolean(getLegacyVaultApiKey(projectId, providerId)?.trim());
 }
 
-function clearVaultApiKey(projectId: string, providerId: string): void {
+function clearLegacyVaultApiKey(projectId: string, providerId: string): void {
   if (!vault || vault.isSealed()) return;
-  const item = vault.listItems(projectId).find((candidate) => candidate.name === vaultKeyName(providerId));
+  const item = vault.listItems(projectId).find((candidate) => candidate.name === legacyVaultKeyName(providerId));
   if (item?.id) vault.deleteItem(projectId, item.id);
 }
 
@@ -362,8 +384,8 @@ function migrateLegacyProviderKeys(projectId: string): boolean {
 
   let rollback: VaultWriteRollback;
   try {
-    rollback = stageVaultApiKeyWrites(projectId, Object.fromEntries(
-      migrated.filter(([providerId]) => !hasVaultApiKey(projectId, providerId)),
+    rollback = stageLegacyVaultApiKeyWrites(projectId, Object.fromEntries(
+      migrated.filter(([providerId]) => !hasLegacyVaultApiKey(projectId, providerId)),
     ));
   } catch {
     return false;
@@ -406,11 +428,16 @@ function parseJsonObject(value: string | undefined): Record<string, string> {
   }
 }
 
-function parseManagedProviders(value: string | undefined): Omit<ManagedProvider, "apiKeySet">[] {
+function parseManagedProviders(value: string | undefined): StoredManagedProvider[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(normalizeManagedProvider) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((provider): provider is StoredManagedProviderRecord =>
+        !!provider && typeof provider === "object" && !Array.isArray(provider),
+      )
+        .map(normalizeManagedProvider)
+      : [];
   } catch {
     return [];
   }
@@ -423,22 +450,208 @@ function normalizeRoles(roles: unknown, role: unknown): ProviderRoles {
   return ["available"];
 }
 
-function normalizeManagedProvider(provider: Record<string, unknown>): Omit<ManagedProvider, "apiKeySet"> {
-  const { role, roles, ...rest } = provider;
+function normalizeManagedProvider(provider: StoredManagedProviderRecord): StoredManagedProvider {
   return {
-    ...rest,
-    roles: normalizeRoles(roles, role),
+    id: typeof provider.id === "string" ? provider.id : "",
+    name: typeof provider.name === "string" ? provider.name : "",
+    npm: typeof provider.npm === "string" ? provider.npm : "",
+    baseURL: typeof provider.baseURL === "string" ? provider.baseURL : "",
+    models: Array.isArray(provider.models)
+      ? provider.models.filter((model): model is string => typeof model === "string")
+      : [],
+    defaultModel: typeof provider.defaultModel === "string" ? provider.defaultModel : "",
+    roles: normalizeRoles(provider.roles, provider.role),
+    enabled: provider.enabled === true,
     allowPrivateNetwork: provider.allowPrivateNetwork === true,
-  } as Omit<ManagedProvider, "apiKeySet">;
+    ...(Object.prototype.hasOwnProperty.call(provider, "credentialItemId")
+      ? { credentialItemId: provider.credentialItemId }
+      : {}),
+  };
 }
 
-function legacyManagedProviders(projectId: string): Omit<ManagedProvider, "apiKeySet">[] {
+interface ManagedCredentialReference {
+  providerId: string;
+  itemId: string;
+}
+
+interface ManagedVaultCredentialStage {
+  references: Map<string, string>;
+  rollback: VaultWriteRollback;
+}
+
+function managedVaultKeyName(providerId: string): string {
+  return `Managed LLM API Key: ${providerId}`;
+}
+
+function isActiveManagedVaultCredential(projectId: string, providerId: string, itemId: string): boolean {
+  if (!VAULT_ITEM_ID_PATTERN.test(itemId)) return false;
+  try {
+    return Boolean(getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare(
+      `SELECT 1 FROM vault_items
+       WHERE project_id = ? AND id = ? AND name = ? AND type = 'api_key' AND access_policy = ?`,
+    ).get(projectId, itemId, managedVaultKeyName(providerId), ACTIVE_VAULT_POLICY));
+  } catch {
+    return false;
+  }
+}
+
+function hasLegacyManagedVaultCredential(projectId: string, providerId: string): boolean {
+  try {
+    return Boolean(getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare(
+      "SELECT 1 FROM vault_items WHERE project_id = ? AND name = ? AND type = 'api_key' AND access_policy <> ?",
+    ).get(projectId, managedVaultKeyName(providerId), DELETED_VAULT_POLICY));
+  } catch {
+    return false;
+  }
+}
+
+function resolveManagedCredentialReferences(
+  projectId: string,
+  providers: StoredManagedProvider[],
+): Map<string, string> | undefined {
+  const providerIds = new Set<string>();
+  const itemIds = new Set<string>();
+  const references = new Map<string, string>();
+  for (const provider of providers) {
+    if (!PROVIDER_ID_PATTERN.test(provider.id) || providerIds.has(provider.id)) return undefined;
+    providerIds.add(provider.id);
+    if (provider.credentialItemId === undefined) {
+      if (hasLegacyManagedVaultCredential(projectId, provider.id)) return undefined;
+      continue;
+    }
+    if (typeof provider.credentialItemId !== "string"
+      || !VAULT_ITEM_ID_PATTERN.test(provider.credentialItemId)
+      || itemIds.has(provider.credentialItemId)
+      || !isActiveManagedVaultCredential(projectId, provider.id, provider.credentialItemId)) {
+      return undefined;
+    }
+    itemIds.add(provider.credentialItemId);
+    references.set(provider.id, provider.credentialItemId);
+  }
+  return references;
+}
+
+function hasManagedVaultApiKey(projectId: string, providerId: string, itemId: unknown): boolean {
+  return typeof itemId === "string" && isActiveManagedVaultCredential(projectId, providerId, itemId);
+}
+
+function getManagedVaultApiKey(projectId: string, providerId: string, itemId: unknown): string | undefined {
+  if (!vault || vault.isSealed() || typeof itemId !== "string") return undefined;
+  if (!isActiveManagedVaultCredential(projectId, providerId, itemId)) return undefined;
+  return vault.decryptItem(projectId, itemId) ?? undefined;
+}
+
+function stageManagedVaultApiKeyWrites(
+  projectId: string,
+  keys: Record<string, string | undefined>,
+  existingReferences: Map<string, string>,
+): ManagedVaultCredentialStage {
+  const references = new Map(existingReferences);
+  if (!Object.values(keys).some(Boolean)) return { references, rollback: () => {} };
+  if (!vault || vault.isSealed()) throw new VaultCredentialWriteError();
+
+  const rollbackSteps: VaultWriteRollback[] = [];
+  try {
+    for (const [providerId, key] of Object.entries(keys)) {
+      if (!key) continue;
+      const existingItemId = references.get(providerId);
+      if (existingItemId) {
+        const previousValue = vault.decryptItem(projectId, existingItemId);
+        if (previousValue === null) throw new VaultCredentialWriteError();
+        vault.updateItem(projectId, existingItemId, key);
+        if (vault.decryptItem(projectId, existingItemId) !== key) throw new VaultCredentialWriteError();
+        rollbackSteps.push(() => vault.updateItem(projectId, existingItemId, previousValue));
+        continue;
+      }
+      const createdItemId = vault.createItem(projectId, managedVaultKeyName(providerId), "api_key", key);
+      if (!createdItemId || createdItemId === "Vault is sealed" || vault.decryptItem(projectId, createdItemId) !== key) {
+        throw new VaultCredentialWriteError();
+      }
+      references.set(providerId, createdItemId);
+      rollbackSteps.push(() => vault.deleteItem(projectId, createdItemId));
+    }
+  } catch {
+    for (const rollback of rollbackSteps.reverse()) {
+      try {
+        rollback();
+      } catch {
+        // A later request cannot safely infer a credential value from an incomplete rollback.
+      }
+    }
+    throw new VaultCredentialWriteError();
+  }
+
+  return {
+    references,
+    rollback: () => {
+      for (const rollback of rollbackSteps.reverse()) {
+        try {
+          rollback();
+        } catch {
+          // The settings write is rejected, so the existing configuration remains retryable.
+        }
+      }
+    },
+  };
+}
+
+function deleteManagedVaultCredential(projectId: string, reference: ManagedCredentialReference): boolean {
+  if (!vault || !isActiveManagedVaultCredential(projectId, reference.providerId, reference.itemId)) return false;
+  try {
+    vault.deleteItem(projectId, reference.itemId);
+    return !isActiveManagedVaultCredential(projectId, reference.providerId, reference.itemId);
+  } catch {
+    return false;
+  }
+}
+
+function restoreManagedVaultCredential(projectId: string, reference: ManagedCredentialReference): boolean {
+  try {
+    const changed = execTransaction(() => getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare(
+      `UPDATE vault_items SET access_policy = ?, updated_at = ?
+       WHERE project_id = ? AND id = ? AND name = ? AND type = 'api_key' AND access_policy = ?`,
+    ).run(
+      ACTIVE_VAULT_POLICY,
+      new Date().toISOString(),
+      projectId,
+      reference.itemId,
+      managedVaultKeyName(reference.providerId),
+      DELETED_VAULT_POLICY,
+    ).changes === 1);
+    if (changed) checkpointAfterWrite();
+    return changed && isActiveManagedVaultCredential(projectId, reference.providerId, reference.itemId);
+  } catch {
+    return false;
+  }
+}
+
+function deleteManagedVaultCredentials(
+  projectId: string,
+  references: ManagedCredentialReference[],
+): ManagedCredentialReference[] | undefined {
+  const deleted: ManagedCredentialReference[] = [];
+  for (const reference of references) {
+    if (deleteManagedVaultCredential(projectId, reference)) {
+      deleted.push(reference);
+      continue;
+    }
+    for (const previous of deleted.reverse()) restoreManagedVaultCredential(projectId, previous);
+    return undefined;
+  }
+  return deleted;
+}
+
+function restoreManagedVaultCredentials(projectId: string, references: ManagedCredentialReference[]): void {
+  for (const reference of [...references].reverse()) restoreManagedVaultCredential(projectId, reference);
+}
+
+function legacyManagedProviders(projectId: string): StoredManagedProvider[] {
   const primaryProvider = settings.getSetting(projectId, "synthesis_provider") || "";
   const primaryModel = settings.getSetting(projectId, "synthesis_model") || "";
   const backupProvider = settings.getSetting(projectId, "synthesis_backup_provider") || "";
   const backupModel = settings.getSetting(projectId, "synthesis_backup_model") || "";
 
-  const entries: Omit<ManagedProvider, "apiKeySet">[] = [];
+  const entries: StoredManagedProvider[] = [];
   if (primaryProvider && primaryModel) {
     entries.push({
       id: "ingenium-primary",
@@ -465,16 +678,15 @@ function legacyManagedProviders(projectId: string): Omit<ManagedProvider, "apiKe
       allowPrivateNetwork: settings.getSetting(projectId, "synthesis_backup_allow_private_network") === "true",
     });
   }
-  return entries.map((provider) => normalizeManagedProvider(provider));
+  return entries;
 }
 
 function getManagedProviders(projectId: string): ManagedProvider[] {
   const stored = parseManagedProviders(settings.getSetting(projectId, "llm_provider_configs"));
-  const providers = (stored.length > 0 ? stored : legacyManagedProviders(projectId))
-    .map((provider) => normalizeManagedProvider(provider));
-  return providers.map((provider) => ({
+  const providers = stored.length > 0 ? stored : legacyManagedProviders(projectId);
+  return providers.map(({ credentialItemId, ...provider }) => ({
     ...provider,
-    apiKeySet: hasVaultApiKey(projectId, provider.id),
+    apiKeySet: hasManagedVaultApiKey(projectId, provider.id, credentialItemId),
   }));
 }
 
@@ -506,6 +718,42 @@ function saveLlmConfig(
     for (const [key, value] of values) upsert.run(projectId, key, value);
   });
   checkpointAfterWrite();
+}
+
+function writeProviderSettings(projectId: string, values: Array<[string, string]>): void {
+  execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const upsert = db.prepare(
+      `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
+       ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
+    );
+    for (const [key, value] of values) upsert.run(projectId, key, value);
+  });
+  checkpointAfterWrite();
+}
+
+function restoreProviderSettings(
+  projectId: string,
+  previousValues: Array<[string, string | undefined]>,
+): boolean {
+  try {
+    execTransaction(() => {
+      const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+      const upsert = db.prepare(
+        `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
+      );
+      const remove = db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?");
+      for (const [key, value] of previousValues) {
+        if (value === undefined) remove.run(projectId, key);
+        else upsert.run(projectId, key, value);
+      }
+    });
+    checkpointAfterWrite();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Project the LLM config into the OpenCode global config as synthetic providers. */
@@ -709,12 +957,21 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: validationError } });
     return;
   }
+  const previous = parseManagedProviders(settings.getSetting(projectId, "llm_provider_configs"));
+  const previousReferences = resolveManagedCredentialReferences(projectId, previous);
+  if (!previousReferences) {
+    res.status(409).json({
+      error: {
+        code: "PROVIDER_CREDENTIAL_REFERENCE_INVALID",
+        message: "Provider credential metadata requires operator review before it can be changed.",
+      },
+    });
+    return;
+  }
   if (!migrateLegacyProviderKeys(projectId)) {
     res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
     return;
   }
-
-  const previous = getManagedProviders(projectId);
   const previousIds = previous.map((provider) => provider.id);
   const resolvedKeys: Record<string, string | undefined> = {};
   const clearedKeyIds = new Set<string>();
@@ -729,7 +986,7 @@ settingsRouter.put("/provider-configs", async (req, res) => {
       roles: normalizeRoles(provider.roles, provider.role),
       enabled: provider.enabled,
       allowPrivateNetwork: provider.allowPrivateNetwork === true,
-    } satisfies Omit<ManagedProvider, "apiKeySet">;
+    } satisfies Omit<StoredManagedProvider, "credentialItemId">;
     const resolvedKey = provider.apiKey === undefined ? undefined : provider.apiKey.trim();
     if (resolvedKey) resolvedKeys[normalized.id] = resolvedKey;
     if (provider.apiKey !== undefined && !provider.apiKey.trim()) clearedKeyIds.add(normalized.id);
@@ -766,7 +1023,7 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     return;
   }
   const values: Array<[string, string]> = [
-    ["llm_provider_configs", JSON.stringify(metadata)],
+    ["llm_provider_configs", ""],
     ["synthesis_provider", primarySelection.providerId],
     ["synthesis_model", primarySelection.modelId],
     ["synthesis_endpoint", metadata.find((p) => p.id === primarySelection.providerId)?.baseURL ?? ""],
@@ -776,41 +1033,65 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     ["synthesis_backup_endpoint", metadata.find((p) => p.id === secondarySelection.providerId)?.baseURL ?? ""],
     ["synthesis_backup_allow_private_network", String(metadata.find((p) => p.id === secondarySelection.providerId)?.allowPrivateNetwork === true)],
   ];
-  let rollbackVaultWrites: VaultWriteRollback;
+  let stagedCredentials: ManagedVaultCredentialStage;
   try {
-    rollbackVaultWrites = stageVaultApiKeyWrites(projectId, resolvedKeys);
+    stagedCredentials = stageManagedVaultApiKeyWrites(projectId, resolvedKeys, previousReferences);
   } catch {
     res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not save API credentials. Verify the vault is available and try again." } });
     return;
   }
-  try {
-    execTransaction(() => {
-      const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-      const upsert = db.prepare(
-        `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
-         ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
-      );
-      for (const [key, value] of values) upsert.run(projectId, key, value);
+
+  const removals: ManagedCredentialReference[] = [];
+  for (const [providerId, itemId] of previousReferences) {
+    if (!metadata.some((provider) => provider.id === providerId) || clearedKeyIds.has(providerId)) {
+      removals.push({ providerId, itemId });
+      stagedCredentials.references.delete(providerId);
+    }
+  }
+  const deletedCredentials = deleteManagedVaultCredentials(projectId, removals);
+  if (!deletedCredentials) {
+    stagedCredentials.rollback();
+    res.status(409).json({
+      error: {
+        code: "VAULT_CREDENTIAL_DELETE_FAILED",
+        message: "Could not remove a provider credential. Provider configuration was left unchanged.",
+      },
     });
-    checkpointAfterWrite();
-  } catch (error) {
-    rollbackVaultWrites();
-    logger.error("settings", "Provider settings write failed after vault update", {
-      errorName: error instanceof Error ? error.name : "UnknownError",
-    });
-    res.status(409).json({ error: { code: "CONFIG_SAVE_FAILED", message: "Could not save provider configuration. Please try again." } });
     return;
   }
 
+  const persistedMetadata = metadata.map((provider) => {
+    const itemId = stagedCredentials.references.get(provider.id);
+    return itemId ? { ...provider, credentialItemId: itemId } : provider;
+  });
+  values[0] = ["llm_provider_configs", JSON.stringify(persistedMetadata)];
+  const previousSettings = values.map(([key]) => [key, settings.getSetting(projectId, key)] as [string, string | undefined]);
+  const previousConfig = configs.getConfig(projectId, "global")?.content;
+
+  let settingsSaved = false;
   try {
+    writeProviderSettings(projectId, values);
+    settingsSaved = true;
     configs.saveConfig(projectId, "global", projectedConfig);
     logger.info("settings", `Projected ${metadata.filter((provider) => provider.enabled).length} managed providers into OpenCode global config`);
-  } catch (err) {
-    logger.error("settings", `Provider settings were saved but OpenCode config projection failed: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error) {
+    if (settingsSaved) restoreProviderSettings(projectId, previousSettings);
+    if (previousConfig !== undefined) {
+      try {
+        configs.saveConfig(projectId, "global", previousConfig);
+      } catch {
+        // The desired-state settings and credential references were restored first.
+      }
+    }
+    restoreManagedVaultCredentials(projectId, deletedCredentials);
+    stagedCredentials.rollback();
+    logger.error("settings", "Provider configuration save failed after credential preparation", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     res.status(409).json({
       error: {
-        code: "CONFIG_PROJECTION_FAILED",
-        message: "Provider settings were saved, but OpenCode global config could not be updated",
+        code: "CONFIG_SAVE_FAILED",
+        message: "Could not save provider configuration. Please try again.",
       },
     });
     return;
@@ -822,19 +1103,28 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     authWarnings.push("OpenCode could not reload the provider configuration automatically");
   }
   for (const provider of metadata) {
-    const key = resolvedKeys[provider.id] ?? getVaultApiKey(projectId, provider.id);
-  if (clearedKeyIds.has(provider.id)) {
-      clearVaultApiKey(projectId, provider.id);
-      const result = await opencodeClient.deleteAuth(provider.id, "/workspace");
+    if (clearedKeyIds.has(provider.id)) {
+      const result = await callOpenCodeWithProviderDeadline((signal) =>
+        opencodeClient.deleteAuth(provider.id, "/workspace", signal),
+      );
       if (isOpenCodeError(result)) authWarnings.push(`Authentication cleanup for ${provider.name} could not be completed`);
       continue;
     }
+    const key = resolvedKeys[provider.id] ?? getManagedVaultApiKey(
+      projectId,
+      provider.id,
+      stagedCredentials.references.get(provider.id),
+    );
     if (!provider.enabled || !key) continue;
-    const result = await opencodeClient.addAuth(provider.id, { type: "api", key }, "/workspace");
+    const result = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.addAuth(provider.id, { type: "api", key }, "/workspace", signal),
+    );
     if (isOpenCodeError(result)) authWarnings.push(`Authentication for ${provider.name} could not be updated`);
   }
   for (const removedId of previousIds.filter((id) => !metadata.some((provider) => provider.id === id))) {
-    const result = await opencodeClient.deleteAuth(removedId, "/workspace");
+    const result = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.deleteAuth(removedId, "/workspace", signal),
+    );
     if (isOpenCodeError(result)) authWarnings.push(`Authentication cleanup for removed provider ${removedId} could not be completed`);
   }
 
@@ -855,7 +1145,7 @@ settingsRouter.get("/llm-config", (req, res) => {
   const primary: LlmConfigEntry = {
     provider: settings.getSetting(projectId, "synthesis_provider") || "",
     model: settings.getSetting(projectId, "synthesis_model") || "",
-    apiKeySet: hasVaultApiKey(projectId, primaryProvider),
+    apiKeySet: hasLegacyVaultApiKey(projectId, primaryProvider),
     endpoint: settings.getSetting(projectId, "synthesis_endpoint") || "",
     allowPrivateNetwork: settings.getSetting(projectId, "synthesis_allow_private_network") === "true",
   };
@@ -863,7 +1153,7 @@ settingsRouter.get("/llm-config", (req, res) => {
   const backup: LlmConfigEntry = {
     provider: settings.getSetting(projectId, "synthesis_backup_provider") || "",
     model: settings.getSetting(projectId, "synthesis_backup_model") || "",
-    apiKeySet: hasVaultApiKey(projectId, backupProvider),
+    apiKeySet: hasLegacyVaultApiKey(projectId, backupProvider),
     endpoint: settings.getSetting(projectId, "synthesis_backup_endpoint") || "",
     allowPrivateNetwork: settings.getSetting(projectId, "synthesis_backup_allow_private_network") === "true",
   };
@@ -949,7 +1239,7 @@ settingsRouter.post("/llm-config", async (req, res) => {
   if (backup?.provider && backup.apiKey?.trim()) credentialWrites[backup.provider.trim()] = backup.apiKey.trim();
   let rollbackVaultWrites: VaultWriteRollback;
   try {
-    rollbackVaultWrites = stageVaultApiKeyWrites(projectId, credentialWrites);
+    rollbackVaultWrites = stageLegacyVaultApiKeyWrites(projectId, credentialWrites);
   } catch {
     res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not save API credentials. Verify the vault is available and try again." } });
     return;
@@ -965,10 +1255,10 @@ settingsRouter.post("/llm-config", async (req, res) => {
     return;
   }
   if (primary.apiKey !== undefined) {
-    if (!primary.apiKey.trim()) clearVaultApiKey(projectId, primary.provider.trim());
+    if (!primary.apiKey.trim()) clearLegacyVaultApiKey(projectId, primary.provider.trim());
   }
   if (backup?.provider && backup.apiKey !== undefined) {
-    if (!backup.apiKey.trim()) clearVaultApiKey(projectId, backup.provider.trim());
+    if (!backup.apiKey.trim()) clearLegacyVaultApiKey(projectId, backup.provider.trim());
   }
 
   // Project into OpenCode global config for Chat

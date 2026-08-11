@@ -121,6 +121,24 @@ another Compose project volume.
 | 083 | `083_restore_plans.sql` | Creates RESTORE-100's immutable server-global plan identities, append-only transition revisions, one-time hash-only confirmation authorizations, append-only stage records/events, and bounded idempotency receipts. SQL triggers enforce preview → authorize → confirm → ready plus the stage-integrity failure path; ready requires a consumed authorization and a component-hash-bound verified stage. Restrictive composite foreign keys prevent deleting a planned source bundle. No trigger or table authorizes active-database replacement; execution is RESTORE-101 scope. |
 | 084 | `084_restore_executor.sql` | Adds RESTORE-101's separately authorized 15-minute execution token, queued run/item ledger, hash-only owner/fence evidence, phase-CAS state graph, bounded idempotency receipts, immutable execution audit, and the RESTORE-100 authorization-ID immutability correction. It is all-or-nothing at startup; partial execution inventory fails closed. |
 
+### Mail watcher durability migration (092)
+
+| # | File | Purpose |
+|---|------|---------|
+| 092 | `092_email_watcher_markers.sql` | Creates durable IMAP watcher duplicate-suppression markers keyed by `project_id`, `account_id`, `folder`, and `uid`; enforces bounded text fields, a project foreign key with cascade cleanup, uniqueness for each scoped UID, and the newest-marker index used for retention. |
+
+Migration 092 is applied after migration 091 on both fresh and existing databases.
+The marker table retains the newest 4,096 rows per `(project_id, account_id,
+folder)` scope; the core `remember()` operation claims or refreshes a marker and
+prunes older rows in one transaction, then checkpoints after commit. The unique
+scope makes concurrent claims deterministic: one caller records a new marker and
+later callers observe it as already processed. `clearAccount()` removes all
+markers for one project/account when an email account is deleted. The startup
+probe requires the complete table, constraints, project foreign key, and
+`idx_email_watcher_markers_scope_newest` index; a partial 092 shape fails closed
+rather than being repaired piecemeal. This schema/runtime hardening adds no MCP
+tool; the built-in catalog count is unchanged.
+
 Migration 078 adds `usage_advisory_thresholds`, keyed one-to-one by
 `project_id` with `ON DELETE RESTRICT`. Its five nullable fields are
 `request_count`, `total_tokens`, `reported_cost_amount`, `cache_read_tokens`,

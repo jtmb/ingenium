@@ -311,6 +311,8 @@ async function triggerMailSyncForAllProjects(generation: number): Promise<void> 
     if (!isSchedulerActive(generation)) return;
     startEngine();
 
+    if (accounts.length === 0) return;
+
     if (!engineStatus.running || !engineStatus.heartbeatAt) {
       logger.warn("mail-sync", `Engine not running (running=${engineStatus.running}, heartbeat=${engineStatus.heartbeatAt}), restarting`);
       startEngine();

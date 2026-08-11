@@ -214,6 +214,12 @@ interface SkillProposalRetentionPaginationMigrationState {
   missing: string[];
 }
 
+interface EmailWatcherMarkersMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -1682,6 +1688,60 @@ function inspectSkillProposalRetentionPaginationMigration(
   return { any, complete: missing.length === 0, missing };
 }
 
+function inspectEmailWatcherMarkersMigration(db: Database.Database): EmailWatcherMarkersMigrationState {
+  const table = "email_watcher_markers";
+  const index = "idx_email_watcher_markers_scope_newest";
+  const tableRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { sql?: string } | undefined;
+  const indexRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+  ).get(index) as { sql?: string } | undefined;
+  const missing: string[] = [];
+  const any = tableRow !== undefined || indexRow !== undefined;
+
+  if (!tableRow?.sql) {
+    missing.push(`${table} table`);
+  } else {
+    const columns = ["id", "project_id", "account_id", "folder", "uid", "created_at", "updated_at"];
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+    if (![
+      "id INTEGER PRIMARY KEY AUTOINCREMENT",
+      "project_id TEXT NOT NULL CHECK(length(project_id) BETWEEN 1 AND 128)",
+      "REFERENCES projects(id) ON DELETE CASCADE",
+      "account_id TEXT NOT NULL CHECK(length(account_id) BETWEEN 1 AND 256)",
+      "folder TEXT NOT NULL CHECK(length(folder) BETWEEN 1 AND 512)",
+      "uid TEXT NOT NULL CHECK(length(uid) BETWEEN 1 AND 512)",
+      "created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64)",
+      "updated_at TEXT NOT NULL CHECK(length(updated_at) BETWEEN 1 AND 64)",
+      "UNIQUE(project_id, account_id, folder, uid)",
+    ].every((fragment) => tableRow.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+    if (!hasCompositeForeignKey(db, table, "projects", ["project_id"])) {
+      missing.push(`${table} → projects foreign key`);
+    }
+    const foreignKeys = db.prepare(`PRAGMA foreign_key_list('${table}')`).all() as Array<{ table: string }>;
+    if (foreignKeys.some((foreignKey) => foreignKey.table !== "projects")) {
+      missing.push(`${table} has unsupported foreign key`);
+    }
+  }
+
+  const expectedIndexSql = normalizeSchemaSql(
+    `CREATE INDEX ${index}
+     ON email_watcher_markers(project_id, account_id, folder, updated_at DESC, id DESC)`,
+  );
+  if (!indexRow?.sql) {
+    missing.push(`${index} index`);
+  } else if (normalizeSchemaSql(indexRow.sql) !== expectedIndexSql) {
+    missing.push(`${index} index definition`);
+  }
+
+  return { any, complete: missing.length === 0, missing };
+}
+
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
   const tables: Record<string, string[]> = {
     synthesis_batches: [
@@ -2706,8 +2766,9 @@ function runMigrations(db: Database.Database): void {
          "087_job_timeout_guard.sql",
           "088_email_suggestion_queue_leases.sql",
           "089_synthesis_batch_phases.sql",
-          "090_backup_deletion_reservations.sql",
-          "091_skill_proposal_retention_pagination.sql",
+           "090_backup_deletion_reservations.sql",
+           "091_skill_proposal_retention_pagination.sql",
+           "092_email_watcher_markers.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -3854,6 +3915,15 @@ function runMigrations(db: Database.Database): void {
   if (!skillProposalRetentionPaginationMigration.complete) {
     db.exec(readFileSync(resolve(migrationsDir, "091_skill_proposal_retention_pagination.sql"), "utf-8"));
     logger.info("db", "Applied migration 091_skill_proposal_retention_pagination.sql");
+  }
+
+  const emailWatcherMarkersMigration = inspectEmailWatcherMarkersMigration(db);
+  if (emailWatcherMarkersMigration.any && !emailWatcherMarkersMigration.complete) {
+    throw restoreMigrationPartialStateError("092", emailWatcherMarkersMigration.missing);
+  }
+  if (!emailWatcherMarkersMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "092_email_watcher_markers.sql"), "utf-8"));
+    logger.info("db", "Applied migration 092_email_watcher_markers.sql");
   }
 
   enforceReservedBrokerInvariant(db);

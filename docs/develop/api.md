@@ -257,7 +257,7 @@ All email routes are prefixed with `/api/v1/emails`. All email data is global (p
 | GET | `/accounts` | List email accounts (`?include_hidden=true` for all) |
 | POST | `/accounts` | Create a new email account |
 | PATCH | `/accounts/:id` | Update account metadata (e.g., `{"hidden": true}`) |
-| DELETE | `/accounts/:id` | Delete an email account (stops sync worker, clears cache) |
+| DELETE | `/accounts/:id` | Delete an email account (stops sync worker and IMAP watcher, clears durable migration-092 watcher markers for the account, then clears cache) |
 | POST | `/accounts/:id/test` | Test IMAP connection |
 | **Email Reading** | | |
 | GET | `/?account=&folder=&page=&limit=&refresh=` | List cached emails in a folder |
@@ -475,6 +475,29 @@ tools are defined here.
 | POST | `/api/v1/settings` with `key` plus `action: preserve\|replace\|clear` | Manage a protected OAuth client secret in the active global project. `replace` requires a non-empty `value`; `clear` is explicit; `preserve` leaves the saved value unchanged. A blank implicit value is preserve. The vault must be initialized and unsealed for writes. |
 | POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. |
 | POST | `/api/v1/settings/test-llm` | Test an LLM connection. Accepts `allowPrivateNetwork` boolean body field. Rejects unsafe/internal endpoint addresses (same `validateEndpointUrl` guard as provider-configs save). On transport failure, returns `{ ok: false, status: 0, message: "Unable to reach LLM endpoint" }` — the endpoint URL is never reflected in error messages. |
+
+#### Managed provider credential desired state
+
+`llm_provider_configs` stores provider metadata and optional vault item
+references, never API-key values. A referenced item must be a unique active
+restricted `api_key` named `Managed LLM API Key: <providerId>` in the canonical
+global project. Invalid, missing, duplicate, deleted, or non-restricted references
+return `409 PROVIDER_CREDENTIAL_REFERENCE_INVALID` before mutation. Omitted
+`apiKey` preserves the reference; a non-empty value is written and decrypt-verified
+before settings/config persistence; an explicit empty value or removed provider
+removes the reference.
+
+For a clear/removal, the API soft-deletes and verifies the referenced vault item
+before committing the provider settings and OpenCode global configuration. This
+specific removal-only path works while the vault is sealed because soft deletion
+does not need the master key; attempting to save a new key while sealed returns
+`409 VAULT_REQUIRED`. A deletion is attempted once per reference. Failure restores
+earlier deletions and staged writes and returns `409 VAULT_CREDENTIAL_DELETE_FAILED`
+with the prior configuration unchanged. A later settings/config failure restores
+the prior desired state and credential policies and returns `409 CONFIG_SAVE_FAILED`.
+There is no automatic retry loop. Post-commit OpenCode synchronization reports
+warnings without rolling back the durable desired state; native auth calls use the
+5-second deadline described in the integration section.
 
 ### Pipeline
 | Method | Endpoint | Purpose |
@@ -799,6 +822,9 @@ allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allow
 | GET | `/integrations/:id` | Get a single native integration by ID |
 | POST | `/integrations/:id/connect/oauth` | Begin an OAuth integration attempt. Returns `{ attemptID, url, mode: "auto"\|"code", instructions }`. State stored in `pendingOAuthAttempts` with 10-min TTL. The returned URL is validated for SSRF safety before being returned. |
 | POST | `/integrations/:id/connect/key` | Connect via API key. Accepts `{ key }` in body. |
+| POST | `/auth/:providerID` | Apply native provider auth. API-key calls use the durable credential saga; non-key calls still use the bounded OpenCode proxy. |
+| DELETE | `/auth/:providerID` | Disconnect native provider auth through the durable credential saga. |
+| GET | `/auth/status` | Read native provider auth status through OpenCode. |
 | POST | `/integrations/complete` | Complete an OAuth code-mode attempt. Accepts `{ attemptID, code }`. |
 | POST | `/integrations/attempts/:id/cancel` | Cancel a pending OAuth attempt. |
 | GET | `/integrations/attempts/:id` | Poll OAuth attempt status. Returns `{ status: "pending"\|"complete"\|"failed"\|"expired", message? }`. |
@@ -806,12 +832,20 @@ allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allow
 | GET | `/chat-config` | Sanitized merged provider catalog for the Chat page (managed + builtin); selection defaults are server-owned and catalog-gated. |
 | PUT | `/chat-selection` | Authenticated global Chat selection; validates an exact provider/model pair against the active server catalog before persistence. |
 
-API-key connect persists the encrypted desired credential in the canonical
-global vault before applying it to OpenCode. Failed OpenCode application is
-compensated by restoring the previous vault/auth state or returning a fixed
-recoverable failure. The corresponding `DELETE /auth/:providerID` operation
-removes OpenCode auth before deleting the vault credential and restores both if
-credential deletion fails. Keys and compensation details are never returned.
+Native API-key operations are serialized per provider with one active operation
+and at most four queued waiters. A full queue is rejected before any credential or
+OpenCode work with `503 PROVIDER_OPERATION_RETRY`, `Retry-After: 2`, and
+`retryable: true`; a queued waiter is rejected at the 2-second deadline. Each OpenCode
+operation, status probe, and compensation call used by this native API-key saga
+receives an abort-backed 5-second deadline. Different providers do not share this
+queue.
+
+API-key connect persists the encrypted desired credential in the canonical global
+vault before applying it to OpenCode. Failed OpenCode application is compensated by
+restoring the previous vault/auth state or returning a fixed recoverable failure.
+The corresponding `DELETE /auth/:providerID` operation removes OpenCode auth before
+deleting the vault credential and restores both if credential deletion fails. Keys
+and compensation details are never returned.
 
 ### MCP Tool Report
 

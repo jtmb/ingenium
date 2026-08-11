@@ -98,6 +98,23 @@ describe("email runtime boundary", () => {
     });
   });
 
+  it("adapts durable watcher marker claims and account cleanup through the API runtime", () => {
+    resetDbForTest();
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-email-runtime-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "canonical", "data.db");
+    process.env.INGENIUM_HOME = join(tempDir, "home");
+    const global = projects.createProject("global-default", true);
+    configureEmailRuntimeForApi();
+
+    expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
+      .toEqual({ alreadyProcessed: false, newlyRecorded: true });
+    expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
+      .toEqual({ alreadyProcessed: true, newlyRecorded: false });
+    expect(getEmailRuntime().watcherMarkers.clearAccount(global.id, "adapter-account")).toBe(1);
+    expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
+      .toEqual({ alreadyProcessed: false, newlyRecorded: true });
+  });
+
   it("uses a migrated protected OAuth client secret without restoring its plaintext setting", async () => {
     resetDbForTest();
     tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-email-runtime-"));

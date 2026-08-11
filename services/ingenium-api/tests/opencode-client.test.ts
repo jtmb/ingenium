@@ -207,6 +207,16 @@ describe("request — URL construction", () => {
     expect(init.headers).toHaveProperty("Content-Type", "application/json");
     expect(init.body).toBe(JSON.stringify({ title: "Test" }));
   });
+
+  it("passes caller cancellation to the OpenCode HTTP transport", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { ok: true }));
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.addAuth("openai", { type: "api", key: "transport-canary" }, undefined, controller.signal);
+
+    expect((fetchSpy.mock.calls[0]![1] as RequestInit).signal).toBe(controller.signal);
+  });
 });
 
 describe("request — error normalization", () => {

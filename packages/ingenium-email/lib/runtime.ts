@@ -70,6 +70,11 @@ export interface EmailObservation {
   importance: number;
 }
 
+export interface WatcherMarkerRememberResult {
+  alreadyProcessed: boolean;
+  newlyRecorded: boolean;
+}
+
 export interface EmailRuntime {
   accounts: {
     getGlobalProjectId(): string;
@@ -107,6 +112,10 @@ export interface EmailRuntime {
     claimSuggestionJob(ownerToken: string, leaseMs?: number): ClaimedSuggestionJob | undefined;
     markJobComplete(jobId: number, ownerToken: string): boolean;
     markJobFailed(jobId: number, ownerToken: string, error: string): boolean;
+  };
+  watcherMarkers: {
+    remember(projectId: string, accountId: string, folder: string, uid: string): WatcherMarkerRememberResult;
+    clearAccount(projectId: string, accountId: string): number;
   };
   llm: {
     isConfigured(projectId: string): boolean;

@@ -18,7 +18,7 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects, settings, configs, resetDbForTest, vault } from "ingenium-core";
+import { configs, getDb, projects, resetDbForTest, settings, vault } from "ingenium-core";
 import { settingsRouter } from "../lib/routes/settings.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import { opencodeClient } from "../lib/opencode-client.js";
@@ -29,10 +29,6 @@ let tempDir: string;
 let projectName: string;
 let server: Server | null = null;
 let baseUrl: string;
-// Keep the real transport outside individual tests. A test that temporarily
-// intercepts the provider request must still be able to call its local Express
-// fixture even if another test has restored or replaced global fetch.
-const nativeFetch = globalThis.fetch.bind(globalThis);
 
 /** MUST be a function — evaluates projectName at call time, not module load time. */
 function projectQ(name?: string): string {
@@ -173,6 +169,26 @@ async function getProviderConfigs() {
   return { res, body: await res.json() };
 }
 
+function managedProvider(id: string, apiKey?: string): Record<string, unknown> {
+  return {
+    id,
+    name: `Provider ${id}`,
+    npm: "@ai-sdk/openai",
+    baseURL: "https://api.openai.com/v1",
+    models: ["test-model"],
+    defaultModel: "test-model",
+    roles: ["available"],
+    enabled: true,
+    ...(apiKey === undefined ? {} : { apiKey }),
+  };
+}
+
+function managedCredentialId(providerId: string): string | undefined {
+  const stored = settings.getSetting(projects.getGlobalProject()!.id, "llm_provider_configs");
+  const provider = stored ? JSON.parse(stored).find((candidate: { id?: string }) => candidate.id === providerId) : undefined;
+  return typeof provider?.credentialItemId === "string" ? provider.credentialItemId : undefined;
+}
+
 describe("managed provider blocks", () => {
   const providers = [
     {
@@ -269,7 +285,7 @@ describe("managed provider blocks", () => {
 
     const { body } = await getProviderConfigs();
     expect(body.data.providers[0].apiKeySet).toBe(false);
-    expect(opencodeClient.deleteAuth).toHaveBeenCalledWith("openai-main", "/workspace");
+    expect(opencodeClient.deleteAuth).toHaveBeenCalledWith("openai-main", "/workspace", expect.any(AbortSignal));
   });
 
   it("does not save provider settings when a vault credential write fails", async () => {
@@ -394,9 +410,11 @@ describe("managed provider blocks", () => {
 
   it("normalizes persisted scalar roles to roles arrays", async () => {
     const projectId = projects.getGlobalProject()!.id;
+    const credentialItemId = managedCredentialId("openai-main");
     settings.setSetting(projectId, "llm_provider_configs", JSON.stringify([{
       ...providers[0]!,
       role: "primary",
+      credentialItemId,
     }]));
 
     const { body } = await getProviderConfigs();
@@ -414,6 +432,218 @@ describe("managed provider blocks", () => {
 
     const { body } = await getProviderConfigs();
     expect(body.data.providers[0].allowPrivateNetwork).toBe(true);
+  });
+
+  it("deletes a referenced removed credential while sealed before removing its configuration", async () => {
+    const providerId = "sealed-removal-provider";
+    const secret = "sealed-removal-secret";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    expect((await putProviderConfigs([managedProvider(providerId, secret)])).status).toBe(200);
+    const itemId = managedCredentialId(providerId);
+    expect(itemId).toBeTruthy();
+    const originalDelete = vault.deleteItem.bind(vault);
+    const deleteItem = vi.spyOn(vault, "deleteItem").mockImplementation((projectId, candidateId) => {
+      expect(projectId).toBe(globalProjectId);
+      expect(candidateId).toBe(itemId);
+      expect(settings.getSetting(globalProjectId, "llm_provider_configs")).toContain(providerId);
+      originalDelete(projectId, candidateId);
+    });
+
+    vault.sealVault();
+    const response = await putProviderConfigs([]);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({ saved: true });
+    expect(JSON.stringify(body)).not.toContain(secret);
+    expect(settings.getSetting(globalProjectId, "llm_provider_configs")).toBe("[]");
+    expect(deleteItem).toHaveBeenCalledOnce();
+    expect(vault.unsealVault(globalProjectId, "test-vault-passphrase").ok).toBe(true);
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === itemId)).toBe(false);
+    deleteItem.mockRestore();
+  });
+
+  it("clears a referenced credential while keeping its provider metadata", async () => {
+    const providerId = "clear-removal-provider";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    expect((await putProviderConfigs([managedProvider(providerId, "clear-removal-secret")])).status).toBe(200);
+    const itemId = managedCredentialId(providerId);
+
+    const response = await putProviderConfigs([managedProvider(providerId, "")]);
+    const { body } = await getProviderConfigs();
+    const stored = JSON.parse(settings.getSetting(globalProjectId, "llm_provider_configs")!);
+
+    expect(response.status).toBe(200);
+    expect(body.data.providers).toEqual([expect.objectContaining({ id: providerId, apiKeySet: false })]);
+    expect(stored[0]).not.toHaveProperty("credentialItemId");
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === itemId)).toBe(false);
+  });
+
+  it("keeps provider configuration when referenced credential deletion fails", async () => {
+    const providerId = "delete-failure-provider";
+    const secret = "delete-failure-secret";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    expect((await putProviderConfigs([managedProvider(providerId, secret)])).status).toBe(200);
+    const previous = settings.getSetting(globalProjectId, "llm_provider_configs");
+    const itemId = managedCredentialId(providerId);
+    const deleteItem = vi.spyOn(vault, "deleteItem").mockImplementationOnce(() => {
+      throw new Error("delete failure canary");
+    });
+
+    const response = await putProviderConfigs([]);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toEqual({
+      code: "VAULT_CREDENTIAL_DELETE_FAILED",
+      message: "Could not remove a provider credential. Provider configuration was left unchanged.",
+    });
+    expect(JSON.stringify(body)).not.toContain(secret);
+    expect(JSON.stringify(body)).not.toContain("delete failure canary");
+    expect(settings.getSetting(globalProjectId, "llm_provider_configs")).toBe(previous);
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === itemId)).toBe(true);
+    deleteItem.mockRestore();
+  });
+
+  it("restores the credential and desired state when config persistence fails after deletion", async () => {
+    const providerId = "config-failure-provider";
+    const secret = "config-failure-secret";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    expect((await putProviderConfigs([managedProvider(providerId, secret)])).status).toBe(200);
+    const previous = settings.getSetting(globalProjectId, "llm_provider_configs");
+    const itemId = managedCredentialId(providerId);
+    const saveConfig = vi.spyOn(configs, "saveConfig").mockImplementationOnce(() => {
+      throw new Error("config failure canary");
+    });
+
+    const response = await putProviderConfigs([]);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toEqual({
+      code: "CONFIG_SAVE_FAILED",
+      message: "Could not save provider configuration. Please try again.",
+    });
+    expect(JSON.stringify(body)).not.toContain(secret);
+    expect(JSON.stringify(body)).not.toContain("config failure canary");
+    expect(settings.getSetting(globalProjectId, "llm_provider_configs")).toBe(previous);
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === itemId)).toBe(true);
+    saveConfig.mockRestore();
+  });
+
+  it("does not recover a deleted credential when the same provider ID is re-added", async () => {
+    const providerId = "readd-provider";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    expect((await putProviderConfigs([managedProvider(providerId, "old-readd-secret")])).status).toBe(200);
+    const oldItemId = managedCredentialId(providerId);
+
+    expect((await putProviderConfigs([])).status).toBe(200);
+    expect((await putProviderConfigs([managedProvider(providerId)])).status).toBe(200);
+    expect(managedCredentialId(providerId)).toBeUndefined();
+    expect((await getProviderConfigs()).body.data.providers[0]).toMatchObject({ id: providerId, apiKeySet: false });
+
+    expect((await putProviderConfigs([managedProvider(providerId, "new-readd-secret")])).status).toBe(200);
+    const newItemId = managedCredentialId(providerId);
+    expect(newItemId).toBeTruthy();
+    expect(newItemId).not.toBe(oldItemId);
+    expect(vault.decryptItem(globalProjectId, newItemId!)).toBe("new-readd-secret");
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === oldItemId)).toBe(false);
+  });
+
+  it("deletes only the canonical project's referenced credential", async () => {
+    const providerId = "project-isolation-provider";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    const otherProject = projects.createProject("provider-credential-isolation");
+    expect((await putProviderConfigs([managedProvider(providerId, "global-isolation-secret")])).status).toBe(200);
+    const globalItemId = managedCredentialId(providerId);
+    const otherItemId = vault.createItem(
+      otherProject.id,
+      `Managed LLM API Key: ${providerId}`,
+      "api_key",
+      "other-isolation-secret",
+    );
+
+    expect((await putProviderConfigs([])).status).toBe(200);
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === globalItemId)).toBe(false);
+    expect(vault.listItems(otherProject.id).some((item: any) => item.id === otherItemId)).toBe(true);
+    expect(vault.decryptItem(otherProject.id, otherItemId)).toBe("other-isolation-secret");
+  });
+
+  it("fails closed for legacy missing and duplicate credential references", async () => {
+    const globalProjectId = projects.getGlobalProject()!.id;
+    const original = settings.getSetting(globalProjectId, "llm_provider_configs");
+    const originalSynthesisProvider = settings.getSetting(globalProjectId, "synthesis_provider");
+    const originalSynthesisApiKey = settings.getSetting(globalProjectId, "synthesis_api_key");
+    const missingProviderId = "legacy-reference-provider";
+    const missingItemId = vault.createItem(
+      globalProjectId,
+      `Managed LLM API Key: ${missingProviderId}`,
+      "api_key",
+      "legacy-reference-secret",
+    );
+    settings.setSetting(globalProjectId, "llm_provider_configs", JSON.stringify([managedProvider(missingProviderId)]));
+    settings.setSetting(globalProjectId, "synthesis_provider", "legacy-side-effect-provider");
+    settings.setSetting(globalProjectId, "synthesis_api_key", "legacy-side-effect-secret");
+
+    const missing = await putProviderConfigs([]);
+    const missingBody = await missing.json();
+    expect(missing.status).toBe(409);
+    expect(missingBody.error).toEqual({
+      code: "PROVIDER_CREDENTIAL_REFERENCE_INVALID",
+      message: "Provider credential metadata requires operator review before it can be changed.",
+    });
+    expect(JSON.stringify(missingBody)).not.toContain(missingProviderId);
+    expect(JSON.stringify(missingBody)).not.toContain("legacy-reference-secret");
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === missingItemId)).toBe(true);
+    expect(settings.getSetting(globalProjectId, "synthesis_api_key")).toBe("legacy-side-effect-secret");
+
+    const duplicateItemId = vault.createItem(
+      globalProjectId,
+      "Managed LLM API Key: duplicate-reference-one",
+      "api_key",
+      "duplicate-reference-secret",
+    );
+    settings.setSetting(globalProjectId, "llm_provider_configs", JSON.stringify([
+      { ...managedProvider("duplicate-reference-one"), credentialItemId: duplicateItemId },
+      { ...managedProvider("duplicate-reference-two"), credentialItemId: duplicateItemId },
+    ]));
+
+    const duplicate = await putProviderConfigs([]);
+    const duplicateBody = await duplicate.json();
+    expect(duplicate.status).toBe(409);
+    expect(duplicateBody.error).toEqual(missingBody.error);
+    expect(JSON.stringify(duplicateBody)).not.toContain(duplicateItemId);
+    expect(JSON.stringify(duplicateBody)).not.toContain("duplicate-reference-secret");
+
+    vault.deleteItem(globalProjectId, missingItemId);
+    vault.deleteItem(globalProjectId, duplicateItemId);
+    settings.setSetting(globalProjectId, "llm_provider_configs", original ?? "[]");
+    settings.setSetting(globalProjectId, "synthesis_provider", originalSynthesisProvider ?? "");
+    settings.setSetting(globalProjectId, "synthesis_api_key", originalSynthesisApiKey ?? "");
+  });
+
+  it("fails closed when a referenced credential policy is not restricted", async () => {
+    const providerId = "unexpected-policy-provider";
+    const globalProjectId = projects.getGlobalProject()!.id;
+    expect((await putProviderConfigs([managedProvider(providerId, "unexpected-policy-secret")])).status).toBe(200);
+    const itemId = managedCredentialId(providerId);
+    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "UPDATE vault_items SET access_policy = ? WHERE project_id = ? AND id = ?",
+    ).run('{"mode":"unexpected"}', globalProjectId, itemId);
+
+    const response = await putProviderConfigs([]);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "PROVIDER_CREDENTIAL_REFERENCE_INVALID",
+        message: "Provider credential metadata requires operator review before it can be changed.",
+      },
+    });
+    expect(settings.getSetting(globalProjectId, "llm_provider_configs")).toContain(providerId);
+    expect(vault.listItems(globalProjectId).some((item: any) => item.id === itemId)).toBe(true);
+    vault.deleteItem(globalProjectId, itemId!);
+    settings.setSetting(globalProjectId, "llm_provider_configs", "[]");
   });
 });
 
@@ -888,14 +1118,15 @@ describe("GET /opencode/chat-config — configured state", () => {
   });
 
   it("handles __custom__ provider correctly", async () => {
-    await postLlmConfig({
+    const response = await postLlmConfig({
       primary: {
         provider: "__custom__",
         model: "my-custom-model",
         apiKey: "sk-custom",
-        endpoint: "https://custom-api.example.com/v1",
+        endpoint: "https://api.openai.com/v1",
       },
     }, "global-default");
+    expect(response.status).toBe(200);
     setManagedChatCatalog([{
       id: "ingenium-primary",
       name: "Custom",
@@ -1229,28 +1460,23 @@ describe("POST /settings/test-llm — requires project context", () => {
   });
 
   it("returns a sanitized transport failure without reflecting the endpoint", async () => {
-    // A public literal IP bypasses resolver timing, so this test exercises the
-    // transport-error branch rather than turning a DNS retry into a flaky test.
-    const endpoint = "https://1.1.1.1/v1";
-    const transport = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = input instanceof Request ? input.url : input.toString();
-      if (url.startsWith(endpoint)) {
-        return Promise.reject(new TypeError("mocked transport failure"));
-      }
-      return nativeFetch(input, init);
+    const transportServer = createServer((request) => {
+      request.socket.destroy();
     });
+    await new Promise<void>((resolve) => transportServer.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(transportServer.address() as AddressInfo).port}/v1`;
     try {
       const res = await fetch(`${baseUrl}/api/v1/settings/test-llm${projectQ()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint, model: "test-model" }),
+        body: JSON.stringify({ endpoint, model: "test-model", allowPrivateNetwork: true }),
       });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.data).toEqual({ ok: false, status: 0, message: "Unable to reach LLM endpoint" });
       expect(JSON.stringify(body)).not.toContain(endpoint);
     } finally {
-      transport.mockRestore();
+      await new Promise<void>((resolve) => transportServer.close(() => resolve()));
     }
   });
 });

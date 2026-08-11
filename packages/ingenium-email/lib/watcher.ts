@@ -12,9 +12,7 @@
  *    IDLE for real-time notifications on IMAP-connected accounts.
  *
  * 🔴 The watcher intentionally scopes to INBOX only — IMAP IDLE monitors a single
- *    mailbox and INBOX is where new messages arrive. This is a legitimate semantic
- *    scope, not a missing-folder bug. The "INBOX" literal on handleNewEmail line 134
- *    reflects the actual mailbox the watcher is monitoring.
+ *    mailbox and INBOX is where new messages arrive.
  */
 
 import { connectAccount, disconnectAccount } from "./imap.js";
@@ -29,7 +27,8 @@ import { getEmailRuntime, type EmailObservation } from "./runtime.js";
 type ImapClient = Awaited<ReturnType<typeof connectAccount>>;
 type ExistsHandler = () => void | Promise<void>;
 const MAX_PROCESSED_UIDS = 4096;
-// ponytail: 4096 in-memory UID ceiling; add a durable marker if duplicate suppression must survive restarts.
+const WATCHER_FOLDER = "INBOX";
+const MAX_MARKER_FAILURE_WARNINGS = 3;
 let processedUidCapacityForTest: number | undefined;
 
 interface WatcherEntry {
@@ -41,8 +40,10 @@ interface WatcherEntry {
   existsHandler: ExistsHandler;
   running: boolean;
   scanPromise: Promise<void> | null;
+  folder: string;
   processedUids: Map<string, undefined>;
   processedUidCapacity: number;
+  markerFailureWarnings: number;
 }
 
 interface WatcherStart {
@@ -121,8 +122,7 @@ async function runWatcherStart(start: WatcherStart): Promise<void> {
     start.client = client;
     if (start.cancelled) return;
 
-    // Select INBOX for IDLE monitoring.
-    await client.mailboxOpen("INBOX");
+    await client.mailboxOpen(WATCHER_FOLDER);
     if (start.cancelled) return;
 
     const entry: WatcherEntry = {
@@ -134,8 +134,10 @@ async function runWatcherStart(start: WatcherStart): Promise<void> {
       existsHandler: () => Promise.resolve(),
       running: true,
       scanPromise: null,
+      folder: WATCHER_FOLDER,
       processedUids: new Map(),
       processedUidCapacity: processedUidCapacityForTest ?? MAX_PROCESSED_UIDS,
+      markerFailureWarnings: 0,
     };
     start.entry = entry;
     entry.existsHandler = () => scheduleWatcherScan(entry);
@@ -241,16 +243,58 @@ function scheduleWatcherScan(entry: WatcherEntry, propagateError = false): Promi
   return scanPromise;
 }
 
-function rememberProcessedUid(entry: WatcherEntry, emailUid: string): boolean {
-  if (entry.processedUids.delete(emailUid)) {
-    entry.processedUids.set(emailUid, undefined);
-    return false;
-  }
+function touchProcessedUid(entry: WatcherEntry, emailUid: string): void {
+  entry.processedUids.delete(emailUid);
   entry.processedUids.set(emailUid, undefined);
   if (entry.processedUids.size > entry.processedUidCapacity) {
     entry.processedUids.delete(entry.processedUids.keys().next().value!);
   }
+}
+
+function hasProcessedUid(entry: WatcherEntry, emailUid: string): boolean {
+  if (!entry.processedUids.has(emailUid)) return false;
+  touchProcessedUid(entry, emailUid);
   return true;
+}
+
+function warnMarkerFailure(entry: WatcherEntry, emailUid: string): void {
+  if (entry.markerFailureWarnings >= MAX_MARKER_FAILURE_WARNINGS) return;
+  entry.markerFailureWarnings++;
+  try {
+    getEmailRuntime().logger.warn(
+      "email-watcher",
+      "Durable watcher marker unavailable; skipped side effects until a later scan",
+      {
+        accountId: entry.accountId,
+        folder: entry.folder,
+        uid: emailUid,
+        retry: entry.markerFailureWarnings,
+      },
+    );
+  } catch {
+    // Logging must not turn a failed marker claim into watcher side effects.
+  }
+}
+
+function rememberProcessedUid(entry: WatcherEntry, emailUid: string): "alreadyProcessed" | "newlyRecorded" | "failed" {
+  if (hasProcessedUid(entry, emailUid)) return "alreadyProcessed";
+
+  try {
+    const marker = getEmailRuntime().watcherMarkers.remember(
+      entry.projectId,
+      entry.accountId,
+      entry.folder,
+      emailUid,
+    );
+    if (marker.alreadyProcessed === marker.newlyRecorded) {
+      throw new Error("Invalid durable watcher marker result");
+    }
+    touchProcessedUid(entry, emailUid);
+    return marker.alreadyProcessed ? "alreadyProcessed" : "newlyRecorded";
+  } catch {
+    warnMarkerFailure(entry, emailUid);
+    return "failed";
+  }
 }
 
 /**
@@ -271,7 +315,7 @@ async function handleNewEmail(entry: WatcherEntry, propagateError = false): Prom
 
     for (const triage of results) {
       if (!entry.running) return;
-      if (!rememberProcessedUid(entry, triage.emailUid)) continue;
+      if (rememberProcessedUid(entry, triage.emailUid) !== "newlyRecorded") continue;
 
       // Log observation for self-learning pipeline
       await logWatcherObservation(entry.projectId, {
@@ -282,13 +326,11 @@ async function handleNewEmail(entry: WatcherEntry, propagateError = false): Prom
 
       // For high/medium priority with response skills, generate suggestions
       if (triage.priority === "high" || triage.priority === "medium") {
-        // 🔴 Legitimate INBOX scope — the watcher monitors INBOX via IMAP IDLE.
-        // This is NOT a missing-folder bug; it's the actual mailbox being watched.
         const suggestion = await suggestResponse(
           entry.projectId,
           entry.accountId,
           triage.emailUid,
-          "INBOX",
+          entry.folder,
         );
 
         if (suggestion && suggestion.confidence > 0.5) {

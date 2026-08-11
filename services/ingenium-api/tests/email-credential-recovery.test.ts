@@ -8,11 +8,16 @@ const {
   connectAccount,
   createAccountWithCredentials,
   createTransport,
+  clearEmailCache,
+  clearWatcherMarkers,
   getAccount,
   getCredentials,
+  getEmailRuntime,
   normalizeEmailAccountEndpoints,
+  removeAccount,
   startEngine,
   stopAccountWorker,
+  stopWatcher,
   storeAccount,
   storeCredentials,
 } = vi.hoisted(() => ({
@@ -20,23 +25,32 @@ const {
   connectAccount: vi.fn(),
   createAccountWithCredentials: vi.fn(),
   createTransport: vi.fn(),
+  clearEmailCache: vi.fn(),
+  clearWatcherMarkers: vi.fn(),
   getAccount: vi.fn(),
   getCredentials: vi.fn(),
+  getEmailRuntime: vi.fn(),
   normalizeEmailAccountEndpoints: vi.fn((provider: string, endpoints: Record<string, unknown>) => {
     if (provider !== "custom" && Object.values(endpoints).some((value) => value !== undefined)) {
       throw new Error("fixed provider endpoint override");
     }
     return endpoints;
   }),
+  removeAccount: vi.fn(),
   storeAccount: vi.fn(),
   storeCredentials: vi.fn(),
   stopAccountWorker: vi.fn(),
+  stopWatcher: vi.fn(async () => {}),
   startEngine: vi.fn(),
 }));
 
+getEmailRuntime.mockReturnValue({
+  watcherMarkers: { clearAccount: clearWatcherMarkers },
+});
+
 vi.mock("ingenium-core", () => ({
   logger: { warn: vi.fn(), error: vi.fn() },
-  emailCache: {},
+  emailCache: { clearCache: clearEmailCache },
   synthesisLlm: {},
   settings: {},
 }));
@@ -49,10 +63,13 @@ vi.mock("ingenium-email", () => ({
   createTransport,
   getAccount,
   getCredentials,
+  getEmailRuntime,
   normalizeEmailAccountEndpoints,
+  removeAccount,
   storeAccount,
   storeCredentials,
   stopAccountWorker,
+  stopWatcher,
   startEngine,
   sanitizeProviderError: vi.fn(() => ({
     code: "PROVIDER_ERROR",
@@ -224,6 +241,23 @@ describe("PATCH /emails/accounts/:id/credentials", () => {
     expect(bodyJson).not.toContain("Encryption");
     expect(stopAccountWorker).not.toHaveBeenCalled();
     expect(startEngine).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /emails/accounts/:id", () => {
+  it("cleans durable watcher markers through the API runtime before deleting the account", async () => {
+    getAccount.mockReturnValue({ id: "deleted-account", email: "deleted@example.test" });
+
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts/deleted-account`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(204);
+    expect(stopAccountWorker).toHaveBeenCalledWith("deleted-account");
+    expect(stopWatcher).toHaveBeenCalledWith("deleted-account");
+    expect(clearWatcherMarkers).toHaveBeenCalledWith("global-project", "deleted-account");
+    expect(removeAccount).toHaveBeenCalledWith("deleted-account");
+    expect(clearEmailCache).toHaveBeenCalledWith("deleted-account");
   });
 });
 

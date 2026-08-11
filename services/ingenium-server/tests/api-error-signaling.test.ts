@@ -4,12 +4,24 @@ import { api, ApiHttpError } from "../lib/client.js";
 import { stateGatedHandler } from "../lib/tool-state-gate.js";
 import { emailOauthExchange } from "../lib/tools/emails.js";
 
-function response(status: number, payload: unknown) {
-  return {
-    ok: status >= 200 && status < 300,
+const MAX_API_ERROR_BODY_BYTES = 8 * 1024;
+
+function response(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
     status,
-    json: async () => payload,
-  };
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function streamedResponse(status: number, chunks: Uint8Array[]): Response {
+  let index = 0;
+  return new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = chunks[index++];
+      if (chunk === undefined) controller.close();
+      else controller.enqueue(chunk);
+    },
+  }), { status });
 }
 
 function resultBody(result: { content: Array<{ text: string }> }): unknown {
@@ -29,9 +41,9 @@ describe("centralized MCP API error signaling", () => {
     [429, "RATE_LIMITED", "Too many requests", 1],
     [502, "UPSTREAM_FAILURE", "Upstream unavailable", 4],
   ])("throws bounded typed errors for HTTP %i", async (status, code, message, attempts) => {
-    const fetchMock = vi.fn().mockResolvedValue(response(status, {
+    const fetchMock = vi.fn(() => Promise.resolve(response(status, {
       error: { code, message, details: { token: "must-not-escape" } },
-    }));
+    })));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(Math, "random").mockReturnValue(0);
 
@@ -50,46 +62,130 @@ describe("centralized MCP API error signaling", () => {
     expect(fetchMock).toHaveBeenCalledTimes(attempts);
   });
 
-  it("parses DELETE errors before throwing and falls back safely for malformed or oversized bodies", async () => {
-    const parsed = vi.fn(async () => ({
-      error: {
-        code: "REVISION_CONFLICT",
-        message: "Revision conflict",
-        details: { token: "must-not-escape" },
-      },
-    }));
-    const malformed = {
-      ok: false,
-      status: 422,
-      text: async () => "{not-json",
+  it("cancels a declared at-cap error body before acquiring a reader", async () => {
+    const body = {
+      getReader: vi.fn(),
+      cancel: vi.fn().mockResolvedValue(undefined),
     };
-    const oversized = {
+    const text = vi.fn();
+    const json = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
-      text: async () => "x".repeat(8 * 1024 + 1),
+      headers: new Headers({ "content-length": String(MAX_API_ERROR_BODY_BYTES) }),
+      body,
+      text,
+      json,
+    }));
+    const gated = stateGatedHandler(
+      "ingenium_declared_oversized_fixture",
+      () => "fixture-project",
+      async () => "enabled",
+      async () => api.post("/declared-oversized-fixture", {}),
+    );
+
+    const result = await gated({ project: "fixture-project" });
+
+    expect(resultBody(result)).toEqual({
+      error: { status: 429, code: "API_REQUEST_FAILED", message: "The API request failed." },
+    });
+    expect(body.getReader).not.toHaveBeenCalled();
+    expect(body.cancel).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("cancels a chunked at-cap error body before later data is read", async () => {
+    const secret = "must-not-read-after-cap";
+    const reader = {
+      read: vi.fn()
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(MAX_API_ERROR_BODY_BYTES) })
+        .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode(secret) }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
     };
+    const body = {
+      getReader: vi.fn(() => reader),
+      cancel: vi.fn().mockResolvedValue(undefined),
+    };
+    const text = vi.fn();
+    const json = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: new Headers(),
+      body,
+      text,
+      json,
+    }));
+
+    await expect(api.post("/chunked-oversized-fixture", {})).rejects.toMatchObject({
+      status: 429,
+      code: "API_REQUEST_FAILED",
+      message: "The API request failed.",
+    });
+
+    expect(reader.read).toHaveBeenCalledTimes(1);
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
+    expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("parses an error body exactly below the raw cap", async () => {
+    const prefix = '{"error":{"code":"RATE_LIMITED","message":"Retry later","padding":"';
+    const suffix = '"}}';
+    const body = `${prefix}${"x".repeat(MAX_API_ERROR_BODY_BYTES - 1 - Buffer.byteLength(prefix + suffix))}${suffix}`;
+    expect(Buffer.byteLength(body)).toBe(MAX_API_ERROR_BODY_BYTES - 1);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, {
+      status: 429,
+      headers: { "content-length": String(MAX_API_ERROR_BODY_BYTES - 1) },
+    })));
+
+    const result = await api.settled.post("/under-cap-fixture", {});
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 429,
+      data: { error: { code: "RATE_LIMITED", message: "Retry later" } },
+      payload: { error: { code: "RATE_LIMITED", message: "Retry later" } },
+    });
+  });
+
+  it("decodes valid UTF-8 split across error-body chunks", async () => {
+    const payload = { error: { code: "VALIDATION_ERROR", message: "Value ☃ is invalid" } };
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const snowman = Buffer.from("☃", "utf8");
+    const split = Buffer.from(bytes).indexOf(snowman) + 1;
+    expect(split).toBeGreaterThan(0);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamedResponse(422, [
+      bytes.slice(0, split),
+      bytes.slice(split),
+    ])));
+
+    await expect(api.post("/multibyte-fixture", {})).rejects.toMatchObject({
+      status: 422,
+      code: "VALIDATION_ERROR",
+      message: "Value ☃ is invalid",
+    });
+  });
+
+  it("uses the fixed fallback for malformed JSON and missing error bodies", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 409, json: parsed })
-      .mockResolvedValueOnce(malformed)
-      .mockResolvedValueOnce(oversized);
+      .mockResolvedValueOnce(new Response("{not-json", { status: 422 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(api.del("/delete-fixture")).rejects.toMatchObject({
-      status: 409,
-      code: "REVISION_CONFLICT",
-      message: "Revision conflict",
-    });
     await expect(api.post("/malformed-fixture", {})).rejects.toMatchObject({
       status: 422,
       code: "API_REQUEST_FAILED",
       message: "The API request failed.",
     });
-    await expect(api.post("/oversized-fixture", {})).rejects.toMatchObject({
-      status: 429,
+    await expect(api.post("/missing-body-fixture", {})).rejects.toMatchObject({
+      status: 404,
       code: "API_REQUEST_FAILED",
       message: "The API request failed.",
     });
-    expect(parsed).toHaveBeenCalledTimes(1);
   });
 
   it("returns one schema-valid bounded MCP error with no nested API details", async () => {
@@ -123,6 +219,56 @@ describe("centralized MCP API error signaling", () => {
     expect(JSON.stringify(result)).not.toContain("details");
     expect(JSON.stringify(result)).not.toContain("must-not-escape");
     expect(JSON.stringify(result)).not.toContain("/private");
+  });
+
+  it.each([
+    [404, "NOT_FOUND", "Resource not found"],
+    [429, "RATE_LIMITED", "Too many requests"],
+    [502, "UPSTREAM_FAILURE", "Upstream unavailable"],
+  ])("marks HTTP %i as an MCP error without relaying API details", async (status, code, message) => {
+    const secret = `token=must-not-escape-${status}`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(status, {
+      error: { code, message, details: { token: secret } },
+    })));
+    const gated = stateGatedHandler(
+      "ingenium_status_error_fixture",
+      () => "fixture-project",
+      async () => "enabled",
+      async () => api.post("/status-error-fixture", {}),
+    );
+
+    const result = await gated({ project: "fixture-project" });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(resultBody(result)).toEqual({ error: { status, code, message } });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain("details");
+  });
+
+  it("keeps settled error payloads bounded and successful payloads unchanged", async () => {
+    const errorPayload = { error: { code: "RATE_LIMITED", message: "Too many requests" } };
+    const successPayload = { data: { success: false, reason: "domain result" } };
+    const rawSuccess = new Response("download body", { status: 200 });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(429, errorPayload))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => successPayload })
+      .mockResolvedValueOnce(response(429, errorPayload))
+      .mockResolvedValueOnce(rawSuccess);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await api.settled.post("/settled-error-fixture", {});
+    const success = await api.settled.post("/settled-success-fixture", {});
+    const octetError = await api.settled.postOctetStream(
+      "/settled-octet-error-fixture",
+      Buffer.from("{}"),
+    );
+    const raw = await api.settled.getRaw("/settled-raw-success-fixture");
+
+    expect(error).toEqual({ ok: false, status: 429, data: errorPayload, payload: errorPayload });
+    expect(success).toEqual({ ok: true, status: 200, data: successPayload.data, payload: successPayload });
+    expect(octetError).toEqual({ ok: false, status: 429, data: errorPayload, payload: errorPayload });
+    expect(raw).toMatchObject({ ok: true, status: 200, response: rawSuccess });
+    await expect(raw.response.text()).resolves.toBe("download body");
   });
 
   it("keeps successful 2xx domain failure objects out of the MCP error channel", async () => {

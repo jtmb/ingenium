@@ -13,6 +13,7 @@ import {
 } from "../opencode-client.js";
 import { requireActiveGlobalProject } from "../helpers.js";
 import {
+  callOpenCodeWithProviderDeadline,
   connectNativeProviderCredential,
   disconnectNativeProviderCredential,
   type NativeProviderCredentialPersistenceStatus,
@@ -281,7 +282,7 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
     let status: number;
     if (code === "AUTH_NOT_CONFIGURED") {
       status = 503;
-    } else if (code === "NETWORK_ERROR") {
+    } else if (code === "NETWORK_ERROR" || code === "OPENCODE_OPERATION_TIMEOUT") {
       status = 503;
       result.error.code = "OPENCODE_UNAVAILABLE";
       result.error.message = "OpenCode is starting up. Please wait a moment and try again.";
@@ -1206,6 +1207,17 @@ function respondNativeProviderPersistenceFailure(
   });
 }
 
+function respondNativeProviderQueueRejected(res: Response): void {
+  res.setHeader("Retry-After", "2");
+  res.status(503).json({
+    error: {
+      code: "PROVIDER_OPERATION_RETRY",
+      message: "Provider operation is busy. Try again shortly.",
+      retryable: true,
+    },
+  });
+}
+
 opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res) => {
   if (!guardPassword(req, res)) return;
   if (!isSafeIdentifier(req.params.integrationID) || !isValidProviderKey(req.body?.key)) {
@@ -1214,10 +1226,14 @@ opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res)
   }
   const providerId = req.params.integrationID!;
   const saga = await connectNativeProviderCredential(providerId, req.body.key, {
-    apply: (key) => opencodeClient.connectIntegrationKey(providerId, key),
-    remove: () => opencodeClient.deleteAuth(providerId),
-    status: () => opencodeClient.getAuthStatus(),
+    apply: (key, signal) => opencodeClient.connectIntegrationKey(providerId, key, signal),
+    remove: (signal) => opencodeClient.deleteAuth(providerId, undefined, signal),
+    status: (signal) => opencodeClient.getAuthStatus(undefined, signal),
   });
+  if (saga.outcome === "queue_rejected") {
+    respondNativeProviderQueueRejected(res);
+    return;
+  }
   if (saga.outcome === "persistence_failed") {
     respondNativeProviderPersistenceFailure(res, saga.persistence, "connect");
     return;
@@ -1311,10 +1327,14 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
   if (typeof body.key === "string") {
     const providerId = req.params.providerID!;
     const saga = await connectNativeProviderCredential(providerId, body.key, {
-      apply: (key) => opencodeClient.addAuth(providerId, { ...body, key }, directory),
-      remove: () => opencodeClient.deleteAuth(providerId, directory),
-      status: () => opencodeClient.getAuthStatus(directory),
+      apply: (key, signal) => opencodeClient.addAuth(providerId, { ...body, key }, directory, signal),
+      remove: (signal) => opencodeClient.deleteAuth(providerId, directory, signal),
+      status: (signal) => opencodeClient.getAuthStatus(directory, signal),
     });
+    if (saga.outcome === "queue_rejected") {
+      respondNativeProviderQueueRejected(res);
+      return;
+    }
     if (saga.outcome === "persistence_failed") {
       respondNativeProviderPersistenceFailure(res, saga.persistence, "connect");
       return;
@@ -1333,7 +1353,9 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
   if (bodyForLog.key) bodyForLog.key = "***REDACTED***";
   logger.debug(SOURCE, `POST /auth/${req.params.providerID}`, { body: bodyForLog });
 
-  const result = await opencodeClient.addAuth(req.params.providerID!, body, directory);
+  const result = await callOpenCodeWithProviderDeadline((signal) =>
+    opencodeClient.addAuth(req.params.providerID!, body, directory, signal),
+  );
   sendResult(req, res, result);
 });
 
@@ -1346,10 +1368,14 @@ opencodeRouter.delete("/auth/:providerID", async (req, res) => {
   const directory = req.query.directory as string | undefined;
   const providerId = req.params.providerID!;
   const saga = await disconnectNativeProviderCredential(providerId, {
-    apply: (key) => opencodeClient.addAuth(providerId, { type: "api", key }, directory),
-    remove: () => opencodeClient.deleteAuth(providerId, directory),
-    status: () => opencodeClient.getAuthStatus(directory),
+    apply: (key, signal) => opencodeClient.addAuth(providerId, { type: "api", key }, directory, signal),
+    remove: (signal) => opencodeClient.deleteAuth(providerId, directory, signal),
+    status: (signal) => opencodeClient.getAuthStatus(directory, signal),
   });
+  if (saga.outcome === "queue_rejected") {
+    respondNativeProviderQueueRejected(res);
+    return;
+  }
   if (saga.outcome === "persistence_failed") {
     respondNativeProviderPersistenceFailure(res, saga.persistence, "disconnect");
     return;
@@ -1368,7 +1394,7 @@ opencodeRouter.delete("/auth/:providerID", async (req, res) => {
 opencodeRouter.get("/auth/status", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
-  const result = await opencodeClient.getAuthStatus(directory);
+  const result = await callOpenCodeWithProviderDeadline((signal) => opencodeClient.getAuthStatus(directory, signal));
   sendResult(req, res, result);
 });
 

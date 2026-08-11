@@ -5,10 +5,14 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projects, resetDbForTest, settings, vault } from "ingenium-core";
+import { logger, projects, resetDbForTest, settings, vault } from "ingenium-core";
 import { opencodeClient } from "../lib/opencode-client.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import {
+  NATIVE_PROVIDER_MAX_WAITERS,
+  NATIVE_PROVIDER_OPERATION_TIMEOUT_MS,
+  NATIVE_PROVIDER_QUEUE_WAIT_TIMEOUT_MS,
+  connectNativeProviderCredential,
   recoverServerGlobalProviderMetadata,
   rehydrateServerGlobalProviderConnections,
   storeNativeProviderCredential,
@@ -79,6 +83,17 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function abortError(): Error {
+  const error = new Error("aborted") as Error & { name: string };
+  error.name = "AbortError";
+  return error;
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 async function withRouter<T>(callback: (baseUrl: string) => Promise<T>): Promise<T> {
   const { server, baseUrl } = await startRouter();
   try {
@@ -144,6 +159,7 @@ describe("server-global provider persistence", () => {
     const destination = vault.listItems(globalProjectId).find((item: any) => item.name === "Managed LLM API Key: provider-one") as { id: string } | undefined;
     expect(destination?.id).toBeTruthy();
     expect(vault.decryptItem(globalProjectId, destination!.id)).toBe(credential);
+    expect(JSON.parse(settings.getSetting(globalProjectId, "llm_provider_configs")!)[0].credentialItemId).toBe(destination!.id);
     expect(vault.listItems(stranded.id).some((item: any) => item.name === "Managed LLM API Key: provider-one")).toBe(false);
 
     expect(recoverServerGlobalProviderMetadata()).toEqual({
@@ -153,6 +169,40 @@ describe("server-global provider persistence", () => {
       skippedForVault: false,
       globalUnavailable: false,
     });
+  });
+
+  it("rewrites a moved managed provider's credential reference without exposing its value", () => {
+    const stranded = projects.createProject("archived-provider-reference-source");
+    const credential = "archived-reference-secret";
+    markProjectAsFormerGlobal(stranded.name);
+    const sourceItemId = vault.createItem(
+      stranded.id,
+      "Managed LLM API Key: provider-reference",
+      "api_key",
+      credential,
+    );
+    settings.setSetting(stranded.id, "llm_provider_configs", JSON.stringify([{
+      id: "provider-reference",
+      name: "Provider Reference",
+      models: ["model-reference"],
+      defaultModel: "model-reference",
+      enabled: true,
+      credentialItemId: sourceItemId,
+    }]));
+    expect(projects.archiveProject(stranded.name)).toBe(true);
+
+    const result = recoverServerGlobalProviderMetadata();
+    const metadata = JSON.parse(settings.getSetting(globalProjectId, "llm_provider_configs")!);
+    const destination = vault.listItems(globalProjectId).find((item: any) =>
+      item.name === "Managed LLM API Key: provider-reference",
+    ) as { id: string } | undefined;
+
+    expect(result).toMatchObject({ migratedSettings: 1, migratedCredentials: 1, conflicts: 0 });
+    expect(destination?.id).toBeTruthy();
+    expect(metadata[0].credentialItemId).toBe(destination!.id);
+    expect(metadata[0].credentialItemId).not.toBe(sourceItemId);
+    expect(JSON.stringify(result)).not.toContain(credential);
+    expect(JSON.stringify(metadata)).not.toContain(credential);
   });
 
   it("leaves conflicting provider candidates and an existing destination untouched", () => {
@@ -235,7 +285,7 @@ describe("server-global provider persistence", () => {
 
       expect(response.status).toBe(200);
       expect(body).not.toContain(secret);
-      expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined);
+      expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined, expect.any(AbortSignal));
       const stored = vault.listItems(globalProjectId).find((item: any) => item.name === "OpenCode Native Provider API Key: openai") as { id: string } | undefined;
       expect(stored?.id).toBeTruthy();
       expect(vault.decryptItem(globalProjectId, stored!.id)).toBe(secret);
@@ -262,7 +312,7 @@ describe("server-global provider persistence", () => {
         expect(body).not.toContain(secret);
       });
 
-      expect(connect).toHaveBeenCalledWith("openai", secret);
+      expect(connect).toHaveBeenCalledWith("openai", secret, expect.any(AbortSignal));
       expect(nativeCredential("openai")).toBe(secret);
     });
 
@@ -295,7 +345,7 @@ describe("server-global provider persistence", () => {
         expect(retry.status).toBe(200);
       });
 
-      expect(remove).toHaveBeenCalledWith("openai");
+      expect(remove).toHaveBeenCalledWith("openai", undefined, expect.any(AbortSignal));
       expect(connect).toHaveBeenCalledTimes(2);
       expect(nativeCredential("openai")).toBe(secret);
     });
@@ -322,8 +372,8 @@ describe("server-global provider persistence", () => {
       });
 
       expect(nativeCredential("openai")).toBe(previous);
-      expect(addAuth).toHaveBeenNthCalledWith(1, "openai", { type: "api", key: desired }, undefined);
-      expect(addAuth).toHaveBeenNthCalledWith(2, "openai", { type: "api", key: previous }, undefined);
+      expect(addAuth).toHaveBeenNthCalledWith(1, "openai", { type: "api", key: desired }, undefined, expect.any(AbortSignal));
+      expect(addAuth).toHaveBeenNthCalledWith(2, "openai", { type: "api", key: previous }, undefined, expect.any(AbortSignal));
     });
 
     it("keeps the desired durable key recoverable when connection compensation is unknown", async () => {
@@ -366,7 +416,7 @@ describe("server-global provider persistence", () => {
         expect(await response.json()).toEqual({ data: { disconnected: true } });
       });
 
-      expect(remove).toHaveBeenCalledWith("openai", undefined);
+      expect(remove).toHaveBeenCalledWith("openai", undefined, expect.any(AbortSignal));
       expect(status).not.toHaveBeenCalled();
       expect(nativeCredential("openai")).toBeUndefined();
     });
@@ -387,7 +437,7 @@ describe("server-global provider persistence", () => {
         expect(await response.json()).toEqual({ data: { disconnected: true } });
       });
 
-      expect(status).toHaveBeenCalledWith("/workspace");
+      expect(status).toHaveBeenCalledWith("/workspace", expect.any(AbortSignal));
       expect(nativeCredential("openai")).toBeUndefined();
     });
 
@@ -408,7 +458,7 @@ describe("server-global provider persistence", () => {
         expect(body).not.toContain(secret);
       });
 
-      expect(status).toHaveBeenCalledWith("/workspace");
+      expect(status).toHaveBeenCalledWith("/workspace", expect.any(AbortSignal));
       expect(nativeCredential("openai")).toBe(secret);
     });
 
@@ -447,7 +497,7 @@ describe("server-global provider persistence", () => {
 
       expect(deleteItem).toHaveBeenCalledOnce();
       expect(nativeCredential("openai")).toBe(secret);
-      expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined);
+      expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined, expect.any(AbortSignal));
     });
 
     it("rejects sealed and conflicting vault state before changing OpenCode", async () => {
@@ -495,6 +545,190 @@ describe("server-global provider persistence", () => {
       expect(connect).not.toHaveBeenCalled();
     });
 
+    it("aborts stalled provider work, releases the lock, and keeps credentials out of logs", async () => {
+      vi.useFakeTimers();
+      const secret = "deadline-provider-secret";
+      let aborted = false;
+      const apply = vi.fn((key: string, signal: AbortSignal) => {
+        if (key !== secret) return Promise.resolve({});
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(abortError());
+          }, { once: true });
+        });
+      });
+      const warning = vi.spyOn(logger, "warn");
+
+      try {
+        const first = connectNativeProviderCredential("openai", secret, {
+          apply,
+          remove: async () => ({}),
+          status: async () => authStatus("openai", false),
+        });
+        await flushMicrotasks();
+        expect(apply).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(NATIVE_PROVIDER_OPERATION_TIMEOUT_MS);
+        await expect(first).resolves.toEqual({ outcome: "connection_failed", compensation: "restored" });
+        expect(aborted).toBe(true);
+
+        await expect(connectNativeProviderCredential("openai", "retry-provider-secret", {
+          apply,
+          remove: async () => ({}),
+          status: async () => authStatus("openai", false),
+        })).resolves.toEqual({ outcome: "connected" });
+        expect(JSON.stringify(warning.mock.calls)).not.toContain(secret);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("expires queued provider operations before running their credential closures", async () => {
+      vi.useFakeTimers();
+      const firstSecret = "queued-first-secret";
+      const queuedSecret = "queued-expired-secret";
+      const apply = vi.fn((_key: string, signal: AbortSignal) => new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(abortError()), { once: true });
+      }));
+      const operations = {
+        apply,
+        remove: async () => ({}),
+        status: async () => authStatus("openai", false),
+      };
+
+      try {
+        const first = connectNativeProviderCredential("openai", firstSecret, operations);
+        await flushMicrotasks();
+        const queued = connectNativeProviderCredential("openai", queuedSecret, operations);
+        await vi.advanceTimersByTimeAsync(NATIVE_PROVIDER_QUEUE_WAIT_TIMEOUT_MS);
+
+        await expect(queued).resolves.toEqual({ outcome: "queue_rejected", retryable: true });
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(nativeCredential("openai")).toBe(firstSecret);
+
+        await vi.advanceTimersByTimeAsync(NATIVE_PROVIDER_OPERATION_TIMEOUT_MS);
+        await expect(first).resolves.toEqual({ outcome: "connection_failed", compensation: "restored" });
+        expect(nativeCredential("openai")).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("caps queued provider waiters without retaining another provider operation", async () => {
+      let calls = 0;
+      const firstApply = deferred<{}>();
+      const apply = vi.fn((_key: string, signal: AbortSignal) => {
+        calls += 1;
+        if (calls > 1) return Promise.resolve({});
+        signal.addEventListener("abort", () => firstApply.reject(abortError()), { once: true });
+        return firstApply.promise;
+      });
+      const operations = {
+        apply,
+        remove: async () => ({}),
+        status: async () => authStatus("openai", false),
+      };
+
+      const first = connectNativeProviderCredential("openai", "cap-first-secret", operations);
+      await flushMicrotasks();
+      const queued = Array.from({ length: NATIVE_PROVIDER_MAX_WAITERS }, (_, index) =>
+        connectNativeProviderCredential("openai", `cap-queued-secret-${index}`, operations),
+      );
+      await flushMicrotasks();
+
+      await expect(connectNativeProviderCredential("openai", "cap-overflow-secret", operations))
+        .resolves.toEqual({ outcome: "queue_rejected", retryable: true });
+      expect(apply).toHaveBeenCalledTimes(1);
+
+      firstApply.resolve({});
+      await expect(first).resolves.toEqual({ outcome: "connected" });
+      await expect(Promise.all(queued)).resolves.toEqual(
+        Array.from({ length: NATIVE_PROVIDER_MAX_WAITERS }, () => ({ outcome: "connected" })),
+      );
+    });
+
+    it("returns a retryable response before sending an excess credential upstream", async () => {
+      let calls = 0;
+      const firstApply = deferred<{}>();
+      const apply = vi.fn((_key: string, signal: AbortSignal) => {
+        calls += 1;
+        if (calls > 1) return Promise.resolve({});
+        signal.addEventListener("abort", () => firstApply.reject(abortError()), { once: true });
+        return firstApply.promise;
+      });
+      const operations = {
+        apply,
+        remove: async () => ({}),
+        status: async () => authStatus("openai", false),
+      };
+      const first = connectNativeProviderCredential("openai", "route-cap-first", operations);
+      await flushMicrotasks();
+      const queued = Array.from({ length: NATIVE_PROVIDER_MAX_WAITERS }, (_, index) =>
+        connectNativeProviderCredential("openai", `route-cap-queued-${index}`, operations),
+      );
+      await flushMicrotasks();
+      const addAuth = vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
+
+      await withRouter(async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "api", key: "route-cap-overflow" }),
+        });
+
+        expect(response.status).toBe(503);
+        expect(response.headers.get("retry-after")).toBe("2");
+        expect(await response.json()).toEqual({
+          error: {
+            code: "PROVIDER_OPERATION_RETRY",
+            message: "Provider operation is busy. Try again shortly.",
+            retryable: true,
+          },
+        });
+      });
+
+      expect(addAuth).not.toHaveBeenCalled();
+      firstApply.resolve({});
+      await expect(first).resolves.toEqual({ outcome: "connected" });
+      await expect(Promise.all(queued)).resolves.toEqual(
+        Array.from({ length: NATIVE_PROVIDER_MAX_WAITERS }, () => ({ outcome: "connected" })),
+      );
+    });
+
+    it("bounds compensation calls with the same abort-backed deadline", async () => {
+      vi.useFakeTimers();
+      const previous = "compensation-previous-secret";
+      const desired = "compensation-desired-secret";
+      expect(storeNativeProviderCredential("openai", previous)).toBe("stored");
+      let compensationAborted = false;
+      const apply = vi.fn((key: string, signal: AbortSignal) => {
+        if (key === desired) return Promise.resolve(openCodeError("NETWORK_ERROR", desired));
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => {
+            compensationAborted = true;
+            reject(abortError());
+          }, { once: true });
+        });
+      });
+
+      try {
+        const result = connectNativeProviderCredential("openai", desired, {
+          apply,
+          remove: async () => ({}),
+          status: async () => authStatus("openai", false),
+        });
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(NATIVE_PROVIDER_OPERATION_TIMEOUT_MS);
+
+        await expect(result).resolves.toEqual({ outcome: "connection_failed", compensation: "recoverable" });
+        expect(compensationAborted).toBe(true);
+        expect(nativeCredential("openai")).toBe(previous);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("serializes same-provider requests while different providers proceed independently", async () => {
       const firstOpenAi = deferred<{}>();
       const anthropic = deferred<{}>();
@@ -534,15 +768,15 @@ describe("server-global provider persistence", () => {
       expect(addAuth).toHaveBeenNthCalledWith(1, "openai", {
         type: "api",
         key: "openai-first-secret",
-      }, undefined);
+      }, undefined, expect.any(AbortSignal));
       expect(addAuth).toHaveBeenNthCalledWith(2, "anthropic", {
         type: "api",
         key: "anthropic-secret",
-      }, undefined);
+      }, undefined, expect.any(AbortSignal));
       expect(addAuth).toHaveBeenNthCalledWith(3, "openai", {
         type: "api",
         key: "openai-second-secret",
-      }, undefined);
+      }, undefined, expect.any(AbortSignal));
       expect(nativeCredential("openai")).toBe("openai-second-secret");
       expect(nativeCredential("anthropic")).toBe("anthropic-secret");
     });
@@ -557,7 +791,7 @@ describe("server-global provider persistence", () => {
         expect(await response.json()).toEqual({ data: authStatus("openai", true) });
       });
 
-      expect(status).toHaveBeenCalledWith("/workspace");
+      expect(status).toHaveBeenCalledWith("/workspace", expect.any(AbortSignal));
       expect(vault.listItems(globalProjectId)).toEqual([]);
     });
   });
@@ -577,6 +811,6 @@ describe("server-global provider persistence", () => {
       nativeOAuth: "unrecoverable_without_durable_credential",
     });
     expect(JSON.stringify(result)).not.toContain(secret);
-    expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, "/workspace");
+    expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, "/workspace", expect.any(AbortSignal));
   });
 });

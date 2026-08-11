@@ -141,6 +141,33 @@ audit details.
 | **Soft-delete** | Deleting an item sets `access_policy` to `{"mode":"deleted"}`; the ciphertext remains in the DB until a future purge. |
 | **Audit immutability** | Audit log is append-only; entries are never modified or deleted. |
 
+### Provider credential state boundary
+
+Managed provider metadata is a desired-state record, not a credential store.
+`llm_provider_configs` contains only provider fields and optional vault item IDs;
+the corresponding API key is held by an active restricted `api_key` vault item.
+The settings route rejects invalid, duplicate, missing, deleted, or non-restricted
+references before mutation and never exposes the key or its ciphertext.
+
+When a managed provider is removed or its `apiKey` is explicitly cleared, the API
+soft-deletes and verifies the referenced vault item **before** committing the new
+provider metadata, synthesis settings, and OpenCode global projection. Vault
+soft-delete changes only `access_policy`, so this removal-only operation succeeds
+while the vault is sealed; new key writes still fail closed with `VAULT_REQUIRED`.
+Deletion is attempted once per reference. A failure restores earlier deletions and
+staged writes and returns `VAULT_CREDENTIAL_DELETE_FAILED` without changing the
+desired state. If settings/config persistence fails after deletion, the previous
+desired state and credential policies are restored and `CONFIG_SAVE_FAILED` is
+returned. OpenCode synchronization occurs after the durable commit and reports
+warnings rather than rolling back committed state; native auth synchronization uses
+the bounded abort-backed calls described below.
+
+Native provider API-key operations are serialized per provider with at most four
+queued waiters and a 2-second queue deadline. Overflow and expiry return a
+retryable provider-operation response; all OpenCode and compensation calls have a
+5-second abort-backed deadline. Different providers remain independent, and
+credentials never appear in status, error, or compensation responses.
+
 ## Usage threshold security boundary (USAGE-100)
 
 Usage thresholds are project-scoped metadata over provider-reported aggregates,

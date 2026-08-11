@@ -26,6 +26,32 @@ To enable Phase 2 (LLM-driven skill synthesis):
 
 > **Vault-backed credential storage**: API keys are stored in the encrypted vault (`vault_items` table with AES-256-GCM), never in the plaintext settings table. On `GET` responses, only `apiKeySet: boolean` is returned — the actual key is never exposed. Empty or omitted `apiKey` fields preserve the saved credential. Legacy `synthesis_api_key` / `synthesis_backup_api_key` settings are migrated into the vault on first read and then deleted from settings.
 
+Managed provider metadata is the desired state. `llm_provider_configs` stores
+provider metadata plus an optional `credentialItemId`; the API key remains only in
+the active vault item named `Managed LLM API Key: <providerId>`. Before a provider
+save, the API validates every stored reference as a unique UUID pointing to that
+provider's active restricted `api_key` vault item. Missing, duplicate, deleted, or
+non-restricted references fail closed with `409 PROVIDER_CREDENTIAL_REFERENCE_INVALID`
+before settings or credentials are changed. Omitted `apiKey` preserves the
+referenced item; a non-empty value is staged and decrypt-verified; an explicit empty
+value clears the reference.
+
+For a removed provider or an explicit credential clear, the referenced vault item is
+soft-deleted and verified **before** the desired provider settings and OpenCode
+global configuration are committed. This removal-only path is allowed while the
+vault is sealed because vault soft deletion changes only `access_policy` and does
+not require the master key. Saving a new key while sealed still returns
+`409 VAULT_REQUIRED`. Credential deletion is attempted once per reference; a
+failure restores earlier deletions and staged writes and returns
+`409 VAULT_CREDENTIAL_DELETE_FAILED` with the provider configuration unchanged.
+If settings/config persistence fails after deletion, the prior desired state and
+credential policies are restored and the API returns `409 CONFIG_SAVE_FAILED`.
+There is no background retry loop; retry a failed request after the underlying
+condition is fixed. OpenCode auth/config synchronization happens after the durable
+commit; a failed synchronization is returned as a warning rather than rolling back
+the desired state. Native auth calls use the separate 5-second deadline described
+below.
+
 ### Server-global provider ownership and recovery
 
 Managed provider configuration used by server-owned features resolves against the
@@ -45,14 +71,23 @@ rehydrate OpenCode auth state. Native OAuth-only auth has no durable API-key cop
 if OpenCode auth storage is lost and no durable credential exists, that connection
 remains unrecoverable by Ingenium and must be authorized again.
 
-Native API-key connect and disconnect operations are compensating sagas. Connect
-stores the desired encrypted vault credential before applying it to OpenCode; if
-the OpenCode operation fails, Ingenium restores the previous vault/OpenCode state
-or reports the failure as recoverable. Disconnect removes the OpenCode auth state
-before deleting the vault credential; if deletion fails, the saved credential and
-OpenCode auth are restored or the operation is reported as recoverable. The API
-returns only fixed status/error data, never the key or compensation details that
-could disclose it.
+Native API-key connect and disconnect operations are per-provider compensating
+sagas. One operation runs at a time for a provider; up to **four waiters** may be
+queued behind it, while different providers proceed independently. An overflow is
+rejected immediately, and a queued operation is rejected at the **2-second**
+deadline before any vault write or OpenCode call. The API reports this as
+`503 PROVIDER_OPERATION_RETRY` with `Retry-After: 2` and `retryable: true`.
+
+Every OpenCode operation used by these native API-key sagas and every compensation
+call is backed by an `AbortController` with a **5-second** deadline. This covers
+auth apply/remove/status calls and compensation restores. Connect stores the
+desired encrypted vault credential before applying it to OpenCode; if the OpenCode
+operation fails, Ingenium restores the previous vault/OpenCode state or reports
+the failure as recoverable. Disconnect removes the OpenCode auth state before
+deleting the vault credential; if deletion
+fails, the saved credential and OpenCode auth are restored or the operation is
+reported as recoverable. The API returns only fixed status/error data, never the key
+or compensation details that could disclose it.
 
 ## Provider Roles
 

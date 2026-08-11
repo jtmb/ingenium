@@ -20,7 +20,7 @@ import { connectAccount, disconnectAccount } from "../lib/imap.js";
 import { triageEmails } from "../lib/triage.js";
 import { parseReplyRecipient, suggestResponse } from "../lib/responder.js";
 import { saveDraft } from "../lib/smtp.js";
-import { configureEmailRuntime, resetEmailRuntimeForTest } from "../lib/runtime.js";
+import { configureEmailRuntime, isEmailRuntimeConfigured, resetEmailRuntimeForTest } from "../lib/runtime.js";
 import type { TriageResult } from "../lib/types.js";
 import {
   configureWatcherProcessedUidCapacityForTest,
@@ -49,6 +49,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 function configureWatcherAccount(accountId?: string): void {
+  if (!isEmailRuntimeConfigured()) configureEmailRuntime(createMemoryEmailRuntime());
   vi.mocked(getAccount).mockImplementation((requestedId) => {
     if (accountId && requestedId !== accountId) return undefined;
     return {
@@ -329,10 +330,50 @@ describe("email watcher scan coalescing", () => {
     expect(saveDraft).toHaveBeenCalledOnce();
     expect(recordObservation).toHaveBeenCalledTimes(2);
   });
+
+  it("skips every side effect after a durable marker failure and retries on a later scan", async () => {
+    const watcher = createEventClient();
+    const recordObservation = vi.fn(async () => {});
+    const runtime = createMemoryEmailRuntime();
+    const remember = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("marker write failed"); })
+      .mockReturnValue({ alreadyProcessed: false, newlyRecorded: true });
+    const warn = vi.fn();
+    runtime.recordObservation = recordObservation;
+    runtime.watcherMarkers.remember = remember;
+    runtime.logger.warn = warn;
+    configureEmailRuntime(runtime);
+    configureWatcherAccount("marker-failure");
+    vi.mocked(connectAccount).mockResolvedValue(watcher.client as never);
+    vi.mocked(triageEmails).mockResolvedValue([highPriorityTriage("marker-failure-uid")]);
+    vi.mocked(suggestResponse).mockResolvedValue({
+      emailUid: "marker-failure-uid",
+      originalSender: "sender@example.test",
+      subject: "Re: status",
+      body: "Draft body",
+      matchedSkill: "email-skill",
+      confidence: 0.9,
+    });
+    vi.mocked(parseReplyRecipient).mockResolvedValue({ address: "sender@example.test" });
+
+    await startWatcher("global-project", "marker-failure");
+
+    expect(recordObservation).not.toHaveBeenCalled();
+    expect(suggestResponse).not.toHaveBeenCalled();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(remember).toHaveBeenCalledWith("global-project", "marker-failure", "INBOX", "marker-failure-uid");
+    expect(warn).toHaveBeenCalledOnce();
+
+    await watcher.emitExists();
+
+    expect(remember).toHaveBeenCalledTimes(2);
+    expect(suggestResponse).toHaveBeenCalledWith("global-project", "marker-failure", "marker-failure-uid", "INBOX");
+    expect(saveDraft).toHaveBeenCalledOnce();
+  });
 });
 
 describe("email watcher processed UID cache", () => {
-  it("caps UID history and refreshes duplicate recency before suppressing side effects", async () => {
+  it("uses the durable marker when a UID falls out of the hot cache", async () => {
     configureWatcherProcessedUidCapacityForTest(2);
     configureWatcherAccount("bounded");
     const watcher = createEventClient();
@@ -358,11 +399,10 @@ describe("email watcher processed UID cache", () => {
       "b",
       "c",
       "d",
-      "c",
     ]);
   });
 
-  it("keeps duplicate state per account and resets it when a watcher restarts", async () => {
+  it("keeps duplicate state per account and across watcher restarts", async () => {
     configureWatcherProcessedUidCapacityForTest(2);
     configureWatcherAccount();
     const first = createEventClient();
@@ -386,6 +426,6 @@ describe("email watcher processed UID cache", () => {
 
     await stopWatcher("first");
     await startWatcher("global-project", "first");
-    expect(suggestResponse).toHaveBeenCalledTimes(3);
+    expect(suggestResponse).toHaveBeenCalledTimes(2);
   });
 });

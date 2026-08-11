@@ -129,15 +129,25 @@ export class ApiUnavailableError extends Error {
   }
 }
 
-interface ParsedResponseBody {
-  payload: unknown;
-  oversized: boolean;
+function declaredErrorBodyExceedsLimit(response: Response): boolean {
+  const headers = (response as { headers?: Headers }).headers;
+  const contentLength = headers?.get("content-length");
+  if (typeof contentLength !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(contentLength)) return false;
+  const length = Number(contentLength);
+  return !Number.isSafeInteger(length) || length >= MAX_API_ERROR_BODY_BYTES;
 }
 
-async function parseJsonResponse(
+async function cancelResponseBody(
   response: Response,
-  maximumBytes = Number.POSITIVE_INFINITY,
-): Promise<ParsedResponseBody> {
+  reader?: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<void> {
+  try {
+    if (reader) await reader.cancel();
+    else await response.body?.cancel();
+  } catch {}
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
   const candidate = response as Response & {
     text?: () => Promise<string>;
     json?: () => Promise<unknown>;
@@ -145,34 +155,88 @@ async function parseJsonResponse(
   try {
     if (typeof candidate.text === "function") {
       const text = await candidate.text();
-      if (Buffer.byteLength(text, "utf8") > maximumBytes) return { payload: null, oversized: true };
-      if (text.trim().length === 0) return { payload: null, oversized: false };
+      if (text.trim().length === 0) return null;
       try {
-        return { payload: JSON.parse(text), oversized: false };
+        return JSON.parse(text);
       } catch {
-        return { payload: null, oversized: false };
+        return null;
       }
     }
     if (typeof candidate.json === "function") {
-      const payload = await candidate.json();
-      if (Number.isFinite(maximumBytes)) {
-        const serialized = JSON.stringify(payload);
-        if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > maximumBytes) {
-          return { payload: null, oversized: true };
-        }
-      }
-      return { payload, oversized: false };
+      return await candidate.json();
     }
   } catch {
-    // A malformed or interrupted body is never included in an MCP error.
+    // A malformed or interrupted body is never included in an MCP response.
   }
-  return { payload: null, oversized: false };
+  return null;
+}
+
+async function parseBoundedErrorResponse(response: Response): Promise<unknown> {
+  if (declaredErrorBodyExceedsLimit(response)) {
+    await cancelResponseBody(response);
+    return null;
+  }
+
+  const body = response.body;
+  if (!body) return null;
+
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = body.getReader();
+  } catch {
+    await cancelResponseBody(response);
+    return null;
+  }
+
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const chunks: string[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array) || value.byteLength >= MAX_API_ERROR_BODY_BYTES - byteLength) {
+        await cancelResponseBody(response, reader);
+        return null;
+      }
+      byteLength += value.byteLength;
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+
+    chunks.push(decoder.decode());
+    const text = chunks.join("");
+    if (text.trim().length === 0) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  } catch {
+    await cancelResponseBody(response, reader);
+    return null;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {}
+  }
 }
 
 function responseData(payload: unknown): unknown {
   return isRecord(payload) && Object.prototype.hasOwnProperty.call(payload, "data")
     ? payload.data
     : payload;
+}
+
+async function settledResponse(response: Response): Promise<ApiSettledResponse> {
+  const payload = response.ok
+    ? await parseJsonResponse(response)
+    : await parseBoundedErrorResponse(response);
+  return {
+    ok: response.ok,
+    status: normalizedStatus(response.status),
+    data: responseData(payload),
+    payload,
+  };
 }
 
 function responseErrorFields(payload: unknown): { code: unknown; message: unknown } {
@@ -263,6 +327,7 @@ async function request(path: string, opts: RequestOptions, retries = canRetry(pa
 
       const response = await fetch(url.toString(), init);
       if (!response.ok && response.status >= 500 && attemptsRemaining > 0) {
+        await cancelResponseBody(response);
         attemptsRemaining -= 1;
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 100 + 50));
         continue;
@@ -281,16 +346,7 @@ async function request(path: string, opts: RequestOptions, retries = canRetry(pa
 
 async function settledJson(path: string, options: RequestOptions): Promise<ApiSettledResponse> {
   const response = await request(path, options);
-  const parsed = await parseJsonResponse(
-    response,
-    response.ok ? Number.POSITIVE_INFINITY : MAX_API_ERROR_BODY_BYTES,
-  );
-  return {
-    ok: response.ok,
-    status: normalizedStatus(response.status),
-    data: responseData(parsed.payload),
-    payload: parsed.oversized ? null : parsed.payload,
-  };
+  return settledResponse(response);
 }
 
 async function successfulJson(path: string, options: RequestOptions): Promise<ApiSuccessResponse> {
@@ -307,6 +363,7 @@ async function settledRawGet(
   params?: Record<string, QueryParameterValue | undefined>,
 ): Promise<ApiSettledRawResponse> {
   const response = await request(path, { method: "GET", params }, 0);
+  if (!response.ok) await parseBoundedErrorResponse(response);
   return { ok: response.ok, status: normalizedStatus(response.status), response };
 }
 
@@ -353,16 +410,7 @@ export const api = {
         contentType: "application/octet-stream",
         params,
       }, 0);
-      const parsed = await parseJsonResponse(
-        response,
-        response.ok ? Number.POSITIVE_INFINITY : MAX_API_ERROR_BODY_BYTES,
-      );
-      return {
-        ok: response.ok,
-        status: normalizedStatus(response.status),
-        data: responseData(parsed.payload),
-        payload: parsed.oversized ? null : parsed.payload,
-      } satisfies ApiSettledResponse;
+      return settledResponse(response);
     },
     /** Preserve the API envelope for the report boundary and its repeated filters. */
     getMcpReport: async (

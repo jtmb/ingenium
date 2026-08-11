@@ -596,7 +596,7 @@ export function updateItemMetadata(
 
 /** Soft-delete an item by transitioning it to an inaccessible policy state. */
 export function deleteItem(projectId: string, itemId: string): void {
-  if (isSealed()) return;
+  // Soft deletion only changes metadata and does not need the master key.
   execTransaction(() => {
     const db = getDb(dbPath());
     const changed = db.prepare(

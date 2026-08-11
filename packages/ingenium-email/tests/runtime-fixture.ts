@@ -5,6 +5,10 @@ export function createMemoryEmailRuntime(
   globalProjectId = "global-project-id",
 ): EmailRuntime {
   const key = (projectId: string, setting: string) => `${projectId}\u0000${setting}`;
+  const watcherMarkerKey = (projectId: string, accountId: string, folder: string, uid: string) => (
+    `${projectId}\u0000${accountId}\u0000${folder}\u0000${uid}`
+  );
+  const watcherMarkers = new Map<string, { projectId: string; accountId: string }>();
   const get = (setting: string) => values.get(key(globalProjectId, setting));
   const set = (setting: string, value: string) => values.set(key(globalProjectId, setting), value);
 
@@ -56,6 +60,25 @@ export function createMemoryEmailRuntime(
       claimSuggestionJob: () => undefined,
       markJobComplete: () => false,
       markJobFailed: () => false,
+    },
+    watcherMarkers: {
+      remember: (projectId, accountId, folder, uid) => {
+        const marker = watcherMarkerKey(projectId, accountId, folder, uid);
+        if (watcherMarkers.has(marker)) {
+          return { alreadyProcessed: true, newlyRecorded: false };
+        }
+        watcherMarkers.set(marker, { projectId, accountId });
+        return { alreadyProcessed: false, newlyRecorded: true };
+      },
+      clearAccount: (projectId, accountId) => {
+        let deleted = 0;
+        for (const [marker, scope] of watcherMarkers) {
+          if (scope.projectId !== projectId || scope.accountId !== accountId) continue;
+          watcherMarkers.delete(marker);
+          deleted++;
+        }
+        return deleted;
+      },
     },
     llm: {
       isConfigured: () => false,
@@ -120,6 +143,7 @@ export function createCoreEmailRuntime(core: typeof import("ingenium-core")): Em
     skills: { listSkills: core.skills.listSkills },
     cache: core.emailCache,
     suggestionQueue: core.emailSuggestionQueue,
+    watcherMarkers: core.emailWatcherMarkers,
     llm: {
       isConfigured: core.synthesisLlm.isLLMSynthesisConfigured,
       resolveConfig: (projectId) => core.synthesisLlm.resolveLLMConfig(projectId),

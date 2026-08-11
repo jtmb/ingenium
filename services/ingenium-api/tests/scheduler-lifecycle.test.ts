@@ -91,6 +91,37 @@ describe("scheduler lifecycle ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("does not restart an unconfigured mail engine for a stale heartbeat", async () => {
+    core.projects.getGlobalProject.mockReturnValue({ id: "global-project", name: "global-default" });
+    core.settings.getSetting.mockImplementation((_projectId: string, key: string) => (
+      key === "mail_sync_interval_ms" ? "100" : undefined
+    ));
+    email.getEngineStatus.mockReturnValue({
+      running: true,
+      heartbeatAt: new Date(Date.now() - 121_000).toISOString(),
+      accounts: [],
+    });
+
+    try {
+      startScheduler(4097);
+      await vi.advanceTimersByTimeAsync(15_100);
+
+      expect(email.startEngine).toHaveBeenCalledTimes(1);
+      expect(core.logger.warn).not.toHaveBeenCalledWith(
+        "mail-sync",
+        expect.stringContaining("heartbeat stale"),
+      );
+    } finally {
+      core.projects.getGlobalProject.mockReturnValue(undefined);
+      core.settings.getSetting.mockReturnValue(undefined);
+      email.getEngineStatus.mockImplementation(() => ({
+        running: true,
+        heartbeatAt: new Date().toISOString(),
+        accounts: [],
+      }));
+    }
+  });
+
   it("passes the scheduler lock owner into synthesis batch ownership", async () => {
     core.projects.listProjects.mockReturnValue([{
       id: "scheduled-project",

@@ -8,6 +8,10 @@ import { readFileSync } from "node:fs";
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
 
+function errorResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), { status });
+}
+
 afterEach(() => {
   if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
   else process.env.INGENIUM_API_TOKEN = originalToken;
@@ -71,11 +75,9 @@ describe("Ingenium API client authentication", () => {
 
   it("sends email once when the API returns 502", async () => {
     process.env.INGENIUM_API_TOKEN = "test-server-token";
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 502,
-      json: async () => ({ error: { code: "UPSTREAM_FAILURE" } }),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(502, {
+      error: { code: "UPSTREAM_FAILURE" },
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { emailSend } = await import("../lib/tools/emails.js");
@@ -106,11 +108,9 @@ describe("Ingenium API client authentication", () => {
 
   it("does not retry arbitrary keyed mutations", async () => {
     process.env.INGENIUM_API_TOKEN = "test-server-token";
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 502,
-      json: async () => ({ error: { code: "UPSTREAM_FAILURE" } }),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(502, {
+      error: { code: "UPSTREAM_FAILURE" },
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { api } = await import("../lib/client.js");
