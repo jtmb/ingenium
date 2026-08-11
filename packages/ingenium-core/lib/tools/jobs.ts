@@ -38,6 +38,9 @@ export type JobUpdateResult =
   | { status: "revision_conflict"; currentRevision: number };
 
 export const JOB_VAULT_REFERENCE_MAX = 16;
+export const DEFAULT_JOB_TIMEOUT_MINUTES = 30;
+export const MIN_JOB_TIMEOUT_MINUTES = 1;
+export const MAX_JOB_TIMEOUT_MINUTES = 1_440;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -52,6 +55,20 @@ export class JobVaultReferenceError extends Error {
     this.name = "JobVaultReferenceError";
     this.code = code;
   }
+}
+
+export class JobTimeoutError extends RangeError {
+  constructor() {
+    super(`timeout_minutes must be an integer between ${MIN_JOB_TIMEOUT_MINUTES} and ${MAX_JOB_TIMEOUT_MINUTES}`);
+    this.name = "JobTimeoutError";
+  }
+}
+
+export function isValidJobTimeoutMinutes(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= MIN_JOB_TIMEOUT_MINUTES
+    && value <= MAX_JOB_TIMEOUT_MINUTES;
 }
 
 function hasOwn(value: object, key: string): boolean {
@@ -216,6 +233,8 @@ export function createJob(
   timeoutMinutes?: number,
   vaultItemIds?: string[],
 ): Job {
+  const effectiveTimeoutMinutes = timeoutMinutes ?? DEFAULT_JOB_TIMEOUT_MINUTES;
+  if (!isValidJobTimeoutMinutes(effectiveTimeoutMinutes)) throw new JobTimeoutError();
   const trustedTriggerEvent = normalizeJobTriggerEvent(triggerEvent);
   const result = execTransaction(() => {
     const db = getDb(dbPath());
@@ -228,7 +247,7 @@ export function createJob(
     ).run(
       id, projectId, name, description ?? null, agent, promptTemplate,
        scheduleCron ?? null, trustedTriggerEvent,
-      timeoutMinutes ?? 30, now, now,
+       effectiveTimeoutMinutes, now, now,
     );
     if (vaultItemIds !== undefined) replaceVaultReferences(db, projectId, id, vaultItemIds);
     return withVaultReferences(
@@ -260,6 +279,9 @@ export function updateJob(
 ): JobUpdateResult {
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
     throw new RangeError("expected_revision must be a nonnegative integer");
+  }
+  if (hasOwn(fields, "timeout_minutes") && !isValidJobTimeoutMinutes(fields.timeout_minutes)) {
+    throw new JobTimeoutError();
   }
   const result = execTransaction(() => {
     const db = getDb(dbPath());
@@ -614,6 +636,21 @@ export function cancelJobRun(projectId: string, runId: string): JobRunWithEventM
   });
   checkpointAfterWrite();
   return result;
+}
+
+/** Mark ordinary runs interrupted by an API restart as terminal so they can run again. */
+export function recoverInterruptedJobRuns(): number {
+  const recovered = execTransaction(() => {
+    const db = getDb(dbPath());
+    const finishedAt = new Date().toISOString();
+    return db.prepare(
+      `UPDATE job_runs
+       SET status = 'failed', finished_at = ?, exit_code = -1
+       WHERE status = 'running' AND trigger IN ('manual', 'cron')`,
+    ).run(finishedAt).changes;
+  });
+  if (recovered > 0) checkpointAfterWrite();
+  return recovered;
 }
 
 /** List job runs for a given job, most recent first. Default limit 50. */

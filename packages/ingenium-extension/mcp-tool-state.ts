@@ -1,5 +1,6 @@
 import { apiRequestHeaders } from "./api-auth.js";
-import { ensureExtensionProject } from "./project-resolver.js";
+import { ensureMcpProject } from "./mcp-client.js";
+import { resolveExtensionProject } from "./project-resolver.js";
 
 const DEFAULT_API_BASE = "http://localhost:4097/api/v1";
 const TOOL_STATE_TIMEOUT_MS = 10_000;
@@ -62,7 +63,8 @@ export async function assertExtensionToolEnabled(
   const request = options.request ?? fetch;
   let project: string;
   try {
-    project = await ensureExtensionProject(worktree, apiBase(), undefined, { request });
+    project = resolveExtensionProject(worktree);
+    await ensureMcpProject(worktree);
   } catch {
     throw unavailable();
   }

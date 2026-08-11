@@ -202,7 +202,7 @@ export default function AgentsPage() {
           <h2 className="text-2xl font-semibold capitalize mb-4">{group.category}</h2>
           <div className="space-y-4">
             {group.items.map(agent => (
-              <div key={agent.id} className="min-w-0 cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow" onClick={() => setSelectedAgent(agent)}>
+              <div key={agent.id} className="min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
                 {editingId === agent.id ? (
                   <div className="space-y-4">
                     <input
@@ -249,38 +249,42 @@ export default function AgentsPage() {
                 ) : (
                   <div>
                     <div className="mb-2 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                        onClick={() => setSelectedAgent(agent)}
+                        aria-label={`View agent ${agent.name}`}
+                      >
                         <span className="break-all text-lg font-semibold">{agent.name}</span>
-                        <span className={`ml-2 ${BADGE_BASE} ${agent.mode === 'primary' ? badgeTones('purple') : badgeTones('blue')}`}>
-                          {agent.mode}
-                        </span>
-                        <span className={`ml-2 ${BADGE_BASE} ${agent.enabled ? badgeTones('success') : badgeTones('muted')}`}>
-                          {agent.enabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                      </div>
+                        <span className={`ml-2 ${BADGE_BASE} ${agent.mode === "primary" ? badgeTones("purple") : badgeTones("blue")}`}>{agent.mode}</span>
+                        <span className={`ml-2 ${BADGE_BASE} ${agent.enabled ? badgeTones("success") : badgeTones("muted")}`}>{agent.enabled ? "Enabled" : "Disabled"}</span>
+                        {agent.description && <span className="mt-2 block break-words text-sm text-[var(--color-text-secondary)]">{agent.description}</span>}
+                        {agent.model && <span className="mt-1 block break-all text-xs text-[var(--color-text-muted)]">Runtime model: {agent.model}</span>}
+                      </button>
                       <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleToggle(agent); }}
+                          type="button"
+                          onClick={() => void handleToggle(agent)}
                           className={`flex-1 rounded px-3 py-1 text-sm text-white sm:flex-none ${agent.enabled ? 'bg-gray-500 hover:bg-gray-600' : 'bg-green-500 hover:bg-green-600'}`}
                         >
                           {agent.enabled ? 'Disable' : 'Enable'}
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); startEdit(agent); }}
+                          type="button"
+                          onClick={() => startEdit(agent)}
                           className="flex-1 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 sm:flex-none"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(agent.name); }}
+                          type="button"
+                          onClick={() => void handleDelete(agent.name)}
                           className="flex-1 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 sm:flex-none"
                         >
                           Delete
                         </button>
                       </div>
                     </div>
-                    {agent.description && <p className="mb-2 break-words text-sm text-[var(--color-text-secondary)]">{agent.description}</p>}
-                    {agent.model && <p className="break-all text-xs text-[var(--color-text-muted)]">Runtime model: {agent.model}</p>}
                     <details className="mt-2">
                       <summary className="text-xs text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-primary)]">Preview content</summary>
                        <pre className="mt-2 max-h-32 overflow-x-auto overflow-y-auto break-all rounded bg-[var(--color-surface-muted)] p-2 text-xs whitespace-pre-wrap">

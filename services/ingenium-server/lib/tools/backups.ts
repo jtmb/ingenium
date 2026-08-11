@@ -4,7 +4,6 @@
  * Supports backup CRUD, download streaming, restore preview/start/status, and schedule management.
  */
 import { api } from "../client.js";
-import { apiRequestHeaders, config } from "../../config/index.js";
 import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
 
 /** Create a new backup with an optional type (e.g. "full", "skills", "config"). */
@@ -46,17 +45,15 @@ export async function backupDownload(project: string, backupId: string, outputPa
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${message}` }) }] };
   }
 
-  // Build the API URL and perform a raw fetch for binary response
-  const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
-  const url = new URL(`backups/${backupId}/download`, apiBase);
-  url.searchParams.set("project", project);
-
-  const response = await fetch(url.toString(), { headers: apiRequestHeaders() });
+  const response = await api.settled.getRaw(
+    `/backups/${encodeURIComponent(backupId)}/download`,
+    { project },
+  );
   if (!response.ok) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };
   }
 
-  const { mimeType, size } = await streamDownloadResponse(response, safePath);
+  const { mimeType, size } = await streamDownloadResponse(response.response, safePath);
   return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size }) }] };
 }
 

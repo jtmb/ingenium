@@ -20,9 +20,9 @@ describe("MCP Tool Catalog Parity", () => {
     expect(inventory.all.filter((name) => !catalog.has(name))).toEqual([]);
     expect(catalogExtensionTools.map(({ name }) => name).sort()).toEqual([...inventory.extension].sort());
     expect(new Set(MCP_TOOL_CATALOG.map(({ name }) => name)).size).toBe(MCP_TOOL_CATALOG.length);
-    expect(MCP_TOOL_CATALOG).toHaveLength(279);
-    expect(MCP_TOOL_CATALOG.filter(({ name }) => name.startsWith("ingenium_"))).toHaveLength(277);
-    expect(new Set(MCP_TOOL_CATALOG.map(({ category }) => category)).size).toBe(29);
+    expect(MCP_TOOL_CATALOG).toHaveLength(282);
+    expect(MCP_TOOL_CATALOG.filter(({ name }) => name.startsWith("ingenium_"))).toHaveLength(280);
+    expect(new Set(MCP_TOOL_CATALOG.map(({ category }) => category)).size).toBe(30);
     for (const name of [
       "ingenium_coordination_status",
       "ingenium_coordination_update",
@@ -30,8 +30,24 @@ describe("MCP Tool Catalog Parity", () => {
       "ingenium_coordination_release",
     ]) expect(catalog.get(name)?.category).toBe("Tasks");
     const catalogSource = readFileSync(CATALOG_SOURCE_PATH, "utf8");
-    expect(catalogSource.match(/name: "/g)).toHaveLength(279);
+    expect(catalogSource.match(/name: "/g)).toHaveLength(282);
     expect(catalogSource).toMatch(/name: "ingenium_mcp_report_get",\s+category: "Servers",\s+description: "Get the bounded MCP usefulness report for a project\.",\s+projectScope: "per-project",\s+defaultEnabled: true,\s+apiEndpoints: MCP_REPORT_ENDPOINTS,/);
+    expect(catalog.get("ingenium_repository_sync")).toMatchObject({
+      category: "Repository Sync",
+      projectScope: "per-project",
+      apiEndpoints: ["POST /api/v1/docs/repository/sync", "POST /api/v1/repository/resources/sync"],
+    });
+    expect(catalog.get("ingenium_skill_proposal_list")?.description).toContain("Deprecated");
+    expect(catalog.get("ingenium_skill_proposal_page")).toMatchObject({
+      category: "Skills",
+      projectScope: "per-project",
+      apiEndpoints: expect.arrayContaining(["GET /api/v1/skills/proposals/page"]),
+    });
+    expect(catalog.get("ingenium_skill_proposal_counts")).toMatchObject({
+      category: "Skills",
+      projectScope: "per-project",
+      apiEndpoints: expect.arrayContaining(["GET /api/v1/skills/proposals/counts"]),
+    });
   });
 
   it("reports every deterministic catalog, registration, projection, and state fault", () => {
@@ -181,6 +197,7 @@ describe("MCP Tool Catalog Parity", () => {
       expect(entry?.projectScope).toBeDefined();
       expect(entry?.apiEndpoints.length).toBeGreaterThan(0);
     }
+    expect(catalogMap.get("ingenium_project_set_global")?.defaultEnabled).toBe(false);
   });
 
   it("catalogs the protected Context upload transport and API contract", () => {

@@ -51,6 +51,13 @@ export interface EmailCacheEntry {
   labels_json?: string | null;
 }
 
+export interface EmailCacheDelta {
+  upserts: Array<{ folder: string; entry: EmailCacheEntry }>;
+  deletes: Array<{ folder?: string; uid: string }>;
+  historyId: string;
+  provider: string;
+}
+
 export interface SyncState {
   last_uid: string;
   uidvalidity: number;
@@ -62,6 +69,79 @@ export interface SyncState {
 /** Use the core resolver so cache writes cannot create a divergent database. */
 function dbPath(): string {
   return resolveCoreDbPath();
+}
+
+function upsertCacheEntries(
+  db: ReturnType<typeof getDb>,
+  accountId: string,
+  entries: Array<{ folder: string; entry: EmailCacheEntry }>,
+): number {
+  const statement = db.prepare(
+    `INSERT INTO email_cache
+       (account_id, folder, uid, subject, from_name, from_addr, date,
+        snippet, flags, has_attachments, envelope_json, labels_json, cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+       subject = excluded.subject,
+       from_name = excluded.from_name,
+       from_addr = excluded.from_addr,
+       date = excluded.date,
+       snippet = excluded.snippet,
+       flags = excluded.flags,
+       has_attachments = excluded.has_attachments,
+       envelope_json = excluded.envelope_json,
+       labels_json = excluded.labels_json,
+       cached_at = datetime('now')`,
+  );
+  let count = 0;
+  for (const { folder, entry } of entries) {
+    statement.run(
+      accountId,
+      folder,
+      entry.uid,
+      entry.subject ?? null,
+      entry.from_name ?? null,
+      entry.from_addr ?? null,
+      entry.date ?? null,
+      entry.snippet ?? null,
+      entry.flags ?? "[]",
+      entry.has_attachments ?? 0,
+      entry.envelope_json ?? null,
+      entry.labels_json ?? null,
+    );
+    count++;
+  }
+  return count;
+}
+
+function deleteCacheEntries(
+  db: ReturnType<typeof getDb>,
+  accountId: string,
+  deletions: EmailCacheDelta["deletes"],
+): number {
+  const deleteExactQueue = db.prepare(
+    "DELETE FROM email_suggestion_queue WHERE account_id = ? AND folder = ? AND uid = ?",
+  );
+  const deleteAnyFolderQueue = db.prepare(
+    "DELETE FROM email_suggestion_queue WHERE account_id = ? AND uid = ?",
+  );
+  const deleteExactParent = db.prepare(
+    "DELETE FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?",
+  );
+  const deleteAnyFolderParent = db.prepare(
+    "DELETE FROM email_cache WHERE account_id = ? AND uid = ?",
+  );
+  let count = 0;
+  for (const deletion of deletions) {
+    if (deletion.folder === undefined) {
+      deleteAnyFolderQueue.run(accountId, deletion.uid);
+      count += deleteAnyFolderParent.run(accountId, deletion.uid).changes;
+      continue;
+    }
+    deleteExactQueue.run(accountId, deletion.folder, deletion.uid);
+    count += deleteExactParent.run(accountId, deletion.folder, deletion.uid).changes;
+  }
+  return count;
 }
 
 // ── Email listing cache ────────────────────────────────────────────────────
@@ -80,42 +160,30 @@ export function upsertEmailCache(
 ): number {
   const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const stmt = db.prepare(
-      `INSERT INTO email_cache
-         (account_id, folder, uid, subject, from_name, from_addr, date,
-          snippet, flags, has_attachments, envelope_json, labels_json, cached_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
-         subject = excluded.subject,
-         from_name = excluded.from_name,
-         from_addr = excluded.from_addr,
-         date = excluded.date,
-         snippet = excluded.snippet,
-         flags = excluded.flags,
-         has_attachments = excluded.has_attachments,
-         envelope_json = excluded.envelope_json,
-         labels_json = excluded.labels_json,
-         cached_at = datetime('now')`,
-    );
-    let count = 0;
-    for (const e of emails) {
-      stmt.run(
-        accountId,
-        folder,
-        e.uid,
-        e.subject ?? null,
-        e.from_name ?? null,
-        e.from_addr ?? null,
-        e.date ?? null,
-        e.snippet ?? null,
-        e.flags ?? "[]",
-        e.has_attachments ?? 0,
-        e.envelope_json ?? null,
-        e.labels_json ?? null,
-      );
-      count++;
-    }
-    return count;
+    return upsertCacheEntries(db, accountId, emails.map((entry) => ({ folder, entry })));
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+/** Apply Gmail history changes and advance the account cursor as one transaction. */
+export function applyEmailCacheDelta(
+  accountId: string,
+  delta: EmailCacheDelta,
+): { upserts: number; deletes: number } {
+  const result = execTransaction(() => {
+    const db = getDb(dbPath());
+    const upserts = upsertCacheEntries(db, accountId, delta.upserts);
+    const deletes = deleteCacheEntries(db, accountId, delta.deletes);
+    db.prepare(
+      `INSERT INTO email_sync_state (account_id, folder, last_uid, history_id, provider, last_synced_at)
+       VALUES (?, '__account__', '0', ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder) DO UPDATE SET
+         history_id = excluded.history_id,
+         provider = excluded.provider,
+         last_synced_at = datetime('now')`,
+    ).run(accountId, delta.historyId, delta.provider);
+    return { upserts, deletes };
   });
   checkpointAfterWrite();
   return result;
@@ -470,6 +538,7 @@ export function clearFolderCache(accountId: string, folder: string): { listings:
   const result = execTransaction(() => {
     const db = getDb(dbPath());
     const bodyResult = db.prepare("DELETE FROM email_bodies WHERE account_id = ? AND folder = ?").run(accountId, folder);
+    db.prepare("DELETE FROM email_suggestion_queue WHERE account_id = ? AND folder = ?").run(accountId, folder);
     const listingResult = db.prepare("DELETE FROM email_cache WHERE account_id = ? AND folder = ?").run(accountId, folder);
     db.prepare("DELETE FROM email_sync_state WHERE account_id = ? AND folder = ?").run(accountId, folder);
     return { listings: listingResult.changes, bodies: bodyResult.changes };

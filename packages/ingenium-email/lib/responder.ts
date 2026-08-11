@@ -6,10 +6,10 @@
  * the matched email.  Confidence scoring uses sender match + keyword overlap.
  */
 
-import type { ResponseSuggestion, EmailMessage } from "./types.js";
-import type { Skill } from "ingenium-core";
-import { emailCache } from "ingenium-core";
+import { simpleParser } from "mailparser";
+import type { ResponseSuggestion, EmailAddress, EmailMessage } from "./types.js";
 import { loadEmailSkills } from "./triage.js";
+import { getEmailRuntime, type EmailSkill } from "./runtime.js";
 
 /**
  * Extract a response template from skill content between ```template and ``` markers.
@@ -42,6 +42,21 @@ export function fillTemplate(
     .replace(/\{\{date\}\}/g, vars.date);
 }
 
+export async function parseReplyRecipient(fromHeader: string): Promise<EmailAddress | null> {
+  const value = fromHeader.replaceAll("\r", " ").replaceAll("\n", " ").trim();
+  if (!value) return null;
+
+  const parsed = await simpleParser(`From: ${value}\r\n\r\n`);
+  const sender = parsed.from?.value.find((candidate) => (
+    Boolean(candidate.address?.trim()) && candidate.address!.includes("@")
+  ));
+  if (!sender?.address) return null;
+  return {
+    name: sender.name?.trim() || undefined,
+    address: sender.address.trim(),
+  };
+}
+
 /**
  * Calculate confidence score (0.0–1.0) for a skill against an email.
  *
@@ -53,7 +68,7 @@ export function fillTemplate(
  * Words shorter than 4 characters are excluded from overlap scoring to
  * avoid false positives from common words (the, and, for, etc.).
  */
-function calculateConfidence(skill: Skill, email: EmailMessage): number {
+function calculateConfidence(skill: EmailSkill, email: EmailMessage): number {
   let confidence = 0;
   const senderAddr = email.from[0]?.address ?? "";
   const skillTags = (skill.tags ?? "").toLowerCase();
@@ -107,10 +122,11 @@ export async function suggestResponse(
 ): Promise<ResponseSuggestion | null> {
   // 🔴 L30: Gmail REST API accounts don't have IMAP connections. Reconstruct
   // the email from the DB cache instead of attempting a live IMAP fetch.
-  const cachedListing = emailCache.getCachedEmail(accountId, folder, String(uid));
+  const cache = getEmailRuntime().cache;
+  const cachedListing = cache.getCachedEmail(accountId, folder, String(uid));
   if (!cachedListing) return null;
 
-  const cachedBody = emailCache.getCachedEmailBody(accountId, folder, String(uid));
+  const cachedBody = cache.getCachedEmailBody(accountId, folder, String(uid));
 
   // Reconstruct enough of an EmailMessage for calculateConfidence() and
   // fillTemplate() — those only need from, subject, date, and body.text.
@@ -132,7 +148,7 @@ export async function suggestResponse(
 
   const emailSkills = loadEmailSkills(projectId);
 
-  let bestSkill: Skill | null = null;
+  let bestSkill: EmailSkill | null = null;
   let bestConfidence = 0;
   let bestTemplate: string | null = null;
 

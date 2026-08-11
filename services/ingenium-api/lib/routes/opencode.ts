@@ -13,6 +13,11 @@ import {
 } from "../opencode-client.js";
 import { requireActiveGlobalProject } from "../helpers.js";
 import {
+  connectNativeProviderCredential,
+  disconnectNativeProviderCredential,
+  type NativeProviderCredentialPersistenceStatus,
+} from "../server-global-provider-persistence.js";
+import {
   CHAT_SELECTION_SETTING,
   getBuiltinChatProvider,
   getChatProviderCatalog,
@@ -205,6 +210,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
     // connection without a response after resolving the callback, which is expected.
     const params = new URLSearchParams({ code, state });
     forwardAutoOAuthCallback(params, "Auto OAuth callback forward failed");
+    logger.info(SOURCE, "Native OAuth provider connections cannot be rehydrated after OpenCode auth storage loss without a separately stored provider credential");
     oauthCallbackPage(res, 200, "Authorization received", "You can close this window and return to Ingenium while the connection completes.");
     return;
   }
@@ -217,6 +223,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
       return;
     }
 
+    logger.info(SOURCE, "Native OAuth provider connections cannot be rehydrated after OpenCode auth storage loss without a separately stored provider credential");
     oauthCallbackPage(res, 200, "Authorization complete", "You can close this window and return to Ingenium.");
   } catch (error) {
     logger.warn(SOURCE, "OAuth callback completion threw unexpectedly", {
@@ -1165,19 +1172,62 @@ function isSafeOAuthUrl(value: string): boolean {
   }
 }
 
+function respondNativeProviderPersistenceFailure(
+  res: Response,
+  persistence: NativeProviderCredentialPersistenceStatus,
+  action: "connect" | "disconnect",
+): void {
+  logger.warn(SOURCE, "Native provider credential saga could not access the vault", { action, status: persistence });
+  if (persistence === "global_unavailable") {
+    res.status(503).json({
+      error: {
+        code: "GLOBAL_PROJECT_UNAVAILABLE",
+        message: "Provider credential storage requires the canonical global project.",
+      },
+    });
+    return;
+  }
+  if (persistence === "conflict") {
+    res.status(409).json({
+      error: {
+        code: "PROVIDER_CREDENTIAL_CONFLICT",
+        message: `A saved provider credential needs operator review before it can be ${action === "connect" ? "changed" : "removed"}.`,
+      },
+    });
+    return;
+  }
+  res.status(409).json({
+    error: {
+      code: "VAULT_REQUIRED",
+      message: action === "connect"
+        ? "Unseal and initialize the vault before connecting a provider with an API key."
+        : "Unseal the vault before disconnecting a provider with a saved API key.",
+    },
+  });
+}
+
 opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res) => {
   if (!guardPassword(req, res)) return;
   if (!isSafeIdentifier(req.params.integrationID) || !isValidProviderKey(req.body?.key)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "API key is required" } });
     return;
   }
-  const result = await opencodeClient.connectIntegrationKey(req.params.integrationID!, req.body.key);
-  if (isOpenCodeError(result)) {
-    logger.warn(SOURCE, `Native provider key connection failed: ${result.error.code}`);
-    res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
+  const providerId = req.params.integrationID!;
+  const saga = await connectNativeProviderCredential(providerId, req.body.key, {
+    apply: (key) => opencodeClient.connectIntegrationKey(providerId, key),
+    remove: () => opencodeClient.deleteAuth(providerId),
+    status: () => opencodeClient.getAuthStatus(),
+  });
+  if (saga.outcome === "persistence_failed") {
+    respondNativeProviderPersistenceFailure(res, saga.persistence, "connect");
     return;
   }
-  sendResult(req, res, result);
+  if (saga.outcome === "connected") {
+    res.status(200).json({ data: { connected: true } });
+    return;
+  }
+  logger.warn(SOURCE, "Native provider key connection failed", { compensation: saga.compensation });
+  res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
 });
 
 opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, res) => {
@@ -1258,6 +1308,25 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid API key is required" } });
     return;
   }
+  if (typeof body.key === "string") {
+    const providerId = req.params.providerID!;
+    const saga = await connectNativeProviderCredential(providerId, body.key, {
+      apply: (key) => opencodeClient.addAuth(providerId, { ...body, key }, directory),
+      remove: () => opencodeClient.deleteAuth(providerId, directory),
+      status: () => opencodeClient.getAuthStatus(directory),
+    });
+    if (saga.outcome === "persistence_failed") {
+      respondNativeProviderPersistenceFailure(res, saga.persistence, "connect");
+      return;
+    }
+    if (saga.outcome === "connected") {
+      res.status(200).json({ data: { connected: true } });
+      return;
+    }
+    logger.warn(SOURCE, "Native provider key connection failed", { compensation: saga.compensation });
+    res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
+    return;
+  }
 
   // Redact key from logging
   const bodyForLog = { ...body };
@@ -1270,9 +1339,30 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
 
 opencodeRouter.delete("/auth/:providerID", async (req, res) => {
   if (!guardPassword(req, res)) return;
+  if (!isSafeIdentifier(req.params.providerID)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid provider ID is required" } });
+    return;
+  }
   const directory = req.query.directory as string | undefined;
-  const result = await opencodeClient.deleteAuth(req.params.providerID!, directory);
-  sendResult(req, res, result);
+  const providerId = req.params.providerID!;
+  const saga = await disconnectNativeProviderCredential(providerId, {
+    apply: (key) => opencodeClient.addAuth(providerId, { type: "api", key }, directory),
+    remove: () => opencodeClient.deleteAuth(providerId, directory),
+    status: () => opencodeClient.getAuthStatus(directory),
+  });
+  if (saga.outcome === "persistence_failed") {
+    respondNativeProviderPersistenceFailure(res, saga.persistence, "disconnect");
+    return;
+  }
+  if (saga.outcome === "disconnected") {
+    res.status(200).json({ data: { disconnected: true } });
+    return;
+  }
+  logger.warn(SOURCE, "Native provider disconnect failed", {
+    outcome: saga.outcome,
+    ...("compensation" in saga ? { compensation: saga.compensation } : {}),
+  });
+  res.status(502).json({ error: { code: "PROVIDER_DISCONNECT_FAILED", message: "Provider disconnect failed" } });
 });
 
 opencodeRouter.get("/auth/status", async (req, res) => {

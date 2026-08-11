@@ -5,7 +5,8 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects, resetDbForTest } from "ingenium-core";
+import { jobs, projects, resetDbForTest } from "ingenium-core";
+import { recoverInterruptedJobRunsAtStartup } from "../scripts/api-server.js";
 
 /**
  * Startup regression tests — verify that the API server does not exit or crash
@@ -227,5 +228,22 @@ describe("API startup — global project isolation", () => {
     expect(global).toBeDefined();
     // With LIMIT 1 and no ORDER BY, the returned row is arbitrary
     expect([first.id, global!.id]).toContain(global!.id);
+  });
+});
+
+describe("API startup — interrupted job recovery", () => {
+  it("marks ordinary running jobs terminal before the scheduler can rerun them", () => {
+    const project = projects.createProject("startup-job-recovery");
+    const job = jobs.createJob(project.id, "Recover startup job", undefined, "ingenium-qa", "test");
+    const run = jobs.startJobRun(project.id, job.id, "manual");
+    if ("reason" in run) throw new Error(run.reason);
+
+    expect(recoverInterruptedJobRunsAtStartup()).toBe(1);
+    expect(jobs.getJobRun(project.id, run.id)).toMatchObject({
+      status: "failed",
+      exit_code: -1,
+      finished_at: expect.any(String),
+    });
+    expect("reason" in jobs.startJobRun(project.id, job.id, "manual")).toBe(false);
   });
 });

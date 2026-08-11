@@ -4,7 +4,7 @@
  * 🔴 All `EmailAccount` records live in the global project (see accounts.ts for details).
  */
 
-/** Supported email providers. "custom" allows arbitrary IMAP/SMTP host/port overrides. */
+/** Supported email providers. Only "custom" allows IMAP/SMTP host/port overrides. */
 export type EmailProvider = "gmail" | "outlook" | "yahoo" | "custom";
 
 /** Authentication mechanism for IMAP/SMTP. */
@@ -33,7 +33,7 @@ export interface EmailAccount {
   name: string;
   provider: EmailProvider;
   authType: AuthType;
-  /** Custom IMAP host override (falls back to provider defaults). */
+  /** Custom-provider IMAP host override (falls back to provider defaults). */
   imapHost?: string;
   imapPort?: number;
   smtpHost?: string;

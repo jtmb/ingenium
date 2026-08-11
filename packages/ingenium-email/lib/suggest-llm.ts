@@ -11,9 +11,9 @@
  *    AGENTS.md HARD RULE #10 — reasoning models may return empty content.
  */
 
-import { emailCache, safeLlmFetch } from "ingenium-core";
 import { GmailProvider } from "./providers/gmail.js";
 import type { EmailAccount, OAuthToken } from "./types.js";
+import { getEmailRuntime } from "./runtime.js";
 
 // ── Exported interfaces ─────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ export async function getVoiceSamples(
     const samples: Array<{ subject: string; snippet: string }> = [];
     for (const msg of messages) {
       if (samples.length >= limit) break;
-      const body = emailCache.getCachedEmailBody(account.id, sentFolder, msg.id);
+      const body = getEmailRuntime().cache.getCachedEmailBody(account.id, sentFolder, msg.id);
       if (body?.text) {
         samples.push({
           subject: msg.subject ?? "(no subject)",
@@ -102,7 +102,7 @@ export async function generateSmartReplies(
   const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await getEmailRuntime().llm.fetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       signal,
@@ -225,7 +225,7 @@ ${emailBody}`;
   const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await getEmailRuntime().llm.fetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -288,7 +288,7 @@ ${text}`;
   const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await getEmailRuntime().llm.fetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({

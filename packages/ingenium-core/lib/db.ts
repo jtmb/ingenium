@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { logger } from "./logger.js";
+import {
+  SKILL_PROPOSAL_RETENTION_DELETE_ERROR,
+  SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER,
+  SKILL_PROPOSAL_RETENTION_INDEX,
+} from "./schema.js";
 
 /**
  * The database file used by deployed Ingenium instances. Do not change this
@@ -180,6 +185,30 @@ interface RestorePlansMigrationState {
 }
 
 interface RestoreExecutorMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface RestoreExecutorPhaseEventsMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface BackupDeletionReservationsMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface SynthesisBatchMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+interface SkillProposalRetentionPaginationMigrationState {
   any: boolean;
   complete: boolean;
   missing: string[];
@@ -1487,6 +1516,301 @@ function inspectRestoreExecutorMigration(db: Database.Database): RestoreExecutor
   return { any, complete: missing.length === 0, missing };
 }
 
+function inspectRestoreExecutorPhaseEventsMigration(
+  db: Database.Database,
+): RestoreExecutorPhaseEventsMigrationState {
+  const table = "backup_restore_execution_phase_events";
+  const requiredColumns = [
+    "id", "project_id", "plan_id", "backup_id", "run_id", "phase_code", "status", "error_code", "created_at",
+  ];
+  const triggers = [
+    "backup_restore_execution_phase_events_validate_insert",
+    "backup_restore_execution_phase_events_immutable_update",
+    "backup_restore_execution_phase_events_immutable_delete",
+  ];
+  const exists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { count: number }).count > 0;
+  const missing: string[] = [];
+  if (!exists) return { any: false, complete: false, missing: [`${table} table`] };
+  if (!hasContextConversationColumns(db, table, requiredColumns)) missing.push(`${table} required columns`);
+  const indexExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+  ).get("idx_backup_restore_execution_phase_events_plan") as { count: number }).count > 0;
+  if (!indexExists) missing.push("idx_backup_restore_execution_phase_events_plan index");
+  for (const trigger of triggers) {
+    const triggerExists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    if (!triggerExists) missing.push(`${trigger} trigger`);
+  }
+  const validationTrigger = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'backup_restore_execution_phase_events_validate_insert'",
+  ).get() as { sql?: string } | undefined;
+  if (validationTrigger?.sql && ![
+    "FROM backup_restore_execution_runs",
+    "project_id = NEW.project_id",
+    "id = NEW.run_id",
+    "plan_id = NEW.plan_id",
+    "backup_id = NEW.backup_id",
+    "NEW.status != 'failed' AND NEW.error_code IS NOT NULL",
+    "NEW.status = 'failed' AND NEW.error_code IS NULL",
+  ].every((fragment) => validationTrigger.sql!.includes(fragment))) {
+    missing.push("backup_restore_execution_phase_events validation trigger");
+  }
+  for (const [reference, columns] of [
+    ["backup_restore_execution_runs", ["project_id", "run_id"]],
+    ["backup_restore_plans", ["project_id", "plan_id"]],
+    ["backup_records", ["project_id", "backup_id"]],
+  ] as Array<[string, string[]]>) {
+    if (!hasCompositeForeignKey(db, table, reference, columns)) {
+      missing.push(`${table} → ${reference} composite foreign key`);
+    }
+  }
+  return { any: true, complete: missing.length === 0, missing };
+}
+
+function inspectBackupDeletionReservationsMigration(
+  db: Database.Database,
+): BackupDeletionReservationsMigrationState {
+  const table = "backup_deletion_reservations";
+  const index = "idx_backup_deletion_reservations_state";
+  const triggers = [
+    "backup_deletion_reservations_reject_referenced_backup",
+    "backup_restore_plans_reject_deleting_backup",
+  ];
+  const tableExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { count: number }).count > 0;
+  const indexExists = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+  ).get(index) as { count: number }).count > 0;
+  const triggerRows = triggers.map((trigger) => ({
+    trigger,
+    row: db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { sql?: string } | undefined,
+  }));
+  const missing: string[] = [];
+  const any = tableExists || indexExists || triggerRows.some(({ row }) => row !== undefined);
+
+  if (!tableExists) {
+    missing.push(`${table} table`);
+  } else {
+    const columns = ["project_id", "backup_id", "state", "attempt_count", "created_at", "updated_at"];
+    if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || ![
+      "state TEXT NOT NULL CHECK(state IN ('reserved', 'deleting'))",
+      "attempt_count INTEGER NOT NULL CHECK(attempt_count BETWEEN 0 AND 2147483647)",
+      "PRIMARY KEY(project_id, backup_id)",
+      "FOREIGN KEY(project_id, backup_id) REFERENCES backup_records(project_id, id) ON DELETE CASCADE",
+    ].every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+    if (!hasCompositeForeignKey(db, table, "backup_records", ["project_id", "backup_id"])) {
+      missing.push(`${table} → backup_records composite foreign key`);
+    }
+  }
+
+  if (!indexExists) missing.push(`${index} index`);
+  for (const { trigger, row } of triggerRows) {
+    if (!row?.sql) missing.push(`${trigger} trigger`);
+  }
+  const reservationTrigger = triggerRows.find(({ trigger }) => trigger === "backup_deletion_reservations_reject_referenced_backup")?.row;
+  if (reservationTrigger?.sql && ![
+    "FROM backup_restore_plans",
+    "project_id = NEW.project_id",
+    "backup_id = NEW.backup_id",
+  ].every((fragment) => reservationTrigger.sql!.includes(fragment))) {
+    missing.push("backup_deletion_reservations reference trigger");
+  }
+  const previewTrigger = triggerRows.find(({ trigger }) => trigger === "backup_restore_plans_reject_deleting_backup")?.row;
+  if (previewTrigger?.sql && ![
+    "FROM backup_deletion_reservations",
+    "project_id = NEW.project_id",
+    "backup_id = NEW.backup_id",
+    "state IN ('reserved', 'deleting')",
+  ].every((fragment) => previewTrigger.sql!.includes(fragment))) {
+    missing.push("backup_restore_plans deletion trigger");
+  }
+
+  return { any, complete: missing.length === 0, missing };
+}
+
+function normalizeSchemaSql(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim().replace(/;$/, "").toLowerCase();
+}
+
+function inspectSkillProposalRetentionPaginationMigration(
+  db: Database.Database,
+): SkillProposalRetentionPaginationMigrationState {
+  const index = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+  ).get(SKILL_PROPOSAL_RETENTION_INDEX) as { sql?: string | null } | undefined;
+  const trigger = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+  ).get(SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER) as { sql?: string | null } | undefined;
+  const missing: string[] = [];
+  const expectedIndexSql = normalizeSchemaSql(
+    `CREATE INDEX ${SKILL_PROPOSAL_RETENTION_INDEX}
+     ON skill_proposals(project_id, status, created_at DESC, id DESC)`,
+  );
+  const expectedTriggerSql = normalizeSchemaSql(
+    `CREATE TRIGGER ${SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER}
+     BEFORE DELETE ON skill_proposals
+     BEGIN
+       SELECT RAISE(ABORT, '${SKILL_PROPOSAL_RETENTION_DELETE_ERROR}');
+     END`,
+  );
+  const any = index !== undefined || trigger !== undefined;
+
+  if (!index?.sql) {
+    missing.push(`${SKILL_PROPOSAL_RETENTION_INDEX} index`);
+  } else if (normalizeSchemaSql(index.sql) !== expectedIndexSql) {
+    missing.push(`${SKILL_PROPOSAL_RETENTION_INDEX} index definition`);
+  }
+
+  if (!trigger?.sql) {
+    missing.push(`${SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER} trigger`);
+  } else if (normalizeSchemaSql(trigger.sql) !== expectedTriggerSql) {
+    missing.push(`${SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER} trigger definition`);
+  }
+
+  return { any, complete: missing.length === 0, missing };
+}
+
+function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
+  const tables: Record<string, string[]> = {
+    synthesis_batches: [
+      "id", "project_id", "stage", "observation_count", "owner_token", "lease_expires_at",
+      "proposal_plan", "last_error_code", "last_error_message", "error_count", "revision",
+      "traits_applied_at", "proposals_applied_at", "completed_at", "created_at", "updated_at",
+    ],
+    synthesis_batch_observations: ["batch_id", "project_id", "observation_id", "ordinal"],
+  };
+  const indexes = [
+    "idx_observations_project_id_id",
+    "idx_synthesis_batches_incomplete",
+    "idx_synthesis_batch_observations_project_observation",
+  ];
+  const triggers = ["synthesis_batches_validate_insert", "synthesis_batches_validate_stage"];
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(tables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${table} table`);
+    else if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+  }
+
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+
+  if (!any) return { any: false, complete: false, missing };
+
+  const batchSql = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'synthesis_batches'",
+  ).get() as { sql?: string } | undefined;
+  if (!batchSql?.sql || ![
+    "stage TEXT NOT NULL DEFAULT 'created'",
+    "observation_count INTEGER NOT NULL CHECK(observation_count BETWEEN 1 AND 50)",
+    "REFERENCES projects(id) ON DELETE CASCADE",
+    "UNIQUE(id, project_id)",
+    "proposal_plan IS NOT NULL",
+  ].every((fragment) => batchSql.sql!.includes(fragment))) {
+    missing.push("synthesis_batches state constraints");
+  }
+
+  const observationIndexSql = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_observations_project_id_id'",
+  ).get() as { sql?: string } | undefined;
+  if (!observationIndexSql?.sql?.includes("CREATE UNIQUE INDEX")) {
+    missing.push("idx_observations_project_id_id unique index");
+  }
+
+  for (const [table, reference, columns] of [
+    ["synthesis_batch_observations", "synthesis_batches", ["batch_id", "project_id"]],
+    ["synthesis_batch_observations", "observations", ["project_id", "observation_id"]],
+  ] as Array<[string, string, string[]]>) {
+    if (!hasCompositeForeignKey(db, table, reference, columns)) {
+      missing.push(`${table} → ${reference} composite foreign key`);
+    }
+  }
+
+  const stageTrigger = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'synthesis_batches_validate_stage'",
+  ).get() as { sql?: string } | undefined;
+  if (!stageTrigger?.sql || ![
+    "OLD.stage = 'created' AND NEW.stage = 'traits_applied'",
+    "OLD.stage = 'traits_applied' AND NEW.stage = 'proposals_applied'",
+    "OLD.stage = 'proposals_applied' AND NEW.stage = 'complete'",
+    "observation.status <> 'processed'",
+  ].every((fragment) => stageTrigger.sql!.includes(fragment))) {
+    missing.push("synthesis_batches stage trigger");
+  }
+
+  return { any: true, complete: missing.length === 0, missing };
+}
+
+function restoreMigrationPartialStateError(migration: string, missing: string[]): Error {
+  return new Error(
+    `Migration ${migration} is in a PARTIAL state. Missing required components: ${missing.join(", ")}.`
+    + " Restore the migration's complete schema before retrying.",
+  );
+}
+
+function assertNoPartialRestoreMigrations(db: Database.Database): void {
+  const restorePlansMigration = inspectRestorePlansMigration(db);
+  if (restorePlansMigration.any && !restorePlansMigration.complete) {
+    throw restoreMigrationPartialStateError("083", restorePlansMigration.missing);
+  }
+
+  const restoreExecutorMigration = inspectRestoreExecutorMigration(db);
+  if (restoreExecutorMigration.any && !restoreExecutorMigration.complete) {
+    throw restoreMigrationPartialStateError("084", restoreExecutorMigration.missing);
+  }
+  if (restoreExecutorMigration.any && !restorePlansMigration.complete) {
+    throw restoreMigrationPartialStateError("084", ["migration 083 prerequisite schema"]);
+  }
+
+  const backupDeletionReservationsMigration = inspectBackupDeletionReservationsMigration(db);
+  if (backupDeletionReservationsMigration.any) {
+    const missing = [
+      ...(!restorePlansMigration.complete ? ["migration 083 prerequisite schema"] : []),
+      ...backupDeletionReservationsMigration.missing,
+    ];
+    if (missing.length > 0) throw restoreMigrationPartialStateError("090", missing);
+  }
+
+  const restorePhaseEventsMigration = inspectRestoreExecutorPhaseEventsMigration(db);
+  if (!restorePhaseEventsMigration.any) return;
+  const missing = [
+    ...(!restorePlansMigration.complete ? ["migration 083 prerequisite schema"] : []),
+    ...(!restoreExecutorMigration.complete ? ["migration 084 prerequisite schema"] : []),
+    ...restorePhaseEventsMigration.missing,
+  ];
+  if (missing.length > 0) throw restoreMigrationPartialStateError("085", missing);
+}
+
 function contextRepairError(message: string): Error {
   return new Error(`Migration 067 context repair preflight refused: ${message}`);
 }
@@ -2377,7 +2701,13 @@ function runMigrations(db: Database.Database): void {
         "082_job_vault_revision_audit.sql",
         "083_restore_plans.sql",
         "084_restore_executor.sql",
-        "085_restore_executor_phase_events.sql",
+         "085_restore_executor_phase_events.sql",
+         "086_server_global_project_provenance.sql",
+         "087_job_timeout_guard.sql",
+          "088_email_suggestion_queue_leases.sql",
+          "089_synthesis_batch_phases.sql",
+          "090_backup_deletion_reservations.sql",
+          "091_skill_proposal_retention_pagination.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -2385,6 +2715,8 @@ function runMigrations(db: Database.Database): void {
     // Verify and rebuild skills_fts after all migrations (including 024 + 041)
     verifyAndRebuildSkillsFts(db);
   } else {
+    assertNoPartialRestoreMigrations(db);
+
     // Check if archived_at column exists (migration 002)
     const colCheck = db.prepare(
       "SELECT count(*) as count FROM pragma_table_info('projects') WHERE name = 'archived_at'",
@@ -3401,11 +3733,7 @@ function runMigrations(db: Database.Database): void {
 
   const restorePlansMigration = inspectRestorePlansMigration(db);
   if (restorePlansMigration.any && !restorePlansMigration.complete) {
-    throw new Error(
-      "Migration 083 is in a PARTIAL state. Missing required components: "
-      + restorePlansMigration.missing.join(", ")
-      + ". Restore the migration's complete schema before retrying.",
-    );
+    throw restoreMigrationPartialStateError("083", restorePlansMigration.missing);
   }
   if (!restorePlansMigration.complete) {
     db.exec(readFileSync(resolve(migrationsDir, "083_restore_plans.sql"), "utf-8"));
@@ -3414,23 +3742,118 @@ function runMigrations(db: Database.Database): void {
 
   const restoreExecutorMigration = inspectRestoreExecutorMigration(db);
   if (restoreExecutorMigration.any && !restoreExecutorMigration.complete) {
-    throw new Error(
-      "Migration 084 is in a PARTIAL state. Missing required components: "
-      + restoreExecutorMigration.missing.join(", ")
-      + ". Restore the migration's complete schema before retrying.",
-    );
+    throw restoreMigrationPartialStateError("084", restoreExecutorMigration.missing);
   }
   if (!restoreExecutorMigration.complete) {
     db.exec(readFileSync(resolve(migrationsDir, "084_restore_executor.sql"), "utf-8"));
     logger.info("db", "Applied migration 084_restore_executor.sql");
   }
 
-  const phaseEventsTable = db.prepare(
-    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'backup_restore_execution_phase_events'",
-  ).get() as { count: number };
-  if (phaseEventsTable.count === 0) {
+  const restorePhaseEventsMigration = inspectRestoreExecutorPhaseEventsMigration(db);
+  if (restorePhaseEventsMigration.any && !restorePhaseEventsMigration.complete) {
+    throw restoreMigrationPartialStateError("085", restorePhaseEventsMigration.missing);
+  }
+  if (!restorePhaseEventsMigration.complete) {
+    const restorePlansPrerequisite = inspectRestorePlansMigration(db);
+    const restoreExecutorPrerequisite = inspectRestoreExecutorMigration(db);
+    const missing = [
+      ...(!restorePlansPrerequisite.complete ? ["migration 083 prerequisite schema"] : []),
+      ...(!restoreExecutorPrerequisite.complete ? ["migration 084 prerequisite schema"] : []),
+    ];
+    if (missing.length > 0) throw restoreMigrationPartialStateError("085", missing);
     db.exec(readFileSync(resolve(migrationsDir, "085_restore_executor_phase_events.sql"), "utf-8"));
     logger.info("db", "Applied migration 085_restore_executor_phase_events.sql");
+  }
+
+  const globalProvenanceTableCheck = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'server_global_project_provenance'",
+  ).get() as { count: number };
+  if (globalProvenanceTableCheck.count > 0) {
+    const requiredColumns = ["id", "source_project_id", "event_type", "occurred_at"];
+    const missingColumns = requiredColumns.filter((column) => {
+      const found = db.prepare(
+        "SELECT count(*) AS count FROM pragma_table_info('server_global_project_provenance') WHERE name = ?",
+      ).get(column) as { count: number };
+      return found.count === 0;
+    });
+    if (missingColumns.length > 0) {
+      throw new Error(
+        "Migration 086 is in a PARTIAL state: server_global_project_provenance is missing required columns: "
+        + missingColumns.join(", "),
+      );
+    }
+  }
+  const globalProvenanceIndexCheck = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_server_global_project_provenance_recovery'",
+  ).get() as { count: number };
+  if (globalProvenanceTableCheck.count === 0 || globalProvenanceIndexCheck.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "086_server_global_project_provenance.sql"), "utf-8"));
+    logger.info("db", "Applied migration 086_server_global_project_provenance.sql");
+  }
+
+  const jobTimeoutGuardColumn = db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_xinfo('jobs') WHERE name = 'timeout_minutes_guard'",
+  ).get() as { count: number };
+  if (jobTimeoutGuardColumn.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "087_job_timeout_guard.sql"), "utf-8"));
+    logger.info("db", "Applied migration 087_job_timeout_guard.sql");
+  }
+
+  const suggestionQueueLeaseColumns = ["lease_state", "lease_owner", "lease_expires_at"];
+  const presentSuggestionQueueLeaseColumns = suggestionQueueLeaseColumns.filter((column) => (
+    db.prepare(
+      "SELECT count(*) AS count FROM pragma_table_info('email_suggestion_queue') WHERE name = ?",
+    ).get(column) as { count: number }
+  ).count > 0);
+  if (presentSuggestionQueueLeaseColumns.length > 0
+    && presentSuggestionQueueLeaseColumns.length < suggestionQueueLeaseColumns.length) {
+    throw new Error(
+      "Migration 088 is in a PARTIAL state: email_suggestion_queue is missing lease columns: "
+      + suggestionQueueLeaseColumns.filter((column) => !presentSuggestionQueueLeaseColumns.includes(column)).join(", "),
+    );
+  }
+  if (presentSuggestionQueueLeaseColumns.length === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "088_email_suggestion_queue_leases.sql"), "utf-8"));
+    logger.info("db", "Applied migration 088_email_suggestion_queue_leases.sql");
+  }
+
+  const synthesisBatchMigration = inspectSynthesisBatchMigration(db);
+  if (synthesisBatchMigration.any && !synthesisBatchMigration.complete) {
+    throw new Error(
+      "Migration 089 is in a PARTIAL state. Missing required components: "
+      + synthesisBatchMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!synthesisBatchMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "089_synthesis_batch_phases.sql"), "utf-8"));
+    logger.info("db", "Applied migration 089_synthesis_batch_phases.sql");
+  }
+
+  const backupDeletionReservationsMigration = inspectBackupDeletionReservationsMigration(db);
+  if (backupDeletionReservationsMigration.any && !backupDeletionReservationsMigration.complete) {
+    throw restoreMigrationPartialStateError("090", backupDeletionReservationsMigration.missing);
+  }
+  if (!backupDeletionReservationsMigration.complete) {
+    const restorePlansPrerequisite = inspectRestorePlansMigration(db);
+    if (!restorePlansPrerequisite.complete) {
+      throw restoreMigrationPartialStateError("090", ["migration 083 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "090_backup_deletion_reservations.sql"), "utf-8"));
+    logger.info("db", "Applied migration 090_backup_deletion_reservations.sql");
+  }
+
+  const skillProposalRetentionPaginationMigration = inspectSkillProposalRetentionPaginationMigration(db);
+  if (skillProposalRetentionPaginationMigration.any && !skillProposalRetentionPaginationMigration.complete) {
+    throw new Error(
+      "Migration 091 is in a PARTIAL state. Missing required components: "
+      + skillProposalRetentionPaginationMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!skillProposalRetentionPaginationMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "091_skill_proposal_retention_pagination.sql"), "utf-8"));
+    logger.info("db", "Applied migration 091_skill_proposal_retention_pagination.sql");
   }
 
   enforceReservedBrokerInvariant(db);

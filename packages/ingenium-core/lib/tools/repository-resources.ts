@@ -175,9 +175,16 @@ function serializedSize(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
+function isBoundedText(value: unknown): value is string {
+  return typeof value === "string" && Buffer.byteLength(value) <= MAX_REPOSITORY_RESOURCE_FILE_BYTES;
+}
+
+function isBoundedRecord(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && serializedSize(value) <= MAX_REPOSITORY_RESOURCE_FILE_BYTES;
+}
+
 function assertEntrySize(entry: unknown, total: { bytes: number }): void {
   const bytes = serializedSize(entry);
-  if (bytes > MAX_REPOSITORY_RESOURCE_FILE_BYTES) throw new RepositoryResourcesManifestError();
   total.bytes += bytes;
   if (total.bytes > MAX_REPOSITORY_RESOURCE_TOTAL_BYTES) throw new RepositoryResourcesManifestError();
 }
@@ -201,13 +208,13 @@ function validateSkill(value: unknown, total: { bytes: number }): RepositorySkil
     || !value.path.startsWith(".opencode/skills/")
     || !isHash(value.sha256)
     || !isSafeSkillName(value.name)
-    || typeof value.skillMd !== "string"
-    || typeof value.body !== "string"
-    || typeof value.description !== "string"
-    || (value.category !== undefined && typeof value.category !== "string")
+    || !isBoundedText(value.skillMd)
+    || !isBoundedText(value.body)
+    || !isBoundedText(value.description)
+    || (value.category !== undefined && !isBoundedText(value.category))
     || !isStringArray(value.tags)
     || typeof value.alwaysApply !== "boolean"
-    || !isRecord(value.metadata)
+    || !isBoundedRecord(value.metadata)
     || !isStringMap(value.fileTree)) throw new RepositoryResourcesManifestError();
   for (const [filePath, content] of Object.entries(value.fileTree)) {
     if (filePath === "SKILL.md" || filePath === "metadata.json" || Buffer.byteLength(content) > MAX_REPOSITORY_RESOURCE_FILE_BYTES) {
@@ -243,12 +250,12 @@ function validateAgent(value: unknown, total: { bytes: number }): RepositoryAgen
     || !isSafeAgentName(value.name)
     || isReservedAgentName(value.name)
     || !isAgentCategory(value.category)
-    || typeof value.frontmatter !== "string"
-    || typeof value.body !== "string"
-    || typeof value.description !== "string"
-    || typeof value.mode !== "string"
-    || !isRecord(value.permissions)
-    || !isRecord(value.metadata)
+    || !isBoundedText(value.frontmatter)
+    || !isBoundedText(value.body)
+    || !isBoundedText(value.description)
+    || !isBoundedText(value.mode)
+    || !isBoundedRecord(value.permissions)
+    || !isBoundedRecord(value.metadata)
     || !isStringArray(value.skills)
     || !isStringArray(value.mirrors)
     || !value.mirrors.every(isSafeRelativePath)
@@ -283,12 +290,12 @@ function validatePlugin(value: unknown, total: { bytes: number }): RepositoryPlu
     || !isAllowedRepositoryPluginPath(value.path)
     || !isHash(value.sha256)
     || !isSafeSkillName(value.name)
-    || typeof value.source !== "string"
+    || !isBoundedText(value.source)
     || value.fileType !== "regular"
     || value.isSymlink !== false
     || typeof value.enabled !== "boolean"
     || (order !== null && (typeof order !== "number" || !Number.isInteger(order) || order < 0))
-    || !isRecord(value.options)
+    || !isBoundedRecord(value.options)
     || containsSecretLikePluginOptionKey(value.options)) throw new RepositoryResourcesManifestError();
   const pluginOrder = order as number | null;
   const entry: RepositoryPluginEntry = {
@@ -365,6 +372,30 @@ function upsertState(db: ReturnType<typeof getDb>, projectId: string, type: Reso
   ).run(projectId, type, entry.identity, resourceId, entry.name, entry.path, entry.sha256, JSON.stringify(payload), timestamp, timestamp);
 }
 
+function adoptManagedIdentity(
+  db: ReturnType<typeof getDb>,
+  projectId: string,
+  type: ResourceType,
+  entry: BaseEntry & { name: string },
+  managed: Map<string, ManagedResource>,
+  dryRun: boolean,
+): ManagedResource | undefined {
+  const exact = managed.get(entry.identity);
+  if (exact) return exact;
+  const matches = [...managed.values()].filter((state) => state.resource_name === entry.name);
+  if (matches.length !== 1) return undefined;
+
+  const previous = matches[0]!;
+  if (!dryRun) {
+    db.prepare("UPDATE repository_sync_resources SET identity = ? WHERE project_id = ? AND resource_type = ? AND identity = ?")
+      .run(entry.identity, projectId, type, previous.identity);
+  }
+  const adopted = { ...previous, identity: entry.identity };
+  managed.delete(previous.identity);
+  managed.set(entry.identity, adopted);
+  return adopted;
+}
+
 function syncSkillsInTransaction(projectId: string, entries: RepositorySkillEntry[], dryRun: boolean): { summary: RepositoryResourcesSyncSummary; confirmed: RepositoryResourcesSyncResult["confirmed"] } {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const summary = emptySummary();
@@ -374,7 +405,7 @@ function syncSkillsInTransaction(projectId: string, entries: RepositorySkillEntr
   const timestamp = new Date().toISOString();
 
   for (const entry of entries) {
-    const state = managed.get(entry.identity);
+    const state = adoptManagedIdentity(db, projectId, "skill", entry, managed, dryRun);
     const current = state && resourceExists(db, "skill", projectId, state.resource_id)
       ? db.prepare("SELECT * FROM skills WHERE id = ?").get(state.resource_id) as { id: string; name: string; description: string; content: string; category: string | null; tags: string | null; always_apply: number; file_tree: string | null; archived_at: string | null } | undefined
       : db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?").get(projectId, entry.name) as { id: string; name: string; description: string; content: string; category: string | null; tags: string | null; always_apply: number; file_tree: string | null; archived_at: string | null } | undefined;
@@ -426,7 +457,7 @@ function syncAgentsInTransaction(projectId: string, entries: RepositoryAgentEntr
   const timestamp = new Date().toISOString();
 
   for (const entry of entries) {
-    const state = managed.get(entry.identity);
+    const state = adoptManagedIdentity(db, projectId, "agent", entry, managed, dryRun);
     const current = state && resourceExists(db, "agent", projectId, state.resource_id)
       ? db.prepare("SELECT * FROM agents WHERE id = ?").get(state.resource_id) as { id: string; name: string; description: string; category: string; mode: string; permissions: string; metadata: string; skills: string; content: string; enabled: number } | undefined
       : db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?").get(projectId, entry.name) as { id: string; name: string; description: string; category: string; mode: string; permissions: string; metadata: string; skills: string; content: string; enabled: number } | undefined;
@@ -478,7 +509,7 @@ function syncPluginsInTransaction(projectId: string, entries: RepositoryPluginEn
   const timestamp = new Date().toISOString();
 
   for (const entry of entries) {
-    const state = managed.get(entry.identity);
+    const state = adoptManagedIdentity(db, projectId, "plugin", entry, managed, dryRun);
     const current = state && resourceExists(db, "plugin", projectId, state.resource_id)
       ? db.prepare("SELECT * FROM plugins WHERE id = ?").get(state.resource_id) as { id: string; name: string; file_path: string; source_content: string | null; enabled: number } | undefined
       : db.prepare("SELECT * FROM plugins WHERE project_id = ? AND name = ?").get(projectId, entry.name) as { id: string; name: string; file_path: string; source_content: string | null; enabled: number } | undefined;

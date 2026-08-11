@@ -67,6 +67,7 @@ async function scheduleAsync(projectId: string, sessionId: string | undefined, o
 
     const result = await synthesis.runSynthesis(projectId, sessionId, {
       llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+      ownerToken,
     });
     logger.info("synthesis", `Completed: ${JSON.stringify(result)}`);
   } catch (err: any) {
@@ -80,11 +81,31 @@ async function scheduleAsync(projectId: string, sessionId: string | undefined, o
   }
 }
 
+function synthesisStatusResponse(status: ReturnType<typeof synthesis.getSynthesisStatus>) {
+  return {
+    total_observations: status.total_observations,
+    pending_count: status.pending_count,
+    processed_count: status.processed_count,
+    trait_count: status.trait_count,
+    last_synthesis_at: status.last_synthesis_at,
+    incompleteBatch: status.incompleteBatch === null ? null : {
+      stage: status.incompleteBatch.stage,
+      observationCount: status.incompleteBatch.observationCount,
+      hasStoredProposalPlan: status.incompleteBatch.hasStoredProposalPlan,
+      errorCount: status.incompleteBatch.errorCount,
+      lastErrorCode: status.incompleteBatch.lastErrorCode,
+      createdAt: status.incompleteBatch.createdAt,
+      updatedAt: status.incompleteBatch.updatedAt,
+      leaseState: status.incompleteBatch.leaseState,
+    },
+  };
+}
+
 synthesisRouter.get("/status", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const status = synthesis.getSynthesisStatus(projectId);
-  res.json({ data: status });
+  res.json({ data: synthesisStatusResponse(status) });
 });
 
 /**

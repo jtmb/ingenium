@@ -216,14 +216,14 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await emailRows.first().click();
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
 
-    const inlineReply = page.locator("div.min-w-\\[400px\\]").first().locator("..").locator("div.border-t").last();
+    const inlineReply = readerPane.locator("div.border-t").last();
     await expect(inlineReply).toBeVisible({ timeout: 3000 });
 
     await page.screenshot({
@@ -259,7 +259,7 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await emailRows.first().click();
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     await page.route("**/api/v1/emails/summarize/**", async (route) => {
@@ -279,7 +279,7 @@ test.describe("Mail dark-mode visual QA", () => {
     await expect(summariseBtn).toBeVisible({ timeout: 3000 });
     await summariseBtn.click();
 
-    const summaryPanel = page.locator("text=AI Summary").first();
+    const summaryPanel = readerPane.getByText("AI Summary").first();
     await expect(summaryPanel).toBeVisible({ timeout: 5000 });
 
     await page.screenshot({
@@ -309,16 +309,16 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await emailRows.first().click();
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
 
-    await expect(page.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
+    await expect(readerPane.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
-    const readerSection = page.locator("div.min-w-\\[400px\\]").first();
+    const readerSection = page.getByTestId("email-reader-content");
     await expect(readerSection).toBeVisible();
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, "dark-mode-smart-suggestions.png"),
@@ -364,15 +364,15 @@ test.describe("Mail dark-mode visual QA", () => {
 
     await emailRows.first().click();
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
 
-    await expect(page.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
+    await expect(readerPane.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
-    const toneChip = page.getByText("professional").first();
+    const toneChip = readerPane.getByText("professional").first();
 
     await expect(toneChip).toBeVisible({ timeout: 10000 });
     expect(suggestCallCount).toBeGreaterThanOrEqual(1);

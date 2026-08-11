@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockAssertExtensionToolEnabled = vi.hoisted(() => vi.fn());
-const mockEnsureExtensionProject = vi.hoisted(() => vi.fn());
-const mockFetch = vi.hoisted(() => vi.fn());
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
 
 vi.mock("@opencode-ai/plugin", () => ({
   tool: (definition: unknown) => definition,
@@ -13,21 +12,20 @@ vi.mock("../mcp-tool-state.js", () => ({
 }));
 
 vi.mock("../project-resolver.js", () => ({
-  ensureExtensionProject: mockEnsureExtensionProject,
-  classifyExtensionProjectFailure: () => "unavailable",
+  resolveExtensionProject: () => "extension-project",
 }));
 
-vi.mock("../api-auth.js", () => ({
-  apiRequestHeaders: () => new Headers(),
+vi.mock("../mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+  McpBridgeError: class McpBridgeError extends Error {
+    constructor(readonly failure: string) { super("bridge"); }
+  },
 }));
 
 let AutoObserverPlugin: typeof import("../auto-observer.js").AutoObserverPlugin;
 let stdout: ReturnType<typeof vi.spyOn>;
 let stderr: ReturnType<typeof vi.spyOn>;
-
-function failedResponse(status: number): Response {
-  return { ok: false, status, json: async () => ({ error: { detail: "Bearer secret-token http://private.example/body" } }) } as Response;
-}
 
 describe("AutoObserverPlugin lifecycle output", () => {
   beforeEach(async () => {
@@ -35,9 +33,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
     stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     mockAssertExtensionToolEnabled.mockReset().mockResolvedValue(undefined);
-    mockEnsureExtensionProject.mockReset().mockResolvedValue("extension-project");
-    mockFetch.mockReset();
-    vi.stubGlobal("fetch", mockFetch);
+    mockCallMcpTool.mockReset();
     ({ AutoObserverPlugin } = await import("../auto-observer.js"));
   });
 
@@ -50,12 +46,12 @@ describe("AutoObserverPlugin lifecycle output", () => {
   });
 
   it.each([
-    ["API-down", () => mockFetch.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")), "request_failed"],
-    ["authentication", () => mockFetch.mockResolvedValue(failedResponse(401)), "authentication"],
+    ["API-down", () => mockCallMcpTool.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")), "request_failed"],
+    ["authentication", () => mockCallMcpTool.mockRejectedValue({ name: "McpBridgeError", failure: "authentication" }), "authentication"],
     ["timeout", () => {
       const error = new Error("Bearer secret-token http://private.example/timeout");
       error.name = "TimeoutError";
-      mockFetch.mockRejectedValue(error);
+      mockCallMcpTool.mockRejectedValue(error);
     }, "timeout"],
   ] as const)("keeps %s lifecycle failures non-fatal and reports only the safe reason", async (_case, failRequest, reason) => {
     failRequest();
@@ -72,7 +68,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
   });
 
   it("swallows logger rejection without changing manual tool errors", async () => {
-    mockFetch.mockResolvedValue(failedResponse(403));
+    mockCallMcpTool.mockRejectedValue({ name: "McpBridgeError", failure: "authentication" });
     const log = vi.fn().mockRejectedValue(new Error("logger rejected Bearer secret-token"));
     const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { app: { log } } });
 
@@ -83,7 +79,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
     }));
 
     const manual = await (plugin.tool.auto_observe_now as any).execute({}, { worktree: "/worktree" });
-    expect(JSON.parse(manual)).toEqual({ triggered: false, message: "API 403" });
+    expect(JSON.parse(manual)).toEqual({ triggered: false, message: "Extraction request failed" });
     expect(mockAssertExtensionToolEnabled).toHaveBeenCalledWith("auto_observe_now", "/worktree");
   });
 });

@@ -2,9 +2,37 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const backupRmControl = vi.hoisted(() => ({
+  beforePath: null as string | null,
+  beforeRemove: null as (() => void) | null,
+  failPath: null as string | null,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    rmSync(...args: Parameters<typeof actual.rmSync>) {
+      const [path] = args;
+      if (backupRmControl.beforePath === path && backupRmControl.beforeRemove) {
+        const beforeRemove = backupRmControl.beforeRemove;
+        backupRmControl.beforePath = null;
+        backupRmControl.beforeRemove = null;
+        beforeRemove();
+      }
+      if (backupRmControl.failPath === path) {
+        backupRmControl.failPath = null;
+        throw new Error("injected backup removal failure");
+      }
+      return actual.rmSync(...args);
+    },
+  };
+});
+
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 import {
@@ -87,6 +115,21 @@ async function snapshot(type = "manual") {
   return createSnapshot(globalProjectId, type, dbPath, opencodeDbPath);
 }
 
+function deletionReservation(backupId: string): { state: string; attempt_count: number } | undefined {
+  return getDb(dbPath).prepare(
+    "SELECT state, attempt_count FROM backup_deletion_reservations WHERE project_id = ? AND backup_id = ?",
+  ).get(globalProjectId, backupId) as { state: string; attempt_count: number } | undefined;
+}
+
+function reserveDeletionForCrash(backupId: string): void {
+  const timestamp = new Date().toISOString();
+  getDb(dbPath).prepare(
+    `INSERT INTO backup_deletion_reservations
+     (project_id, backup_id, state, attempt_count, created_at, updated_at)
+     VALUES (?, ?, 'reserved', 0, ?, ?)`,
+  ).run(globalProjectId, backupId, timestamp, timestamp);
+}
+
 beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-restore-100-"));
   dbPath = join(tempDir, "data");
@@ -150,7 +193,10 @@ describe("RESTORE-100 v2 bundles", () => {
       opencode: { schema_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/), required_tables: expect.any(Array) },
     });
     expect(manifest.signature).toMatch(/^[0-9a-f]{64}$/);
-    expect(getBackup(globalProjectId, created.backupId)).toMatchObject({ sha256: hashFile(join(bundle, "manifest.json")) });
+    expect(getBackup(globalProjectId, created.backupId)).toMatchObject({
+      sha256: hashFile(join(bundle, "manifest.json")), status: "completed",
+    });
+    expect(deletionReservation(created.backupId)).toBeUndefined();
     expect(validateRestorePreflight(globalProjectId, created.backupId)).toMatchObject({ valid: true, blockers: [] });
   });
 
@@ -215,6 +261,114 @@ describe("RESTORE-100 v2 bundles", () => {
     expect(validateRestorePreflight(globalProjectId, legacyId)).toMatchObject({ valid: false, blockers: ["BACKUP_LEGACY_UNSUPPORTED"] });
     expect(() => deleteBackup(globalProjectId, legacyId)).toThrow(expect.objectContaining({ code: "BACKUP_LEGACY_UNSUPPORTED" }));
     expect(getBackup(globalProjectId, legacyId)).not.toBeNull();
+  });
+
+  it("reserves deletion before removal so a preview cannot win the race", async () => {
+    const created = await snapshot();
+    const bundle = join(backupsDir, created.backupId);
+    backupRmControl.beforePath = bundle;
+    backupRmControl.beforeRemove = () => {
+      expect(deletionReservation(created.backupId)).toEqual({ state: "deleting", attempt_count: 1 });
+      expect(existsSync(bundle)).toBe(true);
+      expect(() => previewRestore(globalProjectId, {
+        backupId: created.backupId,
+        dryRun: true,
+        idempotencyKey: "reserved-preview",
+      })).toThrow(expect.objectContaining({ code: "BACKUP_REFERENCED" }));
+      expect(getDb(dbPath).prepare(
+        "SELECT count(*) AS count FROM backup_restore_plans WHERE project_id = ? AND backup_id = ?",
+      ).get(globalProjectId, created.backupId)).toEqual({ count: 0 });
+    };
+
+    deleteBackup(globalProjectId, created.backupId);
+    expect(getBackup(globalProjectId, created.backupId)).toBeNull();
+    expect(deletionReservation(created.backupId)).toBeUndefined();
+    expect(existsSync(bundle)).toBe(false);
+    expect(getDb(dbPath).prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("keeps the bundle when preview creates the immutable reference first", async () => {
+    const created = await snapshot();
+    const bundle = join(backupsDir, created.backupId);
+    const plan = previewRestore(globalProjectId, {
+      backupId: created.backupId,
+      dryRun: true,
+      idempotencyKey: "preview-wins",
+    });
+
+    expect(() => deleteBackup(globalProjectId, created.backupId))
+      .toThrow(expect.objectContaining({ code: "BACKUP_REFERENCED" }));
+    expect(getBackup(globalProjectId, created.backupId)).not.toBeNull();
+    expect(deletionReservation(created.backupId)).toBeUndefined();
+    expect(existsSync(bundle)).toBe(true);
+    expect(listRestoreAudit(globalProjectId, plan.id)).toHaveLength(1);
+  });
+
+  it("retains the inventory row when bundle removal fails", async () => {
+    const created = await snapshot();
+    const bundle = join(backupsDir, created.backupId);
+    backupRmControl.failPath = bundle;
+
+    expect(() => deleteBackup(globalProjectId, created.backupId)).toThrow("injected backup removal failure");
+    expect(getBackup(globalProjectId, created.backupId)).not.toBeNull();
+    expect(deletionReservation(created.backupId)).toEqual({ state: "deleting", attempt_count: 1 });
+    expect(() => previewRestore(globalProjectId, {
+      backupId: created.backupId,
+      dryRun: true,
+      idempotencyKey: "deleting-preview",
+    })).toThrow(expect.objectContaining({ code: "BACKUP_REFERENCED" }));
+    expect(existsSync(bundle)).toBe(true);
+
+    deleteBackup(globalProjectId, created.backupId);
+    expect(getBackup(globalProjectId, created.backupId)).toBeNull();
+    expect(deletionReservation(created.backupId)).toBeUndefined();
+    expect(existsSync(bundle)).toBe(false);
+  });
+
+  it("resumes crash-like reserved states with present or missing bundles idempotently", async () => {
+    const present = await snapshot();
+    reserveDeletionForCrash(present.backupId);
+    expect(() => previewRestore(globalProjectId, {
+      backupId: present.backupId,
+      dryRun: true,
+      idempotencyKey: "crash-reserved-preview",
+    })).toThrow(expect.objectContaining({ code: "BACKUP_REFERENCED" }));
+    deleteBackup(globalProjectId, present.backupId);
+    expect(getBackup(globalProjectId, present.backupId)).toBeNull();
+    expect(deletionReservation(present.backupId)).toBeUndefined();
+    expect(existsSync(join(backupsDir, present.backupId))).toBe(false);
+
+    const missing = await snapshot();
+    const missingBundle = join(backupsDir, missing.backupId);
+    reserveDeletionForCrash(missing.backupId);
+    rmSync(missingBundle, { recursive: true, force: true });
+    expect(() => deleteBackup(globalProjectId, missing.backupId)).not.toThrow();
+    expect(getBackup(globalProjectId, missing.backupId)).toBeNull();
+    expect(deletionReservation(missing.backupId)).toBeUndefined();
+    expect(() => deleteBackup(globalProjectId, missing.backupId)).not.toThrow();
+    expect(getDb(dbPath).prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("retains the deletion reservation rather than following a substituted bundle symlink", async () => {
+    const created = await snapshot();
+    const bundle = join(backupsDir, created.backupId);
+    const outside = join(tempDir, `outside-${created.backupId}`);
+    const sentinel = join(outside, "sentinel");
+    mkdirSync(outside, { mode: 0o700 });
+    writeFileSync(sentinel, "keep");
+    rmSync(bundle, { recursive: true, force: true });
+    symlinkSync(outside, bundle, "dir");
+
+    expect(() => deleteBackup(globalProjectId, created.backupId))
+      .toThrow(expect.objectContaining({ code: "BACKUP_INVALID" }));
+    expect(getBackup(globalProjectId, created.backupId)).not.toBeNull();
+    expect(deletionReservation(created.backupId)).toEqual({ state: "deleting", attempt_count: 1 });
+    expect(existsSync(sentinel)).toBe(true);
+    expect(() => previewRestore(globalProjectId, {
+      backupId: created.backupId,
+      dryRun: true,
+      idempotencyKey: "symlink-deleting-preview",
+    })).toThrow(expect.objectContaining({ code: "BACKUP_REFERENCED" }));
   });
 
   it("uses owner-only, non-symlink signing keys", () => {

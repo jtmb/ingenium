@@ -87,6 +87,17 @@ const MOCK_SUGGEST_RESPONSE = {
 async function setupMocks(page: Page) {
   await page.unroute();
 
+  await page.route("**/api/v1/projects*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: [{ id: "global-default", name: "global-default", is_global: true, archived_at: null }],
+        total: 1,
+      }),
+    });
+  });
+
   await page.route("**/api/v1/emails/accounts*", async (route) => {
     await route.fulfill({
       status: 200,
@@ -203,20 +214,22 @@ async function openFirstEmailAndReply(page: Page) {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
+  await expect(
+    page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` }),
+  ).toBeVisible({ timeout: 15000 });
   await page.waitForTimeout(2000);
 
-  const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+  const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
   await expect(inboxBtn).toBeVisible({ timeout: 10000 });
   await inboxBtn.click();
   await page.waitForTimeout(1000);
 
-  const emailRows = page.locator("div.cursor-pointer");
+  const emailRows = page.getByTestId("email-row");
   await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
   await emailRows.first().click();
   await page.waitForTimeout(800);
 
-  const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+  const readerPane = page.getByTestId("email-reader-content");
   await expect(readerPane).toBeVisible({ timeout: 5000 });
 
   const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
@@ -249,7 +262,7 @@ test("Reply opens compose with To/Subject/From pre-filled and Body EMPTY", async
     description: `Reply Subject: "${subjectValue}" — preserves existing "Re: " prefix ✓`,
   });
 
-  const fromSelect = page.locator("select").first();
+  const fromSelect = page.getByLabel("From").first();
   await expect(fromSelect).toBeVisible();
   const fromValue = await fromSelect.inputValue();
   expect(fromValue).toBe(ACCOUNT_ID);
@@ -303,22 +316,24 @@ test("Forward opens blank compose with nothing pre-filled", async ({ page }) => 
   await setupMocks(page);
   await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
+  await expect(
+    page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` }),
+  ).toBeVisible({ timeout: 15000 });
 
   await page.waitForTimeout(2000);
 
-  const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+  const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
   await expect(inboxBtn).toBeVisible({ timeout: 10000 });
   await inboxBtn.click();
   await page.waitForTimeout(1000);
 
-  const emailRows = page.locator("div.cursor-pointer");
+  const emailRows = page.getByTestId("email-row");
   await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 
   await emailRows.first().click();
   await page.waitForTimeout(800);
 
-  const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+  const readerPane = page.getByTestId("email-reader-content");
   await expect(readerPane).toBeVisible({ timeout: 5000 });
 
   const forwardBtn = readerPane.getByRole("button", { name: "Forward" }).first();
@@ -357,7 +372,7 @@ test("Forward opens blank compose with nothing pre-filled", async ({ page }) => 
     description: `Forward Body: empty — nothing pre-filled ✓`,
   });
 
-  const fromSelect = page.locator("select").first();
+  const fromSelect = page.getByLabel("From").first();
   await expect(fromSelect).toBeVisible();
   const fromValue = await fromSelect.inputValue();
   expect(fromValue).toBe(ACCOUNT_ID);
@@ -371,7 +386,9 @@ test("Smart Replies cards are collapsible with aria-expanded", async ({ page }) 
   await setupMocks(page);
   await openFirstEmailAndReply(page);
 
-  const toggleBtn = page.locator('button[aria-expanded][aria-controls]');
+  const toggleBtn = page
+    .getByTestId("email-reader-content")
+    .getByRole("button", { name: "Smart Replies", exact: true });
   await expect(toggleBtn).toBeVisible({ timeout: 5000 });
   expect(await toggleBtn.getAttribute("aria-expanded")).toBe("true");
 

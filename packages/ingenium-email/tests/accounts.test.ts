@@ -1,55 +1,22 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-
-// Mock the ingenium-core settings/getDb module
-vi.mock("ingenium-core", () => {
-  const store = new Map<string, string>();
-  const settingKey = (projectId: string, key: string) => `${projectId}\u0000${key}`;
-  return {
-    settings: {
-      getSetting: vi.fn((projectId: string, key: string) => store.get(settingKey(projectId, key)) ?? null),
-      setSetting: vi.fn((projectId: string, key: string, value: string) => {
-        store.set(settingKey(projectId, key), value);
-      }),
-    },
-    getDb: vi.fn(() => ({
-      prepare: vi.fn((sql: string) => ({
-        all: vi.fn(() => {
-          const entries: Array<{ project_id: string; key: string; value: string }> = [];
-          for (const [compoundKey, value] of store.entries()) {
-            const separator = compoundKey.indexOf("\u0000");
-            const key = compoundKey.slice(separator + 1);
-            if (key.startsWith("email_account_")) {
-              entries.push({ project_id: compoundKey.slice(0, separator), key, value });
-            }
-          }
-          return entries;
-        }),
-        get: vi.fn((projectId?: string, key?: string) => {
-          if (sql.startsWith("SELECT id FROM projects")) return { id: "global-project-id" };
-          const value = projectId && key ? store.get(settingKey(projectId, key)) : undefined;
-          return value === undefined ? undefined : { value };
-        }),
-        run: vi.fn((projectId: string, key: string, value?: string) => {
-          if (sql.startsWith("INSERT INTO settings") && value !== undefined) {
-            store.set(settingKey(projectId, key), value);
-          }
-          if (sql.startsWith("DELETE FROM settings")) {
-            store.delete(settingKey(projectId, key));
-          }
-        }),
-      })),
-    })),
-    execTransaction: <T>(operation: () => T): T => operation(),
-    checkpointAfterWrite: vi.fn(),
-  };
-});
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { configureEmailRuntime, resetEmailRuntimeForTest } from "../lib/runtime.js";
+import { createMemoryEmailRuntime } from "./runtime-fixture.js";
 
 describe("accounts", () => {
+  let values: Map<string, string>;
+
   beforeAll(() => {
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
   });
 
+  beforeEach(() => {
+    values = new Map();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(values));
+  });
+
   afterAll(() => {
+    resetEmailRuntimeForTest();
     delete process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
   });
 
@@ -136,5 +103,140 @@ describe("accounts", () => {
     const updated = getAccount(account.id);
     expect(updated!.connected).toBe(true);
     expect(updated!.lastSync).toBeDefined();
+  });
+
+  it("updates editable connection metadata without replacing credentials", async () => {
+    const { addAccount, getAccount, getCredentials, storeAccount, storeCredentials } = await import("../lib/accounts.js");
+    const account = addAccount({
+      email: "edit-account@test.com",
+      name: "Before edit",
+      provider: "custom",
+      authType: "app_password",
+      imapHost: "imap.before.test",
+    });
+    storeCredentials(account.id, { imapPass: "saved-password" });
+
+    storeAccount({
+      ...account,
+      email: "edit-account@example.test",
+      name: "After edit",
+      imapHost: "imap.after.test",
+      imapPort: 993,
+      smtpHost: "smtp.after.test",
+      smtpPort: 465,
+    });
+
+    expect(getAccount(account.id)).toMatchObject({
+      email: "edit-account@example.test",
+      name: "After edit",
+      imapHost: "imap.after.test",
+      smtpHost: "smtp.after.test",
+    });
+    expect(getCredentials(account.id)?.password).toBe("saved-password");
+  });
+
+  it("rejects fixed-provider endpoint overrides before creating an account", async () => {
+    const { addAccount, listAccounts } = await import("../lib/accounts.js");
+    const { resolveProviderEndpoints } = await import("../lib/providers.js");
+
+    expect(() => addAccount({
+      email: "fixed-override@example.test",
+      name: "Fixed override",
+      provider: "gmail",
+      authType: "app_password",
+      imapHost: "imap.gmail.com",
+      smtpHost: "smtp.gmail.com",
+    })).toThrow("Endpoint overrides are only supported for custom providers");
+
+    expect(listAccounts()).toEqual([]);
+    expect(resolveProviderEndpoints({
+      provider: "gmail",
+      imapHost: "imap.attacker.example",
+      imapPort: 993,
+      smtpHost: "smtp.attacker.example",
+      smtpPort: 587,
+    })).toMatchObject({
+      imap: { host: "imap.gmail.com", port: 993 },
+      smtp: { host: "smtp.gmail.com", port: 587 },
+    });
+  });
+
+  it("rejects a fixed-provider redirect without changing encrypted account data", async () => {
+    const { createAccountWithCredentials, getCredentials, storeAccount } = await import("../lib/accounts.js");
+    const account = createAccountWithCredentials({
+      email: "fixed-credential@example.test",
+      name: "Fixed credential",
+      provider: "gmail",
+      authType: "app_password",
+    }, {
+      imapPass: "fixed-app-password",
+      smtpPass: "fixed-app-password",
+    });
+    const storageKey = `global-project-id\u0000email_account_${account.id}`;
+    const before = values.get(storageKey);
+
+    expect(() => storeAccount({
+      ...account,
+      imapHost: "imap.attacker.example",
+      imapPort: 993,
+      smtpHost: "smtp.attacker.example",
+      smtpPort: 587,
+    })).toThrow("Endpoint overrides are only supported for custom providers");
+
+    expect(values.get(storageKey)).toBe(before);
+    expect(getCredentials(account.id)?.password).toBe("fixed-app-password");
+  });
+
+  it("normalizes fixed-provider targets and requires explicit custom endpoints on provider changes", async () => {
+    const { createAccountWithCredentials, getAccount, getCredentials, storeAccount } = await import("../lib/accounts.js");
+    const account = createAccountWithCredentials({
+      email: "switch-provider@example.test",
+      name: "Switch provider",
+      provider: "custom",
+      authType: "app_password",
+      imapHost: "imap.custom.example",
+      imapPort: 993,
+      smtpHost: "smtp.custom.example",
+      smtpPort: 587,
+    }, {
+      imapPass: "switch-password",
+      smtpPass: "switch-password",
+    });
+
+    storeAccount({
+      ...account,
+      provider: "gmail",
+      imapHost: "imap.attacker.example",
+      imapPort: 993,
+      smtpHost: "smtp.attacker.example",
+      smtpPort: 587,
+    });
+
+    const fixed = getAccount(account.id)!;
+    expect(fixed.provider).toBe("gmail");
+    expect(fixed.imapHost).toBeUndefined();
+    expect(fixed.smtpHost).toBeUndefined();
+    expect(getCredentials(account.id)?.password).toBe("switch-password");
+    expect(JSON.parse(values.get(`global-project-id\u0000email_account_${account.id}`)!).imapHost).toBeUndefined();
+
+    expect(() => storeAccount({ ...fixed, provider: "custom" })).toThrow(
+      "Custom provider changes require IMAP and SMTP hosts and ports",
+    );
+
+    storeAccount({
+      ...fixed,
+      provider: "custom",
+      imapHost: "imap.replacement.example",
+      imapPort: 993,
+      smtpHost: "smtp.replacement.example",
+      smtpPort: 587,
+    });
+
+    expect(getAccount(account.id)).toMatchObject({
+      provider: "custom",
+      imapHost: "imap.replacement.example",
+      smtpHost: "smtp.replacement.example",
+    });
+    expect(getCredentials(account.id)?.password).toBe("switch-password");
   });
 });

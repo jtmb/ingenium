@@ -13,8 +13,15 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..");
 const SKILLS_DIR = resolve(PROJECT_ROOT, ".opencode", "skills");
@@ -23,6 +30,10 @@ const EXPECTED_CANONICAL = 10;
 const EXPECTED_MIGRATED = 28;
 const EXPECTED_SOURCES = 28;
 const CONSOLIDATION_MAP_VERSION = "1.0.0";
+const DEVELOPMENT_CONVENTIONS_DIR = resolve(
+  SKILLS_DIR,
+  "development-conventions"
+);
 
 /** Recursively find files matching a name under a root directory. */
 function findFiles(root: string, fileName: string): string[] {
@@ -86,6 +97,94 @@ function getMigratedTargetName(filePath: string): string | null {
   const match = content.match(/\*\*Canonical target\*\*:\s*`([^`]+)`/);
   return match ? match[1] : null;
 }
+
+function isPathInside(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate);
+  return (
+    relativePath === "" ||
+    (!isAbsolute(relativePath) &&
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${sep}`))
+  );
+}
+
+describe("recursive relative Markdown links", () => {
+  it("walks development-conventions links without leaving the skill directory", () => {
+    const skillDir = realpathSync(DEVELOPMENT_CONVENTIONS_DIR);
+    const start = realpathSync(resolve(skillDir, "SKILL.md"));
+    const pending = [start];
+    const visited = new Set<string>();
+
+    while (pending.length > 0) {
+      const source = pending.pop()!;
+      if (visited.has(source)) continue;
+      visited.add(source);
+
+      const content = readFileSync(source, "utf-8");
+      const links = /\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+[^)]*)?\)/g;
+      let match: RegExpExecArray | null;
+
+      while ((match = links.exec(content)) !== null) {
+        const rawLink = (match[1] ?? match[2])!;
+        const line = content.slice(0, match.index).split("\n").length;
+        if (
+          /^(?:https?:|mailto:)/i.test(rawLink) ||
+          rawLink.startsWith("#") ||
+          rawLink.startsWith("//")
+        ) {
+          continue;
+        }
+
+        const pathPart = rawLink.replace(/[?#].*$/, "");
+        if (!pathPart) continue;
+
+        let decodedPath: string;
+        try {
+          decodedPath = decodeURIComponent(pathPart);
+        } catch {
+          const resolvedPath = resolve(dirname(source), pathPart);
+          throw new Error(
+            `source ${relative(skillDir, source)}, line ${line}, raw link ${JSON.stringify(rawLink)}, resolved path ${resolvedPath}: URI decode failed`
+          );
+        }
+
+        if (!decodedPath.toLowerCase().endsWith(".md")) continue;
+
+        const resolvedPath = resolve(dirname(source), decodedPath);
+        const context = `source ${relative(skillDir, source)}, line ${line}, raw link ${JSON.stringify(rawLink)}, resolved path ${resolvedPath}`;
+        const targetExists = existsSync(resolvedPath);
+        expect(targetExists, `${context}: target does not exist`).toBe(true);
+        if (!targetExists) continue;
+
+        const canonicalTarget = realpathSync(resolvedPath);
+        const targetIsInside = isPathInside(skillDir, canonicalTarget);
+        expect(
+          targetIsInside,
+          `${context}, canonical path ${canonicalTarget}: target leaves skill directory`
+        ).toBe(true);
+        if (targetIsInside && !visited.has(canonicalTarget)) {
+          pending.push(canonicalTarget);
+        }
+      }
+    }
+
+    const requiredRecursiveFiles = [
+      "references/sources/api-aggregation-patterns/source-index.md",
+      "references/sources/api-aggregation-patterns/references/getProjectDetail-pattern.md",
+      "references/sources/ingenium-ops/source-index.md",
+      "references/sources/language-conventions/source-index.md",
+      "references/sources/mail-app-ui-conventions/source-index.md",
+      "references/sources/visual-standards-conventions/source-index.md",
+    ];
+
+    for (const file of requiredRecursiveFiles) {
+      expect(
+        visited.has(realpathSync(resolve(skillDir, file))),
+        `recursive link walk did not visit ${file}`
+      ).toBe(true);
+    }
+  });
+});
 
 describe("Canonical SKILL.md files", () => {
   let canonicalFiles: string[];

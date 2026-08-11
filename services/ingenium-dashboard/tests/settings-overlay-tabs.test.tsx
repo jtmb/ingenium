@@ -119,4 +119,16 @@ describe("SettingsOverlay deep links", () => {
       { scroll: false },
     );
   });
+
+  it("keeps the Mail panel in a shrinkable scroll region", async () => {
+    navigationMock.searchParams = new URLSearchParams("settings=mail");
+
+    render(<SettingsOverlay />);
+
+    await screen.findByTestId("settings-panel-mail");
+    const scrollRegion = screen.getByTestId("settings-panel-scroll");
+    expect(scrollRegion.className).toContain("min-h-0");
+    expect(scrollRegion.className).toContain("overflow-y-auto");
+    expect(scrollRegion.className).toContain("overscroll-contain");
+  });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useId } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useId } from "react";
 import { createPortal } from "react-dom";
 
 type OverlayProps = {
@@ -21,6 +21,7 @@ const FOCUSABLE_SELECTOR =
 
 let bodyScrollLockCount = 0;
 let bodyOverflowBeforeFirstLock = "";
+const OverlayNestingContext = createContext<(() => () => void) | null>(null);
 
 function lockBodyScroll(): void {
   if (bodyScrollLockCount === 0) {
@@ -117,22 +118,36 @@ export default function Overlay({
   const previousFocus = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
+  const registerWithParent = useContext(OverlayNestingContext);
+  const nestedOverlayCountRef = useRef(0);
+  const registerNestedOverlay = useCallback(() => {
+    nestedOverlayCountRef.current += 1;
+    return () => {
+      nestedOverlayCountRef.current = Math.max(0, nestedOverlayCountRef.current - 1);
+    };
+  }, []);
 
-  // Keep the onClose ref in sync so the effect never needs to re-register
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     // Capture the currently focused element so we can restore it later
     previousFocus.current = document.activeElement as HTMLElement;
+    const unregisterFromParent = registerWithParent?.();
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (nestedOverlayCountRef.current > 0) return;
       if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }
       if (e.key === "Tab") {
+        e.stopImmediatePropagation();
         const panel = panelRef.current;
         if (!panel) return;
         const focusable = Array.from(
@@ -159,7 +174,7 @@ export default function Overlay({
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     lockBodyScroll();
     const restoreBackground = overlayRootRef.current
       ? makeBackgroundInert(overlayRootRef.current)
@@ -170,7 +185,8 @@ export default function Overlay({
 
     return () => {
       window.clearTimeout(focusTimer);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      unregisterFromParent?.();
       unlockBodyScroll();
       restoreBackground();
 
@@ -180,7 +196,7 @@ export default function Overlay({
       }
       previousFocus.current = null;
     };
-  }, [isOpen]);
+  }, [isOpen, registerWithParent]);
 
   if (!isOpen) return null;
 
@@ -190,7 +206,8 @@ export default function Overlay({
   const defaultBodyClassName = `flex-1 overflow-y-auto px-6 py-4 ${fullScreen ? "flex flex-col" : ""}`;
 
   return createPortal(
-    <div ref={overlayRootRef} className="fixed inset-0 z-50 flex items-start justify-center">
+    <OverlayNestingContext.Provider value={registerNestedOverlay}>
+      <div ref={overlayRootRef} className="fixed inset-0 z-50 flex items-start justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       
@@ -225,7 +242,8 @@ export default function Overlay({
           {children}
         </div>
       </div>
-    </div>,
+      </div>
+    </OverlayNestingContext.Provider>,
     document.body
   );
 }

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
@@ -43,7 +45,7 @@ describe("Ingenium API client authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { api } = await import("../lib/client.js");
-    await api.postOctetStream("/context/conversations/import", Buffer.from("{}"), { project: "context-server-test" });
+    await api.settled.postOctetStream("/context/conversations/import", Buffer.from("{}"), { project: "context-server-test" });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
@@ -53,6 +55,74 @@ describe("Ingenium API client authentication", () => {
     expect(requestHeaders.get("Authorization")).toBe("Bearer test-server-token");
     expect(requestHeaders.get("Content-Type")).toBe("application/octet-stream");
     expect(fetchMock.mock.calls[0]?.[1].body).toEqual(Buffer.from("{}"));
+  });
+
+  it("sends email once when the transport fails before a response", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { emailSend } = await import("../lib/tools/emails.js");
+    await expect(emailSend("project", "account", "to@example.test", "subject", "body"))
+      .rejects.toMatchObject({ code: "API_UNAVAILABLE", message: "The API is unavailable." });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends email once when the API returns 502", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: { code: "UPSTREAM_FAILURE" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { emailSend } = await import("../lib/tools/emails.js");
+    await expect(emailSend("project", "account", "to@example.test", "subject", "body"))
+      .rejects.toMatchObject({ status: 502, code: "UPSTREAM_FAILURE" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries safe GET requests and keyed API mutations", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const unavailable = { ok: false, status: 502, json: async () => ({ error: { code: "UNAVAILABLE" } }) };
+    const ok = { ok: true, status: 200, json: async () => ({ data: { ok: true } }) };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(unavailable)
+      .mockResolvedValueOnce(ok)
+      .mockResolvedValueOnce(unavailable)
+      .mockResolvedValueOnce(ok);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await import("../lib/client.js");
+    await expect(api.get("/health")).resolves.toMatchObject({ status: 200, data: { ok: true } });
+    await expect(api.post("/tasks", { title: "retry", idempotency_key: "retry-key" })).resolves.toMatchObject({ status: 200 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(new Headers(fetchMock.mock.calls[3]?.[1].headers).get("Idempotency-Key")).toBe("retry-key");
+  });
+
+  it("does not retry arbitrary keyed mutations", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: { code: "UPSTREAM_FAILURE" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await import("../lib/client.js");
+    await expect(api.post("/emails", { idempotency_key: "not-enforced" }))
+      .rejects.toMatchObject({ status: 502, code: "UPSTREAM_FAILURE" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires outputPath in the email attachment tool schema", () => {
+    const serverSource = readFileSync(fileURLToPath(new URL("../scripts/mcp-server.ts", import.meta.url)), "utf8");
+    expect(serverSource).toMatch(/"email_attachment_get"[\s\S]*?outputPath: z\.string\(\)\.min\(1\)/);
   });
 
   it("preserves existing DELETE params while sending an optional JSON body", async () => {
@@ -99,7 +169,7 @@ describe("Ingenium API client authentication", () => {
       CHILD_MCP_RUNTIME_HANDOFF_HEADER,
       CHILD_MCP_RUNTIME_HANDOFF_PATH,
     } = await import("../lib/client.js");
-    await api.getTrustedChildMcpRuntime("runtime project");
+    await api.settled.getTrustedChildMcpRuntime("runtime project");
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       `http://localhost:4097${CHILD_MCP_RUNTIME_HANDOFF_PATH}?project=runtime+project`,
@@ -124,7 +194,7 @@ describe("Ingenium API client authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { api } = await import("../lib/client.js");
-    await expect(api.getToolState("ingenium_skill_list", "state-project")).resolves.toMatchObject({
+    await expect(api.settled.getToolState("ingenium_skill_list", "state-project")).resolves.toMatchObject({
       data: payload.data,
       payload,
     });

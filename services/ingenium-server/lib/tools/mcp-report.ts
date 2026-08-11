@@ -56,7 +56,7 @@ function queryFilters(filters: McpReportFilters): Record<string, QueryParameterV
 /** Fetch one already-bounded report. The endpoint has no pagination contract. */
 export async function mcpReportGet(project: string, filters: McpReportFilters = {}) {
   try {
-    const response = await api.getMcpReport(project, queryFilters(filters));
+    const response = await api.settled.getMcpReport(project, queryFilters(filters));
     if (!response.ok) return reportError("MCP_REPORT_UNAVAILABLE");
     if (!isReportPayload(response.data)) return reportError("MCP_REPORT_INVALID_RESPONSE");
 

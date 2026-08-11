@@ -22,6 +22,8 @@ import {
   createTestRunContext,
   getTestRunArtifactRoot,
   getTestRunApiTokenPath,
+  readTestRunManifest,
+  readTestRunTelemetry,
   resetTestRunContextForTests,
   releaseTestRunPortReservations,
   type TestRunProcess,
@@ -153,6 +155,30 @@ describe("test server lifecycle contracts", () => {
     expect(specs[0]!.readinessHeaders?.Authorization).toBe(`Bearer ${TEST_API_TOKEN}`);
     expect(specs[1]!.env.SOME_SECRET).toBeUndefined();
     expect(specs[2]!.env.INGENIUM_API_TOKEN).toBeUndefined();
+  });
+
+  it("captures the pre-existing process baseline before a fixture child can launch", async () => {
+    const context = createTestRunContext({ ports: { api: 45204, dashboard: 45205, fixture: 45206 } });
+    track(context);
+    let baselineAtSpawn: ReturnType<typeof readTestRunManifest>["preexistingProcessBaseline"];
+
+    try {
+      await expect(startTestServers(context, {
+        production: false,
+        build: false,
+        spawnServer: () => {
+          baselineAtSpawn = readTestRunManifest(context.manifestPath).preexistingProcessBaseline;
+          throw new Error("baseline capture probe");
+        },
+      })).rejects.toThrow("baseline capture probe");
+
+      expect(baselineAtSpawn).toBeDefined();
+      expect(readTestRunManifest(context.manifestPath).preexistingProcessBaseline).toEqual(baselineAtSpawn);
+      expect(readTestRunTelemetry(context.telemetryPath!).preexistingProcessBaseline).toEqual(baselineAtSpawn);
+    } finally {
+      updateTestRunManifest(context.manifestPath, { status: "created", processes: [] });
+      cleanupTestRun(context.manifestPath);
+    }
   });
 
   it("never forwards parent secrets to child environments", () => {

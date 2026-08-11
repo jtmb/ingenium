@@ -4,8 +4,6 @@ import {
   lstatSync,
   readdirSync,
   realpathSync,
-  readFileSync,
-  readlinkSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,9 +18,15 @@ import {
   readTestRunTelemetry,
   type TestRunManifest,
   type TestRunProcess,
+  type TestRunPreexistingProcessBaseline,
   type TestRunTelemetry,
 } from "./test-run-context";
-import { inspectProcessIdentity, type ProcessIdentity } from "./test-server-lifecycle";
+import {
+  discoverRepositoryProcessCandidates,
+  inspectProcessIdentity,
+  type ProcessIdentity,
+  type RepositoryProcessCandidate,
+} from "./test-run-process-discovery";
 import {
   COMPOSE_OWNED_HOST_PORTS,
   inspectComposeOwnership,
@@ -36,7 +40,7 @@ const DEFAULT_RSS_LIMIT = 512 * 1024 * 1024;
 // a full stale-run interval. Fresh evidence remains a strict recovery failure.
 const HISTORICAL_INERT_EVIDENCE_AFTER_MS = 60 * 60 * 1_000;
 
-export type PortOwnership = "fixture-owned" | "compose-owned" | "unverified" | "unowned";
+export type PortOwnership = "fixture-owned" | "compose-owned" | "pre-existing-unowned" | "unverified" | "unowned";
 
 export interface PortState {
   port: number;
@@ -65,6 +69,10 @@ export interface DiscoveredProcessState {
   runNonce?: string;
   listeningPorts: number[];
   reason: "manifestless-candidate";
+}
+
+export interface PreexistingUnownedProcessState extends Omit<DiscoveredProcessState, "reason"> {
+  reason: "pre-existing-unowned";
 }
 
 export type ArtifactClassification =
@@ -112,6 +120,7 @@ export interface ContainmentAuditReport {
   unownedTempEntries: string[];
   managedProcesses: ManagedProcessState[];
   discoveredProcesses: DiscoveredProcessState[];
+  preexistingUnownedProcesses: PreexistingUnownedProcessState[];
   holds: string[];
   telemetryErrors: string[];
   /** Retained evidence from pre-runner/legacy suites; never a runnable run. */
@@ -148,6 +157,13 @@ interface TelemetryManifestCheck {
   error?: string;
 }
 
+function preexistingProcessBaselinesMatch(
+  left: TestRunPreexistingProcessBaseline | undefined,
+  right: TestRunPreexistingProcessBaseline | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function checkTelemetryManifest(entry: TestRunTelemetry, repoRoot: string): TelemetryManifestCheck {
   if (!existsSync(entry.manifestPath)) return { state: "missing", error: "manifest is missing" };
   try {
@@ -158,7 +174,8 @@ function checkTelemetryManifest(entry: TestRunTelemetry, repoRoot: string): Tele
       && resolve(manifest.manifestPath) === resolve(entry.manifestPath)
       && manifest.ports.api === entry.ports.api
       && manifest.ports.dashboard === entry.ports.dashboard
-      && manifest.ports.fixture === entry.ports.fixture;
+      && manifest.ports.fixture === entry.ports.fixture
+      && preexistingProcessBaselinesMatch(manifest.preexistingProcessBaseline, entry.preexistingProcessBaseline);
     if (!identityMatches) {
       return { state: "invalid", error: "manifest identity does not match telemetry" };
     }
@@ -218,10 +235,12 @@ export function classifyPortOwnership(input: {
   listening: boolean;
   managedPorts: ReadonlySet<number>;
   fixtureOwnedPorts: ReadonlySet<number>;
+  preexistingUnownedPorts: ReadonlySet<number>;
   composeOwnership: ComposeOwnershipReport;
 }): PortOwnership {
   if (!input.listening) return "unowned";
   if (input.fixtureOwnedPorts.has(input.port)) return "fixture-owned";
+  if (input.preexistingUnownedPorts.has(input.port)) return "pre-existing-unowned";
   if (input.composeOwnership.classification === "compose-owned"
     && input.composeOwnership.hostPorts.includes(input.port)) {
     return "compose-owned";
@@ -236,6 +255,7 @@ async function auditPorts(
   ports: number[],
   managedPorts: Set<number>,
   fixtureOwnedPorts: Set<number>,
+  preexistingUnownedPorts: Set<number>,
   composeOwnership: ComposeOwnershipReport,
   portProbe: (port: number) => Promise<boolean> = isListening,
 ): Promise<PortState[]> {
@@ -250,6 +270,7 @@ async function auditPorts(
         listening,
         managedPorts,
         fixtureOwnedPorts,
+        preexistingUnownedPorts,
         composeOwnership,
       }),
     };
@@ -612,97 +633,16 @@ function pathIsInside(parent: string, child: string): boolean {
   return fromParent === "" || (!fromParent.startsWith("..") && !isAbsolute(fromParent));
 }
 
-function readProcNonce(pid: number): string | undefined {
-  try {
-    const environ = readFileSync(`/proc/${pid}/environ`, "utf8");
-    return environ.split("\u0000")
-      .find((entry) => entry.startsWith("INGENIUM_TEST_RUN_NONCE="))
-      ?.slice("INGENIUM_TEST_RUN_NONCE=".length);
-  } catch {
-    return undefined;
-  }
-}
-
-function readListeningInodes(): Map<string, number[]> {
-  const inodes = new Map<string, number[]>();
-  if (process.platform === "win32") return inodes;
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
-    try {
-      const lines = readFileSync(file, "utf8").trim().split("\n").slice(1);
-      for (const line of lines) {
-        const fields = line.trim().split(/\s+/);
-        if (fields.length < 10 || fields[3] !== "0A") continue;
-        const portText = fields[1]?.split(":")[1];
-        const port = portText ? Number.parseInt(portText, 16) : Number.NaN;
-        const inode = fields[9];
-        if (!Number.isInteger(port) || port < 1 || port > 65535 || !inode || !/^\d+$/.test(inode)) continue;
-        const ports = inodes.get(inode) ?? [];
-        if (!ports.includes(port)) ports.push(port);
-        inodes.set(inode, ports);
-      }
-    } catch {
-      // /proc/net may be unavailable in a restricted audit environment. The
-      // process identity scan remains read-only and still reports nonce-bound
-      // candidates.
-    }
-  }
-  return inodes;
-}
-
-function listeningPortsForPid(pid: number, inodes: Map<string, number[]>): number[] {
-  const ports = new Set<number>();
-  try {
-    for (const fd of readdirSync(`/proc/${pid}/fd`)) {
-      let target: string;
-      try {
-        target = readlinkSync(`/proc/${pid}/fd/${fd}`);
-      } catch {
-        continue;
-      }
-      const match = /^socket:\[(\d+)\]$/.exec(target);
-      if (!match) continue;
-      for (const port of inodes.get(match[1]!) ?? []) ports.add(port);
-    }
-  } catch {
-    // A disappearing process or a protected fd directory is not a reason to
-    // signal anything. The candidate is simply omitted unless its nonce is
-    // independently visible.
-  }
-  return [...ports].sort((left, right) => left - right);
-}
-
-function repositoryProcessCandidate(
-  repoRoot: string,
-  pid: number,
-  listeningInodes: Map<string, number[]>,
-): DiscoveredProcessState | undefined {
-  if (pid <= 1 || pid === process.pid) return undefined;
-  const identity = inspectProcessIdentity(pid);
-  if (!identity) return undefined;
-  let cwd: string;
-  let executable: string;
-  let commandLine: string[] = [];
-  try {
-    cwd = realpathSync(`/proc/${pid}/cwd`);
-    executable = realpathSync(`/proc/${pid}/exe`);
-    commandLine = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\u0000").filter(Boolean);
-  } catch {
-    return undefined;
-  }
-  const commandPathCandidate = commandLine.some((argument) => isAbsolute(argument) && pathIsInside(repoRoot, argument));
-  if (!pathIsInside(repoRoot, cwd) && !pathIsInside(repoRoot, executable) && !commandPathCandidate) return undefined;
-  const listeningPorts = listeningPortsForPid(pid, listeningInodes);
-  const runNonce = identity.runNonce ?? readProcNonce(pid);
-  if (listeningPorts.length === 0 && !runNonce) return undefined;
+function discoveredProcessState(candidate: RepositoryProcessCandidate): DiscoveredProcessState {
   return {
-    pid,
-    pidStartTime: identity.pidStartTime,
-    pgid: identity.pgid,
-    groupIdentity: identity.groupIdentity,
-    cwd,
-    executable,
-    ...(runNonce ? { runNonce } : {}),
-    listeningPorts,
+    pid: candidate.pid,
+    pidStartTime: candidate.pidStartTime,
+    pgid: candidate.pgid,
+    groupIdentity: candidate.groupIdentity,
+    cwd: candidate.cwd,
+    executable: candidate.executable,
+    ...(candidate.runNonce ? { runNonce: candidate.runNonce } : {}),
+    listeningPorts: candidate.listeningPorts,
     reason: "manifestless-candidate",
   };
 }
@@ -713,19 +653,7 @@ function repositoryProcessCandidate(
  * or a run nonce. Manifest ownership is intentionally resolved by the caller.
  */
 export function discoverRepositoryProcesses(repoRoot: string): DiscoveredProcessState[] {
-  if (process.platform === "win32") return [];
-  const listeningInodes = readListeningInodes();
-  const discovered: DiscoveredProcessState[] = [];
-  try {
-    for (const entry of readdirSync("/proc", { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
-      const candidate = repositoryProcessCandidate(repoRoot, Number(entry.name), listeningInodes);
-      if (candidate) discovered.push(candidate);
-    }
-  } catch {
-    return discovered;
-  }
-  return discovered;
+  return discoverRepositoryProcessCandidates(repoRoot).map(discoveredProcessState);
 }
 
 export const discoverManifestlessProcesses = discoverRepositoryProcesses;
@@ -744,6 +672,33 @@ function isHistoricalInertTelemetry(
   if (Date.now() - Date.parse(entry.updatedAt) < HISTORICAL_INERT_EVIDENCE_AFTER_MS) return false;
   if (entry.activeProcesses.some((record) => inspectManagedProcess(record, entry.runNonce).state !== "exited")) return false;
   return Object.values(entry.ports).every((port) => !ports.some((state) => state.port === port && state.listening));
+}
+
+function isTerminallyResolved(entry: TestRunTelemetry): boolean {
+  return entry.status === "complete"
+    && entry.activeProcesses.length === 0
+    && entry.resolution?.status === "resolved";
+}
+
+function baselineMatchesCandidate(
+  baseline: TestRunPreexistingProcessBaseline,
+  candidate: RepositoryProcessCandidate,
+  managedPorts: ReadonlySet<number>,
+): boolean {
+  if (candidate.runNonce !== undefined || candidate.listeningPorts.some((port) => managedPorts.has(port))) {
+    return false;
+  }
+  return baseline.candidates.some((record) => record.pid === candidate.pid
+    && record.pidStartTime === candidate.pidStartTime
+    && record.pgid === candidate.pgid
+    && record.groupIdentity === candidate.groupIdentity
+    && record.executableHash === candidate.executableHash
+    && record.commandHash === candidate.commandHash
+    && JSON.stringify(record.listeningPorts) === JSON.stringify(candidate.listeningPorts));
+}
+
+function preexistingUnownedProcessState(candidate: RepositoryProcessCandidate): PreexistingUnownedProcessState {
+  return { ...discoveredProcessState(candidate), reason: "pre-existing-unowned" };
 }
 
 export async function auditSuiteContainment(options: ContainmentAuditOptions = {}): Promise<ContainmentAuditReport> {
@@ -773,6 +728,25 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   for (const entry of telemetry) {
     for (const port of Object.values(entry.ports)) managedPorts.add(port);
   }
+  const telemetryManifestChecks = new Map(
+    telemetry.map((entry) => [entry, checkTelemetryManifest(entry, repoRoot)]),
+  );
+  const newestTelemetry = telemetry.reduce<TestRunTelemetry | undefined>((latest, entry) => {
+    if (!latest) return entry;
+    const latestTime = Date.parse(latest.updatedAt);
+    const entryTime = Date.parse(entry.updatedAt);
+    if (entryTime > latestTime) return entry;
+    if (entryTime < latestTime) return latest;
+    return getTestRunTelemetryPath(entry).localeCompare(getTestRunTelemetryPath(latest)) > 0 ? entry : latest;
+  }, undefined);
+  const newestManifestCheck = newestTelemetry === undefined
+    ? undefined
+    : telemetryManifestChecks.get(newestTelemetry);
+  const trustedPreexistingBaselines = newestTelemetry?.preexistingProcessBaseline !== undefined
+    && newestManifestCheck?.state === "missing"
+    && isTerminallyResolved(newestTelemetry)
+    ? [newestTelemetry.preexistingProcessBaseline]
+    : [];
   const managedRecords = collectManagedRecords(loadedManifest.manifest, telemetry);
   const managedProcesses = managedRecords.map(({ record, runNonce }) => inspectManagedProcess(record, runNonce));
   const fixtureOwnedPorts = new Set(
@@ -787,12 +761,20 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
       .filter(({ record }) => record.identityState === "provisional")
       .map(({ record, runNonce }) => `${runNonce}:${record.pid}`),
   );
-  const discoveredProcesses = discoverRepositoryProcesses(repoRoot).filter((candidate) =>
+  const unmanagedCandidates = discoverRepositoryProcessCandidates(repoRoot).filter((candidate) =>
     !managedIdentityKeys.has(`${candidate.runNonce ?? ""}:${candidate.pid}:${candidate.pidStartTime}:${candidate.groupIdentity}`)
     && !managedProvisionalSpawns.has(`${candidate.runNonce ?? ""}:${candidate.pid}`));
+  const preexistingUnownedCandidates = unmanagedCandidates.filter((candidate) =>
+    trustedPreexistingBaselines.some((baseline) => baselineMatchesCandidate(baseline, candidate, managedPorts)));
+  const preexistingUnownedPids = new Set(preexistingUnownedCandidates.map((candidate) => candidate.pid));
+  const discoveredProcesses = unmanagedCandidates
+    .filter((candidate) => !preexistingUnownedPids.has(candidate.pid))
+    .map(discoveredProcessState);
+  const preexistingUnownedProcesses = preexistingUnownedCandidates.map(preexistingUnownedProcessState);
   const holds = discoveredProcesses.map((candidate) =>
     `manifestless candidate ${candidate.pid} listening on ${candidate.listeningPorts.join(",") || "no recorded port"}`);
-  const discoveredPorts = discoveredProcesses.flatMap((candidate) => candidate.listeningPorts);
+  const discoveredPorts = unmanagedCandidates.flatMap((candidate) => candidate.listeningPorts);
+  const preexistingUnownedPorts = new Set(preexistingUnownedCandidates.flatMap((candidate) => candidate.listeningPorts));
   const expectedOciRevision = process.env.INGENIUM_AUDIT_OCI_REVISION?.trim() || undefined;
   const composeOwnership = options.composeOwnership ?? inspectComposeOwnership({
     repoRoot,
@@ -802,6 +784,7 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     [...new Set([...parsePorts(), ...managedPorts, ...discoveredPorts, ...composeOwnership.hostPorts])],
     managedPorts,
     fixtureOwnedPorts,
+    preexistingUnownedPorts,
     composeOwnership,
     options.portProbe,
   );
@@ -814,7 +797,7 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   const rssLimit = Number(process.env.INGENIUM_AUDIT_RSS_LIMIT ?? DEFAULT_RSS_LIMIT);
   const selectedManifestPath = options.manifestPath ?? process.env[TEST_RUN_MANIFEST_ENV];
   const telemetryReport = telemetry.map((entry) => {
-    const manifestCheck = checkTelemetryManifest(entry, repoRoot);
+    const manifestCheck = telemetryManifestChecks.get(entry)!;
     const path = getTestRunTelemetryPath(entry);
     const evidenceDisposition: TelemetryEvidenceDisposition = isHistoricalInertTelemetry(
       entry,
@@ -854,12 +837,15 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     unownedTempEntries: tempAudit.manifestless,
     managedProcesses,
     discoveredProcesses,
+    preexistingUnownedProcesses,
     holds,
     telemetryErrors,
     legacyEvidence,
     informational: [
       ...legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
       ...inertHistoricalEvidence,
+      ...preexistingUnownedProcesses.map((candidate) =>
+        `pre-existing unowned candidate retained: ${candidate.pid} listening on ${candidate.listeningPorts.join(",")}`),
       ...tempAudit.manifestless.map((path) => `manifestless temp evidence retained (unowned, not deleted): ${path}`),
     ],
     artifactClassifications,
@@ -888,11 +874,12 @@ export function strictFailures(report: ContainmentAuditReport, manifestError?: s
   if (report.telemetryErrors.length > 0) failures.push(`telemetry: ${report.telemetryErrors.join("; ")}`);
   const openPorts = report.ports
     // A raw expected-port setting is not ownership proof. A listener is
-    // accepted only after the fixture identity or the exact Compose container
-    // inspection has bound it to this repository.
+    // accepted only after fixture/Compose ownership or a stable baseline
+    // identity has bound the exact process and its current listener set.
     .filter((state) => state.listening
       && state.ownership !== "fixture-owned"
-      && state.ownership !== "compose-owned")
+      && state.ownership !== "compose-owned"
+      && state.ownership !== "pre-existing-unowned")
     .map((state) => state.port);
   if (openPorts.length > 0) failures.push(`listening ports: ${openPorts.join(", ")}`);
   if (report.tempEntries.length > 0) failures.push(`temp entries: ${report.tempEntries.join(", ")}`);

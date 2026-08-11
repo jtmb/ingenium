@@ -51,13 +51,12 @@ beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-llm-config-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
 
+  const globalProjectId = projects.createProject("global-default", true).id;
   projectName = "llm-config-test-project";
   projects.createProject(projectName);
-  projects.setProjectGlobal(projectName, true);
-  const projectId = projects.getProject(projectName)!.id;
   // Provider credentials are intentionally vault-only. Tests unseal the same
   // encrypted storage the production route requires before supplying a key.
-  expect(vault.initializeVault(projectId, "test-vault-passphrase", "test-vault-passphrase").ok).toBe(true);
+  expect(vault.initializeVault(globalProjectId, "test-vault-passphrase", "test-vault-passphrase").ok).toBe(true);
   vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
   vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
   // Chat config always performs runtime provider discovery. Keep this fixture
@@ -87,8 +86,8 @@ afterAll(async () => {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** POST to /settings/llm-config with a body and return the response. */
-function postLlmConfig(body: Record<string, unknown>) {
-  return fetch(`${baseUrl}/api/v1/settings/llm-config${projectQ()}`, {
+function postLlmConfig(body: Record<string, unknown>, project = projectName) {
+  return fetch(`${baseUrl}/api/v1/settings/llm-config${projectQ(project)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -153,7 +152,7 @@ function runtimeProviderList() {
   } as any;
 }
 
-function setManagedChatCatalog(entries: Array<Record<string, unknown>>, name = projectName): void {
+function setManagedChatCatalog(entries: Array<Record<string, unknown>>, name = "global-default"): void {
   settings.setSetting(
     projects.getProject(name)!.id,
     "llm_provider_configs",
@@ -222,6 +221,7 @@ describe("managed provider blocks", () => {
 
     expect(settings.getSetting(projects.getGlobalProject()!.id, "synthesis_provider")).toBe("openai-main");
     expect(settings.getSetting(projects.getGlobalProject()!.id, "synthesis_backup_provider")).toBe("anthropic-backup");
+    expect(settings.getSetting(projects.getProject(projectName)!.id, "llm_provider_configs")).toBeUndefined();
 
     const config = JSON.parse(configs.getConfig(projects.getGlobalProject()!.id, "global")!.content);
     expect(config.provider["openai-main"]).toEqual({
@@ -750,8 +750,9 @@ describe("POST /settings/llm-config — input validation", () => {
 
   it("preserves malformed or empty global config and reports projection failure", async () => {
     const project = projects.getProject(projectName)!;
+    const globalProject = projects.getProject("global-default")!;
     for (const originalContent of ["{ malformed config", ""]) {
-      configs.saveConfig(project.id, "global", originalContent);
+      configs.saveConfig(globalProject.id, "global", originalContent);
 
       const res = await postLlmConfig({
         primary: {
@@ -763,10 +764,10 @@ describe("POST /settings/llm-config — input validation", () => {
 
       expect(res.status).toBe(409);
       expect((await res.json()).error.code).toBe("CONFIG_PROJECTION_FAILED");
-      expect(configs.getConfig(project.id, "global")?.content).toBe(originalContent);
+      expect(configs.getConfig(globalProject.id, "global")?.content).toBe(originalContent);
       expect(settings.getSetting(project.id, "synthesis_model")).not.toBe("must-not-save");
     }
-    configs.saveConfig(project.id, "global", "{}");
+    configs.saveConfig(globalProject.id, "global", "{}");
   });
 });
 
@@ -784,7 +785,7 @@ describe("GET /opencode/chat-config — configured state", () => {
         apiKey: "sk-dont-leak-me",
         endpoint: "https://api.deepseek.com/v1",
       },
-    });
+    }, "global-default");
     expect(postRes.status).toBe(200);
     setManagedChatCatalog([{
       id: "deepseek",
@@ -838,7 +839,7 @@ describe("GET /opencode/chat-config — configured state", () => {
         apiKey: "sk-backup",
         endpoint: "",
       },
-    });
+    }, "global-default");
     setManagedChatCatalog([
       {
         id: "deepseek",
@@ -879,7 +880,7 @@ describe("GET /opencode/chat-config — configured state", () => {
         model: "restart-test-model",
         endpoint: "https://api.openai.com/v1",
       },
-    });
+    }, "global-default");
     expect(postRes.status).toBe(200);
 
     const { body } = await getChatConfig();
@@ -894,7 +895,7 @@ describe("GET /opencode/chat-config — configured state", () => {
         apiKey: "sk-custom",
         endpoint: "https://custom-api.example.com/v1",
       },
-    });
+    }, "global-default");
     setManagedChatCatalog([{
       id: "ingenium-primary",
       name: "Custom",

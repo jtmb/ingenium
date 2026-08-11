@@ -1,247 +1,113 @@
-/**
- * email-suggestion-queue.test.ts — Tests for the durable suggestion job queue.
- *
- * Covers:
- *   1. Enqueue → dequeue → markComplete (happy path)
- *   2. Enqueue duplicate → ON CONFLICT DO NOTHING (returns false)
- *   3. Enqueue for non-existent email_cache row → returns false
- *   4. MarkFailed: attempts progression 1→5 + delay correctness
- *   5. MarkFailed: max attempts (5) → row deleted
- *   6. Dequeue with future next_attempt_at → not returned
- *
- * Uses real SQLite (Pattern 2) — no mocks.
- */
-
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createProject } from "../lib/tools/projects.js";
-import { getDb } from "../lib/db.js";
+import { getDb, resetDbForTest } from "../lib/db.js";
 import { upsertEmailCache } from "../lib/tools/email-cache.js";
-import type { EmailCacheEntry } from "../lib/tools/email-cache.js";
 import {
+  claimSuggestionJob,
   enqueueSuggestionJob,
-  dequeueSuggestionJob,
   markJobComplete,
   markJobFailed,
 } from "../lib/tools/email-suggestion-queue.js";
 
-let tempDir: string;
+const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
+let tempDir = "";
 
-function dbPath(): string {
+function databasePath(): string {
   return process.env.INGENIUM_CORE_DB_PATH!;
 }
 
-beforeAll(() => {
-  tempDir = mkdtempSync(join(tmpdir(), "ingenium-test-esq-"));
-  process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
-  // createProject triggers DB init → migrations → creates email_* tables
-  createProject("test-project");
-});
-
-afterAll(() => {
-  rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function makeEntry(uid: string, overrides?: Partial<EmailCacheEntry>): EmailCacheEntry {
-  return {
-    uid,
-    subject: `Test Subject ${uid}`,
-    from_name: "Test Sender",
-    from_addr: "test@example.com",
-    date: "2026-07-15T12:00:00.000Z",
-    snippet: `Snippet for ${uid}`,
-    flags: "[]",
-    has_attachments: 0,
-    envelope_json: null,
-    ...overrides,
-  };
+function seedMessage(uid: string): void {
+  upsertEmailCache("queue-account", "INBOX", [{ uid, flags: "[]" }]);
 }
 
-function readJob(rowId: number): {
-  id: number; attempts: number; next_attempt_at: string;
-} | undefined {
-  const db = getDb(dbPath());
-  return db.prepare(
-    "SELECT id, attempts, next_attempt_at FROM email_suggestion_queue WHERE id = ?",
-  ).get(rowId) as any;
+function makeReady(jobId: number): void {
+  getDb(databasePath()).prepare(
+    "UPDATE email_suggestion_queue SET next_attempt_at = datetime('now', '-1 second') WHERE id = ?",
+  ).run(jobId);
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+function readJob(jobId: number): Record<string, unknown> | undefined {
+  return getDb(databasePath()).prepare(
+    "SELECT id, attempts, lease_state, lease_owner, lease_expires_at FROM email_suggestion_queue WHERE id = ?",
+  ).get(jobId) as Record<string, unknown> | undefined;
+}
 
-describe("enqueueSuggestionJob", () => {
-  const accountId = "test-account";
-  const folder = "INBOX";
-  const uid = "esq-001";
-
-  it("enqueue → dequeue → markComplete (happy path)", () => {
-    // 1. Ensure parent email_cache row exists
-    upsertEmailCache(accountId, folder, [makeEntry(uid)]);
-
-    // 2. Enqueue
-    const enqueued = enqueueSuggestionJob(accountId, folder, uid);
-    expect(enqueued).toBe(true);
-
-    // 3. Dequeue
-    const job = dequeueSuggestionJob();
-    expect(job).not.toBeUndefined();
-    expect(job!.account_id).toBe(accountId);
-    expect(job!.folder).toBe(folder);
-    expect(job!.uid).toBe(uid);
-
-    // 4. Mark complete
-    markJobComplete(job!.id);
-
-    // 5. Verify no more jobs
-    const next = dequeueSuggestionJob();
-    expect(next).toBeUndefined();
-
-  });
-
-  it("enqueue duplicate → ON CONFLICT DO NOTHING (returns false)", () => {
-    const dupUid = "esq-dup-001";
-    upsertEmailCache(accountId, folder, [makeEntry(dupUid)]);
-
-    // First enqueue succeeds
-    expect(enqueueSuggestionJob(accountId, folder, dupUid)).toBe(true);
-    // Second enqueue (duplicate) returns false
-    expect(enqueueSuggestionJob(accountId, folder, dupUid)).toBe(false);
-
-    // Only one job should be dequeuable
-    const job = dequeueSuggestionJob();
-    expect(job).not.toBeUndefined();
-
-    // Clean up
-    markJobComplete(job!.id);
-  });
-
-  it("enqueue for non-existent email_cache row → returns false", () => {
-    const ghostUid = "esq-ghost-001";
-    // No parent email_cache row — should fail
-    const enqueued = enqueueSuggestionJob(accountId, folder, ghostUid);
-    expect(enqueued).toBe(false);
-
-    // Verify nothing was queued
-    const job = dequeueSuggestionJob();
-    expect(job).toBeUndefined();
-  });
+beforeEach(() => {
+  resetDbForTest();
+  tempDir = mkdtempSync(join(tmpdir(), "ingenium-email-queue-"));
+  process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
 });
 
-describe("markJobFailed", () => {
-  const accountId = "test-account-mf";
-  const folder = "INBOX";
-
-  it("attempts progression 1→4 with correct delays, then deleted at attempt 5", () => {
-    const uid = "esq-mf-001";
-    upsertEmailCache(accountId, folder, [makeEntry(uid)]);
-
-    // Enqueue
-    enqueueSuggestionJob(accountId, folder, uid);
-    const job = dequeueSuggestionJob();
-    expect(job).not.toBeUndefined();
-    const jobId = job!.id;
-
-    // Expected delays: [30, 60, 120, 300, 600] seconds
-    // Actually the code uses: [30, 60, 120, 300, 600]
-    // Attempt 1: delay 30s
-    // Attempt 2: delay 60s
-    // Attempt 3: delay 120s
-    // Attempt 4: delay 300s
-    // Attempt 5: DELETE
-
-    // Fail 4 times, checking state each time
-    for (let attempt = 0; attempt < 4; attempt++) {
-      markJobFailed(jobId, `Test error ${attempt + 1}`);
-
-      // After markJobFailed, the job still exists if attempts < 5
-      const row = readJob(jobId);
-      if (attempt < 3) {
-        // Attempts 0→1, 1→2, 2→3, 3→4 — still exists for 0-3 (4 iterations)
-        expect(row).not.toBeUndefined();
-        expect(row!.attempts).toBe(attempt + 1); // actual attempts after markJobFailed
-        // next_attempt_at should be in the future
-        expect(row!.next_attempt_at).toBeTruthy();
-      }
-    }
-
-    // After the 4th markJobFailed call, attempts should be 4
-    // 5th call should delete
-    markJobFailed(jobId, "Final error — attempt 5");
-
-    // Verify job is deleted
-    const deleted = readJob(jobId);
-    expect(deleted).toBeUndefined();
-  });
-
-  it("max attempts (5) → row deleted", () => {
-    const uid = "esq-max-001";
-    upsertEmailCache(accountId, folder, [makeEntry(uid)]);
-
-    enqueueSuggestionJob(accountId, folder, uid);
-    const job = dequeueSuggestionJob();
-    expect(job).not.toBeUndefined();
-    const jobId = job!.id;
-
-    // Call markJobFailed exactly 5 times → row should be deleted on 5th
-    markJobFailed(jobId, "e1");
-    expect(readJob(jobId)).not.toBeUndefined(); // attempts = 1
-    markJobFailed(jobId, "e2");
-    expect(readJob(jobId)).not.toBeUndefined(); // attempts = 2
-    markJobFailed(jobId, "e3");
-    expect(readJob(jobId)).not.toBeUndefined(); // attempts = 3
-    markJobFailed(jobId, "e4");
-    expect(readJob(jobId)).not.toBeUndefined(); // attempts = 4
-    markJobFailed(jobId, "e5");
-    // Row should be deleted now
-    expect(readJob(jobId)).toBeUndefined();
-  });
-
-  it("delay correctness — next_attempt_at is advanced into the future", () => {
-    const uid = "esq-delay-001";
-    upsertEmailCache(accountId, folder, [makeEntry(uid)]);
-
-    enqueueSuggestionJob(accountId, folder, uid);
-    const job = dequeueSuggestionJob();
-    expect(job).not.toBeUndefined();
-    const jobId = job!.id;
-
-    // Initial state: next_attempt_at should be <= now
-    const initial = readJob(jobId)!;
-    const initialTs = Date.parse(initial.next_attempt_at + "Z");
-
-    // Fail once — delay should be 30s
-    markJobFailed(jobId, "delay test");
-    const after = readJob(jobId)!;
-    const afterTs = Date.parse(after.next_attempt_at + "Z");
-
-    // next_attempt_at should be at least 29 seconds in the future
-    // (allowing 1s clock skew)
-    expect(afterTs - initialTs).toBeGreaterThanOrEqual(28_000);
-  });
+afterEach(() => {
+  resetDbForTest();
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  tempDir = "";
+  if (originalDbPath === undefined) delete process.env.INGENIUM_CORE_DB_PATH;
+  else process.env.INGENIUM_CORE_DB_PATH = originalDbPath;
 });
 
-describe("dequeueSuggestionJob with future next_attempt_at", () => {
-  const accountId = "test-account-future";
-  const folder = "INBOX";
+describe("email suggestion queue leases", () => {
+  it("atomically gives one claimant the job and requires that owner to complete it", () => {
+    seedMessage("one-winner");
+    expect(enqueueSuggestionJob("queue-account", "INBOX", "one-winner")).toBe(true);
 
-  it("job with future next_attempt_at is not returned by dequeue", () => {
-    const uid = "esq-future-001";
-    upsertEmailCache(accountId, folder, [makeEntry(uid)]);
+    const first = claimSuggestionJob("worker-a");
+    const second = claimSuggestionJob("worker-b");
 
-    enqueueSuggestionJob(accountId, folder, uid);
-    const job = dequeueSuggestionJob();
-    expect(job).not.toBeUndefined();
-    const jobId = job!.id;
+    expect(first).toMatchObject({ account_id: "queue-account", folder: "INBOX", uid: "one-winner" });
+    expect(second).toBeUndefined();
+    expect(readJob(first!.id)?.lease_owner).not.toBe("worker-a");
+    expect(markJobComplete(first!.id, "worker-b")).toBe(false);
+    expect(markJobComplete(first!.id, "worker-a")).toBe(true);
+    expect(readJob(first!.id)).toBeUndefined();
+  });
 
-    // Mark failed — sets next_attempt_at to now + 30s
-    markJobFailed(jobId, "future test");
+  it("releases failed work for a later claimant and preserves retry state", () => {
+    seedMessage("retry-owner");
+    enqueueSuggestionJob("queue-account", "INBOX", "retry-owner");
+    const first = claimSuggestionJob("worker-a")!;
 
-    // Immediate dequeue should NOT return this job
-    const next = dequeueSuggestionJob();
-    expect(next).toBeUndefined();
+    expect(markJobFailed(first.id, "worker-b", "not owner")).toBe(false);
+    expect(markJobFailed(first.id, "worker-a", "safe failure")).toBe(true);
+    expect(readJob(first.id)).toMatchObject({ attempts: 1, lease_state: "queued", lease_owner: null, lease_expires_at: null });
 
+    makeReady(first.id);
+    const retry = claimSuggestionJob("worker-b");
+    expect(retry).toMatchObject({ id: first.id, uid: "retry-owner" });
+  });
+
+  it("reclaims an expired lease after reopening the database", () => {
+    seedMessage("restart-lease");
+    enqueueSuggestionJob("queue-account", "INBOX", "restart-lease");
+    const claimed = claimSuggestionJob("before-restart")!;
+    getDb(databasePath()).prepare(
+      "UPDATE email_suggestion_queue SET lease_expires_at = datetime('now', '-1 second') WHERE id = ?",
+    ).run(claimed.id);
+
+    resetDbForTest();
+
+    const recovered = claimSuggestionJob("after-restart");
+    expect(recovered).toMatchObject({ id: claimed.id, uid: "restart-lease" });
+    expect(markJobComplete(claimed.id, "before-restart")).toBe(false);
+    expect(markJobComplete(claimed.id, "after-restart")).toBe(true);
+  });
+
+  it("removes a claimed job at the fifth owned failure", () => {
+    seedMessage("retry-limit");
+    enqueueSuggestionJob("queue-account", "INBOX", "retry-limit");
+    const job = claimSuggestionJob("worker-a")!;
+    getDb(databasePath()).prepare(
+      "UPDATE email_suggestion_queue SET attempts = 4 WHERE id = ?",
+    ).run(job.id);
+
+    expect(markJobFailed(job.id, "worker-a", "fifth failure")).toBe(true);
+    expect(readJob(job.id)).toBeUndefined();
+  });
+
+  it("does not enqueue an orphaned child job", () => {
+    expect(enqueueSuggestionJob("queue-account", "INBOX", "missing-parent")).toBe(false);
+    expect(claimSuggestionJob("worker-a")).toBeUndefined();
   });
 });

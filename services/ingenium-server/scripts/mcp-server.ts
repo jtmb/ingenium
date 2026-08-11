@@ -9,7 +9,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { apiRequestHeaders, config } from "../config/index.js";
+import { config } from "../config/index.js";
+import { api, ApiHttpError, ApiUnavailableError } from "../lib/client.js";
 import { logger } from "../lib/logger.js";
 import {
   installToolVisibilityProjection,
@@ -18,10 +19,9 @@ import {
 } from "../lib/tool-visibility.js";
 import {
   getProjectStateAttestation,
+  launcherBoundStateGatedHandler,
   ProjectStateAttestor,
   stateGatedHandler,
-  TOOL_STATE_GATE_CODES,
-  toolStateError,
 } from "../lib/tool-state-gate.js";
 import {
   ChildMcpGateway,
@@ -59,6 +59,7 @@ import * as ragTools from "../lib/tools/rag.js";
 import * as providerTools from "../lib/tools/providers.js";
 import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
+import { repositorySync } from "../lib/tools/repository.js";
 
 const projectStateAttestor = new ProjectStateAttestor();
 const observationSourceSchema = z.enum([
@@ -83,15 +84,11 @@ async function checkToolEnabled(
   project: string,
 ): Promise<"enabled" | "disabled" | "unavailable"> {
   try {
-    const res = await fetch(`${config.apiUrl}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`, {
-      headers: apiRequestHeaders(),
-    });
+    const res = await api.settled.getToolState(toolName, project);
     if (!res.ok) return "unavailable";
-    const response = await res.json();
-    const data = response?.data ?? response;
-    if (!projectStateAttestor.attest(project, response)
-      || typeof data?.enabled !== "boolean") return "unavailable";
-    return data.enabled ? "enabled" : "disabled";
+    if (!projectStateAttestor.attest(project, res.payload)
+      || typeof res.data?.enabled !== "boolean") return "unavailable";
+    return res.data.enabled ? "enabled" : "disabled";
   } catch {
     return "unavailable";
   }
@@ -136,13 +133,7 @@ function wrapLauncherBoundHandler(
   launcherProject: string | null,
   handler: (args: any) => Promise<any>,
 ) {
-  const stateChecked = wrapHandler(toolName, handler);
-  return async (args: any) => {
-    if (!launcherProject || args?.project !== launcherProject) {
-      return toolStateError(TOOL_STATE_GATE_CODES.project, "The requested project does not match the launcher binding.");
-    }
-    return stateChecked(args);
-  };
+  return launcherBoundStateGatedHandler(toolName, launcherProject, checkToolEnabled, handler);
 }
 
 /**
@@ -159,13 +150,13 @@ interface CategorizedToolState {
 
 const toolVisibilityApi: ToolVisibilityApi = {
   async listToolStates(project) {
-    const response = await fetch(`${config.apiUrl}/mcp-tools?project=${encodeURIComponent(project)}&include_categories=true`, {
-      headers: apiRequestHeaders(),
+    const response = await api.settled.get("/mcp-tools", {
+      project,
+      include_categories: "true",
     });
     if (!response.ok) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
-    const payload = await response.json();
-    const data = payload?.data ?? payload;
-    const attestation = getProjectStateAttestation(payload, project);
+    const data = response.data;
+    const attestation = getProjectStateAttestation(response.payload, project);
     if (!attestation
       || !Array.isArray(data)) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
     const states = new Map<string, boolean>();
@@ -190,14 +181,41 @@ const projectParam = z.string().min(1).max(64).refine(
   (value) => resolveChildMcpProjectIdentity(value) !== null,
   "A valid project identity is required",
 );
+const repositoryDocEntryParam = z.object({
+  path: z.string().min(1).max(512),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  content: z.string().max(512 * 1024),
+  fileType: z.literal("regular"),
+  isSymlink: z.literal(false),
+}).strict();
+const repositoryDocsManifestParam = z.object({
+  files: z.array(repositoryDocEntryParam).max(256),
+}).strict();
+const repositoryResourcesManifestParam = z.object({
+  version: z.literal(2),
+  skills: z.array(z.record(z.unknown())).max(512),
+  agents: z.array(z.record(z.unknown())).max(512),
+  plugins: z.array(z.record(z.unknown())).max(512),
+}).strict().superRefine((manifest, context) => {
+  if (manifest.skills.length + manifest.agents.length + manifest.plugins.length > 512) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
+  }
+});
 const jobVaultItemIdsParam = z.array(z.string().uuid()).max(16).refine(
   (itemIds) => new Set(itemIds).size === itemIds.length,
   "vault_item_ids must be unique",
 );
+const projectRetentionDaysParam = z.number().finite().int().min(0).max(3_650);
+const jobTimeoutMinutesParam = z.number().finite().int().min(1).max(1_440);
 const jobUpdateFieldsParam = z.record(z.unknown()).superRefine((fields, context) => {
-  if (!("vault_item_ids" in fields)) return;
-  const result = jobVaultItemIdsParam.safeParse(fields.vault_item_ids);
-  if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "vault_item_ids must be an array of up to 16 unique UUIDs" });
+  if ("vault_item_ids" in fields) {
+    const result = jobVaultItemIdsParam.safeParse(fields.vault_item_ids);
+    if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "vault_item_ids must be an array of up to 16 unique UUIDs" });
+  }
+  if ("timeout_minutes" in fields) {
+    const result = jobTimeoutMinutesParam.safeParse(fields.timeout_minutes);
+    if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "timeout_minutes must be an integer between 1 and 1440" });
+  }
 });
 const launcherProject = resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT);
 const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";
@@ -247,6 +265,21 @@ server.registerTool(
   "setting_test_llm",
   { description: "Test the configured synthesis LLM connection.", inputSchema: { project: projectParam } },
   wrapHandler(C("setting_test_llm"), async ({ project }) => settingTestLlm(project)),
+);
+
+server.registerTool(
+  "repository_sync",
+  {
+    description: "Synchronize a repository-authoritative docs and resource manifest through the API.",
+    inputSchema: {
+      project: projectParam,
+      docsManifest: repositoryDocsManifestParam,
+      resourcesManifest: repositoryResourcesManifestParam.optional(),
+      dryRun: z.boolean().optional(),
+    },
+  },
+  wrapLauncherBoundHandler(C("repository_sync"), launcherProject, async ({ project, docsManifest, resourcesManifest, dryRun }) =>
+    repositorySync(project, docsManifest, resourcesManifest, dryRun)),
 );
 
 server.registerTool(
@@ -465,10 +498,34 @@ server.registerTool(
 server.registerTool(
   "skill_proposal_list",
   {
-    description: "List all skill proposals for a project, optionally filtered by status (draft/pending/rejected/applied/rolled_back/stale).",
+    description: "Deprecated compatibility tool. It returns SKILL_PROPOSAL_LIST_RETIRED; use skill_proposal_page and skill_proposal_counts.",
     inputSchema: { project: projectParam, status: z.enum(["draft", "pending", "rejected", "applied", "rolled_back", "stale"]).optional() },
   },
   wrapHandler(C("skill_proposal_list"), async ({ project, status }) => skillTools.skillProposalList(project, status)),
+);
+
+server.registerTool(
+  "skill_proposal_page",
+  {
+    description: "Read one bounded page of open or history skill proposals.",
+    inputSchema: {
+      project: projectParam,
+      view: skillTools.skillProposalPageViewSchema,
+      limit: skillTools.skillProposalPageLimitSchema.optional(),
+      cursor: skillTools.skillProposalPageCursorSchema.optional(),
+    },
+  },
+  wrapHandler(C("skill_proposal_page"), async ({ project, view, limit, cursor }) =>
+    skillTools.skillProposalPage(project, view, limit, cursor)),
+);
+
+server.registerTool(
+  "skill_proposal_counts",
+  {
+    description: "Get scoped counts for skill proposals.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("skill_proposal_counts"), async ({ project }) => skillTools.skillProposalCounts(project)),
 );
 
 server.registerTool(
@@ -1421,13 +1478,13 @@ server.registerTool(
 
 server.registerTool(
   "project_purge",
-  { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: z.number().optional() } },
+  { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: projectRetentionDaysParam.optional() } },
   wrapHandler(C("project_purge"), async ({ project, retentionDays }) => projectTools.projectPurge(project, retentionDays)),
 );
 
 server.registerTool(
   "project_set_global",
-  { description: "Mark a project as global (or unmark).", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } },
+  { description: "Forward an API-enforced global lifecycle request.", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } },
   wrapHandler(C("project_set_global"), async ({ project, name, isGlobal }) => projectTools.projectSetGlobal(project, name, isGlobal)),
 );
 
@@ -1974,7 +2031,7 @@ server.registerTool(
       uid: z.number(),
       attachmentId: z.string(),
       folder: z.string().optional(),
-      outputPath: z.string().optional(),
+      outputPath: z.string().min(1),
     },
   },
   wrapHandler(C("email_attachment_get"), async ({ project, account, uid, attachmentId, folder, outputPath }) =>
@@ -1999,7 +2056,7 @@ server.registerTool(
       prompt_template: z.string(),
       schedule_cron: z.string().optional(),
       trigger_event: z.string().optional(),
-      timeout_minutes: z.number().optional(),
+      timeout_minutes: jobTimeoutMinutesParam.optional(),
       vault_item_ids: jobVaultItemIdsParam.optional(),
     },
   },
@@ -2178,16 +2235,17 @@ server.registerTool(
     description: "Get aggregated dashboard summary — learning stats, task counts, job counts, and mail status.",
     inputSchema: { project: projectParam },
   },
-  // NOTE: Uses bare fetch instead of the retrying `api` client because the summary
-  // endpoint aggregates from multiple sources and may be slower — the standard
-  // 10s timeout + 3 retries could cascade under load. A single quick failure is
-  // preferred over delaying the dashboard render.
+  // The aggregate remains a single no-retry request so a partial outage cannot
+  // hold the MCP call open across the normal safe-request retry window.
   wrapHandler(C("dashboard_summary"), async ({ project }) => {
-    const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
-    const url = new URL("dashboard/summary", apiBase);
-    url.searchParams.set("project", project);
-    const res = await fetch(url.toString(), { headers: apiRequestHeaders() });
-    const data = await res.json();
+    const res = await api.settled.getRaw("/dashboard/summary", { project });
+    if (!res.ok) throw new ApiHttpError(res.status, "API_REQUEST_FAILED", "The API request failed.");
+    let data: unknown;
+    try {
+      data = await res.response.json();
+    } catch {
+      throw new ApiUnavailableError();
+    }
     return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
   }),
 );

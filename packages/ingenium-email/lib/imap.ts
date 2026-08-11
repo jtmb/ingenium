@@ -23,7 +23,7 @@ import type {
   SearchQuery,
 } from "./types.js";
 import { parseRawEmail } from "./parser.js";
-import { PROVIDERS } from "./providers.js";
+import { resolveProviderEndpoints } from "./providers.js";
 import type { ProviderConfig } from "./providers.js";
 import { ProviderOperationError, providerErrorDiagnostic, sanitizeProviderError } from "./provider-errors.js";
 
@@ -45,7 +45,7 @@ const connectingLocks = new Map<string, Promise<ImapFlow>>();
 
 /** Resolve the provider configuration for an account (IMAP/SMTP defaults). */
 function getProviderConfig(account: EmailAccount): ProviderConfig {
-  return PROVIDERS[account.provider];
+  return resolveProviderEndpoints(account);
 }
 
 /**
@@ -126,8 +126,7 @@ export async function connectAccount(
   // ── Create connection with mutex guard ────────────────────────────
   const connectPromise = (async () => {
     const config = getProviderConfig(account);
-    const host = account.imapHost || config.imap.host;
-    const port = account.imapPort || config.imap.port;
+    const { host, port } = config.imap;
 
     let client: ImapFlow;
     try {

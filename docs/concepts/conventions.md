@@ -30,6 +30,11 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 ## DB Isolation
 - Only `packages/ingenium-core` and `services/ingenium-api` may import SQL libraries
 - CI enforces: `grep -r "better-sqlite3\|\.db\|sqlite" services/ingenium-server/` must return empty
+- Git-authoritative external-worktree synchronization is exactly Git worktree →
+  `@ingenium/extension` resource-sync → configured MCP stdio → authenticated API
+  → database. Runtime consumers never import core, read/write DB files, or call
+  mutation REST endpoints directly. Administrative skill sync tools are repair/
+  import operations only; use the API boundary for any such repair.
 
 ## API-First Frontend
 - Dashboard imports ZERO core/server code. All data via HTTP to API.
@@ -51,7 +56,7 @@ Observations are primarily created by the server-side extraction engine (Phase 0
 
 The self-learning pipeline uses **observations** instead of the deprecated `ingenium_learning_log` tool.
 
-Observations are **DB-primary** with a **file fallback**: if the API is down, observations append to `.opencode/skills/observations.md`. On the next session start, `importObservationsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
+Observations are **server-recorded** with a file fallback: if the API is down, observations append to `.opencode/skills/observations.md`. On the next session start, `importObservationsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
 
 **Observation types** (Zod schema, `packages/ingenium-core/lib/schema.ts`):
 
@@ -100,8 +105,9 @@ Every skill in the DB has a `file_tree` column (TEXT, JSON map of relative paths
 - **Writing to disk**: `writeSkillToDisk()` always writes SKILL.md (with YAML frontmatter) + metadata.json, then writes every file in the `file_tree` JSON to the skill directory.
 - **Reading from disk**: `syncSkillFromDisk()` reads SKILL.md + metadata.json, walks the directory tree for all auxiliary files (excluding SKILL.md and metadata.json), and stores them as `file_tree` JSON.
 - **Split-skill format on disk**: Each skill is a directory with `SKILL.md` (main content + YAML frontmatter), `metadata.json` (tags, alwaysApply), and optional `references/` directory for auxiliary docs.
-- **Skills live at `.opencode/skills/`** — edit SKILL.md here, then use the dashboard or `ingenium_skill_sync` to persist changes to the DB.
-- **Runtime copy at `.opencode/skills/`** is automatically written from the DB. Do not edit — changes will be overwritten unless synced back.
+- **Skills live at `.opencode/skills/`** — Git worktree files are projected by the
+  resource-sync plugin through MCP and the authenticated API. Do not run
+  `ingenium_skill_sync*` after edits; those tools are admin repair/import paths.
 
 ## SSR Portal Guard — `createPortal` + `mounted` Pattern
 

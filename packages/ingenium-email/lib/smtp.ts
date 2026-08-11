@@ -11,8 +11,9 @@
  */
 
 import nodemailer from "nodemailer";
+import { simpleParser } from "mailparser";
 import type { EmailAccount, OAuthToken, EmailAddress } from "./types.js";
-import { PROVIDERS } from "./providers.js";
+import { resolveProviderEndpoints } from "./providers.js";
 import { connectAccount } from "./imap.js";
 import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
 
@@ -51,9 +52,8 @@ export async function createTransport(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
 ): Promise<nodemailer.Transporter> {
-  const config = PROVIDERS[account.provider];
-  const host = account.smtpHost || config.smtp.host;
-  const port = account.smtpPort || config.smtp.port;
+  const config = resolveProviderEndpoints(account);
+  const { host, port } = config.smtp;
 
   // Build SMTP options with OAuth2 or password auth
   const smtpOptions: Record<string, unknown> = {
@@ -102,18 +102,7 @@ export async function sendEmail(
 ): Promise<string> {
   try {
     const transport = await createTransport(account, auth);
-    const result = await transport.sendMail({
-      from: `"${account.name}" <${account.email}>`,
-      to: options.to.map((a) => addressString(a)),
-      cc: options.cc?.map((a) => addressString(a)),
-      bcc: options.bcc?.map((a) => addressString(a)),
-      subject: options.subject,
-      html: options.html,
-      text: options.text,
-      attachments: options.attachments,
-      inReplyTo: options.inReplyTo,
-      references: options.references,
-    });
+    const result = await transport.sendMail(buildMessage(account, options));
     return result.messageId;
   } catch (error: unknown) {
     throw sanitizeProviderError(error, "smtp");
@@ -121,32 +110,65 @@ export async function sendEmail(
 }
 
 /**
- * Save a draft by sending via SMTP, then appending a copy to the Drafts IMAP folder.
- *
- * Two-step approach because there's no universal "save draft" SMTP command:
- *   1. Send the message via SMTP (so it gets a Message-ID and is deliverable)
- *   2. Append a raw copy to the IMAP Drafts folder with \\Draft flag
- *
- * If the IMAP append fails, the draft was still sent — non-fatal, logged but not thrown.
+ * Save a draft by generating RFC822 locally and appending it to Drafts via IMAP.
  */
 export async function saveDraft(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
   options: SendOptions,
 ): Promise<string> {
-  const messageId = await sendEmail(account, auth, options);
-
-  // Also append to Drafts folder via IMAP
-  try {
-    const client = await connectAccount(account, auth);
-    // Build a raw MIME message from options
-    const raw = buildDraftRaw(account, options, messageId);
-    await client.append("Drafts", raw, ["\\Draft"]);
-  } catch {
-    // Non-fatal: draft still sent via SMTP
+  if (!await hasValidRecipients(options.to, true)
+    || !await hasValidRecipients(options.cc, false)
+    || !await hasValidRecipients(options.bcc, false)) {
+    throw new ProviderOperationError("PROVIDER_REJECTED", "imap", false);
   }
 
-  return messageId;
+  try {
+    const draftTransport = nodemailer.createTransport({
+      streamTransport: true,
+      buffer: true,
+      newline: "windows",
+    });
+    const result = await draftTransport.sendMail(buildMessage(account, options));
+    const message = (result as { message?: Buffer | string }).message;
+    if (!message) throw new ProviderOperationError("PROVIDER_ERROR", "imap", true);
+
+    const client = await connectAccount(account, auth);
+    await client.append("Drafts", Buffer.isBuffer(message) ? message : Buffer.from(message), ["\\Draft"]);
+    return result.messageId;
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "imap");
+  }
+}
+
+async function hasValidRecipients(
+  recipients: EmailAddress[] | undefined,
+  required: boolean,
+): Promise<boolean> {
+  if (!Array.isArray(recipients)) return !required;
+  if (required && recipients.length === 0) return false;
+
+  for (const recipient of recipients) {
+    if (!recipient || typeof recipient.address !== "string") return false;
+    const address = recipient.address.trim();
+    if (!address || /[\r\n]/.test(address)) return false;
+
+    try {
+      // Delegate RFC 2822 parsing to mailparser rather than maintaining an address regex.
+      const parsed = await simpleParser(`To: ${address}\r\n\r\n`);
+      const parsedRecipients = parsed.to?.value ?? [];
+      if (parsedRecipients.length !== 1
+        || !parsedRecipients[0]?.address
+        || !address.includes("@")
+        || parsedRecipients[0].address.trim().toLowerCase() !== address.toLowerCase()) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /** Format an EmailAddress as a display string (quoted display name if present). */
@@ -154,23 +176,20 @@ function addressString(a: EmailAddress): string {
   return a.name ? `"${a.name}" <${a.address}>` : a.address;
 }
 
-/** Build a minimal raw RFC822 draft message from options for IMAP append. */
-function buildDraftRaw(
+function buildMessage(
   account: EmailAccount,
   options: SendOptions,
-  messageId: string,
-): string {
-  const lines: string[] = [];
-  lines.push(`From: "${account.name}" <${account.email}>`);
-  lines.push(`To: ${options.to.map((a) => addressString(a)).join(", ")}`);
-  if (options.cc?.length) lines.push(`Cc: ${options.cc.map((a) => addressString(a)).join(", ")}`);
-  lines.push(`Subject: ${options.subject}`);
-  lines.push(`Message-ID: ${messageId}`);
-  if (options.inReplyTo) lines.push(`In-Reply-To: ${options.inReplyTo}`);
-  if (options.references) lines.push(`References: ${options.references}`);
-  lines.push("MIME-Version: 1.0");
-  lines.push('Content-Type: text/html; charset="UTF-8"');
-  lines.push("");
-  lines.push(options.html ?? options.text ?? "");
-  return lines.join("\r\n");
+): Parameters<nodemailer.Transporter["sendMail"]>[0] {
+  return {
+    from: `"${account.name}" <${account.email}>`,
+    to: options.to.map((address) => addressString(address)),
+    cc: options.cc?.map((address) => addressString(address)),
+    bcc: options.bcc?.map((address) => addressString(address)),
+    subject: options.subject,
+    html: options.html,
+    text: options.text,
+    attachments: options.attachments,
+    inReplyTo: options.inReplyTo,
+    references: options.references,
+  };
 }

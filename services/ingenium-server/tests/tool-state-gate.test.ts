@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ProjectStateAttestor,
+  launcherBoundStateGatedHandler,
   responseProjectMatches,
   stateGatedHandler,
   TOOL_STATE_GATE_CODES,
@@ -50,6 +51,36 @@ describe("stateGatedHandler", () => {
     });
     expect(checkState).toHaveBeenCalledWith("ingenium_project_detail", "launcher-project");
     expect(handler).toHaveBeenCalledWith({ name: "target-project" });
+  });
+
+  it("rejects foreign projects and checks disabled launcher-bound calls against only the launcher project", async () => {
+    const handler = vi.fn(async (args) => ({ content: [{ type: "text", text: args.project }] }));
+    const checkState = vi.fn(async () => "disabled" as const);
+    const gated = launcherBoundStateGatedHandler(
+      "ingenium_repository_sync",
+      "launcher-project",
+      checkState,
+      handler,
+    );
+
+    await expect(gated({ project: "foreign-project" })).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringContaining(TOOL_STATE_GATE_CODES.project) }],
+    });
+    expect(checkState).not.toHaveBeenCalled();
+
+    await expect(gated({ project: "launcher-project" })).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringContaining(TOOL_STATE_GATE_CODES.disabled) }],
+    });
+    expect(checkState).toHaveBeenCalledWith("ingenium_repository_sync", "launcher-project");
+    expect(handler).not.toHaveBeenCalled();
+
+    checkState.mockResolvedValueOnce("enabled");
+    await expect(gated({ project: "launcher-project" })).resolves.toMatchObject({
+      content: [{ text: "launcher-project" }],
+    });
+    expect(handler).toHaveBeenCalledWith({ project: "launcher-project" });
   });
 
   it("requires exact project and project_id attestations, then binds each name immutably", () => {

@@ -63,6 +63,7 @@ vi.mock("../src/app/components/Overlay", () => ({
 }));
 
 import BoardView from "../src/app/tasks/components/BoardView";
+import ListView from "../src/app/tasks/components/ListView";
 import TaskCreateModal from "../src/app/tasks/components/TaskCreateModal";
 import TaskDetail from "../src/app/tasks/components/TaskDetail";
 
@@ -135,6 +136,16 @@ describe("Tasks accessibility", () => {
 
     expect(screen.getByRole("combobox", { name: "Move selected tasks to status" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Set selected task priority" })).toBeTruthy();
+  });
+
+  it("uses a native button to enter inline task editing", () => {
+    render(<ListView project="test-project" tasks={[task]} onTasksChange={vi.fn()} />);
+
+    const editTitle = screen.getByRole("button", { name: "Edit Untitled" });
+    expect(editTitle.tagName).toBe("BUTTON");
+    fireEvent.click(editTitle);
+
+    expect(screen.getByDisplayValue("Draft accessible form")).toBeTruthy();
   });
 
   it("associates detail and dependency controls, including safe custom-field ids", async () => {

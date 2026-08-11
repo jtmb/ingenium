@@ -144,7 +144,7 @@ export default function DocsShell({
 
   return (
     <div className="flex flex-col h-full bg-[var(--color-surface)]">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--color-border)] shrink-0 bg-[var(--color-surface)] h-11" role="toolbar" aria-label="Docs workspace toolbar">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-1.5 border-b border-[var(--color-border)] shrink-0 bg-[var(--color-surface)] min-h-11 h-auto lg:flex-nowrap lg:h-11" role="toolbar" aria-label="Docs workspace toolbar">
         {/* Mobile: hamburger to open tree drawer */}
         <button
           type="button"
@@ -231,7 +231,7 @@ export default function DocsShell({
 
         {/* Extra top bar actions slot (e.g., publish/archive control, breadcrumb indicator) */}
         {topBarActions && (
-          <div className="flex items-center gap-1.5 shrink-0">{topBarActions}</div>
+          <div className="flex max-w-full flex-wrap items-center gap-1.5 shrink-0">{topBarActions}</div>
         )}
 
         {/* Right side controls */}

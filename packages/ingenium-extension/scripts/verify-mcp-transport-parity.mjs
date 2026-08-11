@@ -6,13 +6,16 @@ const TRANSPORT_REGISTRATION_PATTERN = /server\.registerTool\(\s*"([^"]+)"\s*,/g
 const CATALOG_NAME_PATTERN = /\bname:\s*"([^"]+)"/g;
 // Current built-in registrations in services/ingenium-server/scripts/mcp-server.ts.
 // Update only with an intentional server/catalog parity change.
-const EXPECTED_TRANSPORT_REGISTRATION_COUNT = 277;
+const EXPECTED_TRANSPORT_REGISTRATION_COUNT = 280;
 const CONTEXT_UPLOAD_TRANSPORT_NAME = "context_upload_file";
 const CONTEXT_UPLOAD_CATALOG_NAME = `ingenium_${CONTEXT_UPLOAD_TRANSPORT_NAME}`;
 const CONTEXT_UPLOAD_SCHEMA_MARKER = "contextUploadFilePathParam";
 const MCP_REPORT_TRANSPORT_NAME = "mcp_report_get";
 const MCP_REPORT_CATALOG_NAME = `ingenium_${MCP_REPORT_TRANSPORT_NAME}`;
 const MCP_REPORT_SCHEMA_MARKER = "mcpReportFilters";
+const REPOSITORY_SYNC_TRANSPORT_NAME = "repository_sync";
+const REPOSITORY_SYNC_CATALOG_NAME = `ingenium_${REPOSITORY_SYNC_TRANSPORT_NAME}`;
+const REPOSITORY_SYNC_SCHEMA_MARKER = "repositoryDocsManifestParam";
 
 function readRequiredFile(path) {
   if (!existsSync(path)) {
@@ -106,6 +109,20 @@ export function assertMcpTransportParity(repositoryRoot) {
     || !catalogNames.has(MCP_REPORT_CATALOG_NAME)) {
     throw new Error(`Required MCP report registration is absent: ${MCP_REPORT_CATALOG_NAME}`);
   }
+
+  if (!serverToolNames.includes(REPOSITORY_SYNC_TRANSPORT_NAME)
+    || !packagedToolNames.includes(REPOSITORY_SYNC_TRANSPORT_NAME)
+    || !catalogNames.has(REPOSITORY_SYNC_CATALOG_NAME)) {
+    throw new Error(`Required repository sync registration is absent: ${REPOSITORY_SYNC_CATALOG_NAME}`);
+  }
+  for (const [label, source] of [
+    ["server source", serverTransport],
+    ["packaged transport", packagedTransport],
+  ]) {
+    if (!source.includes(REPOSITORY_SYNC_SCHEMA_MARKER)) {
+      throw new Error(`Required repository sync schema marker is absent from ${label}: ${REPOSITORY_SYNC_SCHEMA_MARKER}`);
+    }
+  }
   for (const [label, source] of [
     ["server source", serverTransport],
     ["packaged transport", packagedTransport],
@@ -124,6 +141,9 @@ export function assertMcpTransportParity(repositoryRoot) {
     mcpReportTransportName: MCP_REPORT_TRANSPORT_NAME,
     mcpReportCatalogName: MCP_REPORT_CATALOG_NAME,
     mcpReportSchemaMarker: MCP_REPORT_SCHEMA_MARKER,
+    repositorySyncTransportName: REPOSITORY_SYNC_TRANSPORT_NAME,
+    repositorySyncCatalogName: REPOSITORY_SYNC_CATALOG_NAME,
+    repositorySyncSchemaMarker: REPOSITORY_SYNC_SCHEMA_MARKER,
   };
 }
 
@@ -133,7 +153,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.log(
       `MCP transport parity verified: ${result.packagedToolCount} registrations, `
       + `${result.contextUploadCatalogName}, schema ${result.contextUploadSchemaMarker}; `
-      + `${result.mcpReportCatalogName}, schema ${result.mcpReportSchemaMarker}`,
+      + `${result.mcpReportCatalogName}, schema ${result.mcpReportSchemaMarker}; `
+      + `${result.repositorySyncCatalogName}, schema ${result.repositorySyncSchemaMarker}`,
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : "MCP transport parity verification failed");

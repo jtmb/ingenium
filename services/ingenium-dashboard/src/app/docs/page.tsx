@@ -1121,7 +1121,7 @@ function DocsContent() {
   /** Save page content with optimistic revision bump and robust error handling. */
   const handleSave = useCallback(
     async (content: string) => {
-      if (!page) return;
+      if (!page) throw new Error("No page selected");
       // Optimistic revision for snappy UX — the API will provide the authoritative revision
       const prevRevision = page.revision;
       setPage((prev) => prev ? { ...prev, revision: prev.revision + 1 } : prev);
@@ -1137,6 +1137,7 @@ function DocsContent() {
         } else {
           showToast("Failed to save page");
         }
+        throw e;
       }
     },
     [page, showToast],

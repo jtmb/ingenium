@@ -50,7 +50,7 @@ test.describe("Skills Page", () => {
   test("loads with heading, search, and skill cards", async ({ page }) => {
     await goto(page, "/skills");
 
-    await expect(page.getByRole("heading", { name: /^Skills / })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Active Skills/ })).toBeVisible();
 
     await expect(page.getByPlaceholder("Search skills...")).toBeVisible();
 
@@ -79,7 +79,7 @@ test.describe("Skills Page", () => {
     await sortSelect.selectOption("Newest first");
     await waitForClientState(page);
 
-    await expect(page.getByRole("heading", { name: /^Skills / })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Active Skills/ })).toBeVisible();
   });
 });
 

@@ -109,7 +109,7 @@ function isRuntimeDefinition(value: unknown): value is ChildMcpRuntimeDefinition
 /** API adapter that preserves only typed protocol outcomes at the runtime boundary. */
 export const childMcpGatewayApi: ChildMcpGatewayApi = {
   async listRuntimeDefinitions(project) {
-    const response = await api.getTrustedChildMcpRuntime(project);
+    const response = await api.settled.getTrustedChildMcpRuntime(project);
     if (!response.ok || !isRecord(response.data)) {
       throw new Error("CHILD_MCP_RUNTIME_UNAVAILABLE");
     }
@@ -121,7 +121,7 @@ export const childMcpGatewayApi: ChildMcpGatewayApi = {
   },
 
   async recordDiscovery(project, server, report) {
-    const response = await api.post(
+    const response = await api.settled.post(
       `/mcp-servers/${encodeURIComponent(server)}/discovery`,
       report,
       { project },
@@ -131,7 +131,7 @@ export const childMcpGatewayApi: ChildMcpGatewayApi = {
 
   async toolEnabled(project, toolName) {
     try {
-      const response = await api.getToolState(toolName, project);
+      const response = await api.settled.getToolState(toolName, project);
       const attestation = getProjectStateAttestation(response.payload, project);
       if (!response.ok || !attestation || !isRecord(response.data) || typeof response.data.enabled !== "boolean") {
         return { state: "unavailable", attestation: null };

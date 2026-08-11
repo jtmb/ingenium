@@ -11,6 +11,7 @@ import { resolveExtensionProject } from "./project-resolver.js";
 
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
+const serverRoot = join(repositoryRoot, "services", "ingenium-server");
 const dockerfilePath = join(repositoryRoot, "Dockerfile");
 const tscPath = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 const temporaryDirectories: string[] = [];
@@ -41,7 +42,36 @@ function buildCliDistribution(): string {
   const output = `${build.stdout}\n${build.stderr}`;
   expect(build.error, output).toBeUndefined();
   expect(build.status, output).toBe(0);
+  const transportDirectory = temporaryDirectory("ingenium-init-project-transport-");
+  const transportBuild = spawnSync(
+    process.execPath,
+    [tscPath, "--project", "tsconfig.json", "--outDir", transportDirectory],
+    { cwd: serverRoot, encoding: "utf8", timeout: 60_000 },
+  );
+  const transportOutput = `${transportBuild.stdout}\n${transportBuild.stderr}`;
+  expect(transportBuild.error, transportOutput).toBeUndefined();
+  expect(transportBuild.status, transportOutput).toBe(0);
+  cpSync(join(transportDirectory, "config"), join(outputDirectory, "config"), { recursive: true });
+  cpSync(join(transportDirectory, "lib"), join(outputDirectory, "lib"), { recursive: true });
+  copyFileSync(join(transportDirectory, "scripts", "mcp-server.js"), join(outputDirectory, "scripts", "mcp-transport.js"));
+  symlinkSync(join(repositoryRoot, "node_modules"), join(outputDirectory, "node_modules"), "dir");
   return outputDirectory;
+}
+
+function handlesMcpControlRequest(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): boolean {
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const project = url.searchParams.get("project") ?? "runtime-project";
+  if (url.pathname === "/api/v1/mcp-tools") {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ project, project_id: "runtime-project-id", data: [] }));
+    return true;
+  }
+  if (url.pathname === "/api/v1/mcp-tools/ingenium_repository_sync/state") {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ project, project_id: "runtime-project-id", data: { tool_name: "ingenium_repository_sync", enabled: true } }));
+    return true;
+  }
+  return false;
 }
 
 function createRuntimeSymlink(entrypoint: string): string {
@@ -142,17 +172,27 @@ describe("ingenium-init-project production runtime contract", () => {
     expect(result.stdout).toContain("--project <name>");
   });
 
-  it("uses --project before INGENIUM_PROJECT for a dry-run preflight without provisioning", async () => {
+  it("uses --project before INGENIUM_PROJECT and provisions through the packaged MCP launcher", async () => {
     const distribution = buildCliDistribution();
     const entrypoint = join(distribution, "scripts", "init-project.js");
     const command = createRuntimeSymlink(entrypoint);
     const worktree = temporaryDirectory("ingenium-init-project-worktree-");
     mkdirSync(join(worktree, "docs"), { recursive: true });
     writeFileSync(join(worktree, "docs", "index.md"), "# Runtime CLI fixture\n", "utf8");
+    writeProtectedFallbackToken(worktree, "d".repeat(32));
     const requests: Array<{ url: string; method: string }> = [];
     const server = createServer((request, response) => {
       requests.push({ url: request.url ?? "", method: request.method ?? "" });
+      if (handlesMcpControlRequest(request, response)) return;
       response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url === "/api/v1/auth/preflight") {
+        response.end(JSON.stringify({ data: { authenticated: true } }));
+        return;
+      }
+      if (request.url === "/api/v1/projects") {
+        response.end(JSON.stringify({ data: { id: "runtime-project-id" } }));
+        return;
+      }
       if (request.url?.startsWith("/api/v1/repository/resources/sync")) {
         response.end(JSON.stringify({ data: { summary: {
           skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
@@ -184,6 +224,12 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
       expect(requests).toEqual([
         { method: "GET", url: "/api/v1/auth/preflight" },
+        { method: "GET", url: "/api/v1/auth/preflight" },
+        { method: "POST", url: "/api/v1/projects" },
+        { method: "GET", url: "/api/v1/mcp-tools?project=ingenium&include_categories=true" },
+        { method: "GET", url: "/api/v1/mcp-tools?project=ingenium&include_categories=true" },
+        { method: "GET", url: "/_ingenium/child-mcp-runtime?project=ingenium" },
+        { method: "GET", url: "/api/v1/mcp-tools/ingenium_repository_sync/state?project=ingenium" },
         { method: "POST", url: "/api/v1/docs/repository/sync?project=ingenium" },
         { method: "POST", url: "/api/v1/repository/resources/sync?project=ingenium" },
       ]);
@@ -245,13 +291,23 @@ describe("ingenium-init-project production runtime contract", () => {
     const entrypoint = join(distribution, "scripts", "init-project.js");
     const command = createRuntimeSymlink(entrypoint);
     const worktree = createRuntimeWorktree();
+    writeProtectedFallbackToken(worktree, "c".repeat(32));
     const requests: Array<{ url: string; method: string; body: string }> = [];
     const server = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
         requests.push({ url: request.url ?? "", method: request.method ?? "", body: Buffer.concat(chunks).toString("utf8") });
+        if (handlesMcpControlRequest(request, response)) return;
         response.writeHead(200, { "Content-Type": "application/json" });
+        if (request.url === "/api/v1/auth/preflight") {
+          response.end(JSON.stringify({ data: { authenticated: true } }));
+          return;
+        }
+        if (request.url === "/api/v1/projects") {
+          response.end(JSON.stringify({ data: { id: "runtime-project-id" } }));
+          return;
+        }
         if (request.url?.startsWith("/api/v1/repository/resources/sync")) {
           response.end(JSON.stringify({ data: { summary: {
             skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
@@ -283,11 +339,19 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
       expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
         { method: "GET", url: "/api/v1/auth/preflight" },
+        { method: "GET", url: "/api/v1/auth/preflight" },
+        { method: "POST", url: "/api/v1/projects" },
+        { method: "GET", url: "/api/v1/mcp-tools?project=ingenium&include_categories=true" },
+        { method: "GET", url: "/api/v1/mcp-tools?project=ingenium&include_categories=true" },
+        { method: "GET", url: "/_ingenium/child-mcp-runtime?project=ingenium" },
+        { method: "GET", url: "/api/v1/mcp-tools/ingenium_repository_sync/state?project=ingenium" },
         { method: "POST", url: "/api/v1/docs/repository/sync?project=ingenium" },
         { method: "POST", url: "/api/v1/repository/resources/sync?project=ingenium" },
       ]);
 
-      const payload = JSON.parse(requests[2]!.body) as { manifest: {
+      const resourceRequest = requests.find((request) => request.url === "/api/v1/repository/resources/sync?project=ingenium");
+      expect(resourceRequest).toBeDefined();
+      const payload = JSON.parse(resourceRequest!.body) as { manifest: {
         skills: Array<{ path: string }>;
         agents: Array<{ path: string; name: string }>;
         plugins: Array<{ path: string; source: string }>;
@@ -326,9 +390,14 @@ describe("ingenium-init-project production runtime contract", () => {
         response.end(JSON.stringify({ error: { code: "UNAUTHORIZED" } }));
         return;
       }
+      if (handlesMcpControlRequest(request, response)) return;
       response.writeHead(200, { "Content-Type": "application/json" });
       if (request.url === "/api/v1/auth/preflight") {
         response.end(JSON.stringify({ data: { authenticated: true } }));
+        return;
+      }
+      if (request.url === "/api/v1/projects") {
+        response.end(JSON.stringify({ data: { id: "runtime-project-id" } }));
         return;
       }
       if (request.url?.startsWith("/api/v1/repository/resources/sync")) {
@@ -362,6 +431,10 @@ describe("ingenium-init-project production runtime contract", () => {
         { method: "GET", url: "/api/v1/auth/preflight", authenticated: true },
         { method: "GET", url: "/api/v1/auth/preflight", authenticated: true },
         { method: "POST", url: "/api/v1/projects", authenticated: true },
+        { method: "GET", url: "/api/v1/mcp-tools?project=packaged-plugin-project&include_categories=true", authenticated: true },
+        { method: "GET", url: "/api/v1/mcp-tools?project=packaged-plugin-project&include_categories=true", authenticated: true },
+        { method: "GET", url: "/_ingenium/child-mcp-runtime?project=packaged-plugin-project", authenticated: true },
+        { method: "GET", url: "/api/v1/mcp-tools/ingenium_repository_sync/state?project=packaged-plugin-project", authenticated: true },
         { method: "POST", url: "/api/v1/docs/repository/sync?project=packaged-plugin-project", authenticated: true },
         { method: "POST", url: "/api/v1/repository/resources/sync?project=packaged-plugin-project", authenticated: true },
       ]);

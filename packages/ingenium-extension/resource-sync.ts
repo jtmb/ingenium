@@ -15,13 +15,13 @@ import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lst
 import { resolve, basename, dirname, isAbsolute, parse as parsePath, sep, relative, extname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  classifyExtensionProjectFailure,
-  ensureExtensionProject,
   resolveExtensionProject,
-  type ExtensionProjectFailureKind,
 } from "./project-resolver.js";
 import { apiRequestHeaders } from "./api-auth.js";
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
+import { callMcpTool, mcpToolData } from "./mcp-client.js";
+
+// Compatibility-only helpers below retain legacy exports; lifecycle hooks use repositorySync via MCP.
 
 const API_BASE =
   (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ??
@@ -80,11 +80,12 @@ function hashFile(filePath: string): string | null {
 // resource scans below. Repository sync is a one-way, validated projection of
 // the local worktree; it never scans commands or either project/global config.
 
-const REPOSITORY_MAX_ITEMS = 512;
-const REPOSITORY_MAX_FILE_BYTES = 512 * 1024;
-const REPOSITORY_MAX_RESOURCE_BYTES = 256 * 1024;
-const REPOSITORY_MAX_DOC_BYTES = 1_500 * 1024;
-const REPOSITORY_MAX_RESOURCE_TOTAL_BYTES = 1_500 * 1024;
+export const REPOSITORY_MAX_ITEMS = 512;
+export const REPOSITORY_MAX_DOC_ITEMS = 256;
+export const REPOSITORY_MAX_FILE_BYTES = 512 * 1024;
+export const REPOSITORY_MAX_RESOURCE_BYTES = 256 * 1024;
+export const REPOSITORY_MAX_DOC_BYTES = 1_500 * 1024;
+export const REPOSITORY_MAX_RESOURCE_TOTAL_BYTES = 1_500 * 1024;
 const REPOSITORY_PLUGIN_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const REPOSITORY_PLUGIN_ROOTS = [".opencode/plugins/", "packages/"] as const;
 
@@ -92,6 +93,23 @@ export class RepositorySyncScanError extends Error {
   constructor(message = "Repository resource scan rejected an unsafe path or content") {
     super(message);
     this.name = "RepositorySyncScanError";
+  }
+}
+
+/** Bounds source retained while constructing a resource manifest before MCP starts. */
+class RepositoryResourceScanBudget {
+  private readonly paths = new Set<string>();
+  private items = 0;
+  private bytes = 0;
+
+  add(path: string, content: string): void {
+    if (this.paths.has(path)) return;
+    this.paths.add(path);
+    this.items += 1;
+    this.bytes += Buffer.byteLength(path, "utf8") + Buffer.byteLength(content, "utf8");
+    if (this.items > REPOSITORY_MAX_ITEMS || this.bytes > REPOSITORY_MAX_RESOURCE_TOTAL_BYTES) {
+      throw new RepositorySyncScanError();
+    }
   }
 }
 
@@ -285,7 +303,7 @@ function repositoryRelativePath(worktree: string, target: string): string {
   const root = repositoryWorktreeRoot(worktree);
   const absolute = resolve(root, target);
   const value = relative(root, absolute).split(sep).join("/");
-  if (!value || value.startsWith("../") || value === ".." || isAbsolute(value) || value.includes("\\") || value.includes("\u0000")) {
+  if (!value || value.length > 512 || value.startsWith("../") || value === ".." || isAbsolute(value) || value.includes("\\") || value.includes("\u0000")) {
     throw new RepositorySyncScanError();
   }
   return value;
@@ -327,6 +345,8 @@ function walkRepositoryFiles(
   directory: string,
   maxFileBytes: number,
   shouldIncludeRegularFile?: (filePath: string, mode: number) => boolean,
+  maxItems = REPOSITORY_MAX_ITEMS,
+  resourceBudget?: RepositoryResourceScanBudget,
 ): RepositoryDiskFile[] {
   const base = assertContainedDirectory(worktree, directory);
   if (!base) return [];
@@ -347,10 +367,11 @@ function walkRepositoryFiles(
       }
       if (!stat.isFile()) throw new RepositorySyncScanError();
       if (shouldIncludeRegularFile && !shouldIncludeRegularFile(fullPath, stat.mode)) continue;
-      if (files.length >= REPOSITORY_MAX_ITEMS) throw new RepositorySyncScanError();
+      if (files.length >= maxItems) throw new RepositorySyncScanError();
       const relativePath = repositoryRelativePath(worktree, fullPath);
       const content = normalizeRepositoryText(readRepositoryRegularText(worktree, fullPath));
       if (Buffer.byteLength(content) > maxFileBytes) throw new RepositorySyncScanError();
+      resourceBudget?.add(relativePath, content);
       files.push({ path: relativePath, absolutePath: fullPath, content });
     }
   };
@@ -412,8 +433,13 @@ function parseSkillMetadata(content: string | undefined): Record<string, unknown
 
 function scanRepositoryDocs(worktree: string): RepositoryDocManifestEntry[] {
   const docsDir = resolve(worktree, "docs");
-  const entries = walkRepositoryFiles(worktree, docsDir, REPOSITORY_MAX_FILE_BYTES)
-    .filter((file) => file.path.startsWith("docs/") && file.path.endsWith(".md"));
+  const entries = walkRepositoryFiles(
+    worktree,
+    docsDir,
+    REPOSITORY_MAX_FILE_BYTES,
+    (filePath) => filePath.endsWith(".md"),
+    REPOSITORY_MAX_DOC_ITEMS,
+  ).filter((file) => file.path.startsWith("docs/"));
   let total = 0;
   return entries.map((file) => {
     total += Buffer.byteLength(file.content);
@@ -422,7 +448,11 @@ function scanRepositoryDocs(worktree: string): RepositoryDocManifestEntry[] {
   });
 }
 
-function scanRepositorySkills(worktree: string, baseline: RepositoryBaseline): RepositorySkillManifestEntry[] {
+function scanRepositorySkills(
+  worktree: string,
+  baseline: RepositoryBaseline,
+  resourceBudget: RepositoryResourceScanBudget,
+): RepositorySkillManifestEntry[] {
   const skillsRoot = assertContainedDirectory(worktree, resolve(worktree, ".opencode", "skills"));
   if (!skillsRoot) return [];
   const entries: RepositorySkillManifestEntry[] = [];
@@ -449,7 +479,14 @@ function scanRepositorySkills(worktree: string, baseline: RepositoryBaseline): R
       throw new RepositorySyncScanError();
     }
     if (skillMdStat.isSymbolicLink() || !skillMdStat.isFile()) continue;
-    const allFiles = walkRepositoryFiles(worktree, skillDir, REPOSITORY_MAX_RESOURCE_BYTES);
+    const allFiles = walkRepositoryFiles(
+      worktree,
+      skillDir,
+      REPOSITORY_MAX_RESOURCE_BYTES,
+      undefined,
+      REPOSITORY_MAX_ITEMS,
+      resourceBudget,
+    );
     const skillMd = allFiles.find((file) => file.absolutePath === skillMdPath);
     if (!skillMd) throw new RepositorySyncScanError();
     const metadataFile = allFiles.find((file) => file.path.endsWith(`/${name}/metadata.json`));
@@ -461,7 +498,11 @@ function scanRepositorySkills(worktree: string, baseline: RepositoryBaseline): R
     const category = typeof metadata.category === "string" ? metadata.category : parsed.fields.category;
     const fileTree = Object.fromEntries(allFiles
       .filter((file) => file !== skillMd && file !== metadataFile)
-      .map((file) => [relative(skillDir, file.absolutePath).split(sep).join("/"), file.content]));
+      .map((file) => {
+        const path = relative(skillDir, file.absolutePath).split(sep).join("/");
+        if (!path || path.length > 512 || path.includes("\\") || path.includes("\u0000")) throw new RepositorySyncScanError();
+        return [path, file.content];
+      }));
     const semantic = { path: skillMd.path, name, skillMd: skillMd.content, body: parsed.body, description: parsed.fields.description ?? "", category, tags, alwaysApply, metadata, fileTree };
     // The semantic SHA below includes every auxiliary path. This separate
     // content fingerprint intentionally omits auxiliary paths so a uniquely
@@ -558,7 +599,11 @@ function parseRepositoryAgentCandidate(agentsRoot: string, file: RepositoryDiskF
   return { path: file.path, ...semantic, fingerprint: repositoryHash(mirrorSemantic) };
 }
 
-function scanRepositoryAgents(worktree: string, baseline: RepositoryBaseline): RepositoryAgentManifestEntry[] {
+function scanRepositoryAgents(
+  worktree: string,
+  baseline: RepositoryBaseline,
+  resourceBudget: RepositoryResourceScanBudget,
+): RepositoryAgentManifestEntry[] {
   const agentsRoot = assertContainedDirectory(worktree, resolve(worktree, ".opencode", "agents"));
   if (!agentsRoot) return [];
   // Profiles are public OpenCode metadata, not secrets. A mode-restricted
@@ -570,6 +615,8 @@ function scanRepositoryAgents(worktree: string, baseline: RepositoryBaseline): R
     agentsRoot,
     REPOSITORY_MAX_RESOURCE_BYTES,
     (filePath, mode) => !filePath.endsWith(".md") || (mode & 0o777) === 0o644,
+    REPOSITORY_MAX_ITEMS,
+    resourceBudget,
   )
     .filter((file) => file.path.endsWith(".md"));
   const byName = new Map<string, AgentCandidate[]>();
@@ -648,14 +695,25 @@ function parseConfiguredPlugins(worktree: string): PluginConfigEntry[] {
   });
 }
 
-function scanRepositoryPlugins(worktree: string, baseline: RepositoryBaseline): RepositoryPluginManifestEntry[] {
+function scanRepositoryPlugins(
+  worktree: string,
+  baseline: RepositoryBaseline,
+  resourceBudget: RepositoryResourceScanBudget,
+): RepositoryPluginManifestEntry[] {
   const configured = parseConfiguredPlugins(worktree);
   const candidates = new Map<string, PluginConfigEntry>();
   for (const entry of configured) {
     candidates.set(entry.path, entry);
   }
   const pluginsRoot = resolve(worktree, ".opencode", "plugins");
-  for (const local of walkRepositoryFiles(worktree, pluginsRoot, REPOSITORY_MAX_RESOURCE_BYTES)) {
+  for (const local of walkRepositoryFiles(
+    worktree,
+    pluginsRoot,
+    REPOSITORY_MAX_RESOURCE_BYTES,
+    (filePath) => REPOSITORY_PLUGIN_EXTENSIONS.has(extname(filePath)),
+    REPOSITORY_MAX_ITEMS,
+    resourceBudget,
+  )) {
     if (!isAllowedRepositoryPluginPath(local.path)) continue;
     candidates.set(local.path, candidates.get(local.path) ?? { path: local.path, enabled: false, order: -1, options: {} });
   }
@@ -671,6 +729,7 @@ function scanRepositoryPlugins(worktree: string, baseline: RepositoryBaseline): 
       throw new RepositorySyncScanError("Plugin source is missing or unsafe");
     }
     if (Buffer.byteLength(source) > REPOSITORY_MAX_RESOURCE_BYTES) throw new RepositorySyncScanError();
+    resourceBudget.add(candidate.path, source);
     let name = basename(candidate.path, extname(candidate.path));
     if (!safeRepositoryName(name)) throw new RepositorySyncScanError();
     if (usedNames.has(name)) name = `${name}-${hashContent(candidate.path).slice(0, 8)}`;
@@ -683,17 +742,36 @@ function scanRepositoryPlugins(worktree: string, baseline: RepositoryBaseline): 
   return entries;
 }
 
+function repositorySerializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function assertRepositoryResourceManifestBounds(manifest: Pick<RepositoryManifestV2, "skills" | "agents" | "plugins">): void {
+  const entries = [...manifest.skills, ...manifest.agents, ...manifest.plugins];
+  if (entries.length > REPOSITORY_MAX_ITEMS) throw new RepositorySyncScanError();
+
+  let total = 0;
+  for (const entry of entries) {
+    const bytes = repositorySerializedBytes(entry);
+    total += bytes;
+    if (total > REPOSITORY_MAX_RESOURCE_TOTAL_BYTES) throw new RepositorySyncScanError();
+  }
+}
+
 /** Build the complete, local repository projection without network or disk writes. */
 export function buildRepositoryManifestV2(worktree: string, manifest?: SyncManifest): RepositoryManifestV2 {
   const current = manifest ?? emptyManifest(resolveExtensionProject(worktree));
   const repository = repositoryBaseline(current);
-  return {
+  const resourceBudget = new RepositoryResourceScanBudget();
+  const projection: RepositoryManifestV2 = {
     version: 2,
     docs: scanRepositoryDocs(worktree),
-    skills: scanRepositorySkills(worktree, repository.skills),
-    agents: scanRepositoryAgents(worktree, repository.agents),
-    plugins: scanRepositoryPlugins(worktree, repository.plugins),
+    skills: scanRepositorySkills(worktree, repository.skills, resourceBudget),
+    agents: scanRepositoryAgents(worktree, repository.agents, resourceBudget),
+    plugins: scanRepositoryPlugins(worktree, repository.plugins, resourceBudget),
   };
+  assertRepositoryResourceManifestBounds(projection);
+  return projection;
 }
 
 /** Maps resource name to its SHA-256 hash for change detection. */
@@ -2714,9 +2792,8 @@ function pluginFingerprint(entry: RepositoryPluginManifestEntry): string {
 
 /**
  * Deterministic repository initialization/sync. `dryRun` resolves the project
- * identity but never provisions a project, writes a manifest, or mutates local
- * files. `apply` provisions the validated project then submits repository-owned
- * resources only; commands and all config are intentionally excluded.
+ * identity and submits repository-owned resources only through the packaged MCP
+ * transport. Commands and all config are intentionally excluded.
  */
 export async function repositorySync(
   worktree: string,
@@ -2724,13 +2801,13 @@ export async function repositorySync(
 ): Promise<RepositorySyncResult> {
   const dryRun = options.dryRun === true;
   const scope = options.scope ?? "all";
-  const project = dryRun
-    ? resolveExtensionProject(worktree, options.project)
-    : await ensureExtensionProject(worktree, API_BASE, options.project);
+  const project = resolveExtensionProject(worktree, options.project);
   _projectCache = project;
   _projectResolved = true;
   const manifest = loadManifest(worktree, project);
-  const projection = buildRepositoryManifestV2(worktree, manifest);
+  const projection = scope === "all"
+    ? buildRepositoryManifestV2(worktree, manifest)
+    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
   const docsResult = emptyResult();
   const skillsResult = emptyResult();
   const agentsResult = emptyResult();
@@ -2739,49 +2816,34 @@ export async function repositorySync(
   let resourcesConfirmed = false;
 
   try {
-    const response = await fetch(`${API_BASE}/docs/repository/sync?${encodeProject(project)}`, {
-      method: "POST",
-      headers: apiHeaders(worktree),
-      body: JSON.stringify({ manifest: { files: projection.docs }, dryRun }),
-    });
-    if (!response.ok) {
-      docsResult.errors = 1;
-      return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
-    }
-    const payload = await response.json() as { data?: { summary?: Record<string, number> } };
-    Object.assign(docsResult, resultFromRepositorySummary(payload.data?.summary));
+    const response = mcpToolData(await callMcpTool(worktree, "repository_sync", {
+      project,
+      docsManifest: { files: projection.docs },
+      resourcesManifest: scope === "all"
+        ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins }
+        : undefined,
+      dryRun,
+    })) as {
+      docs?: { summary?: Record<string, number> };
+      resources?: { summary?: Record<string, Record<string, number>> };
+    };
+    if (typeof response !== "object" || response === null) throw new Error("Invalid MCP response");
+    const payload = response as {
+      docs?: { summary?: Record<string, number> };
+      resources?: { summary?: Record<string, Record<string, number>> };
+    };
+    Object.assign(docsResult, resultFromRepositorySummary(payload.docs?.summary));
     docsConfirmed = true;
+    if (scope === "all") {
+      if (!payload.resources?.summary) throw new Error("Invalid MCP response");
+      Object.assign(skillsResult, resultFromRepositorySummary(payload.resources.summary.skill));
+      Object.assign(agentsResult, resultFromRepositorySummary(payload.resources.summary.agent));
+      Object.assign(pluginsResult, resultFromRepositorySummary(payload.resources.summary.plugin));
+      resourcesConfirmed = true;
+    }
   } catch {
     docsResult.errors = 1;
     return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
-  }
-
-  if (scope === "all") {
-    try {
-      const response = await fetch(`${API_BASE}/repository/resources/sync?${encodeProject(project)}`, {
-        method: "POST",
-        headers: apiHeaders(worktree),
-        body: JSON.stringify({
-          manifest: { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins },
-          dryRun,
-        }),
-      });
-      if (!response.ok) {
-        skillsResult.errors = 1;
-        agentsResult.errors = 1;
-        pluginsResult.errors = 1;
-      } else {
-        const payload = await response.json() as { data?: { summary?: Record<string, Record<string, number>> } };
-        Object.assign(skillsResult, resultFromRepositorySummary(payload.data?.summary?.skill));
-        Object.assign(agentsResult, resultFromRepositorySummary(payload.data?.summary?.agent));
-        Object.assign(pluginsResult, resultFromRepositorySummary(payload.data?.summary?.plugin));
-        resourcesConfirmed = true;
-      }
-    } catch {
-      skillsResult.errors = 1;
-      agentsResult.errors = 1;
-      pluginsResult.errors = 1;
-    }
   }
 
   // The baseline advances only after the owning API endpoint confirmed the
@@ -2891,39 +2953,14 @@ function resultSummary(label: string, r: SyncResult): string {
  */
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
-  let startupProvisioningFailure: ExtensionProjectFailureKind | null = null;
-  const reportWarning = (operation: "extension_project_init" | "resource_sync", reason: ExtensionProjectFailureKind | "request_failed") => {
+  const reportWarning = (operation: "resource_sync", reason: "request_failed") => {
     logPluginLifecycle(ctx.client, "resource-sync", "warn", `${operation}: ${reason}`);
   };
-
-  const recoverStartupProvisioning = async (): Promise<boolean> => {
-    if (!startupProvisioningFailure) return true;
-    try {
-      await ensureExtensionProject(worktree, API_BASE);
-      startupProvisioningFailure = null;
-      logPluginLifecycle(ctx.client, "resource-sync", "info", "extension_project_init: recovered");
-      return true;
-    } catch {
-      // The initial failure was already reported with a safe classification.
-      // Do not emit repeated or lower-level errors on every lifecycle event.
-      return false;
-    }
-  };
-
-  // Provision at plugin load so a database/API restart cannot leave this
-  // worktree missing until a later session lifecycle event happens to fire.
-  try {
-    await ensureExtensionProject(worktree, API_BASE);
-  } catch (error) {
-    startupProvisioningFailure = classifyExtensionProjectFailure(error);
-    reportWarning("extension_project_init", startupProvisioningFailure);
-  }
 
   return {
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
         try {
-          if (!(await recoverStartupProvisioning())) return;
           const result = await fullSync(worktree);
           const lines: string[] = [
             resultSummary("docs", result.docs ?? emptyResult()),
@@ -2944,7 +2981,6 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
 
       if (event.type === "session.idle") {
         try {
-          if (!(await recoverStartupProvisioning())) return;
           const result = await incrementalSync(worktree);
           if (result) {
             const lines: string[] = [
@@ -2970,24 +3006,15 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
 };
 
 /**
- * Exported for skill-sync.ts delegation.
- * Performs a skills-only sync on session.created.
+ * Compatibility-only export for published SkillSyncPlugin installations.
  */
 export async function skillsOnlySync(worktree: string): Promise<{ synced: number; skipped: number }> {
-  const project = await ensureExtensionProject(worktree, API_BASE);
-  const manifest = loadManifest(worktree, project);
-  const isInitialSync = Object.keys(manifest.resources.skills).length === 0;
-
-  const result = await syncSkills(worktree, project, manifest, { isInitialSync });
-  manifest.lastFullSync = new Date().toISOString();
-  saveManifest(worktree, manifest);
-
-  return { synced: result.synced, skipped: result.skipped + result.conflicts };
+  const result = await repositorySync(worktree);
+  return { synced: result.skills.synced, skipped: result.skills.skipped + result.skills.conflicts };
 }
 
 /**
- * Exported for onboarding-sync.ts delegation.
- * Pushes all disk resources to the API (disk→API only).
+ * Compatibility-only export for published OnboardingSyncPlugin installations.
  */
 export async function pushDiskToApi(worktree: string): Promise<{
   plugins: { created: number; skipped: number; errors: number };

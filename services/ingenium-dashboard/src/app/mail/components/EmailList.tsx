@@ -116,6 +116,7 @@ export default function EmailList({
             return (
               <div
                 key={email.uid}
+                data-testid="email-row"
                 onClick={() => onSelect(email.uid)}
                 className={`px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer ${
                   isSelected ? "bg-[var(--color-surface-selected)]" : ""

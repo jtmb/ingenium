@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { createConnection } from "node:net";
 import { basename, join } from "node:path";
 import {
@@ -18,6 +18,14 @@ import {
   type TestRunProcess,
   updateTestRunManifest,
 } from "./test-run-context";
+import {
+  capturePreexistingProcessBaseline,
+  inspectProcessIdentity,
+  readProcStat,
+  type ProcessIdentity,
+} from "./test-run-process-discovery";
+
+export { inspectProcessIdentity, type ProcessIdentity } from "./test-run-process-discovery";
 
 export const SERVER_START_TIMEOUT_MS = 45_000;
 export const SERVER_STOP_TIMEOUT_MS = 8_000;
@@ -45,14 +53,6 @@ export interface ServerSpec {
   env: NodeJS.ProcessEnv;
   readinessUrl: string;
   readinessHeaders?: Record<string, string>;
-}
-
-export interface ProcessIdentity {
-  pidStartTime: string;
-  pgid: number;
-  executable: string;
-  groupIdentity: string;
-  runNonce?: string;
 }
 
 interface RunningServer {
@@ -264,54 +264,6 @@ export function getServerSpecs(
 function appendOutput(buffer: { value: string }, chunk: Buffer | string): void {
   const text = chunk.toString();
   buffer.value = `${buffer.value}${text}`.slice(-32_000);
-}
-
-function readProcStat(pid: number): { pgid: number; startTime: string; state: string } | undefined {
-  if (process.platform === "win32") return undefined;
-  try {
-    const value = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const closingParen = value.lastIndexOf(")");
-    if (closingParen < 0) return undefined;
-    const fields = value.slice(closingParen + 1).trim().split(/\s+/);
-    const state = fields[0];
-    const pgid = Number(fields[2]);
-    const startTime = fields[19];
-    if (!state || !Number.isInteger(pgid) || pgid <= 1 || !startTime || !/^\d+$/.test(startTime)) return undefined;
-    return { pgid, startTime, state };
-  } catch {
-    return undefined;
-  }
-}
-
-function readProcessNonce(pid: number): string | undefined {
-  if (process.platform === "win32") return undefined;
-  try {
-    const environment = readFileSync(`/proc/${pid}/environ`, "utf8");
-    const entry = environment.split("\u0000").find((item) => item.startsWith("INGENIUM_TEST_RUN_NONCE="));
-    return entry?.slice("INGENIUM_TEST_RUN_NONCE=".length);
-  } catch {
-    return undefined;
-  }
-}
-
-export function inspectProcessIdentity(pid: number): ProcessIdentity | undefined {
-  if (!Number.isInteger(pid) || pid <= 1) return undefined;
-  const processStat = readProcStat(pid);
-  if (!processStat) return undefined;
-  const groupStat = readProcStat(processStat.pgid);
-  if (!groupStat || groupStat.pgid !== processStat.pgid) return undefined;
-  try {
-    const executable = realpathSync(`/proc/${pid}/exe`);
-    return {
-      pidStartTime: processStat.startTime,
-      pgid: processStat.pgid,
-      executable,
-      groupIdentity: `${processStat.pgid}:${groupStat.startTime}`,
-      runNonce: readProcessNonce(pid),
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -1222,6 +1174,7 @@ export async function startTestServers(
   const specs = getServerSpecs(context, production, options.dashboardEnvironment);
   const running: RunningServer[] = [];
   try {
+    capturePreexistingProcessBaseline(context);
     if (production && shouldBuild) await buildProductionArtifacts(context, options.buildTimeoutMs);
     if (production) {
       if (!existsSync(specs[0]!.args[0]!)) throw new Error("API production entrypoint is missing after build");

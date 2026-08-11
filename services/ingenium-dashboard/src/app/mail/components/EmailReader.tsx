@@ -354,7 +354,7 @@ export default function EmailReader({
           {email.subject || "(No subject)"}
         </h2>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+          <span data-testid="email-reader-from" className="text-sm font-semibold text-[var(--color-text-primary)]">
             {fromAddress?.name || fromAddress?.address || "Unknown"}
           </span>
           {fromAddress?.address && fromAddress?.name && (
@@ -373,7 +373,7 @@ export default function EmailReader({
             <span className="font-medium">CC:</span> {ccList}
           </p>
         )}
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <p data-testid="email-reader-date" className="text-xs text-[var(--color-text-muted)]">
           {email.date ? new Date(email.date).toLocaleString() : ""}
         </p>
       </div>

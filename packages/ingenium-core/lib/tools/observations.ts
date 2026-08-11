@@ -131,17 +131,17 @@ export function getObservation(projectId: string, id: number): Observation | und
 }
 
 /**
- * Batch-fetch observations by IDs. Uses a single parameterized query with
- * dynamically built IN clause placeholders. Returns only matching rows.
+ * Batch-fetch observations by IDs within one project. Uses a single parameterized
+ * query with dynamically built IN clause placeholders. Returns only matching rows.
  * Empty input or no matches returns an empty array.
  */
-export function getObservationsByIds(ids: number[]): Observation[] {
+export function getObservationsByIds(projectId: string, ids: number[]): Observation[] {
   if (!ids.length) return [];
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   const placeholders = ids.map(() => "?").join(",");
   return db.prepare(
-    `SELECT * FROM observations WHERE id IN (${placeholders})`
-  ).all(...ids) as Observation[];
+    `SELECT * FROM observations WHERE project_id = ? AND id IN (${placeholders})`
+  ).all(projectId, ...ids) as Observation[];
 }
 
 /**

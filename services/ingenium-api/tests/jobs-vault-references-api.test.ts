@@ -210,4 +210,38 @@ describe("VAULT-100 jobs API", () => {
     expect(JSON.stringify(body)).not.toContain(canary);
     expect(JSON.stringify(body)).not.toContain("api-reference");
   });
+
+  it.each([0, -1, 1.5, 1_441, Number.MAX_SAFE_INTEGER])(
+    "rejects invalid timeout_minutes at the API boundary: %p",
+    async (timeoutMinutes) => {
+      const response = await request("/", "jobs-vault-api-first", json({
+        name: "Invalid timeout job",
+        agent: "agent",
+        prompt_template: "prompt",
+        timeout_minutes: timeoutMinutes,
+      }));
+
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    },
+  );
+
+  it("rejects an invalid timeout update without changing the saved timeout", async () => {
+    const created = await request("/", "jobs-vault-api-first", json({
+      name: "Timeout update job",
+      agent: "agent",
+      prompt_template: "prompt",
+    }));
+    const job = (await created.json()).data as { id: string; revision: number; timeout_minutes: number };
+
+    const update = await request(`/${job.id}`, "jobs-vault-api-first", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: job.revision, timeout_minutes: 1_441 }),
+    });
+
+    expect(update.status).toBe(422);
+    expect((await request(`/${job.id}`, "jobs-vault-api-first").then((response) => response.json())).data.timeout_minutes)
+      .toBe(job.timeout_minutes);
+  });
 });

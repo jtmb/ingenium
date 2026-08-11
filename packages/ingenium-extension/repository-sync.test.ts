@@ -7,6 +7,7 @@ import {
   buildRepositoryManifestV2,
   loadManifest,
   pushDiskToApi,
+  REPOSITORY_MAX_RESOURCE_TOTAL_BYTES,
   RepositorySyncScanError,
   repositorySync,
   saveManifest,
@@ -15,6 +16,13 @@ import {
 import { OnboardingSyncPlugin } from "./onboarding-sync.js";
 import { resetEnsuredProjects } from "./project-resolver.js";
 import { parseInitProjectArgs } from "./scripts/init-project.js";
+
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
+
+vi.mock("./mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+}));
 
 let worktree = "";
 const originalFetch = globalThis.fetch;
@@ -71,36 +79,29 @@ function fixture(): void {
   }));
 }
 
-function successfulFetch(): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
-    const path = new URL(String(url)).pathname;
-    if (path.endsWith("/auth/preflight") && init?.method === undefined) {
-      return { ok: true, status: 200, json: async () => ({ data: { authenticated: true } }) } as Response;
-    }
-    if (path.endsWith("/projects") && init?.method === "POST") {
-      return { ok: true, status: 201, json: async () => ({}) } as Response;
-    }
-    // Keep the repository docs response distinct from project provisioning.
-    // repositorySync must receive a successful payload here or it returns
-    // before exercising the resource endpoint used by the wrapper tests.
-    if (path.endsWith("/docs/repository/sync") && init?.method === "POST") {
-      return { ok: true, status: 200, json: async () => ({ data: { summary: { created: 2, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } } }) } as Response;
-    }
-    if (path.endsWith("/repository/resources/sync") && init?.method === "POST") {
-      return { ok: true, status: 200, json: async () => ({ data: { summary: {
-        skill: { created: 1, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
-        agent: { created: 1, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
-        plugin: { created: 2, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
-      } } }) } as Response;
-    }
-    return { ok: false, status: 404, json: async () => ({}) } as Response;
+function successfulMcp(): ReturnType<typeof vi.fn> {
+  const call = vi.fn(async (_worktree: string, name: string, args: Record<string, unknown>) => {
+    expect(name).toBe("repository_sync");
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        project: args.project,
+        dryRun: args.dryRun,
+        docs: { summary: { created: 2, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } },
+        resources: args.resourcesManifest === undefined ? undefined : { summary: {
+          skill: { created: 1, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+          agent: { created: 1, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+          plugin: { created: 2, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+        } },
+      }) }],
+    };
   });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  mockCallMcpTool.mockImplementation(call);
+  return call;
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  mockCallMcpTool.mockReset();
   resetEnsuredProjects();
   globalThis.fetch = originalFetch;
   if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
@@ -162,6 +163,7 @@ describe("repository-authoritative manifest v2", () => {
     expect(projection.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/browser-agent-errors.md");
     expect(projection.agents.map((entry) => entry.name)).toContain("browser-agent");
     expect(projection.plugins.map((entry) => entry.path)).toEqual(configuredPluginPaths);
+    expect(Object.keys(projection.skills.find((entry) => entry.name === "development-conventions")!.fileTree).length).toBeGreaterThanOrEqual(66);
     for (const plugin of projection.plugins) {
       expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
     }
@@ -181,7 +183,7 @@ describe("repository-authoritative manifest v2", () => {
 
   it("changes semantic hashes for metadata/frontmatter-only edits and retains unique nested moves", async () => {
     fixture();
-    successfulFetch();
+    successfulMcp();
     await repositorySync(worktree);
     const state = loadManifest(worktree, "repository-fixture");
     const first = buildRepositoryManifestV2(worktree, state);
@@ -200,7 +202,7 @@ describe("repository-authoritative manifest v2", () => {
 
   it("applies baselines only after confirmation, supports docs-only, and preserves the baseline on auth failure", async () => {
     fixture();
-    const fetchMock = successfulFetch();
+    const mcpCall = successfulMcp();
     const applied = await repositorySync(worktree, { scope: "all" });
     expect(applied).toMatchObject({ dryRun: false, project: "repository-fixture", docs: { pushed: 2 }, skills: { pushed: 1 } });
     const saved = JSON.parse(readFileSync(join(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8"));
@@ -208,15 +210,16 @@ describe("repository-authoritative manifest v2", () => {
     expect(Object.keys(saved.resources.repository.docs)).toHaveLength(2);
     expect(Object.keys(saved.resources.repository.skills)).toHaveLength(1);
 
-    const callsBeforeDocsOnly = fetchMock.mock.calls.length;
+    const callsBeforeDocsOnly = mcpCall.mock.calls.length;
     await repositorySync(worktree, { scope: "docs" });
-    const docsOnlyCalls = fetchMock.mock.calls.slice(callsBeforeDocsOnly).map(([url]) => String(url));
+    const docsOnlyCalls = mcpCall.mock.calls.slice(callsBeforeDocsOnly);
     expect(docsOnlyCalls).toHaveLength(1);
-    expect(docsOnlyCalls[0]).toContain("/docs/repository/sync");
+    expect(docsOnlyCalls[0]![1]).toBe("repository_sync");
+    expect(docsOnlyCalls[0]![2]).toMatchObject({ resourcesManifest: undefined });
 
     const beforeFailure = readFileSync(join(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8");
     write("docs/index.md", "# Changed\n");
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }) as Response));
+    mockCallMcpTool.mockRejectedValueOnce(new Error("MCP unavailable"));
     const failed = await repositorySync(worktree, { scope: "docs" });
     expect(failed.docs.errors).toBe(1);
     expect(readFileSync(join(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8")).toBe(beforeFailure);
@@ -224,16 +227,16 @@ describe("repository-authoritative manifest v2", () => {
 
   it("does not provision or persist a baseline during dry-run", async () => {
     fixture();
-    const fetchMock = successfulFetch();
+    const mcpCall = successfulMcp();
     const result = await repositorySync(worktree, { dryRun: true });
     expect(result.dryRun).toBe(true);
-    expect(fetchMock.mock.calls.map(([url]) => String(url)).some((url) => url.endsWith("/projects"))).toBe(false);
+    expect(mcpCall).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({ dryRun: true }));
     expect(existsSync(join(worktree, ".opencode", ".ingenium-sync-state.json"))).toBe(false);
   });
 
   it("does not advance non-doc baselines for a docs-only confirmation", async () => {
     fixture();
-    successfulFetch();
+    successfulMcp();
     await repositorySync(worktree, { scope: "docs" });
     const saved = JSON.parse(readFileSync(join(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8"));
     expect(saved.resources.repository.docs).not.toEqual({});
@@ -242,9 +245,9 @@ describe("repository-authoritative manifest v2", () => {
     expect(saved.resources.repository.plugins).toEqual({});
   });
 
-  it("pushDiskToApi sends the allowlisted plugin projection after the docs endpoint succeeds", async () => {
+  it("pushDiskToApi sends the complete allowlisted projection through repository_sync", async () => {
     fixture();
-    const fetchMock = successfulFetch();
+    const mcpCall = successfulMcp();
 
     const result = await pushDiskToApi(worktree);
 
@@ -253,46 +256,57 @@ describe("repository-authoritative manifest v2", () => {
       agents: { created: 1, skipped: 0, errors: 0 },
       skills: { created: 1, skipped: 0, errors: 0 },
     });
-    const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
-    expect(paths).toEqual([
-      "/api/v1/auth/preflight",
-      "/api/v1/projects",
-      "/api/v1/docs/repository/sync",
-      "/api/v1/repository/resources/sync",
-    ]);
-
-    const resourcesCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/repository/resources/sync"));
-    expect(resourcesCall).toBeDefined();
-    const body = JSON.parse(String(resourcesCall![1]?.body));
-    expect(body.manifest.plugins.map((plugin: { path: string }) => plugin.path)).toEqual([
+    expect(mcpCall).toHaveBeenCalledOnce();
+    const payload = mcpCall.mock.calls[0]![2] as { resourcesManifest: { plugins: Array<{ path: string; fileType: string; isSymlink: boolean }> } };
+    expect(payload.resourcesManifest.plugins.map((plugin) => plugin.path)).toEqual([
       ".opencode/plugins/nested/local-plugin.ts",
       "packages/custom-plugin.ts",
     ]);
-    expect(body.manifest.plugins.every((plugin: { fileType: string; isSymlink: boolean }) =>
+    expect(payload.resourcesManifest.plugins.every((plugin) =>
       plugin.fileType === "regular" && plugin.isSymlink === false)).toBe(true);
+    expect(payload.resourcesManifest).toMatchObject({
+      skills: [expect.objectContaining({ metadata: { tags: ["one", "two"], alwaysApply: true, category: "workflow" }, fileTree: { "references/nested/example.md": "Reference\n" } })],
+    });
   });
 
   it("enforces the configured-plugin allowlist through pushDiskToApi", async () => {
     fixture();
     write("secrets/plugin.ts", "export const secret = true;\n");
     write("opencode.json", JSON.stringify({ plugin: ["secrets/plugin.ts"] }));
-    const fetchMock = successfulFetch();
+    successfulMcp();
 
     await expect(pushDiskToApi(worktree)).rejects.toBeInstanceOf(RepositorySyncScanError);
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
-      "/api/v1/auth/preflight",
-      "/api/v1/projects",
-    ]);
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects aggregate resource content before MCP and preserves the confirmed baseline", async () => {
+    fixture();
+    successfulMcp();
+    await repositorySync(worktree);
+    const statePath = join(worktree, ".opencode", ".ingenium-sync-state.json");
+    const baseline = readFileSync(statePath, "utf8");
+    const body = "x".repeat(Math.floor(REPOSITORY_MAX_RESOURCE_TOTAL_BYTES / 7));
+
+    for (let index = 0; index < 7; index += 1) {
+      write(
+        `.opencode/skills/aggregate-${index}/SKILL.md`,
+        `---\nname: aggregate-${index}\ndescription: "Aggregate"\n---\n\n${body}`,
+      );
+    }
+
+    await expect(repositorySync(worktree)).rejects.toBeInstanceOf(RepositorySyncScanError);
+    expect(mockCallMcpTool).toHaveBeenCalledTimes(1);
+    expect(readFileSync(statePath, "utf8")).toBe(baseline);
   });
 
   it("runs OnboardingSyncPlugin's session.created wrapper and logs the pushed resources", async () => {
     fixture();
-    const fetchMock = successfulFetch();
+    const mcpCall = successfulMcp();
     const log = vi.fn();
     const plugin = await OnboardingSyncPlugin({ worktree, client: { app: { log } } });
 
     await plugin.event({ event: { type: "session.idle" } });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mcpCall).not.toHaveBeenCalled();
 
     await plugin.event({ event: { type: "session.created" } });
 
@@ -315,17 +329,12 @@ describe("repository-authoritative manifest v2", () => {
       writeFileSync(outsideManifest, original, "utf8");
       const manifestPath = join(worktree, ".opencode", ".ingenium-sync-state.json");
       symlinkSync(outsideManifest, manifestPath);
-      const fetchMock = successfulFetch();
+      successfulMcp();
       const plugin = await OnboardingSyncPlugin({ worktree, client: { app: { log: vi.fn() } } });
 
       await expect(plugin.event({ event: { type: "session.created" } })).rejects.toBeInstanceOf(RepositorySyncScanError);
       expect(readFileSync(outsideManifest, "utf8")).toBe(original);
-      expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
-        "/api/v1/auth/preflight",
-        "/api/v1/projects",
-        "/api/v1/docs/repository/sync",
-        "/api/v1/repository/resources/sync",
-      ]);
+      expect(mockCallMcpTool).toHaveBeenCalledOnce();
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

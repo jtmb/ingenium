@@ -33,9 +33,6 @@ export async function ragAsk(project: string, question: string) {
 export async function ragIngestDocument(project: string, title: string, text: string, format?: string) {
   // Step 1: Create a source entry
   const createRes = await api.post("/rag/sources", { title, format: format ?? "text" }, { project });
-  if (!createRes.ok) {
-    return { content: [{ type: "text" as const, text: JSON.stringify(createRes.data) }] };
-  }
   const sourceId = createRes.data?.id ?? createRes.data?.source?.id;
   if (!sourceId) {
     return {

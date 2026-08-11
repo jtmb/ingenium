@@ -21,7 +21,7 @@ const mockApi = {
   postOctetStream: vi.fn(),
 };
 
-vi.mock("../lib/client.js", () => ({ api: mockApi }));
+vi.mock("../lib/client.js", () => ({ api: { settled: mockApi } }));
 
 const {
   CONTEXT_UPLOAD_MAX_FILE_BYTES,

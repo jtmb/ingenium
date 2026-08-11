@@ -3,7 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
 import { pathToFileURL } from "node:url";
-import { agents, backups, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { agents, backups, jobs, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
@@ -55,7 +55,7 @@ import {
   isPackagedMcpLauncher,
   resolvePackagedMcpLauncher,
 } from "../lib/mcp-launcher.js";
-import { projects as projectsDb, protectedSettings, servers } from "ingenium-core";
+import { projects as projectsDb, protectedSettings, servers, skillGovernance } from "ingenium-core";
 import { startScheduler } from "../lib/scheduler.js";
 import { recoverVaultSecretRunDirectories } from "../lib/job-runner.js";
 import { startBackupScheduler } from "../lib/backup-scheduler.js";
@@ -63,6 +63,10 @@ import { createApiLifecycle, installShutdownSignalHandlers, type ApiLifecycle } 
 import { startMailMaintenance } from "../lib/mail-maintenance.js";
 import { shouldStartBackgroundSchedulers, shouldStartMailMaintenance } from "../lib/runtime-mode.js";
 import { startRestoreMaintenance } from "../lib/restore-supervisor.js";
+import { configureEmailRuntimeForApi } from "../lib/email-runtime.js";
+import { recoverServerGlobalProviderMetadata } from "../lib/server-global-provider-persistence.js";
+
+configureEmailRuntimeForApi();
 
 /**
  * Ensure the global-default project exists at startup.
@@ -75,7 +79,7 @@ import { startRestoreMaintenance } from "../lib/restore-supervisor.js";
  */
 function ensureGlobalProject(): string | null {
   try {
-    const global = projectsDb.ensureGlobalProject();
+    const global = projectsDb.ensureCanonicalGlobalProject();
     // The broker is a system-owned profile. Its dedicated core bootstrap emits
     // the only row accepted by migration 058; no public agent route can create
     // or reactivate it.
@@ -88,6 +92,11 @@ function ensureGlobalProject(): string | null {
     }
     if (conflicts > 0) {
       logger.warn("api", "OAuth client-secret migration requires operator review", { conflicts });
+    }
+    const providerRecovery = recoverServerGlobalProviderMetadata();
+    if (providerRecovery.migratedSettings > 0 || providerRecovery.migratedCredentials > 0
+      || providerRecovery.conflicts > 0 || providerRecovery.skippedForVault) {
+      logger.info("api", "Server-global provider recovery completed", providerRecovery);
     }
     return global.id;
   } catch {
@@ -176,11 +185,34 @@ app.use("/api/v1/usage", usageRouter);
 // from middleware registered below the error handler.
 app.use(errorHandler);
 
+export function recoverInterruptedJobRunsAtStartup(): number {
+  try {
+    const recoveredRuns = jobs.recoverInterruptedJobRuns();
+    if (recoveredRuns > 0) {
+      logger.warn("api", "Marked interrupted ordinary job runs as failed after API restart", { recoveredRuns });
+    }
+    return recoveredRuns;
+  } catch {
+    logger.warn("api", "Interrupted ordinary job run recovery failed; scheduler start will continue");
+    return 0;
+  }
+}
+
 function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   logger.info("api", `ingenium-api listening privately on 127.0.0.1:${config.port}`);
 
   // Ensure global-default exists before schedulers or mail maintenance use it.
   const globalProjectId = ensureGlobalProject();
+  recoverInterruptedJobRunsAtStartup();
+
+  try {
+    const proposalReconciliation = skillGovernance.reconcileOpenProposalCandidates();
+    if (proposalReconciliation.keysAssigned > 0 || proposalReconciliation.staleProposals > 0 || proposalReconciliation.truncated) {
+      logger.info("api", "Reconciled open skill proposal candidates", proposalReconciliation);
+    }
+  } catch {
+    logger.warn("api", "Open skill proposal candidate reconciliation failed; it will retry on the next startup");
+  }
 
   // Migration 061 can run before a first-start global project is created. Run
   // the idempotent backfill again after startup resolution so those legacy
@@ -236,7 +268,7 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   }
 
   try {
-    const globalProjectRec = projectsDb.getGlobalProject();
+    const globalProjectRec = projectsDb.getCanonicalGlobalProject();
     if (globalProjectRec) {
       const launcherPath = resolvePackagedMcpLauncher(import.meta.url);
       if (!isPackagedMcpLauncher(launcherPath)) {

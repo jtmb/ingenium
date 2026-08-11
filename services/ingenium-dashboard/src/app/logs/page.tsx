@@ -3,11 +3,11 @@ export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
-import { api, type LogEntry } from "../../lib/api";
+import { api, ApiError, type LogEntry } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
 // 500-entry cap prevents unbounded memory growth in long-running sessions.
-// 2s poll interval gives near-real-time log display without saturating the API.
+// A one-shot timer starts only after the previous request settles.
 const MAX_ENTRIES = 500;
 const POLL_MS = 2_000;
 
@@ -95,24 +95,62 @@ export default function LogsPage() {
 
   const [paused, setPaused] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
   const seenKeys = useRef(new Set<string>());
   const lastTimestampRef = useRef<string>("");
 
-  const fetchLogs = useCallback(() => {
-    api.logs
-      .list(project, lastTimestampRef.current || undefined, 200)
-      .then((r: any) => {
-        const data = r.data || r;
+  useEffect(() => {
+    let disposed = false;
+    let hidden = document.hidden;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let controller: AbortController | null = null;
+
+    const clearTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    const abortRequest = () => {
+      const activeController = controller;
+      controller = null;
+      activeController?.abort();
+    };
+
+    const canPoll = () => !disposed && !paused && !hidden;
+
+    const schedule = (delay: number) => {
+      if (!canPoll()) return;
+      clearTimer();
+      timer = setTimeout(() => {
+        timer = null;
+        void poll();
+      }, delay);
+    };
+
+    const poll = async (): Promise<void> => {
+      if (!canPoll() || controller) return;
+
+      const requestController = new AbortController();
+      controller = requestController;
+      try {
+        const response = await api.logs.list(
+          project,
+          lastTimestampRef.current || undefined,
+          200,
+          requestController.signal,
+        );
+        if (!canPoll() || requestController.signal.aborted) return;
+
+        const data = response.data || response;
         const newEntries: LogEntry[] = data.entries || [];
         const newSources: string[] = data.sources || [];
 
         if (newEntries.length > 0) {
-          // Deduplicate using seenKeys
-          const unseen = newEntries.filter((e) => {
-            const key = dedupeKey(e);
+          const unseen = newEntries.filter((entry) => {
+            const key = dedupeKey(entry);
             if (seenKeys.current.has(key)) return false;
             seenKeys.current.add(key);
             return true;
@@ -121,14 +159,11 @@ export default function LogsPage() {
           if (unseen.length > 0) {
             setEntries((prev) => {
               const merged = [...prev, ...unseen];
-              // Enforce MAX_ENTRIES limit
               return merged.length > MAX_ENTRIES
                 ? merged.slice(merged.length - MAX_ENTRIES)
                 : merged;
             });
-            // Update last timestamp for `since` pagination
-            const latest = unseen[unseen.length - 1]!;
-            lastTimestampRef.current = latest.timestamp;
+            lastTimestampRef.current = unseen[unseen.length - 1]!.timestamp;
           }
         }
 
@@ -137,30 +172,54 @@ export default function LogsPage() {
         setLastUpdate(new Date().toISOString());
         setError(null);
         setLoading(false);
-      })
-      .catch((err: Error) => {
-        setError(err.message || "Failed to fetch logs");
+        schedule(POLL_MS);
+      } catch (err: unknown) {
+        if (disposed || requestController.signal.aborted) return;
+
         setLoading(false);
-      });
-  }, [project]);
+        if (err instanceof ApiError && err.status === 429) {
+          if (err.retryAfterStatus === "valid" && err.retryAfterSeconds !== null) {
+            setError(`${err.message} Retrying in ${err.retryAfterSeconds}s.`);
+            schedule(err.retryAfterSeconds * 1_000);
+          } else {
+            const retryMessage = err.retryAfterStatus === "excessive"
+              ? "The server supplied an excessive Retry-After delay."
+              : err.retryAfterStatus === "invalid"
+                ? "The server supplied an invalid Retry-After delay."
+                : "The server did not supply a valid Retry-After delay.";
+            setError(`${err.message} ${retryMessage} Polling stopped.`);
+            clearTimer();
+          }
+          return;
+        }
 
-  useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
-
-  useEffect(() => {
-    if (paused) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+        setError(err instanceof Error ? err.message || "Failed to fetch logs" : "Failed to fetch logs");
+        schedule(POLL_MS);
+      } finally {
+        if (controller === requestController) controller = null;
       }
-    } else {
-      intervalRef.current = setInterval(fetchLogs, POLL_MS);
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [paused, fetchLogs]);
+
+    const handleVisibilityChange = () => {
+      hidden = document.hidden;
+      if (hidden) {
+        clearTimer();
+        abortRequest();
+      } else if (!paused) {
+        schedule(0);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!hidden && !paused) void poll();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearTimer();
+      abortRequest();
+    };
+  }, [paused, project]);
 
   useEffect(() => {
     if (shouldAutoScroll.current && scrollRef.current) {
@@ -345,8 +404,8 @@ export default function LogsPage() {
         </div>
       )}
 
-      {error && entries.length === 0 && (
-        <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
+      {error && (
+        <div role="alert" className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
           {error}
         </div>
       )}

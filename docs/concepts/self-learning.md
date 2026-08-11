@@ -3,7 +3,7 @@ title: Self-Learning Pipeline Reference
 description: Comprehensive guide to the Ingenium self-learning pipeline — extraction engine, trait consolidation, skill synthesis, and observability.
 ---
 
-> **Note:** This document was relocated from `docs/self-learning-pipeline.md`. Please update your bookmarks.
+> **Canonical document:** This file is the self-learning pipeline reference.
 
 # Self-Learning Pipeline Reference
 
@@ -44,7 +44,7 @@ flowchart TB
         B2 --> B3
         B3 -->|yes| B4
         B3 -->|no| B7[Skip Phase 2]
-        B4 -->|writeSkillToDisk| B6
+        B4 -->|API skill persistence| B6
         B4 -->|create traits| B5
     end
 
@@ -62,24 +62,11 @@ flowchart TB
         D1 --> D2
     end
 
-    subgraph Sync["Bidirectional Skill Sync"]
-        E1{/sync-skills command}
-        E2{Scheduled 15min Sync}
-        E3[Disk to DB import]
-        E4[DB to Disk write]
-        E1 --> E3
-        E1 --> E4
-        E2 --> E3
-        E2 --> E4
-        E3 --> B6
-        B6 --> E4
-    end
-
     Phase0 --> Phase2
     Phase2 --> Phase3
     Phase0 -.->|pipeline events| Observability
     Phase2 -.->|pipeline events| Observability
-    Sync -.->|keeps skills in sync| Phase2
+    Phase2 -.->|skills are projected by Git-authoritative resource sync| Phase3
 ```
 
 ### Three-Phase Architecture
@@ -104,7 +91,7 @@ flowchart TB
 ┌─────────────────────────────────────────────────────────────┐
 │  PHASE 2: SKILL SYNTHESIS + PERSONALITY                     │
 │  - Groups 3+ related observations → LLM creates skills     │
-│  - Skills written to disk via writeSkillToDisk()            │
+│  - Skills persisted by the API; worktree projection is separate │
 │  - LLM-suggested personality_traits actually created        │
 │  - Confidence: 0.10–0.15 start, +0.15/confirmation,        │
 │    cap 0.95, display gate ≥0.30, 7-day decay -0.05         │
@@ -136,22 +123,23 @@ User interacts with OpenCode (:4098)
   │     fails LLM extraction, preventing gaps from transient errors
   │   → pipeline event: extraction_completed
   │
-  ├─ Auto-Observer Plugin (auto-observer.ts, thin trigger only)
-  │   → on session.idle, POSTs /api/v1/extraction/run (no detection logic)
+   ├─ Auto-Observer Plugin (auto-observer.ts, thin trigger only)
+   │   → on session.idle, calls Ingenium MCP (no detection logic)
+   │   → MCP invokes the authenticated extraction API route
   │   → if plugin fails to load, scheduler covers extraction anyway
   │   → auto_observe_now tool for manual trigger
   │
-  ├─ Observer Plugin (observer.ts, session.created / session.idle)
-  │   → imports local file fallbacks if API was down
-  │   → triggers POST /api/v1/synthesis/run
+   ├─ Observer Plugin (observer.ts, session.created / session.idle)
+   │   → imports local file fallbacks if API was down
+   │   → calls Ingenium MCP; MCP invokes the authenticated synthesis API route
   │   → fires pipeline events for dashboard observability
   │   → 🔴 non-fatal: dropped pipeline events (API unavailable) are
   │     logged to stderr instead of silently swallowed; the
   │     scheduled 15min maintenance cycle provides coverage
   │
-   ├─ Resource Sync Plugin (resource-sync.ts, session.created / throttled session.idle)
-   │   → reconciles skills, agents, plugins, commands, and config with the API
-   │   → uses a SHA-256 manifest for conflict-aware bidirectional sync
+    ├─ Resource Sync Plugin (resource-sync.ts, session.created / throttled session.idle)
+    │   → projects Git worktree resources through MCP stdio to the authenticated API
+    │   → uses a SHA-256 manifest; admin CRUD/sync tools are repair/import only
    │   → preserves unresolved conflicts and writes a broker only after full canonical-template validation
   │
    ├─ Scheduled Scheduler (every 15 min in API server)
@@ -169,7 +157,7 @@ User interacts with OpenCode (:4098)
       Phase 2 (if LLM configured): LLM Skill Synthesis
       → groups 3+ related observations from batch
       → sends to LLM with existing skills + traits as context
-      → creates/updates skills with writeSkillToDisk() + llm-synthesized prefix
+      → creates/updates skills through the API with llm-synthesized prefix
       → LLM-suggested personality_traits actually created (previously dropped)
       → logs errors but doesn't block Phase 1 results
 
@@ -186,7 +174,7 @@ User interacts with OpenCode (:4098)
 | **Agent** | Calls `ingenium_observe()` during workflow to record user interactions (manual, for exceptional cases — extraction engine handles most detection) |
 | **Extraction Engine** (extraction.ts) | **Server-side**: Reads OpenCode messages via API, watermark-gated + content-hash dedup, regex pre-filter selects candidates, LLM batch extraction creates durable behavior rule observations. Runs in the scheduler. |
 | **Observer Plugin** (observer.ts) | Monitors session events, imports file fallbacks, triggers synthesis |
-| **Auto-Observer Plugin** (auto-observer.ts) | **Thin trigger only**: On session.idle, POSTs `/api/v1/extraction/run`. Zero detection logic — all extraction is server-side. If plugin fails to load, scheduler covers extraction. |
+| **Auto-Observer Plugin** (auto-observer.ts) | **Thin trigger only**: On session.idle, calls Ingenium MCP, which invokes the authenticated extraction API route. Zero detection logic — all extraction is server-side. If plugin fails to load, scheduler covers extraction. |
 | **Resource Sync Plugin** (resource-sync.ts) | Reconciles skills, agents, plugins, commands, and config on session events using a SHA-256 manifest; preserves unresolved conflicts and writes the reserved broker only after full canonical-template validation |
 | **Synthesis Pipeline** | Processes observations via LLM consolidation (CONFIRM/CREATE/IGNORE), generates normalized personality traits (Phase 1), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion |
 | **API Layer** | REST endpoints for all operations (sole DB authority). New: `POST /api/v1/extraction/run`, DELETE observations/personality endpoints |
@@ -205,6 +193,29 @@ the target observation or trait belongs to that same project and report it as no
 found otherwise. The only intentional promotion into `global-default` is the
 separate cross-project synthesis flow after a pattern appears in multiple projects.
 
+### Durable synthesis batches and resumption
+
+Synthesis claims one durable batch of up to **50 pending observations** and
+advances it through these persisted stages:
+
+1. `created` — consolidate traits and apply the trait stage.
+2. `traits_applied` — persist the proposal plan, then apply skill proposals and
+   any LLM-suggested traits.
+3. `proposals_applied` — acknowledge the batch.
+4. `complete` — mark every batch observation as `processed`.
+
+Observations remain pending until the trait and proposal stages have completed
+and the final acknowledgment succeeds. A failed LLM call, stage write, or
+acknowledgment leaves the incomplete batch resumable; its persisted proposal plan
+is reused rather than regenerated. A subsequent synthesis run can reclaim an
+expired batch lease and continue from its recorded stage.
+
+Batch ownership leases last **5 minutes** and are renewed before stage work;
+workers that lose ownership stop advancing that batch. Durable failure metadata
+is bounded to a 64-byte error code, a 1,024-byte error message, and at most 100
+recorded errors per batch. These bounds keep retry diagnostics discoverable
+without allowing an unbounded synthesis payload.
+
 ### Explicit current-learning RAG snapshots
 
 CTX-003 does not automatically export raw observations into RAG. A caller can
@@ -221,7 +232,7 @@ source-attributed retrieval of durable learning output.
 
 ## 2.5 Extraction Engine (Server-Side)
 
-Observation detection runs **server-side in the API** — the client-side auto-observer plugin is now only a thin trigger. The extraction engine (`packages/ingenium-core/lib/tools/extraction.ts`, `runExtraction(projectId, projectName)`) reads OpenCode messages via the existing `GET /api/v1/opencode/messages` endpoint.
+Observation detection runs **server-side in the API** — the client-side auto-observer plugin is now only a thin trigger. Configured extension plugins call Ingenium MCP, and MCP invokes authenticated API routes. The extraction engine (`packages/ingenium-core/lib/tools/extraction.ts`, `runExtraction(projectId, projectName)`) may read OpenCode messages through API-owned internals.
 
 ### Architecture
 
@@ -269,7 +280,7 @@ The core pipeline uses direct calls (60s timeout) for batch processing when an e
 | Trigger | Mechanism |
 |---------|-----------|
 | **Scheduler** (every 15 min) | `services/ingenium-api/lib/scheduler.ts` runs extraction before synthesis for all active projects |
-| **Auto-Observer Plugin** | On `session.idle`, POSTs `POST /api/v1/extraction/run` (thin trigger) |
+| **Auto-Observer Plugin** | On `session.idle`, calls Ingenium MCP (thin trigger); MCP invokes the authenticated extraction API route |
 | **MCP Tool** | `ingenium_extraction_run` — manual trigger |
 | **API Endpoint** | `POST /api/v1/extraction/run` — direct API call |
 
@@ -281,7 +292,8 @@ The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is now a 
 Auto-Observer Plugin (auto-observer.ts)
   │
   ├─ Hook: session.idle
-  │   → POSTs /api/v1/extraction/run
+  │   → Calls Ingenium MCP
+  │   → MCP invokes the authenticated extraction API route
   │   → No detection logic — all extraction runs server-side
   │
   └─ MCP Tool: auto_observe_now
@@ -381,7 +393,7 @@ GROUP BY project_id, trait_type;
 
 ---
 
-*Full documentation continues with observation types, personality trait system, confidence model, MCP tools reference, API endpoints, pipeline observability, LLM skill synthesis, troubleshooting, and version history. This document was relocated from `docs/self-learning-pipeline.md`.*
+*Full documentation continues with observation types, personality trait system, confidence model, MCP tools reference, API endpoints, pipeline observability, LLM skill synthesis, troubleshooting, and version history. This file is the canonical self-learning pipeline document.*
 
 ---
 

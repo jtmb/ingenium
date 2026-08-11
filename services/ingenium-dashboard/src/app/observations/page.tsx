@@ -60,17 +60,49 @@ export default function ObservationsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [selected, setSelected] = useState<any>(null);
-  const [stats, setStats] = useState({ total: 0, pending: 0 });
-  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<{ total: number; pending: number } | null>(null);
+  const [observationsState, setObservationsState] = useState<"loading" | "success" | "error">("loading");
+  const [statsState, setStatsState] = useState<"loading" | "success" | "error">("loading");
+  const [observationsError, setObservationsError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   useEffect(() => {
-    setError(null);
+    let cancelled = false;
+    setObservations([]);
+    setStats(null);
+    setObservationsState("loading");
+    setStatsState("loading");
+    setObservationsError(null);
+    setStatsError(null);
+
     api.observations.list(project, statusFilter, typeFilter)
-      .then((r) => setObservations(r.data || []))
-      .catch(() => setError("Failed to load observations — API may be unreachable"));
+      .then((response) => {
+        if (cancelled) return;
+        setObservations(Array.isArray(response.data) ? response.data : []);
+        setObservationsState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setObservationsError(error instanceof Error ? error.message : "API may be unreachable");
+        setObservationsState("error");
+      });
     api.observations.stats(project)
-      .then((r) => setStats(r.data || { total: 0, pending: 0 }))
-      .catch(() => { /* stats are non-critical */ });
+      .then((response) => {
+        if (cancelled) return;
+        const data = response.data;
+        if (!data || !Number.isFinite(data.total) || !Number.isFinite(data.pending)) {
+          throw new Error("Invalid observation stats response");
+        }
+        setStats(data);
+        setStatsState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setStatsError(error instanceof Error ? error.message : "Unable to load observation stats");
+        setStatsState("error");
+      });
+
+    return () => { cancelled = true; };
   }, [project, statusFilter, typeFilter]);
 
   return (
@@ -78,8 +110,14 @@ export default function ObservationsPage() {
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="min-w-0 break-words text-3xl font-bold">Observations</h1>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]">
-          <span>Total: <strong>{stats.total}</strong></span>
-          <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
+          {statsState === "loading" && <span aria-busy="true">Loading stats...</span>}
+          {statsState === "error" && <span role="alert">Stats unavailable: {statsError}</span>}
+          {statsState === "success" && stats && (
+            <>
+              <span>Total: <strong>{stats.total}</strong></span>
+              <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
+            </>
+          )}
         </div>
       </div>
 
@@ -107,43 +145,50 @@ export default function ObservationsPage() {
       </div>
 
       <div className="space-y-2">
-        {error && (
-          <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
-            {error}
+        {observationsState === "loading" && (
+          <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-6 text-center text-sm text-[var(--color-text-muted)]" aria-busy="true">
+            Loading observations...
           </div>
         )}
-        {!error && observations.length === 0 && (
+        {observationsState === "error" && (
+          <div className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center text-sm text-[var(--color-error-text)]" role="alert">
+            Failed to load observations — {observationsError}
+          </div>
+        )}
+        {observationsState === "success" && observations.length === 0 && (
           <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
             No observations yet. The agent will record observations automatically during interactions.
           </div>
         )}
-        {observations.map((o: Observation) => (
+        {observationsState === "success" && observations.map((o: Observation) => (
           <div
             key={o.id}
-            className="group min-w-0 cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
-            onClick={() => setSelected(o)}
+            className="group min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
           >
-            <div className="mb-1 flex flex-wrap items-center gap-2">
-              <span className={`${BADGE_BASE} ${typeColors(o.observation_type)}`}>
-                {o.observation_type}
-              </span>
-              <span className={`${BADGE_BASE} ${statusColors(o.status)}`}>{o.status}</span>
-              <span className="text-xs text-[var(--color-text-muted)]">{new Date(o.created_at).toLocaleString()}</span>
-              {o.importance && <span className="text-xs text-[var(--color-text-muted)]">Importance: {o.importance}/10</span>}
-              <span className="ml-0 opacity-100 transition-opacity sm:ml-auto sm:opacity-0 sm:group-hover:opacity-100">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push(buildProjectNavigationHref(`/observations/${o.id}`, project));
-                  }}
-                  className="text-xs text-[var(--color-text-link)] hover:text-blue-800 underline"
-                  title="View full details"
-                >
-                  Open
-                </button>
-              </span>
+            <div className="flex min-w-0 items-start gap-3">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                onClick={() => setSelected(o)}
+                aria-label={`View observation ${o.id}`}
+              >
+                <span className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className={`${BADGE_BASE} ${typeColors(o.observation_type)}`}>{o.observation_type}</span>
+                  <span className={`${BADGE_BASE} ${statusColors(o.status)}`}>{o.status}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">{new Date(o.created_at).toLocaleString()}</span>
+                  {o.importance && <span className="text-xs text-[var(--color-text-muted)]">Importance: {o.importance}/10</span>}
+                </span>
+                <span className="block break-words text-sm">{o.content}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(buildProjectNavigationHref(`/observations/${o.id}`, project))}
+                className="shrink-0 text-xs text-[var(--color-text-link)] underline hover:text-blue-800"
+                title="View full details"
+              >
+                Open
+              </button>
             </div>
-            <p className="break-words text-sm">{o.content}</p>
             {o.context && <pre className="mt-1 break-all whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">{o.context}</pre>}
           </div>
         ))}

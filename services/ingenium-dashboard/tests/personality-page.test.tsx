@@ -115,6 +115,17 @@ describe("PersonalityPage", () => {
     expect(screen.getByTestId("emerging-trait-3")).toBeTruthy();
   });
 
+  it("opens trait details from a native card control", async () => {
+    const { default: PersonalityPage } = await import("../src/app/personality/page");
+    render(<PersonalityPage />);
+
+    const traitControl = await screen.findByRole("button", { name: "View trait Prefers concise responses" });
+    expect(traitControl.tagName).toBe("BUTTON");
+    fireEvent.click(traitControl);
+
+    expect(screen.getByRole("dialog", { name: "Prefers concise responses" })).toBeTruthy();
+  });
+
   it("removes a dismissed emerging card immediately and sends the external project", async () => {
     const { default: PersonalityPage } = await import("../src/app/personality/page");
     render(<PersonalityPage />);

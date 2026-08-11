@@ -4,8 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mockAssertExtensionToolEnabled = vi.hoisted(() => vi.fn());
-const mockEnsureExtensionProject = vi.hoisted(() => vi.fn());
-const mockFetch = vi.hoisted(() => vi.fn());
 const mockTriggerSynthesis = vi.hoisted(() => vi.fn());
 
 vi.mock("@opencode-ai/plugin", () => ({
@@ -16,13 +14,12 @@ vi.mock("../mcp-tool-state.js", () => ({
   assertExtensionToolEnabled: mockAssertExtensionToolEnabled,
 }));
 
-vi.mock("../project-resolver.js", () => ({
-  ensureExtensionProject: mockEnsureExtensionProject,
-  classifyExtensionProjectFailure: () => "unavailable",
-}));
+vi.mock("../project-resolver.js", () => ({ resolveExtensionProject: () => "extension-project" }));
 
-vi.mock("../api-auth.js", () => ({
-  apiRequestHeaders: () => new Headers(),
+vi.mock("../mcp-client.js", () => ({
+  callMcpTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "{}" }] }),
+  mcpToolData: () => ({}),
+  McpBridgeError: class extends Error {},
 }));
 
 vi.mock("../observer-core.js", () => ({
@@ -138,10 +135,7 @@ async function loadManualTools(): Promise<Record<ExtensionToolName, ToolDefiniti
 describe("MCP-101 extension registration conformance", () => {
   beforeEach(() => {
     mockAssertExtensionToolEnabled.mockResolvedValue("extension-project");
-    mockEnsureExtensionProject.mockResolvedValue("extension-project");
-    mockFetch.mockResolvedValue(response({ data: { created: 0 } }));
     mockTriggerSynthesis.mockResolvedValue({ triggered: true, message: "ok" });
-    vi.stubGlobal("fetch", mockFetch);
   });
 
   afterEach(() => {
@@ -194,7 +188,6 @@ describe("MCP-101 extension registration conformance", () => {
       "synthesize_observations",
     ]);
     expect(mockAssertExtensionToolEnabled.mock.calls.every(([, guardedWorktree]) => guardedWorktree === worktree)).toBe(true);
-    expect(mockAssertExtensionToolEnabled.mock.invocationCallOrder[0]).toBeLessThan(mockFetch.mock.invocationCallOrder[0]!);
     expect(mockAssertExtensionToolEnabled.mock.invocationCallOrder[1]).toBeLessThan(mockTriggerSynthesis.mock.invocationCallOrder[0]!);
   });
 
@@ -212,7 +205,6 @@ describe("MCP-101 extension registration conformance", () => {
         "auto_observe_now",
         "synthesize_observations",
       ]);
-      expect(mockFetch).not.toHaveBeenCalled();
       expect(mockTriggerSynthesis).not.toHaveBeenCalled();
     },
   );

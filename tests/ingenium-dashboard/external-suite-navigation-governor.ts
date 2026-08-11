@@ -28,7 +28,10 @@ export const API_FIXED_WINDOW_REQUEST_LIMIT = 100;
 export const OBSERVED_DOCKER_LOGICAL_READS_PER_TEST = 12;
 export const OBSERVED_DOCKER_DIRECT_API_READS_PER_TEST = 7;
 export const DOCKER_API_PREFLIGHT_READS = 2;
-export const ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS = 3_000;
+// The Mail settings panel adds ten per-key reads to the page and project
+// resolution requests. Match the Docker cadence so Settings parity stays
+// within the deployed API's 100-request fixed window.
+export const ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS = 6_000;
 export const DOCKER_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS = 6_000;
 export const DOCKER_TESTS_PER_API_WINDOW = Math.floor(
   API_FIXED_WINDOW_MS / DOCKER_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
@@ -38,8 +41,6 @@ export const DOCKER_API_READS_PER_WINDOW =
   + DOCKER_API_PREFLIGHT_READS;
 export const DOCKER_API_HEADROOM_PER_WINDOW =
   API_FIXED_WINDOW_REQUEST_LIMIT - DOCKER_API_READS_PER_WINDOW;
-// Keep the established route-parity cadence as the default for configurations
-// that do not explicitly opt into Docker's larger fixed-window budget.
 export const EXTERNAL_SUITE_TRANSITION_INTERVAL_MS =
   ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS;
 export const EXTERNAL_SUITE_TRANSITION_INTERVAL_METADATA_KEY =

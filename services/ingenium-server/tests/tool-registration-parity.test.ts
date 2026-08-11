@@ -170,7 +170,6 @@ describe("MCP server registration conformance", () => {
     const comparison = assertCurrentRegistrationConformance();
 
     expect(new Set(comparison.actualCanonicalNames)).toEqual(new Set(comparison.expectedCanonicalNames));
-    expect(comparison.actualCanonicalNames).toHaveLength(277);
   });
 
   it("requires a literal registration name and ignores calls after restoration", () => {

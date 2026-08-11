@@ -5,6 +5,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { resetEnsuredProjects } from "./project-resolver.js";
 import { resetProjectCache } from "./resource-sync.js";
 
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
+
+vi.mock("./mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+  McpBridgeError: class McpBridgeError extends Error {
+    constructor(readonly failure: string) {
+      super("bridge");
+    }
+  },
+}));
+
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
 const wrapperSpecs = [
@@ -85,14 +97,18 @@ async function applyOpenCode1189V1Server(mod: Record<string, unknown>, spec: str
 
 describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
   const originalProject = process.env.INGENIUM_PROJECT;
+  const originalToken = process.env.INGENIUM_API_TOKEN;
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    mockCallMcpTool.mockReset();
     resetEnsuredProjects();
     resetProjectCache();
     if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
     else process.env.INGENIUM_PROJECT = originalProject;
+    if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
+    else process.env.INGENIUM_API_TOKEN = originalToken;
   });
 
   it("uses explicit local wrapper specs and rejects bare package-like paths", () => {
@@ -237,13 +253,13 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
 
   it("keeps API authentication failures from every V1 lifecycle wrapper off stdio", async () => {
     process.env.INGENIUM_PROJECT = "plugin-loader-v1-failure";
+    process.env.INGENIUM_API_TOKEN = "a".repeat(32);
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: { detail: "Bearer secret-token http://private.example/stack" } }),
-    } as Response)));
+    mockCallMcpTool.mockImplementation(async () => {
+      expect(process.env.INGENIUM_API_TOKEN).toBe("a".repeat(32));
+      throw { name: "McpBridgeError", failure: "authentication" };
+    });
 
     const [autoWrapper, observerWrapper, resourceWrapper] = await Promise.all([
       import("./plugins/auto-observer.js"),
@@ -264,7 +280,8 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
 
     const output = JSON.stringify(log.mock.calls);
     expect(output).toContain("trigger_extraction: authentication");
-    expect(output).toContain("extension_project_init: authentication");
+    expect(output).toContain("resource_sync: request_failed");
+    expect(output).not.toContain("extension_project_init");
     expect(output).not.toContain("secret-token");
     expect(output).not.toContain("private.example");
     expect(output).not.toContain("stack");

@@ -55,15 +55,31 @@ function TasksContent() {
   );
 
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksState, setTasksState] = useState<"loading" | "success" | "error">("loading");
+  const [tasksError, setTasksError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [detailTask, setDetailTask] = useState<Task | null>(null);
 
-  useEffect(() => {
-    api.tasks.list(project).then((r) => setTasks(r.data ?? [])).catch(() => {});
+  const loadTasks = useCallback(async () => {
+    setTasksState("loading");
+    setTasksError(null);
+    try {
+      const response = await api.tasks.list(project);
+      setTasks(Array.isArray(response.data) ? response.data : []);
+      setTasksState("success");
+    } catch (error: unknown) {
+      setTasks([]);
+      setTasksError(error instanceof Error ? error.message : "Unable to load tasks");
+      setTasksState("error");
+    }
   }, [project]);
+
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
 
   const switchView = useCallback(
     (mode: ViewMode) => {
@@ -141,26 +157,41 @@ function TasksContent() {
         ))}
       </div>
 
-      {view === "board" && (
-        <BoardView
-          project={project}
-          tasks={filteredTasks}
-          onTasksChange={setTasks}
-        />
-      )}
-      {view === "list" && (
-        <ListView
-          project={project}
-          tasks={filteredTasks}
-          onTasksChange={setTasks}
-        />
-      )}
-      {view === "timeline" && (
-        <TimelineView
-          project={project}
-          tasks={filteredTasks}
-          onTasksChange={setTasks}
-        />
+      {tasksState === "loading" ? (
+        <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-8 text-center text-sm text-[var(--color-text-muted)]" aria-busy="true">
+          Loading tasks...
+        </div>
+      ) : tasksState === "error" ? (
+        <div className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center" role="alert">
+          <p className="text-sm text-[var(--color-error-text)]">Unable to load tasks: {tasksError}</p>
+          <button type="button" onClick={() => void loadTasks()} className="mt-3 rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          {view === "board" && (
+            <BoardView
+              project={project}
+              tasks={filteredTasks}
+              onTasksChange={setTasks}
+            />
+          )}
+          {view === "list" && (
+            <ListView
+              project={project}
+              tasks={filteredTasks}
+              onTasksChange={setTasks}
+            />
+          )}
+          {view === "timeline" && (
+            <TimelineView
+              project={project}
+              tasks={filteredTasks}
+              onTasksChange={setTasks}
+            />
+          )}
+        </>
       )}
 
       <SpotlightSearch project={project} onTaskSelect={handleSpotlightSelect} />

@@ -33,7 +33,7 @@ describe("external-suite Playwright configuration", () => {
     expect(source).toContain(ROUTE_PARITY_GOVERNOR_IMPORT);
   });
 
-  it("configures Docker separately from the retained three-second route-parity budget", () => {
+  it("configures Docker and route parity from their explicit transition budgets", () => {
     const dockerConfigSource = readFileSync(resolve(repositoryRoot, "tests/playwright.docker.config.ts"), "utf8");
     const routeParityConfigSource = readFileSync(
       resolve(repositoryRoot, "tests/dashboard-route-parity/playwright.config.ts"),
@@ -41,7 +41,7 @@ describe("external-suite Playwright configuration", () => {
     );
 
     expect(DOCKER_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(6_000);
-    expect(ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(3_000);
+    expect(ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(6_000);
     expect(dockerConfig.projects?.[0]?.metadata).toMatchObject({
       [EXTERNAL_SUITE_TRANSITION_INTERVAL_METADATA_KEY]: DOCKER_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
     });

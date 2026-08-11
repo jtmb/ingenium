@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
+import { configureEmailRuntime, resetEmailRuntimeForTest } from "../lib/runtime.js";
+import { createMemoryEmailRuntime } from "./runtime-fixture.js";
 
 const coreMockState = vi.hoisted(() => ({
   settings: new Map<string, string>(),
@@ -261,9 +263,12 @@ describe("encryptCredentials / decryptCredentials", () => {
 describe("getOAuthUrl / exchangeCode", () => {
   beforeEach(() => {
     resetOAuthMocks();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   afterEach(() => {
+    resetEmailRuntimeForTest();
     restoreOAuthEnvironment();
   });
 
@@ -345,9 +350,12 @@ describe("getOAuthUrl / exchangeCode", () => {
 describe("refreshAccessToken global configuration", () => {
   beforeEach(() => {
     resetOAuthMocks();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   afterEach(() => {
+    resetEmailRuntimeForTest();
     restoreOAuthEnvironment();
   });
 
@@ -401,9 +409,12 @@ describe("refreshAccessToken global configuration", () => {
 describe("compiled email release OAuth contract", () => {
   beforeEach(() => {
     resetOAuthMocks();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   afterEach(() => {
+    resetEmailRuntimeForTest();
     restoreOAuthEnvironment();
   });
 
@@ -414,6 +425,9 @@ describe("compiled email release OAuth contract", () => {
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_gmail_client_id", "release-non-global-gmail-client-id");
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_gmail_client_secret", "release-non-global-gmail-client-secret");
 
+    const builtRuntime = await import("../dist/lib/runtime.js");
+    builtRuntime.resetEmailRuntimeForTest();
+    builtRuntime.configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
     const built = await import("../dist/index.js");
     expect(built.refreshAccessToken).toBeTypeOf("function");
     const result = await built.refreshAccessToken("gmail", "release-refresh-token");
@@ -434,7 +448,13 @@ describe("storeTokens / getValidTokens", () => {
   });
 
   afterAll(() => {
+    resetEmailRuntimeForTest();
     delete process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
+  });
+
+  beforeEach(() => {
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   it("should return null for non-existent account", async () => {

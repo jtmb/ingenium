@@ -37,6 +37,7 @@ const MOCK_STATS = { spaces: 1, pages: 1, drafts: 0, versions: 1, tags: 1, comme
 let forceConflict = false;
 let forceSlugExists = false;
 let forceNotFound = false;
+let forceNoDraft = false;
 let forceCycle = false;
 
 // Fake in-memory DB for routes that use getDb directly (comment update, alias lookups)
@@ -157,7 +158,7 @@ vi.mock("ingenium-core", async (importOriginal) => {
       purgeArchivedPages: (_spaceId: number) => 1,
 
       // Drafts
-      getDraft: (_pageId: number) => forceNotFound ? undefined : MOCK_DRAFT,
+      getDraft: (_pageId: number) => forceNotFound || forceNoDraft ? undefined : MOCK_DRAFT,
       saveDraft: (_pageId: number, content: string, _title?: string, _slug?: string, _baseRevision?: number) => ({ ...MOCK_DRAFT, content }),
       deleteDraft: (_pageId: number) => !forceNotFound,
 
@@ -266,6 +267,7 @@ beforeEach(() => {
   forceConflict = false;
   forceSlugExists = false;
   forceNotFound = false;
+  forceNoDraft = false;
   forceCycle = false;
   seedMockData();
 });
@@ -681,6 +683,13 @@ describe("Drafts", () => {
     expect(data.data).toHaveProperty("pageId");
     expect(data.data).toHaveProperty("baseRevision");
     expect(data.data).toHaveProperty("savedAt");
+  });
+
+  it("GET /pages/1/draft returns a successful nullable result when no draft exists", async () => {
+    forceNoDraft = true;
+    const { status, data } = await req("GET", "/pages/1/draft");
+    expect(status).toBe(200);
+    expect(data).toEqual({ data: null });
   });
 
   it("GET /pages/999/draft returns 404", async () => {

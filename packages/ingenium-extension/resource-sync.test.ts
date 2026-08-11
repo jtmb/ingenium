@@ -17,6 +17,13 @@ import {
 } from "./resource-sync.js";
 import { resetEnsuredProjects } from "./project-resolver.js";
 
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
+
+vi.mock("./mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+}));
+
 let worktree = "";
 
 afterEach(() => {
@@ -25,6 +32,7 @@ afterEach(() => {
   resetIncrementalSyncThrottle();
   resetProjectCache();
   resetEnsuredProjects();
+  mockCallMcpTool.mockReset();
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
 });
@@ -381,22 +389,15 @@ describe("incremental resource sync recovery", () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-idle-"));
     const originalProject = process.env.INGENIUM_PROJECT;
     process.env.INGENIUM_PROJECT = "idle-recovery-project";
-    let docsCalls = 0;
-    const fetchMock = vi.fn(async (url: string | URL) => {
-      const path = new URL(String(url)).pathname;
-      if (path.endsWith("/auth/preflight")) return { ok: true, status: 200, json: async () => ({}) } as Response;
-      if (path.endsWith("/projects")) return { ok: true, status: 201, json: async () => ({}) } as Response;
-      if (path.endsWith("/docs/repository/sync")) {
-        docsCalls += 1;
-        if (docsCalls === 1) return { ok: false, status: 503, json: async () => ({}) } as Response;
-        return { ok: true, status: 200, json: async () => ({ data: { summary: {} } }) } as Response;
-      }
-      if (path.endsWith("/repository/resources/sync")) {
-        return { ok: true, status: 200, json: async () => ({ data: { summary: {} } }) } as Response;
-      }
-      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    let calls = 0;
+    mockCallMcpTool.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("MCP unavailable");
+      return { content: [{ type: "text", text: JSON.stringify({
+        docs: { summary: {} },
+        resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+      }) }] };
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     try {
       const failed = await incrementalSync(worktree);
@@ -406,7 +407,7 @@ describe("incremental resource sync recovery", () => {
       expect(failed?.docs?.errors).toBe(1);
       expect(recovered?.docs?.errors).toBe(0);
       expect(throttled).toBeNull();
-      expect(docsCalls).toBe(2);
+      expect(calls).toBe(2);
     } finally {
       if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
       else process.env.INGENIUM_PROJECT = originalProject;

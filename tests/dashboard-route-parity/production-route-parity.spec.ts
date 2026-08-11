@@ -180,11 +180,21 @@ async function assertSettingsSelection(
 ): Promise<void> {
   const activePanel = page.getByTestId(deepLink.panelTestId);
   await expect(activePanel, `${deepLink.id} did not render its expected panel`).toBeVisible();
+  expect(
+    await activePanel.evaluate((panel) => !panel.closest("[hidden], [inert]")),
+    `${deepLink.id} selected a hidden or inert panel`,
+  ).toBe(true);
+
+  const visibleRegisteredPanels = page.locator(
+    inventory.settingsDeepLinks
+      .map(({ panelTestId }) => `[data-testid="${panelTestId}"]:visible`)
+      .join(", "),
+  );
   await expect(
-    page.locator('[data-testid^="settings-panel-"]:visible'),
+    visibleRegisteredPanels,
     `${deepLink.id} did not select exactly one visible panel`,
   ).toHaveCount(1);
-  await expect(page.locator('[data-testid^="settings-panel-"]:visible')).toHaveAttribute(
+  await expect(visibleRegisteredPanels).toHaveAttribute(
     "data-testid",
     deepLink.panelTestId,
   );
@@ -347,7 +357,9 @@ test.describe("Production dashboard route parity", () => {
         await runReadOnlyBrowserCheck(page, context, `settings=${deepLink.id} at ${viewport.name}`, async () => {
           await openSettingsDeepLink(page, deepLink.id);
           await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-          expect(new URL(page.url()).searchParams.get("settings")).toBe(deepLink.id);
+          const url = new URL(page.url());
+          expect(url.searchParams.get("settings")).toBe(deepLink.id);
+          expect(url.searchParams.get("project")).toBe("global-default");
           await assertSettingsSelection(page, deepLink, viewport.name);
         });
       });

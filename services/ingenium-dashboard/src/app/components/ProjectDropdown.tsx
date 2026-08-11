@@ -70,12 +70,15 @@ export default function ProjectDropdown() {
         <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
         </svg>
-        {isChatRoute && (
-          <span className="flex min-w-0 max-w-full items-center gap-1 text-xs font-medium text-[var(--color-text-primary)] sm:max-w-56">
-            <span className="hidden shrink-0 sm:inline" data-testid="project-context-prefix">Context project: </span>
-            <span className="min-w-0 truncate font-normal">{activeProject}</span>
-          </span>
-        )}
+        <span
+          className={[
+            "min-w-0 items-center gap-1 text-xs font-medium text-[var(--color-text-primary)]",
+            isChatRoute ? "flex max-w-full sm:max-w-56" : "hidden max-w-40 sm:flex",
+          ].join(" ")}
+        >
+          {isChatRoute && <span className="hidden shrink-0 sm:inline" data-testid="project-context-prefix">Context project: </span>}
+          <span className="min-w-0 truncate font-normal" data-testid="project-name">{activeProject}</span>
+        </span>
         <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>

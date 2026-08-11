@@ -91,6 +91,13 @@ files should contain the MCP command, API URL, and non-secret settings only.
 
 ### Extension project initialization preflight
 
+This authenticated boundary protects the Git-authoritative repository path:
+Git worktree → `@ingenium/extension` resource-sync → configured MCP stdio →
+authenticated API → database. Plugins, CLIs, and agents never read/write the
+database or call mutation REST endpoints directly. `ingenium-core` is internal
+to the API. Administrative skill sync tools are repair/import only. Rebuild the
+extension and restart OpenCode when plugin or config sources change.
+
 `ingenium-init-project` and extension project provisioning perform an
 authenticated `GET /api/v1/auth/preflight` before a project is created or a
 repository projection begins. Extension startup permits at most three probes,

@@ -6,9 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coreRoot = resolve(apiRoot, "../../packages/ingenium-core");
+const emailRoot = resolve(apiRoot, "../../packages/ingenium-email");
 const tscPath = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 const outputDirectory = mkdtempSync(join(apiRoot, ".typecheck-core-"));
 const coreOutputDirectory = join(outputDirectory, "core-dist");
+const emailOutputDirectory = join(outputDirectory, "email-dist");
+const emailConfigPath = join(outputDirectory, "email-tsconfig.json");
 const configPath = join(outputDirectory, "tsconfig.json");
 
 function runTypeScript(argumentsList, cwd) {
@@ -28,21 +31,41 @@ function runTypeScript(argumentsList, cwd) {
 try {
   if (runTypeScript(["--project", "tsconfig.json", "--outDir", coreOutputDirectory], coreRoot)) {
     writeFileSync(
-      configPath,
+      emailConfigPath,
       `${JSON.stringify({
-        extends: relative(outputDirectory, join(apiRoot, "tsconfig.json")),
+        extends: relative(outputDirectory, join(emailRoot, "tsconfig.json")),
         compilerOptions: {
-          baseUrl: apiRoot,
+          outDir: emailOutputDirectory,
+          baseUrl: emailRoot,
           paths: {
-            "ingenium-core": [relative(apiRoot, join(coreOutputDirectory, "lib", "index.d.ts"))],
-            "ingenium-core/lib/*": [relative(apiRoot, join(coreOutputDirectory, "lib", "*.d.ts"))],
+            "ingenium-core": [relative(emailRoot, join(coreOutputDirectory, "lib", "index.d.ts"))],
+            "ingenium-core/lib/*": [relative(emailRoot, join(coreOutputDirectory, "lib", "*.d.ts"))],
           },
         },
       })}\n`,
       "utf8",
     );
 
-    runTypeScript(["--project", configPath, "--noEmit"], apiRoot);
+    if (runTypeScript(["--project", emailConfigPath], emailRoot)) {
+      writeFileSync(
+        configPath,
+        `${JSON.stringify({
+          extends: relative(outputDirectory, join(apiRoot, "tsconfig.json")),
+          compilerOptions: {
+            baseUrl: apiRoot,
+            paths: {
+              "ingenium-core": [relative(apiRoot, join(coreOutputDirectory, "lib", "index.d.ts"))],
+              "ingenium-core/lib/*": [relative(apiRoot, join(coreOutputDirectory, "lib", "*.d.ts"))],
+              "ingenium-email": [relative(apiRoot, join(emailOutputDirectory, "index.d.ts"))],
+              "ingenium-email/lib/*": [relative(apiRoot, join(emailOutputDirectory, "lib", "*.d.ts"))],
+            },
+          },
+        })}\n`,
+        "utf8",
+      );
+
+      runTypeScript(["--project", configPath, "--noEmit"], apiRoot);
+    }
   }
 } finally {
   rmSync(outputDirectory, { recursive: true, force: true });

@@ -143,6 +143,7 @@ interface JobRunnerRuntime {
   findProcessesByNonceHash: (nonceHash: string) => JobProcessIdentity[] | null;
   createRunNonce: () => string;
   signalProcessGroup: (processGroupId: number, signal: NodeJS.Signals) => void;
+  workingDirectory: string;
   vaultSecretRoot: string;
   openCodeConfigPath: string;
   openCodeAuthPath: string;
@@ -455,6 +456,7 @@ const defaultJobRunnerRuntime: JobRunnerRuntime = {
   signalProcessGroup(processGroupId, signal): void {
     process.kill(-processGroupId, signal);
   },
+  workingDirectory: "/workspace",
   vaultSecretRoot: VAULT_JOB_SECRET_ROOT,
   openCodeConfigPath: VAULT_OPENCODE_CONFIG_SOURCE,
   openCodeAuthPath: VAULT_OPENCODE_AUTH_SOURCE,
@@ -1780,7 +1782,7 @@ export async function executeJobRun(
   let proc: ChildProcess;
   try {
     proc = spawn("opencode", args, {
-      cwd: vaultRunFiles?.runtime.home ?? "/workspace",
+      cwd: vaultRunFiles?.runtime.home ?? jobRunnerRuntime.workingDirectory,
       env: buildJobProcessEnvironment(
         job.project_id,
         runNonce,

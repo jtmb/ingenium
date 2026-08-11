@@ -109,6 +109,11 @@ type VerifiedBundle = {
   totalSize: number;
 };
 
+type BackupDeletionReservation = {
+  state: "reserved" | "deleting";
+  attempt_count: number;
+};
+
 type StoredRestorePlan = {
   id: string;
   project_id: string;
@@ -847,9 +852,122 @@ function isV2Record(record: BackupRecord): boolean {
   }
 }
 
+function getBackupDeletionReservation(
+  db: Database.Database,
+  projectId: string,
+  backupId: string,
+): BackupDeletionReservation | null {
+  const reservation = db.prepare(
+    `SELECT state, attempt_count
+     FROM backup_deletion_reservations
+     WHERE project_id = ? AND backup_id = ?`,
+  ).get(projectId, backupId) as BackupDeletionReservation | undefined;
+  return reservation ?? null;
+}
+
+function assertBackupDeletionIsNotReserved(
+  db: Database.Database,
+  projectId: string,
+  backupId: string,
+): void {
+  if (getBackupDeletionReservation(db, projectId, backupId)) {
+    throw new BackupError("BACKUP_REFERENCED");
+  }
+}
+
+function hasRestorePlanReference(db: Database.Database, projectId: string, backupId: string): boolean {
+  return (db.prepare(
+    "SELECT count(*) AS count FROM backup_restore_plans WHERE project_id = ? AND backup_id = ?",
+  ).get(projectId, backupId) as { count: number }).count > 0;
+}
+
+function reserveBackupDeletion(projectId: string, backupId: string): { exists: boolean; created: boolean } {
+  return execTransaction(() => {
+    const db = getDb(backupDbPath());
+    const record = db.prepare(
+      "SELECT * FROM backup_records WHERE project_id = ? AND id = ?",
+    ).get(projectId, backupId) as BackupRecord | undefined;
+    if (!record) return { exists: false, created: false };
+    if (!isV2Record(record)) throw new BackupError("BACKUP_LEGACY_UNSUPPORTED");
+    if (hasRestorePlanReference(db, projectId, backupId)) throw new BackupError("BACKUP_REFERENCED");
+    if (getBackupDeletionReservation(db, projectId, backupId)) return { exists: true, created: false };
+
+    const timestamp = now();
+    db.prepare(
+      `INSERT INTO backup_deletion_reservations
+       (project_id, backup_id, state, attempt_count, created_at, updated_at)
+       VALUES (?, ?, 'reserved', 0, ?, ?)`,
+    ).run(projectId, backupId, timestamp, timestamp);
+    return { exists: true, created: true };
+  });
+}
+
+function beginBackupDeletionAttempt(projectId: string, backupId: string): boolean {
+  return execTransaction(() => {
+    const db = getDb(backupDbPath());
+    const record = db.prepare(
+      "SELECT * FROM backup_records WHERE project_id = ? AND id = ?",
+    ).get(projectId, backupId) as BackupRecord | undefined;
+    if (!record) return false;
+    if (!isV2Record(record)) throw new BackupError("BACKUP_LEGACY_UNSUPPORTED");
+    if (hasRestorePlanReference(db, projectId, backupId)) throw new BackupError("BACKUP_REFERENCED");
+    if (!getBackupDeletionReservation(db, projectId, backupId)) throw new BackupError("BACKUP_INVALID");
+
+    const attempt = db.prepare(
+      `UPDATE backup_deletion_reservations
+       SET state = 'deleting', attempt_count = attempt_count + 1, updated_at = ?
+       WHERE project_id = ? AND backup_id = ? AND state IN ('reserved', 'deleting')`,
+    ).run(now(), projectId, backupId);
+    if (attempt.changes !== 1) throw new BackupError("BACKUP_INVALID");
+    return true;
+  });
+}
+
+function removeReservedBackupBundle(backupId: string): void {
+  const policy = trustedArtifactPolicy();
+  const root = ensureBackupRoot(resolveBackupDirectory(backupDbPath()), policy);
+  const bundle = exactBundlePath(root, backupId);
+  let bundleStat: Stats | undefined;
+  try {
+    bundleStat = lstatSync(bundle);
+  } catch (error) {
+    if (!error || typeof error !== "object" || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (!bundleStat) return;
+  if (
+    !bundleStat.isDirectory()
+    || bundleStat.isSymbolicLink()
+    || bundleStat.uid !== policy.ownerUid
+    || bundleStat.gid !== policy.ownerGid
+    || (bundleStat.mode & 0o777) !== 0o700
+    || realpathSync(bundle) !== bundle
+  ) throw new BackupError("BACKUP_INVALID");
+  rmSync(bundle, { recursive: true, force: true });
+}
+
+function finalizeBackupDeletion(projectId: string, backupId: string): boolean {
+  return execTransaction(() => {
+    const db = getDb(backupDbPath());
+    const record = db.prepare(
+      "SELECT * FROM backup_records WHERE project_id = ? AND id = ?",
+    ).get(projectId, backupId) as BackupRecord | undefined;
+    if (!record) return false;
+    if (!isV2Record(record)) throw new BackupError("BACKUP_LEGACY_UNSUPPORTED");
+    if (hasRestorePlanReference(db, projectId, backupId)) throw new BackupError("BACKUP_REFERENCED");
+    if (!getBackupDeletionReservation(db, projectId, backupId)) throw new BackupError("BACKUP_INVALID");
+
+    const deleted = db.prepare(
+      "DELETE FROM backup_records WHERE project_id = ? AND id = ?",
+    ).run(projectId, backupId);
+    if (deleted.changes !== 1) throw new BackupError("BACKUP_NOT_FOUND");
+    return true;
+  });
+}
+
 function verifyBundle(projectId: string, backupId: string): VerifiedBundle {
   const record = getBackup(projectId, backupId);
   if (!record) throw new BackupError("BACKUP_NOT_FOUND");
+  assertBackupDeletionIsNotReserved(getDb(backupDbPath()), projectId, backupId);
   if (!isV2Record(record)) throw new BackupError("BACKUP_LEGACY_UNSUPPORTED");
 
   const root = ensureBackupRoot(resolveBackupDirectory(backupDbPath()));
@@ -1025,23 +1143,15 @@ export function readVerifiedBackupComponent(
 
 /** Delete only an unreferenced v2 bundle. Legacy records/files are preserved. */
 export function deleteBackup(projectId: string, backupId: string): void {
-  const record = getBackup(projectId, backupId);
-  if (!record) return;
-  if (!isV2Record(record)) throw new BackupError("BACKUP_LEGACY_UNSUPPORTED");
-  execTransaction(() => {
-    const referenced = getDb(backupDbPath()).prepare(
-      "SELECT count(*) AS count FROM backup_restore_plans WHERE project_id = ? AND backup_id = ?",
-    ).get(projectId, backupId) as { count: number };
-    if (referenced.count > 0) throw new BackupError("BACKUP_REFERENCED");
-    const deleted = getDb(backupDbPath()).prepare(
-      "DELETE FROM backup_records WHERE project_id = ? AND id = ?",
-    ).run(projectId, backupId);
-    if (deleted.changes !== 1) throw new BackupError("BACKUP_NOT_FOUND");
-  });
+  const reservation = reserveBackupDeletion(projectId, backupId);
+  if (!reservation.exists) return;
+  if (reservation.created) checkpointAfterWrite();
+
+  if (!beginBackupDeletionAttempt(projectId, backupId)) return;
   checkpointAfterWrite();
-  const root = ensureBackupRoot(resolveBackupDirectory(backupDbPath()));
-  const bundle = exactBundlePath(root, backupId);
-  if (existsSync(bundle)) rmSync(bundle, { recursive: true, force: true });
+  removeReservedBackupBundle(backupId);
+
+  if (finalizeBackupDeletion(projectId, backupId)) checkpointAfterWrite();
 }
 
 /** Content-free validation output used by restore preview and confirmation. */
@@ -1227,9 +1337,14 @@ export function previewRestore(projectId: string, input: { backupId: string; dry
   requireIdempotencyKey(input.idempotencyKey);
   const hash = requestHash({ backupId: input.backupId, dryRun: input.dryRun });
   const replay = receiptReplay<{ planId: string }>(projectId, "preview_restore", input.idempotencyKey, hash);
-  if (replay) return requirePlan(projectId, replay.planId) && planDto(requirePlan(projectId, replay.planId));
+  if (replay) {
+    const plan = requirePlan(projectId, replay.planId);
+    assertBackupDeletionIsNotReserved(getDb(backupDbPath()), plan.project_id, plan.backup_id);
+    return planDto(plan);
+  }
   const record = getBackup(projectId, input.backupId);
   if (!record) throw new BackupError("BACKUP_NOT_FOUND");
+  assertBackupDeletionIsNotReserved(getDb(backupDbPath()), projectId, input.backupId);
   const validation = validateRestorePreflight(projectId, input.backupId);
   const manifestHash = validation.manifestHash ?? requestHash({ backupId: input.backupId, blockers: validation.blockers });
   const components = validation.components;
@@ -1248,6 +1363,11 @@ export function previewRestore(projectId: string, input: { backupId: string; dry
   });
   const result = execTransaction(() => {
     const db = getDb(backupDbPath());
+    const current = db.prepare(
+      "SELECT 1 FROM backup_records WHERE project_id = ? AND id = ?",
+    ).get(projectId, input.backupId);
+    if (!current) throw new BackupError("BACKUP_NOT_FOUND");
+    assertBackupDeletionIsNotReserved(db, projectId, input.backupId);
     const timestamp = now();
     const planId = randomUUID();
     db.prepare(

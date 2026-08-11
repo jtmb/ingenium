@@ -5,8 +5,11 @@ agent: ingenium-orchestrator
 
 # `/init-project` — deterministic repository sync
 
-Run the extension binary; it calls `repositorySync(worktree, options)` directly.
-Do **not** enumerate files into MCP `*_create` calls or hardcode a project name.
+Invoke the dedicated authenticated MCP repository-sync operation. The operation
+accepts the verified worktree manifest and applies it through the configured MCP
+stdio transport; it is not a direct API/CLI `repositorySync` call and does not
+perform direct database synchronization. Do **not** enumerate files into MCP
+`*_create` calls or hardcode a project name.
 
 ## Arguments
 
@@ -26,21 +29,22 @@ Optional scope:
 - `--project <name>` — use a validated project name for this invocation. It
   takes precedence over `INGENIUM_PROJECT` and the validated worktree basename.
 
-Use `--help` to print the complete non-interactive CLI contract. In the
-production image, the command is available on `PATH` at
-`/usr/local/bin/ingenium-init-project`; it does not rely on a workspace
-`node_modules/.bin` entry.
+The MCP operation exposes the complete non-interactive contract; do not invoke
+an extension CLI or API endpoint as a substitute.
 
 ## Execution contract
 
-1. From the active worktree, run `ingenium-init-project --dry-run` or
-   `ingenium-init-project --apply`; append `--docs-only` for the Docs scope and
-   `--project <name>` when an explicit validated target is required.
-2. The binary resolves the project with validated `--project` first, then
+1. From the active worktree, call the dedicated MCP repository-sync operation in
+   dry-run or apply mode; append the Docs-only scope and `--project <name>` when
+   an explicit validated target is required. The operation is the only supported
+   repository projection entry point.
+2. The MCP operation resolves the project with validated `--project` first, then
    validated `INGENIUM_PROJECT`, otherwise a validated worktree basename; it
    never defaults to `global-default`.
 3. Report its JSON result. Surface errors without retrying with resource-specific
-   create/update loops.
+   create/update loops. Rebuild/restart the extension and restart OpenCode when
+   the transport or plugin source changes; a repository content change alone is
+   consumed by the next sync lifecycle event.
 
 The `all` scope is repository-authoritative for exactly:
 

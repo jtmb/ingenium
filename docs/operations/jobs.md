@@ -68,6 +68,17 @@ When creating or editing a job, a magic-wand button (✨ icon labeled "Auto-gene
    - **Schedule (cron)** — extracted schedule from the description
    - **Trigger Event** — extracted event trigger (if any)
 
+### Timeout and startup recovery
+
+Job timeouts default to **30 minutes**. `timeout_minutes` must be a safe integer
+from **1 through 1,440 minutes inclusive** when a job is created or updated;
+out-of-range values are rejected rather than silently clamped.
+
+At API startup, interrupted `running` runs with a `manual` or `cron` trigger are
+marked `failed`, given a finish time, and assigned exit code `-1`. This clears
+the stale concurrency guard so the job can be run again. Trusted-event runs are
+not changed by this ordinary-run recovery path.
+
 ## API Endpoints
 - `GET /api/v1/jobs?project=<name>` — list all jobs with status
 - `GET /api/v1/jobs/:id?project=<name>` — get job details and run history

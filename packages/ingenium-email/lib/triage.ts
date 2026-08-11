@@ -7,10 +7,9 @@
  * by sender address and keyword overlap.
  */
 
-import { skills as skillsModule } from "ingenium-core";
-import type { Skill } from "ingenium-core";
 import type { TriageResult } from "./types.js";
 import { listEmails } from "./imap.js";
+import { getEmailRuntime, type EmailSkill } from "./runtime.js";
 
 // ── Keyword categories ────────────────────────────────────────────────────
 // These are broad keyword sets for first-pass classification.
@@ -109,8 +108,8 @@ function suggestAction(priority: "high" | "medium" | "low", category: string, ma
  *   - Extracting high-priority senders
  *   - Generating response templates in the responder module
  */
-export function loadEmailSkills(projectId: string): Skill[] {
-  const allSkills = skillsModule.listSkills(projectId);
+export function loadEmailSkills(projectId: string): EmailSkill[] {
+  const allSkills = getEmailRuntime().skills.listSkills(projectId);
   return allSkills.filter((s) => {
     const tags = (s.tags ?? "").toLowerCase();
     const cat = (s.category ?? "").toLowerCase();

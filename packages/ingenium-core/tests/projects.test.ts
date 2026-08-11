@@ -4,7 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, resetDbForTest } from "../lib/db.js";
-import { createProject, deleteProject, isValidProjectName, migrateWorkspaceProject, setProjectGlobal, updateProject } from "../lib/tools/projects.js";
+import {
+  archiveProject,
+  createProject,
+  deleteProject,
+  getProject,
+  isValidProjectName,
+  listArchivedProjects,
+  listProjects,
+  MAX_PROJECT_RETENTION_DAYS,
+  migrateWorkspaceProject,
+  purgeExpiredProjects,
+  setProjectGlobal,
+  updateProject,
+} from "../lib/tools/projects.js";
 
 let tempDir = "";
 afterEach(() => {
@@ -47,6 +60,28 @@ describe("project identity", () => {
     expect(globals).toEqual([{ name: "second" }]);
     expect(setProjectGlobal("first", true)).toBe(true);
     expect(getDb(process.env.INGENIUM_CORE_DB_PATH!).prepare("SELECT name FROM projects WHERE is_global = 1").all()).toEqual([{ name: "first" }]);
+  });
+
+  it("lists active and archived projects separately while direct lookup retains archived detail", () => {
+    database();
+    createProject("active-project");
+    createProject("archived-project");
+    expect(archiveProject("archived-project")).toBe(true);
+
+    expect(listProjects().map((project) => project.name)).toEqual(["active-project"]);
+    expect(listArchivedProjects().map((project) => project.name)).toEqual(["archived-project"]);
+    expect(getProject("archived-project")?.archived_at).not.toBeNull();
+  });
+
+  it("rejects invalid retention periods before inspecting projects for deletion", () => {
+    const db = database();
+    const project = createProject("retention-project");
+    expect(archiveProject(project.name)).toBe(true);
+
+    for (const retentionDays of [-1, 0.5, MAX_PROJECT_RETENTION_DAYS + 1, Infinity]) {
+      expect(() => purgeExpiredProjects(retentionDays)).toThrow(RangeError);
+      expect(db.prepare("SELECT name FROM projects WHERE id = ?").get(project.id)).toEqual({ name: project.name });
+    }
   });
 
   it("returns a typed child-reference result without deleting a project", () => {

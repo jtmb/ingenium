@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useProject } from "../../lib/ProjectContext";
+import { useGlobalProject, useProject } from "../../lib/ProjectContext";
 import { api, type PipelineEvent } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
@@ -95,6 +95,8 @@ type DisplayItem =
   | { kind: "collapsed"; group: CollapsedGroup };
 
 type FilterMode = "all" | "agent" | "plugin" | "synthesis" | "trait";
+type LoadState = "loading" | "success" | "error";
+type PipelineRequest = { project: string; filterMode: FilterMode; requestId: number };
 
 /**
  * PipelinePage — Git-workflow-style timeline of pipeline events.
@@ -114,23 +116,66 @@ type FilterMode = "all" | "agent" | "plugin" | "synthesis" | "trait";
  */
 export default function PipelinePage() {
   const project = useProject();
+  const { project: globalProject, loading: globalProjectLoading, error: globalProjectError } = useGlobalProject();
   const [events, setEvents] = useState<PipelineEvent[]>([]);
+  const [eventsState, setEventsState] = useState<LoadState>("loading");
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [selected, setSelected] = useState<any>(null);
   const [paused, setPaused] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [nextRun, setNextRun] = useState("");
-  const [intervalMs, setIntervalMs] = useState(900000);
+  const [intervalMs, setIntervalMs] = useState<number | null>(null);
+  const [scheduleState, setScheduleState] = useState<LoadState>("loading");
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const eventsInFlightRef = useRef(false);
+  const queuedRequestRef = useRef<PipelineRequest | null>(null);
+  const latestRequestIdRef = useRef(0);
 
   useEffect(() => {
-    api.settings.get("synthesis_interval_ms", "global-default").then((r) => {
-      const ms = parseInt(r.data?.value, 10);
-      if (!isNaN(ms) && ms > 0) setIntervalMs(ms);
-    }).catch(() => {});
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    setIntervalMs(null);
+    setScheduleError(null);
+
+    if (globalProjectLoading) {
+      setScheduleState("loading");
+      return () => { cancelled = true; };
+    }
+    if (!globalProject) {
+      setScheduleError(globalProjectError?.message ?? "No active global project is configured");
+      setScheduleState("error");
+      return () => { cancelled = true; };
+    }
+
+    setScheduleState("loading");
+    api.settings.get("synthesis_interval_ms", globalProject)
+      .then((response) => {
+        const value = Number(response.data?.value);
+        if (!Number.isFinite(value) || value < 0) throw new Error("Invalid synthesis schedule response");
+        if (cancelled) return;
+        setIntervalMs(value);
+        setScheduleState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setScheduleError(error instanceof Error ? error.message : "Unable to load synthesis schedule");
+        setScheduleState("error");
+      });
+
+    return () => { cancelled = true; };
+  }, [globalProject, globalProjectError, globalProjectLoading]);
+
+  useEffect(() => {
+    if (scheduleState !== "success" || intervalMs === null) {
+      setNextRun("");
+      return;
+    }
     if (intervalMs <= 0) { setNextRun("disabled"); return; }
     const tick = () => {
       // Estimate next run from last synthesis_completed event
@@ -145,45 +190,65 @@ export default function PipelinePage() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [events, intervalMs]);
+  }, [events, intervalMs, scheduleState]);
 
-  const fetchEvents = useCallback(() => {
-    const sourceParam =
-      filterMode === "agent" || filterMode === "plugin" || filterMode === "synthesis"
-        ? filterMode
-        : undefined;
+  const queueEvents = useCallback((request: PipelineRequest) => {
+    queuedRequestRef.current = request;
+    if (eventsInFlightRef.current) return;
+    eventsInFlightRef.current = true;
 
-    api.pipeline
-      .events(project, { limit: 500, ...(sourceParam ? { source: sourceParam } : {}) })
-      .then((r: any) => {
-        let data: PipelineEvent[] = (r.data || []);
-        if (filterMode === "trait") {
-          data = data.filter(
-            (e) => e.event_type === "trait_created" || e.event_type === "trait_updated",
-          );
+    void (async () => {
+      while (queuedRequestRef.current) {
+        const currentRequest = queuedRequestRef.current;
+        queuedRequestRef.current = null;
+        const source = currentRequest.filterMode === "agent" || currentRequest.filterMode === "plugin" || currentRequest.filterMode === "synthesis"
+          ? currentRequest.filterMode
+          : undefined;
+
+        try {
+          const response = await api.pipeline.events(currentRequest.project, {
+            limit: 500,
+            ...(source ? { source } : {}),
+          });
+          if (!mountedRef.current || latestRequestIdRef.current !== currentRequest.requestId) continue;
+          let data = Array.isArray(response.data) ? response.data as PipelineEvent[] : [];
+          if (currentRequest.filterMode === "trait") {
+            data = data.filter((event) => event.event_type === "trait_created" || event.event_type === "trait_updated");
+          }
+          setEvents(data);
+          setEventsError(null);
+          setEventsState("success");
+        } catch (error: unknown) {
+          if (!mountedRef.current || latestRequestIdRef.current !== currentRequest.requestId) continue;
+          setEvents([]);
+          setEventsError(error instanceof Error ? error.message : "Unable to load pipeline events");
+          setEventsState("error");
         }
-        setEvents(data);
-      })
-      .catch(() => {});
-  }, [project, filterMode]);
-
-  useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
-
-  useEffect(() => {
-    if (paused) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
       }
-    } else {
-      intervalRef.current = setInterval(fetchEvents, 3_000);
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      eventsInFlightRef.current = false;
+    })();
+  }, []);
+
+  useEffect(() => {
+    const request = {
+      project,
+      filterMode,
+      requestId: latestRequestIdRef.current + 1,
     };
-  }, [paused, fetchEvents]);
+    latestRequestIdRef.current = request.requestId;
+    setEvents([]);
+    setEventsError(null);
+    setEventsState("loading");
+    queueEvents(request);
+  }, [filterMode, project, queueEvents]);
+
+  useEffect(() => {
+    if (paused) return;
+    const interval = setInterval(() => {
+      queueEvents({ project, filterMode, requestId: latestRequestIdRef.current });
+    }, 3_000);
+    return () => clearInterval(interval);
+  }, [filterMode, paused, project, queueEvents]);
 
   const stats = useMemo(
     () => ({
@@ -193,8 +258,8 @@ export default function PipelinePage() {
       traits: events.filter((e) => e.event_type.startsWith("trait_")).length,
       skills: events.filter((e) => {
         if (e.event_type === "trait_created" || e.event_type === "trait_updated") {
-          const d = typeof e.data === "string" ? JSON.parse(e.data || "{}") : (e.data || {});
-          return d.skill_name || d.via_llm;
+          const data = parseData(e.data);
+          return Boolean(data && typeof data === "object" && ("skill_name" in data || "via_llm" in data));
         }
         return false;
       }).length,
@@ -277,28 +342,22 @@ export default function PipelinePage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Pipeline Activity</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">{nextRun}</p>
+          {scheduleState === "loading" && <p className="mt-1 text-sm text-[var(--color-text-muted)]" aria-busy="true">Loading synthesis schedule...</p>}
+          {scheduleState === "error" && <p className="mt-1 text-sm text-[var(--color-error-text)]" role="alert">Synthesis schedule unavailable: {scheduleError}</p>}
+          {scheduleState === "success" && <p className="mt-1 text-sm text-[var(--color-text-muted)]">{nextRun}</p>}
         </div>
         <div className="text-sm text-[var(--color-text-muted)] space-x-4">
-          <span>
-            Total: <strong>{stats.total}</strong>
-          </span>
-          <span>
-            Observations:{" "}
-            <strong className="text-[var(--color-warning-text)]">{stats.observations}</strong>
-          </span>
-          <span>
-            Syntheses:{" "}
-            <strong className="text-emerald-600">{stats.syntheses}</strong>
-          </span>
-          <span>
-            Traits:{" "}
-            <strong className="text-[var(--color-text-link)]">{stats.traits}</strong>
-          </span>
-          <span>
-            Skills:{" "}
-            <strong className="text-purple-600">{stats.skills}</strong>
-          </span>
+          {eventsState === "loading" && <span aria-busy="true">Loading events...</span>}
+          {eventsState === "error" && <span>Events unavailable: {eventsError}</span>}
+          {eventsState === "success" && (
+            <>
+              <span>Total: <strong>{stats.total}</strong></span>
+              <span>Observations: <strong className="text-[var(--color-warning-text)]">{stats.observations}</strong></span>
+              <span>Syntheses: <strong className="text-emerald-600">{stats.syntheses}</strong></span>
+              <span>Traits: <strong className="text-[var(--color-text-link)]">{stats.traits}</strong></span>
+              <span>Skills: <strong className="text-purple-600">{stats.skills}</strong></span>
+            </>
+          )}
         </div>
       </div>
 
@@ -329,13 +388,25 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      {events.length === 0 && (
+      {eventsState === "loading" && (
+        <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-8 text-center text-[var(--color-text-muted)]" aria-busy="true">
+          Loading pipeline events...
+        </div>
+      )}
+
+      {eventsState === "error" && (
+        <div className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-8 text-center text-[var(--color-error-text)]" role="alert">
+          Pipeline events are unavailable: {eventsError}
+        </div>
+      )}
+
+      {eventsState === "success" && events.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No pipeline events yet. Events are logged automatically during agent interactions.
         </div>
       )}
 
-      {events.length > 0 && (
+      {eventsState === "success" && events.length > 0 && (
         <div className="relative">
           <div className="absolute left-[36px] top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
 
@@ -370,12 +441,14 @@ export default function PipelinePage() {
                       {isExpanded && (
                         <div className="mt-2 border-l-2 border-dashed border-gray-300 dark:border-gray-600 ml-5 pl-4 space-y-2">
                           {group.events.map((obs) => (
-                            <div
+                            <button
+                              type="button"
                               key={obs.id}
-                              className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
+                              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-left hover:shadow-md transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
                               onClick={() => setSelected(obs)}
+                              aria-label={`View event ${obs.id}`}
                             >
-                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="mb-1 flex flex-wrap items-center gap-2">
                                 <span className={`${BADGE_BASE} border ${SOURCE_BADGE[obs.event_source] ?? badgeTones("muted")}`}>
                                   {SOURCE_LABEL[obs.event_source] ?? obs.event_source}
                                 </span>
@@ -383,12 +456,10 @@ export default function PipelinePage() {
                                 {obs.importance != null && (
                                   <span className="text-xs text-[var(--color-text-muted)]">imp: {obs.importance}</span>
                                 )}
-                              </div>
-                              <p className="text-sm text-[var(--color-text-primary)]">{obs.title}</p>
-                              {obs.description && (
-                                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{obs.description}</p>
-                              )}
-                            </div>
+                              </span>
+                              <span className="block text-sm text-[var(--color-text-primary)]">{obs.title}</span>
+                              {obs.description && <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{obs.description}</span>}
+                            </button>
                           ))}
                         </div>
                       )}
@@ -739,39 +810,44 @@ function EventRow({
   onClickDetail?: () => void;
   children?: React.ReactNode;
 }) {
+  const dotClassName = `shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-[var(--color-border)] ${
+    isChild ? "w-2 h-2" : "w-3 h-3"
+  } ${dotColor} ${countBadge ? "hover:ring-2 hover:ring-offset-1 hover:ring-offset-[var(--color-surface)] hover:ring-gray-300 dark:ring-gray-600 dark:hover:ring-offset-[var(--color-surface)]" : ""}`;
+  const dotContent = countBadge ? (
+    <span className="text-[8px] font-bold leading-none text-white">+{countBadge}</span>
+  ) : (
+    <span className={`${isChild ? "text-[6px]" : "text-[10px]"} select-none leading-none text-white`}>{icon}</span>
+  );
+
   return (
     <div>
       <div className="flex">
         <div className="w-[72px] shrink-0 flex flex-col items-center relative">
           <div className={`w-0.5 flex-1 ${lineColor}`} />
-          <div
-             className={`shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-[var(--color-border)] ${
-              isChild ? "w-2 h-2" : "w-3 h-3"
-            } ${dotColor} ${countBadge ? "cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-offset-[var(--color-surface)] hover:ring-gray-300 dark:ring-gray-600 dark:hover:ring-offset-[var(--color-surface)]" : ""}`}
-            onClick={onToggle}
-            title={iconLabel}
-          >
-            {countBadge ? (
-              <span className="text-[8px] font-bold text-white leading-none">
-                +{countBadge}
-              </span>
-            ) : (
-              <span className={`${isChild ? "text-[6px]" : "text-[10px]"} text-white leading-none select-none`}>
-                {icon}
-              </span>
-            )}
-          </div>
+          {onToggle ? (
+            <button
+              type="button"
+              className={dotClassName}
+              onClick={onToggle}
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? `Collapse ${title}` : `Expand ${title}`}
+              title={iconLabel}
+            >
+              {dotContent}
+            </button>
+          ) : (
+            <span className={dotClassName} title={iconLabel} aria-hidden="true">
+              {dotContent}
+            </span>
+          )}
           <div className={`w-0.5 flex-1 ${isLast ? "bg-transparent" : lineColor}`} />
         </div>
 
-        <div
-          className={`flex-1 pb-3 ${isChild ? "pb-2" : ""} min-w-0`}
-        >
+        <div className={`min-w-0 flex-1 pb-3 ${isChild ? "pb-2" : ""}`}>
           <div
             className={`bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-3 ${
               isChild ? "p-2" : "p-3"
-            } ${onClickDetail ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
-            onClick={onClickDetail}
+            } ${onClickDetail ? "hover:shadow-md transition-shadow" : ""}`}
           >
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
@@ -781,8 +857,10 @@ function EventRow({
               </span>
               {isExpanded !== undefined && (
                 <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
                   className="text-xs text-[var(--color-text-link)] hover:text-blue-800 font-medium"
+                  aria-expanded={isExpanded}
                 >
                   {isExpanded ? "Collapse" : `+${countBadge ?? 0} observations`}
                 </button>
@@ -796,13 +874,27 @@ function EventRow({
                 </span>
               )}
             </div>
-            <p className={`font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>
-              {title}
-            </p>
-            {description && (
-              <p className={`text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>
-                {description}
-              </p>
+            {onClickDetail ? (
+              <button
+                type="button"
+                onClick={onClickDetail}
+                className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                aria-label={`View event ${title}`}
+              >
+                <span className={`block font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>
+                  {title}
+                </span>
+                {description && (
+                  <span className={`block text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>
+                    {description}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <>
+                <p className={`font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>{title}</p>
+                {description && <p className={`text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>{description}</p>}
+              </>
             )}
           </div>
         </div>

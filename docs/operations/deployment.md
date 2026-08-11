@@ -219,11 +219,17 @@ rejected before proxying with `403`. The ttyd listener remains private on
 
 ## Volume Configurations
 
+The Compose deployment keeps three primary Ingenium/OpenCode persistence stores
+mounted across image rebuilds:
+
 | Volume Name | Mount Path | Purpose |
 |-------------|------------|---------|
 | `ingenium-data` | `/app/.ingenium` | SQLite databases, learnings, tasks, projects, commands |
 | `opencode-config` | `/home/appuser/.config` | OpenCode configuration (persists across rebuilds) |
-| `opencode-data` | `/home/appuser/.local` | OpenCode user data, session state |
+| `opencode-data` | `/home/appuser/.local` | OpenCode auth-data and user data, including native provider auth at `/home/appuser/.local/share/opencode/auth.json` |
+
+The separate `vscode-data` volume preserves code-server settings and extensions;
+it does not replace any of the three stores above.
 
 ### Workspace bind-mount (Windows + WSL)
 
@@ -248,11 +254,18 @@ The canonical Ingenium SQLite path in the container is `/app/.ingenium/data` (no
 image, not the named volume, so `docker compose up --build -d` preserves mail
 accounts, cached mail, settings, and encrypted credential metadata.
 
-Docker prefixes declared volume names with the Compose project name. Keep using
-the same checkout and project name; changing `-p`, `COMPOSE_PROJECT_NAME`, or the
-directory used to invoke Compose can select a new, empty volume. Do not use
-`docker compose down -v` for a rebuild or restart: `-v` deletes the persisted
-volume. Prefer:
+`docker-compose.yml` declares the top-level Compose project name as `ingenium`.
+Therefore ordinary `docker compose ...` invocations using this file keep the
+default volume names stable across supported invocation directories. Docker
+prefixes each declared volume with that project name, so the default stores are
+named `ingenium_ingenium-data`, `ingenium_opencode-config`, and
+`ingenium_opencode-data`.
+
+Explicit project selection remains an intentional override. Either
+`docker compose -p another-store ...` or
+`COMPOSE_PROJECT_NAME=another-store docker compose ...` selects a distinct
+`another-store_*` volume set and therefore a distinct store. Use the canonical
+name explicitly when scripting or when you want the project identity visible:
 
 ```bash
 docker compose -p ingenium up --build -d
@@ -263,6 +276,9 @@ If an existing installation was started under another project name, continue
 using that exact name or perform an operator-controlled volume migration with a
 backup first. Do not create a second database by copying data to `data.db`,
 `.ingenium/data.db`, or another project-prefixed volume.
+
+Do not use `docker compose down -v` for a rebuild or restart: `-v` deletes the
+selected persisted volumes.
 
 ---
 
@@ -352,7 +368,7 @@ The host-loopback API boundary is `127.0.0.1:4097`; it validates and replaces th
 | OAuth callback fails | Request is not exactly `GET /auth/callback` on loopback `1455`, or OAuth state is invalid/expired | Use the provider redirect to `http://localhost:1455/auth/callback`; do not use `1455` as an API tunnel. |
 | Changed `NEXT_PUBLIC_*` URL has no effect | Values are build-time dashboard settings | Set both origins before `docker compose up --build -d`; restart alone is insufficient. |
 | MCP still uses an old token | OpenCode child process retained old config/process state | Replace the protected file, restart OpenCode, and restart/recreate the container if its runtime token changed. |
-| Mail accounts disappear after rebuild | A different Compose project name selected a new named volume, or `down -v` removed the old one | Stop; do not recreate accounts. Re-run with the original project name and verify `/app/.ingenium/data`. |
+| Mail accounts disappear after rebuild | An explicit `-p`/`COMPOSE_PROJECT_NAME` override selected a different named volume, or `down -v` removed the old one | Stop; do not recreate accounts. Re-run with the original project name and verify `/app/.ingenium/data`. |
 | Mail shows `degraded` or asks to reconnect after restart | Credentials cannot be decrypted or a folder hit the auth circuit breaker | Keep the account; use **Reconnect**. OAuth accounts require provider consent; app-password accounts use the credential update form. |
 | Restart reports an encryption-key mismatch | `INGENIUM_EMAIL_ENCRYPTION_KEY` differs from the key that encrypted stored credentials | Restore the original secret from the operator secret store. Do not rotate blindly or overwrite credentials; the fingerprint is diagnostic only. |
 

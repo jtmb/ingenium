@@ -411,7 +411,7 @@ export async function coordinationStatus(
   incarnation: number,
 ): Promise<ToolResult> {
   return request(
-    () => api.get("/coordination/snapshot", {
+    () => api.settled.get("/coordination/snapshot", {
       project,
       worktree_id: worktreeId,
       session_id: sessionId,
@@ -430,7 +430,7 @@ export async function coordinationUpdate(
   switch (operation) {
     case "register":
       return request(
-        () => api.post("/coordination/register", {
+        () => api.settled.post("/coordination/register", {
           worktree_id: input.worktree_id,
           session_id: input.session_id,
           incarnation: input.incarnation,
@@ -442,7 +442,7 @@ export async function coordinationUpdate(
       );
     case "recover":
       return request(
-        () => api.post("/coordination/recover", {
+        () => api.settled.post("/coordination/recover", {
           ...leaseBody(input),
           next_ownership_token: input.next_ownership_token,
           ttl_ms: input.ttl_ms,
@@ -451,7 +451,7 @@ export async function coordinationUpdate(
       );
     case "update":
       return request(
-        () => api.patch("/coordination/update", {
+        () => api.settled.patch("/coordination/update", {
           ...leaseBody(input),
           snapshot: input.snapshot,
           snapshot_revision: input.snapshot_revision,
@@ -464,7 +464,7 @@ export async function coordinationUpdate(
       );
     case "heartbeat":
       return request(
-        () => api.post("/coordination/heartbeat", {
+        () => api.settled.post("/coordination/heartbeat", {
           ...leaseBody(input),
           ttl_ms: input.ttl_ms,
         }, { project }),
@@ -472,12 +472,12 @@ export async function coordinationUpdate(
       );
     case "close":
       return request(
-        () => api.post("/coordination/close", leaseBody(input), { project }),
+        () => api.settled.post("/coordination/close", leaseBody(input), { project }),
         (data) => projectMutationResponse(data, "session"),
       );
     case "takeover":
       return request(
-        () => api.post("/coordination/takeover", {
+        () => api.settled.post("/coordination/takeover", {
           ...mutationBody(input),
           next_ownership_token: input.next_ownership_token,
           ttl_ms: input.ttl_ms,
@@ -493,7 +493,7 @@ export async function coordinationClaim(
   input: CoordinationClaimBatchInput,
 ): Promise<ToolResult> {
   return request(
-    () => api.post("/coordination/claims/batch", {
+    () => api.settled.post("/coordination/claims/batch", {
       worktree_id: input.worktree_id,
       session_id: input.session_id,
       incarnation: input.incarnation,
@@ -516,7 +516,7 @@ export async function coordinationRelease(
   input: CoordinationReleaseInput,
 ): Promise<ToolResult> {
   return request(
-    () => api.post("/coordination/claims/release", {
+    () => api.settled.post("/coordination/claims/release", {
       worktree_id: input.worktree_id,
       session_id: input.session_id,
       incarnation: input.incarnation,

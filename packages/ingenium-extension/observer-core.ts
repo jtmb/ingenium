@@ -8,11 +8,8 @@
  * back to global-default, which is reserved for the container's own session.
  */
 
-import { ensureExtensionProject } from "./project-resolver.js";
-import { apiRequestHeaders } from "./api-auth.js";
-
-const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
-const OBSERVER_API_REQUEST_TIMEOUT_MS = 10_000;
+import { callMcpTool, McpBridgeError, mcpToolData } from "./mcp-client.js";
+import { resolveExtensionProject } from "./project-resolver.js";
 
 /** Stable, credential-free diagnostics emitted by observer lifecycle hooks. */
 export type ObserverRequestFailure = "authentication" | "not_found" | "locked" | "timeout" | "request_failed";
@@ -20,13 +17,6 @@ export type ObserverFailureReporter = (
   operation: "pipeline_event_rejected" | "import_observations" | "trigger_synthesis",
   reason: ObserverRequestFailure,
 ) => void;
-
-class ObserverApiRequestError extends Error {
-  constructor(readonly failure: ObserverRequestFailure) {
-    super("Observer API request failed");
-    this.name = "ObserverApiRequestError";
-  }
-}
 
 /** Map HTTP responses without propagating a status, body, URL, or credential. */
 export function classifyObserverHttpFailure(status: number): ObserverRequestFailure {
@@ -37,42 +27,21 @@ export function classifyObserverHttpFailure(status: number): ObserverRequestFail
 }
 
 export function classifyObserverFailure(error: unknown): ObserverRequestFailure {
-  if (error instanceof ObserverApiRequestError) return error.failure;
+  const bridgeFailure = error instanceof McpBridgeError
+    ? error.failure
+    : typeof error === "object" && error !== null && "failure" in error
+      ? (error as { failure?: unknown }).failure
+      : undefined;
+  if (bridgeFailure === "authentication") return "authentication";
+  if (bridgeFailure === "timeout") return "timeout";
   if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
     return "timeout";
   }
   return "request_failed";
 }
 
-async function apiFetch(worktree: string, path: string, options?: RequestInit): Promise<any> {
-  const url = `${API_BASE}${path}`;
-  const headers = apiRequestHeaders(worktree, options?.headers);
-  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OBSERVER_API_REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new ObserverApiRequestError(classifyObserverHttpFailure(res.status));
-    }
-    return res.json();
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new ObserverApiRequestError("timeout");
-    }
-    if (error instanceof ObserverApiRequestError) throw error;
-    throw new ObserverApiRequestError(classifyObserverFailure(error));
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 /**
- * Log a pipeline lifecycle event to the Ingenium API for dashboard timeline observability.
+ * Log a pipeline lifecycle event to the Ingenium MCP server for dashboard timeline observability.
  * Non-fatal on failure — observability must never block pipeline operations.
  */
 export async function logPipelineEvent(
@@ -86,18 +55,16 @@ export async function logPipelineEvent(
   onFailure?: ObserverFailureReporter,
 ): Promise<void> {
   try {
-    const project = await ensureExtensionProject(worktree, API_BASE);
-    await apiFetch(worktree, `/pipeline/events?project=${encodeURIComponent(project)}`, {
-      method: "POST",
-      body: JSON.stringify({
-        event_type: eventType,
-        event_source: eventSource,
-        title,
-        description,
-        data,
-        session_id: sessionId,
-        importance: 5,
-      }),
+    const project = resolveExtensionProject(worktree);
+    await callMcpTool(worktree, "pipeline_event_log", {
+      project,
+      eventType,
+      eventSource,
+      title,
+      description,
+      data,
+      sessionId,
+      importance: 5,
     });
   } catch (error) {
     // Non-fatal — observability should never block pipeline. The reporter receives
@@ -121,7 +88,7 @@ export async function importObservationsFromFile(
   worktree: string,
   onFailure?: ObserverFailureReporter,
 ): Promise<{ imported: number; skipped: number }> {
-  const project = await ensureExtensionProject(worktree, API_BASE);
+  const project = resolveExtensionProject(worktree);
   const pathModule = require("path");
   const fs = require("fs");
 
@@ -154,14 +121,12 @@ export async function importObservationsFromFile(
       const obsContent = parts[2]?.trim() || entry;
       const importance = parseInt(parts[3]?.trim() || "5");
       
-      await apiFetch(worktree, `/observations?project=${encodeURIComponent(project)}`, {
-        method: "POST",
-        body: JSON.stringify({
-          observation_type: obsType,
-          content: obsContent,
-          importance,
-          source: "import",
-        }),
+      await callMcpTool(worktree, "observe", {
+        project,
+        observation_type: obsType,
+        content: obsContent,
+        importance,
+        source: "import",
       });
       imported++;
     } catch {
@@ -196,7 +161,7 @@ export async function importObservationsFromFile(
 }
 
 /**
- * Trigger the synthesis pipeline via the API.
+ * Trigger the synthesis pipeline via MCP.
  * The API processes pending observations into personality traits and skill updates.
  */
 export async function triggerSynthesis(
@@ -209,7 +174,7 @@ export async function triggerSynthesis(
   failure?: ObserverRequestFailure;
 }> {
   try {
-    const project = await ensureExtensionProject(worktree, API_BASE);
+    const project = resolveExtensionProject(worktree);
     await logPipelineEvent(
       "synthesis_triggered",
       "plugin",
@@ -221,12 +186,8 @@ export async function triggerSynthesis(
       onFailure,
     );
 
-    const params = new URLSearchParams({ project });
-    if (sessionId) params.set("session_id", sessionId);
-    const result = await apiFetch(worktree, `/synthesis/run?${params}`, {
-      method: "POST",
-    });
-    return { triggered: true, message: JSON.stringify(result.data) };
+    const result = mcpToolData(await callMcpTool(worktree, "synthesis_run", { project, sessionId }));
+    return { triggered: true, message: JSON.stringify(result) };
   } catch (error) {
     return {
       triggered: false,

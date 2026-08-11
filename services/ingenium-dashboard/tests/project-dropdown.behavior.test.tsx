@@ -54,9 +54,10 @@ describe("ProjectDropdown lazy loading", () => {
     expect(mocks.listProjects).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the validated Context project on Chat without changing ordinary compact triggers", () => {
+  it("shows the selected project on desktop triggers and preserves the compact Chat label", () => {
     const ordinaryView = render(<ProjectDropdown />);
-    expect(screen.getByRole("button", { name: "Active project: global-default" })).toBeTruthy();
+    const ordinaryTrigger = screen.getByRole("button", { name: "Active project: global-default" });
+    expect(ordinaryTrigger.textContent).toContain("global-default");
     expect(screen.queryByText("Context project:")).toBeNull();
     ordinaryView.unmount();
 

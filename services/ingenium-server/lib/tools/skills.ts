@@ -4,7 +4,8 @@
  * Each function calls the Ingenium API via HTTP and returns MCP-formatted results.
  * Skills use a bidirectional disk↔DB sync model with SHA-256 hash manifests.
  */
-import { api } from "../client.js";
+import { api, ApiHttpError } from "../client.js";
+import { z } from "zod";
 
 /** List all skills for a project. */
 export async function skillList(project: string) {
@@ -149,6 +150,11 @@ export type ProposalType = "create" | "update" | "merge" | "archive";
 
 /** DB proposal statuses used for filtering (must match API query param). */
 export type ProposalStatus = "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale";
+export type ProposalPageView = "open" | "history";
+
+export const skillProposalPageViewSchema = z.enum(["open", "history"]);
+export const skillProposalPageLimitSchema = z.number().int().min(1).max(100);
+export const skillProposalPageCursorSchema = z.string().max(512);
 
 /** Proposal state object type for the governance workflow — camelCase wire shape expected by API. */
 export interface ProposalProposedState {
@@ -199,11 +205,35 @@ export async function skillProposalCreate(
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** List all skill proposals for a project. */
+/** @deprecated The API returns SKILL_PROPOSAL_LIST_RETIRED; use page and counts tools. */
 export async function skillProposalList(project: string, status?: ProposalStatus) {
   const params: Record<string, string> = { project };
   if (status) params.status = status;
   const res = await api.get("/skills/proposals", params);
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Read one API-enforced bounded proposal page without transforming its metadata. */
+export async function skillProposalPage(
+  project: string,
+  view: ProposalPageView,
+  limit?: number,
+  cursor?: string,
+) {
+  const params: Record<string, string> = { project, view };
+  if (limit !== undefined) params.limit = String(limit);
+  if (cursor !== undefined) params.cursor = cursor;
+  const res = await api.settled.get("/skills/proposals/page", params);
+  if (!res.ok) {
+    const payload = res.payload as { error?: { code?: unknown; message?: unknown } } | null;
+    throw new ApiHttpError(res.status, payload?.error?.code, payload?.error?.message);
+  }
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.payload) }] };
+}
+
+/** Read API-derived proposal counts for the scoped project. */
+export async function skillProposalCounts(project: string) {
+  const res = await api.get("/skills/proposals/counts", { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 

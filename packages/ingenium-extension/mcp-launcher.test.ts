@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -104,12 +104,19 @@ describe("packaged Ingenium MCP launcher", () => {
     );
   });
 
-  it("forwards the validated project to the packaged transport before it imports", async () => {
+  it("provisions the validated project before importing the packaged transport", async () => {
     writeProtectedToken();
     let projectDuringImport: string | undefined;
     let importedTransport: URL | undefined;
+    const ensureProject = vi.fn(async (resolvedWorktree: string, apiBase: string, project: string) => {
+      expect(resolvedWorktree).toBe(worktree);
+      expect(apiBase).toBe("http://localhost:4097/api/v1");
+      expect(project).toBe(basename(worktree));
+      return project;
+    });
 
     await expect(runMcpLauncher(worktree, {
+      ensureProject,
       importTransport: async (transportUrl) => {
         projectDuringImport = process.env.INGENIUM_PROJECT;
         importedTransport = transportUrl;
@@ -118,5 +125,6 @@ describe("packaged Ingenium MCP launcher", () => {
 
     expect(projectDuringImport).toBe(basename(worktree));
     expect(importedTransport).toEqual(getMcpTransportUrl());
+    expect(ensureProject).toHaveBeenCalledOnce();
   });
 });

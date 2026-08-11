@@ -37,8 +37,11 @@ All LLM provider endpoints are validated by `validateEndpointUrl()` before any H
 `safeLlmFetch()` wraps every LLM HTTP request with:
 
 1. **Pre-request validation** — calls `validateEndpointUrl()` before the fetch
-2. **Redirect following** — follows HTTP redirects (up to 10) and validates each redirect target via `validateEndpointUrl()`
-3. **Timeout** — configurable via `EndpointPolicyOptions.timeoutMs` (default 60s) using `AbortSignal.timeout`
+2. **Pinned transport** — uses the complete validated address set for that hop rather than performing an unpinned second DNS lookup
+3. **Redirect following** — follows HTTP redirects (up to 10), re-resolves and validates every target, and applies the redirect method/body rules
+4. **Credential stripping** — removes authorization, cookies, proxy-authentication, and credential-bearing content headers on cross-origin redirects
+5. **Response bound** — rejects declared or streamed response bodies at 1 MiB or larger
+6. **Timeout** — configurable via `EndpointPolicyOptions.timeoutMs` (default 60s) using `AbortSignal.timeout`
 
 ### Opt-in for Local Endpoints
 Set `allowPrivateNetwork: true` on the provider block to bypass private-address rejection. This is required when using local inference servers (Ollama, LM Studio, vLLM on localhost). See the [synthesis configuration](../configure/synthesis.md) docs for the security warning.
@@ -54,6 +57,20 @@ Set `allowPrivateNetwork: true` on the provider block to bypass private-address 
 - **Docs AI** — `docs-ai.ts` LLM calls
 - **Job suggestions** — `job-suggest-llm.ts`
 - **Observation extraction** — `extraction.ts` LLM calls
+
+## Command Filesystem Boundary
+
+**Source**: `packages/ingenium-core/lib/tools/commands.ts`
+
+Command persistence uses the same fail-closed filesystem policy as other
+protected local-file operations. Command paths are relative to the resolved
+`.opencode/commands` root; absolute paths, separators, dot segments, unsafe
+components, symlinks, and replacement identities are rejected. Runtime
+operations require Linux descriptor anchors (`O_DIRECTORY`, `O_NOFOLLOW`, and
+`/proc/self/fd`); unsupported or incomplete descriptor support fails closed
+instead of falling back to path-only access. Reads and mutations re-check file
+identity around the operation, and temporary/quarantine files are published or
+removed only after verification.
 
 ## Vault Security Model
 

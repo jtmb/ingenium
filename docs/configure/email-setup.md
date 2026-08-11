@@ -28,14 +28,14 @@ export OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
 ```
 These are passed through to `docker compose` via the `${VAR:-}` expansion in `docker-compose.yml`.
 
-> 🔴 **Security**: Never commit these values. The encryption key must be 64 hex characters (32 bytes) or a 64-character base64url secret; the latter is deterministically reduced to an AES-256 key. Generate a unique key per project — do not reuse across deployments.
+> 🔴 **Security**: Never commit these values. The encryption key must be 64 hex characters (32 bytes) or a 64-character base64url secret; the latter is deterministically reduced to an AES-256 key. Generate a unique key per deployment and retain it unchanged while that deployment's encrypted mail data is in use.
 
 ## OAuth2 Credential Setup
 
 OAuth application client secrets (`oauth_gmail_client_secret` and
 `oauth_outlook_client_secret`) are protected settings backed by the encrypted
-vault and belong only to the sole active global project. The selected dashboard
-project does not change their storage scope. The Settings API returns only
+vault and belong only to the canonical `global-default` project. The selected
+dashboard project does not change their storage scope. The Settings API returns only
 masked presence metadata (`isSet` and `masked`), never the secret value. Use
 explicit `preserve`, `replace`, or `clear` actions; a blank value from a
 sanitized settings form preserves the existing secret. The dashboard requires
@@ -112,19 +112,42 @@ After successful authentication, you should see:
 - Inbox view populated with recent messages
 - Folder navigation showing standard folders (INBOX, Sent, Drafts)
 
+For manual setup, the account is saved before the initial connection test. A
+failed test keeps the account and offers **Retry Connection**, editing, or
+**Remove Saved Account**; retrying updates the existing account instead of
+creating a duplicate.
+
+### Provider endpoint rules
+
+Gmail, Outlook, and Yahoo use fixed provider endpoints. Host and port overrides
+for these providers are rejected; the transport always uses the canonical
+provider configuration:
+
+| Provider | IMAP | SMTP |
+|---|---|---|
+| Gmail | `imap.gmail.com:993` | `smtp.gmail.com:587` |
+| Outlook | `outlook.office365.com:993` | `smtp.office365.com:587` |
+| Yahoo | `imap.mail.yahoo.com:993` | `smtp.mail.yahoo.com:587` |
+
+The **Custom** provider may override IMAP and SMTP hosts and ports. Hosts must
+not contain whitespace, and ports must be integers from **1 through 65,535**.
+When changing an existing account to Custom, provide all four values (IMAP host,
+IMAP port, SMTP host, and SMTP port); invalid endpoint data is rejected before
+credentials are accessed.
+
 ## Troubleshooting
 
 | Problem | Likely Cause | Fix |
 |---------|--------------|-----|
 | OAuth2 redirect fails (404) | Callback URI not registered | Add `http://localhost:3000/mail/oauth/callback` to authorized redirect URIs |
 | "Access denied" error | OAuth scopes too limited | Re-authorize account via dashboard |
-| Account shows in dropdown but no emails | Account not fully authenticated | Remove and re-add via setup flow |
+| Account shows in dropdown but no emails | Initial connection test failed or credentials are invalid | Keep the saved account; edit its settings and retry the connection, or remove it explicitly |
 
 ## Security Notes
 
 - **Credentials encrypted**: All OAuth2 secrets are stored using AES-256-GCM with `INGENIUM_EMAIL_ENCRYPTION_KEY`
 - **No plaintext storage**: Never see raw client IDs/secrets — decrypted at runtime only
-- **Project-scoped keys**: Each project should have its own encryption key
+- **Deployment-scoped key continuity**: Each deployment should have its own encryption key, which must remain available to decrypt its stored credentials
 
 ## Account Removal
 
@@ -133,6 +156,9 @@ Removing an email account follows a three-step cleanup flow:
 1. **Worker stop** — The sync engine stops any active IMAP watcher and IDLE connections for the account.
 2. **Settings removal** — The account entry and its encrypted credential bundle are deleted from the database.
 3. **Cache cleanup** — All cached email data (headers, bodies, summaries, smart-reply caches) for the account is purged.
+
+This cleanup occurs only after an explicit **Remove** action; a failed initial
+connection test does not trigger it.
 
 To remove an account, go to **Settings → Mail** and click **Remove** next to the account name. You will be prompted to confirm.
 

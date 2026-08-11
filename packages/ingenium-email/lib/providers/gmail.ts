@@ -326,7 +326,7 @@ export const GmailProvider = {
     cursor: string | null,
   ): Promise<{
     upserts: CachedEmailWrite[];
-    deletes: { folder: string; id: string }[];
+    deletes: { folder?: string; id: string }[];
     newCursor: string;
     fullResyncRequired?: boolean;
   }> {
@@ -348,7 +348,7 @@ export const GmailProvider = {
       const history = await getHistory(token, cursor);
 
       const upserts: CachedEmailWrite[] = [];
-      const deletes: Array<{ folder: string; id: string }> = [];
+      const deletes: Array<{ folder?: string; id: string }> = [];
       const processedMessageIds = new Set<string>();
 
       // Build label → folder lookup once
@@ -386,7 +386,6 @@ export const GmailProvider = {
           processedMessageIds.add(deleted.message.id);
 
           deletes.push({
-            folder: "", // Unknown folder for deletes — caller handles
             id: deleted.message.id,
           });
         }

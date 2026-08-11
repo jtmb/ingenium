@@ -62,6 +62,16 @@ function getSchedule(): BackupSchedule {
   return { ...DEFAULT_SCHEDULE };
 }
 
+/** Match deleteBackup's v2-only boundary so retention never attempts legacy records. */
+function isDeletableBackupRecord(record: { id: string; filename: string; components: string }): boolean {
+  try {
+    return JSON.parse(record.components)?.format === backups.BACKUP_BUNDLE_FORMAT
+      && record.filename === record.id;
+  } catch {
+    return false;
+  }
+}
+
 /** Reports whether the snapshot completed successfully. */
 async function createBackup(
   projectId: string,
@@ -105,7 +115,7 @@ function applyRetention(projectId: string): void {
 
   for (const type of ["scheduled_hourly", "scheduled_daily", "manual"] as const) {
     const typed = records
-      .filter((record) => record.backup_type === type)
+      .filter((record) => record.backup_type === type && isDeletableBackupRecord(record))
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()); // oldest first
 
     const max = retentionMap[type] ?? 0;

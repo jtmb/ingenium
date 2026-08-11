@@ -74,6 +74,24 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it("gives Escape to the topmost nested overlay", () => {
+    const outerOnClose = vi.fn();
+    const innerOnClose = vi.fn();
+
+    render(
+      <Overlay isOpen onClose={outerOnClose} title="Outer">
+        <Overlay isOpen onClose={innerOnClose} title="Inner">
+          <p>Nested content</p>
+        </Overlay>
+      </Overlay>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(innerOnClose).toHaveBeenCalledTimes(1);
+    expect(outerOnClose).not.toHaveBeenCalled();
+  });
+
   it("moves focus to the close button when the overlay opens", async () => {
     const onClose = vi.fn();
     render(

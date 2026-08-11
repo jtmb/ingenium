@@ -19,19 +19,19 @@ export async function projectInit(name: string, isGlobal?: boolean) {
 
 /** Delete a project by name. */
 export async function projectDelete(name: string) {
-  const res = await api.del(`/projects/${encodeURIComponent(name)}`);
-  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: res.ok }) }] };
+  await api.del(`/projects/${encodeURIComponent(name)}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
 }
 
 /** Restore a previously deleted project. */
 export async function projectRestore(project: string, name: string) {
-  const res = await api.post(`/projects/${name}/restore?project=${project}`);
+  const res = await api.post(`/projects/${encodeURIComponent(name)}/restore`, {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
 /** List all archived (deleted) projects. */
 export async function projectListArchived(project: string) {
-  const res = await api.get(`/projects/archive?project=${project}`);
+  const res = await api.get("/projects/archive", { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 

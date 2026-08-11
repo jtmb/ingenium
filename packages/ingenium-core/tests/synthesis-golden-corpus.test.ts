@@ -544,22 +544,17 @@ describe("golden corpus — edge cases", () => {
       { payload: mockContent(synthesisResponse2) },
     ]);
 
-    // Second run: the duplicate create proposal is accepted by governance
-    // (createProposal only blocks if the SKILL already exists, not if another
-    // proposal with the same name exists — proposal-level dedup requires
-    // candidateGroupKey which is not set by synthesis).
-    // The pipeline should NOT crash.
+    // The pipeline should replace the now-obsolete candidate without crashing.
     const result2 = await runSynthesis(projectId);
     expect(result2).toBeDefined();
-    // No error should be thrown — the duplicate proposal just coexists
+    // No error should be thrown while the older candidate is retained as history.
     expect(result2.errors.every(e => !e.includes("crash") && !e.includes("SIGSEGV"))).toBe(true);
 
-    // Both proposals exist (governance doesn't auto-dedup by name)
+    // Both historical rows remain, but only the replacement remains reviewable.
     const proposalsAfter = listProposals(projectId);
     const functionalFirstProposals = proposalsAfter.filter(p => p.target_name === "functional-first");
-    // Both proposals coexist — dedup by candidateGroupKey is not used in synthesis
     expect(functionalFirstProposals.length).toBe(2);
-    // Both should be in pending state
-    expect(functionalFirstProposals.every(p => p.status === "pending")).toBe(true);
+    expect(functionalFirstProposals.filter(p => p.status === "pending")).toHaveLength(1);
+    expect(functionalFirstProposals.filter(p => p.status === "stale")).toHaveLength(1);
   });
 });

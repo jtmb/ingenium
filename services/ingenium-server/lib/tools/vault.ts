@@ -64,8 +64,8 @@ export async function vaultItemUpdate(project: string, itemId: string, value: st
 
 /** Delete a vault item by ID. */
 export async function vaultItemDelete(project: string, itemId: string) {
-  const res = await api.del(`/vault/items/${encodeURIComponent(itemId)}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: res.ok }) }] };
+  await api.del(`/vault/items/${encodeURIComponent(itemId)}`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
 }
 
 /** Generate a secure password. */

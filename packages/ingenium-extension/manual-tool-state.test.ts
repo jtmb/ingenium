@@ -13,13 +13,10 @@ vi.mock("./mcp-tool-state.js", () => ({
   assertExtensionToolEnabled: mockAssertExtensionToolEnabled,
 }));
 
-vi.mock("./project-resolver.js", () => ({
-  ensureExtensionProject: vi.fn().mockResolvedValue("extension-project"),
-  classifyExtensionProjectFailure: () => "unavailable",
-}));
-
-vi.mock("./api-auth.js", () => ({
-  apiRequestHeaders: () => new Headers(),
+vi.mock("./mcp-client.js", () => ({
+  callMcpTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "{}" }] }),
+  mcpToolData: () => ({}),
+  McpBridgeError: class extends Error {},
 }));
 
 vi.mock("./observer-core.js", () => ({

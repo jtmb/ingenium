@@ -21,17 +21,21 @@ export function getApiBase(): string {
  */
 const DEFAULT_PROJECT = "global-default";
 
+export type RetryAfterStatus = "missing" | "valid" | "invalid" | "excessive";
+
 /**
  * Structured API error carrying the HTTP status and optional Retry-After header.
  *
  * Callers can check `instanceof ApiError` to distinguish API errors from network
- * failures, and read `retryAfterSeconds` for rate-limit (429) backoff.
+ * failures, and read the parsed Retry-After status for rate-limit backoff.
  */
 export class ApiError extends Error {
   /** HTTP status code (e.g. 429, 503). */
   status: number;
   /** Seconds to wait before retrying, parsed from the `Retry-After` header (capped at 60). */
   retryAfterSeconds: number | null;
+  /** Whether the server supplied a bounded value safe for automatic retry. */
+  retryAfterStatus: RetryAfterStatus;
   /** Bounded server error code; never includes response details. */
   code: string | null;
   /** Present only for safe optimistic-concurrency conflicts. */
@@ -43,27 +47,33 @@ export class ApiError extends Error {
     retryAfterSeconds: number | null,
     code: string | null = null,
     currentRevision: number | null = null,
+    retryAfterStatus: RetryAfterStatus = retryAfterSeconds === null ? "missing" : "valid",
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.retryAfterStatus = retryAfterStatus;
     this.code = code;
     this.currentRevision = currentRevision;
   }
 }
 
 /**
- * Parse the `Retry-After` header value into seconds, capped at 60.
+ * Parse the `Retry-After` header value into a bounded delay classification.
  * Accepts integer seconds only (the API emits seconds, not HTTP-date).
- *
- * @returns Parsed seconds, or `null` if the header was absent or invalid.
  */
-function parseRetryAfter(header: string | null): number | null {
-  if (!header) return null;
-  const seconds = parseInt(header, 10);
-  if (isNaN(seconds) || seconds <= 0) return null;
-  return Math.min(seconds, 60);
+function parseRetryAfter(header: string | null): { seconds: number | null; status: RetryAfterStatus } {
+  if (header === null) return { seconds: null, status: "missing" };
+  const value = header.trim();
+  if (!/^\d+$/.test(value)) return { seconds: null, status: "invalid" };
+
+  const seconds = Number(value);
+  if (seconds <= 0) return { seconds: null, status: "invalid" };
+  if (!Number.isSafeInteger(seconds) || seconds > 60) {
+    return { seconds: Number.isFinite(seconds) ? 60 : null, status: "excessive" };
+  }
+  return { seconds, status: "valid" };
 }
 
 function setRequestHeader(
@@ -159,7 +169,14 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
       && err.error.currentRevision >= 0
       ? err.error.currentRevision
       : null;
-    throw new ApiError(res.status, err.error?.message ?? res.statusText, retryAfter, code, currentRevision);
+    throw new ApiError(
+      res.status,
+      err.error?.message ?? res.statusText,
+      retryAfter.seconds,
+      code,
+      currentRevision,
+      retryAfter.status,
+    );
   }
   // 204 No Content — returned by DELETE endpoints; no body to parse
   if (res.status === 204) return undefined as T;
@@ -190,6 +207,39 @@ export type Skill = {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type SkillProposalView = "open" | "history";
+
+export type SkillProposalCounts = {
+  open: number;
+  history: number;
+  byStatus: Record<string, number>;
+};
+
+export type SkillProposalSummary = {
+  id: string;
+  status: string;
+  proposalType: string;
+  targetName: string;
+  sourceName: string | null;
+  qualityScore: number;
+  noveltyScore: number;
+  createdAt: string;
+};
+
+export type SkillProposalPage = {
+  data: SkillProposalSummary[];
+  pagination: {
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+};
+
+export type SkillProposalPageOptions = {
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
 };
 
 /** A Kaban-board-style task with column tracking. */
@@ -1122,6 +1172,7 @@ async function jobsRequest<T>(path: string, options?: RequestInit): Promise<T> {
       apiError?.retryAfterSeconds ?? null,
       apiError?.code ?? null,
       apiError?.currentRevision ?? null,
+      apiError?.retryAfterStatus,
     );
   }
 }
@@ -1944,8 +1995,8 @@ export const api = {
   projects: {
     list: () => request<{ data: Project[] }>("/projects"),
     create: (name: string) => request<{ data: Project }>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
-    archive: (name: string) => request<{ data: { archived: boolean } }>(`/projects/${name}`, { method: "DELETE" }),
-    restore: (name: string) => request<{ data: { restored: boolean } }>(`/projects/${name}/restore`, { method: "POST" }),
+    archive: (name: string) => request<{ data: { archived: boolean } }>(`/projects/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    restore: (name: string) => request<{ data: { restored: boolean } }>(`/projects/${encodeURIComponent(name)}/restore`, { method: "POST" }),
     purge: (retentionDays?: number) =>
       request<{ data: { purged_count: number } }>("/projects/purge", { method: "POST", body: JSON.stringify({ retention_days: retentionDays ?? 7 }) }),
     listArchived: () => request<{ data: Project[] }>("/projects/archive"),
@@ -1968,6 +2019,20 @@ export const api = {
     proposals: {
       list: (project = DEFAULT_PROJECT, status?: string) => 
         request<{ data: any[] }>(`/skills/proposals?project=${encodeURIComponent(project)}${status ? `&status=${status}` : ''}`),
+      counts: (project = DEFAULT_PROJECT, signal?: AbortSignal) =>
+        request<{ data: SkillProposalCounts }>(
+          `/skills/proposals/counts?project=${encodeURIComponent(project)}`,
+          { signal },
+        ),
+      page: (view: SkillProposalView, project = DEFAULT_PROJECT, options: SkillProposalPageOptions = {}) => {
+        const params = new URLSearchParams({
+          project,
+          view,
+          limit: String(options.limit ?? 25),
+        });
+        if (options.cursor) params.set("cursor", options.cursor);
+        return request<SkillProposalPage>(`/skills/proposals/page?${params}`, { signal: options.signal });
+      },
       get: (proposalId: string, project = DEFAULT_PROJECT) => 
         request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}?project=${encodeURIComponent(project)}`),
       approve: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
@@ -2359,10 +2424,10 @@ export const api = {
       request<{ data: { id: string; content: string } | null }>(`/config/sync?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "POST" }),
   },
   logs: {
-    list: (project = DEFAULT_PROJECT, since?: string, limit = 200) => {
+    list: (project = DEFAULT_PROJECT, since?: string, limit = 200, signal?: AbortSignal) => {
       const params = new URLSearchParams({ project, limit: String(limit) });
       if (since) params.set("since", since);
-      return request<{ data: { entries: LogEntry[]; sources: string[]; total: number } }>(`/logs?${params}`);
+      return request<{ data: { entries: LogEntry[]; sources: string[]; total: number } }>(`/logs?${params}`, { signal });
     },
   },
   mcpTools: {

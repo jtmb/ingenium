@@ -45,7 +45,8 @@ beforeEach(async () => {
   process.env.INGENIUM_HOME = join(tempDir, "home");
   process.env.OPENCODE_SERVER_PASSWORD = "phase4c-opencode-password";
   projectName = "phase4c-api";
-  projects.createProject(projectName, true);
+  projects.createProject("global-default", true);
+  projects.createProject(projectName);
 
   server = createServer(buildApp());
   await new Promise<void>((resolve) => {
@@ -75,7 +76,7 @@ afterEach(async () => {
 });
 
 function projectId(): string {
-  return projects.getProject(projectName)!.id;
+  return projects.getProject("global-default")!.id;
 }
 
 async function getSetting(key: string): Promise<{ response: Response; body: any }> {

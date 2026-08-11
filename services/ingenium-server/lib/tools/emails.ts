@@ -4,7 +4,6 @@
  * Provides 27 tools: 7 basic + 6 assistance + 14 admin/operations tools.
  */
 import { api } from "../client.js";
-import { apiRequestHeaders, config } from "../../config/index.js";
 import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
 
 // ── Basic Email Tools ──────────────────────────────────────────────────────
@@ -158,8 +157,8 @@ export async function emailAccountCreate(
 
 /** Delete an email account and clear its cached data */
 export async function emailAccountDelete(project: string, account: string) {
-  const res = await api.del(`/emails/accounts/${account}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.ok ? { deleted: true } : { error: "Deletion failed" }) }] };
+  await api.del(`/emails/accounts/${account}`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
 }
 
 /** Test IMAP connection for an account */
@@ -184,12 +183,12 @@ export async function emailOauthExchange(
   const body: any = { provider, code, state };
   if (redirectUri) body.redirectUri = redirectUri;
   if (accountId) body.accountId = accountId;
-  const res = await api.post("/emails/accounts/oauth", body, { project });
+  const res = await api.settled.post("/emails/accounts/oauth", body, { project });
   // 🔴 SAFETY: Only return success/failure, NEVER any credential material
   if (res.ok && res.data?.accountId) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, accountId: res.data.accountId }) }] };
   }
-  return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: res.data?.error ?? "OAuth exchange failed" }) }] };
+  return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "OAuth exchange failed" }) }] };
 }
 
 /** Get LLM-generated email summary (cache-first) */
@@ -223,11 +222,11 @@ export async function emailSetFlags(project: string, account: string, uid: numbe
 
 /** Delete an email (moves to Trash via IMAP) */
 export async function emailDelete(project: string, account: string, uid: number, folder?: string) {
-  const res = await api.del(`/emails/${uid}`, {
+  await api.del(`/emails/${uid}`, {
     project, account,
     folder: folder ?? "INBOX",
   });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.ok ? { deleted: true } : { error: "Deletion failed" }) }] };
+  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
 }
 
 /** Trigger engine-backed sync hint */
@@ -257,7 +256,7 @@ export async function emailWatchStop(project: string, account: string) {
  */
 export async function emailAttachmentGet(
   project: string, account: string, uid: number, attachmentId: string,
-  folder?: string, outputPath?: string,
+  folder: string | undefined, outputPath: string,
 ) {
   if (!outputPath) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: "outputPath is required — specify a path within /workspace or your home directory" }) }] };
@@ -272,21 +271,14 @@ export async function emailAttachmentGet(
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${message}` }) }] };
   }
 
-  // Build the API URL and perform a raw fetch for binary response
-  const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
-  const url = new URL(
-    `emails/${uid}/attachments/${attachmentId}`,
-    apiBase,
+  const response = await api.settled.getRaw(
+    `/emails/${uid}/attachments/${encodeURIComponent(attachmentId)}`,
+    { project, account, folder: folder ?? "INBOX" },
   );
-  url.searchParams.set("project", project);
-  url.searchParams.set("account", account);
-  url.searchParams.set("folder", folder ?? "INBOX");
-
-  const response = await fetch(url.toString(), { headers: apiRequestHeaders() });
   if (!response.ok) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };
   }
 
-  const { mimeType, size } = await streamDownloadResponse(response, safePath);
+  const { mimeType, size } = await streamDownloadResponse(response.response, safePath);
   return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size }) }] };
 }

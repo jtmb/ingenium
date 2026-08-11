@@ -212,18 +212,22 @@ export default function PluginsPage() {
             ) : (
               <div
                 key={p.id}
-                className="flex min-w-0 cursor-pointer flex-col gap-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
-                onClick={() => setSelectedPlugin(p)}
+                className="flex min-w-0 flex-col gap-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
               >
                 <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                    onClick={() => setSelectedPlugin(p)}
+                    aria-label={`View plugin ${p.name}`}
+                  >
                     <span className="break-all font-medium">{p.name}</span>
                     <span className="ml-2 break-all text-sm text-[var(--color-text-muted)]">{p.file_path}</span>
-                  </div>
+                  </button>
                   <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
                     <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
+                      type="button"
+                      onClick={async () => {
                         let content = p.source_content || "";
                         if (!content) {
                           try {
@@ -240,7 +244,8 @@ export default function PluginsPage() {
                       Edit
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggle(p); }}
+                      type="button"
+                      onClick={() => void toggle(p)}
                        className={`flex-1 rounded px-3 py-1 text-sm transition-colors sm:flex-none ${
                         p.enabled
                           ? "bg-[var(--color-success-bg)] text-green-700 hover:bg-[var(--color-surface-hover)]"
@@ -250,7 +255,8 @@ export default function PluginsPage() {
                       {p.enabled ? "Enabled" : "Disabled"}
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(p); }}
+                      type="button"
+                      onClick={() => void handleDelete(p)}
                        className="flex-1 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 transition-colors sm:flex-none"
                     >
                       Delete

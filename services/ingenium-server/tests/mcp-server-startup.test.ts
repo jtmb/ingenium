@@ -33,4 +33,11 @@ describe("MCP server startup", () => {
 
     expect(source).toMatch(/server\.registerTool\(\s*"mcp_report_get",[\s\S]*?wrapHandler\(C\("mcp_report_get"\)/);
   });
+
+  it("registers repository synchronization once through the launcher-bound state gate", () => {
+    const source = readFileSync(SERVER_SOURCE_PATH, "utf8");
+
+    expect(source.match(/server\.registerTool\(\s*"repository_sync"/g)).toHaveLength(1);
+    expect(source).toMatch(/"repository_sync",[\s\S]*?docsManifest: repositoryDocsManifestParam,[\s\S]*?wrapLauncherBoundHandler\(C\("repository_sync"\), launcherProject/);
+  });
 });

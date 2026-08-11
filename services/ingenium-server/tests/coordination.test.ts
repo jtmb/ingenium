@@ -8,7 +8,7 @@ const mockApi = {
   patch: vi.fn(),
 };
 
-vi.mock("../lib/client.js", () => ({ api: mockApi }));
+vi.mock("../lib/client.js", () => ({ api: { settled: mockApi } }));
 
 const coordination = await import("../lib/tools/coordination.js");
 

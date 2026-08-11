@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextFunction, Request, Router, Response } from "express";
-import { checkpointAfterWrite, emailCache, execTransaction, getDb, logger, settings, synthesisLlm } from "ingenium-core";
+import { checkpointAfterWrite, emailCache, execTransaction, getDb, logger, projects, settings, synthesisLlm } from "ingenium-core";
 import {
   // Account CRUD
   listAccounts,
@@ -54,6 +54,8 @@ import {
   // Providers
   GmailProvider,
   sanitizeProviderError,
+  normalizeEmailAccountEndpoints,
+  EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING,
   validateEmailAccountMigrationCredentials,
 } from "ingenium-email";
 import type {
@@ -282,15 +284,22 @@ emailsRouter.post("/accounts", (req, res) => {
     return;
   }
 
+  let endpoints: Pick<EmailAccount, "imapHost" | "imapPort" | "smtpHost" | "smtpPort">;
+  try {
+    endpoints = normalizeEmailAccountEndpoints(provider, { imapHost, imapPort, smtpHost, smtpPort });
+  } catch {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "Endpoint overrides are only supported for custom providers" },
+    });
+    return;
+  }
+
   const accountInput = {
     email,
-    provider,
+    provider: provider as EmailProvider,
     authType,
     name: name ?? email,
-    imapHost,
-    imapPort,
-    smtpHost,
-    smtpPort,
+    ...endpoints,
   } as Omit<EmailAccount, "id" | "connected">;
   const account = appPassword
     ? createAccountWithCredentials(accountInput, {
@@ -323,7 +332,7 @@ emailsRouter.delete("/accounts/:id", async (req, res) => {
   res.status(204).send();
 });
 
-/** PATCH /accounts/:id?project= — Update account metadata (e.g., hidden flag). */
+/** PATCH /accounts/:id?project= — Update non-secret account metadata. */
 emailsRouter.patch("/accounts/:id", (req, res) => {
   const accountId = req.params.id!;
   const account = getAccount(accountId);
@@ -334,10 +343,59 @@ emailsRouter.patch("/accounts/:id", (req, res) => {
     return;
   }
 
-  const { hidden } = req.body;
+  const {
+    hidden,
+    provider,
+    email,
+    name,
+    imapHost,
+    imapPort,
+    smtpHost,
+    smtpPort,
+  } = req.body as Record<string, unknown>;
+  if (provider !== undefined && provider !== account.provider) {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "provider cannot be changed after account creation" },
+    });
+    return;
+  }
+
+  let endpoints: Pick<EmailAccount, "imapHost" | "imapPort" | "smtpHost" | "smtpPort">;
+  try {
+    endpoints = normalizeEmailAccountEndpoints(account.provider, { imapHost, imapPort, smtpHost, smtpPort });
+  } catch {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "Endpoint overrides are only supported for custom providers" },
+    });
+    return;
+  }
+
+  const isOptionalText = (value: unknown): value is string | undefined =>
+    value === undefined || typeof value === "string";
+  const isOptionalPort = (value: unknown): value is number | undefined =>
+    value === undefined || (typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65_535);
+  if (!isOptionalText(email) || !isOptionalText(name) || !isOptionalText(imapHost) || !isOptionalText(smtpHost)
+    || !isOptionalPort(imapPort) || !isOptionalPort(smtpPort)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Account metadata is invalid" } });
+    return;
+  }
+  if (typeof email === "string" && !email.trim()) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "email must not be empty" } });
+    return;
+  }
+  if (typeof name === "string" && !name.trim()) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name must not be empty" } });
+    return;
+  }
   if (hidden !== undefined) {
     account.hidden = !!hidden;
   }
+  if (typeof email === "string") account.email = email.trim();
+  if (typeof name === "string") account.name = name.trim();
+  if (imapHost !== undefined) account.imapHost = endpoints.imapHost;
+  if (imapPort !== undefined) account.imapPort = endpoints.imapPort;
+  if (smtpHost !== undefined) account.smtpHost = endpoints.smtpHost;
+  if (smtpPort !== undefined) account.smtpPort = endpoints.smtpPort;
 
   storeAccount(account);
   res.json({ data: account });
@@ -1519,18 +1577,30 @@ interface MailSettingRow {
   value: string;
 }
 
+interface MailAccountMigrationGroup {
+  accountId: string;
+  rows: MailSettingRow[];
+}
+
 function emptyMailMigrationResult(): MailAccountMigrationResult {
   return { migratedSettings: 0, migratedAccounts: 0, collisions: 0, skippedForEncryption: false };
 }
 
-function validateMailMigrationGroup(group: MailSettingRow[]): boolean {
-  const accounts = group.filter((row) => row.key.startsWith("email_account_"));
-  const oauth = group.filter((row) => row.key.startsWith("email_oauth_"));
+function validateMailMigrationGroup(group: MailAccountMigrationGroup): boolean {
+  const accounts = group.rows.filter((row) => row.key.startsWith("email_account_"));
+  const oauth = group.rows.filter((row) => row.key.startsWith("email_oauth_"));
   if (accounts.length !== 1 || oauth.length > 1) return false;
 
   const account = accounts[0]!;
-  const accountId = account.key.slice("email_account_".length);
-  return validateEmailAccountMigrationCredentials(accountId, account.value, oauth[0]?.value).valid;
+  return validateEmailAccountMigrationCredentials(group.accountId, account.value, oauth[0]?.value).valid;
+}
+
+function mailMigrationSignature(group: MailAccountMigrationGroup): string {
+  return group.rows
+    .slice()
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map((row) => `${row.key}\u0000${row.value}`)
+    .join("\u0001");
 }
 
 /**
@@ -1550,39 +1620,74 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
         return { ...emptyMailMigrationResult(), skippedForEncryption: true };
       }
 
-      const rows = db.prepare(
-        `SELECT s.project_id, s.key, s.value
-         FROM settings s
-         JOIN projects p ON s.project_id = p.id
-         WHERE p.is_global = 0
-           AND p.archived_at IS NULL
-            AND (s.key LIKE 'email_account_%' OR s.key LIKE 'email_oauth_%')
-         ORDER BY s.project_id, s.key`,
-      ).all() as MailSettingRow[];
+      const destinationFingerprint = db.prepare(
+        "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+      ).get(globalId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING) as { value: string } | undefined;
+      if (!destinationFingerprint) {
+        return { ...emptyMailMigrationResult(), skippedForEncryption: true };
+      }
 
       const result = emptyMailMigrationResult();
-      const groups = new Map<string, MailSettingRow[]>();
+      const sourceProjectIds = projects.getFormerGlobalProjectIds(globalId);
+      if (sourceProjectIds.length === 0) return result;
+
+      const sourcePlaceholders = sourceProjectIds.map(() => "?").join(", ");
+      const rows = db.prepare(
+        `SELECT s.project_id, s.key, s.value
+        FROM settings s
+         WHERE s.project_id IN (${sourcePlaceholders})
+           AND (s.key LIKE 'email_account_%' OR s.key LIKE 'email_oauth_%')
+         ORDER BY s.project_id, s.key`,
+      ).all(...sourceProjectIds) as MailSettingRow[];
+
+      const groups = new Map<string, MailAccountMigrationGroup>();
       for (const row of rows) {
         const accountId = row.key.startsWith("email_account_")
           ? row.key.slice("email_account_".length)
           : row.key.slice("email_oauth_".length);
         const groupKey = `${row.project_id}\u0000${accountId}`;
-        const group = groups.get(groupKey) ?? [];
-        group.push(row);
+        const group = groups.get(groupKey) ?? { accountId, rows: [] };
+        group.rows.push(row);
         groups.set(groupKey, group);
       }
 
-      // Validate the complete source set before any destination write or source
-      // deletion. A legacy plaintext, malformed, orphaned, or key-mismatched
-      // entry leaves every source row untouched for operator recovery.
-      for (const group of groups.values()) {
-        if (!validateMailMigrationGroup(group)) {
-          return { ...emptyMailMigrationResult(), skippedForEncryption: true };
+      const sourceFingerprints = new Map<string, string | undefined>();
+      const sourceFingerprint = db.prepare(
+        "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+      );
+      const candidates = new Map<string, MailAccountMigrationGroup[]>();
+      for (const [groupKey, group] of groups) {
+        const projectId = groupKey.slice(0, groupKey.indexOf("\u0000"));
+        let fingerprint = sourceFingerprints.get(projectId);
+        if (!sourceFingerprints.has(projectId)) {
+          fingerprint = (sourceFingerprint.get(projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING) as { value: string } | undefined)?.value;
+          sourceFingerprints.set(projectId, fingerprint);
+        }
+        const accountGroups = candidates.get(group.accountId) ?? [];
+        accountGroups.push(group);
+        candidates.set(group.accountId, accountGroups);
+        if (!validateMailMigrationGroup(group)
+          || (fingerprint !== undefined && fingerprint !== destinationFingerprint.value)) {
+          result.skippedForEncryption = true;
         }
       }
 
-      for (const group of groups.values()) {
-        const collision = group.some((row) => {
+      for (const accountGroups of candidates.values()) {
+        const hasUnsafeCandidate = accountGroups.some((group) => {
+          const projectId = group.rows[0]?.project_id;
+          const fingerprint = projectId ? sourceFingerprints.get(projectId) : undefined;
+          return !validateMailMigrationGroup(group)
+            || (fingerprint !== undefined && fingerprint !== destinationFingerprint.value);
+        });
+        if (hasUnsafeCandidate) continue;
+
+        if (new Set(accountGroups.map(mailMigrationSignature)).size > 1) {
+          result.collisions++;
+          continue;
+        }
+
+        const groupRows = accountGroups.flatMap((group) => group.rows);
+        const collision = groupRows.some((row) => {
           const destination = db.prepare(
             "SELECT value FROM settings WHERE project_id = ? AND key = ?",
           ).get(globalId, row.key) as { value: string } | undefined;
@@ -1593,13 +1698,13 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
           continue;
         }
 
-        for (const row of group) {
+        for (const row of groupRows) {
           db.prepare(
             `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
              ON CONFLICT(project_id, key) DO NOTHING`,
           ).run(globalId, row.key, row.value);
         }
-        for (const row of group) {
+        for (const row of groupRows) {
           const destination = db.prepare(
             "SELECT value FROM settings WHERE project_id = ? AND key = ?",
           ).get(globalId, row.key) as { value: string } | undefined;
@@ -1607,12 +1712,12 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
             throw new Error("Mail account migration destination verification failed");
           }
         }
-        for (const row of group) {
+        for (const row of groupRows) {
           db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
             .run(row.project_id, row.key);
           result.migratedSettings++;
-          if (row.key.startsWith("email_account_")) result.migratedAccounts++;
         }
+        result.migratedAccounts++;
       }
       committedWrites = result.migratedSettings > 0;
       return result;

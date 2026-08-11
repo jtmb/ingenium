@@ -1,13 +1,15 @@
 ---
 title: Skill System Architecture
-description: Canonical taxonomy, three-layer lifecycle, bidirectional sync, security, and MCP tool catalog for the Ingenium skill system.
+description: Canonical taxonomy, three-layer lifecycle, Git-authoritative resource sync, security, and MCP tool catalog for the Ingenium skill system.
 ---
 
 # Skill System Architecture
 
 ## Overview
 
-The Ingenium skill system manages AI agent skills through a **DB-primary, three-layer lifecycle** architecture. Skills define conventions, rules, and patterns that agents load at session startup to guide their behavior.
+The Ingenium skill system manages AI agent skills through a **Git-authoritative,
+three-layer lifecycle** architecture. Skills define conventions, rules, and
+patterns that agents load at session startup to guide their behavior.
 
 ## Canonical Taxonomy
 
@@ -61,16 +63,25 @@ Each skill lives at `.opencode/skills/<name>/` with a split-skill format:
 - Approval checks: revision conflicts, missing/archived targets before applying.
 - Merge approvals create lineage records where applicable.
 
-## Skill Sync (Bidirectional)
+Migration `091_skill_proposal_retention_pagination.sql` retains every proposal:
+the database rejects deletes from `skill_proposals`. Proposal reads use bounded
+keyset pagination over the project/status/created-at/id index. The API and MCP
+surface an `open` view (`draft`/`pending`), a `history` view
+(`stale`/`rejected`/`applied`/`rolled_back`), and separate scoped counts; pages
+default to 25 rows and accept at most 100. The former unbounded list route is
+retired with `410 SKILL_PROPOSAL_LIST_RETIRED`.
 
-The system uses a **Resource Sync Engine** (`packages/ingenium-extension/resource-sync.ts`) with SHA-256 hash manifest for conflict-aware bidirectional sync:
+## Skill Sync
+
+The system uses the Resource Sync Engine with a SHA-256 manifest for the single
+Git-authoritative projection path:
 
 | Direction | Trigger | Mechanism |
 |-----------|---------|-----------|
-| DB → Disk | After API create/update | `writeSkillToDisk()` — reads `file_tree` JSON, writes all files |
-| Disk → DB | `session.created`, `session.idle` | Resource sync engine — hashed manifest comparison |
-| Bidirectional | `/sync-skills` command | Two-phase sync: disk imports → DB writes → disk writes |
-| Scheduled | Every 15 min (API scheduler) | Runs extraction → synthesis for all active projects; resource sync runs separately in the extension on session events |
+| Git worktree → API/DB | `session.created`, `session.idle`, repository sync | Resource sync through MCP stdio and authenticated API |
+| API/DB repair → worktree | Explicit administrative repair only | Authenticated API/MCP operation; never automatic external sync |
+| Build/runtime | Extension or plugin change | Rebuild extension and restart OpenCode |
+| Scheduled learning | Every 15 min (API scheduler) | Runs extraction → synthesis; this is separate from resource sync |
 
 ## Maintenance Locks
 
@@ -111,13 +122,17 @@ Skills are **never hard-deleted**. `deleteSkill()` delegates to `archiveSkill()`
 | No token leak | Lock owner token stripped from all API responses |
 | Wire compatibility boundary | Legacy CRUD returns `snake_case` raw rows; governance returns `camelCase` DTOs |
 
-## MCP Tool Catalog (25 tools)
+## MCP Tool Catalog (28 tools)
 
-**11 Core:**
-`list`, `load`, `search`, `create`, `update`, `delete` (→ archive), `enable`, `disable`, `sync`, `consolidate`, `sync_all`
+**12 Core:**
+`list`, `load`, `search`, `create`, `update`, `delete` (→ archive), `enable`, `disable`, `sync`, `consolidate`, `sync_all`, `sync_all_preview`
 
-**14 Governance:**
-`archive`, `restore`, `list_archived`, `versions`, `rollback`, `lineage_create`, `lineage_list`, `proposal_create`, `proposal_list`, `proposal_get`, `proposal_submit`, `proposal_approve`, `proposal_reject`, `proposal_rollback`
+**16 Governance:**
+`archive`, `restore`, `list_archived`, `versions`, `rollback`, `lineage_create`, `lineage_list`, `proposal_create`, `proposal_list` (deprecated), `proposal_page`, `proposal_counts`, `proposal_get`, `proposal_submit`, `proposal_approve`, `proposal_reject`, `proposal_rollback`
+
+`ingenium_skill_sync` and `ingenium_skill_sync_all` are API-host/admin repair or
+import tools only. Agents must not run them after edits and they are not the
+automatic external-worktree synchronization path.
 
 ## MCP Tools vs REST Endpoints
 

@@ -245,10 +245,10 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
   });
 
   test("7 - Skills page renders skill cards from API data", async ({ page }) => {
-    await goto(page, "/skills");
+    const project = await goto(page, "/skills");
 
     await expect(
-      page.getByRole("heading", { name: /^Skills / }),
+      page.getByRole("heading", { name: /^Active Skills/ }),
     ).toBeVisible({ timeout: 10000 });
 
     await expect(page.getByPlaceholder("Search skills...")).toBeVisible({
@@ -262,7 +262,7 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
     ).toBeVisible();
 
     const skillCards = page.locator("[data-testid^='skill-card-']");
-    const noSkills = page.getByText("No skills yet. Upload a skill file to get started.");
+    const noSkills = page.getByText(`No active skills in ${project}. Use the project selector above to switch projects.`);
     await expect(skillCards.first().or(noSkills)).toBeVisible({ timeout: 15_000 });
 
     await page.screenshot({

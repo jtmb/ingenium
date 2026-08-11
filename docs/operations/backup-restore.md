@@ -124,6 +124,18 @@ Navigate to **`/backups`** in the dashboard to:
 - Delete old backups
 - Configure the automated schedule with hourly and daily toggles
 
+### Safe deletion and retry behavior
+
+Deleting a v2 backup first records a durable deletion reservation. While that
+reservation exists, a new restore preview for the backup is rejected, preventing
+preview from racing bundle removal. The backup record is removed only after the
+bundle removal and final database step succeed.
+
+If filesystem or database cleanup fails, the reservation and backup inventory
+row remain. The backup therefore stays discoverable in the list and the same
+delete action can be retried; do not treat a failed delete response as proof that
+the backup no longer exists.
+
 ## Backup Procedures
 
 ### Creating a Backup via MCP

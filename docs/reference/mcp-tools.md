@@ -1,17 +1,25 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 279-tool built-in Ingenium MCP catalog across 29 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 282-tool built-in Ingenium MCP catalog across 30 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **279 tools** across **29 baseline categories**:
-275 tools registered by stdio and 2 extension tools. A project-scoped
+The built-in catalog contains **282 tools** across **30 baseline categories**:
+280 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** name (except where noted).
 
 The canonical catalog (source of truth) lives at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
+
+## Repository-authoritative synchronization
+
+The dedicated repository-sync MCP operation projects Git worktree files through
+`@ingenium/extension` resource-sync, configured MCP stdio, and the authenticated
+API to the database. Git remains authoritative; runtime consumers do not access
+SQLite or call mutation REST directly. Skill CRUD and `ingenium_skill_sync*`
+tools are API-host/admin repair/import operations only.
 
 ### Naming Convention
 
@@ -70,6 +78,20 @@ launcher or transport. A safe read smoke test is `ingenium_health_check`; it
 does not require a project argument. Authentication, unavailable transport, and
 unrecognized status failures are reported with fixed diagnostics that do not
 include bearer tokens or upstream error text.
+
+### MCP API error boundary
+
+The typed HTTP client resolves only 2xx responses through its standard methods.
+Adapters that intentionally inspect non-2xx responses use the explicit
+`api.settled` namespace instead; this preserves status and bounded payload data
+for state, report, and child-runtime adapters without weakening the normal error
+boundary. Failed API payloads are capped at 8 KiB for error parsing, error codes
+are restricted to 64 safe uppercase characters, and messages are restricted to 256 UTF-8 bytes
+with control characters, paths, and credential-shaped text rejected.
+
+At the MCP tool boundary, state-gated API failures are returned as
+`isError: true` results. Their serialized error text is capped at 512 bytes and
+oversized or unsafe data falls back to the fixed `API_REQUEST_FAILED` message.
 
 ### MCP usefulness report (public/developer schema)
 
@@ -170,7 +192,7 @@ The report is also exposed as the project-scoped tool
 | `ingenium_project_rename` | Renames an existing project. |
 | `ingenium_project_migrate_workspace` | DB-only migration — moves the historical `/workspace` project into `global-default`. Never touches filesystem. Use `dryRun: true` first. |
 
-## SKILLS — Guides the AI uses to work (25 tools = 11 core + 14 governance)
+## SKILLS — Guides the AI uses to work (28 tools = 12 core + 16 governance)
 
 | Tool | What it does |
 |------|-------------|
@@ -182,11 +204,19 @@ The report is also exposed as the project-scoped tool
 | `ingenium_skill_delete` | Archive-only (delegates to `archiveSkill`). Not hard-delete. |
 | `ingenium_skill_enable` | Turns a skill ON (writes it to disk). |
 | `ingenium_skill_disable` | Turns a skill OFF (removes SKILL.md from disk only). |
-| `ingenium_skill_sync` | Saves disk file changes back to the database. |
+| `ingenium_skill_sync` | Administrative repair/import of one skill; not automatic worktree sync. |
 | `ingenium_skill_consolidate` | Triggers LLM-driven skill audit — merges redundant skills. |
-| `ingenium_skill_sync_all` | Sync ALL skills disk↔DB for a project. |
+| `ingenium_skill_sync_all` | Administrative repair/import of project skills; not automatic worktree sync. |
+| `ingenium_skill_sync_all_preview` | Previews project skill sync changes without modifying state. |
 
-**14 Governance tools:** archive, restore, list_archived, versions, rollback, lineage_create, lineage_list, proposal_create, proposal_list, proposal_get, proposal_submit, proposal_approve, proposal_reject, proposal_rollback.
+**16 Governance tools:** archive, restore, list_archived, versions, rollback, lineage_create, lineage_list, proposal_create, proposal_list, proposal_page, proposal_counts, proposal_get, proposal_submit, proposal_approve, proposal_reject, proposal_rollback.
+
+`ingenium_skill_proposal_list` is a deprecated compatibility tool. Its REST
+route returns `410 SKILL_PROPOSAL_LIST_RETIRED`; use
+`ingenium_skill_proposal_page` for one bounded `open` or `history` page
+(default 25, maximum 100, optional keyset cursor) and
+`ingenium_skill_proposal_counts` for scoped totals. Proposal rows are retained;
+the page and counts tools are the bounded read surface.
 
 ## OBSERVE — Log notes about user behavior
 
@@ -455,6 +485,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 279 tools across 29 categories (277 stdio + 2 extension).** Project-scoped child
+**Built-in baseline: 282 tools across 30 categories (280 `ingenium_` catalog entries + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

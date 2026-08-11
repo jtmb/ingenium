@@ -1,178 +1,135 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const token = "p".repeat(32);
 const project = "protected-plugin-project";
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
+
+vi.mock("./mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+  McpBridgeError: class McpBridgeError extends Error {
+    constructor(readonly failure: string) {
+      super("bridge");
+    }
+  },
+}));
+
 let worktree = "";
-let server: Server | undefined;
-let apiUrl = "";
-let originalApiUrl: string | undefined;
 let originalProject: string | undefined;
-let originalToken: string | undefined;
-let originalTokenFile: string | undefined;
-let remainingPreflightFailures = 0;
-let preflightFailureStatus = 503;
-let hangingPreflightAttempts = 0;
 
-interface RequestRecord {
-  path: string;
-  authenticated: boolean;
+function mcpResponse(value: unknown) {
+  return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
 
-const requests: RequestRecord[] = [];
-
-function writeProtectedFallbackToken(): void {
-  const directory = join(worktree, ".opencode");
-  mkdirSync(directory, { recursive: true });
-  const tokenPath = join(directory, ".ingenium-api-token");
-  writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
-  chmodSync(tokenPath, 0o600);
+function successfulMcpTool(name: string) {
+  if (name === "repository_sync") {
+    return mcpResponse({
+      docs: { summary: { created: 1 } },
+      resources: {
+        summary: {
+          skill: { created: 0 },
+          agent: { created: 0 },
+          plugin: { created: 0 },
+        },
+      },
+    });
+  }
+  if (name === "extraction_run") return mcpResponse({ created: 0 });
+  return mcpResponse({ processed: 0 });
 }
 
-beforeEach(async () => {
-  originalApiUrl = process.env.INGENIUM_API_URL;
+beforeEach(() => {
   originalProject = process.env.INGENIUM_PROJECT;
-  originalToken = process.env.INGENIUM_API_TOKEN;
-  originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
-  delete process.env.INGENIUM_API_TOKEN;
-  delete process.env.INGENIUM_API_TOKEN_FILE;
   process.env.INGENIUM_PROJECT = project;
   worktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-protected-auth-"));
-  writeProtectedFallbackToken();
-  requests.splice(0);
-  server = createServer((request, response) => {
-    requests.push({
-      path: request.url ?? "",
-      authenticated: request.headers.authorization === `Bearer ${token}`,
-    });
-    if (request.headers.authorization !== `Bearer ${token}`) {
-      response.writeHead(401, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "UNAUTHORIZED" } }));
-      return;
-    }
-    if (request.url === "/api/v1/auth/preflight" && hangingPreflightAttempts > 0) {
-      hangingPreflightAttempts -= 1;
-      return;
-    }
-    if (request.url === "/api/v1/auth/preflight" && remainingPreflightFailures > 0) {
-      remainingPreflightFailures -= 1;
-      response.writeHead(preflightFailureStatus, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: { detail: `startup diagnostic ${token}` } }));
-      return;
-    }
-    response.writeHead(200, { "Content-Type": "application/json" });
-    if (request.url?.startsWith("/api/v1/synthesis/run")) {
-      response.end(JSON.stringify({ data: { processed: 0 } }));
-      return;
-    }
-    if (request.url?.startsWith("/api/v1/extraction/run")) {
-      response.end(JSON.stringify({ data: { created: 0 } }));
-      return;
-    }
-    response.end(JSON.stringify({ data: {} }));
-  });
-  await new Promise<void>((resolveListen) => server!.listen(0, "127.0.0.1", resolveListen));
-  apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1`;
-  process.env.INGENIUM_API_URL = apiUrl;
-  remainingPreflightFailures = 0;
-  preflightFailureStatus = 503;
-  hangingPreflightAttempts = 0;
+  mkdirSync(join(worktree, "docs"), { recursive: true });
+  writeFileSync(join(worktree, "docs", "index.md"), "# Fixture\n", "utf8");
+  mockCallMcpTool.mockReset();
   vi.resetModules();
 });
 
-afterEach(async () => {
-  await new Promise<void>((resolveClose) => server?.close(() => resolveClose()));
-  if (originalApiUrl === undefined) delete process.env.INGENIUM_API_URL;
-  else process.env.INGENIUM_API_URL = originalApiUrl;
+afterEach(() => {
   if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
   else process.env.INGENIUM_PROJECT = originalProject;
-  if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
-  else process.env.INGENIUM_API_TOKEN = originalToken;
-  if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
-  else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
-  server = undefined;
+  mockCallMcpTool.mockReset();
+  vi.unstubAllGlobals();
   vi.resetModules();
   vi.restoreAllMocks();
 });
 
-describe("packaged extension plugin protected API requests", () => {
-  it("uses the worktree protected bearer for resource sync, extraction, and observer lifecycle calls", async () => {
+describe("packaged extension lifecycle MCP boundary", () => {
+  it("binds repository and observer calls to the configured project without direct HTTP mutations", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    mockCallMcpTool.mockImplementation(async (_worktree: string, name: string) => successfulMcpTool(name));
+
     const { ResourceSyncPlugin } = await import("./resource-sync.js");
     const { AutoObserverPlugin } = await import("./auto-observer.js");
     const { ObserverPlugin } = await import("./observer.js");
     const log = vi.fn();
 
-    await ResourceSyncPlugin({ worktree, client: { app: { log } } });
+    const resourceSync = await ResourceSyncPlugin({ worktree, client: { app: { log } } });
+    await resourceSync.event({ event: { type: "session.created" } });
     const autoObserver = await AutoObserverPlugin({ worktree, client: { app: { log } } });
     await autoObserver.event({ event: { type: "session.idle" } });
     const observer = await ObserverPlugin({ worktree, client: { app: { log } } });
     await observer.event({ event: { type: "session.created", session: { id: "session-1" } } });
 
-    expect(requests.length).toBeGreaterThanOrEqual(5);
-    expect(requests.every((request) => request.authenticated)).toBe(true);
-    expect(requests.map((request) => request.path)).toEqual(expect.arrayContaining([
-      "/api/v1/projects",
-      `/api/v1/extraction/run?project=${project}`,
-      expect.stringMatching(new RegExp(`^/api/v1/pipeline/events\\?project=${project}`)),
-      expect.stringMatching(new RegExp(`^/api/v1/synthesis/run\\?project=${project}`)),
-    ]));
-    expect(JSON.stringify(log.mock.calls)).not.toContain(token);
+    expect(mockCallMcpTool.mock.calls.map(([, name]) => name)).toEqual([
+      "repository_sync",
+      "extraction_run",
+      "pipeline_event_log",
+      "pipeline_event_log",
+      "synthesis_run",
+    ]);
+    expect(mockCallMcpTool.mock.calls.every(([calledWorktree, _name, args]) =>
+      calledWorktree === worktree && args.project === project,
+    )).toBe(true);
+    expect(mockCallMcpTool).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({
+      project,
+      dryRun: false,
+      docsManifest: { files: [expect.objectContaining({ path: "docs/index.md" })] },
+      resourcesManifest: expect.objectContaining({ version: 2 }),
+    }));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("recovers a cold-start project readiness race on the next session event without leaking diagnostics", async () => {
-    remainingPreflightFailures = 3;
+  it("keeps resource-sync bridge failures non-fatal and credential-free", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const log = vi.fn().mockRejectedValue(new Error(`logger rejected ${token}`));
+    const log = vi.fn();
+    mockCallMcpTool.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack"));
     const { ResourceSyncPlugin } = await import("./resource-sync.js");
 
     const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log } } });
     await plugin.event({ event: { type: "session.created" } });
 
     const diagnostic = JSON.stringify(log.mock.calls);
-    expect(diagnostic).toContain("extension_project_init: unavailable");
-    expect(diagnostic).toContain("extension_project_init: recovered");
-    expect(diagnostic).not.toContain(token);
-    expect(diagnostic).not.toContain(apiUrl);
-    expect(diagnostic).not.toContain("startup diagnostic");
+    expect(diagnostic).toContain("resource_sync: request_failed");
+    expect(diagnostic).not.toContain("secret-token");
+    expect(diagnostic).not.toContain("private.example");
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
-    expect(requests.filter((request) => request.path === "/api/v1/auth/preflight")).toHaveLength(4);
-    expect(requests.every((request) => request.authenticated)).toBe(true);
-    expect(log.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("keeps authentication and timeout-shaped startup failures out of process output", async () => {
+  it.each([
+    ["authentication", { failure: "authentication" }, "authentication"],
+    ["timeout", Object.assign(new Error("timed out"), { name: "TimeoutError" }), "timeout"],
+  ])("keeps %s observer bridge failures non-fatal and credential-free", async (_case, failure, expected) => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const log = vi.fn();
-    preflightFailureStatus = 401;
-    remainingPreflightFailures = 1;
-    const { ResourceSyncPlugin } = await import("./resource-sync.js");
+    mockCallMcpTool.mockRejectedValue(failure);
+    const { AutoObserverPlugin } = await import("./auto-observer.js");
+    const plugin = await AutoObserverPlugin({ worktree, client: { app: { log } } });
 
-    await expect(ResourceSyncPlugin({ worktree, client: { app: { log } } })).resolves.toBeDefined();
-    expect(JSON.stringify(log.mock.calls)).toContain("extension_project_init: authentication");
+    await expect(plugin.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
+    expect(JSON.stringify(log.mock.calls)).toContain(`trigger_extraction: ${expected}`);
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
-
-    vi.restoreAllMocks();
-    const timeoutStdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const timeoutStderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const timeoutLog = vi.fn();
-    hangingPreflightAttempts = 3;
-    const { ResourceSyncPlugin: TimeoutResourceSyncPlugin } = await import("./resource-sync.js");
-
-    await expect(TimeoutResourceSyncPlugin({ worktree, client: { app: { log: timeoutLog } } })).resolves.toBeDefined();
-    expect(JSON.stringify(timeoutLog.mock.calls)).toContain("extension_project_init: unavailable");
-    expect(JSON.stringify(timeoutLog.mock.calls)).not.toContain(token);
-    expect(JSON.stringify(timeoutLog.mock.calls)).not.toContain(apiUrl);
-    expect(timeoutStdout).not.toHaveBeenCalled();
-    expect(timeoutStderr).not.toHaveBeenCalled();
   });
 });

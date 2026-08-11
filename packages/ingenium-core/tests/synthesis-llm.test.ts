@@ -284,6 +284,27 @@ describe("synthesis LLM", () => {
     expect(result.skills_to_update[0].patch_type).toBe("update-section");
   });
 
+  it("filters create candidates with blank fields or unsafe names", async () => {
+    const payload = {
+      skills_to_create: [
+        { name: "blank-description", description: "  \n", content: "content" },
+        { name: "blank-content", description: "Description", content: "\t" },
+        { name: "   ", description: "Description", content: "content" },
+        { name: "../unsafe", description: "Description", content: "content" },
+        { name: "valid-candidate", description: "Description", content: "content" },
+      ],
+    };
+    setMockResponse(mockContent(JSON.stringify(payload)));
+
+    const result = await callSynthesisLLM(
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
+    );
+
+    expect(result.skills_to_create).toEqual([
+      expect.objectContaining({ name: "valid-candidate", description: "Description", content: "content" }),
+    ]);
+  });
+
   it("parses JSON extracted from surrounding text", async () => {
     // tryParseJSON strips ``` fences, then if JSON.parse fails, does regex {…} extraction
     // The mockContent wrapper provides valid JSON, but the content field can contain markdown-wrapped JSON

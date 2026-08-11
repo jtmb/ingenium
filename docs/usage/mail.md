@@ -11,13 +11,18 @@ The email client provides Gmail REST API inbox viewing via thin `fetch()` client
 
 ## Durable account identity
 
-Mail accounts are shared service resources owned by the active global project
-(the project marked `is_global=1`, normally `global-default`), not by an
-external worktree project. The engine resolves that global project on each
-operation. Account metadata, cache, OAuth values, and encrypted app-password
-values are stored in the canonical SQLite database on the `ingenium-data`
-volume. Rebuilds preserve them; changing the Compose project name or using
-`down -v` does not.
+Mail accounts are shared service resources owned by the canonical `global-default`
+project (`is_global=1`), not by an external worktree or selected dashboard
+project. The engine resolves that canonical project on each operation. Account
+metadata, cache, OAuth values, and encrypted app-password values are stored in
+the canonical SQLite database on the `ingenium-data` volume. Rebuilds preserve
+them; changing the Compose project name or using `down -v` does not.
+
+Mail API routes resolve the canonical global project before account, cache, or
+provider work begins. The `project` query parameter remains accepted for
+backward compatibility but does not select the mail namespace. If canonical
+global resolution fails, the operation fails closed before a provider request is
+made.
 
 ### Encryption continuity
 
@@ -29,24 +34,40 @@ malformed, or changed key blocks writes rather than replacing recoverable data.
 Account discovery remains available, while credential reads fail closed and the
 mail service reports a reconnect/degraded state.
 
-There must be exactly one active global project. If project integrity is
-ambiguous, mail resolution fails closed rather than choosing a project by name
-or row order.
+There must be exactly one active global project, and it must be named
+`global-default`. If project integrity is ambiguous or the active global has a
+different name, mail resolution fails closed rather than choosing a project by
+name or row order.
 
 ### Legacy Account Migration
 
-The project-scoped-to-global migration is an all-or-nothing operation. Its
-preflight groups account metadata with its OAuth token record, decrypts every
-credential with the active key, checks account identity and destination
-collisions, and verifies the destination before deleting any source row.
+Startup recovery may move stranded mail settings from other project namespaces
+into canonical `global-default`, but only as an all-or-nothing, verified,
+compatible group.
+Its preflight groups account metadata with its OAuth token record, decrypts every
+credential with the active key, checks account identity, encryption continuity,
+unambiguous source ownership, and destination collisions, and verifies the
+destination before deleting any source row.
 
 - A malformed, orphaned, plaintext, or undecryptable group is skipped.
 - Source rows are retained when preflight or destination verification fails.
-- Collisions are left for operator review rather than overwritten.
+- Ambiguous or conflicting candidates are left for operator review rather than
+  overwritten; existing destination values are never replaced. Recovery reports
+  only bounded counts/status; it never exposes credential values, ciphertext, or
+  account contents.
 - Transient OAuth CSRF state is not migrated as durable account data.
 
 Run preflight only after deploying the release containing the migration guards;
 do not trigger a live migration against an older running API.
+
+### Initial connection test and account retention
+
+Manual account setup persists the account metadata and encrypted credential before
+testing the connection. If that first test fails, the account is retained and
+the setup form offers **Retry Connection**, editing, and **Remove Saved Account**.
+Retry updates the existing account rather than creating a duplicate. Removal is
+explicit; a failed connection test does not silently delete the account or its
+saved data.
 
 Provider and OAuth failures are redacted at the mail boundary: responses and
 durable diagnostics contain only a stable code, safe message, operation, and
@@ -56,7 +77,7 @@ library error text are not returned or logged.
 ### Global OAuth application secrets
 
 OAuth application client secrets are stored as protected vault settings under
-the sole active global project. After the vault is unsealed, legacy plaintext
+the canonical `global-default` project. After the vault is unsealed, legacy plaintext
 settings are reconciled for Gmail and Outlook. The encrypted copy is
 decrypted/verified before the legacy row is removed. Conflicts, unavailable
 vaults, and decryptability failures retain the source and do not overwrite a
@@ -75,6 +96,18 @@ The email client uses a **cache-first** pattern to ensure the UI never blocks on
 - **Cache miss = instant return + background fetch** — UI never waits on the Gmail API
 - **Body caching** — When an email is opened for reading, the body is fetched and cached
 - **Freshness gate** — Uses durable DB `last_synced_at` timestamp to skip recently synced folders
+
+When the account, folder, page, search, or selected message changes, in-flight
+mail requests are aborted and responses carrying an older mail context are
+discarded. A slow response from the previous selection cannot overwrite the
+current account or folder.
+
+### Gmail delta consistency
+
+Gmail history changes apply message upserts, message deletions, and the account
+history cursor in one database transaction. A failed write does not advance the
+cursor, so the same history remains eligible for retry. Deleted messages also
+remove their matching cached suggestion work and cached message row atomically.
 
 ## Viewing Inbox
 
@@ -119,6 +152,9 @@ The email composer uses a **TipTap-based rich text editor** with bold, italic, u
 
 - **Reply** and **Draft (from smart-reply suggestion)** — Open an embedded inline compose box at the bottom of the reading pane
 - **Forward** and **Compose New** — Use the full-screen modal overlay
+
+**Save Draft** builds the RFC822 message locally and appends it to the provider's
+`Drafts` mailbox through IMAP. It does not send the message through SMTP.
 
 ### Review with AI
 
@@ -345,6 +381,20 @@ budget AND invoice NOT cancelled
 ## Smart Reply Learning
 
 The email client can learn your response style and draft 3 reply options when you reply to emails. When you click Reply, the compact inline composer mounts, auto-fetches suggestions, and renders them as pill/chip buttons below the message textarea.
+
+Suggestion generation uses a leased background queue. A worker claim lasts 120
+seconds by default; an expired claim can be reclaimed by another worker. Failed
+jobs retry with bounded backoff (30, 60, 120, then 300 seconds) and are removed
+after the fifth failed attempt. Jobs are deduplicated and are only generated
+when the cached message and body are still available.
+
+The IMAP IDLE watcher coalesces overlapping new-message events into one scan and
+tracks message UIDs already handled during the watcher lifetime. Repeated events
+therefore do not create duplicate triage or automatic drafts.
+Duplicate suppression is process-local: the watcher keeps a bounded 4,096-entry
+least-recently-used set, and those entries are lost when the API process restarts.
+It is not a durable marker; restart-surviving duplicate suppression would require
+an explicit persisted marker.
 
 ### Configuration
 

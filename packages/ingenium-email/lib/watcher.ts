@@ -19,23 +19,53 @@
 
 import { connectAccount, disconnectAccount } from "./imap.js";
 import { triageEmails } from "./triage.js";
-import { suggestResponse } from "./responder.js";
+import { parseReplyRecipient, suggestResponse } from "./responder.js";
 import { saveDraft } from "./smtp.js";
 import { getAccount, getCredentials } from "./accounts.js";
-import { apiRequestHeaders } from "./api-auth.js";
 import type { EmailAccount, OAuthToken } from "./types.js";
 import { ProviderOperationError } from "./provider-errors.js";
+import { getEmailRuntime, type EmailObservation } from "./runtime.js";
+
+type ImapClient = Awaited<ReturnType<typeof connectAccount>>;
+type ExistsHandler = () => void | Promise<void>;
+const MAX_PROCESSED_UIDS = 4096;
+// ponytail: 4096 in-memory UID ceiling; add a durable marker if duplicate suppression must survive restarts.
+let processedUidCapacityForTest: number | undefined;
 
 interface WatcherEntry {
   projectId: string;
   accountId: string;
   account: EmailAccount;
   auth: { password?: string; tokens?: OAuthToken };
+  client: ImapClient;
+  existsHandler: ExistsHandler;
   running: boolean;
+  scanPromise: Promise<void> | null;
+  processedUids: Map<string, undefined>;
+  processedUidCapacity: number;
+}
+
+interface WatcherStart {
+  projectId: string;
+  accountId: string;
+  cancelled: boolean;
+  connectStarted: boolean;
+  client: ImapClient | null;
+  entry: WatcherEntry | null;
+  promise: Promise<void>;
 }
 
 /** Process-global watcher registry. Keyed by account ID. */
 const watchers = new Map<string, WatcherEntry>();
+/** Synchronous startup reservations prevent duplicate listener setup. */
+const startingWatchers = new Map<string, WatcherStart>();
+
+export function configureWatcherProcessedUidCapacityForTest(capacity?: number): void {
+  if (capacity !== undefined && (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > MAX_PROCESSED_UIDS)) {
+    throw new Error(`Processed UID capacity must be between 1 and ${MAX_PROCESSED_UIDS}`);
+  }
+  processedUidCapacityForTest = capacity;
+}
 
 /**
  * Start the IMAP IDLE watcher for an account.
@@ -47,41 +77,99 @@ const watchers = new Map<string, WatcherEntry>();
  *
  * If a watcher already exists for this account, it is stopped first.
  */
-export async function startWatcher(
+export function startWatcher(
   projectId: string,
   accountId: string,
 ): Promise<void> {
-  // Stop any existing watcher for this account
-  if (watchers.has(accountId)) {
-    await stopWatcher(accountId);
+  const current = startingWatchers.get(accountId);
+  if (current) return current.promise;
+
+  const start: WatcherStart = {
+    projectId,
+    accountId,
+    cancelled: false,
+    connectStarted: false,
+    client: null,
+    entry: null,
+    promise: Promise.resolve(),
+  };
+  startingWatchers.set(accountId, start);
+  start.promise = runWatcherStart(start);
+  return start.promise;
+}
+
+async function runWatcherStart(start: WatcherStart): Promise<void> {
+  let committed = false;
+  try {
+    const existing = watchers.get(start.accountId);
+    if (existing) await stopStoredWatcher(start.accountId, existing);
+    if (start.cancelled) return;
+
+    const account = getAccount(start.accountId);
+    if (!account) {
+      throw new ProviderOperationError("PROVIDER_NOT_FOUND", "imap", false);
+    }
+
+    const creds = getCredentials(start.accountId);
+    if (!creds) {
+      throw new ProviderOperationError("CREDENTIALS_UNAVAILABLE", "imap", false);
+    }
+
+    const auth = { password: creds.password, tokens: creds.tokens };
+    start.connectStarted = true;
+    const client = await connectAccount(account, auth);
+    start.client = client;
+    if (start.cancelled) return;
+
+    // Select INBOX for IDLE monitoring.
+    await client.mailboxOpen("INBOX");
+    if (start.cancelled) return;
+
+    const entry: WatcherEntry = {
+      projectId: start.projectId,
+      accountId: start.accountId,
+      account,
+      auth,
+      client,
+      existsHandler: () => Promise.resolve(),
+      running: true,
+      scanPromise: null,
+      processedUids: new Map(),
+      processedUidCapacity: processedUidCapacityForTest ?? MAX_PROCESSED_UIDS,
+    };
+    start.entry = entry;
+    entry.existsHandler = () => scheduleWatcherScan(entry);
+    client.on("exists", entry.existsHandler);
+    if (start.cancelled) return;
+
+    watchers.set(start.accountId, entry);
+
+    // Kick off an initial scan to catch messages that arrived before IDLE was registered.
+    await scheduleWatcherScan(entry, true);
+    if (start.cancelled) return;
+    committed = true;
+  } catch (error: unknown) {
+    if (!start.cancelled) throw error;
+  } finally {
+    if (!committed) await cleanupWatcherStart(start);
+    if (startingWatchers.get(start.accountId) === start) startingWatchers.delete(start.accountId);
   }
+}
 
-  const account = getAccount(accountId);
-  if (!account) {
-    throw new ProviderOperationError("PROVIDER_NOT_FOUND", "imap", false);
+async function cleanupWatcherStart(start: WatcherStart): Promise<void> {
+  if (start.entry) {
+    start.entry.running = false;
+    detachExistsListener(start.entry);
+    if (watchers.get(start.accountId) === start.entry) watchers.delete(start.accountId);
   }
-
-  const creds = getCredentials(accountId);
-  if (!creds) {
-    throw new ProviderOperationError("CREDENTIALS_UNAVAILABLE", "imap", false);
+  if (start.client || start.connectStarted) {
+    try {
+      await disconnectAccount(start.accountId);
+    } catch {
+      // Non-fatal: connection may already be closed.
+    }
+    start.client = null;
   }
-
-  const auth = { password: creds.password, tokens: creds.tokens };
-  const client = await connectAccount(account, auth);
-
-  // Select INBOX for IDLE monitoring
-  await client.mailboxOpen("INBOX");
-
-  const entry: WatcherEntry = { projectId, accountId, account, auth, running: true };
-  watchers.set(accountId, entry);
-
-  // Listen for new emails (exists event fires on new messages via IMAP IDLE)
-  client.on("exists", async () => {
-    await handleNewEmail(entry);
-  });
-
-  // Kick off an initial scan to catch messages that arrived before IDLE was registered
-  await handleNewEmail(entry);
 }
 
 /**
@@ -90,27 +178,79 @@ export async function startWatcher(
  * Idempotent — safe to call if no watcher exists.
  */
 export async function stopWatcher(accountId: string): Promise<void> {
+  const starting = startingWatchers.get(accountId);
+  if (starting) {
+    starting.cancelled = true;
+    if (starting.entry) starting.entry.running = false;
+    await starting.promise.catch(() => undefined);
+    return;
+  }
+
   const entry = watchers.get(accountId);
   if (!entry) return;
+  await stopStoredWatcher(accountId, entry);
+}
 
+async function stopStoredWatcher(accountId: string, entry: WatcherEntry): Promise<void> {
   entry.running = false;
+  detachExistsListener(entry);
   try {
     await disconnectAccount(accountId);
   } catch {
     // Non-fatal: connection may already be closed
   }
-  watchers.delete(accountId);
+  if (watchers.get(accountId) === entry) watchers.delete(accountId);
+}
+
+function detachExistsListener(entry: WatcherEntry): void {
+  const client = entry.client as ImapClient & {
+    off?: (event: string, listener: ExistsHandler) => void;
+    removeListener?: (event: string, listener: ExistsHandler) => void;
+  };
+  try {
+    if (typeof client.off === "function") {
+      client.off("exists", entry.existsHandler);
+    } else if (typeof client.removeListener === "function") {
+      client.removeListener("exists", entry.existsHandler);
+    }
+  } catch {
+    // Listener cleanup is best-effort; disconnect still closes the client.
+  }
 }
 
 /** Stop every watcher this process owns during API shutdown. */
 export async function stopAllWatchers(): Promise<void> {
-  await Promise.allSettled([...watchers.keys()].map((accountId) => stopWatcher(accountId)));
+  const accountIds = new Set([...watchers.keys(), ...startingWatchers.keys()]);
+  await Promise.allSettled([...accountIds].map((accountId) => stopWatcher(accountId)));
 }
 
 /** Get watcher status for an account (whether it's running or stopped). */
 export function getWatcherStatus(accountId: string): { running: boolean } {
   const entry = watchers.get(accountId);
   return { running: entry?.running ?? false };
+}
+
+function scheduleWatcherScan(entry: WatcherEntry, propagateError = false): Promise<void> {
+  if (!entry.running) return Promise.resolve();
+  if (entry.scanPromise) return entry.scanPromise;
+
+  const scanPromise = handleNewEmail(entry, propagateError).finally(() => {
+    if (entry.scanPromise === scanPromise) entry.scanPromise = null;
+  });
+  entry.scanPromise = scanPromise;
+  return scanPromise;
+}
+
+function rememberProcessedUid(entry: WatcherEntry, emailUid: string): boolean {
+  if (entry.processedUids.delete(emailUid)) {
+    entry.processedUids.set(emailUid, undefined);
+    return false;
+  }
+  entry.processedUids.set(emailUid, undefined);
+  if (entry.processedUids.size > entry.processedUidCapacity) {
+    entry.processedUids.delete(entry.processedUids.keys().next().value!);
+  }
+  return true;
 }
 
 /**
@@ -122,7 +262,7 @@ export function getWatcherStatus(accountId: string): { running: boolean } {
  *
  * All errors are caught and logged as observations (never thrown).
  */
-async function handleNewEmail(entry: WatcherEntry): Promise<void> {
+async function handleNewEmail(entry: WatcherEntry, propagateError = false): Promise<void> {
   if (!entry.running) return;
 
   try {
@@ -130,6 +270,9 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
     const results = await triageEmails(entry.projectId, entry.accountId, 10);
 
     for (const triage of results) {
+      if (!entry.running) return;
+      if (!rememberProcessedUid(entry, triage.emailUid)) continue;
+
       // Log observation for self-learning pipeline
       await logWatcherObservation(entry.projectId, {
         observation_type: "pattern",
@@ -144,15 +287,18 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
         const suggestion = await suggestResponse(
           entry.projectId,
           entry.accountId,
-          Number(triage.emailUid),
+          triage.emailUid,
           "INBOX",
         );
 
         if (suggestion && suggestion.confidence > 0.5) {
+          const recipient = await parseReplyRecipient(suggestion.originalSender);
+          if (!recipient) continue;
+
           // Auto-save as draft
           try {
             await saveDraft(entry.account, entry.auth, {
-              to: [{ address: "", name: "" }], // placeholder — caller should resolve recipient
+              to: [recipient],
               subject: suggestion.subject,
               html: suggestion.body,
               text: suggestion.body.replace(/<[^>]+>/g, ""),
@@ -175,38 +321,31 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
         }
       }
     }
-  } catch {
+  } catch (error: unknown) {
     await logWatcherObservation(entry.projectId, {
       observation_type: "error",
       // Do not persist raw error text: it can contain provider diagnostics or tokens.
       content: `Watcher error for account ${entry.accountId}: processing failed`,
       importance: 7,
     });
+    if (propagateError) throw error;
   }
 }
 
 /**
- * Log an observation to the Ingenium API for the self-learning pipeline.
+ * Log an observation through the API-owned runtime boundary.
  * Best-effort: failures are silent (non-critical path).
  */
 export async function logWatcherObservation(
   projectId: string,
   data: {
-    observation_type: string;
-    content: string;
-    importance: number;
+    observation_type: EmailObservation["observation_type"];
+    content: EmailObservation["content"];
+    importance: EmailObservation["importance"];
   },
 ): Promise<void> {
   try {
-    const apiUrl = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
-    await fetch(`${apiUrl}/observations?project=${projectId}`, {
-      method: "POST",
-      headers: apiRequestHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        ...data,
-        source: "email_watcher",
-      }),
-    });
+    await getEmailRuntime().recordObservation(projectId, data);
   } catch {
     // Non-fatal: observation logging is best-effort
   }

@@ -3,32 +3,34 @@
 import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
 import type { EmailProvider } from "./types.js";
-import { checkpointAfterWrite, settings, getDb } from "ingenium-core";
 import { getCredentials, getGlobalProjectId, storeOAuthTokens } from "./accounts.js";
 import { decryptCredentialValue, encryptCredentialValue } from "./credential-crypto.js";
 import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
+import { getEmailRuntime } from "./runtime.js";
 
 // ── OAuth credential resolution ──────────────────────────────────────────
 
 /**
- * Resolve OAuth client ID/secret: check settings table first, fall back to env vars.
+ * Resolve OAuth client IDs from settings and secrets from protected runtime storage,
+ * then fall back to environment variables.
  *
- * The dual resolution (settings → env var) allows per-instance configuration
- * via the Dashboard UI (settings) while still supporting container-level env
- * overrides for production deployments.
+ * Dashboard-managed values take precedence while production deployments can
+ * still supply container-level environment fallbacks.
  */
 function getOAuthCreds(
   provider: Extract<EmailProvider, "gmail" | "outlook">,
   projectId: string,
 ): { clientId: string; clientSecret: string } {
+  const runtime = getEmailRuntime();
+  const settings = runtime.settings;
   if (provider === "gmail") {
     const clientId = settings.getSetting(projectId, "oauth_gmail_client_id") || process.env.GOOGLE_OAUTH_CLIENT_ID || "";
-    const clientSecret = settings.getSetting(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "";
+    const clientSecret = runtime.oauthClientSecrets.getClientSecret(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "";
     return { clientId, clientSecret };
   }
   // outlook
   const clientId = settings.getSetting(projectId, "oauth_outlook_client_id") || process.env.MS_OAUTH_CLIENT_ID || "";
-  const clientSecret = settings.getSetting(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "";
+  const clientSecret = runtime.oauthClientSecrets.getClientSecret(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "";
   return { clientId, clientSecret };
 }
 
@@ -127,7 +129,9 @@ export async function getOAuthUrl(
     const pid = getGlobalProjectId();
 
     // Store state for CSRF validation on callback
-    settings.setSetting(pid, `oauth_state_${provider}`, state);
+    getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+      settings.set(`oauth_state_${provider}`, state);
+    });
 
     if (provider === "gmail") {
       const gClient = await getGoogleClient(pid);
@@ -181,16 +185,13 @@ export async function exchangeCode(
 ): Promise<OAuthToken> {
   try {
     const pid = getGlobalProjectId();
-    const storedState = settings.getSetting(pid, `oauth_state_${provider}`);
-    if (!storedState || storedState !== state) {
-      throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
-    }
-    // Delete stored state after validation (one-time use, prevents replay), then
-    // checkpoint after the write commits before contacting the external provider.
-    const db = getDb();
-    db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
-      .run(pid, `oauth_state_${provider}`);
-    checkpointAfterWrite();
+    getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+      const storedState = settings.get(`oauth_state_${provider}`);
+      if (!storedState || storedState !== state) {
+        throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+      }
+      settings.delete(`oauth_state_${provider}`);
+    });
 
     const resolvedRedirectUri = redirectUri ?? getRedirectUri();
 

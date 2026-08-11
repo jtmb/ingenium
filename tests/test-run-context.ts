@@ -18,6 +18,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 
 export const TEST_RUN_MANIFEST_VERSION = 2;
 export const TEST_RUN_TELEMETRY_VERSION = 1;
+export const TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION = 1;
+export const TEST_RUN_PREEXISTING_PROCESS_BASELINE_LIMIT = 64;
+export const TEST_RUN_PREEXISTING_PROCESS_PORT_LIMIT = 32;
 export const TEST_RUN_TEMP_PREFIX = "ingenium-playwright-run-";
 export const TEST_RUN_STALE_PREFIX = "ingenium-playwright-";
 export const TEST_RUN_MANIFEST_ENV = "INGENIUM_TEST_RUN_MANIFEST";
@@ -85,6 +88,22 @@ export interface TestRunProcess {
   identityState?: "provisional" | "bound";
 }
 
+export interface TestRunPreexistingProcess {
+  pid: number;
+  pidStartTime: string;
+  pgid: number;
+  groupIdentity: string;
+  executableHash: string;
+  commandHash: string;
+  listeningPorts: number[];
+}
+
+export interface TestRunPreexistingProcessBaseline {
+  version: typeof TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION;
+  capturedAt: string;
+  candidates: TestRunPreexistingProcess[];
+}
+
 export interface TestRunManifest {
   version: typeof TEST_RUN_MANIFEST_VERSION;
   runId: string;
@@ -104,6 +123,7 @@ export interface TestRunManifest {
   projectProvisionedAt?: string;
   ports: TestRunPorts;
   portReservations?: TestRunPortReservation[];
+  preexistingProcessBaseline?: TestRunPreexistingProcessBaseline;
   processes: TestRunProcess[];
 }
 
@@ -150,6 +170,7 @@ export interface TestRunTelemetry {
   status: TestRunManifest["status"];
   updatedAt: string;
   ports: TestRunPorts;
+  preexistingProcessBaseline?: TestRunPreexistingProcessBaseline;
   activeProcesses: TestRunProcess[];
   processes: TestRunTelemetryProcess[];
   failures: string[];
@@ -748,6 +769,95 @@ function isTimestamp(value: unknown): value is string {
     && !Number.isNaN(Date.parse(value));
 }
 
+function isGroupIdentity(value: unknown, pgid: unknown): value is string {
+  return typeof value === "string"
+    && typeof pgid === "number"
+    && /^\d+:\d+$/.test(value)
+    && value.split(":")[0] === String(pgid);
+}
+
+function validatePreexistingProcessBaseline(
+  value: unknown,
+  ports: TestRunPorts,
+): TestRunPreexistingProcessBaseline {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid pre-existing process baseline");
+  }
+  const baseline = value as Partial<TestRunPreexistingProcessBaseline> & Record<string, unknown>;
+  if (Object.keys(baseline).some((key) => !["version", "capturedAt", "candidates"].includes(key))
+    || baseline.version !== TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION
+    || !isTimestamp(baseline.capturedAt)
+    || !Array.isArray(baseline.candidates)
+    || baseline.candidates.length > TEST_RUN_PREEXISTING_PROCESS_BASELINE_LIMIT) {
+    throw new Error("Invalid pre-existing process baseline");
+  }
+
+  const runPorts = new Set(Object.values(ports));
+  const candidates: TestRunPreexistingProcess[] = [];
+  let previousPid = 1;
+  for (const value of baseline.candidates) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid pre-existing process baseline candidate");
+    }
+    const candidate = value as Partial<TestRunPreexistingProcess> & Record<string, unknown>;
+    if (Object.keys(candidate).some((key) => ![
+      "pid",
+      "pidStartTime",
+      "pgid",
+      "groupIdentity",
+      "executableHash",
+      "commandHash",
+      "listeningPorts",
+    ].includes(key))
+      || typeof candidate.pid !== "number"
+      || !Number.isSafeInteger(candidate.pid)
+      || candidate.pid <= previousPid
+      || typeof candidate.pidStartTime !== "string"
+      || !/^\d+$/.test(candidate.pidStartTime)
+      || typeof candidate.pgid !== "number"
+      || !Number.isSafeInteger(candidate.pgid)
+      || candidate.pgid <= 1
+      || !isGroupIdentity(candidate.groupIdentity, candidate.pgid)
+      || typeof candidate.executableHash !== "string"
+      || !/^[a-f0-9]{64}$/.test(candidate.executableHash)
+      || typeof candidate.commandHash !== "string"
+      || !/^[a-f0-9]{64}$/.test(candidate.commandHash)
+      || !Array.isArray(candidate.listeningPorts)
+      || candidate.listeningPorts.length === 0
+      || candidate.listeningPorts.length > TEST_RUN_PREEXISTING_PROCESS_PORT_LIMIT) {
+      throw new Error("Invalid pre-existing process baseline candidate");
+    }
+
+    let previousPort = 0;
+    for (const port of candidate.listeningPorts) {
+      if (typeof port !== "number"
+        || !Number.isInteger(port)
+        || port <= previousPort
+        || port < 1
+        || port > 65535
+        || runPorts.has(port)) {
+        throw new Error("Invalid pre-existing process baseline candidate");
+      }
+      previousPort = port;
+    }
+    previousPid = candidate.pid;
+    candidates.push({
+      pid: candidate.pid,
+      pidStartTime: candidate.pidStartTime,
+      pgid: candidate.pgid,
+      groupIdentity: candidate.groupIdentity,
+      executableHash: candidate.executableHash,
+      commandHash: candidate.commandHash,
+      listeningPorts: [...candidate.listeningPorts],
+    });
+  }
+  return {
+    version: TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION,
+    capturedAt: baseline.capturedAt,
+    candidates,
+  };
+}
+
 function validateProcessRecord(
   value: unknown,
   ports: TestRunPorts,
@@ -829,6 +939,7 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
     "status",
     "updatedAt",
     "ports",
+    "preexistingProcessBaseline",
     "activeProcesses",
     "processes",
     "failures",
@@ -865,6 +976,9 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
     dashboard: telemetryPorts.dashboard,
     fixture: telemetryPorts.fixture,
   });
+  const preexistingProcessBaseline = parsed.preexistingProcessBaseline === undefined
+    ? undefined
+    : validatePreexistingProcessBaseline(parsed.preexistingProcessBaseline, ports);
 
   const processKeys = new Set<string>();
   const processes: TestRunTelemetryProcess[] = [];
@@ -926,6 +1040,7 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
     status: parsed.status as TestRunManifest["status"],
     updatedAt: parsed.updatedAt,
     ports,
+    ...(preexistingProcessBaseline !== undefined ? { preexistingProcessBaseline } : {}),
     activeProcesses,
     processes,
     failures: parsed.failures,
@@ -1020,6 +1135,9 @@ function writeRunnerTelemetry(manifest: TestRunManifest, now = new Date().toISOS
     status: manifest.status,
     updatedAt: now,
     ports: manifest.ports,
+    ...(manifest.preexistingProcessBaseline !== undefined
+      ? { preexistingProcessBaseline: manifest.preexistingProcessBaseline }
+      : {}),
     activeProcesses,
     processes: history,
     failures: previous?.failures ?? [],
@@ -1390,6 +1508,7 @@ function parseManifest(value: string): TestRunContext {
     "projectProvisionedAt",
     "ports",
     "portReservations",
+    "preexistingProcessBaseline",
     "processes",
   ]);
   if (Object.keys(parsed).some((key) => !allowedManifestKeys.has(key))) {
@@ -1448,6 +1567,12 @@ function parseManifest(value: string): TestRunContext {
     dashboard: ports.dashboard as number,
     fixture: ports.fixture as number,
   });
+  if (manifest.preexistingProcessBaseline !== undefined) {
+    manifest.preexistingProcessBaseline = validatePreexistingProcessBaseline(
+      manifest.preexistingProcessBaseline,
+      validatedPorts,
+    );
+  }
 
   if (manifest.portReservations !== undefined) {
     if (!Array.isArray(manifest.portReservations)) throw new Error("Invalid test-run port reservations");
@@ -1502,7 +1627,9 @@ export function getTestRunContext(): TestRunContext {
 
 export function updateTestRunManifest(
   manifestPath: string,
-  update: Partial<Pick<TestRunManifest, "status" | "projectProvisionedAt" | "portReservations" | "processes">>,
+  update: Partial<Pick<TestRunManifest,
+    "status" | "projectProvisionedAt" | "portReservations" | "preexistingProcessBaseline" | "processes"
+  >>,
 ): TestRunContext {
   const manifest = readTestRunManifest(manifestPath);
   const updated: TestRunContext = { ...manifest, ...update };

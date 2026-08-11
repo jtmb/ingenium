@@ -2,8 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { getDb } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 import {
+  DEFAULT_JOB_TIMEOUT_MINUTES,
+  JobTimeoutError,
   createJob,
   listJobs,
   getJob,
@@ -16,6 +20,8 @@ import {
   getJobRun,
   appendRunLog,
   getRunLogs,
+  MAX_JOB_TIMEOUT_MINUTES,
+  recoverInterruptedJobRuns,
 } from "../lib/tools/jobs.js";
 
 let tempDir: string;
@@ -70,8 +76,25 @@ describe("jobs — CRUD", () => {
     expect(job.description).toBeNull();
     expect(job.schedule_cron).toBeNull();
     expect(job.trigger_event).toBeNull();
-    expect(job.timeout_minutes).toBe(30); // default
+    expect(job.timeout_minutes).toBe(DEFAULT_JOB_TIMEOUT_MINUTES);
     expect(job.enabled).toBe(1);
+  });
+
+  it("rejects invalid timeout values at the core boundary and through the database guard", () => {
+    for (const timeoutMinutes of [0, -1, 1.5, MAX_JOB_TIMEOUT_MINUTES + 1, Infinity, NaN]) {
+      expect(() => createJob(projectId, "Invalid timeout", undefined, "ingenium-qa", "test", undefined, undefined, timeoutMinutes))
+        .toThrow(JobTimeoutError);
+    }
+
+    const job = createJob(projectId, "Valid timeout", undefined, "ingenium-qa", "test");
+    expect(() => updateJob(projectId, job.id, { timeout_minutes: 0 }, job.revision)).toThrow(JobTimeoutError);
+    expect(getJob(projectId, job.id)?.timeout_minutes).toBe(DEFAULT_JOB_TIMEOUT_MINUTES);
+
+    const now = new Date().toISOString();
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      `INSERT INTO jobs (id, project_id, name, agent, prompt_template, timeout_minutes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(randomUUID(), projectId, "Unchecked timeout", "ingenium-qa", "test", 0, now, now)).toThrow();
   });
 
   it("accepts only cataloged trigger events for new jobs", () => {
@@ -254,6 +277,25 @@ describe("jobs — cancel and timeout", () => {
   it("cancel on nonexistent run returns undefined", () => {
     const cancelled = cancelJobRun(projectId, "nonexistent");
     expect(cancelled).toBeUndefined();
+  });
+});
+
+describe("jobs — startup recovery", () => {
+  it("marks only interrupted manual and cron runs terminal so they can rerun", () => {
+    const manualJob = createJob(projectId, "Recover manual", undefined, "ingenium-qa", "test");
+    const cronJob = createJob(projectId, "Recover cron", undefined, "ingenium-qa", "test");
+    const eventJob = createJob(projectId, "Preserve event", undefined, "ingenium-qa", "test");
+    const manualRun = startJobRun(projectId, manualJob.id, "manual") as JobRun;
+    const cronRun = startJobRun(projectId, cronJob.id, "cron") as JobRun;
+    const eventRun = startJobRun(projectId, eventJob.id, "event") as JobRun;
+
+    expect(recoverInterruptedJobRuns()).toBe(2);
+    expect(getJobRun(projectId, manualRun.id)).toMatchObject({ status: "failed", exit_code: -1, finished_at: expect.any(String) });
+    expect(getJobRun(projectId, cronRun.id)).toMatchObject({ status: "failed", exit_code: -1, finished_at: expect.any(String) });
+    expect(getJobRun(projectId, eventRun.id)).toMatchObject({ status: "running", finished_at: null });
+    expect("reason" in startJobRun(projectId, manualJob.id, "manual")).toBe(false);
+
+    finishJobRun(projectId, eventRun.id, "failed", -1);
   });
 });
 

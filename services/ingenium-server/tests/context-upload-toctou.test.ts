@@ -33,7 +33,7 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-vi.mock("../lib/client.js", () => ({ api: { postOctetStream: vi.fn() } }));
+vi.mock("../lib/client.js", () => ({ api: { settled: { postOctetStream: vi.fn() } } }));
 
 const { ContextUploadFileError, prepareContextUploadSnapshot } = await import("../lib/tools/context-upload.js");
 

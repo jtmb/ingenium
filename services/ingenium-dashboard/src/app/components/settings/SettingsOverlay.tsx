@@ -238,7 +238,7 @@ export default function SettingsOverlay() {
           onSelect={selectTab}
         />
 
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
             <h2 id="settings-title" className="text-xl font-bold text-[var(--color-text-primary)]">Settings</h2>
             <button
@@ -266,7 +266,7 @@ export default function SettingsOverlay() {
             ))}
           </Select>
 
-          <div className="flex-1 overflow-y-auto">
+          <div data-testid="settings-panel-scroll" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {/* Mount only the active panel. Inactive settings must not start
                 API requests or OpenCode provider discovery in the background. */}
             <Suspense fallback={<PanelLoading tab={activeTab} />}>

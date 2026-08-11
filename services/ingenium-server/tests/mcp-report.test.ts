@@ -47,7 +47,7 @@ describe("mcp_report_get", () => {
 
     const { api } = await import("../lib/client.js");
     const { mcpReportGet } = await import("../lib/tools/mcp-report.js");
-    const response = await api.getMcpReport("report-project", { q: "health", boundary: "mcp-stdio" });
+    const response = await api.settled.getMcpReport("report-project", { q: "health", boundary: "mcp-stdio" });
     const result = await mcpReportGet("report-project", {
       category: "Health",
       enabled: true,

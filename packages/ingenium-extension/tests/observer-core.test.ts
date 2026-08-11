@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockEnsureExtensionProject = vi.hoisted(() => vi.fn());
-const mockFetch = vi.hoisted(() => vi.fn());
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
 
 vi.mock("../project-resolver.js", () => ({
-  ensureExtensionProject: mockEnsureExtensionProject,
+  resolveExtensionProject: () => "extension-project",
 }));
 
-vi.mock("../api-auth.js", () => ({
-  apiRequestHeaders: () => new Headers(),
+vi.mock("../mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: () => ({}),
+  McpBridgeError: class McpBridgeError extends Error {
+    constructor(readonly failure: string) { super("bridge"); }
+  },
 }));
 
 import { classifyObserverFailure, classifyObserverHttpFailure, logPipelineEvent } from "../observer-core.js";
@@ -20,9 +23,7 @@ describe("observer API diagnostics", () => {
   beforeEach(() => {
     stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    mockEnsureExtensionProject.mockReset().mockResolvedValue("extension-project");
-    mockFetch.mockReset();
-    vi.stubGlobal("fetch", mockFetch);
+    mockCallMcpTool.mockReset();
   });
 
   afterEach(() => {
@@ -51,12 +52,12 @@ describe("observer API diagnostics", () => {
   });
 
   it.each([
-    ["API-down", () => mockFetch.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")), "request_failed"],
-    ["authentication", () => mockFetch.mockResolvedValue({ ok: false, status: 401 } as Response), "authentication"],
+    ["API-down", () => mockCallMcpTool.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")), "request_failed"],
+    ["authentication", () => mockCallMcpTool.mockRejectedValue({ name: "McpBridgeError", failure: "authentication" }), "authentication"],
     ["timeout", () => {
       const error = new Error("Bearer secret-token http://private.example/timeout");
       error.name = "TimeoutError";
-      mockFetch.mockRejectedValue(error);
+      mockCallMcpTool.mockRejectedValue(error);
     }, "timeout"],
   ] as const)("reports only the stable %s failure through the lifecycle callback", async (_case, failRequest, failure) => {
     failRequest();
@@ -71,7 +72,7 @@ describe("observer API diagnostics", () => {
   });
 
   it("swallows a rejected lifecycle reporter without a recursive diagnostic", async () => {
-    mockFetch.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack"));
+    mockCallMcpTool.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack"));
     const report = vi.fn(() => { throw new Error("logger rejected"); });
 
     await expect(logPipelineEvent("session_created", "plugin", "started", "/worktree", "", {}, undefined, report))

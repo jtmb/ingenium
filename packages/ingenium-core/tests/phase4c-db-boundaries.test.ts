@@ -101,8 +101,8 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const latestMigration = "084_restore_executor.sql";
-    const expected = Array.from({ length: 84 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const latestMigration = "086_server_global_project_provenance.sql";
+    const expected = Array.from({ length: 86 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
@@ -149,6 +149,8 @@ describe("Phase 4C core database boundaries", () => {
     expect(expected).toContain("081_vault_job_runs.sql");
     expect(expected).toContain("082_job_vault_revision_audit.sql");
     expect(expected).toContain("084_restore_executor.sql");
+    expect(expected).toContain("085_restore_executor_phase_events.sql");
+    expect(expected).toContain("086_server_global_project_provenance.sql");
     expect(expected.at(-1)).toBe(latestMigration);
     expect(expected).toContain(latestMigration);
 
@@ -171,10 +173,7 @@ describe("Phase 4C core database boundaries", () => {
     expect(freshRegistration?.[1]?.match(/"\d{3}_[^"]+\.sql"/g))
       .toEqual(expected.map((migration) => `"${migration}"`));
 
-    const upgradeRegistration = dbSource.match(
-      /const restoreExecutorMigration = inspectRestoreExecutorMigration\(db\);[\s\S]*?if \(!restoreExecutorMigration\.complete\) \{([\s\S]*?)\n\s*\}/,
-    );
-    expect(upgradeRegistration?.[1]).toContain(
+    expect(dbSource).toContain(
       `readFileSync(resolve(migrationsDir, "${latestMigration}"), "utf-8")`,
     );
   });

@@ -20,6 +20,10 @@ Manages project configurations. Each project has its own SQLite database contain
    - **Archive** — soft-delete (moves to Archived tab)
    - **Restore** — move back to Active (from Archived tab)
 
+The default project listing is the **Active** list: archived projects are
+excluded. Use the **Archived** tab or the archive-list endpoint when you need
+to restore one.
+
 ## Global vs Regular Projects
 
 Projects can be either **regular** (default) or **global**.
@@ -83,6 +87,13 @@ When a project is marked as global, patterns discovered in one project can be sh
 - `POST /api/v1/projects/:name/restore` — restore an archived project
 - `GET /api/v1/projects/archive` — list archived projects
 - `POST /api/v1/projects/purge` — purge expired projects (body: `{ retention_days }`)
+
+The dashboard URL-encodes validated project names used in path segments, so
+archive, restore, rename, detail, and one-project purge work with any name that
+passes project-name validation. Purge retention is an integer from **0 through
+3,650 days inclusive**; the default is 7 days. A project is eligible only when
+its archive timestamp is older than the selected retention cutoff, and projects
+with referenced child data are retained.
 
 ## MCP Tools
 

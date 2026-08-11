@@ -15,14 +15,38 @@ const mockApi = {
   put: vi.fn(),
   patch: vi.fn(),
   del: vi.fn(),
+  settled: {
+    get: vi.fn(),
+  },
 };
+
+const apiErrors = vi.hoisted(() => {
+  class ApiHttpError extends Error {
+    readonly status: number;
+    readonly code: string;
+
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.name = "ApiHttpError";
+      this.status = status;
+      this.code = code;
+    }
+  }
+
+  class ApiUnavailableError extends Error {}
+
+  return { ApiHttpError, ApiUnavailableError };
+});
 
 vi.mock("../lib/client.js", () => ({
   api: mockApi,
+  ApiHttpError: apiErrors.ApiHttpError,
+  ApiUnavailableError: apiErrors.ApiUnavailableError,
 }));
 
 // Dynamic import so mock is in place before module eval
 const skillTools = await import("../lib/tools/skills.js");
+const { stateGatedHandler } = await import("../lib/tool-state-gate.js");
 
 function mockApiSuccess(data: unknown = { ok: true }) {
   return { ok: true, status: 200, data };
@@ -30,6 +54,31 @@ function mockApiSuccess(data: unknown = { ok: true }) {
 
 function mockApiError(status: number, message: string) {
   return { ok: false, status, data: { error: { message } } };
+}
+
+function mockApiSettledSuccess(payload: unknown) {
+  return { ok: true, status: 200, data: payload, payload };
+}
+
+function mockApiSettledError(status: number, code: string, message: string) {
+  return { ok: false, status, data: null, payload: { error: { code, message } } };
+}
+
+function extractToolRegistration(source: string, toolName: string): string {
+  const registration = new RegExp(
+    `server\\.registerTool\\(\\s*"${toolName}"\\s*,`,
+  ).exec(source);
+  if (!registration || registration.index === undefined) {
+    throw new Error(`Missing server.registerTool registration for ${toolName}`);
+  }
+  const start = registration.index;
+
+  const nextStart = source.indexOf("server.registerTool(", start + registration[0].length);
+  const block = source.slice(start, nextStart === -1 ? source.length : nextStart);
+  if (block.length === 0) {
+    throw new Error(`Empty server.registerTool registration for ${toolName}`);
+  }
+  return block;
 }
 
 describe("Skills Governance Tools", () => {
@@ -288,22 +337,104 @@ describe("Skills Governance Tools", () => {
   });
 
   describe("ingenium_skill_proposal_list", () => {
-    it("GETs /skills/proposals with optional status filter", async () => {
-      mockApi.get.mockResolvedValue(mockApiSuccess({ proposals: [] }));
+    it("surfaces the retired API response through the shared MCP error result", async () => {
+      mockApi.get.mockRejectedValue(new apiErrors.ApiHttpError(
+        410,
+        "SKILL_PROPOSAL_LIST_RETIRED",
+        "Use /api/v1/skills/proposals/page and /api/v1/skills/proposals/counts instead.",
+      ));
+      const handler = stateGatedHandler(
+        "ingenium_skill_proposal_list",
+        (args) => args.project,
+        async () => "enabled" as const,
+        (args) => skillTools.skillProposalList(args.project, args.status),
+      );
 
-      const result = await skillTools.skillProposalList(PROJECT, "pending");
+      const result = await handler({ project: PROJECT, status: "pending" });
 
       expect(mockApi.get).toHaveBeenCalledWith("/skills/proposals", { project: PROJECT, status: "pending" });
-      const data = JSON.parse(result.content[0].text);
-      expect(data.proposals).toEqual([]);
+      expect(result).toMatchObject({ isError: true });
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: {
+          status: 410,
+          code: "SKILL_PROPOSAL_LIST_RETIRED",
+          message: "Use /api/v1/skills/proposals/page and /api/v1/skills/proposals/counts instead.",
+        },
+      });
+    });
+  });
+
+  describe("ingenium_skill_proposal_page", () => {
+    it("forwards one exact bounded page request and preserves 5,000-row page metadata", async () => {
+      const page = {
+        data: Array.from({ length: 100 }, (_, index) => ({ id: `proposal-${index}` })),
+        pagination: { nextCursor: "next-page", hasMore: true },
+      };
+      mockApi.settled.get.mockResolvedValue(mockApiSettledSuccess(page));
+
+      const result = await skillTools.skillProposalPage(PROJECT, "open", 100, "current-page");
+
+      expect(mockApi.settled.get).toHaveBeenCalledTimes(1);
+      expect(mockApi.settled.get).toHaveBeenCalledWith("/skills/proposals/page", {
+        project: PROJECT,
+        view: "open",
+        limit: "100",
+        cursor: "current-page",
+      });
+      expect(JSON.parse(result.content[0].text)).toEqual(page);
     });
 
-    it("omits status param when not provided", async () => {
-      mockApi.get.mockResolvedValue(mockApiSuccess({ proposals: [] }));
+    it("omits optional pagination query fields without changing the required view", async () => {
+      mockApi.settled.get.mockResolvedValue(mockApiSettledSuccess({
+        data: [],
+        pagination: { nextCursor: null, hasMore: false },
+      }));
 
-      await skillTools.skillProposalList(PROJECT);
+      await skillTools.skillProposalPage(PROJECT, "history");
 
-      expect(mockApi.get).toHaveBeenCalledWith("/skills/proposals", { project: PROJECT });
+      expect(mockApi.settled.get).toHaveBeenCalledWith("/skills/proposals/page", {
+        project: PROJECT,
+        view: "history",
+      });
+    });
+
+    it("rejects malformed page arguments before the API adapter can run", () => {
+      expect(skillTools.skillProposalPageViewSchema.safeParse("pending").success).toBe(false);
+      expect(skillTools.skillProposalPageLimitSchema.safeParse(0).success).toBe(false);
+      expect(skillTools.skillProposalPageLimitSchema.safeParse(101).success).toBe(false);
+      expect(skillTools.skillProposalPageLimitSchema.safeParse(1.5).success).toBe(false);
+      expect(skillTools.skillProposalPageCursorSchema.safeParse("x".repeat(513)).success).toBe(false);
+      expect(mockApi.settled.get).not.toHaveBeenCalled();
+    });
+
+    it("maps a proposal page API error to the shared MCP error result", async () => {
+      mockApi.settled.get.mockResolvedValue(mockApiSettledError(422, "VALIDATION_ERROR", "Invalid page request"));
+      const handler = stateGatedHandler(
+        "ingenium_skill_proposal_page",
+        (args) => args.project,
+        async () => "enabled" as const,
+        (args) => skillTools.skillProposalPage(args.project, args.view, args.limit, args.cursor),
+      );
+
+      const result = await handler({ project: PROJECT, view: "open", limit: 100, cursor: "current-page" });
+
+      expect(result).toMatchObject({ isError: true });
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: { status: 422, code: "VALIDATION_ERROR", message: "Invalid page request" },
+      });
+    });
+  });
+
+  describe("ingenium_skill_proposal_counts", () => {
+    it("forwards only the scoped project and returns API counts", async () => {
+      const counts = { open: 2, history: 8, total: 10 };
+      mockApi.get.mockResolvedValue(mockApiSuccess(counts));
+
+      const result = await skillTools.skillProposalCounts(PROJECT);
+
+      expect(mockApi.get).toHaveBeenCalledTimes(1);
+      expect(mockApi.get).toHaveBeenCalledWith("/skills/proposals/counts", { project: PROJECT });
+      expect(JSON.parse(result.content[0].text)).toEqual(counts);
     });
   });
 
@@ -565,13 +696,18 @@ describe("Skills Governance Tools", () => {
       expect(rollbackBlock).toMatch(/revision:\s*z\.number\(\)\.int\(\)\.min\(0\)/);
     });
 
-    it("does not use numeric proposal IDs", () => {
-      const proposalSection = mcpSource.slice(
-        mcpSource.indexOf('"skill_proposal_create"'),
-        mcpSource.indexOf('observe'),
-      );
-      expect(proposalSection).not.toMatch(/proposalId:\s*z\.number\(\)/);
-      expect(proposalSection).toMatch(/proposalId:\s*z\.string\(\)\.uuid\(\)/);
+    it("uses UUID strings for every proposal ID registration", () => {
+      for (const toolName of [
+        "skill_proposal_get",
+        "skill_proposal_submit",
+        "skill_proposal_approve",
+        "skill_proposal_reject",
+        "skill_proposal_rollback",
+      ]) {
+        const registration = extractToolRegistration(mcpSource, toolName);
+        expect(registration).not.toMatch(/proposalId:\s*z\.number\(\)/);
+        expect(registration).toMatch(/proposalId:\s*z\.string\(\)\.uuid\(\)/);
+      }
     });
 
     it("does not use parentName/childName/relationshipType in lineage create registration", () => {
@@ -611,6 +747,19 @@ describe("Skills Governance Tools", () => {
       );
       expect(listBlock).toMatch(/rolled_back/);
       expect(listBlock).not.toMatch(/rolledBack/);
+    });
+
+    it("registers bounded proposal page/count tools and retains legacy guidance", () => {
+      const pageRegistration = extractToolRegistration(mcpSource, "skill_proposal_page");
+      expect(pageRegistration).toMatch(/view:\s*skillTools\.skillProposalPageViewSchema/);
+      expect(pageRegistration).toMatch(/limit:\s*skillTools\.skillProposalPageLimitSchema\.optional\(\)/);
+      expect(pageRegistration).toMatch(/cursor:\s*skillTools\.skillProposalPageCursorSchema\.optional\(\)/);
+      expect(extractToolRegistration(mcpSource, "skill_proposal_counts"))
+        .toMatch(/inputSchema:\s*\{ project: projectParam \}/);
+
+      const legacyRegistration = extractToolRegistration(mcpSource, "skill_proposal_list");
+      expect(legacyRegistration).toMatch(/Deprecated compatibility tool/);
+      expect(legacyRegistration).toMatch(/skill_proposal_page and skill_proposal_counts/);
     });
   });
 });

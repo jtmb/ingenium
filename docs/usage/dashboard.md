@@ -14,7 +14,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container with seven supervisord processes: API, the private API boundary, Dashboard, gateway, opencode-web (internal :4098), ttyd-opencode (internal :4099), and code-server (private :4100). Browser access uses the local `localhost:3000` dashboard root, `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots, and `vscode.localhost:3000` VS Code root without browser credentials. Direct 4098/4099/4100 access is not supported. The built-in MCP catalog contains **275 tools** across **29 baseline categories** (273 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
+Docker starts a single container with seven supervisord processes: API, the private API boundary, Dashboard, gateway, opencode-web (internal :4098), ttyd-opencode (internal :4099), and code-server (private :4100). Browser access uses the local `localhost:3000` dashboard root, `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots, and `vscode.localhost:3000` VS Code root without browser credentials. Direct 4098/4099/4100 access is not supported. The built-in MCP catalog contains **282 tools** across **30 baseline categories** (280 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -39,7 +39,13 @@ Point your MCP client to the `@ingenium/extension` package:
 }
 ```
 
-The extension package ships three OpenCode plugins — `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based bidirectional sync for skills, agents, plugins, commands, and config), and `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history). Reference them in your OpenCode config:
+The extension package ships three OpenCode plugins — `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based Git-authoritative resource projection for skills, agents, plugins, commands, and config), and `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history). Reference them in your OpenCode config:
+
+`resource-sync.ts` is the Git-authoritative projection path: Git worktree files
+flow through the extension, configured MCP stdio, authenticated API, and then
+the database. Skill CRUD and `ingenium_skill_sync*` are admin repair/import
+operations only. Plugin/config changes require an extension rebuild and
+OpenCode restart.
 
 ```jsonc
 {
@@ -98,6 +104,24 @@ preferences remove navigation transitions. The left rail and drawer retain
 native wheel, touch, Page Down, and keyboard scrolling. Their scrollbar gutter
 is stable, remains invisible while idle, and reveals only the thumb on hover;
 the scrollbar styling does not change the main content or create overflow.
+
+### Visible data states
+
+Dashboard views distinguish loading, empty, and failure states. Loading is shown
+with a status message or skeleton; an empty result says that there is no data;
+and an API failure is shown as an error or alert instead of being rendered as an
+empty page. Where retry is supported, the failed view includes a **Retry**
+action. The home dashboard also labels unavailable independent sections while
+keeping any successfully loaded sections visible.
+
+### Keyboard and modal behavior
+
+The shared dashboard modal contract is keyboard-operable: opening a modal moves
+focus into it, `Tab` and `Shift+Tab` stay within the dialog, `Escape` closes it,
+and focus returns to the opening control. The backdrop and close control also
+dismiss it, background content is inert, and body scroll is locked while the
+modal is open. Settings follows the same focus, Escape, and scroll-lock
+behavior.
 
 ### VS Code workspace
 
@@ -177,8 +201,11 @@ semantics, keyboard-focusable tables, and responsive mobile cards.
 - Click a skill card to open a split-pane overlay with file tree navigation and content viewer
 - Upload a skill from a `.md` file (frontmatter-parsed) using the Upload button
 - Skills auto-load on session start via /skill-load
+- Open the **Proposals** tab to switch between bounded Open proposals and retained
+  Proposal history. Counts load separately; history loads when selected, and
+  **Load more** follows the keyset cursor without fetching the entire history.
 
-**API**: GET /api/v1/skills, GET /api/v1/skills/:id, GET /api/v1/skills/search?q=..., POST /api/v1/skills, PATCH /api/v1/skills/:id
+**API**: GET /api/v1/skills, GET /api/v1/skills/:id, GET /api/v1/skills/search?q=..., POST /api/v1/skills, PATCH /api/v1/skills/:id, GET /api/v1/skills/proposals/counts, GET /api/v1/skills/proposals/page
 
 ## Commands
 
@@ -328,6 +355,11 @@ Use a deep link such as `/?settings=providers`. Route-linked panels intentionall
 
 **Provider drafts**: Changes made in the Providers panel are local state and survive tab switches because inactive panels remain mounted but hidden/inert. Closing the overlay discards unsaved provider edits; click **Save providers** to persist them.
 **Provider credentials**: API keys are never returned by the API or written to OpenCode config; saved keys are represented by an `apiKeySet` placeholder.
+
+On mobile, Settings replaces the sidebar with a category selector. The active
+panel is the independently scrollable region, while the page behind the modal
+remains locked; long settings forms therefore remain usable without scrolling
+the underlying dashboard.
 
 ## Agents
 

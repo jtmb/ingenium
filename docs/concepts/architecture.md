@@ -162,8 +162,23 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **277 built-in registered tools** across **29 baseline categories**. Two extension-registered tools bring the built-in catalog to **279**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **280 built-in catalog entries** across **30 baseline categories**. Two extension-registered tools bring the built-in catalog to **282**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+
+### Git-authoritative external-worktree synchronization
+
+Automatic external-worktree synchronization follows exactly:
+
+```text
+Git worktree files → @ingenium/extension resource-sync plugin → configured
+Ingenium MCP stdio transport → authenticated Ingenium API → database
+```
+
+Git is authoritative. Extension plugins, CLIs, and agents never read or write
+the database and never call mutation REST endpoints directly. `ingenium-core` is
+the API's internal DB implementation and cannot be imported by runtime
+consumers. Administrative skill CRUD/sync tools are repair/import operations
+only; they are not automatic worktree synchronization.
 
 ## Restore Plan and Executor Boundary (RESTORE-100/101)
 
@@ -297,31 +312,37 @@ Engine → MailProvider interface → GmailProvider (REST API)
 
 ## Skill System
 
-Skills are loaded from the Ingenium SQLite database via the MCP server. The canonical source files live at `.opencode/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/). When created or updated via API, skills are written to disk for agent access.
+Skills are loaded from canonical Git worktree files at `.opencode/skills/<name>/`
+with a split-skill format (SKILL.md + metadata.json + references/). The
+resource-sync plugin projects those files through MCP and the authenticated API
+for persistence; runtime consumers do not access SQLite directly.
 
 ### file_tree Column
 
 The `skills` table has a `file_tree` column (TEXT, stores JSON map of relative paths → content). This enables complete data round-trips:
 
-- **`writeSkillToDisk()`** — After DB create/update, reads `file_tree` JSON and writes every file under the skill directory. Always writes SKILL.md (with YAML frontmatter) and metadata.json.
-- **`syncSkillFromDisk()`** — Reads SKILL.md, parses frontmatter, reads metadata.json, and walks the directory tree to rebuild `file_tree`. If skill doesn't exist in DB, creates it; otherwise updates.
+- The API stores the synchronized `file_tree` representation for persistence and
+  repair. It is not the authority for external worktree files.
 
 This means a skill can contain any number of auxiliary files (reference docs, examples, configs) that are fully preserved in the DB's `file_tree` and round-tripped to disk.
 
 ### Resource Sync Engine
 
-The resource sync engine (`packages/ingenium-extension/resource-sync.ts`) provides **unified bidirectional synchronization** of skills, agents, plugins, commands, and config between the Ingenium API and the local filesystem. It supersedes the former `skill-sync.ts` and `onboarding-sync.ts`.
+The resource sync engine (`packages/ingenium-extension/resource-sync.ts`) provides
+the Git-authoritative projection of skills, agents, plugins, commands, and config
+from the local worktree through the configured MCP stdio transport and
+authenticated API. It supersedes the former `skill-sync.ts` and
+`onboarding-sync.ts`.
 
 #### Architecture
 
 - **Change detection**: SHA-256 content hashes enable three-way comparison (API vs disk vs manifest baseline)
 - **Sync manifest**: Stored at `.opencode/.ingenium-sync-state.json` — maps resource names to their last-known SHA-256 hash
 - **Conflict resolution**: Three-way merge using manifest baseline as the common ancestor:
-  - API changed, disk unchanged → pull API → disk
-  - Disk changed, API unchanged → push disk → API
-  - Both changed, manifest matches API → disk wins
-  - Both changed, manifest matches disk → API wins  
-  - Both changed, manifest matches neither → conflict (logged, skipped)
+  - Git worktree changed → project the worktree payload through MCP → API
+  - API/database state differs → report or repair through the authenticated
+    boundary; never overwrite Git automatically
+  - Both changed → preserve the Git worktree and require explicit repair
 
 #### Sync Hooks
 
@@ -376,7 +397,11 @@ The dashboard sync log captures this condition and prompts the user to restart O
 
 ### Skill Seeds
 
-10 canonical skill directories (plus absorbed legacy source archives under `references/sources/`) live at `.opencode/skills/` and are synced via `/sync-skills`. The Phase 3 migration (2026-07-16) consolidated 36 legacy skills into 10 canonical skills with full provenance tracking. Legacy content is preserved under `references/sources/<legacy-name>/` in each canonical skill.
+10 canonical skill directories (plus absorbed legacy source archives under
+`references/sources/`) live at `.opencode/skills/` and are projected by the
+Git-authoritative resource-sync path. The Phase 3 migration (2026-07-16)
+consolidated 36 legacy skills into 10 canonical skills with full provenance
+tracking. Legacy content is preserved under `references/sources/<legacy-name>/`.
 
 The MCP server provides 25 skill tools (11 core CRUD + 14 governance). The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
 
@@ -432,9 +457,9 @@ The self-learning pipeline enables agents to learn from user interactions throug
 
 - **Phase 1 — Trait Consolidation**: `consolidateTraits()` sends observations + existing traits to the LLM, which returns CONFIRM/CREATE/IGNORE decisions. Traits are normalized statements (not verbatim copies). Confidence model: start 0.10–0.15, +0.15 per confirmation, cap 0.95, display threshold ≥0.30.
 
-- **Phase 2 — LLM Skill Synthesis**: Groups 3+ related observations and sends them to the LLM with existing skills/traits as context. Creates/updates skills via `writeSkillToDisk()` with the `llm-synthesized` prefix. A backup provider provides fallback if the primary LLM fails. Scheduled and manual per-project runs hold a project `skills` lease; cross-project synthesis holds the global `skills` lease.
+ - **Phase 2 — LLM Skill Synthesis**: Groups 3+ related observations and sends them to the LLM with existing skills/traits as context. Creates/updates skills through the API with the `llm-synthesized` prefix. A backup provider provides fallback if the primary LLM fails. Scheduled and manual per-project runs hold a project `skills` lease; cross-project synthesis holds the global `skills` lease.
 
-- **Auto-Observer Plugin**: Thin trigger (~62 lines) that POSTs `/api/v1/extraction/run` on `session.idle`. The 15-minute scheduler covers extraction if the plugin fails to load.
+- **Auto-Observer Plugin**: Thin trigger (~62 lines) that calls Ingenium MCP on `session.idle`; MCP invokes the authenticated extraction API route. The 15-minute scheduler covers extraction if the plugin fails to load.
 
 See [self-learning.md](self-learning.md) for full detail.
 
@@ -1142,14 +1167,14 @@ Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` em
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **275 tools** across **29 baseline
-categories** (**273 stdio + 2 extension**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **282 tools** across **30 baseline
+categories** (**280 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
 |----------|-------|-------|
 | Settings | 3 | get, set, test_llm |
-| Skills | 25 (11 core + 14 governance) | **Core:** list, load, search, create, update, delete, enable, disable, sync, consolidate, sync_all. **Governance:** archive, restore, list_archived, versions, rollback, lineage_create, lineage_list, proposal_create, proposal_list, proposal_get, proposal_submit, proposal_approve, proposal_reject, proposal_rollback |
+| Skills | 28 (12 core + 16 governance) | **Core:** list, load, search, create, update, delete, enable, disable, sync, consolidate, sync_all, sync_all_preview. **Governance:** archive, restore, list_archived, versions, rollback, lineage_create, lineage_list, proposal_create, proposal_list, proposal_page, proposal_counts, proposal_get, proposal_submit, proposal_approve, proposal_reject, proposal_rollback |
 | Observe | 1 | observe |
 | Observations | 8 | search, list, stats, get, update, enrich, delete, delete_by_source |
 | Personality | 7 | personality, personality_traits, set_trait, trait_dismiss, trait_disable, trait_delete, traits_delete_all |

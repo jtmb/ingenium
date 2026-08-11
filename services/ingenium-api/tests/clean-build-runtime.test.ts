@@ -119,7 +119,43 @@ function withoutWorkspaceCoreDistribution<T>(run: () => T): T {
   }
 }
 
+function withoutWorkspaceCoreAndEmailDistributions<T>(run: () => T): T {
+  const distributions = [coreRoot, emailRoot].map((root) => {
+    const path = join(root, "dist");
+    return {
+      path,
+      quarantine: `${path}.clean-typecheck-${process.pid}-${Date.now()}`,
+      exists: existsSync(path),
+    };
+  });
+
+  for (const distribution of distributions) {
+    if (distribution.exists) renameSync(distribution.path, distribution.quarantine);
+  }
+
+  try {
+    for (const distribution of distributions) expect(existsSync(distribution.path)).toBe(false);
+    return run();
+  } finally {
+    for (const distribution of distributions) rmSync(distribution.path, { recursive: true, force: true });
+    for (const distribution of [...distributions].reverse()) {
+      if (distribution.exists) renameSync(distribution.quarantine, distribution.path);
+    }
+    vi.resetModules();
+  }
+}
+
 describe("clean-build runtime distribution", () => {
+  it("typechecks the API against clean Core and Email declarations", () => {
+    const check = withoutWorkspaceCoreAndEmailDistributions(() => spawnSync(
+      process.execPath,
+      [join(apiRoot, "scripts", "typecheck-with-clean-core.mjs")],
+      { cwd: apiRoot, encoding: "utf8", timeout: 60_000 },
+    ));
+
+    expectSuccessfulBuild(check);
+  });
+
   it("builds an empty distribution without the workspace core dist and resolves the API entrypoint imports", () => {
     const outputDirectory = mkdtempSync(join(apiRoot, ".clean-build-"));
 

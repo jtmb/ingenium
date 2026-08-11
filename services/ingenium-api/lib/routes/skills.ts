@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks, observations } from "ingenium-core";
-import type { Skill, SkillVersion, SkillLineage, SkillProposal } from "ingenium-core";
+import type { Skill, SkillVersion, SkillLineage, SkillProposal, SkillProposalSummary } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 import fs from "fs";
@@ -13,6 +13,12 @@ const LOCK_RESOURCE = "skills";
 const LOCK_TTL_MIN_MS = 1_000;
 const LOCK_TTL_MAX_MS = 300_000; // 5 minutes
 const LOCK_TTL_DEFAULT_MS = 30_000; // 30 seconds
+const SKILL_PROPOSAL_LIST_RETIRED_ERROR = {
+  error: {
+    code: "SKILL_PROPOSAL_LIST_RETIRED",
+    message: "Use /api/v1/skills/proposals/page and /api/v1/skills/proposals/counts instead.",
+  },
+} as const;
 
 //
 // Skill rows (list / get / create / update / archive / restore / rollback / sync)
@@ -83,17 +89,18 @@ function mapProposalStatus(status: string): string {
 }
 
 /** Map common snake_case keys in proposedState JSON to camelCase for response.
- *  Parses stored `file_tree` JSON string into a `fileTree` object. Invalid JSON is handled safely. */
+ *  Parses stored file-tree JSON strings into objects. Invalid JSON is handled safely. */
 function camelizeProposedState(state: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...state };
   const keyMap: Record<string, string> = {
     always_apply: "alwaysApply",
     file_tree: "fileTree",
+    file_tree_patch: "fileTreePatch",
   };
   for (const [snake, camel] of Object.entries(keyMap)) {
     if (snake in out) {
       const val = out[snake];
-      if (snake === "file_tree" && typeof val === "string") {
+      if ((snake === "file_tree" || snake === "file_tree_patch") && typeof val === "string") {
         out[camel] = safeJsonParse(val, null);
       } else {
         out[camel] = val;
@@ -135,6 +142,19 @@ function proposalToDto(p: SkillProposal): Record<string, unknown> {
     reviewedAt: p.reviewed_at ?? null,
     appliedAt: p.applied_at ?? null,
     rolledBackAt: p.rolled_back_at ?? null,
+  };
+}
+
+function proposalSummaryToDto(p: SkillProposalSummary): Record<string, unknown> {
+  return {
+    id: p.id,
+    status: mapProposalStatus(p.status),
+    proposalType: p.proposal_type,
+    targetName: p.target_name,
+    sourceName: p.source_name,
+    qualityScore: p.quality_score,
+    noveltyScore: p.novelty_score,
+    createdAt: p.created_at,
   };
 }
 
@@ -205,17 +225,50 @@ skillsRouter.get("/archived", (req, res) => {
   res.json({ data: list.map(skillToDto), total: list.length });
 });
 
-/** GET /proposals — list all governance proposals for the project (optional ?status filter). */
-skillsRouter.get("/proposals", (req, res) => {
+/** @deprecated GET /proposals is retained only to direct clients to bounded reads. */
+skillsRouter.get("/proposals", (_req, res) => {
+  res.status(410).json(SKILL_PROPOSAL_LIST_RETIRED_ERROR);
+});
+
+skillsRouter.get("/proposals/counts", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const statusFilter = req.query.status as string | undefined;
-  if (statusFilter && !["draft", "pending", "rejected", "applied", "rolled_back", "stale"].includes(statusFilter)) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: `Invalid status filter: ${statusFilter}` } });
+  res.json({ data: skillGovernance.getProposalCounts(projectId) });
+});
+
+skillsRouter.get("/proposals/page", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+
+  const { view, limit: rawLimit, cursor } = req.query;
+  if (view !== "open" && view !== "history") {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "view must be either open or history" } });
     return;
   }
-  const list = skillGovernance.listProposals(projectId, statusFilter);
-  res.json({ data: list.map(proposalToDto), total: list.length });
+  if (rawLimit !== undefined && (typeof rawLimit !== "string" || !/^\d+$/.test(rawLimit))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "limit must be an integer between 1 and 100" } });
+    return;
+  }
+  const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+  if (limit !== undefined && (limit < 1 || limit > 100 || !Number.isSafeInteger(limit))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "limit must be an integer between 1 and 100" } });
+    return;
+  }
+  if (cursor !== undefined && typeof cursor !== "string") {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor must be a base64url value" } });
+    return;
+  }
+
+  try {
+    const page = skillGovernance.listProposalPage(projectId, { view, limit, cursor });
+    res.json({ data: page.data.map(proposalSummaryToDto), pagination: page.pagination });
+  } catch (err) {
+    if (err instanceof skillGovernance.GovernanceError) {
+      res.status(governanceErrorStatus(err)).json(governanceErrorPayload(err));
+      return;
+    }
+    throw err;
+  }
 });
 
 /** GET /proposals/:proposalId — get a single proposal by ID.
@@ -254,7 +307,7 @@ skillsRouter.get("/proposals/:proposalId", (req, res) => {
       // observations: batch-fetch summaries for each observation ID
       const obsIds = Array.isArray(dto.observationIds) ? (dto.observationIds as number[]) : [];
       if (obsIds.length > 0) {
-        const obsRows = observations.getObservationsByIds(obsIds.filter(id => typeof id === "number"));
+        const obsRows = observations.getObservationsByIds(projectId, obsIds.filter(id => typeof id === "number"));
         (dto as any).observations = obsRows.map(o => ({
           id: o.id,
           type: o.observation_type,
@@ -323,17 +376,23 @@ skillsRouter.post("/proposals", (req, res) => {
   }
 
   // Convert camelCase request → core's snake_case JSON shape.
-  // Core expects file_tree as a JSON string; always_apply as a number.
+  // Core expects file-tree values as JSON strings; always_apply as a number.
   const coreProposedState: Record<string, unknown> = { ...proposedState };
   if ("alwaysApply" in coreProposedState) {
     coreProposedState.always_apply = coreProposedState.alwaysApply;
     delete coreProposedState.alwaysApply;
   }
   if ("fileTree" in coreProposedState) {
-    // Core expects file_tree to be a JSON string, not a raw object
     const ft = coreProposedState.fileTree;
     coreProposedState.file_tree = (typeof ft === "string") ? ft : JSON.stringify(ft);
     delete coreProposedState.fileTree;
+  }
+  if ("fileTreePatch" in coreProposedState) {
+    const fileTreePatch = coreProposedState.fileTreePatch;
+    coreProposedState.file_tree_patch = (typeof fileTreePatch === "string")
+      ? fileTreePatch
+      : JSON.stringify(fileTreePatch);
+    delete coreProposedState.fileTreePatch;
   }
   const proposedStateJson = JSON.stringify(coreProposedState);
 

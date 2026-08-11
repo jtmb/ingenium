@@ -70,6 +70,37 @@ const STATE_MAP: Record<string, ServiceInfo["state"]> = {
   STOPPED: "stopped",
 };
 
+const GET_ALL_PROCESS_INFO_XML = "<?xml version=\"1.0\"?><methodCall><methodName>supervisor.getAllProcessInfo</methodName></methodCall>";
+
+function escapeXml(value: string): string {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&apos;",
+    "\"": "&quot;",
+  })[character]!);
+}
+
+function unescapeXml(value: string): string {
+  return value.replace(/&(amp|lt|gt|apos|quot);/g, (_match, entity: string) => ({
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    apos: "'",
+    quot: "\"",
+  })[entity]!);
+}
+
+function sendServiceError(
+  res: import("express").Response,
+  status: number,
+  code: string,
+  message: string,
+): void {
+  res.status(status).json({ error: { code, message } });
+}
+
 /**
  * Resolve the UUID for the global-default project.
  * Falls back to the literal string "global-default" if the project doesn't exist.
@@ -94,7 +125,7 @@ function extractMember(struct: string, memberName: string): string {
     "s"
   );
   const match = struct.match(regex);
-  return match?.[2] ?? match?.[3] ?? match?.[4] ?? "";
+  return unescapeXml(match?.[2] ?? match?.[3] ?? match?.[4] ?? "");
 }
 
 /**
@@ -196,7 +227,15 @@ function parseProcessInfo(xml: string): Record<string, string> {
 function parseReadLog(xml: string): string {
   const match = xml.match(/<string>(.*?)<\/string>/s);
   if (!match) return "";
-  return match[1] ?? "";
+  return unescapeXml(match[1] ?? "");
+}
+
+async function resolveSupervisorProcessName(name: string): Promise<string | undefined> {
+  const processName = Object.entries(DISPLAY_NAME_MAP).find(
+    ([, display]) => display === name,
+  )?.[0] ?? name;
+  const processes = parseSupervisorResponse(await supervisorRpc(GET_ALL_PROCESS_INFO_XML));
+  return processes.some((process) => process.name === processName) ? processName : undefined;
 }
 
 function buildServiceDetail(info: Record<string, string>): ServiceDetail {
@@ -295,9 +334,7 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
   }
 
   try {
-    const xml = await supervisorRpc(
-      `<?xml version="1.0"?>\n<methodCall><methodName>supervisor.getAllProcessInfo</methodName></methodCall>`
-    );
+    const xml = await supervisorRpc(GET_ALL_PROCESS_INFO_XML);
 
     const processes = parseSupervisorResponse(xml);
 
@@ -466,20 +503,20 @@ servicesRouter.get("/applications/:name", async (req, res): Promise<void> => {
 servicesRouter.get("/:name", async (req, res): Promise<void> => {
   const { name } = req.params;
 
-  // Resolve display name back to internal supervisord process name
-  const processName = Object.entries(DISPLAY_NAME_MAP).find(
-    ([, display]) => display === name
-  )?.[0] ?? name;
-
   try {
+    const processName = await resolveSupervisorProcessName(name);
+    if (!processName) {
+      sendServiceError(res, 404, "PROCESS_NOT_FOUND", "Process not found");
+      return;
+    }
     const xml = await supervisorRpc(
-      `<?xml version="1.0"?>\n<methodCall><methodName>supervisor.getProcessInfo</methodName></params><param><value><string>${processName}</string></value></param></params></methodCall>`
+      `<?xml version="1.0"?><methodCall><methodName>supervisor.getProcessInfo</methodName><params><param><value><string>${escapeXml(processName)}</string></value></param></params></methodCall>`,
     );
 
     const info = parseProcessInfo(xml);
 
-    if (!info["name"]) {
-      res.status(404).json({ error: `Process "${name}" not found` });
+    if (info["name"] !== processName) {
+      sendServiceError(res, 404, "PROCESS_NOT_FOUND", "Process not found");
       return;
     }
 
@@ -488,7 +525,7 @@ servicesRouter.get("/:name", async (req, res): Promise<void> => {
     res.json({ data: detail });
   } catch (err: any) {
     logger.error("services", `getProcessInfo failed for "${name}": ${err.message}`);
-    res.status(502).json({ error: `Failed to fetch process info: ${err.message}` });
+    sendServiceError(res, 502, "SUPERVISOR_UNAVAILABLE", "Unable to fetch process details");
   }
 });
 
@@ -499,17 +536,17 @@ servicesRouter.get("/:name/logs", async (req, res): Promise<void> => {
   const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 8192);
   const stream = (req.query.stream as string) === "stderr" ? "stderr" : "stdout";
 
-  // Resolve display name back to internal supervisord process name
-  const processName = Object.entries(DISPLAY_NAME_MAP).find(
-    ([, display]) => display === name
-  )?.[0] ?? name;
-
   try {
+    const processName = await resolveSupervisorProcessName(name);
+    if (!processName) {
+      sendServiceError(res, 404, "PROCESS_NOT_FOUND", "Process not found");
+      return;
+    }
     const method = stream === "stderr"
       ? "supervisor.readProcessStderrLog"
       : "supervisor.readProcessStdoutLog";
     const xml = await supervisorRpc(
-      `<?xml version="1.0"?>\n<methodCall><methodName>${method}</methodName><params><param><value><string>${processName}</string></value></param><param><value><i4>${offset}</i4></value></param><param><value><i4>${limit}</i4></value></param></params></methodCall>`
+      `<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params><param><value><string>${escapeXml(processName)}</string></value></param><param><value><i4>${offset}</i4></value></param><param><value><i4>${limit}</i4></value></param></params></methodCall>`,
     );
 
     const logText = parseReadLog(xml);
@@ -524,6 +561,6 @@ servicesRouter.get("/:name/logs", async (req, res): Promise<void> => {
     });
   } catch (err: any) {
     logger.error("services", `readProcessStderrLog failed for "${name}": ${err.message}`);
-    res.status(502).json({ error: `Failed to read process log: ${err.message}` });
+    sendServiceError(res, 502, "SUPERVISOR_UNAVAILABLE", "Unable to fetch process logs");
   }
 });

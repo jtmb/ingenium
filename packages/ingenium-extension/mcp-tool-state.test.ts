@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockEnsureExtensionProject = vi.hoisted(() => vi.fn());
+const mockEnsureMcpProject = vi.hoisted(() => vi.fn());
+
+vi.mock("./mcp-client.js", () => ({
+  ensureMcpProject: mockEnsureMcpProject,
+}));
 
 vi.mock("./project-resolver.js", () => ({
-  ensureExtensionProject: mockEnsureExtensionProject,
+  resolveExtensionProject: () => "extension-project",
 }));
 
 vi.mock("./api-auth.js", () => ({
@@ -26,7 +30,7 @@ function response(body: unknown, status = 200): Response {
 
 describe("extension MCP tool state guard", () => {
   beforeEach(() => {
-    mockEnsureExtensionProject.mockResolvedValue("extension-project");
+    mockEnsureMcpProject.mockResolvedValue("extension-project");
   });
 
   afterEach(() => {
@@ -41,12 +45,7 @@ describe("extension MCP tool state guard", () => {
     await expect(assertExtensionToolEnabled("auto_observe_now", "/worktree", { request }))
       .resolves.toBe("extension-project");
 
-    expect(mockEnsureExtensionProject).toHaveBeenCalledWith(
-      "/worktree",
-      expect.any(String),
-      undefined,
-      { request },
-    );
+    expect(mockEnsureMcpProject).toHaveBeenCalledWith("/worktree");
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("/mcp-tools/auto_observe_now/state?project=extension-project"),
       expect.objectContaining({ headers: expect.any(Headers) }),

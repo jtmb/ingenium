@@ -96,6 +96,17 @@ async function setupMocks(page: Page) {
 
   await page.unrouteAll();
 
+  await page.route("**/api/v1/projects*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: [{ id: "global-default", name: "global-default", is_global: true, archived_at: null }],
+        total: 1,
+      }),
+    });
+  });
+
   await page.route("**/api/v1/emails/accounts*", async (route) => {
     await route.fulfill({
       status: 200,
@@ -301,23 +312,24 @@ async function gotoMail(page: Page) {
 }
 
 async function waitForAccount(page: Page) {
-  await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
+  await expect(
+    page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` }),
+  ).toBeVisible({ timeout: 15000 });
 }
 
 async function waitForEmailList(page: Page) {
-  await page.waitForTimeout(500);
-  const emailRows = page.locator("div.cursor-pointer");
+  const emailRows = page.getByTestId("email-row");
   await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 }
 
 async function clickEmailRow(page: Page, index = 0) {
-  const rows = page.locator("div.cursor-pointer");
+  const rows = page.getByTestId("email-row");
   await rows.nth(index).click();
   await page.waitForTimeout(800);
 }
 
 async function getEmailListBoundingBox(page: Page) {
-  const listPanel = page.locator("div.w-\\[350px\\]").first();
+  const listPanel = page.getByTestId("email-list");
   return listPanel.boundingBox();
 }
 
@@ -330,7 +342,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const selector = page.locator("button").filter({ hasText: GMAIL_EMAIL }).first();
+    const selector = page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` });
     await expect(selector).toBeVisible();
 
     await expect(selector.locator("svg").first()).toBeVisible();
@@ -347,27 +359,28 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const selector = page.locator("button").filter({ hasText: GMAIL_EMAIL }).first();
+    const selector = page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` });
     await selector.click();
     await page.waitForTimeout(500);
 
-    const dropdown = page.locator("div.shadow-lg").first();
+    const dropdown = page.getByRole("menu", { name: "Email accounts" });
     await expect(dropdown).toBeVisible({ timeout: 5000 });
 
-    const gmailItem = dropdown.locator("button").filter({ hasText: GMAIL_EMAIL }).first();
+    const gmailItem = dropdown.getByRole("menuitem").filter({ hasText: GMAIL_EMAIL });
+    await expect(gmailItem).toHaveCount(1);
     await gmailItem.click();
     await page.waitForTimeout(1000);
 
     await expect(
-      page.locator("button").filter({ hasText: "INBOX" }).first(),
+      page.getByRole("button", { name: /INBOX/ }).first(),
     ).toBeVisible({ timeout: 10000 });
 
     await expect(
-      page.locator("button").filter({ hasText: "Sent Mail" }).first(),
+      page.getByRole("button", { name: /^Sent Mail/ }).first(),
     ).toBeVisible({ timeout: 3000 });
 
     await expect(
-      page.locator("button").filter({ hasText: "Drafts" }).first(),
+      page.getByRole("button", { name: /Drafts/ }).first(),
     ).toBeVisible({ timeout: 3000 });
   });
 
@@ -396,11 +409,11 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     expect(draftsSpanCount).toBeGreaterThanOrEqual(2);
 
     await expect(
-      page.locator("button").filter({ hasText: "Personal" }).first(),
+      page.getByRole("button", { name: /Personal/ }).first(),
     ).toBeVisible({ timeout: 3000 });
 
     await expect(
-      page.locator("button").filter({ hasText: "Receipts" }).first(),
+      page.getByRole("button", { name: /Receipts/ }).first(),
     ).toBeVisible({ timeout: 3000 });
   });
 
@@ -408,13 +421,13 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
 
     await waitForEmailList(page);
 
-    const emailRows = page.locator("div.cursor-pointer");
+    const emailRows = page.getByTestId("email-row");
     const rowCount = await emailRows.count();
     expect(rowCount).toBeGreaterThan(0);
 
@@ -428,13 +441,13 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
     await clickEmailRow(page, 0);
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     const subjectEl = readerPane.locator("h2").first();
@@ -451,7 +464,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
@@ -479,13 +492,13 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
     await clickEmailRow(page, 0);
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     const subject = readerPane.locator("h2").first();
@@ -494,13 +507,13 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     expect(subjectText).not.toBeNull();
     expect(subjectText!.trim().length).toBeGreaterThan(0);
 
-    const fromField = readerPane.locator("span.text-sm.font-semibold").first();
+    const fromField = readerPane.getByTestId("email-reader-from");
     await expect(fromField).toBeVisible({ timeout: 3000 });
     const fromText = await fromField.textContent();
     expect(fromText).not.toBeNull();
     expect(fromText!.trim().length).toBeGreaterThan(0);
 
-    const dateField = readerPane.locator("p.text-xs").first();
+    const dateField = readerPane.getByTestId("email-reader-date");
     await expect(dateField).toBeVisible({ timeout: 3000 });
     const dateText = await dateField.textContent();
     expect(dateText).not.toBeNull();
@@ -523,7 +536,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
 
     const search = page.getByPlaceholder("Search emails...");
     await search.fill("archive-task");
-    const resultRow = page.locator("div.cursor-pointer").filter({ hasText: "Archive task result" }).first();
+    const resultRow = page.getByTestId("email-row").filter({ hasText: "Archive task result" }).first();
     await expect(resultRow).toBeVisible({ timeout: 5000 });
     await resultRow.click();
 
@@ -561,12 +574,12 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
     await clickEmailRow(page, 0);
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     // HTML email content is isolated in the reader iframe.
@@ -580,32 +593,35 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const composeBtn = page.locator("button").filter({ hasText: "Compose" }).first();
+    const composeBtn = page.getByRole("button", { name: "Compose", exact: true });
     await expect(composeBtn).toBeVisible();
     await composeBtn.click();
     await page.waitForTimeout(1000);
 
-    const composeHeading = page.getByRole("heading", { name: "Compose" }).first();
+    const composeDialog = page.getByRole("dialog", { name: "Compose" });
+    const composeHeading = composeDialog.getByRole("heading", { name: "Compose" });
     await expect(composeHeading).toBeVisible({ timeout: 5000 });
 
-    const composeHeadings = page.getByRole("heading", { name: "Compose" });
+    const composeHeadings = composeDialog.getByRole("heading", { name: "Compose" });
     const headingCount = await composeHeadings.count();
     expect(headingCount).toBe(1);
 
-    await expect(page.getByPlaceholder("To")).toBeVisible({ timeout: 3000 });
-    await expect(page.getByPlaceholder("Subject")).toBeVisible();
-    await expect(page.getByPlaceholder("Write your message...")).toBeVisible();
+    await expect(composeDialog.getByPlaceholder("To")).toBeVisible({ timeout: 3000 });
+    await expect(composeDialog.getByPlaceholder("Subject")).toBeVisible();
+    await expect(composeDialog.getByText("Message", { exact: true })).toBeVisible();
+    await expect(
+      composeDialog.getByRole("toolbar", { name: "Formatting toolbar" }),
+    ).toBeVisible();
 
-    await expect(page.locator("label").filter({ hasText: "From" }).first()).toBeVisible();
-    await expect(page.locator("select").first()).toBeVisible();
+    await expect(composeDialog.getByLabel("From")).toBeVisible();
 
-    await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Save Draft" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Discard" })).toBeVisible();
+    await expect(composeDialog.getByRole("button", { name: "Send" })).toBeVisible();
+    await expect(composeDialog.getByRole("button", { name: "Save Draft" })).toBeVisible();
+    await expect(composeDialog.getByRole("button", { name: "Discard" })).toBeVisible();
 
     await page.screenshot({ path: path.join(SCREENSHOTS_DIR, "mail-test-09.png") });
 
-    await page.getByRole("button", { name: "Discard" }).click();
+    await composeDialog.getByRole("button", { name: "Discard" }).click();
     await page.waitForTimeout(500);
     await expect(composeHeading).not.toBeVisible();
   });
@@ -616,7 +632,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await waitForAccount(page);
 
     await page.waitForTimeout(1500);
-    const errorDiv = page.locator("div").filter({ hasText: /IMAP|Failed|error/i }).first();
+    const errorDiv = page.getByText(/IMAP|Failed|error/i).first();
     await expect(errorDiv).toBeVisible({ timeout: 10000 });
 
     const errorText = await errorDiv.textContent();
@@ -630,7 +646,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
@@ -649,7 +665,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await refreshResponsePromise;
 
     await page.waitForTimeout(500);
-    const emailRows = page.locator("div.cursor-pointer");
+    const emailRows = page.getByTestId("email-row");
     const rowCount = await emailRows.count();
     expect(rowCount).toBeGreaterThan(0);
   });
@@ -658,7 +674,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
@@ -670,9 +686,9 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     const startTime = performance.now();
     await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
+    await waitForAccount(page);
 
-    const emailRows = page.locator("div.cursor-pointer");
+    const emailRows = page.getByTestId("email-row");
     await expect(emailRows.first()).toBeVisible({ timeout: 10000 });
 
     const loadTime = performance.now() - startTime;
@@ -694,11 +710,11 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     expect(bodyText.toLowerCase()).not.toContain("demo@ingenium");
     expect(bodyText.toLowerCase()).not.toContain("demo account");
 
-    const selector = page.locator("button").filter({ hasText: GMAIL_EMAIL }).first();
+    const selector = page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` });
     await selector.click();
     await page.waitForTimeout(500);
 
-    const dropdown = page.locator("div.shadow-lg").first();
+    const dropdown = page.getByRole("menu", { name: "Email accounts" });
     const dropdownVisible = await dropdown.isVisible().catch(() => false);
     if (dropdownVisible) {
       const dropdownText = await dropdown.innerText();
@@ -711,14 +727,15 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const selector = page.locator("button").filter({ hasText: GMAIL_EMAIL }).first();
+    const selector = page.getByRole("button", { name: `Select account, current ${GMAIL_EMAIL}` });
     await selector.click();
     await page.waitForTimeout(500);
 
-    const dropdown = page.locator("div.shadow-lg").first();
+    const dropdown = page.getByRole("menu", { name: "Email accounts" });
     await expect(dropdown).toBeVisible({ timeout: 3000 });
 
-    const gmailEntry = dropdown.locator("button").filter({ hasText: GMAIL_EMAIL }).first();
+    const gmailEntry = dropdown.getByRole("menuitem").filter({ hasText: GMAIL_EMAIL });
+    await expect(gmailEntry).toHaveCount(1);
     await expect(gmailEntry).toBeVisible();
 
     await expect(gmailEntry.locator("span").first()).toBeVisible();
@@ -731,7 +748,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
       await expect(notConnected).toBeVisible();
     }
 
-    const addAccountBtn = dropdown.getByText("+ Add Account");
+    const addAccountBtn = dropdown.getByRole("menuitem", { name: "+ Add Account", exact: true });
     await expect(addAccountBtn).toBeVisible();
 
     await page.screenshot({ path: path.join(SCREENSHOTS_DIR, "mail-test-14.png") });
@@ -743,16 +760,16 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
-    const emailRows = page.locator("div.cursor-pointer");
+    const emailRows = page.getByTestId("email-row");
     const rowCount = await emailRows.count();
     expect(rowCount).toBeGreaterThanOrEqual(2);
 
     await clickEmailRow(page, 0);
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     const readerBox1 = await readerPane.boundingBox();
@@ -770,23 +787,22 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
   });
 
   test("16 - Settings page shows ✉️ Mail section with sync frequency select", async ({ page }) => {
-    await page.goto(`${BASE}/settings`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible({
+    await page.goto(`${BASE}/mail?settings=mail`, { waitUntil: "domcontentloaded" });
+
+    const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+    await expect(settingsDialog).toBeVisible({
       timeout: 10000,
     });
 
-    const mailSection = page.getByText("✉️ Mail").first();
-    await expect(mailSection).toBeVisible({ timeout: 5000 });
-
     await expect(
-      page.getByText("How often the server checks for new emails in connected accounts."),
-    ).toBeVisible();
+      settingsDialog.getByRole("tab", { name: "Mail", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
 
-    const checkEveryLabel = page.locator("label").filter({ hasText: "Check every" }).first();
-    await expect(checkEveryLabel).toBeVisible();
+    const mailPanel = settingsDialog.getByTestId("settings-panel-mail");
+    await expect(mailPanel).toBeVisible({ timeout: 5000 });
+    await expect(mailPanel.getByRole("heading", { name: "Mail Sync", exact: true })).toBeVisible();
 
-    const parentDiv = checkEveryLabel.locator("..");
-    const intervalSelect = parentDiv.locator("select").first();
+    const intervalSelect = mailPanel.getByRole("combobox", { name: "Check every" });
     await expect(intervalSelect).toBeVisible();
 
     const options = await intervalSelect.locator("option").allTextContents();
@@ -795,8 +811,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     expect(options).toContain("15 minutes");
     expect(options).toContain("30 minutes");
 
-    const mailSectionDiv = mailSection.locator("..");
-    await mailSectionDiv.screenshot({
+    await mailPanel.screenshot({
       path: path.join(SCREENSHOTS_DIR, "mail-test-16.png"),
     });
   });
@@ -806,13 +821,13 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
     await clickEmailRow(page, 0);
 
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
 
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
@@ -861,12 +876,12 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn.click();
     await waitForEmailList(page);
 
     await clickEmailRow(page, 0);
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane = page.getByTestId("email-reader-content");
     await expect(readerPane).toBeVisible({ timeout: 5000 });
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await replyBtn.click();
@@ -892,13 +907,13 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForAccount(page);
 
-    const inboxBtn2 = page.locator("button").filter({ hasText: "INBOX" }).first();
+    const inboxBtn2 = page.getByRole("button", { name: /INBOX/ }).first();
     await inboxBtn2.click();
     await waitForEmailList(page);
 
     await clickEmailRow(page, 0);
     await page.waitForTimeout(500);
-    const readerPane2 = page.locator("div.min-w-\\[400px\\]").first();
+    const readerPane2 = page.getByTestId("email-reader-content");
     await expect(readerPane2).toBeVisible({ timeout: 5000 });
     const replyBtn2 = readerPane2.getByRole("button", { name: "Reply" }).first();
     await replyBtn2.click();
@@ -919,17 +934,16 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const composeBtn = page.locator("button").filter({ hasText: "Compose" }).first();
+    const composeBtn = page.getByRole("button", { name: "Compose", exact: true });
     await expect(composeBtn).toBeVisible();
     await composeBtn.click();
     await page.waitForTimeout(1000);
 
-    const overlayPanel = page.locator("div.fixed.inset-0.z-50").first();
+    const overlayPanel = page.getByRole("dialog", { name: "Compose" });
     await expect(overlayPanel).toBeVisible({ timeout: 5000 });
 
-    const maxW2xl = page.locator(".max-w-2xl");
-    const maxW2xlCount = await maxW2xl.count();
-    expect(maxW2xlCount).toBe(0);
+    const maxWidth = await overlayPanel.evaluate((element) => getComputedStyle(element).maxWidth);
+    expect(maxWidth).toBe("none");
 
     const panelBox = await overlayPanel.boundingBox();
     expect(panelBox).not.toBeNull();
@@ -946,7 +960,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await gotoMail(page);
     await waitForAccount(page);
 
-    const composeBtn = page.locator("button").filter({ hasText: "Compose" }).first();
+    const composeBtn = page.getByRole("button", { name: "Compose", exact: true });
     await expect(composeBtn).toBeVisible();
     await composeBtn.click();
     await page.waitForTimeout(1000);

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { logger } from "../logger.js";
-import { getGlobalProject } from "./projects.js";
+import { getCanonicalGlobalProject } from "./projects.js";
 import * as vault from "./vault.js";
 
 export const OAUTH_CLIENT_SECRET_KEYS = [
@@ -45,7 +45,7 @@ export function isOAuthClientSecretKey(value: unknown): value is OAuthClientSecr
  */
 function isActiveGlobalProjectId(projectId: string): boolean {
   try {
-    return getGlobalProject()?.id === projectId;
+    return getCanonicalGlobalProject()?.id === projectId;
   } catch {
     // An ambiguous or unavailable global project is an integrity failure. The
     // caller must fail closed instead of selecting a project by convention.
@@ -277,7 +277,7 @@ export function migrateLegacyOAuthClientSecrets(projectId: string): OAuthClientS
  */
 export function migrateLegacyOAuthClientSecretsForActiveGlobalProject(): OAuthClientSecretLifecycleMigration {
   try {
-    const globalProject = getGlobalProject();
+    const globalProject = getCanonicalGlobalProject();
     if (!globalProject) {
       logger.warn("protected-settings", "OAuth client-secret migration skipped because no active global project is available");
       return { status: "no_active_global", results: [] };

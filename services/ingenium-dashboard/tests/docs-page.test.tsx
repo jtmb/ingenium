@@ -45,7 +45,28 @@ vi.mock("../src/app/docs/components/DocsShell", () => ({
 }));
 
 vi.mock("../src/app/docs/components/DocsEditor", () => ({
-  default: () => <div data-testid="docs-editor">Editor</div>,
+  default: ({ onSave }: { onSave: (content: string) => Promise<void> }) => {
+    const [status, setStatus] = React.useState("");
+    return (
+      <div data-testid="docs-editor">
+        Editor
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await onSave("editor content");
+              setStatus("saved");
+            } catch {
+              setStatus("failed");
+            }
+          }}
+        >
+          Save document
+        </button>
+        {status && <span>{status}</span>}
+      </div>
+    );
+  },
 }));
 
 vi.mock("../src/app/components/Overlay", () => ({
@@ -175,5 +196,33 @@ describe("DocsPage empty workspace heading", () => {
     expect(screen.getByRole("dialog", { name: "Create Task" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Title" })).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("rethrows a page update failure so the editor keeps its draft", async () => {
+    mocks.searchParams = "space=1&page=42";
+    mocks.listSpaces.mockResolvedValue({ data: [{ id: 1, name: "Docs" }] });
+    mocks.getPage.mockResolvedValue({
+      data: {
+        id: 42,
+        spaceId: 1,
+        parentPageId: null,
+        title: "Save failure",
+        slug: "save-failure",
+        content: "Original",
+        revision: 7,
+        status: "draft",
+        sortOrder: 0,
+        isFavorite: 0,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    });
+    mocks.updatePage.mockRejectedValue(new Error("Update unavailable"));
+
+    render(<DocsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save document" }));
+
+    expect(await screen.findByText("failed")).toBeTruthy();
+    expect(mocks.updatePage).toHaveBeenCalledWith(42, { content: "editor content" }, 7);
   });
 });

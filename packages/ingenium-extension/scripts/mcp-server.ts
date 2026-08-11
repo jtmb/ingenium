@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiRequestHeaders } from "../api-auth.js";
-import { resolveExtensionProject } from "../project-resolver.js";
+import { ensureExtensionProject, resolveExtensionProject } from "../project-resolver.js";
 
 export type McpLauncherPreflight =
   | { ok: true; project: string }
@@ -12,6 +12,8 @@ export type McpLauncherPreflight =
 export interface McpLauncherOptions {
   /** Injectable only so the preflight-to-transport environment handoff is testable. */
   importTransport?: (transportUrl: URL) => Promise<unknown>;
+  /** Injectable only to verify launcher-owned project provisioning. */
+  ensureProject?: (worktree: string, apiBase: string, project: string) => Promise<string>;
 }
 
 const MISSING_TOKEN_MESSAGE = "Ingenium MCP could not read a protected API token. Run scripts/bootstrap-local-secrets.sh for local development or configure INGENIUM_API_TOKEN_FILE.";
@@ -74,6 +76,13 @@ export async function runMcpLauncher(
     // Preserve the validated preflight result rather than repeating resolution
     // after its dynamic import has started.
     process.env.INGENIUM_PROJECT = preflight.project;
+    const ensureProject = options.ensureProject ?? ((resolvedWorktree: string, apiBase: string, project: string) =>
+      ensureExtensionProject(resolvedWorktree, apiBase, project));
+    await ensureProject(
+      resolve(worktree),
+      process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1",
+      preflight.project,
+    );
     const importTransport = options.importTransport ?? ((transportUrl: URL) => import(transportUrl.href));
     await importTransport(getMcpTransportUrl());
     return 0;

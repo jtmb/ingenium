@@ -3,8 +3,32 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-const { getAccount, storeCredentials, stopAccountWorker, startEngine } = vi.hoisted(() => ({
+const {
+  addAccount,
+  connectAccount,
+  createAccountWithCredentials,
+  createTransport,
+  getAccount,
+  getCredentials,
+  normalizeEmailAccountEndpoints,
+  startEngine,
+  stopAccountWorker,
+  storeAccount,
+  storeCredentials,
+} = vi.hoisted(() => ({
+  addAccount: vi.fn(),
+  connectAccount: vi.fn(),
+  createAccountWithCredentials: vi.fn(),
+  createTransport: vi.fn(),
   getAccount: vi.fn(),
+  getCredentials: vi.fn(),
+  normalizeEmailAccountEndpoints: vi.fn((provider: string, endpoints: Record<string, unknown>) => {
+    if (provider !== "custom" && Object.values(endpoints).some((value) => value !== undefined)) {
+      throw new Error("fixed provider endpoint override");
+    }
+    return endpoints;
+  }),
+  storeAccount: vi.fn(),
   storeCredentials: vi.fn(),
   stopAccountWorker: vi.fn(),
   startEngine: vi.fn(),
@@ -19,7 +43,14 @@ vi.mock("ingenium-core", () => ({
 
 vi.mock("ingenium-email", () => ({
   getGlobalProjectId: vi.fn(() => "global-project"),
+  addAccount,
+  connectAccount,
+  createAccountWithCredentials,
+  createTransport,
   getAccount,
+  getCredentials,
+  normalizeEmailAccountEndpoints,
+  storeAccount,
   storeCredentials,
   stopAccountWorker,
   startEngine,
@@ -192,6 +223,171 @@ describe("PATCH /emails/accounts/:id/credentials", () => {
     expect(bodyJson).not.toContain("sensitive-secret");
     expect(bodyJson).not.toContain("Encryption");
     expect(stopAccountWorker).not.toHaveBeenCalled();
+    expect(startEngine).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /emails/accounts/:id", () => {
+  it("persists edited manual connection metadata", async () => {
+    const account = {
+      id: "manual-metadata",
+      email: "manual@example.com",
+      name: "Manual",
+      provider: "custom",
+      authType: "app_password",
+      imapHost: "imap.old.example.com",
+      imapPort: 993,
+      smtpHost: "smtp.old.example.com",
+      smtpPort: 465,
+    };
+    getAccount.mockReturnValue(account);
+
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts/manual-metadata`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        imapHost: "imap.new.example.com",
+        imapPort: 143,
+        smtpHost: "smtp.new.example.com",
+        smtpPort: 587,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        ...account,
+        imapHost: "imap.new.example.com",
+        imapPort: 143,
+        smtpHost: "smtp.new.example.com",
+        smtpPort: 587,
+      },
+    });
+    expect(storeAccount).toHaveBeenCalledWith(account);
+  });
+
+  it("rejects invalid connection metadata without persisting it", async () => {
+    getAccount.mockReturnValue({ id: "manual-invalid", email: "manual@example.com", provider: "custom", authType: "app_password" });
+
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts/manual-invalid`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imapPort: 0 }),
+    });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "VALIDATION_ERROR", message: "Account metadata is invalid" },
+    });
+    expect(storeAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects a fixed-provider redirect before credential, transport, or persistence side effects", async () => {
+    const account = {
+      id: "fixed-redirect",
+      email: "fixed@example.com",
+      name: "Fixed",
+      provider: "gmail",
+      authType: "app_password",
+      connected: true,
+    };
+    getAccount.mockReturnValue(account);
+    const before = { ...account };
+
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts/fixed-redirect`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        imapHost: "imap.attacker.example",
+        imapPort: 993,
+        smtpHost: "smtp.attacker.example",
+        smtpPort: 587,
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "VALIDATION_ERROR", message: "Endpoint overrides are only supported for custom providers" },
+    });
+    expect(normalizeEmailAccountEndpoints).toHaveBeenCalledWith("gmail", {
+      imapHost: "imap.attacker.example",
+      imapPort: 993,
+      smtpHost: "smtp.attacker.example",
+      smtpPort: 587,
+    });
+    expect(account).toEqual(before);
+    expect(storeAccount).not.toHaveBeenCalled();
+    expect(getCredentials).not.toHaveBeenCalled();
+    expect(connectAccount).not.toHaveBeenCalled();
+    expect(createTransport).not.toHaveBeenCalled();
+    expect(startEngine).not.toHaveBeenCalled();
+  });
+
+  it("rejects fixed-provider canonical endpoint overrides", async () => {
+    getAccount.mockReturnValue({
+      id: "fixed-canonical",
+      email: "canonical@example.com",
+      name: "Canonical",
+      provider: "gmail",
+      authType: "oauth2",
+      connected: false,
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts/fixed-canonical`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imapHost: "imap.gmail.com", imapPort: 993 }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(storeAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects a provider-switch payload rather than applying its endpoint fields", async () => {
+    getAccount.mockReturnValue({
+      id: "fixed-switch",
+      email: "switch@example.com",
+      name: "Switch",
+      provider: "gmail",
+      authType: "app_password",
+      connected: false,
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts/fixed-switch`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "custom", imapHost: "imap.attacker.example" }),
+    });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "VALIDATION_ERROR", message: "provider cannot be changed after account creation" },
+    });
+    expect(storeAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects fixed-provider endpoint overrides on account creation before encryption or persistence", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/emails/accounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "create-fixed@example.com",
+        provider: "gmail",
+        authType: "app_password",
+        appPassword: "secret",
+        imapHost: "imap.gmail.com",
+        smtpHost: "smtp.gmail.com",
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "VALIDATION_ERROR", message: "Endpoint overrides are only supported for custom providers" },
+    });
+    expect(createAccountWithCredentials).not.toHaveBeenCalled();
+    expect(addAccount).not.toHaveBeenCalled();
+    expect(connectAccount).not.toHaveBeenCalled();
+    expect(createTransport).not.toHaveBeenCalled();
     expect(startEngine).not.toHaveBeenCalled();
   });
 });

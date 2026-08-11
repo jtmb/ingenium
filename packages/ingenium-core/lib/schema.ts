@@ -74,11 +74,29 @@ export interface SkillLineage {
   updated_at: string;
 }
 
+export const SKILL_PROPOSAL_STATUSES = [
+  "draft",
+  "pending",
+  "rejected",
+  "applied",
+  "rolled_back",
+  "stale",
+] as const;
+export type SkillProposalStatus = typeof SKILL_PROPOSAL_STATUSES[number];
+
+export const SKILL_PROPOSAL_PAGE_VIEWS = ["open", "history"] as const;
+export type SkillProposalPageView = typeof SKILL_PROPOSAL_PAGE_VIEWS[number];
+
+export const SKILL_PROPOSAL_PAGE_CURSOR_VERSION = 1 as const;
+export const SKILL_PROPOSAL_RETENTION_INDEX = "idx_skill_proposals_project_status_created_id";
+export const SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER = "skill_proposals_retain_before_delete";
+export const SKILL_PROPOSAL_RETENTION_DELETE_ERROR = "skill proposals are retained";
+
 /** A governance proposal for a skill mutation: create, update, merge, or archive. */
 export interface SkillProposal {
   id: string;
   project_id: string;
-  status: "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale";
+  status: SkillProposalStatus;
   proposal_type: "create" | "update" | "merge" | "archive";
   target_skill_id?: string | null;
   target_name: string;
@@ -104,6 +122,46 @@ export interface SkillProposal {
   reviewed_at?: string | null;
   applied_at?: string | null;
   rolled_back_at?: string | null;
+}
+
+/** Opaque versioned anchor for proposal keyset pagination. */
+export interface SkillProposalPageCursor {
+  v: typeof SKILL_PROPOSAL_PAGE_CURSOR_VERSION;
+  createdAt: string;
+  id: string;
+}
+
+/** Bounded proposal-list fields that intentionally exclude payload and review text. */
+export interface SkillProposalSummary {
+  id: string;
+  status: SkillProposalStatus;
+  proposal_type: SkillProposal["proposal_type"];
+  target_name: string;
+  source_name: string | null;
+  quality_score: number;
+  novelty_score: number;
+  created_at: string;
+}
+
+export interface SkillProposalPage {
+  data: SkillProposalSummary[];
+  pagination: {
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+
+export interface SkillProposalCounts {
+  open: number;
+  history: number;
+  byStatus: {
+    draft: number;
+    pending: number;
+    stale: number;
+    rejected: number;
+    applied: number;
+    rolledBack: number;
+  };
 }
 
 /** A kanban task with sub-tasking, scheduling, and time-tracking support. */
@@ -968,6 +1026,57 @@ export interface Observation {
   session_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+export const SYNTHESIS_BATCH_STAGES = [
+  "created",
+  "traits_applied",
+  "proposals_applied",
+  "complete",
+] as const;
+export type SynthesisBatchStage = typeof SYNTHESIS_BATCH_STAGES[number];
+
+/** Durable ownership and phase state for a bounded set of observations. */
+export interface SynthesisBatch {
+  id: string;
+  project_id: string;
+  stage: SynthesisBatchStage;
+  observation_count: number;
+  observation_ids: number[];
+  owner_token: string | null;
+  lease_expires_at: string | null;
+  proposal_plan: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  error_count: number;
+  revision: number;
+  traits_applied_at: string | null;
+  proposals_applied_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SynthesisBatchLeaseState = "available" | "owned";
+
+export interface IncompleteSynthesisBatchStatus {
+  stage: Exclude<SynthesisBatchStage, "complete">;
+  observationCount: number;
+  hasStoredProposalPlan: boolean;
+  errorCount: number;
+  lastErrorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  leaseState: SynthesisBatchLeaseState;
+}
+
+export interface SynthesisStatus {
+  total_observations: number;
+  pending_count: number;
+  processed_count: number;
+  trait_count: number;
+  last_synthesis_at: string | null;
+  incompleteBatch: IncompleteSynthesisBatchStatus | null;
 }
 
 /** A consolidated personality trait derived from observations by the synthesis pipeline. Confidence reflects corroboration strength. */

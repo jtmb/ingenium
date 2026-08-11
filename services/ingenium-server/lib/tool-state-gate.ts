@@ -1,3 +1,8 @@
+import {
+  ApiHttpError,
+  ApiUnavailableError,
+} from "./client.js";
+
 export const TOOL_STATE_GATE_CODES = {
   project: "PROJECT_IDENTITY_REQUIRED",
   disabled: "TOOL_DISABLED",
@@ -10,6 +15,13 @@ export interface ProjectStateAttestation {
   project: string;
   project_id: string;
 }
+
+export type McpErrorResult = {
+  isError: true;
+  content: [{ type: "text"; text: string }];
+};
+
+const MAX_MCP_API_ERROR_TEXT_BYTES = 512;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -56,11 +68,29 @@ export class ProjectStateAttestor {
   }
 }
 
-export function toolStateError(code: string, message: string) {
+export function toolStateError(code: string, message: string): McpErrorResult {
   return {
     isError: true as const,
     content: [{ type: "text" as const, text: JSON.stringify({ error: { code, message } }) }],
   };
+}
+
+function apiHttpErrorResult(error: ApiHttpError): McpErrorResult {
+  const text = JSON.stringify({
+    error: {
+      status: error.status,
+      code: error.code,
+      message: error.message,
+    },
+  });
+  if (Buffer.byteLength(text, "utf8") <= MAX_MCP_API_ERROR_TEXT_BYTES) {
+    return { isError: true, content: [{ type: "text", text }] };
+  }
+  return toolStateError("API_REQUEST_FAILED", "The API request failed.");
+}
+
+function apiUnavailableResult(): McpErrorResult {
+  return toolStateError("API_UNAVAILABLE", "The API is unavailable.");
 }
 
 /** Verify the required MCP-102 project attestation without changing bindings. */
@@ -77,16 +107,44 @@ export function stateGatedHandler(
   missingProjectMessage = "A valid explicit project identity is required.",
 ) {
   return async (args: any) => {
-    const project = resolveProject(args);
-    if (!project) return toolStateError(TOOL_STATE_GATE_CODES.project, missingProjectMessage);
+    try {
+      const project = resolveProject(args);
+      if (!project) return toolStateError(TOOL_STATE_GATE_CODES.project, missingProjectMessage);
 
-    const state = await checkState(toolName, project);
-    if (state === "enabled") return handler(args);
-    return toolStateError(
-      state === "disabled" ? TOOL_STATE_GATE_CODES.disabled : TOOL_STATE_GATE_CODES.unavailable,
-      state === "disabled"
-        ? "This tool is disabled for the project."
-        : "The tool state could not be verified.",
-    );
+      const state = await checkState(toolName, project);
+      if (state === "enabled") return await handler(args);
+      return toolStateError(
+        state === "disabled" ? TOOL_STATE_GATE_CODES.disabled : TOOL_STATE_GATE_CODES.unavailable,
+        state === "disabled"
+          ? "This tool is disabled for the project."
+          : "The tool state could not be verified.",
+      );
+    } catch (error) {
+      if (error instanceof ApiHttpError) return apiHttpErrorResult(error);
+      if (error instanceof ApiUnavailableError) return apiUnavailableResult();
+      throw error;
+    }
+  };
+}
+
+/** Bind filesystem-backed operations and their state check to the launcher project. */
+export function launcherBoundStateGatedHandler(
+  toolName: string,
+  launcherProject: string | null,
+  checkState: (toolName: string, project: string) => Promise<ToolState>,
+  handler: (args: any) => Promise<any>,
+) {
+  const stateChecked = stateGatedHandler(
+    toolName,
+    () => launcherProject,
+    checkState,
+    (args) => handler({ ...args, project: launcherProject }),
+    "A valid launcher project identity is required.",
+  );
+  return async (args: any) => {
+    if (!launcherProject || args?.project !== launcherProject) {
+      return toolStateError(TOOL_STATE_GATE_CODES.project, "The requested project does not match the launcher binding.");
+    }
+    return stateChecked(args);
   };
 }

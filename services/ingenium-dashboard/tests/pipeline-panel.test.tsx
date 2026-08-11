@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 
 const { getProviderConfigs, saveProviderConfigs } = vi.hoisted(() => ({
@@ -7,11 +7,12 @@ const { getProviderConfigs, saveProviderConfigs } = vi.hoisted(() => ({
   saveProviderConfigs: vi.fn(),
 }));
 
-const { listProviders, listIntegrations, connectKey, beginOAuth, disconnect } = vi.hoisted(() => ({
+const { listProviders, listIntegrations, connectKey, beginOAuth, cancelAttempt, disconnect } = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listIntegrations: vi.fn(),
   connectKey: vi.fn(),
   beginOAuth: vi.fn(),
+  cancelAttempt: vi.fn(),
   disconnect: vi.fn(),
 }));
 
@@ -35,7 +36,7 @@ vi.mock("../src/lib/opencode", () => ({
       beginOAuth,
       attemptStatus: vi.fn(),
       completeAttempt: vi.fn(),
-      cancelAttempt: vi.fn(),
+      cancelAttempt,
     },
     auth: { disconnect },
   },
@@ -46,6 +47,7 @@ vi.mock("../src/lib/ProjectContext", () => ({
 }));
 
 import PipelinePanel from "../src/app/components/settings/panels/PipelinePanel";
+import Overlay from "../src/app/components/Overlay";
 
 const providerFixture = [
   {
@@ -111,6 +113,7 @@ beforeEach(() => {
     ],
   });
   connectKey.mockResolvedValue(undefined);
+  cancelAttempt.mockResolvedValue(undefined);
   disconnect.mockResolvedValue(undefined);
 });
 
@@ -304,5 +307,55 @@ describe("provider block panel", () => {
 
     expect(screen.getByRole("dialog", { name: "Connect OpenAI" })).not.toBeNull();
     expect(screen.getByRole("option", { name: "ChatGPT Pro/Plus (browser)" })).not.toBeNull();
+  });
+
+  it("cancels OAuth when the nested connection dialog closes with Escape", async () => {
+    beginOAuth.mockResolvedValue({
+      data: {
+        attemptID: "attempt-1",
+        mode: "code",
+        url: "https://example.test/oauth",
+      },
+    });
+    const outerOnClose = vi.fn();
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    render(
+      <Overlay isOpen onClose={outerOnClose} title="Settings">
+        <PipelinePanel />
+      </Overlay>,
+    );
+
+    const openAi = await screen.findByText("OpenAI", { selector: "div.font-medium" });
+    fireEvent.click(openAi.closest("div.flex.items-center.justify-between")!.querySelector("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Continue in browser" }));
+    expect(await screen.findByLabelText("Authorization code")).not.toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await vi.waitFor(() => expect(cancelAttempt).toHaveBeenCalledWith("attempt-1"));
+    expect(outerOnClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Connect OpenAI" })).toBeNull();
+    windowOpen.mockRestore();
+  });
+
+  it("does not leave a new connection dialog disabled after cancelling an in-flight key connection", async () => {
+    let resolveConnect!: () => void;
+    connectKey.mockReturnValue(new Promise<void>((resolve) => { resolveConnect = resolve; }));
+    render(<PipelinePanel />);
+
+    const deepSeek = await screen.findByText("DeepSeek", { selector: "div.font-medium" });
+    fireEvent.click(deepSeek.closest("div.flex.items-center.justify-between")!.querySelector("button")!);
+    let dialog = screen.getByRole("dialog", { name: "Connect DeepSeek" });
+    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "key" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(deepSeek.closest("div.flex.items-center.justify-between")!.querySelector("button")!);
+    dialog = screen.getByRole("dialog", { name: "Connect DeepSeek" });
+    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "new-key" } });
+
+    expect((within(dialog).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false);
+    resolveConnect();
   });
 });

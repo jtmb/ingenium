@@ -6,6 +6,7 @@ import {
   encryptCredentialValue,
   getEmailEncryptionKeyFingerprint,
 } from "../lib/credential-crypto.js";
+import { createCoreEmailRuntime } from "./runtime-fixture.js";
 
 const TEST_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_KEY = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
@@ -32,6 +33,8 @@ async function createFixture(): Promise<Fixture> {
 
   const core = await import("ingenium-core");
   core.resetDbForTest();
+  const runtime = await import("../lib/runtime.js");
+  runtime.configureEmailRuntime(createCoreEmailRuntime(core));
   const accounts = await import("../lib/accounts.js");
   const global = core.projects.createProject("global-default", true);
 

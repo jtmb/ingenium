@@ -12,6 +12,7 @@ import {
 } from "../../../../lib/opencode";
 import SettingRow from "../SettingRow";
 import Select from "../../Select";
+import Overlay from "../../Overlay";
 
 /** Internal type that adds a stable draft ID for React keys and collapse/key-visibility state. */
 type DraftProvider = ManagedProviderConfig & { _draftId?: string };
@@ -92,6 +93,7 @@ export default function PipelinePanel() {
   const [oauthCode, setOauthCode] = useState("");
   const [connecting, setConnecting] = useState(false);
   const activeAttemptRef = useRef<string | null>(null);
+  const connectionSessionRef = useRef(0);
 
   const refreshNativeProviders = useCallback(async () => {
     setNativeLoading(true);
@@ -206,7 +208,8 @@ export default function PipelinePanel() {
     try {
       const providersToSave: ManagedProviderConfig[] = providers.map(
         (p) => {
-          const { _draftId: _unused, ...rest } = p;
+          const rest = { ...p };
+          delete rest._draftId;
           const roles = ["available", ...(p.id === primaryProviderId ? ["primary"] : []), ...(p.id === backupProviderId ? ["backup"] : [])];
           return { ...rest, roles } as ManagedProviderConfig;
         },
@@ -252,6 +255,7 @@ export default function PipelinePanel() {
   };
 
   const openConnect = (providerId: string) => {
+    connectionSessionRef.current += 1;
     const integration = integrations.find((candidate) => candidate.id === providerId);
     const methods = integration?.methods ?? [];
     const method = methods.find((candidate) => candidate.type === "oauth")
@@ -266,16 +270,25 @@ export default function PipelinePanel() {
     setStatus("");
   };
 
-  const closeConnect = async () => {
+  const closeConnect = () => {
+    connectionSessionRef.current += 1;
     const attemptID = activeAttemptRef.current;
     activeAttemptRef.current = null;
-    if (attemptID) await opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
     setConnectProviderId(null);
     setConnectMethod(null);
     setOauthAttempt(null);
     setConnectKey("");
     setOauthCode("");
+    setConnecting(false);
+    if (attemptID) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
   };
+
+  useEffect(() => () => {
+    const attemptID = activeAttemptRef.current;
+    activeAttemptRef.current = null;
+    connectionSessionRef.current += 1;
+    if (attemptID) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
+  }, []);
 
   const waitForOAuth = async (attempt: OpenCodeIntegrationAttempt) => {
     for (let count = 0; count < 60 && activeAttemptRef.current === attempt.attemptID; count += 1) {
@@ -291,12 +304,14 @@ export default function PipelinePanel() {
 
   const connectNativeProvider = async () => {
     if (!connectProviderId || !connectMethod) return;
+    const session = connectionSessionRef.current;
     setConnecting(true);
     setStatus("");
     try {
       if (connectMethod.type === "key") {
         await opencode.integrations.connectKey(connectProviderId, connectKey);
         await refreshNativeProviders();
+        if (connectionSessionRef.current !== session) return;
         setConnectProviderId(null);
         setConnectMethod(null);
         setConnectKey("");
@@ -305,32 +320,40 @@ export default function PipelinePanel() {
       }
       if (!connectMethod.id) throw new Error("This OAuth method is unavailable");
       const response = await opencode.integrations.beginOAuth(connectProviderId, connectMethod.id, connectInputs);
+      if (connectionSessionRef.current !== session) {
+        void opencode.integrations.cancelAttempt(response.data.attemptID).catch(() => undefined);
+        return;
+      }
       setOauthAttempt(response.data);
       activeAttemptRef.current = response.data.attemptID;
       window.open(response.data.url, "_blank", "noopener,noreferrer");
       setStatus("Complete authorization in the opened page. A direct link is available in this dialog.");
       if (response.data.mode === "auto") {
         void waitForOAuth(response.data).then(async (connected) => {
-          if (!connected) return;
+          if (!connected || connectionSessionRef.current !== session || activeAttemptRef.current !== response.data.attemptID) return;
           activeAttemptRef.current = null;
           await refreshNativeProviders();
+          if (connectionSessionRef.current !== session) return;
           setConnectProviderId(null);
           setConnectMethod(null);
           setOauthAttempt(null);
           setStatus("Provider connected. Models were discovered automatically.");
         }).catch((error: unknown) => {
+          if (connectionSessionRef.current !== session) return;
           setStatus(error instanceof Error ? error.message : "Provider connection failed");
         });
       }
     } catch (error: unknown) {
+      if (connectionSessionRef.current !== session) return;
       setStatus(error instanceof Error ? error.message : "Provider connection failed");
     } finally {
-      setConnecting(false);
+      if (connectionSessionRef.current === session) setConnecting(false);
     }
   };
 
   const finishOAuth = async () => {
     if (!oauthAttempt) return;
+    const session = connectionSessionRef.current;
     setConnecting(true);
     try {
       if (oauthAttempt.mode === "code") {
@@ -343,6 +366,7 @@ export default function PipelinePanel() {
         }
       }
       await refreshNativeProviders();
+      if (connectionSessionRef.current !== session) return;
       activeAttemptRef.current = null;
       setConnectProviderId(null);
       setConnectMethod(null);
@@ -350,9 +374,10 @@ export default function PipelinePanel() {
       setOauthCode("");
       setStatus("Provider connected. Models were discovered automatically.");
     } catch (error: unknown) {
+      if (connectionSessionRef.current !== session) return;
       setStatus(error instanceof Error ? error.message : "OAuth connection failed");
     } finally {
-      setConnecting(false);
+      if (connectionSessionRef.current === session) setConnecting(false);
     }
   };
 
@@ -665,16 +690,14 @@ export default function PipelinePanel() {
       </div>
 
       {connectProviderId && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`Connect ${selectedNativeProvider?.label ?? connectProviderId}`}>
-          <div className="w-full max-w-lg rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h4 className="text-base font-semibold text-[var(--color-text-primary)]">Connect {selectedNativeProvider?.label ?? connectProviderId}</h4>
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">Models will be loaded automatically from OpenCode.</p>
-              </div>
-              <button type="button" onClick={closeConnect} aria-label="Close provider connection" className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">×</button>
-            </div>
-
+        <Overlay
+          isOpen
+          onClose={closeConnect}
+          title={`Connect ${selectedNativeProvider?.label ?? connectProviderId}`}
+          subtitle="Models will be loaded automatically from OpenCode."
+          panelClassName="mt-8 mb-8 w-11/12 max-w-lg max-h-[90vh]"
+          bodyClassName="flex-1 overflow-y-auto px-5 py-5"
+        >
             {!oauthAttempt && (
               <div className="mt-5 space-y-4">
                 {actionableMethods.length > 1 && (
@@ -734,8 +757,7 @@ export default function PipelinePanel() {
                 )}
               </div>
             )}
-          </div>
-        </div>
+        </Overlay>
       )}
     </div>
   );

@@ -65,6 +65,22 @@ function sendExpectedRevisionValidation(res: import("express").Response): void {
   });
 }
 
+function hasValidJobTimeout(body: unknown): boolean {
+  if (!body || typeof body !== "object" || !Object.prototype.hasOwnProperty.call(body, "timeout_minutes")) {
+    return true;
+  }
+  return jobs.isValidJobTimeoutMinutes((body as Record<string, unknown>).timeout_minutes);
+}
+
+function sendJobTimeoutValidation(res: import("express").Response): void {
+  res.status(422).json({
+    error: {
+      code: "VALIDATION_ERROR",
+      message: `timeout_minutes must be an integer between ${jobs.MIN_JOB_TIMEOUT_MINUTES} and ${jobs.MAX_JOB_TIMEOUT_MINUTES}`,
+    },
+  });
+}
+
 function sendRevisionConflict(res: import("express").Response, currentRevision: number): void {
   res.status(409).json({
     error: {
@@ -121,6 +137,10 @@ jobsRouter.post("/", (req, res) => {
     sendVaultItemIdsValidation(res);
     return;
   }
+  if (!hasValidJobTimeout(body)) {
+    sendJobTimeoutValidation(res);
+    return;
+  }
 
   try {
     const job = jobs.createJob(
@@ -143,6 +163,10 @@ jobsRouter.post("/", (req, res) => {
     if (error instanceof jobs.JobVaultReferenceError) {
       if (error.code === "INVALID_VAULT_ITEM_IDS") sendVaultItemIdsValidation(res);
       else sendVaultReferenceNotFound(res);
+      return;
+    }
+    if (error instanceof jobs.JobTimeoutError) {
+      sendJobTimeoutValidation(res);
       return;
     }
     throw error;
@@ -353,6 +377,10 @@ jobsRouter.patch("/:id", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "No valid fields to update" } });
     return;
   }
+  if (!hasValidJobTimeout(body)) {
+    sendJobTimeoutValidation(res);
+    return;
+  }
 
   const vaultItemIds = parseVaultItemIds(body);
   if (vaultItemIds === null) {
@@ -372,6 +400,10 @@ jobsRouter.patch("/:id", (req, res) => {
     if (error instanceof jobs.JobVaultReferenceError) {
       if (error.code === "INVALID_VAULT_ITEM_IDS") sendVaultItemIdsValidation(res);
       else sendVaultReferenceNotFound(res);
+      return;
+    }
+    if (error instanceof jobs.JobTimeoutError) {
+      sendJobTimeoutValidation(res);
       return;
     }
     throw error;

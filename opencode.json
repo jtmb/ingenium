@@ -13,7 +13,7 @@
   "agent": {
     "plan": { "permission": { "question": "allow" } },
     "explore": { "model": "openai/gpt-5.6-luna", "variant": "max" },
-    "browser-agent": { "model": "deepseek/deepseek-v4-flash" },
+    "browser-agent": { "model": "openai/gpt-5.6-luna", "variant": "max" },
     "ingenium-docs": { "model": "openai/gpt-5.6-luna", "variant": "max" },
     "ingenium-qa": { "model": "openai/gpt-5.6-terra", "variant": "high" },
     "ingenium-qa-vision": { "model": "openai/gpt-5.6-luna", "variant": "max" },

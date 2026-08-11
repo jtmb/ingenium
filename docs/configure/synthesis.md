@@ -26,6 +26,34 @@ To enable Phase 2 (LLM-driven skill synthesis):
 
 > **Vault-backed credential storage**: API keys are stored in the encrypted vault (`vault_items` table with AES-256-GCM), never in the plaintext settings table. On `GET` responses, only `apiKeySet: boolean` is returned — the actual key is never exposed. Empty or omitted `apiKey` fields preserve the saved credential. Legacy `synthesis_api_key` / `synthesis_backup_api_key` settings are migrated into the vault on first read and then deleted from settings.
 
+### Server-global provider ownership and recovery
+
+Managed provider configuration used by server-owned features resolves against the
+canonical `global-default` project. The selected dashboard or external worktree
+project does not redirect provider metadata or credentials to another namespace.
+When recovery finds stranded compatible mail/provider records in other project
+namespaces, it moves only unambiguous, non-conflicting records. Existing
+destination values are never overwritten; conflicts remain for operator review
+and are reported only as content-free status/counts. Credential values and
+ciphertext are never returned or included in recovery diagnostics.
+
+Native OpenCode provider API keys use the same protected vault-backed persistence
+before being synchronized through OpenCode's auth API. The key is not written to
+OpenCode configuration files or exposed in API responses. When the protected
+store is available during startup/unseal recovery, durable API-key records can
+rehydrate OpenCode auth state. Native OAuth-only auth has no durable API-key copy;
+if OpenCode auth storage is lost and no durable credential exists, that connection
+remains unrecoverable by Ingenium and must be authorized again.
+
+Native API-key connect and disconnect operations are compensating sagas. Connect
+stores the desired encrypted vault credential before applying it to OpenCode; if
+the OpenCode operation fails, Ingenium restores the previous vault/OpenCode state
+or reports the failure as recoverable. Disconnect removes the OpenCode auth state
+before deleting the vault credential; if deletion fails, the saved credential and
+OpenCode auth are restored or the operation is reported as recoverable. The API
+returns only fixed status/error data, never the key or compensation details that
+could disclose it.
+
 ## Provider Roles
 
 Each managed provider block has a **roles array** (`"available" | "primary" | "backup"`) that controls how the provider is used:
@@ -209,5 +237,5 @@ settings or environment variables.
 ## Related Docs
 - [Self-Learning Pipeline](../concepts/self-learning.md) — Full pipeline reference (Phase 1, Phase 2, architecture, DB schema)
 - [API Reference](../develop/api.md#settings--llm-config) — LLM config endpoint documentation
-- [Personality Traits](personality.md) — Personality traits
+- [Personality Traits](../concepts/self-learning.md#personality_traits-table) — Personality traits
 - [Jobs](../operations/jobs.md) — Job scheduling (magic-wand feature)

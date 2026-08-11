@@ -12,6 +12,11 @@ const SEARCH_EMAIL = {
 vi.mock("../src/lib/api", () => ({
   dashboardFetch: (...args: Parameters<typeof fetch>) => fetch(...args),
   getApiBase: () => "/api/v1",
+  api: {
+    projects: {
+      list: () => fetch("/api/v1/projects").then((response) => response.json()),
+    },
+  },
 }));
 
 vi.mock("../src/app/mail/components/FolderSidebar", () => ({ default: () => <aside /> }));

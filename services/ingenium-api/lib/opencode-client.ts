@@ -22,6 +22,8 @@ export interface OpenCodeErrorShape {
   error: {
     message: string;
     code: string;
+    /** Upstream HTTP status for server-side recovery decisions; never serialized. */
+    status?: number;
   };
 }
 
@@ -539,11 +541,11 @@ export async function request<T>(
         sanitizedUpstreamError ? { status: response.status } : { status: response.status, code: errCode },
       );
 
-      return {
-        error: sanitizedUpstreamError
-          ? sanitizedUpstreamError
-          : { message: errMsg, code: errCode },
-      };
+      const error: OpenCodeErrorShape["error"] = sanitizedUpstreamError
+        ? { ...sanitizedUpstreamError }
+        : { message: errMsg, code: errCode };
+      Object.defineProperty(error, "status", { value: response.status, enumerable: false });
+      return { error };
     }
 
     // Non-JSON responses (shouldn't happen except maybe for 204/205)

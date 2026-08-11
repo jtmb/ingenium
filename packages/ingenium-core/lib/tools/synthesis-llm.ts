@@ -4,6 +4,7 @@ import { getGlobalProject } from "./projects.js";
 import { logger } from "../logger.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
 import { tryParseJSON } from "./llm-json.js";
+import { isSafeSkillName } from "./skills.js";
 
 /**
  * Structured response from the LLM synthesis engine.
@@ -30,6 +31,7 @@ export interface SynthesisLLMResult {
   }>;
   insights: string[];
   summary: string;
+  unavailable?: boolean;
 }
 
 /**
@@ -178,25 +180,34 @@ function validateResponse(raw: any): SynthesisLLMResult {
 
   if (Array.isArray(raw.skills_to_create)) {
     result.skills_to_create = raw.skills_to_create.slice(0, 5).map((s: any) => {
-      let name = String(s.name || "").slice(0, 64).replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-      const item: any = {
+      if (!s || typeof s !== "object") return null;
+      const rawName = typeof s.name === "string" ? s.name : "";
+      const name = rawName.trim().length > 0
+        && rawName.length <= 64
+        && isSafeSkillName(rawName)
+        && /[a-z0-9]/i.test(rawName)
+        ? rawName.replace(/[^a-z0-9-]/gi, "-").toLowerCase()
+        : "";
+      const description = typeof s.description === "string" ? s.description.slice(0, 200) : "";
+      const content = typeof s.content === "string" ? s.content : "";
+      if (!name || !description.trim() || !content.trim()) return null;
+      const item: SynthesisLLMResult["skills_to_create"][number] = {
         name,
-        description: String(s.description || "").slice(0, 200),
-        content: String(s.content || ""),
+        description,
+        content,
         tags: s.tags ? String(s.tags) : undefined,
       };
-      // Handle reference_files for split-skill format
       if (s.reference_files && Array.isArray(s.reference_files)) {
         item.reference_files = s.reference_files
-          .filter((rf: any) => rf.path && rf.content && rf.path.startsWith("references/"))
-          .slice(0, 10)  // cap at 10 reference files per skill
+          .filter((rf: any) => typeof rf?.path === "string" && typeof rf?.content === "string" && rf.path.startsWith("references/"))
+          .slice(0, 10)
           .map((rf: any) => ({
-            path: rf.path.replace(/[^a-zA-Z0-9_\-/\.]/g, ""),  // sanitize path
-            content: rf.content.slice(0, 8000),  // cap content length
+            path: rf.path.replace(/[^a-zA-Z0-9_\-/\.]/g, ""),
+            content: rf.content.slice(0, 8000),
           }));
       }
       return item;
-    }).filter((s: { name: string; content: string }) => s.name && s.content);
+    }).filter((s: SynthesisLLMResult["skills_to_create"][number] | null): s is SynthesisLLMResult["skills_to_create"][number] => s !== null);
   }
 
   if (Array.isArray(raw.skills_to_update)) {
@@ -301,7 +312,7 @@ export async function callSynthesisLLM(
         signal,
       }, { allowPrivateNetwork, timeoutMs: 60_000 });
       if (!fallbackResponse.ok) {
-        return { skills_to_create: [], skills_to_update: [], insights: [], summary: `API error: ${fallbackResponse.status}` };
+        return { skills_to_create: [], skills_to_update: [], insights: [], summary: `API error: ${fallbackResponse.status}`, unavailable: true };
       }
       const fbJson = await fallbackResponse.json();
       const fbContent = fbJson.choices?.[0]?.message?.content || "{}";
@@ -318,7 +329,7 @@ export async function callSynthesisLLM(
       return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis was cancelled." };
     }
     logger.error("synthesis-llm", `LLM synthesis call failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
-    return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed" };
+    return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed", unavailable: true };
   }
 }
 
@@ -361,7 +372,7 @@ export async function callSynthesisLLMWithExecutor(
       });
     }
   }
-  return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis unavailable" };
+  return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis unavailable", unavailable: true };
 }
 
 // ── LLM Config Resolution ──────────────────────────────────

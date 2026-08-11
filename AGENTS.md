@@ -73,7 +73,9 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 
 `development-conventions` `devops-conventions` `engineering-workflow` `local-models` `mcp-tooling` `skill-maintenance`
 
-> 💡 Skills are synced between the DB and `.opencode/skills/` via the `/sync-skills` command or scheduled sync.
+> 🔴 Git is authoritative for external worktrees. Automatic synchronization uses
+> the resource-sync plugin through MCP and the authenticated API, not direct DB
+> or mutation-REST access.
 
 ### 🔴 MANDATORY — Self-Improvement
 
@@ -82,10 +84,13 @@ After ANY code change, you MUST run:
 | Command | Action |
 |---------|--------|
 | `/synthesize` | Triggers synthesis pipeline to process pending observations into traits + skills |
-| `/sync-skills` | Bidirectional disk↔DB skill sync |
 | `ingenium_observe` | Log observations about changes (manual only for exceptional cases — extraction is automatic) |
 
-> 🔴 **Observation is now automatic** via the server-side extraction engine. The client-side auto-observer plugin is only a thin trigger (`POST /api/v1/extraction/run`). Manual `ingenium_observe` calls should only be used for exceptional cases. See [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md).
+The deleted legacy skill-sync command must not be recreated, and agents must not
+run `ingenium_skill_sync*` after edits. Administrative skill CRUD/sync tools are
+repair/import operations only.
+
+> 🔴 **Observation is now automatic** via the server-side extraction engine. Configured extension plugins call Ingenium MCP; MCP invokes the authenticated API, while the server-side extraction engine may read OpenCode messages through API-owned internals. Manual `ingenium_observe` calls should only be used for exceptional cases. See [docs/concepts/self-learning.md](docs/concepts/self-learning.md).
 
 ---
 
@@ -340,6 +345,23 @@ grep -r "better-sqlite3\|\.db\|sqlite" services/ingenium-dashboard/  # must retu
 
 Move any DB logic to the API layer immediately.
 
+### Git-authoritative external-worktree synchronization
+
+Automatic external-worktree synchronization follows exactly:
+
+```text
+Git worktree files → @ingenium/extension resource-sync plugin → configured
+Ingenium MCP stdio transport → authenticated Ingenium API → database
+```
+
+Git is authoritative. Extension plugins, CLIs, and agents never read or write
+the database and never call mutation REST endpoints directly. `ingenium-core` is
+the API's internal DB implementation and cannot be imported by runtime
+consumers. The dedicated repository-sync MCP operation is the supported
+projection entry point. Plugin/config changes require an extension rebuild and
+OpenCode restart; ordinary repository content is consumed by the next sync
+event.
+
 ### Database Migrations
 
 Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` files. Full migration table, anti-corruption guard, and repair instructions: [docs/reference/database-migrations.md](docs/reference/database-migrations.md).
@@ -519,7 +541,7 @@ The self-learning pipeline captures observations about user behavior, consolidat
 
 > 🔴 **Observe user behavior, NOT implementation.** Observations track user preferences, corrections, and patterns — not what code was written. Implementation activity belongs in pipeline events and git commits. Observation is automatic via the server-side extraction engine; manual `ingenium_observe` calls are only for exceptional cases.
 
-**Full pipeline reference**: [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md) — covers extraction engine, trait consolidation (Phase 1), skill synthesis (Phase 2), confidence model, pipeline observability timeline, and all observation/trait types.
+**Full pipeline reference**: [docs/concepts/self-learning.md](docs/concepts/self-learning.md) — covers extraction engine, trait consolidation (Phase 1), skill synthesis (Phase 2), confidence model, pipeline observability timeline, and all observation/trait types.
 
 **Key sections**:
 - Observation types: `correction`, `preference`, `pattern`, `insight`, `feedback`, `behavior`, `terminology`, `workflow`, `error`, `goal`
@@ -547,7 +569,6 @@ Commands are captured in the DB alongside skills, agents, and plugins:
 | Command | File | Purpose |
 |---------|------|---------|
 | `/synthesize` | `.opencode/commands/synthesize.md` | Trigger synthesis pipeline to process pending observations |
-| `/sync-skills` | `.opencode/commands/sync-skills.md` | Bidirectional disk↔DB skill sync |
 | `/init-project` | `.opencode/commands/init-project.md` | Preview or apply repository-authoritative docs, skills, agents, and plugins sync; supports `--docs-only` |
 | `/repo-context` | `.opencode/commands/repo-context.md` | Load project identity — reads `.opencode.json`, identifies workspace, and loads relevant context files |
 
@@ -570,9 +591,11 @@ For API endpoints and detailed MCP tool reference, see [docs/HOW-TO/settings.md]
 
 - **Plugin Auto-Config Sync**: Every plugin lifecycle operation MUST sync `.opencode/plugins/<file>.ts` on disk AND `opencode.json`'s `plugin` array.
 - **Plugin Source Auto-Populate**: If `sourceContent` is empty at creation, the API reads the file from disk. See [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md).
-- **🔴 Skill Sync Pattern**: Skills sync via the **Resource Sync Engine** (`packages/ingenium-extension/resource-sync.ts`) with SHA-256 hash manifest for conflict-aware bidirectional sync on `session.created` and `session.idle`. See [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md).
+- **🔴 Git-authoritative Resource Sync**: Git worktree files flow through `@ingenium/extension` resource-sync, configured MCP stdio, authenticated API, and then the database. Administrative skill CRUD/sync tools are repair/import operations only. See [docs/concepts/skill-system.md](docs/concepts/skill-system.md).
 - **🔴 Plugin/Config Restart Requirement**: When the sync engine detects changes to plugins or config (opencode.json), `restartRequired: true` is returned. OpenCode must be restarted for plugin array or config content changes to take effect. Skills, agents, and commands do not require a restart.
-- **Skill file_tree Format**: DB `file_tree` column stores JSON map of paths → content. `writeSkillToDisk()` writes SKILL.md + metadata.json + all files.
+- **Skill file_tree Format**: The API stores a JSON map of paths → content for
+  persistence and repair. Worktree authority remains Git and projection follows
+  the resource-sync/MCP/API path.
 - **Dashboard Styling**: Every service with a frontend must have a `STYLING-GUIDE.md`. All `<select>` elements use `hover:bg-gray-50 cursor-pointer`. See [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 - 🔴 **Auto-observer auto-registration**: Must be registered in DB plugins table + both opencode configs (project + global).
 
@@ -587,7 +610,7 @@ For quick reference, here are the non-negotiable rules from above:
 | 1 | Never commit API tokens to source | Header |
 | 2 | Verify every claim against source files | Header |
 | 3 | Load matching skills before any action | [Load Skills](#-mandatory--load-skills-before-acting) |
-| 4 | Run `/synthesize` + `/sync-skills` + `ingenium_observe` after code changes | [Self-Improvement](#-mandatory--self-improvement) |
+| 4 | Run `/synthesize` + `ingenium_observe` after code changes; never run `ingenium_skill_sync*` | [Self-Improvement](#-mandatory--self-improvement) |
 | 5 | Only `core` and `api` packages may import SQL libraries | [Database Isolation](#-mandatory--database-isolation) |
 | 6 | `checkpointAfterWrite()` must be OUTSIDE `execTransaction()` | [WAL Safety](#-wal-safety--checkpointafterwrite-outside-transaction) |
 | 7 | Parent-existence check before FK-constrained child table upserts | [Email FK Pattern](#-email-fk-defensive-pattern--parent-existence-check) |
@@ -602,6 +625,8 @@ For quick reference, here are the non-negotiable rules from above:
 | 16 | Plugin lifecycle MUST sync disk + `opencode.json` plugin array | [Plugin Conventions](#plugin--skill-conventions) |
 | 17 | Auto-observer registered in DB + both opencode configs | [Plugin Conventions](#plugin--skill-conventions) |
 | 18 | Agent model mappings live in `opencode.json` — not in Markdown profile frontmatter | [Agent Table](#agent-table) |
+| 19 | Git is authoritative; external sync is worktree → extension → MCP → API → DB | [Database Isolation](#-mandatory--database-isolation) |
+| 20 | Runtime consumers cannot import core or call mutation REST directly | [Database Isolation](#-mandatory--database-isolation) |
 | 19 | Never exceed 6 active subagents or 3 concurrent writers per phase; serialize conflicting writers | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 20 | Declare phase (active count, writers, territories, dependencies, verification) before dispatch | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 21 | Restart OpenCode for newly-added agent profiles to become invocable | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |

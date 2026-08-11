@@ -91,6 +91,12 @@ describe("default Playwright suite containment", () => {
     expect(config).not.toContain("import.meta.dirname");
   });
 
+  it("uses a CJS-compatible repository root in the manual config", () => {
+    const config = sourceFor("tests/playwright.manual.config.ts");
+    expect(config).toContain("resolve(__dirname, \"..\")");
+    expect(config).not.toContain("import.meta.dirname");
+  });
+
   it("resolves every Playwright output directory from the canonical repository root", () => {
     for (const file of PLAYWRIGHT_CONFIGS) {
       const config = sourceFor(file);

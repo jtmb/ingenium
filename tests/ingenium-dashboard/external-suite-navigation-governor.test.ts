@@ -163,8 +163,8 @@ describe("external-suite dashboard navigation governor", () => {
     expect(DASHBOARD_NAVIGATION_INTERVAL_MS).toBe(400);
     expect(GATEWAY_FULL_BUCKET_DRAIN_MS).toBe(2_000);
     expect(API_FIXED_WINDOW_REQUEST_LIMIT).toBe(100);
-    expect(ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(3_000);
-    expect(EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(3_000);
+    expect(ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(6_000);
+    expect(EXTERNAL_SUITE_TRANSITION_INTERVAL_MS).toBe(6_000);
   });
 
   it("reserves Docker's fixed window with separate per-suite metadata", () => {

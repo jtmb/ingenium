@@ -67,6 +67,20 @@ Requiredness is state-dependent:
 - **Synthesis** is required while its interval is enabled. No completed run yet is reported as healthy; stale or failed runs degrade/error the aggregate. Setting `synthesis_interval_ms` to `0` reports `disabled` and makes it optional.
 - **Docs** and **Tasks** are always optional. Their `idle` or `error` states are informational and do not degrade aggregate health.
 
+## Aggregate status and detail views
+
+`GET /api/v1/services/status` is the aggregate view: it returns supervisord
+processes, in-process application health, and the overall `healthy`, `degraded`,
+or `down` result. Selecting a process card opens its process-detail view, while
+selecting an application card opens application detail with the relevant engine
+or statistics payload; detail data does not replace the aggregate health result.
+
+Unknown process names return `404 PROCESS_NOT_FOUND`. If Supervisor cannot
+answer a process or log request, the API returns `502 SUPERVISOR_UNAVAILABLE`
+with a safe message. Process detail also exposes the bounded log view used by
+the status overlay; application detail is available for email, synthesis, Docs,
+and Tasks.
+
 ## Code Location
 - Page: `services/ingenium-dashboard/src/app/status/page.tsx`
 - Health strip: `services/ingenium-dashboard/src/app/components/HealthStrip.tsx`

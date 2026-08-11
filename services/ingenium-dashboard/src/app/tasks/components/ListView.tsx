@@ -74,13 +74,18 @@ function EditableCell({
       placeholder={placeholder}
     />
   ) : (
-    <span
+    <button
+      type="button"
       className="cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded inline-block min-w-[2rem]"
-      onClick={() => setEditing(true)}
-      title="Click to edit"
+      onClick={(event) => {
+        event.stopPropagation();
+        setEditing(true);
+      }}
+      title="Edit"
+      aria-label={`Edit ${placeholder ?? "value"}`}
     >
       {value || <span className="text-[var(--color-text-muted)] italic">{placeholder ?? "—"}</span>}
-    </span>
+    </button>
   );
 }
 

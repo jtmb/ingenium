@@ -837,7 +837,7 @@ export async function uploadContextFile(
   try {
     // This is intentionally the only Context API write made by this tool.
     const apiRequestStartedAt = performance.now();
-    const response = await api.postOctetStream(
+    const response = await api.settled.postOctetStream(
       CONTEXT_UPLOAD_SNAPSHOT_PATH,
       prepared.snapshot.bytes,
       { project },

@@ -50,6 +50,8 @@ const SKILLS_ENDPOINTS = [
   // Proposals
   "POST /api/v1/skills/proposals",
   "GET /api/v1/skills/proposals",
+  "GET /api/v1/skills/proposals/page",
+  "GET /api/v1/skills/proposals/counts",
   "GET /api/v1/skills/proposals/:id",
   "POST /api/v1/skills/proposals/:id/submit",
   "POST /api/v1/skills/proposals/:id/approve",
@@ -90,6 +92,11 @@ const SYNTHESIS_ENDPOINTS = [
 
 const EXTRACTION_ENDPOINTS = [
   "POST /api/v1/extraction/run",
+];
+
+const REPOSITORY_SYNC_ENDPOINTS = [
+  "POST /api/v1/docs/repository/sync",
+  "POST /api/v1/repository/resources/sync",
 ];
 
 const TASKS_ENDPOINTS = [
@@ -378,6 +385,15 @@ const DOCS_ENDPOINTS = [
 // ── Canonical Catalog ────────────────────────────────────
 
 export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
+  {
+    name: "ingenium_repository_sync",
+    category: "Repository Sync",
+    description: "Synchronize a repository-authoritative docs and resource manifest through the API.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: REPOSITORY_SYNC_ENDPOINTS,
+  },
+
   // ── Settings (3) ─────────────────────────────────────
   {
     name: "ingenium_setting_get",
@@ -571,7 +587,23 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_skill_proposal_list",
     category: "Skills",
-    description: "List all skill proposals for a project, optionally filtered by status.",
+    description: "Deprecated compatibility tool. It returns SKILL_PROPOSAL_LIST_RETIRED; use skill_proposal_page and skill_proposal_counts.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_proposal_page",
+    category: "Skills",
+    description: "Read one bounded page of open or history skill proposals.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_proposal_counts",
+    category: "Skills",
+    description: "Get scoped counts for skill proposals.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: SKILLS_ENDPOINTS,
@@ -1117,9 +1149,9 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_project_set_global",
     category: "Projects",
-    description: "Mark a project as global (or unmark).",
+    description: "Forward an API-enforced global lifecycle request.",
     projectScope: "per-project",
-    defaultEnabled: true,
+    defaultEnabled: false,
     apiEndpoints: PROJECTS_ENDPOINTS,
   },
   {

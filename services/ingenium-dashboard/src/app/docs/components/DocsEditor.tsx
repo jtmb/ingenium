@@ -99,24 +99,18 @@ async function fetchDraft(pageId: number): Promise<DocDraft | null> {
 }
 
 async function saveDraft(pageId: number, content: string): Promise<void> {
-  try {
-    await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
-      method: "PUT",
-      body: JSON.stringify({ content }),
-    });
-  } catch {
-    // Silently fail — drafts are best-effort
-  }
+  const res = await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`Draft save failed (${res.status})`);
 }
 
 async function deleteDraft(pageId: number): Promise<void> {
-  try {
-     await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
-        method: "DELETE",
-      });
-  } catch {
-    // silently fail
-  }
+  const res = await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Draft delete failed (${res.status})`);
 }
 
 /**
@@ -253,6 +247,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       const current = contentRef.current;
       if (current !== page.content) {
         saveDraft(page.id, current).then(() => {
+          setHasDraft(true);
           setSaveStatus("saved");
           setTimeout(() => setSaveStatus("idle"), 2000);
         }).catch(() => {
@@ -414,9 +409,9 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     setSaveError(null);
     try {
       await onSave(content);
-      setSaveStatus("saved");
       await deleteDraft(page.id);
       setHasDraft(false);
+      setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (err: any) {
       const message = err.message || "Save failed";
@@ -441,9 +436,13 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   }, [page.id]);
 
   const handleDiscardDraft = useCallback(async () => {
-    await deleteDraft(page.id);
-    setHasDraft(false);
-    setShowDraftPrompt(false);
+    try {
+      await deleteDraft(page.id);
+      setHasDraft(false);
+      setShowDraftPrompt(false);
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error ? error.message : "Draft delete failed");
+    }
   }, [page.id]);
 
   const handleAIApply = useCallback(

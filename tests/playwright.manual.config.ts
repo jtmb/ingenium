@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 import { getPlaywrightOutputDirectory } from "./test-run-context";
 
-const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
+const PLAYWRIGHT_REPO_ROOT = resolve(__dirname, "..");
 
 /** Manual visual evidence is never selected by the default Playwright run. */
 export default defineConfig({

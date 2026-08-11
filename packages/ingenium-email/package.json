@@ -29,7 +29,6 @@
     "@azure/msal-node": "^2.0.0",
     "google-auth-library": "^9.0.0",
     "imapflow": "^1.0.0",
-    "ingenium-core": "*",
     "mailparser": "^3.7.0",
     "nodemailer": "^9.0.3"
   },

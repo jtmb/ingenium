@@ -170,7 +170,7 @@ test.describe("responsive route regressions at 390x844", () => {
 
   test("/projects wraps long identifiers, actions, and the creation dialog", async ({ page }) => {
     await openMobileRoute(page, "/projects", "Projects");
-    await expect(page.getByText(PROJECT, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: `View details for ${PROJECT}`, exact: true })).toBeVisible();
     await expectNoDocumentOverflow(page);
     const create = page.getByRole("button", { name: "+ New Project", exact: true });
     await expectVisibleInBounds(create);

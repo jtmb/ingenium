@@ -13,6 +13,20 @@ container port `4096`, which is the sole database authority. Host port `1455`
 reaches the Nginx callback listener, which forwards only the exact
 `GET /auth/callback` path to private Express `4096`.
 
+## Repository synchronization boundary
+
+Git is authoritative for external worktree resources. The supported path is:
+
+```text
+Git worktree files → @ingenium/extension resource-sync plugin → configured
+Ingenium MCP stdio transport → authenticated Ingenium API → database
+```
+
+Plugins, CLIs, and agents never read/write the database or call mutation REST
+endpoints directly. `ingenium-core` is API-internal and unavailable to runtime
+consumers. `ingenium_skill_sync*` and skill CRUD remain API-host/admin
+repair/import interfaces, not automatic worktree sync.
+
 ## Public Endpoint (Auth Allowlist)
 
 The following endpoint is the sole exact unauthenticated exception. The auth
@@ -180,6 +194,18 @@ data that is absent remains explicitly unknown.
 | PATCH | `/api/v1/skills/:name` | Update a skill |
 | DELETE | `/api/v1/skills/:name` | Archive a skill (soft-delete) |
 | GET | `/api/v1/skills/search?q=...` | FTS5 search across skills |
+| GET | `/api/v1/skills/proposals` | Retired unbounded proposal list; returns `410 SKILL_PROPOSAL_LIST_RETIRED` and points callers to the bounded routes |
+| GET | `/api/v1/skills/proposals/counts` | Return project-scoped counts for open and retained proposal history |
+| GET | `/api/v1/skills/proposals/page?view=<open-or-history>&limit=&cursor=` | Return one keyset page of proposal summaries; `limit` defaults to 25 and is capped at 100 |
+
+Proposal rows are retained indefinitely. The `open` view contains `draft` and
+`pending` rows; `history` contains `stale`, `rejected`, `applied`, and
+`rolled_back` rows. The cursor is project-scoped and ordered by
+`created_at DESC, id DESC`.
+
+Update proposals may use `proposedState.fileTreePatch` for additive auxiliary
+files. It is merged with the target's current `fileTree` on approval and is
+mutually exclusive with a full `proposedState.fileTree` snapshot.
 
 ### Observations
 Observation and personality endpoints require a valid `?project=<name>` query
@@ -779,6 +805,13 @@ allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allow
 | GET | `/builtin-providers` | Runtime OpenCode Zen free model discovery — queries OpenCode runtime provider catalog, filters to only free models. |
 | GET | `/chat-config` | Sanitized merged provider catalog for the Chat page (managed + builtin); selection defaults are server-owned and catalog-gated. |
 | PUT | `/chat-selection` | Authenticated global Chat selection; validates an exact provider/model pair against the active server catalog before persistence. |
+
+API-key connect persists the encrypted desired credential in the canonical
+global vault before applying it to OpenCode. Failed OpenCode application is
+compensated by restoring the previous vault/auth state or returning a fixed
+recoverable failure. The corresponding `DELETE /auth/:providerID` operation
+removes OpenCode auth before deleting the vault credential and restores both if
+credential deletion fails. Keys and compensation details are never returned.
 
 ### MCP Tool Report
 

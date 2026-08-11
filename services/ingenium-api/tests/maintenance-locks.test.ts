@@ -12,7 +12,14 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects, skills as skillsModule, maintenanceLocks } from "ingenium-core";
+import {
+  maintenanceLocks,
+  observations,
+  projects,
+  skillGovernance,
+  skills as skillsModule,
+  synthesis,
+} from "ingenium-core";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
 
@@ -535,6 +542,49 @@ describe("POST /synthesis/run — lock acquisition", () => {
       });
     }
   });
+
+  it("resumes a persisted proposal-stage batch without calling the LLM again", async () => {
+    const observation = observations.storeObservation(
+      projectId,
+      "workflow",
+      "Resume durable synthesis through the manual API route",
+      8,
+    );
+    const proposalName = "manual-route-resume";
+    const executor = async ({ system }: { system: string }) => ({
+      ok: true,
+      content: JSON.stringify(system.includes("personality model consolidator")
+        ? { create: [], confirm: [], ignore_count: 1 }
+        : {
+            skills_to_create: [{
+              name: proposalName,
+              description: "Manual route durable synthesis coverage",
+              content: "# Manual route durable synthesis\n",
+            }],
+            skills_to_update: [],
+            insights: [],
+            summary: "manual route resume",
+          }),
+    });
+
+    await expect(synthesis.runSynthesis(projectId, undefined, {
+      llmExecutor: executor,
+      faultInjector: (point) => {
+        if (point === "after_proposals_applied") throw new Error("injected crash");
+      },
+    })).rejects.toThrow("injected crash");
+
+    expect(observations.getObservations(projectId).find((item) => item.id === observation.id)?.status).toBe("pending");
+    expect(skillGovernance.listProposals(projectId).filter((proposal) => proposal.target_name === proposalName)).toHaveLength(1);
+
+    const response = await fetch(synthPath(`/run?project=${projectName}`), { method: "POST" });
+    expect(response.status).toBe(200);
+
+    await vi.waitFor(() => {
+      expect(observations.getObservations(projectId).find((item) => item.id === observation.id)?.status).toBe("processed");
+    });
+    expect(skillGovernance.listProposals(projectId).filter((proposal) => proposal.target_name === proposalName)).toHaveLength(1);
+  });
 });
 
 // ── Expired Lock Retry ──────────────────────────────────────────────────────
@@ -770,10 +820,15 @@ describe("Lock heartbeat renewal", () => {
       const responsePromise = fetch(synthPath(`/run?project=${projectName}`), { method: "POST" });
       await new Promise((r) => setTimeout(r, 100));
 
-      const res = await responsePromise;
-      expect(res.status).toBe(200);
+       const res = await responsePromise;
+       expect(res.status).toBe(200);
+       expect(runMock).toHaveBeenCalledWith(
+         projectId,
+         undefined,
+         expect.objectContaining({ ownerToken: expect.any(String) }),
+       );
 
-      let lock = maintenanceLocks.getLockStatus("skills", projectId);
+       let lock = maintenanceLocks.getLockStatus("skills", projectId);
       expect(lock).not.toBeUndefined();
 
       const conflictToken = maintenanceLocks.generateOwnerToken();

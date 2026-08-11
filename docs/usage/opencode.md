@@ -76,6 +76,17 @@ tokens, or transport diagnostics.
 
 Web and CLI sessions share the same backend process state.
 
+### Repository synchronization
+
+The external-worktree path is Git → `@ingenium/extension` resource-sync plugin
+→ configured MCP stdio → authenticated API → database. Git is authoritative;
+plugins, CLIs, and agents do not access SQLite or call mutation REST directly.
+Use `/init-project` and its dedicated MCP repository-sync operation for
+repository projection. Do not run `ingenium_skill_sync*` after edits; those are
+admin repair/import tools. The deleted legacy skill-sync command is not part of
+the workflow.
+Rebuild the extension and restart OpenCode after plugin/config changes.
+
 ## Ponytail
 
 The supported Ponytail integration is an immutable upstream checkout pinned to
@@ -159,4 +170,4 @@ service or bridge, and no current-session/OpenCode-session import tool.
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
-- Use the OpenCode interface to interact with the built-in 275-tool Ingenium MCP catalog across 29 baseline categories (273 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 282-tool Ingenium MCP catalog across 30 baseline categories (280 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

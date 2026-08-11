@@ -45,4 +45,10 @@ describe("VAULT-100 MCP job forwarding", () => {
     expect(catalogSource).toContain("metadata-only vault_item_ids authorization");
     expect(catalogSource).toContain("CAS-update job fields with required expected_revision.");
   });
+
+  it("uses the bounded timeout schema for create and nested update fields", () => {
+    expect(serverSource).toMatch(/const jobTimeoutMinutesParam = z\.number\(\)\.finite\(\)\.int\(\)\.min\(1\)\.max\(1_440\)/);
+    expect(serverSource).toMatch(/"job_create"[\s\S]*?timeout_minutes: jobTimeoutMinutesParam\.optional\(\)/);
+    expect(serverSource).toMatch(/"timeout_minutes" in fields[\s\S]*?jobTimeoutMinutesParam\.safeParse\(fields\.timeout_minutes\)/);
+  });
 });

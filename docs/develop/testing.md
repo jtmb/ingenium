@@ -41,8 +41,8 @@ divergent snapshot rejection without partial writes. The tests also verify
 fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
 markers and rejection of same-inode, same-size mutation during the
 descriptor-bound read. The transport-parity check
-also verifies `ingenium_context_upload_file` and the **275-tool** inventory
-(266 server registrations plus 2 extension tools).
+also verifies `ingenium_context_upload_file` and the **282-tool** inventory
+(280 `ingenium_` catalog entries plus 2 extension tools).
 
 ## Explicit full/release/cross-cutting acceptance gates
 
@@ -244,9 +244,10 @@ The API source default and its limiter test establish 100 requests per
 Playwright project metadata, rather than changing test order or adding a
 test-specific exception. That admits 10 transitions: `10 × 7 + 2` Docker
 preflight reads = 72, retaining 28 requests of fixed-window headroom. Route
-parity explicitly retains its verified 3-second project-metadata interval.
-This covers repeated `goto` and `reload` calls plus fresh pages created by a
-test; it does not pace OpenCode/code-server origins or asset subrequests.
+parity uses the same 6-second project-metadata interval because its Mail
+settings deep link adds ten per-key reads to page and project resolution. This
+covers repeated `goto` and `reload` calls plus fresh pages created by a test;
+it does not pace OpenCode/code-server origins or asset subrequests.
 
 The retained failures distinguish the two limiters without retaining response
 bodies: the API fixed-window limiter returns JSON `RATE_LIMITED` plus a numeric
@@ -418,7 +419,7 @@ The global preflight applies the one-time API-health drain described above; its
 gateway root response still treats every `429` as fatal. The shared document
 governor reserves 12 observed-plus-headroom dynamic requests at 30 requests per
 second, serializes dashboard documents at one per 400ms, drains the 60-request
-Nginx burst for 2 seconds after global setup, and waits 3 seconds before each
+Nginx burst for 2 seconds after global setup, and waits 6 seconds before each
 external test transition. During browser checks only, the bounded same-origin
 API-read recovery described above may replay a valid `Retry-After` response
 once; all RSC and non-API `429` responses remain fatal and are classified by

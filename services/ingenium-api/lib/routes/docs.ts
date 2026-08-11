@@ -794,7 +794,11 @@ router.get("/pages/:id/draft", (req, res) => {
     if (id === null) return;
     const draft = docs.getDraft(id);
     if (!draft) {
-      res.status(404).json({ error: { code: "NOT_FOUND", message: `No draft found for page ${id}` } });
+      if (!docs.getPage(id)) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Page ${id} not found` } });
+        return;
+      }
+      res.json({ data: null });
       return;
     }
     res.json({ data: mapDraft(draft) });

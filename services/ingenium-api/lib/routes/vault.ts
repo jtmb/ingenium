@@ -3,6 +3,10 @@ import type { NextFunction, Request, Response } from "express";
 import * as core from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { vaultBruteForceLimiter } from "../middleware/rate-limit.js";
+import {
+  recoverServerGlobalProviderMetadata,
+  rehydrateServerGlobalProviderConnections,
+} from "../server-global-provider-persistence.js";
 
 /** Signature that matches the actual vault module in ingenium-core. */
 type VaultService = {
@@ -259,6 +263,12 @@ vaultRouter.post("/unseal", vaultBruteForceLimiter, (req, res) => {
   }
 
   audit(projectId, "vault_unsealed");
+  const migration = recoverServerGlobalProviderMetadata();
+  void rehydrateServerGlobalProviderConnections().then((rehydration) => {
+    core.logger.info("vault", "Server-global provider rehydration completed", { migration, rehydration });
+  }).catch(() => {
+    core.logger.warn("vault", "Server-global provider rehydration failed safely");
+  });
   res.json({ data: { ...result, unsealed: result.ok } });
 });
 

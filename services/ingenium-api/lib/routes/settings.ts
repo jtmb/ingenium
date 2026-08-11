@@ -34,20 +34,37 @@ function sendProtectedOAuthSecretError(
 
 /**
  * OAuth client secrets are mail-service credentials, not dashboard-project
- * settings. Resolve them through the active global project on the server and
+ * settings. Resolve them through the canonical global project on the server and
  * deliberately ignore the selected dashboard project.
  */
-function requireActiveGlobalOAuthProject(res: import("express").Response): string | null {
+function requireCanonicalOAuthProject(res: import("express").Response): string | null {
   try {
-    const globalProject = projects.getGlobalProject();
+    const globalProject = projects.getCanonicalGlobalProject();
     if (globalProject) return globalProject.id;
   } catch {
     // Do not disclose database integrity details through a credential route.
-    logger.warn("settings", "OAuth client-secret request rejected because active global project resolution failed");
-    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage is unavailable until the active global project is repaired" } });
+    logger.warn("settings", "OAuth client-secret request rejected because canonical global project resolution failed");
+    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage is unavailable until the canonical global project is repaired" } });
     return null;
   }
-  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage requires an active global project" } });
+  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage requires the canonical global project" } });
+  return null;
+}
+
+function requireCanonicalProviderProject(res: import("express").Response): string | null {
+  try {
+    const globalProject = projects.getCanonicalGlobalProject();
+    if (globalProject) return globalProject.id;
+  } catch {
+    // Keep provider storage unavailable rather than inheriting an arbitrary
+    // active project after a global designation change.
+  }
+  res.status(503).json({
+    error: {
+      code: "GLOBAL_PROJECT_UNAVAILABLE",
+      message: "Provider storage requires the canonical global project.",
+    },
+  });
   return null;
 }
 
@@ -79,7 +96,7 @@ settingsRouter.get("/", (req, res) => {
     return;
   }
   if (protectedSettings.isOAuthClientSecretKey(key)) {
-    const projectId = requireActiveGlobalOAuthProject(res);
+    const projectId = requireCanonicalOAuthProject(res);
     if (!projectId) return;
     const migration = protectedSettings.migrateLegacyOAuthClientSecret(projectId, key);
     if (migration.status === "legacy_conflict") {
@@ -113,7 +130,7 @@ settingsRouter.post("/", (req, res) => {
     return;
   }
   if (protectedSettings.isOAuthClientSecretKey(key)) {
-    const projectId = requireActiveGlobalOAuthProject(res);
+    const projectId = requireCanonicalOAuthProject(res);
     if (!projectId) return;
     const request = resolveOAuthSecretAction(body);
     if (!request) {
@@ -135,22 +152,6 @@ settingsRouter.post("/", (req, res) => {
     return;
   }
   settings.setSetting(projectId, key, value);
-
-  // Self-heal: if saving synthesis_model config, ensure the project is marked global
-  // so the self-learning pipeline can find it. The pipeline only reads from the global
-  // project — if no project is marked global, extraction/synthesis silently disables.
-  if (key === "synthesis_model") {
-    const globalProject = projects.getGlobalProject();
-    if (!globalProject) {
-      const projectName = req.query.project as string;
-      if (projectName) {
-        const healed = projects.setProjectGlobal(projectName, true);
-        if (healed) {
-          logger.info("settings", `Self-healed: marked project "${projectName}" as global because synthesis_model was saved and no global project existed`);
-        }
-      }
-    }
-  }
 
   res.json({
     data: isSensitiveSettingKey(key)
@@ -680,8 +681,8 @@ async function validateManagedProviders(providersToSave: ManagedProviderInput[])
   return null;
 }
 
-settingsRouter.get("/provider-configs", (req, res) => {
-  const projectId = requireProject(req, res);
+settingsRouter.get("/provider-configs", (_req, res) => {
+  const projectId = requireCanonicalProviderProject(res);
   if (!projectId) return;
   if (!migrateLegacyProviderKeys(projectId)) {
     res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
@@ -694,7 +695,7 @@ settingsRouter.get("/provider-configs", (req, res) => {
 });
 
 settingsRouter.put("/provider-configs", async (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireCanonicalProviderProject(res);
   if (!projectId) return;
   const providersInput = req.body?.providers;
   if (!Array.isArray(providersInput)) {
@@ -740,24 +741,15 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     return;
   }
 
-  let globalProject = projects.getGlobalProject();
-  if (!globalProject) {
-    const projectName = req.query.project as string;
-    if (projectName) projects.setProjectGlobal(projectName, true);
-    globalProject = projects.getGlobalProject();
-  }
-
-  let projectedConfig: string | null = null;
-  if (globalProject) {
-    try {
-      projectedConfig = buildManagedOpenCodeConfig(globalProject.id, previousIds, metadata);
-    } catch (err) {
-      logger.warn("settings", `OpenCode provider projection failed: ${err instanceof Error ? err.message : String(err)}`);
-      res.status(409).json({
-        error: { code: "CONFIG_PROJECTION_FAILED", message: "OpenCode global config could not be updated and was left unchanged" },
-      });
-      return;
-    }
+  let projectedConfig: string;
+  try {
+    projectedConfig = buildManagedOpenCodeConfig(projectId, previousIds, metadata);
+  } catch (err) {
+    logger.warn("settings", `OpenCode provider projection failed: ${err instanceof Error ? err.message : String(err)}`);
+    res.status(409).json({
+      error: { code: "CONFIG_PROJECTION_FAILED", message: "OpenCode global config could not be updated and was left unchanged" },
+    });
+    return;
   }
 
   const primary = metadata.find((provider) => provider.enabled && provider.roles.includes("primary"));
@@ -810,28 +802,24 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     return;
   }
 
-  if (globalProject && projectedConfig) {
-    try {
-      configs.saveConfig(globalProject.id, "global", projectedConfig);
-      logger.info("settings", `Projected ${metadata.filter((provider) => provider.enabled).length} managed providers into OpenCode global config`);
-    } catch (err) {
-      logger.error("settings", `Provider settings were saved but OpenCode config projection failed: ${err instanceof Error ? err.message : String(err)}`);
-      res.status(409).json({
-        error: {
-          code: "CONFIG_PROJECTION_FAILED",
-          message: "Provider settings were saved, but OpenCode global config could not be updated",
-        },
-      });
-      return;
-    }
+  try {
+    configs.saveConfig(projectId, "global", projectedConfig);
+    logger.info("settings", `Projected ${metadata.filter((provider) => provider.enabled).length} managed providers into OpenCode global config`);
+  } catch (err) {
+    logger.error("settings", `Provider settings were saved but OpenCode config projection failed: ${err instanceof Error ? err.message : String(err)}`);
+    res.status(409).json({
+      error: {
+        code: "CONFIG_PROJECTION_FAILED",
+        message: "Provider settings were saved, but OpenCode global config could not be updated",
+      },
+    });
+    return;
   }
 
   const authWarnings: string[] = [];
-  if (projectedConfig) {
-    const result = await opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>);
-    if (isOpenCodeError(result)) {
-      authWarnings.push("OpenCode could not reload the provider configuration automatically");
-    }
+  const result = await opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>);
+  if (isOpenCodeError(result)) {
+    authWarnings.push("OpenCode could not reload the provider configuration automatically");
   }
   for (const provider of metadata) {
     const key = resolvedKeys[provider.id] ?? getVaultApiKey(projectId, provider.id);
@@ -981,18 +969,6 @@ settingsRouter.post("/llm-config", async (req, res) => {
   }
   if (backup?.provider && backup.apiKey !== undefined) {
     if (!backup.apiKey.trim()) clearVaultApiKey(projectId, backup.provider.trim());
-  }
-
-  // Self-heal global project marking
-  if (primary.provider || primary.model) {
-    const globalProject = projects.getGlobalProject();
-    if (!globalProject) {
-      const projectName = req.query.project as string;
-      if (projectName) {
-        projects.setProjectGlobal(projectName, true);
-        logger.info("settings", `Self-healed: marked project "${projectName}" as global`);
-      }
-    }
   }
 
   // Project into OpenCode global config for Chat

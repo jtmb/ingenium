@@ -134,6 +134,7 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
       try {
         const result = await synthesis.runSynthesis(p.id, undefined, {
           llmExecutor: createBackgroundSynthesisBrokerExecutor(p.id),
+          ownerToken,
         });
         logger.info(
           "scheduler",

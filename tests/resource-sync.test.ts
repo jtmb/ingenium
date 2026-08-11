@@ -19,6 +19,13 @@ import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
+
+vi.mock("../packages/ingenium-extension/mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+}));
+
 function tmpDir(): string {
   const dir = resolve(tmpdir(), `resource-sync-test-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
@@ -81,7 +88,9 @@ describe("Project Resolution", () => {
 
   afterEach(() => {
     process.env = { ...origEnv };
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    mockCallMcpTool.mockReset();
   });
 
   it("uses INGENIUM_PROJECT env var when set", async () => {
@@ -193,28 +202,38 @@ describe("Project Resolution", () => {
     resetEnsuredProjects();
   });
 
-  it("provisions the project when the resource-sync plugin loads", async () => {
+  it("submits the configured project through MCP on session creation without direct mutation fetches", async () => {
     process.env.INGENIUM_PROJECT = "startup-project";
+    const worktree = tmpDir();
+    writeFile(resolve(worktree, "docs", "index.md"), "# MCP fixture\n");
     vi.resetModules();
-    const fetchMock = vi.fn(async (url: string | URL) => ({
-      ok: new URL(String(url)).pathname.endsWith("/auth/preflight"),
-      status: new URL(String(url)).pathname.endsWith("/auth/preflight") ? 200 : 201,
-    } as Response));
-    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    mockCallMcpTool.mockResolvedValue({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          docs: { summary: { created: 1 } },
+          resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+        }),
+      }],
+    });
     const { ResourceSyncPlugin } = await import("../packages/ingenium-extension/resource-sync.js");
 
-    await ResourceSyncPlugin({ worktree: "/worktrees/startup-project", client: {} });
+    try {
+      const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log: vi.fn() } } });
+      await plugin.event({ event: { type: "session.created" } });
 
-    const preflightCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/auth/preflight"));
-    expect(preflightCall).toBeDefined();
-    expect(preflightCall?.[1]).not.toHaveProperty("method");
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/projects"),
-      expect.objectContaining({ method: "POST" }),
-    );
-    const projectCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/projects"));
-    const request = projectCall?.[1] as RequestInit;
-    expect(JSON.parse(String(request.body))).toMatchObject({ name: "startup-project", is_global: false });
+      expect(mockCallMcpTool).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({
+        project: "startup-project",
+        dryRun: false,
+        docsManifest: { files: [expect.objectContaining({ path: "docs/index.md" })] },
+        resourcesManifest: expect.objectContaining({ version: 2 }),
+      }));
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 });
 

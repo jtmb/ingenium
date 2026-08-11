@@ -21,20 +21,39 @@ let globalProjectId: string;
 let server: Server | null = null;
 let baseUrl: string;
 const nativeFetch = globalThis.fetch;
+const defaultSupervisorProcesses = [
+  "restore-maintenance",
+  "ingenium-api",
+  "ingenium-api-boundary",
+  "ingenium-dashboard",
+  "ingenium-gateway",
+  "opencode-web",
+  "ttyd-opencode",
+  "vscode",
+];
+let supervisorProcesses = [...defaultSupervisorProcesses];
+let supervisorRequests: string[] = [];
+
+function escapeXml(value: string): string {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&apos;",
+    "\"": "&quot;",
+  })[character]!);
+}
+
+function processStruct(name: string): string {
+  return `<struct><member><name>name</name><value><string>${escapeXml(name)}</string></value></member><member><name>statename</name><value><string>${name === "restore-maintenance" ? "STOPPED" : "RUNNING"}</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`;
+}
 
 function supervisorResponse(): string {
-  return [
-    "restore-maintenance",
-    "ingenium-api",
-    "ingenium-api-boundary",
-    "ingenium-dashboard",
-    "ingenium-gateway",
-    "opencode-web",
-    "ttyd-opencode",
-    "vscode",
-  ]
-    .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>${name === "restore-maintenance" ? "STOPPED" : "RUNNING"}</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`)
-    .join("");
+  return supervisorProcesses.map(processStruct).join("");
+}
+
+function processInfoResponse(name: string): string {
+  return `<methodResponse><params><param><value>${processStruct(name)}</value></param></params></methodResponse>`;
 }
 
 function buildApp(): express.Express {
@@ -68,13 +87,21 @@ beforeAll(async () => {
 
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === "http://127.0.0.1:9001/RPC2") {
-      return new Response(supervisorResponse(), { status: 200 });
+      const request = String(init?.body ?? "");
+      supervisorRequests.push(request);
+      if (request.includes("supervisor.getAllProcessInfo")) {
+        return new Response(supervisorResponse(), { status: 200 });
+      }
+      const process = supervisorProcesses.find((name) => request.includes(`<string>${escapeXml(name)}</string>`));
+      return new Response(process ? processInfoResponse(process) : "<methodResponse/>", { status: 200 });
     }
     return nativeFetch(input, init);
   });
 });
 
 beforeEach(() => {
+  supervisorProcesses = [...defaultSupervisorProcesses];
+  supervisorRequests = [];
   emailMocks.getGlobalProjectId.mockReturnValue(globalProjectId);
   emailMocks.listAccounts.mockReturnValue([]);
   emailMocks.getEngineStatus.mockReturnValue({
@@ -277,5 +304,47 @@ describe("GET /api/v1/services/applications/:name", () => {
     const body = await res.json();
     expect(body).toHaveProperty("error");
     expect(body.error).toContain("Unknown application");
+  });
+});
+
+describe("GET /api/v1/services/:name", () => {
+  it("uses a valid getProcessInfo envelope for every process returned by aggregate status", async () => {
+    const aggregate = await fetch(`${baseUrl}/api/v1/services/status`);
+    const services = (await aggregate.json()).data.services as Array<{ name: string }>;
+
+    for (const service of services) {
+      const response = await fetch(`${baseUrl}/api/v1/services/${encodeURIComponent(service.name)}`);
+      expect(response.status).toBe(200);
+      expect((await response.json()).data).toMatchObject({ processName: expect.any(String) });
+    }
+
+    const detailRequests = supervisorRequests.filter((request) => request.includes("supervisor.getProcessInfo"));
+    expect(detailRequests).toHaveLength(services.length);
+    for (const request of detailRequests) {
+      expect(request).toMatch(/<methodName>supervisor\.getProcessInfo<\/methodName><params><param><value><string>[^<]+<\/string><\/value><\/param><\/params><\/methodCall>/);
+      expect(request).not.toContain("</methodName></params>");
+    }
+  });
+
+  it("rejects names absent from aggregate status with a typed error", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/services/not-a-supervisor-process`);
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "PROCESS_NOT_FOUND", message: "Process not found" },
+    });
+    expect(supervisorRequests.some((request) => request.includes("supervisor.getProcessInfo"))).toBe(false);
+  });
+
+  it("escapes a whitelisted supervisor process name in the XML request", async () => {
+    const name = "worker & <unsafe> \"quoted\"";
+    supervisorProcesses = [name];
+
+    const response = await fetch(`${baseUrl}/api/v1/services/${encodeURIComponent(name)}`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.processName).toBe(name);
+
+    const request = supervisorRequests.find((candidate) => candidate.includes("supervisor.getProcessInfo"));
+    expect(request).toContain(`<string>${escapeXml(name)}</string>`);
+    expect(request).not.toContain(`<string>${name}</string>`);
   });
 });

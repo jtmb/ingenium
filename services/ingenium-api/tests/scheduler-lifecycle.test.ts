@@ -58,6 +58,7 @@ afterEach(async () => {
   await stopScheduler();
   await stopBackupScheduler();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -88,5 +89,26 @@ describe("scheduler lifecycle ownership", () => {
     await stopBackupScheduler();
     expect(isBackupSchedulerRunning()).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("passes the scheduler lock owner into synthesis batch ownership", async () => {
+    core.projects.listProjects.mockReturnValue([{
+      id: "scheduled-project",
+      name: "scheduled-project",
+      archived_at: null,
+    }]);
+    core.extraction.runExtraction.mockResolvedValue({ scanned: 0, created: 0 });
+    core.synthesis.runSynthesis.mockResolvedValue({ summary: "resumed" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200 })));
+
+    startScheduler(4097);
+    await vi.advanceTimersByTimeAsync(30_001);
+    await Promise.resolve();
+
+    expect(core.synthesis.runSynthesis).toHaveBeenCalledWith(
+      "scheduled-project",
+      undefined,
+      expect.objectContaining({ ownerToken: "lock-token" }),
+    );
   });
 });

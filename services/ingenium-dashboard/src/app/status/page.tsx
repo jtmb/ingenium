@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ServiceOverlay from "./ServiceOverlay";
 import { badgeTones } from "../../lib/badgeTones";
 import { getApiBase } from "@/lib/api";
@@ -236,8 +236,11 @@ function healthBanner(
 export default function StatusPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedCardType, setSelectedCardType] = useState<"service" | "application" | null>(null);
+  const statusRequestRef = useRef<AbortController | null>(null);
+  const statusRequestIdRef = useRef(0);
 
   const handleServiceClick = (name: string) => {
     // Determine whether this card is a supervisord service or an in-process application.
@@ -251,26 +254,35 @@ export default function StatusPage() {
   };
 
   const fetchStatus = useCallback(async () => {
+    if (statusRequestRef.current) return;
+    const controller = new AbortController();
+    const requestId = ++statusRequestIdRef.current;
+    statusRequestRef.current = controller;
     try {
-      const res = await fetch(`${API_URL}/services/status`);
+      const res = await fetch(`${API_URL}/services/status`, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: StatusResponse = await res.json();
+      if (controller.signal.aborted || requestId !== statusRequestIdRef.current) return;
       setStatus(data);
       setError(null);
     } catch (err: any) {
+      if (controller.signal.aborted || requestId !== statusRequestIdRef.current) return;
       setError(err.message);
-      // Keep stale data visible if we have it
-      if (!status) {
-        setStatus(null);
-      }
+    } finally {
+      if (requestId === statusRequestIdRef.current) setLoading(false);
+      if (statusRequestRef.current === controller) statusRequestRef.current = null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, POLL_INTERVAL);
-    return () => clearInterval(interval);
+    void fetchStatus();
+    const interval = setInterval(() => void fetchStatus(), POLL_INTERVAL);
+    return () => {
+      clearInterval(interval);
+      statusRequestIdRef.current += 1;
+      statusRequestRef.current?.abort();
+      statusRequestRef.current = null;
+    };
   }, [fetchStatus]);
 
   const services = status?.data?.services ?? [];
@@ -300,6 +312,18 @@ export default function StatusPage() {
           <p className="text-[var(--color-error-text)] font-semibold">Cannot reach status API</p>
           <p className="text-[var(--color-error-text)] text-sm mt-1">{error}</p>
         </div>
+      </div>
+    );
+  }
+
+  if (loading && !status) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold">Service Status</h1>
+          <p className="mt-1 text-[var(--color-text-muted)]">Real-time process monitoring via supervisord</p>
+        </div>
+        <p className="text-sm text-[var(--color-text-muted)]" aria-busy="true">Loading service status...</p>
       </div>
     );
   }
@@ -334,48 +358,31 @@ export default function StatusPage() {
         {services.map((svc) => {
           const badge = stateBadge(svc.state);
           return (
-            <div
+            <button
+              type="button"
               key={svc.name}
-              className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 cursor-pointer hover:shadow-md transition-shadow"
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-left hover:shadow-md transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
               onClick={() => handleServiceClick(svc.name)}
+              aria-label={`View ${svc.name} service details`}
             >
-              {/* Service name */}
-              <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">
-                {svc.name}
-              </h2>
-              <p className="text-xs text-[var(--color-text-muted)] mb-4 min-h-[2rem]">
-                {svc.description}
-              </p>
-
-              {/* State badge */}
-              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${badge.bg} ${badge.text} text-xs font-medium mb-4`}>
+              <span className="mb-1 block text-lg font-semibold text-[var(--color-text-primary)]">{svc.name}</span>
+              <span className="mb-4 block min-h-[2rem] text-xs text-[var(--color-text-muted)]">{svc.description}</span>
+              <span className={`mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${badge.bg} ${badge.text}`}>
                 <span className={`inline-block w-2 h-2 rounded-full ${badge.dotClass}`} />
                 {badge.label}
-              </div>
-
-              {/* Stats grid */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
+              </span>
+              <span className="grid grid-cols-2 gap-3 text-sm">
+                <span>
                   <span className="text-[var(--color-text-muted)] text-xs">Uptime</span>
-                  <p className="text-[var(--color-text-primary)] font-mono text-sm">
-                    {formatUptime(svc.uptime)}
-                  </p>
-                </div>
-                <div>
+                  <span className="block font-mono text-sm text-[var(--color-text-primary)]">{formatUptime(svc.uptime)}</span>
+                </span>
+                <span>
                   <span className="text-[var(--color-text-muted)] text-xs">Port</span>
-                  <p className="text-[var(--color-text-primary)] font-mono text-sm">
-                    {svc.port || "—"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Restart info */}
-              {svc.restartCount > 0 && (
-                <p className="text-xs text-[var(--color-warning-text)] mt-3">
-                  Restarted {svc.restartCount}×
-                </p>
-              )}
-            </div>
+                  <span className="block font-mono text-sm text-[var(--color-text-primary)]">{svc.port || "—"}</span>
+                </span>
+              </span>
+              {svc.restartCount > 0 && <span className="mt-3 block text-xs text-[var(--color-warning-text)]">Restarted {svc.restartCount}×</span>}
+            </button>
           );
         })}
       </div>
@@ -390,27 +397,21 @@ export default function StatusPage() {
             {applications.map((app) => {
               const badge = appStateBadge(app.state);
               return (
-                <div
+                <button
+                  type="button"
                   key={app.name}
-                  className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-4 cursor-pointer hover:shadow-md transition-shadow"
+                  className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-left hover:shadow-md transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
                   onClick={() => handleServiceClick(app.name)}
+                  aria-label={`View ${app.name} application details`}
                 >
-                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
-                    {app.name}
-                  </h3>
-                  <p className="text-xs text-[var(--color-text-muted)] mb-3 min-h-[1.5rem]">
-                    {app.description}
-                  </p>
-                  <div
-                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full ${badge.bg} ${badge.text} text-xs font-medium`}
-                  >
+                  <span className="mb-1 block text-sm font-semibold text-[var(--color-text-primary)]">{app.name}</span>
+                  <span className="mb-3 block min-h-[1.5rem] text-xs text-[var(--color-text-muted)]">{app.description}</span>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${badge.bg} ${badge.text}`}>
                     <span className={`inline-block w-2 h-2 rounded-full ${badge.dotClass}`} />
                     {badge.label}
-                  </div>
-                  {app.detail && (
-                    <p className="text-xs text-[var(--color-text-muted)] mt-2">{app.detail}</p>
-                  )}
-                </div>
+                  </span>
+                  {app.detail && <span className="mt-2 block text-xs text-[var(--color-text-muted)]">{app.detail}</span>}
+                </button>
               );
             })}
           </div>

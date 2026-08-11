@@ -1,3 +1,8 @@
+# Named-volume names include the Compose project name. Keep ordinary supported
+# invocations on this canonical identity; explicit `-p` and COMPOSE_PROJECT_NAME
+# overrides intentionally select a different project and therefore different volumes.
+name: ingenium
+
 services:
   ingenium:
     build:

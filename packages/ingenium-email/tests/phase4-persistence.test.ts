@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OAuthToken } from "../lib/types.js";
+import { createCoreEmailRuntime } from "./runtime-fixture.js";
 
 const TEST_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_KEY = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
@@ -31,6 +32,8 @@ async function createFixture(): Promise<Fixture> {
 
   const core = await import("ingenium-core");
   core.resetDbForTest();
+  const runtime = await import("../lib/runtime.js");
+  runtime.configureEmailRuntime(createCoreEmailRuntime(core));
   const accounts = await import("../lib/accounts.js");
   const oauth = await import("../lib/oauth.js");
   const global = core.projects.createProject("global-default", true);
@@ -163,14 +166,14 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     expect(fixture!.accounts.getCredentials(account.id)).toBeUndefined();
   });
 
-  it("resolves accounts against a recreated global project instead of a deleted project", async () => {
+  it("resolves accounts against a recreated canonical global project instead of a deleted project", async () => {
     fixture = await createFixture();
     const oldGlobalId = fixture.globalId;
     const oldAccount = fixture.accounts.addAccount(accountInput());
     fixture.accounts.removeAccount(oldAccount.id);
     expect(fixture.core.projects.deleteProject("global-default")).toEqual({ status: "deleted" });
 
-    const replacement = fixture.core.projects.createProject("replacement-global", true);
+    const replacement = fixture.core.projects.createProject("global-default", true);
     const replacementAccount = fixture.accounts.addAccount({
       ...accountInput(),
       email: "replacement@example.test",
@@ -180,6 +183,17 @@ describe("Phase 4 email persistence and credential boundaries", () => {
     expect(fixture.accounts.getAccount(replacementAccount.id)?.email).toBe("replacement@example.test");
     expect(fixture.core.settings.getSetting(oldGlobalId, `email_account_${replacementAccount.id}`)).toBeUndefined();
     expect(fixture.core.settings.getSetting(replacement.id, `email_account_${replacementAccount.id}`)).toContain("replacement@example.test");
+  });
+
+  it("fails closed rather than selecting a noncanonical active global project", async () => {
+    fixture = await createFixture();
+    const alternate = fixture.core.projects.createProject("alternate-global", true);
+
+    expect(() => fixture!.accounts.addAccount(accountInput())).toThrow(/global-default/i);
+    expect(fixture.core.getDb().prepare(
+      "SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'email_account_%'",
+    ).get()).toEqual({ count: 0 });
+    expect(alternate.id).toBeTruthy();
   });
 
   it("keeps writes in the canonical global namespace", async () => {

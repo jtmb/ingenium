@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import StatusPage from "../src/app/status/page";
 import HealthStrip from "../src/app/components/HealthStrip";
 import type { HealthData } from "../src/lib/api";
@@ -50,6 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -110,6 +111,49 @@ describe("StatusPage aggregate health", () => {
 
     expect(await screen.findByText("All healthy")).toBeTruthy();
     expect(screen.getByText("Idle")).toBeTruthy();
+  });
+
+  it("distinguishes initial loading from an unreachable status API", async () => {
+    let rejectResponse!: (error: Error) => void;
+    fetchMock.mockReturnValue(new Promise((_, reject) => { rejectResponse = reject; }));
+
+    render(<StatusPage />);
+    expect(screen.getByText("Loading service status...")).toBeTruthy();
+
+    await act(async () => rejectResponse(new Error("Status endpoint unavailable")));
+
+    expect(await screen.findByText("Cannot reach status API")).toBeTruthy();
+    expect(screen.getByText("Status endpoint unavailable")).toBeTruthy();
+  });
+
+  it("uses semantic controls for service and application detail cards", async () => {
+    fetchMock.mockResolvedValue(statusResponse());
+
+    render(<StatusPage />);
+
+    expect(await screen.findByRole("button", { name: "View API service details" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View email-client application details" })).toBeTruthy();
+  });
+
+  it("serializes polling and aborts an active request on unmount", async () => {
+    vi.useFakeTimers();
+    let resolveResponse!: (response: ReturnType<typeof statusResponse>) => void;
+    fetchMock.mockReturnValue(new Promise((resolve) => { resolveResponse = resolve; }));
+
+    const { unmount } = render(<StatusPage />);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const signal = request.signal as AbortSignal;
+    unmount();
+    expect(signal.aborted).toBe(true);
+
+    resolveResponse(statusResponse());
   });
 });
 

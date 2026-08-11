@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -12,12 +12,19 @@ import {
   createTestRunContext,
   cleanupTestRun,
   getTestRunArtifactRoot,
+  readTestRunManifest,
   readTestRunTelemetry,
   releaseTestRunPortReservations,
   resetTestRunContextForTests,
   updateTestRunManifest,
 } from "./test-run-context";
 import { recoverStoppingTestRun } from "./test-server-lifecycle";
+import {
+  capturePreexistingProcessBaseline,
+  discoverRepositoryProcessCandidates,
+  toPreexistingProcess,
+  type RepositoryProcessCandidate,
+} from "./test-run-process-discovery";
 import {
   auditSuiteContainment,
   inspectOwnedMisplacedTestResults,
@@ -27,6 +34,7 @@ import {
 
 const contexts: Array<ReturnType<typeof createTestRunContext>> = [];
 const servers: Server[] = [];
+const children: ChildProcess[] = [];
 const temporaryRepositories: string[] = [];
 const temporaryManifestlessEvidence: string[] = [];
 const testComposeOwnership = {
@@ -59,7 +67,62 @@ function createContextWithReservedPortRetry(
   throw lastError;
 }
 
+function createBaselineContext(): ReturnType<typeof createTestRunContext> {
+  const context = createContextWithReservedPortRetry({ applyEnvironment: false });
+  contexts.push(context);
+  return context;
+}
+
+function startRepositoryListener(runNonce?: string, port = 0): ChildProcess {
+  const child = spawn(process.execPath, [
+    "-e",
+    `require('node:net').createServer().listen(${port}, '127.0.0.1')`,
+  ], {
+    cwd: process.cwd(),
+    detached: true,
+    env: {
+      PATH: process.env.PATH ?? "",
+      ...(runNonce ? { INGENIUM_TEST_RUN_NONCE: runNonce } : {}),
+    },
+    stdio: "ignore",
+  });
+  if (!child.pid) throw new Error("repository listener did not expose a PID");
+  children.push(child);
+  return child;
+}
+
+async function waitForRepositoryListener(pid: number): Promise<RepositoryProcessCandidate> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const candidate = discoverRepositoryProcessCandidates(process.cwd())
+      .find((entry) => entry.pid === pid);
+    if (candidate?.listeningPorts.length) return candidate;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`repository listener ${pid} was not discovered`);
+}
+
+function hasContainmentHoldFor(report: Awaited<ReturnType<typeof auditSuiteContainment>>, pid: number): boolean {
+  return strictFailures(report).some((failure) => failure.includes("containment holds")
+    && failure.includes(`manifestless candidate ${pid}`));
+}
+
 afterEach(async () => {
+  for (const child of children.splice(0)) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      child.once("close", () => resolve());
+      setTimeout(resolve, 500);
+    });
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+        setTimeout(resolve, 500);
+      });
+    }
+  }
   for (const server of servers.splice(0)) {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -155,6 +218,212 @@ describe("suite containment audit", () => {
         setTimeout(resolve, 500);
       });
     }
+  });
+
+  it("persists an unchanged pre-existing listener through normal cleanup without failing strict containment", async () => {
+    const context = createBaselineContext();
+    const child = startRepositoryListener();
+    const candidate = await waitForRepositoryListener(child.pid!);
+    const baseline = capturePreexistingProcessBaseline(context);
+
+    expect(baseline.candidates).toContainEqual(toPreexistingProcess(candidate));
+    expect(readTestRunManifest(context.manifestPath).preexistingProcessBaseline).toEqual(baseline);
+    expect(readTestRunTelemetry(context.telemetryPath!).preexistingProcessBaseline).toEqual(baseline);
+
+    cleanupTestRun(context.manifestPath);
+    expect(existsSync(context.manifestPath)).toBe(false);
+    expect(readTestRunTelemetry(context.telemetryPath!).preexistingProcessBaseline).toEqual(baseline);
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+    const port = candidate.listeningPorts[0]!;
+
+    expect(report.preexistingUnownedProcesses).toContainEqual(expect.objectContaining({
+      pid: child.pid,
+      listeningPorts: candidate.listeningPorts,
+    }));
+    expect(report.discoveredProcesses.some(({ pid }) => pid === child.pid)).toBe(false);
+    expect(report.ports.find(({ port: current }) => current === port)).toMatchObject({
+      listening: true,
+      ownership: "pre-existing-unowned",
+    });
+    expect(hasContainmentHoldFor(report, child.pid!)).toBe(false);
+    expect(strictFailures(report).some((failure) => failure.includes("listening ports:")
+      && failure.includes(String(port)))).toBe(false);
+  });
+
+  it("rejects a reused PID whose stable baseline identity changed", async () => {
+    const context = createBaselineContext();
+    const child = startRepositoryListener();
+    const candidate = await waitForRepositoryListener(child.pid!);
+    const baseline = capturePreexistingProcessBaseline(context);
+    const changedBaseline = {
+      ...baseline,
+      candidates: baseline.candidates.map((record) => record.pid === child.pid
+        ? { ...record, pidStartTime: `${record.pidStartTime}0` }
+        : record),
+    };
+
+    updateTestRunManifest(context.manifestPath, { preexistingProcessBaseline: changedBaseline });
+    cleanupTestRun(context.manifestPath);
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(report.preexistingUnownedProcesses.some(({ pid }) => pid === child.pid)).toBe(false);
+    expect(report.discoveredProcesses.some(({ pid }) => pid === child.pid)).toBe(true);
+    expect(hasContainmentHoldFor(report, child.pid!)).toBe(true);
+    expect(candidate.pidStartTime).not.toBe(`${candidate.pidStartTime}0`);
+  });
+
+  it("rejects a new manifestless listener absent from the startup baseline", async () => {
+    const context = createBaselineContext();
+    capturePreexistingProcessBaseline(context);
+    const child = startRepositoryListener();
+    const candidate = await waitForRepositoryListener(child.pid!);
+
+    cleanupTestRun(context.manifestPath);
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(report.preexistingUnownedProcesses.some(({ pid }) => pid === child.pid)).toBe(false);
+    expect(report.discoveredProcesses.some(({ pid }) => pid === child.pid)).toBe(true);
+    expect(hasContainmentHoldFor(report, child.pid!)).toBe(true);
+    expect(candidate.listeningPorts).toHaveLength(1);
+  });
+
+  it("rejects a pre-existing listener on a run-owned port", async () => {
+    const context = createBaselineContext();
+    const child = startRepositoryListener(undefined, context.ports.fixture);
+    const candidate = await waitForRepositoryListener(child.pid!);
+    const baseline = capturePreexistingProcessBaseline(context);
+
+    expect(baseline.candidates.some(({ pid }) => pid === child.pid)).toBe(false);
+    cleanupTestRun(context.manifestPath);
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(candidate.listeningPorts).toEqual([context.ports.fixture]);
+    expect(report.ports.find(({ port }) => port === context.ports.fixture)).toMatchObject({
+      ownership: "unverified",
+    });
+    expect(hasContainmentHoldFor(report, child.pid!)).toBe(true);
+  });
+
+  it("rejects a run-owned descendant even when its stable identity is forged into the baseline", async () => {
+    const context = createBaselineContext();
+    const baseline = capturePreexistingProcessBaseline(context);
+    const child = startRepositoryListener(context.runNonce);
+    const candidate = await waitForRepositoryListener(child.pid!);
+    const forgedBaseline = {
+      ...baseline,
+      candidates: [...baseline.candidates, toPreexistingProcess(candidate)]
+        .sort((left, right) => left.pid - right.pid),
+    };
+
+    updateTestRunManifest(context.manifestPath, { preexistingProcessBaseline: forgedBaseline });
+    cleanupTestRun(context.manifestPath);
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(candidate.runNonce).toBe(context.runNonce);
+    expect(report.preexistingUnownedProcesses.some(({ pid }) => pid === child.pid)).toBe(false);
+    expect(report.discoveredProcesses.some(({ pid, runNonce }) => pid === child.pid
+      && runNonce === context.runNonce)).toBe(true);
+    expect(hasContainmentHoldFor(report, child.pid!)).toBe(true);
+  });
+
+  it("rejects missing and malformed pre-existing process baselines", async () => {
+    const missingChild = startRepositoryListener();
+    await waitForRepositoryListener(missingChild.pid!);
+    const olderBaselineContext = createBaselineContext();
+    capturePreexistingProcessBaseline(olderBaselineContext);
+    cleanupTestRun(olderBaselineContext.manifestPath);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const missingContext = createBaselineContext();
+    cleanupTestRun(missingContext.manifestPath);
+
+    const missingReport = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [olderBaselineContext.telemetryPath!, missingContext.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(missingReport.preexistingUnownedProcesses.some(({ pid }) => pid === missingChild.pid)).toBe(false);
+    expect(hasContainmentHoldFor(missingReport, missingChild.pid!)).toBe(true);
+
+    const malformedContext = createBaselineContext();
+    const malformedChild = startRepositoryListener();
+    const malformedCandidate = await waitForRepositoryListener(malformedChild.pid!);
+    capturePreexistingProcessBaseline(malformedContext);
+    cleanupTestRun(malformedContext.manifestPath);
+    const malformedTelemetry = JSON.parse(readFileSync(malformedContext.telemetryPath!, "utf8")) as {
+      preexistingProcessBaseline: { candidates: Array<{ pid: number; commandHash: string }> };
+    };
+    const baselineCandidate = malformedTelemetry.preexistingProcessBaseline.candidates
+      .find(({ pid }) => pid === malformedChild.pid);
+    if (!baselineCandidate) throw new Error("listener was not persisted in the baseline");
+    baselineCandidate.commandHash = "malformed";
+    writeFileSync(malformedContext.telemetryPath!, JSON.stringify(malformedTelemetry));
+
+    const malformedReport = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [malformedContext.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(malformedReport.telemetryErrors.some((error) => error.includes(malformedContext.telemetryPath!))).toBe(true);
+    expect(malformedReport.discoveredProcesses.some(({ pid }) => pid === malformedChild.pid)).toBe(true);
+    expect(hasContainmentHoldFor(malformedReport, malformedChild.pid!)).toBe(true);
+    expect(malformedCandidate.listeningPorts).toHaveLength(1);
+  });
+
+  it("does not trust a baseline while its manifest is active or malformed", async () => {
+    const context = createBaselineContext();
+    const child = startRepositoryListener();
+    await waitForRepositoryListener(child.pid!);
+    capturePreexistingProcessBaseline(context);
+    updateTestRunManifest(context.manifestPath, { status: "running" });
+
+    const activeReport = await auditContainment({
+      manifestPath: context.manifestPath,
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(activeReport.preexistingUnownedProcesses.some(({ pid }) => pid === child.pid)).toBe(false);
+    expect(hasContainmentHoldFor(activeReport, child.pid!)).toBe(true);
+
+    writeFileSync(context.manifestPath, "not valid JSON\n");
+    const malformedReport = await auditContainment({
+      manifestPath: context.manifestPath,
+      telemetryPaths: [context.telemetryPath!],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(malformedReport.telemetry.find(({ runId }) => runId === context.runId)).toMatchObject({
+      manifestState: "invalid",
+    });
+    expect(malformedReport.preexistingUnownedProcesses.some(({ pid }) => pid === child.pid)).toBe(false);
+    expect(hasContainmentHoldFor(malformedReport, child.pid!)).toBe(true);
   });
 
   it("allows strict audit after explicit recovery while retaining resolved telemetry", async () => {

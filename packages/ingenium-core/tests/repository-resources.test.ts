@@ -113,6 +113,14 @@ describe("repository resource sync", () => {
     expect(getDb(process.env.INGENIUM_CORE_DB_PATH!).prepare("SELECT name FROM skills WHERE project_id = ?").get(projectId)).toEqual({ name: "renamed-skill" });
   });
 
+  it("adopts a prior managed identity when the resource name remains stable", () => {
+    repositoryResources.syncRepositoryResources(projectId, manifest({ skills: [skill("skill:previous")] }));
+    const adopted = skill("skill:adopted");
+
+    expect(repositoryResources.syncRepositoryResources(projectId, manifest({ skills: [adopted] })).summary.skill.unchanged).toBe(1);
+    expect(repositoryResources.syncRepositoryResources(projectId, manifest({ skills: [adopted] }), true).summary.skill.unchanged).toBe(1);
+  });
+
   it("treats metadata/frontmatter-only changes as repository updates without losing the exact payload", () => {
     repositoryResources.syncRepositoryResources(projectId, manifest());
     const changed = skill();
@@ -128,6 +136,21 @@ describe("repository resource sync", () => {
       "SELECT payload FROM repository_sync_resources WHERE project_id = ? AND resource_type = 'skill'",
     ).get(projectId) as { payload: string };
     expect(JSON.parse(payload.payload).metadata).toEqual(changed.metadata);
+  });
+
+  it("accepts a composite skill entry when each source field and the aggregate are bounded", () => {
+    const composite = skill();
+    const body = "x".repeat(140 * 1024);
+    composite.skillMd = `---\nname: fixture-skill\ndescription: "Fixture"\n---\n\n${body}`;
+    composite.body = body;
+    composite.sha256 = hash({
+      path: composite.path, name: composite.name, skillMd: composite.skillMd, body: composite.body,
+      description: composite.description, category: composite.category, tags: composite.tags,
+      alwaysApply: composite.alwaysApply, metadata: composite.metadata, fileTree: composite.fileTree,
+    });
+
+    expect(Buffer.byteLength(JSON.stringify(composite))).toBeGreaterThan(256 * 1024);
+    expect(repositoryResources.syncRepositoryResources(projectId, manifest({ skills: [composite] }), true).summary.skill.created).toBe(1);
   });
 
   it("archives/removes only prior sync-managed entries and leaves unmanaged data untouched", () => {

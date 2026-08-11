@@ -58,6 +58,7 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@opencode-ai/plugin": "1.18.9"
   }
 }
