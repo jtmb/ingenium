@@ -29,6 +29,46 @@ While any roadmap task or `TodoWrite` item remains open, the orchestrator must n
 
 Every agent task must self-verify: run typechecks, tests, lints before returning results. Never ask the user to verify — do it yourself. No simulated testing.
 
+### 🔴 Mandatory Phase Commit Boundaries
+
+The configured `scripts/phase-commit.sh` contract is mandatory for every
+declared implementation, docs, QA-remediation, deployment-remediation, and
+acceptance-fix phase. Read-only diagnosis and review phases also require both
+boundaries, even when they produce no repository changes:
+
+```bash
+scripts/phase-commit.sh begin <phase-id>
+scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'
+```
+
+`begin` runs before work, records the begin SHA, and opens protected state only
+from a fully clean worktree, including non-ignored untracked files. A dirty
+pre-phase tree blocks dispatch; it is never permission to commit unrelated
+changes. Writers return exact paths, and the orchestrator stages only those
+intended paths before `end`. Unknown files, generated artifacts, secrets,
+another worktree/session's changes, amend commits, and hook bypasses are never
+accepted. A verified no-change phase uses `--allow-empty`.
+
+Each phase has exactly one begin marker followed by one terminal end or cancel
+commit. No ordinary commit may occur between those boundaries or outside an
+active phase; the orchestrator creates commits only through the phase helper.
+Its Bash permissions are ordered for last-match semantics: wildcard/broad Git
+denials, helper and read-only inspection allows, then direct commit/ref/push/
+reset, hook/config/index mutation, and amend denials. The helper uses standard
+Git hooks, revalidates the bound ref and index after each pre-update hook, and
+rejects hook changes to the verified index; a failed pre-update hook leaves the
+phase active for correction.
+
+No next phase dispatch is allowed while state is open. Explicit STOP/CANCELLED
+uses only `scripts/phase-commit.sh cancel <phase-id> [reason]` from a clean tree;
+it does not absorb dirty work. A failed end or cancel preserves resumable phase
+state, and a failed begin writes no state. Deployment/source changes made within
+a phase must be in its end commit before the next phase. Final reconciliation
+must pass `scripts/phase-commit.sh verify-history [baseline..target]` with every
+first-parent begin paired to its matching end or authorized cancel.
+The history check may be deferred during pre-end validation while the active
+boundary is open, but must pass after end or cancel and before the next phase.
+
 ### 🔴 Isolate Before You Fix
 
 Never attempt a fix until you have isolated the minimal reproduction. Guessing at fixes without isolation leads to cascading changes that obscure the root cause.
@@ -50,6 +90,19 @@ Every agent definition must include a `permission` block explicitly allowing the
 An agent is a writer when its permission block grants `edit: allow` or `write: allow`, regardless of whether the task is code, documentation, or browser automation. In the current topology, `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-docs`, and `@browser-agent` are writers. Docs and Browser therefore count toward the maximum of three concurrent writers, and Browser is dispatchable. Every phase must stay at **≤6 active subagents and ≤3 permission-derived writers**; reserve exclusive territories and serialize overlaps.
 
 Valid example: one phase with Fast, Docs, and Browser writers plus QA, Explore, and QA Vision read-only agents is **6 active / 3 writers**. A phase declaration must state those counts before dispatch.
+
+### Phase Declaration Protocol
+
+Every phase declaration must record:
+
+1. **Phase ID** — lowercase slug passed to `phase-commit.sh`
+2. **Begin SHA** — recorded after the successful begin marker
+3. **Expected end commit owner** — one named boundary owner
+4. **Active count** — total subagents (max 6)
+5. **Writer count** — total writers (max 3)
+6. **Exclusive territories** — file/directory ownership per writer; zero overlap
+7. **Dependencies** — serialization order for writers sharing territories across waves
+8. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
 
 ### 🔴 Agent Output Must Be Direct and Uncensored
 

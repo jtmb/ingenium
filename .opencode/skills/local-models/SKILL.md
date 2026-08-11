@@ -138,13 +138,13 @@ agent in the current root configuration.
 | `ingenium-scout` | OpenAI GPT-5.6 Luna | `high` |
 | `ingenium-chat` | DeepSeek V4 Flash | `high` |
 | `ingenium-security-auditor` | OpenAI GPT-5.6 Sol | `high` |
-| `browser-agent` | DeepSeek V4 Flash | none |
+| `browser-agent` | OpenAI GPT-5.6 Luna | `max` |
 | `ingenium-llm-broker` | unmapped (hidden system agent) | — |
 
 For model-specific subagent safety rules (phase limits, anti-loop constraints), see:
 
 - **[qwen-3.5-9b.md](references/qwen-3.5-9b.md)** — Historical Qwen 3.5 9B protocol; it is not the active runtime protocol for the current agent assignments.
-- **[deep-seek.md](references/deep-seek.md)** — DeepSeek V4 Flash protocol used by the currently assigned `browser-agent` and `ingenium-chat`; it also documents general verification patterns used when auditing orchestration.
+- **[deep-seek.md](references/deep-seek.md)** — DeepSeek V4 Flash protocol used by the currently assigned `ingenium-chat`; it also documents general verification patterns used when auditing orchestration.
 
 ## Cross-References
 

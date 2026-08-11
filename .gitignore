@@ -84,6 +84,7 @@ servers-page.yml
 *-accessibility.md
 
 # Generated test artifacts
+/test-results/
 tests/artifacts/
 tests/qa-screenshots/
 tests/test-results/

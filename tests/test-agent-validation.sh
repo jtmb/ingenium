@@ -525,32 +525,56 @@ validate_orchestrator_bash_permissions() {
   local errors=0
   local bash_header_count
   local rule command action
-  local -a expected_rules=(
-    'git add *'
-    'git commit *'
-    'git push *'
-    'git rev-parse --short HEAD'
-    'npm test*'
-    'npm run test*'
-    'npm run build*'
-    'npm run typecheck*'
-    'npx tsc*'
-    'npx playwright test*'
-    'python -m pytest*'
-    'pytest*'
-    'go test*'
-    'go build*'
-    'cargo test*'
-    'cargo check*'
-    'cargo build*'
-  )
   local -a bash_rules=()
-  declare -A expected_rules_set=()
+  declare -A expected_rules=(
+    ["*"]='deny'
+    ['git *']='deny'
+    ['scripts/phase-commit.sh begin *']='allow'
+    ['scripts/phase-commit.sh end *']='allow'
+    ['scripts/phase-commit.sh cancel *']='allow'
+    ['scripts/phase-commit.sh status']='allow'
+    ['scripts/phase-commit.sh verify-history']='allow'
+    ['scripts/phase-commit.sh verify-history *']='allow'
+    ['git status']='allow'
+    ['git status *']='allow'
+    ['git diff']='allow'
+    ['git diff *']='allow'
+    ['git log']='allow'
+    ['git log *']='allow'
+    ['git add *']='allow'
+    ['git rev-parse --short HEAD']='allow'
+    ['git commit']='deny'
+    ['git commit *']='deny'
+    ['git commit --amend*']='deny'
+    ['git commit-tree']='deny'
+    ['git commit-tree *']='deny'
+    ['git update-ref']='deny'
+    ['git update-ref *']='deny'
+    ['git push']='deny'
+    ['git push *']='deny'
+    ['git reset']='deny'
+    ['git reset *']='deny'
+    ['git config']='deny'
+    ['git config *']='deny'
+    ['git hook']='deny'
+    ['git hook *']='deny'
+    ['git update-index']='deny'
+    ['git update-index *']='deny'
+    ['npm test*']='allow'
+    ['npm run test*']='allow'
+    ['npm run build*']='allow'
+    ['npm run typecheck*']='allow'
+    ['npx tsc*']='allow'
+    ['npx playwright test*']='allow'
+    ['python -m pytest*']='allow'
+    ['pytest*']='allow'
+    ['go test*']='allow'
+    ['go build*']='allow'
+    ['cargo test*']='allow'
+    ['cargo check*']='allow'
+    ['cargo build*']='allow'
+  )
   declare -A seen_rules=()
-
-  for rule in "${expected_rules[@]}"; do
-    expected_rules_set["$rule"]=1
-  done
 
   bash_header_count="$(awk '/^  bash:[[:space:]]*$/ { count++ } END { print count + 0 }' "$ORCHESTRATOR")"
   if [[ "$bash_header_count" -ne 1 ]]; then
@@ -609,19 +633,12 @@ validate_orchestrator_bash_permissions() {
     if [[ "$command" == "__MALFORMED__" ]]; then
       fail "orchestrator bash permissions contain a malformed nested rule: $action"
       errors=1
-    elif [[ "$action" == "allow" && -n "${expected_rules_set[$command]:-}" ]]; then
+    elif [[ "${expected_rules[$command]:-}" == "$action" ]]; then
       if [[ -n "${seen_rules[$command]:-}" ]]; then
-        fail "orchestrator bash permissions contain duplicate allow rule: $command"
+        fail "orchestrator bash permissions contain duplicate rule: $command"
         errors=1
       else
         seen_rules["$command"]=1
-      fi
-    elif [[ "$command" == "*" && "$action" == "deny" ]]; then
-      if [[ -n "${seen_rules['*|deny']:-}" ]]; then
-        fail "orchestrator bash permissions contain duplicate wildcard deny rules"
-        errors=1
-      else
-        seen_rules['*|deny']=1
       fi
     else
       fail "orchestrator bash permissions contain an unexpected rule: $command ($action)"
@@ -629,15 +646,15 @@ validate_orchestrator_bash_permissions() {
     fi
   done
 
-  for rule in "${expected_rules[@]}"; do
-    if [[ -z "${seen_rules[$rule]:-}" ]]; then
-      fail "orchestrator bash permissions are missing intended rule: $rule"
+  for command in "${!expected_rules[@]}"; do
+    if [[ -z "${seen_rules[$command]:-}" ]]; then
+      fail "orchestrator bash permissions are missing intended rule: $command (${expected_rules[$command]})"
       errors=1
     fi
   done
 
   if [[ "$errors" -eq 0 ]]; then
-    pass "orchestrator has deny-by-default bash permissions limited to git coordination and test/build verification"
+    pass "orchestrator has deny-by-default bash permissions limited to phase boundaries, Git coordination, and verification"
     return 0
   fi
   return 1
@@ -1867,6 +1884,17 @@ done
 
 if [[ "$causal_policy_errors" -eq 0 ]]; then
   pass "causal task contracts, bounded diagnosis, cancellation, and non-recursive policy invariants hold"
+fi
+
+phase_status=""
+if ! phase_status="$("$REPO_ROOT/scripts/phase-commit.sh" status)"; then
+  fail "phase commit status must be readable"
+elif [[ "$phase_status" == active\ phase:* ]]; then
+  pass "phase commit history is deferred while the active phase is valid"
+elif ! "$REPO_ROOT/scripts/phase-commit.sh" verify-history; then
+  fail "phase commit history must be closed and valid"
+else
+  pass "phase commit history is closed and valid"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then exit 1; fi

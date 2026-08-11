@@ -253,6 +253,54 @@ OpenCode interactive `question` access is denied globally and in every custom ag
 
 QA and security each report scope-classified findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a writer fixes an in-scope reviewer blocker, run only the minimum targeted regression for that root cause. Do not rerun QA or security unless the source change in that review boundary requires the reviewer’s originally declared check; never create a recursive reviewer handoff.
 
+### 🔴 Mandatory Phase Commit Boundaries
+
+`scripts/phase-commit.sh` is the sole phase-boundary mechanism. Every declared
+implementation, docs, QA-remediation, deployment-remediation, and acceptance-fix
+phase, including read-only diagnosis or review phases that make no repository
+changes, must have an explicit boundary:
+
+```text
+scripts/phase-commit.sh begin <phase-id>
+scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'
+```
+
+Each phase has exactly one begin marker followed by one terminal end or cancel
+commit. The orchestrator never creates an ordinary commit between those
+boundaries or outside an active phase; all commit creation goes through the
+helper. Its Bash permission rules use last-match ordering: wildcard and broad
+Git denial comes first, the phase-helper and read-only inspection allowlist
+follows, and direct commit/ref/push/reset, hook/config/index mutation, and
+amend denials remain last. The helper uses standard Git hooks, revalidates the
+bound ref and index after each pre-update hook, and rejects hook changes to the
+verified index; a failed pre-update hook leaves the phase active for correction.
+
+The `begin` command runs before phase work and records the begin commit and
+protected phase state. It requires a named branch, no in-progress Git operation,
+the configured history baseline, and a fully clean worktree including
+non-ignored untracked files. A dirty pre-phase tree blocks dispatch; it is never
+permission to commit unrelated work. Report or coordinate direct conflicts.
+
+Every phase declaration records **Phase ID**, **Begin SHA**, and **Expected end
+commit owner** in addition to the existing scope and verification fields. Writers
+return exact changed paths. The orchestrator stages only those intended paths
+before `end`; it never auto-stages unknown files, generated artifacts, secrets,
+or changes from another worktree/session. Never amend or bypass hooks. The end
+message must be a semantic conventional commit subject, not a phase-boundary
+marker. Use `--allow-empty` for a verified no-change diagnosis/review phase.
+
+No next phase may dispatch while the phase state is open. An explicit
+`STOP`/`CANCELLED` request closes an active phase only with
+`scripts/phase-commit.sh cancel <phase-id> [reason]` and only from a clean
+worktree; it is not an end commit. A failed `end` or `cancel` preserves the
+active state for resumption, while a failed `begin` writes no phase state.
+Deployment and source changes made within a phase must be included in its end
+commit before any next phase dispatch. Final reconciliation must run
+`scripts/phase-commit.sh verify-history [baseline..target]` and confirm every
+first-parent phase begin is paired with its matching end or authorized cancel.
+Pre-end validation may defer the closed-history check while the active boundary
+is open; it is mandatory after end or cancel and before the next phase dispatch.
+
 ### Concurrency Limits
 
 | Limit | Value | Scope |
@@ -282,6 +330,9 @@ The non-writer agents are `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`
 The following implementation phase is within both limits: **5 active, 3 permission-derived writers**. QA and visual gates run later, after their applicable implementation work is final.
 
 ```text
+Phase ID: dashboard-docs-browser
+Begin SHA: recorded by successful `begin`
+Expected end commit owner: @ingenium-orchestrator
 Phase: "Dashboard implementation, direct docs, and browser work"
   @ingenium-software-engineer-fast → dashboard/components/ (writer)
   @ingenium-docs                   → docs/              (writer)
@@ -290,23 +341,30 @@ Phase: "Dashboard implementation, direct docs, and browser work"
   @ingenium-scout                  → retrieve context   (non-writer)
 ```
 
+The boundary owner stages only the returned paths, runs the declared checks, and
+then ends the phase with a semantic message. Deployment/source changes are not
+carried into a later phase.
+
 No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
 
 ### Phase Declaration Protocol
 
 Every task and phase MUST declare before dispatch:
 
-1. **IN_SCOPE** — permitted files, behavior, and remediation
-2. **OUT_OF_SCOPE** — excluded work; valid excluded findings are never auto-dispatched
-3. **Acceptance criteria** — observable pass conditions
-4. **STOP_CONDITION** — `PASS`, `ESCALATE_USER`, `STOP`, or `CANCELLED`
-5. **Verification plan** — targeted checks, deployment/acceptance steps, bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for each remediation
-6. **Escalation rule** — evidence for one of the five permitted `ESCALATE_USER` conditions only
-7. **Active count** — total subagents to spawn (max 6)
-8. **Writer count** — total writers (max 3)
-9. **Exclusive territories** — file/directory ownership per writer; zero overlap
-10. **Dependencies** — serialization order for writers sharing territories across waves
-11. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
+1. **Phase ID** — lowercase slug passed to `phase-commit.sh`
+2. **Begin SHA** — recorded only after a successful `begin`
+3. **Expected end commit owner** — one named boundary owner, normally the orchestrator
+4. **IN_SCOPE** — permitted files, behavior, and remediation
+5. **OUT_OF_SCOPE** — excluded work; valid excluded findings are never auto-dispatched
+6. **Acceptance criteria** — observable pass conditions
+7. **STOP_CONDITION** — `PASS`, `ESCALATE_USER`, `STOP`, or `CANCELLED`
+8. **Verification plan** — targeted checks, deployment/acceptance steps, bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for each remediation
+9. **Escalation rule** — evidence for one of the five permitted `ESCALATE_USER` conditions only
+10. **Active count** — total subagents to spawn (max 6)
+11. **Writer count** — total writers (max 3)
+12. **Exclusive territories** — file/directory ownership per writer; zero overlap
+13. **Dependencies** — serialization order for writers sharing territories across waves
+14. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
 
 Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. A finding is **BLOCKING** only when it is in the user scope and fails acceptance criteria or is immediately exploitable changed code. Only an in-scope BLOCKING finding may reopen implementation. FOLLOW_UP findings are reported separately and never auto-dispatched. Every remediation must name and address the current reproducible root cause, then run the minimum targeted regression; a second failed check alone is never an escalation condition.
 
@@ -634,6 +692,11 @@ For quick reference, here are the non-negotiable rules from above:
 | 23 | Declare task scope, acceptance, stop condition, causal verification plan, and permitted escalation before dispatch | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 24 | Remediate reproducible in-scope root causes automatically; only the five escalation conditions return ESCALATE_USER | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 25 | STOP/CANCELLED is terminal; preserve evidence and report skipped work | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 26 | Every declared phase requires an explicit begin/end boundary, including empty read-only phases | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 27 | Dirty pre-phase trees block dispatch; boundary owners stage only intended paths and never commit unrelated/generated/secret files | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 28 | No next phase dispatch while state is open; STOP/CANCELLED uses clean-tree cancel and failures preserve resumable state | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 29 | Deployment/source changes must be committed before the next phase and final history pairing must pass | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 30 | The orchestrator creates commits only through the phase helper; direct Git mutation and broad Git commands remain denied | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 
 ---
 
