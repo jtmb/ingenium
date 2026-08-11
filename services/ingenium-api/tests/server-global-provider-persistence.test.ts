@@ -39,6 +39,7 @@ afterEach(() => {
   vault.sealVault();
   resetDbForTest();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   tempDir = "";
   globalProjectId = "";
@@ -87,6 +88,17 @@ function abortError(): Error {
   const error = new Error("aborted") as Error & { name: string };
   error.name = "AbortError";
   return error;
+}
+
+function mockResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+    body: null,
+  } as unknown as Response;
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -581,6 +593,116 @@ describe("server-global provider persistence", () => {
         expect(JSON.stringify(warning.mock.calls)).not.toContain(secret);
       } finally {
         vi.useRealTimers();
+      }
+    });
+
+    it("aborts a stalled global config reload and releases the provider lock for a retry", async () => {
+      vi.useFakeTimers();
+      const firstCredential = "stalled-reload-credential";
+      const retryCredential = "reload-retry-credential";
+      let aborted = false;
+      let pendingAbortListeners = 0;
+      const stalledFetch = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        expect(signal).toBeDefined();
+        pendingAbortListeners += 1;
+        signal!.addEventListener("abort", () => {
+          pendingAbortListeners -= 1;
+          aborted = true;
+          reject(abortError());
+        }, { once: true });
+      }));
+      const apply = vi.fn((_key: string, signal: AbortSignal) =>
+        opencodeClient.updateGlobalConfig({ provider: { openai: { models: {} } } }, signal));
+
+      try {
+        vi.stubGlobal("fetch", stalledFetch);
+        const first = connectNativeProviderCredential("openai", firstCredential, {
+          apply,
+          remove: async () => ({}),
+          status: async () => authStatus("openai", false),
+        });
+        await flushMicrotasks();
+
+        await vi.advanceTimersByTimeAsync(NATIVE_PROVIDER_OPERATION_TIMEOUT_MS);
+        await expect(first).resolves.toEqual({ outcome: "connection_failed", compensation: "restored" });
+        expect(aborted).toBe(true);
+        expect(pendingAbortListeners).toBe(0);
+        expect((stalledFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+        expect(nativeCredential("openai")).toBeUndefined();
+
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse(200, {})));
+        await expect(connectNativeProviderCredential("openai", retryCredential, {
+          apply,
+          remove: async () => ({}),
+          status: async () => authStatus("openai", false),
+        })).resolves.toEqual({ outcome: "connected" });
+        expect(nativeCredential("openai")).toBe(retryCredential);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sanitizes reflected credential errors through connection, compensation, status, and typed 404 removal", async () => {
+      const upstreamCanary = "reflected-upstream-credential-canary";
+      const submittedCredential = "submitted-route-credential-canary";
+      const reflectedError = {
+        name: upstreamCanary,
+        _tag: upstreamCanary,
+        code: upstreamCanary,
+        message: upstreamCanary,
+        body: upstreamCanary,
+        data: {
+          name: upstreamCanary,
+          _tag: upstreamCanary,
+          code: upstreamCanary,
+          message: upstreamCanary,
+          body: upstreamCanary,
+        },
+      };
+      const originalFetch = globalThis.fetch;
+      const upstreamFetch = vi.fn().mockResolvedValue(mockResponse(502, reflectedError));
+      const debug = vi.spyOn(logger, "debug");
+      const warn = vi.spyOn(logger, "warn");
+      const error = vi.spyOn(logger, "error");
+
+      try {
+        vi.stubGlobal("fetch", upstreamFetch);
+        await withRouter(async (baseUrl) => {
+          const integration = await originalFetch(`${baseUrl}/api/v1/opencode/integrations/openai/connect/key`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: submittedCredential }),
+          });
+          expect(integration.status).toBe(502);
+          expect(await integration.json()).toEqual({
+            error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" },
+          });
+
+          const auth = await originalFetch(`${baseUrl}/api/v1/opencode/auth/anthropic`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "api", key: submittedCredential }),
+          });
+          expect(auth.status).toBe(502);
+          expect(await auth.json()).toEqual({
+            error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" },
+          });
+
+          upstreamFetch.mockResolvedValue(mockResponse(404, reflectedError));
+          const remove = await originalFetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
+            method: "DELETE",
+          });
+          expect(remove.status).toBe(200);
+          expect(await remove.json()).toEqual({ data: { disconnected: true } });
+        });
+
+        const output = JSON.stringify([debug.mock.calls, warn.mock.calls, error.mock.calls]);
+        expect(output).not.toContain(upstreamCanary);
+        expect(output).not.toContain(submittedCredential);
+      } finally {
+        vi.unstubAllGlobals();
       }
     });
 

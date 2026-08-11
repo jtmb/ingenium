@@ -19,6 +19,7 @@ import {
   isOpenCodeError,
   opencodeClient,
 } from "../lib/opencode-client.js";
+import { logger } from "ingenium-core";
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -208,14 +209,17 @@ describe("request — URL construction", () => {
     expect(init.body).toBe(JSON.stringify({ title: "Test" }));
   });
 
-  it("passes caller cancellation to the OpenCode HTTP transport", async () => {
+  it("passes caller cancellation to credential and config HTTP transports", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { ok: true }));
     const controller = new AbortController();
+    const configController = new AbortController();
     vi.stubGlobal("fetch", fetchSpy);
 
     await opencodeClient.addAuth("openai", { type: "api", key: "transport-canary" }, undefined, controller.signal);
+    await opencodeClient.updateGlobalConfig({ provider: { openai: { models: {} } } }, configController.signal);
 
     expect((fetchSpy.mock.calls[0]![1] as RequestInit).signal).toBe(controller.signal);
+    expect((fetchSpy.mock.calls[1]![1] as RequestInit).signal).toBe(configController.signal);
   });
 });
 
@@ -365,6 +369,74 @@ describe("request — AbortError", () => {
 
     await expect(request("/session")).rejects.toThrow("The operation was aborted");
     await expect(request("/session")).rejects.toHaveProperty("name", "AbortError");
+  });
+});
+
+describe("credential operation error sanitization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not return or log reflected upstream credential error fields", async () => {
+    const canary = "reflected-credential-canary";
+    const submittedCredential = "submitted-credential-canary";
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(mockResponse(502, {
+      name: canary,
+      _tag: canary,
+      code: canary,
+      message: canary,
+      body: canary,
+      data: { name: canary, _tag: canary, code: canary, message: canary, body: canary },
+    }))));
+    const debug = vi.spyOn(logger, "debug");
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+
+    const results = await Promise.all([
+      opencodeClient.connectIntegrationKey("openai", submittedCredential),
+      opencodeClient.addAuth("openai", { type: "api", key: submittedCredential }),
+      opencodeClient.deleteAuth("openai"),
+      opencodeClient.getAuthStatus(),
+    ]);
+
+    const codes = [
+      "PROVIDER_INTEGRATION_CONNECT_FAILED",
+      "PROVIDER_AUTH_APPLY_FAILED",
+      "PROVIDER_AUTH_REMOVE_FAILED",
+      "PROVIDER_AUTH_STATUS_FAILED",
+    ];
+    for (const [index, result] of results.entries()) {
+      expect(isOpenCodeError(result)).toBe(true);
+      if (isOpenCodeError(result)) {
+        expect(result.error.code).toBe(codes[index]);
+        expect(result.error.status).toBe(502);
+      }
+    }
+
+    const output = JSON.stringify([results, debug.mock.calls, warn.mock.calls, error.mock.calls]);
+    expect(output).not.toContain(canary);
+    expect(output).not.toContain(submittedCredential);
+  });
+
+  it("normalizes credential abort errors without exposing abort text", async () => {
+    const canary = "credential-abort-canary";
+    const aborted = new Error(canary) as Error & { name: string };
+    aborted.name = "AbortError";
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(aborted));
+
+    const result = await opencodeClient.addAuth("openai", { type: "api", key: "credential-input" });
+
+    expect(result).toEqual({
+      error: {
+        code: "PROVIDER_AUTH_APPLY_FAILED",
+        message: "Provider authentication update failed",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(canary);
   });
 });
 

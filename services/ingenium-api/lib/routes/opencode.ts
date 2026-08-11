@@ -288,7 +288,7 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
       result.error.message = "OpenCode is starting up. Please wait a moment and try again.";
       // Set Retry-After header so clients can back off gracefully
       res.setHeader("Retry-After", "5");
-    } else if (code === "NOT_FOUND" || code === "NotFoundError") {
+    } else if (result.error.status === 404 || code === "NOT_FOUND" || code === "NotFoundError") {
       status = 404;
     } else if (code === "BadRequest" || code.startsWith("HTTP_4")) {
       status = 400;

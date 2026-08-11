@@ -414,6 +414,33 @@ const PROVIDER_CATALOG_ERROR: OpenCodeErrorShape["error"] = {
   code: "PROVIDER_CATALOG_FAILED",
   message: "OpenCode provider catalog is unavailable",
 };
+const PROVIDER_CONFIG_RELOAD_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_CONFIG_RELOAD_FAILED",
+  message: "OpenCode provider configuration reload failed",
+};
+const INTEGRATION_KEY_CONNECT_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_INTEGRATION_CONNECT_FAILED",
+  message: "Provider connection failed",
+};
+const PROVIDER_AUTH_APPLY_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_AUTH_APPLY_FAILED",
+  message: "Provider authentication update failed",
+};
+const PROVIDER_AUTH_REMOVE_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_AUTH_REMOVE_FAILED",
+  message: "Provider authentication removal failed",
+};
+const PROVIDER_AUTH_STATUS_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_AUTH_STATUS_FAILED",
+  message: "Provider authentication status is unavailable",
+};
+
+type SafeProviderOperation =
+  | "provider_config_reload"
+  | "integration_key_connect"
+  | "provider_auth_apply"
+  | "provider_auth_remove"
+  | "provider_auth_status";
 
 /* ── Helpers ── */
 
@@ -471,6 +498,8 @@ export async function request<T>(
     signal?: AbortSignal;
     /** Route-owned failures must not log or return opaque upstream codes. */
     sanitizedUpstreamError?: OpenCodeErrorShape["error"];
+    /** Fixed local label for logs around a sensitive provider operation. */
+    safeProviderOperation?: SafeProviderOperation;
   } = {},
 ): Promise<OpenCodeResult<T>> {
   const auth = buildAuthHeader();
@@ -483,7 +512,14 @@ export async function request<T>(
     };
   }
 
-  const { method = "GET", body, query, signal, sanitizedUpstreamError } = opts;
+  const {
+    method = "GET",
+    body,
+    query,
+    signal,
+    sanitizedUpstreamError,
+    safeProviderOperation,
+  } = opts;
 
   // Build URL with query params
   let url = `${config.opencodeUrl}${path}`;
@@ -512,15 +548,40 @@ export async function request<T>(
       init.body = JSON.stringify(body);
     }
 
-    logger.debug(SOURCE, `${method} ${url}`, {
-      headers: redactHeaders(headers),
-      bodyLen: body ? JSON.stringify(body).length : 0,
-    });
+    if (safeProviderOperation) {
+      logger.debug(SOURCE, "OpenCode provider operation requested", {
+        operation: safeProviderOperation,
+      });
+    } else {
+      logger.debug(SOURCE, `${method} ${url}`, {
+        headers: redactHeaders(headers),
+        bodyLen: body ? JSON.stringify(body).length : 0,
+      });
+    }
 
     const response = await fetch(url, init);
     const contentType = response.headers.get("content-type") ?? "";
 
     if (!response.ok) {
+      if (sanitizedUpstreamError) {
+        // Do not parse credential-bearing error bodies; canceling releases the response stream.
+        await response.body?.cancel().catch(() => undefined);
+        logger.warn(
+          SOURCE,
+          safeProviderOperation ? "OpenCode provider operation failed" : `OpenCode ${response.status} for ${method} ${path}`,
+          safeProviderOperation
+            ? {
+              operation: safeProviderOperation,
+              code: sanitizedUpstreamError.code,
+              status: response.status,
+            }
+            : { status: response.status },
+        );
+        const error: OpenCodeErrorShape["error"] = { ...sanitizedUpstreamError };
+        Object.defineProperty(error, "status", { value: response.status, enumerable: false });
+        return { error };
+      }
+
       // Attempt to parse the error body
       let errMsg = `HTTP ${response.status}`;
       let errCode = `HTTP_${response.status}`;
@@ -540,12 +601,10 @@ export async function request<T>(
       logger.warn(
         SOURCE,
         `OpenCode ${response.status} for ${method} ${path}`,
-        sanitizedUpstreamError ? { status: response.status } : { status: response.status, code: errCode },
+        { status: response.status, code: errCode },
       );
 
-      const error: OpenCodeErrorShape["error"] = sanitizedUpstreamError
-        ? { ...sanitizedUpstreamError }
-        : { message: errMsg, code: errCode };
+      const error: OpenCodeErrorShape["error"] = { message: errMsg, code: errCode };
       Object.defineProperty(error, "status", { value: response.status, enumerable: false });
       return { error };
     }
@@ -561,14 +620,23 @@ export async function request<T>(
   } catch (err: unknown) {
     const e = err as Error & { name?: string };
 
-    // AbortError is thrown when we cancel a streaming request — re-throw
-    // so the caller can distinguish cancellation from a real error.
+    // Provider credential operations must not expose an abort implementation's
+    // message or name; generic requests retain their cancellation contract.
     if (e.name === "AbortError") {
+      if (safeProviderOperation && sanitizedUpstreamError) {
+        return { error: { ...sanitizedUpstreamError } };
+      }
       throw err;
     }
 
     if (sanitizedUpstreamError) {
-      logger.error(SOURCE, `Fetch failed for ${method} ${path}`, { name: e.name });
+      logger.error(
+        SOURCE,
+        safeProviderOperation ? "OpenCode provider operation failed" : `Fetch failed for ${method} ${path}`,
+        safeProviderOperation
+          ? { operation: safeProviderOperation, code: sanitizedUpstreamError.code }
+          : { name: e.name },
+      );
     } else {
       logger.error(SOURCE, `Fetch failed for ${method} ${path}: ${e.message}`, {
         name: e.name,
@@ -670,10 +738,16 @@ export const opencodeClient = {
     request<OpenCodeHealth>("/global/health"),
 
   /** Apply a partial global config without interrupting active sessions. */
-  updateGlobalConfig: (config: Record<string, unknown>): Promise<OpenCodeResult<Record<string, unknown>>> =>
+  updateGlobalConfig: (
+    config: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<Record<string, unknown>>> =>
     request<Record<string, unknown>>("/global/config", {
       method: "PATCH",
       body: { config },
+      signal,
+      sanitizedUpstreamError: PROVIDER_CONFIG_RELOAD_ERROR,
+      safeProviderOperation: "provider_config_reload",
     }),
 
   /* ── Sessions ── */
@@ -898,6 +972,8 @@ export const opencodeClient = {
       method: "POST",
       body: { key },
       signal,
+      sanitizedUpstreamError: INTEGRATION_KEY_CONNECT_ERROR,
+      safeProviderOperation: "integration_key_connect",
     }),
 
   beginIntegrationOAuth: (
@@ -935,6 +1011,8 @@ export const opencodeClient = {
       body,
       query: { directory },
       signal,
+      sanitizedUpstreamError: PROVIDER_AUTH_APPLY_ERROR,
+      safeProviderOperation: "provider_auth_apply",
     }),
 
   deleteAuth: (
@@ -946,6 +1024,8 @@ export const opencodeClient = {
       method: "DELETE",
       query: { directory },
       signal,
+      sanitizedUpstreamError: PROVIDER_AUTH_REMOVE_ERROR,
+      safeProviderOperation: "provider_auth_remove",
     }),
 
   getAuthStatus: async (
@@ -955,6 +1035,8 @@ export const opencodeClient = {
     const result = await request<V2Response<IntegrationInfo[]>>("/api/integration", {
       query: { "location.directory": directory },
       signal,
+      sanitizedUpstreamError: PROVIDER_AUTH_STATUS_ERROR,
+      safeProviderOperation: "provider_auth_status",
     });
     if (isOpenCodeError(result)) return result;
     return {

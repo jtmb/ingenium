@@ -252,6 +252,16 @@ describe("managed provider blocks", () => {
     expect(JSON.stringify(config)).not.toContain("provider-secret");
   });
 
+  it("runs managed provider config reloads inside the deadline signal boundary", async () => {
+    const reload = vi.spyOn(opencodeClient, "updateGlobalConfig").mockResolvedValue({});
+
+    const response = await putProviderConfigs(providers);
+
+    expect(response.status).toBe(200);
+    expect(reload).toHaveBeenCalledWith(expect.any(Object), expect.any(AbortSignal));
+    reload.mockRestore();
+  });
+
   it("preserves omitted credentials and removes deleted provider projections", async () => {
     const withoutKeys = providers.slice(0, 2).map(({ apiKey: _apiKey, ...provider }) => provider);
     const response = await putProviderConfigs(withoutKeys);

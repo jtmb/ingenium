@@ -1098,7 +1098,9 @@ settingsRouter.put("/provider-configs", async (req, res) => {
   }
 
   const authWarnings: string[] = [];
-  const result = await opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>);
+  const result = await callOpenCodeWithProviderDeadline((signal) =>
+    opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>, signal),
+  );
   if (isOpenCodeError(result)) {
     authWarnings.push("OpenCode could not reload the provider configuration automatically");
   }
@@ -1107,7 +1109,7 @@ settingsRouter.put("/provider-configs", async (req, res) => {
       const result = await callOpenCodeWithProviderDeadline((signal) =>
         opencodeClient.deleteAuth(provider.id, "/workspace", signal),
       );
-      if (isOpenCodeError(result)) authWarnings.push(`Authentication cleanup for ${provider.name} could not be completed`);
+      if (isOpenCodeError(result)) authWarnings.push("Authentication cleanup could not be completed");
       continue;
     }
     const key = resolvedKeys[provider.id] ?? getManagedVaultApiKey(
@@ -1119,13 +1121,13 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     const result = await callOpenCodeWithProviderDeadline((signal) =>
       opencodeClient.addAuth(provider.id, { type: "api", key }, "/workspace", signal),
     );
-    if (isOpenCodeError(result)) authWarnings.push(`Authentication for ${provider.name} could not be updated`);
+    if (isOpenCodeError(result)) authWarnings.push("Authentication could not be updated");
   }
   for (const removedId of previousIds.filter((id) => !metadata.some((provider) => provider.id === id))) {
     const result = await callOpenCodeWithProviderDeadline((signal) =>
       opencodeClient.deleteAuth(removedId, "/workspace", signal),
     );
-    if (isOpenCodeError(result)) authWarnings.push(`Authentication cleanup for removed provider ${removedId} could not be completed`);
+    if (isOpenCodeError(result)) authWarnings.push("Authentication cleanup could not be completed");
   }
 
   res.json({ data: { saved: true, warnings: authWarnings } });
@@ -1221,9 +1223,14 @@ settingsRouter.post("/llm-config", async (req, res) => {
   if (globalProject) {
     try {
       const projectedConfig = projectToOpenCodeConfig(globalProject.id, primary, backup?.provider ? backup : undefined);
-      const result = await opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>);
+      const result = await callOpenCodeWithProviderDeadline((signal) =>
+        opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>, signal),
+      );
       if (isOpenCodeError(result)) {
-        logger.warn("settings", `OpenCode could not reload the LLM configuration automatically: ${result.error.code}`);
+        logger.warn("settings", "OpenCode could not reload the LLM configuration automatically", {
+          operation: "provider_config_reload",
+          code: result.error.code,
+        });
       }
     } catch (err) {
       logger.warn("settings", `OpenCode config projection failed: ${err instanceof Error ? err.message : String(err)}`);
