@@ -14,7 +14,7 @@ import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Request, Response, NextFunction } from "express";
-import { authMiddleware, isPublicOAuthCallbackRequest } from "../lib/middleware/auth.js";
+import { authMiddleware, isPublicLocalAuthRequest, isPublicOAuthCallbackRequest } from "../lib/middleware/auth.js";
 import {
   ApiTokenConfigurationError,
   isValidApiToken,
@@ -303,6 +303,18 @@ describe("authMiddleware — timing-safe comparison", () => {
         code: "API_AUTH_NOT_CONFIGURED",
       });
       expect(next).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("AUTH-101 public route allowlist", () => {
+    it.each([
+      ["GET", "/api/v1/auth/csrf", true],
+      ["POST", "/api/v1/auth/login", true],
+      ["GET", "/api/v1/auth/session", false],
+      ["POST", "/api/v1/auth/login/", false],
+      ["GET", "/api/v1/unknown", false],
+    ] as const)("matches only declared %s %s routes", (method, path, expected) => {
+      expect(isPublicLocalAuthRequest(makeReq(undefined, method, path) as Request)).toBe(expected);
     });
   });
 });

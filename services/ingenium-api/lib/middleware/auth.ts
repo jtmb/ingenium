@@ -1,10 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "./errors.js";
 import { apiTokensEqual, loadApiToken } from "./api-token.js";
+import { authentication, securityTokens } from "ingenium-core";
 
 export type RequestPrincipal =
   | { type: "compatibility"; id: "legacy-server-bearer"; scopes: readonly ["legacy:*"] }
-  | { type: "user"; id: string; scopes: readonly string[] };
+  | { type: "user"; id: string; scopes: readonly string[]; session?: authentication.AuthSession; tokenId?: string; organizationId?: string | null; projectId?: string | null }
+  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null };
 
 declare global {
   namespace Express {
@@ -23,6 +25,48 @@ export function isPublicOAuthCallbackRequest(req: Request): boolean {
   return req.method === "GET" && req.path === "/auth/callback";
 }
 
+const PUBLIC_LOCAL_AUTH = new Set([
+  "GET /api/v1/auth/csrf",
+  "POST /api/v1/auth/login",
+  "POST /api/v1/auth/mfa/challenge",
+  "POST /api/v1/auth/password/forgot",
+  "POST /api/v1/auth/password/reset",
+  "POST /api/v1/auth/email/verify",
+  "GET /api/v1/auth/invitations/preview",
+  "POST /api/v1/auth/oidc/start",
+  "GET /api/v1/auth/oidc/callback",
+]);
+
+const SESSION_AUTH_ROUTES = [
+  /^(GET) \/api\/v1\/auth\/(session|sessions|tokens|preflight)$/,
+  /^(POST) \/api\/v1\/auth\/(session\/refresh|logout|step-up|password\/change|email\/resend|invitations\/accept|totp\/enroll|totp\/confirm|tokens)$/,
+  /^(DELETE) \/api\/v1\/auth\/(totp|sessions\/[^/]+|tokens\/[^/]+)$/,
+];
+const SCOPED_TOKEN_ROUTES = new Map([["GET /api/v1/auth/preflight", "auth:preflight"]]);
+
+export function isPublicLocalAuthRequest(req: Request): boolean {
+  return PUBLIC_LOCAL_AUTH.has(`${req.method} ${req.path}`);
+}
+
+function cookieValue(req: Request, name: string): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(value.join("="));
+  }
+  return undefined;
+}
+
+function authorizeAuth101Route(req: Request, principal: RequestPrincipal): void {
+  if (principal.type === "compatibility") return;
+  const route = `${req.method} ${req.path}`;
+  if (principal.type === "user" && principal.session && SESSION_AUTH_ROUTES.some((pattern) => pattern.test(route))) return;
+  const requiredScope = SCOPED_TOKEN_ROUTES.get(route);
+  if ((principal.type !== "user" || !principal.session) && requiredScope && principal.scopes.includes(requiredScope)) return;
+  throw new AppError("The authenticated principal cannot access this route", "FORBIDDEN", 403);
+}
+
 /**
  * Token-based authentication for every API management request.
  *
@@ -39,12 +83,32 @@ export function isPublicOAuthCallbackRequest(req: Request): boolean {
  * and inline configuration have the same strength and timing-safe guarantees.
  */
 export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  if (isPublicOAuthCallbackRequest(req)) {
+  if (isPublicOAuthCallbackRequest(req) || isPublicLocalAuthRequest(req)) {
     next();
     return;
   }
 
   const authHeader = req.headers.authorization;
+  const sessionToken = cookieValue(req, authentication.SESSION_COOKIE_NAME);
+  if (!authHeader && sessionToken) {
+    const session = authentication.resolveSession(sessionToken, new Date(), true);
+    if (!session) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
+    req.principal = { type: "user", id: session.user_id, scopes: ["user:*"], session };
+    authorizeAuth101Route(req, req.principal);
+    next();
+    return;
+  }
+
+  if (authHeader?.startsWith("Bearer ing_")) {
+    const resolved = securityTokens.resolveScopedApiToken(authHeader.slice(7));
+    if (!resolved) throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
+    req.principal = resolved.userId
+      ? { type: "user", id: resolved.userId, scopes: resolved.scopes, tokenId: resolved.id, organizationId: resolved.organizationId, projectId: resolved.projectId }
+      : { type: "service", id: resolved.servicePrincipalId!, scopes: resolved.scopes, tokenId: resolved.id, organizationId: resolved.organizationId, projectId: resolved.projectId };
+    authorizeAuth101Route(req, req.principal);
+    next();
+    return;
+  }
   let token: string;
   try {
     token = loadApiToken();

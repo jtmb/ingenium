@@ -1,32 +1,12 @@
--- AUTH-101 authentication identities, credentials, browser sessions, and one-time factors.
+-- AUTH-101 exact upgrade from the AUTH-100 authentication foundation.
+PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
 
 ALTER TABLE users ADD COLUMN email_verified_at TEXT;
 ALTER TABLE users ADD COLUMN security_epoch INTEGER NOT NULL DEFAULT 0 CHECK(security_epoch >= 0);
 
-CREATE TABLE auth_identities (
-  id TEXT PRIMARY KEY CHECK(length(id) = 36),
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  provider TEXT NOT NULL CHECK(provider IN ('local', 'oidc')),
-  issuer TEXT NOT NULL CHECK(length(issuer) BETWEEN 1 AND 2048),
-  subject TEXT NOT NULL CHECK(length(subject) BETWEEN 1 AND 512),
-  created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64),
-  updated_at TEXT NOT NULL CHECK(length(updated_at) BETWEEN 1 AND 64),
-  UNIQUE(issuer, subject),
-  UNIQUE(user_id, provider, issuer)
-);
-
-CREATE TABLE password_credentials (
-  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
-  password_hash TEXT NOT NULL CHECK(length(password_hash) = 64 AND password_hash NOT GLOB '*[^0-9a-f]*'),
-  salt TEXT NOT NULL CHECK(length(salt) = 32 AND salt NOT GLOB '*[^0-9a-f]*'),
-  scrypt_n INTEGER NOT NULL CHECK(scrypt_n >= 65536),
-  scrypt_r INTEGER NOT NULL CHECK(scrypt_r >= 8),
-  scrypt_p INTEGER NOT NULL CHECK(scrypt_p >= 1),
-  created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64),
-  updated_at TEXT NOT NULL CHECK(length(updated_at) BETWEEN 1 AND 64)
-);
-
+DROP INDEX idx_auth_sessions_user_active;
+ALTER TABLE auth_sessions RENAME TO auth_sessions_auth100;
 CREATE TABLE auth_sessions (
   id TEXT PRIMARY KEY CHECK(length(id) = 36),
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -42,7 +22,19 @@ CREATE TABLE auth_sessions (
   last_seen_at TEXT NOT NULL CHECK(length(last_seen_at) BETWEEN 1 AND 64),
   CHECK(julianday(idle_expires_at) IS NOT NULL AND julianday(absolute_expires_at) IS NOT NULL AND idle_expires_at <= absolute_expires_at)
 );
+INSERT INTO auth_sessions
+  (id, user_id, token_hash, security_epoch, idle_expires_at, absolute_expires_at, revoked_at, created_at, last_seen_at)
+SELECT auth_sessions_auth100.id, auth_sessions_auth100.user_id, auth_sessions_auth100.token_hash, users.security_epoch,
+       auth_sessions_auth100.idle_expires_at, auth_sessions_auth100.absolute_expires_at,
+       COALESCE(auth_sessions_auth100.revoked_at, datetime('now')), auth_sessions_auth100.created_at,
+       auth_sessions_auth100.last_seen_at
+FROM auth_sessions_auth100 JOIN users ON users.id = auth_sessions_auth100.user_id;
+DROP TABLE auth_sessions_auth100;
+CREATE INDEX idx_auth_sessions_user_active ON auth_sessions(user_id, revoked_at, absolute_expires_at);
 
+DROP TRIGGER auth_one_time_states_consume_once;
+DROP INDEX idx_auth_one_time_states_expiry;
+ALTER TABLE auth_one_time_states RENAME TO auth_one_time_states_auth100;
 CREATE TABLE auth_one_time_states (
   id TEXT PRIMARY KEY CHECK(length(id) = 36),
   purpose TEXT NOT NULL CHECK(purpose IN ('password_reset', 'email_verification', 'mfa_challenge')),
@@ -53,7 +45,19 @@ CREATE TABLE auth_one_time_states (
   consumed_at TEXT,
   created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64)
 );
+INSERT INTO auth_one_time_states
+SELECT * FROM auth_one_time_states_auth100 WHERE purpose IN ('password_reset', 'email_verification');
+DROP TABLE auth_one_time_states_auth100;
+CREATE INDEX idx_auth_one_time_states_expiry ON auth_one_time_states(purpose, expires_at, consumed_at);
+CREATE TRIGGER auth_one_time_states_consume_once
+BEFORE UPDATE ON auth_one_time_states
+WHEN NEW.id IS NOT OLD.id OR NEW.purpose IS NOT OLD.purpose OR NEW.user_id IS NOT OLD.user_id
+  OR NEW.state_hash IS NOT OLD.state_hash OR NEW.metadata_json IS NOT OLD.metadata_json
+  OR NEW.expires_at IS NOT OLD.expires_at OR NEW.created_at IS NOT OLD.created_at
+  OR OLD.consumed_at IS NOT NULL OR NEW.consumed_at IS NULL
+BEGIN SELECT RAISE(ABORT, 'one-time authentication state may only be consumed once'); END;
 
+ALTER TABLE auth_totp_factors RENAME TO auth_totp_factors_auth100;
 CREATE TABLE auth_totp_factors (
   id TEXT PRIMARY KEY CHECK(length(id) = 36),
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -63,14 +67,9 @@ CREATE TABLE auth_totp_factors (
   revoked_at TEXT,
   created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64)
 );
-
-CREATE TABLE auth_recovery_codes (
-  id TEXT PRIMARY KEY CHECK(length(id) = 36),
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  code_hash TEXT NOT NULL UNIQUE CHECK(length(code_hash) = 64 AND code_hash NOT GLOB '*[^0-9a-f]*'),
-  consumed_at TEXT,
-  created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64)
-);
+INSERT INTO auth_totp_factors (id, user_id, encrypted_secret, enabled_at, revoked_at, created_at)
+SELECT id, user_id, encrypted_secret, enabled_at, revoked_at, created_at FROM auth_totp_factors_auth100;
+DROP TABLE auth_totp_factors_auth100;
 
 CREATE TABLE oidc_providers (
   id TEXT PRIMARY KEY CHECK(length(id) = 36),
@@ -83,7 +82,6 @@ CREATE TABLE oidc_providers (
   created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64),
   updated_at TEXT NOT NULL CHECK(length(updated_at) BETWEEN 1 AND 64)
 );
-
 CREATE TABLE oidc_authorization_states (
   id TEXT PRIMARY KEY CHECK(length(id) = 36),
   provider_id TEXT NOT NULL REFERENCES oidc_providers(id) ON DELETE RESTRICT,
@@ -95,20 +93,7 @@ CREATE TABLE oidc_authorization_states (
   consumed_at TEXT,
   created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64)
 );
-
-CREATE INDEX idx_auth_identities_user ON auth_identities(user_id, provider);
-CREATE INDEX idx_auth_sessions_user_active ON auth_sessions(user_id, revoked_at, absolute_expires_at);
-CREATE INDEX idx_auth_one_time_states_expiry ON auth_one_time_states(purpose, expires_at, consumed_at);
 CREATE INDEX idx_oidc_authorization_states_expiry ON oidc_authorization_states(expires_at, consumed_at);
-
-CREATE TRIGGER auth_one_time_states_consume_once
-BEFORE UPDATE ON auth_one_time_states
-WHEN NEW.id IS NOT OLD.id OR NEW.purpose IS NOT OLD.purpose OR NEW.user_id IS NOT OLD.user_id
-  OR NEW.state_hash IS NOT OLD.state_hash OR NEW.metadata_json IS NOT OLD.metadata_json
-  OR NEW.expires_at IS NOT OLD.expires_at OR NEW.created_at IS NOT OLD.created_at
-  OR OLD.consumed_at IS NOT NULL OR NEW.consumed_at IS NULL
-BEGIN SELECT RAISE(ABORT, 'one-time authentication state may only be consumed once'); END;
-
 CREATE TRIGGER oidc_authorization_states_consume_once
 BEFORE UPDATE ON oidc_authorization_states
 WHEN NEW.id IS NOT OLD.id OR NEW.provider_id IS NOT OLD.provider_id OR NEW.state_hash IS NOT OLD.state_hash
@@ -119,3 +104,4 @@ WHEN NEW.id IS NOT OLD.id OR NEW.provider_id IS NOT OLD.provider_id OR NEW.state
 BEGIN SELECT RAISE(ABORT, 'OIDC authorization state may only be consumed once'); END;
 
 COMMIT;
+PRAGMA foreign_keys = ON;

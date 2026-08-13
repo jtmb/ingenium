@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -44,7 +44,7 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
       "095": { complete: true, missing: [] },
     });
 
-    db.exec("DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER scoped_api_tokens_identity_immutable; DROP INDEX idx_security_audit_scope; DROP INDEX idx_organization_invitations_scope; DROP INDEX idx_scoped_api_tokens_service; DROP INDEX idx_scoped_api_tokens_user; DROP TABLE security_audit_events; DROP TABLE organization_invitations; DROP TABLE scoped_api_tokens; DROP TABLE service_principals; DROP TABLE installation_admins; DROP TRIGGER auth_one_time_states_consume_once; DROP INDEX idx_auth_one_time_states_expiry; DROP INDEX idx_auth_sessions_user_active; DROP INDEX idx_auth_identities_user; DROP TABLE auth_recovery_codes; DROP TABLE auth_totp_factors; DROP TABLE auth_one_time_states; DROP TABLE auth_sessions; DROP TABLE password_credentials; DROP TABLE auth_identities; DROP TRIGGER projects_require_organization_insert; DROP TRIGGER projects_require_organization_update; DROP TRIGGER project_memberships_same_organization_insert; DROP TRIGGER project_memberships_same_organization_update; DROP TRIGGER organization_memberships_keep_owner_delete; DROP TRIGGER organization_memberships_keep_owner_update; DROP TRIGGER project_memberships_reject_org_departure; DROP TRIGGER project_memberships_reject_org_delete; DROP TRIGGER projects_reject_membership_reparent; DROP TRIGGER bootstrap_manifests_immutable_update; DROP TRIGGER bootstrap_manifests_immutable_delete; DROP INDEX idx_projects_organization; DROP TABLE project_memberships; DROP TABLE organization_memberships; DROP TABLE bootstrap_state; DROP TABLE bootstrap_manifests; DROP TABLE users; ALTER TABLE projects DROP COLUMN organization_id; DROP TABLE organizations;");
+    db.exec("DROP TRIGGER organization_invitations_consume_once; DROP TRIGGER scoped_api_tokens_project_organization_insert; DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER scoped_api_tokens_identity_immutable; DROP INDEX idx_security_audit_scope; DROP INDEX idx_organization_invitations_scope; DROP INDEX idx_scoped_api_tokens_service; DROP INDEX idx_scoped_api_tokens_user; DROP TABLE security_audit_events; DROP TABLE organization_invitations; DROP TABLE scoped_api_tokens; DROP TABLE service_principals; DROP TABLE installation_admins; DROP TRIGGER oidc_authorization_states_consume_once; DROP TRIGGER auth_one_time_states_consume_once; DROP INDEX idx_oidc_authorization_states_expiry; DROP INDEX idx_auth_one_time_states_expiry; DROP INDEX idx_auth_sessions_user_active; DROP INDEX idx_auth_identities_user; DROP TABLE oidc_authorization_states; DROP TABLE oidc_providers; DROP TABLE auth_recovery_codes; DROP TABLE auth_totp_factors; DROP TABLE auth_one_time_states; DROP TABLE auth_sessions; DROP TABLE password_credentials; DROP TABLE auth_identities; DROP TRIGGER projects_require_organization_insert; DROP TRIGGER projects_require_organization_update; DROP TRIGGER project_memberships_same_organization_insert; DROP TRIGGER project_memberships_same_organization_update; DROP TRIGGER organization_memberships_keep_owner_delete; DROP TRIGGER organization_memberships_keep_owner_update; DROP TRIGGER project_memberships_reject_org_departure; DROP TRIGGER project_memberships_reject_org_delete; DROP TRIGGER projects_reject_membership_reparent; DROP TRIGGER bootstrap_manifests_immutable_update; DROP TRIGGER bootstrap_manifests_immutable_delete; DROP INDEX idx_projects_organization; DROP TABLE project_memberships; DROP TABLE organization_memberships; DROP TABLE bootstrap_state; DROP TABLE bootstrap_manifests; DROP TABLE users; ALTER TABLE projects DROP COLUMN organization_id; DROP TABLE organizations;");
     resetDbForTest();
     const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
     expect(upgraded.prepare("SELECT id FROM projects ORDER BY id").all()).toEqual(projectIds);
@@ -59,6 +59,22 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
     const raw = new Database(process.env.INGENIUM_CORE_DB_PATH!);
     expect(raw.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_auth_sessions_user_active'").get()).toEqual({ count: 0 });
     raw.close();
+  });
+
+  it("upgrades an exact AUTH-100 authentication schema and preserves valid one-time states", () => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    db.exec("DROP TRIGGER organization_invitations_consume_once; DROP TRIGGER scoped_api_tokens_project_organization_update; DROP TRIGGER scoped_api_tokens_project_organization_insert; DROP TRIGGER security_audit_events_project_organization_insert; DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER scoped_api_tokens_identity_immutable; DROP INDEX idx_security_audit_scope; DROP INDEX idx_organization_invitations_scope; DROP INDEX idx_scoped_api_tokens_service; DROP INDEX idx_scoped_api_tokens_user; DROP TABLE security_audit_events; DROP TABLE organization_invitations; DROP TABLE scoped_api_tokens; DROP TABLE service_principals; DROP TABLE installation_admins; DROP TRIGGER oidc_authorization_states_consume_once; DROP INDEX idx_oidc_authorization_states_expiry; DROP TABLE oidc_authorization_states; DROP TABLE oidc_providers; DROP TRIGGER auth_one_time_states_consume_once; DROP INDEX idx_auth_one_time_states_expiry; DROP INDEX idx_auth_sessions_user_active; DROP INDEX idx_auth_identities_user; DROP TABLE auth_recovery_codes; DROP TABLE auth_totp_factors; DROP TABLE auth_one_time_states; DROP TABLE auth_sessions; DROP TABLE password_credentials; DROP TABLE auth_identities; ALTER TABLE users DROP COLUMN security_epoch; ALTER TABLE users DROP COLUMN email_verified_at;");
+    db.exec(readFileSync(join(import.meta.dirname, "auth100-authentication.sql"), "utf8"));
+    const user = createUser("upgrade@example.test", "Upgrade");
+    db.prepare("INSERT INTO auth_one_time_states (id, purpose, user_id, state_hash, expires_at, created_at) VALUES (?, 'password_reset', ?, ?, ?, ?)")
+      .run(randomUUID(), user.id, "a".repeat(64), new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
+    resetDbForTest();
+    const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(upgraded.prepare("SELECT purpose FROM auth_one_time_states").all()).toEqual([{ purpose: "password_reset" }]);
+    expect(() => upgraded.prepare("INSERT INTO auth_one_time_states (id, purpose, user_id, state_hash, expires_at, created_at) VALUES (?, 'mfa_challenge', ?, ?, ?, ?)")
+      .run(randomUUID(), user.id, "b".repeat(64), new Date(Date.now() + 60_000).toISOString(), new Date().toISOString())).not.toThrow();
+    expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(getAuthenticationFoundationMigrationStatus()["094"]).toEqual({ any: true, complete: true, missing: [] });
   });
 
   it("fails closed when a complete-looking security table has an ambiguous definition", () => {

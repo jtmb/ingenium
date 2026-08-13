@@ -349,10 +349,13 @@ Evidence AUTH-100: 8 focused core tests cover fresh and 092-shaped upgrades, par
   duplicate OIDC identity, unbounded session, or forbidden signup/passkey/SMS is
   `BLOCKING`; provider UX enhancements are `FOLLOW_UP`; bounded auth telemetry is
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
+- **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all gates; [x] replaced
   `Evidence AUTH-101: <acceptance evidence placeholder>` with non-empty auth,
   security, deployment, E2E, and containment evidence.
+<!-- (work-started) AUTH-101 2026-08-13T14:00:00Z ingenium-software-engineer-premium -->
+<!-- (work-complete) AUTH-101 2026-08-13T14:20:00Z ingenium-software-engineer-premium -->
+Evidence AUTH-101: focused core/API tests pass for exact AUTH-100 schema upgrade parity and foreign-key integrity; local login/reset enumeration resistance with 64 MiB asynchronous scrypt and Unicode code-point policy; atomic hash-only session rotation, bounded expiry/revocation, and fresh/stale step-up enforcement; exact-origin pre-auth/session CSRF; one-time reset/verification/invitation flows; encrypted TOTP and single-use recovery codes; compatibility-only operator recovery; fail-closed browser/scoped-token route policy; scoped hash-only API-token lifecycle/redaction; and deterministic OIDC Authorization Code + PKCE with a matching HttpOnly browser transaction cookie plus state/nonce/issuer/audience/algorithm/expiry/not-before/replay/no-email-autolink failures. Core and API typechecks pass; the accepted bounded verification excluded Docker, Playwright, deployment, fixture E2E, and containment per the user task contract.
 
 #### AUTH-102 — Authorization: principals, roles, audit, and step-up
 

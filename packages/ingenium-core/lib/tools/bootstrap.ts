@@ -35,6 +35,7 @@ export async function claimBootstrap(input: BootstrapClaimInput): Promise<{ user
     const now = new Date().toISOString();
     database.prepare("INSERT INTO users (id, email_normalized, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
       .run(userId, email, displayName, now, now);
+    database.prepare("UPDATE users SET email_verified_at = ? WHERE id = ?").run(now, userId);
     database.prepare("INSERT INTO auth_identities (id, user_id, provider, issuer, subject, created_at, updated_at) VALUES (?, ?, 'local', 'ingenium:local', ?, ?, ?)")
       .run(identityId, userId, email, now, now);
     database.prepare(

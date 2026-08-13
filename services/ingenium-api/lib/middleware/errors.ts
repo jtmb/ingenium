@@ -79,6 +79,7 @@ export function errorHandler(
   }
 
   if (err instanceof AppError) {
+    if (err.statusCode === 401) res.set("WWW-Authenticate", 'Bearer realm="ingenium"');
     res.status(err.statusCode).json({
       error: {
         code: err.code,
@@ -108,13 +109,14 @@ export function errorHandler(
     return;
   }
 
-  // Unexpected error — log full details but return a sanitized 500.
-  // Stack traces are never sent to the client; they're written to the structured
-  // log for server-side debugging only.
-  logger.error("api", `${_req.method} ${_req.originalUrl} → ${err?.name || "Error"}: ${err?.message}`, {
-    error: err?.message,
-    name: err?.name,
-    stack: err?.stack,
+  // Authentication routes can carry credentials; their unexpected failures are logged content-free.
+  const authenticationPath = _req.originalUrl.startsWith("/api/v1/auth/");
+  logger.error("api", authenticationPath
+    ? `${_req.method} authentication route failed`
+    : `${_req.method} ${_req.originalUrl} → ${err?.name || "Error"}: ${err?.message}`, {
+    error: authenticationPath ? "AUTH_ROUTE_FAILURE" : err?.message,
+    name: authenticationPath ? "AuthenticationRouteError" : err?.name,
+    stack: authenticationPath ? undefined : err?.stack,
     method: _req.method,
     path: _req.originalUrl,
     requestId,

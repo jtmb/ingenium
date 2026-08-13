@@ -29,6 +29,8 @@ export interface User {
   email_normalized: string;
   display_name: string;
   status: "active" | "disabled";
+  email_verified_at: string | null;
+  security_epoch: number;
   created_at: string;
   updated_at: string;
 }
@@ -45,8 +47,12 @@ export interface AuthSession {
   id: string;
   user_id: string;
   token_hash: string;
+  csrf_hash: string;
+  security_epoch: number;
+  device_label: string | null;
   idle_expires_at: string;
   absolute_expires_at: string;
+  recent_step_up_at: string | null;
   revoked_at: string | null;
   created_at: string;
   last_seen_at: string;

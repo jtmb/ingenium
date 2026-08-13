@@ -1840,7 +1840,7 @@ function inspectIdentityTenancyMigration(db: Database.Database): AuthenticationF
       db,
       "093_identity_tenancy.sql",
       "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, path TEXT, is_global INTEGER, created_at TEXT, updated_at TEXT);",
-      [...tables, ...indexes, ...triggers],
+      [...tables.filter((table) => table !== "users"), ...indexes, ...triggers],
     ));
   }
   if (state.missing.length === 0) {
@@ -1859,17 +1859,23 @@ function inspectIdentityTenancyMigration(db: Database.Database): AuthenticationF
 }
 
 function inspectAuthenticationMigration(db: Database.Database): AuthenticationFoundationMigrationState {
-  const tables = ["auth_identities", "password_credentials", "auth_sessions", "auth_one_time_states", "auth_totp_factors", "auth_recovery_codes"];
-  const indexes = ["idx_auth_identities_user", "idx_auth_sessions_user_active", "idx_auth_one_time_states_expiry"];
-  const triggers = ["auth_one_time_states_consume_once"];
+  const tables = ["auth_identities", "password_credentials", "auth_sessions", "auth_one_time_states", "auth_totp_factors", "auth_recovery_codes", "oidc_providers", "oidc_authorization_states"];
+  const indexes = ["idx_auth_identities_user", "idx_auth_sessions_user_active", "idx_auth_one_time_states_expiry", "idx_oidc_authorization_states_expiry"];
+  const triggers = ["auth_one_time_states_consume_once", "oidc_authorization_states_consume_once"];
   const state = inspectMigrationComponents(db, {
     auth_identities: ["id", "user_id", "provider", "issuer", "subject", "created_at", "updated_at"],
     password_credentials: ["user_id", "password_hash", "salt", "scrypt_n", "scrypt_r", "scrypt_p", "created_at", "updated_at"],
-    auth_sessions: ["id", "user_id", "token_hash", "idle_expires_at", "absolute_expires_at", "revoked_at", "created_at", "last_seen_at"],
+    auth_sessions: ["id", "user_id", "token_hash", "csrf_hash", "security_epoch", "device_label", "idle_expires_at", "absolute_expires_at", "recent_step_up_at", "revoked_at", "created_at", "last_seen_at"],
     auth_one_time_states: ["id", "purpose", "user_id", "state_hash", "metadata_json", "expires_at", "consumed_at", "created_at"],
-    auth_totp_factors: ["id", "user_id", "encrypted_secret", "enabled_at", "revoked_at", "created_at"],
+    auth_totp_factors: ["id", "user_id", "encrypted_secret", "secret_key_version", "enabled_at", "revoked_at", "created_at"],
     auth_recovery_codes: ["id", "user_id", "code_hash", "consumed_at", "created_at"],
+    oidc_providers: ["id", "name", "issuer", "client_id", "redirect_uri", "signature_algorithm", "enabled", "created_at", "updated_at"],
+    oidc_authorization_states: ["id", "provider_id", "state_hash", "transaction_hash", "nonce_hash", "encrypted_pkce_verifier", "expires_at", "consumed_at", "created_at"],
   }, indexes, triggers);
+  const userColumns = new Set((db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map((column) => column.name));
+  state.any ||= userColumns.has("email_verified_at") || userColumns.has("security_epoch");
+  if (!userColumns.has("email_verified_at")) state.missing.push("users.email_verified_at column");
+  if (!userColumns.has("security_epoch")) state.missing.push("users.security_epoch column");
   if (state.any && state.missing.length === 0) {
     state.missing.push(...compareMigrationDefinitions(
       db,
@@ -1882,6 +1888,23 @@ function inspectAuthenticationMigration(db: Database.Database): AuthenticationFo
   return state;
 }
 
+function isAuth100AuthenticationSchema(db: Database.Database): boolean {
+  const sessionColumns = new Set((db.prepare("PRAGMA table_info(auth_sessions)").all() as Array<{ name: string }>).map(({ name }) => name));
+  const factorColumns = new Set((db.prepare("PRAGMA table_info(auth_totp_factors)").all() as Array<{ name: string }>).map(({ name }) => name));
+  const oneTimeState = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'auth_one_time_states'",
+  ).get() as { sql: string } | undefined;
+  const oidcProvider = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'oidc_providers'",
+  ).get() as { count: number };
+  return sessionColumns.has("token_hash")
+    && !sessionColumns.has("csrf_hash")
+    && factorColumns.has("encrypted_secret")
+    && !factorColumns.has("secret_key_version")
+    && Boolean(oneTimeState?.sql.includes("'oidc'") && !oneTimeState.sql.includes("'mfa_challenge'"))
+    && oidcProvider.count === 0;
+}
+
 function inspectAuthorizationAuditMigration(db: Database.Database): AuthenticationFoundationMigrationState {
   const tables = ["installation_admins", "service_principals", "scoped_api_tokens", "organization_invitations", "security_audit_events"];
   const indexes = ["idx_scoped_api_tokens_user", "idx_scoped_api_tokens_service", "idx_organization_invitations_scope", "idx_security_audit_scope"];
@@ -1889,10 +1912,10 @@ function inspectAuthorizationAuditMigration(db: Database.Database): Authenticati
   const state = inspectMigrationComponents(db, {
     installation_admins: ["user_id", "created_at"],
     service_principals: ["id", "organization_id", "name", "status", "created_at", "updated_at"],
-    scoped_api_tokens: ["id", "user_id", "service_principal_id", "token_hash", "scopes_json", "expires_at", "revoked_at", "created_at"],
+    scoped_api_tokens: ["id", "user_id", "service_principal_id", "name", "token_prefix", "token_hash", "scopes_json", "organization_id", "project_id", "expires_at", "revoked_at", "last_used_at", "created_at"],
     organization_invitations: ["id", "organization_id", "email_normalized", "role", "token_hash", "expires_at", "accepted_at", "revoked_at", "created_at"],
     security_audit_events: ["id", "actor_type", "actor_id", "action", "organization_id", "project_id", "outcome", "metadata_json", "created_at"],
-  }, indexes, triggers);
+  }, indexes, [...triggers, "scoped_api_tokens_project_organization_insert", "scoped_api_tokens_project_organization_update", "organization_invitations_consume_once"]);
   if (state.any && state.missing.length === 0) {
     state.missing.push(...compareMigrationDefinitions(
       db,
@@ -4108,7 +4131,30 @@ function runMigrations(db: Database.Database): void {
   ] as const;
   for (const [migration, file, inspect] of authenticationFoundations) {
     const state = inspect(db);
-    if (state.any && !state.complete) throw restoreMigrationPartialStateError(migration, state.missing);
+    if (state.any && !state.complete) {
+      const auth100Upgrade = migration === "094"
+        && state.missing.includes("users.email_verified_at column")
+        && state.missing.includes("oidc_providers table")
+        && isAuth100AuthenticationSchema(db);
+      const authorization100Upgrade = migration === "095"
+        && state.missing.includes("scoped_api_tokens required columns")
+        && state.missing.includes("scoped_api_tokens_project_organization_insert trigger")
+        && state.missing.includes("organization_invitations_consume_once trigger");
+      if (auth100Upgrade) {
+        db.exec(readFileSync(resolve(migrationsDir, "094_authentication_auth101_upgrade.sql"), "utf-8"));
+      } else if (authorization100Upgrade) {
+        db.exec(readFileSync(resolve(migrationsDir, "095_authorization_auth101_upgrade.sql"), "utf-8"));
+      } else {
+        throw restoreMigrationPartialStateError(migration, state.missing);
+      }
+      const upgraded = inspect(db);
+      if (!upgraded.complete) throw restoreMigrationPartialStateError(migration, upgraded.missing);
+      if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+        throw restoreMigrationPartialStateError(migration, ["foreign key integrity"]);
+      }
+      logger.info("db", `Applied AUTH-101 upgrade for migration ${migration}`);
+      continue;
+    }
     if (!state.complete) {
       if (migration !== "093" && !inspectIdentityTenancyMigration(db).complete) {
         throw restoreMigrationPartialStateError(migration, ["migration 093 prerequisite schema"]);
