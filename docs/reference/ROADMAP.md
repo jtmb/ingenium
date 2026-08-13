@@ -284,10 +284,11 @@ These gates are explicit acceptance requirements, not implied future work:
   startup, cross-tenant access, or public signup is `BLOCKING`; unrelated
   historical drift is `FOLLOW_UP`; bounded migration evidence is
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-100: <acceptance evidence placeholder>` with non-empty
-  preservation, deployment, security, isolation, and containment evidence.
+- **Markers/evidence:** [x] appended `work-started`; [x] appended matching
+  `work-complete`; [x] recorded focused acceptance evidence below.
+<!-- (work-started) AUTH-100 2026-08-13T13:20:00Z ingenium-software-engineer-premium -->
+<!-- (work-complete) AUTH-100 2026-08-13T13:42:00Z ingenium-software-engineer-premium -->
+Evidence AUTH-100: 8 focused core tests cover fresh and 092-shaped upgrades, partial-state refusal without repair, project ID preservation, bootstrap exactly-once, organization/project membership and owner invariants, session/token hash-expiry-revocation, content-free immutable audit metadata, and audit organization/project consistency; protected API bootstrap/error contracts and affected core/API typechecks passed on 2026-08-13.
 
 #### AUTH-101 — Session identity: local/OIDC authentication and recovery
 

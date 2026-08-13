@@ -2,6 +2,18 @@ import { Request, Response, NextFunction } from "express";
 import { AppError } from "./errors.js";
 import { apiTokensEqual, loadApiToken } from "./api-token.js";
 
+export type RequestPrincipal =
+  | { type: "compatibility"; id: "legacy-server-bearer"; scopes: readonly ["legacy:*"] }
+  | { type: "user"; id: string; scopes: readonly string[] };
+
+declare global {
+  namespace Express {
+    interface Request {
+      principal?: RequestPrincipal;
+    }
+  }
+}
+
 /**
  * The sole unauthenticated API route is the OAuth provider redirect. It must
  * remain an exact GET match: query parameters carry the provider state, while
@@ -49,5 +61,6 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     throw new AppError("Invalid authorization token", "FORBIDDEN", 403);
   }
 
+  req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
   next();
 }

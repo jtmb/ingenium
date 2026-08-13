@@ -21,7 +21,58 @@ export interface Project {
   is_global: boolean;
   created_at: string;
   updated_at: string;
+  organization_id: string;
 }
+
+export interface User {
+  id: string;
+  email_normalized: string;
+  display_name: string;
+  status: "active" | "disabled";
+  created_at: string;
+  updated_at: string;
+}
+
+export type OrganizationRole = "owner" | "admin" | "member" | "viewer";
+export type ProjectRole = "editor" | "viewer";
+
+export interface EffectiveProjectAccess {
+  canRead: boolean;
+  canWrite: boolean;
+}
+
+export interface AuthSession {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  idle_expires_at: string;
+  absolute_expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+  last_seen_at: string;
+}
+
+export const BootstrapClaimInputSchema = z.object({
+  email: z.string().trim().min(3).max(320),
+  displayName: z.string().trim().min(1).max(128),
+  password: z.string().min(12).max(1024),
+}).strict();
+export type BootstrapClaimInput = z.infer<typeof BootstrapClaimInputSchema>;
+
+export interface BootstrapStatus {
+  state: "pending" | "claimed";
+  revision: number;
+}
+
+export const SecurityAuditEventInputSchema = z.object({
+  actorType: z.enum(["compatibility", "user", "service", "system"]),
+  actorId: z.string().min(1).max(128).optional(),
+  action: z.string().min(1).max(128),
+  organizationId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  outcome: z.enum(["success", "denied", "failure"]),
+}).strict();
+export type SecurityAuditEventInput = z.infer<typeof SecurityAuditEventInputSchema>;
 
 /** A learned or authored skill with full-text content, metadata, and file_tree for disk sync. */
 export interface Skill {

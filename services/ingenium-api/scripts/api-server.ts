@@ -50,6 +50,7 @@ import { ragRouter } from "../lib/routes/rag.js";
 import { usageRouter } from "../lib/routes/usage.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
 import { coordinationRouter } from "../lib/routes/coordination.js";
+import { bootstrapRouter } from "../lib/routes/bootstrap.js";
 import {
   defaultMcpServerProjection,
   isPackagedMcpLauncher,
@@ -137,6 +138,7 @@ app.get("/api/v1/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
 app.use("/api/v1/auth", authPreflightRouter);
+app.use("/api/v1/bootstrap", bootstrapRouter);
 
 // Mounted after bearer/CSRF protection. Its dedicated octet-stream media type
 // avoids the global JSON parser and it owns its own bounded raw parser.

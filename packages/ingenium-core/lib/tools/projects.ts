@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import * as skills from "./skills.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "./organizations.js";
 
 /** List active projects, newest first. */
 export function listProjects(): Project[] {
@@ -128,9 +129,9 @@ export function createProject(name: string, isGlobal = false): Project {
     mkdirSync(projectPath, { recursive: true });
     if (isGlobal) demoteActiveGlobalProjects(db, now);
     db.prepare(
-      `INSERT INTO projects (id, name, path, is_global, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now);
+      `INSERT INTO projects (id, name, path, is_global, created_at, updated_at, organization_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now, BOOTSTRAP_ORGANIZATION_ID);
     if (isGlobal) recordGlobalProjectTransition(db, id, "became_global", now);
     // Auto-load global skills into new project
     const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL").get() as Project | undefined;
@@ -397,7 +398,7 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
 
   let global = db.prepare("SELECT * FROM projects WHERE name = 'global-default'").get() as Project | undefined;
   if (!global && dryRun) {
-    global = { ...source, id: "dry-run-global-default", name: "global-default", is_global: true };
+    global = { ...source, id: "dry-run-global-default", name: "global-default", is_global: true, organization_id: BOOTSTRAP_ORGANIZATION_ID };
   }
   if (!global) global = createProject("global-default", true);
 

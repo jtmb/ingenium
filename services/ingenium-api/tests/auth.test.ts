@@ -136,6 +136,11 @@ describe("authMiddleware — timing-safe comparison", () => {
 
     authMiddleware(req as Request, res as Response, next);
     expect(called).toBe(true);
+    expect((req as Request).principal).toEqual({
+      type: "compatibility",
+      id: "legacy-server-bearer",
+      scopes: ["legacy:*"],
+    });
   });
 
   it("handles tokens of different lengths without throwing (padding)", () => {

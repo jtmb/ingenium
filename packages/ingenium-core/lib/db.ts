@@ -220,6 +220,12 @@ interface EmailWatcherMarkersMigrationState {
   missing: string[];
 }
 
+interface AuthenticationFoundationMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -1742,6 +1748,163 @@ function inspectEmailWatcherMarkersMigration(db: Database.Database): EmailWatche
   return { any, complete: missing.length === 0, missing };
 }
 
+function inspectMigrationComponents(
+  db: Database.Database,
+  tables: Record<string, string[]>,
+  indexes: string[],
+  triggers: string[],
+): AuthenticationFoundationMigrationState {
+  const missing: string[] = [];
+  let any = false;
+  for (const [table, columns] of Object.entries(tables)) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${table} table`);
+    else if (!hasContextConversationColumns(db, table, columns)) missing.push(`${table} required columns`);
+  }
+  for (const index of indexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of triggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  return { any, complete: missing.length === 0, missing };
+}
+
+const expectedAuthenticationSchema = new Map<string, Map<string, string>>();
+
+function compareMigrationDefinitions(
+  db: Database.Database,
+  migrationFile: string,
+  prerequisiteSql: string,
+  objectNames: string[],
+): string[] {
+  let expected = expectedAuthenticationSchema.get(migrationFile);
+  if (!expected) {
+    const reference = new Database(":memory:");
+    try {
+      reference.exec(prerequisiteSql);
+      reference.exec(readFileSync(resolve(import.meta.dirname ?? __dirname, "../data/migrations", migrationFile), "utf-8"));
+      expected = new Map(objectNames.map((name) => {
+        const row = reference.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name) as { sql?: string } | undefined;
+        if (!row?.sql) throw new Error(`Migration ${migrationFile} reference object is missing: ${name}`);
+        return [name, normalizeSchemaSql(row.sql)];
+      }));
+      expectedAuthenticationSchema.set(migrationFile, expected);
+    } finally {
+      reference.close();
+    }
+  }
+  return objectNames.flatMap((name) => {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name) as { sql?: string } | undefined;
+    return row?.sql && normalizeSchemaSql(row.sql) === expected!.get(name) ? [] : [`${name} definition`];
+  });
+}
+
+function inspectIdentityTenancyMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const tables = ["organizations", "users", "organization_memberships", "project_memberships", "bootstrap_state", "bootstrap_manifests"];
+  const indexes = ["idx_organization_memberships_user", "idx_projects_organization", "idx_project_memberships_user"];
+  const triggers = [
+    "projects_require_organization_insert", "projects_require_organization_update",
+    "project_memberships_same_organization_insert", "project_memberships_same_organization_update",
+    "organization_memberships_keep_owner_delete", "organization_memberships_keep_owner_update",
+    "project_memberships_reject_org_departure", "project_memberships_reject_org_delete",
+    "projects_reject_membership_reparent",
+    "bootstrap_manifests_immutable_update", "bootstrap_manifests_immutable_delete",
+  ];
+  const state = inspectMigrationComponents(db, {
+    organizations: ["id", "name", "slug", "status", "created_at", "updated_at"],
+    users: ["id", "email_normalized", "display_name", "status", "created_at", "updated_at"],
+    organization_memberships: ["organization_id", "user_id", "role", "status", "created_at", "updated_at"],
+    project_memberships: ["project_id", "user_id", "role", "created_at", "updated_at"],
+    bootstrap_state: ["singleton", "state", "organization_id", "owner_user_id", "claimed_at", "revision", "created_at", "updated_at"],
+    bootstrap_manifests: ["id", "migration", "organization_id", "project_count", "project_ids_json", "phase", "integrity_result", "foreign_key_violations", "created_at"],
+  }, indexes, triggers);
+  const organizationColumn = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('projects') WHERE name = 'organization_id'",
+  ).get() as { count: number }).count > 0;
+  state.any ||= organizationColumn;
+  if (!organizationColumn) state.missing.push("projects.organization_id column");
+  if (state.any && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "093_identity_tenancy.sql",
+      "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, path TEXT, is_global INTEGER, created_at TEXT, updated_at TEXT);",
+      [...tables, ...indexes, ...triggers],
+    ));
+  }
+  if (state.missing.length === 0) {
+    const unmapped = db.prepare("SELECT count(*) AS count FROM projects WHERE organization_id IS NULL").get() as { count: number };
+    const manifest = db.prepare(
+      "SELECT project_count, json_array_length(project_ids_json) AS id_count, phase, integrity_result, foreign_key_violations FROM bootstrap_manifests WHERE migration = 93",
+    ).get() as { project_count: number; id_count: number; phase: string; integrity_result: string; foreign_key_violations: number } | undefined;
+    if (unmapped.count > 0) state.missing.push("project organization backfill");
+    if (!manifest || manifest.project_count !== manifest.id_count || manifest.phase !== "verified"
+      || manifest.integrity_result !== "ok" || manifest.foreign_key_violations !== 0) {
+      state.missing.push("verified bootstrap manifest");
+    }
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
+function inspectAuthenticationMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const tables = ["auth_identities", "password_credentials", "auth_sessions", "auth_one_time_states", "auth_totp_factors", "auth_recovery_codes"];
+  const indexes = ["idx_auth_identities_user", "idx_auth_sessions_user_active", "idx_auth_one_time_states_expiry"];
+  const triggers = ["auth_one_time_states_consume_once"];
+  const state = inspectMigrationComponents(db, {
+    auth_identities: ["id", "user_id", "provider", "issuer", "subject", "created_at", "updated_at"],
+    password_credentials: ["user_id", "password_hash", "salt", "scrypt_n", "scrypt_r", "scrypt_p", "created_at", "updated_at"],
+    auth_sessions: ["id", "user_id", "token_hash", "idle_expires_at", "absolute_expires_at", "revoked_at", "created_at", "last_seen_at"],
+    auth_one_time_states: ["id", "purpose", "user_id", "state_hash", "metadata_json", "expires_at", "consumed_at", "created_at"],
+    auth_totp_factors: ["id", "user_id", "encrypted_secret", "enabled_at", "revoked_at", "created_at"],
+    auth_recovery_codes: ["id", "user_id", "code_hash", "consumed_at", "created_at"],
+  }, indexes, triggers);
+  if (state.any && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "094_authentication.sql",
+      "CREATE TABLE users (id TEXT PRIMARY KEY);",
+      [...tables, ...indexes, ...triggers],
+    ));
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
+function inspectAuthorizationAuditMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const tables = ["installation_admins", "service_principals", "scoped_api_tokens", "organization_invitations", "security_audit_events"];
+  const indexes = ["idx_scoped_api_tokens_user", "idx_scoped_api_tokens_service", "idx_organization_invitations_scope", "idx_security_audit_scope"];
+  const triggers = ["security_audit_events_immutable_update", "security_audit_events_immutable_delete", "security_audit_events_project_organization_insert", "scoped_api_tokens_identity_immutable"];
+  const state = inspectMigrationComponents(db, {
+    installation_admins: ["user_id", "created_at"],
+    service_principals: ["id", "organization_id", "name", "status", "created_at", "updated_at"],
+    scoped_api_tokens: ["id", "user_id", "service_principal_id", "token_hash", "scopes_json", "expires_at", "revoked_at", "created_at"],
+    organization_invitations: ["id", "organization_id", "email_normalized", "role", "token_hash", "expires_at", "accepted_at", "revoked_at", "created_at"],
+    security_audit_events: ["id", "actor_type", "actor_id", "action", "organization_id", "project_id", "outcome", "metadata_json", "created_at"],
+  }, indexes, triggers);
+  if (state.any && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "095_authorization_audit.sql",
+      "CREATE TABLE users (id TEXT PRIMARY KEY); CREATE TABLE organizations (id TEXT PRIMARY KEY); CREATE TABLE projects (id TEXT PRIMARY KEY);",
+      [...tables, ...indexes, ...triggers],
+    ));
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
   const tables: Record<string, string[]> = {
     synthesis_batches: [
@@ -2714,6 +2877,15 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095", AuthenticationFoundationMigrationState> {
+  const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  return {
+    "093": inspectIdentityTenancyMigration(database),
+    "094": inspectAuthenticationMigration(database),
+    "095": inspectAuthorizationAuditMigration(database),
+  };
+}
+
 /**
  * Apply SQL migrations using a probe-based strategy (no migrations table).
  *
@@ -2768,7 +2940,10 @@ function runMigrations(db: Database.Database): void {
           "089_synthesis_batch_phases.sql",
            "090_backup_deletion_reservations.sql",
            "091_skill_proposal_retention_pagination.sql",
-           "092_email_watcher_markers.sql",
+            "092_email_watcher_markers.sql",
+            "093_identity_tenancy.sql",
+            "094_authentication.sql",
+            "095_authorization_audit.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -3924,6 +4099,28 @@ function runMigrations(db: Database.Database): void {
   if (!emailWatcherMarkersMigration.complete) {
     db.exec(readFileSync(resolve(migrationsDir, "092_email_watcher_markers.sql"), "utf-8"));
     logger.info("db", "Applied migration 092_email_watcher_markers.sql");
+  }
+
+  const authenticationFoundations = [
+    ["093", "093_identity_tenancy.sql", inspectIdentityTenancyMigration],
+    ["094", "094_authentication.sql", inspectAuthenticationMigration],
+    ["095", "095_authorization_audit.sql", inspectAuthorizationAuditMigration],
+  ] as const;
+  for (const [migration, file, inspect] of authenticationFoundations) {
+    const state = inspect(db);
+    if (state.any && !state.complete) throw restoreMigrationPartialStateError(migration, state.missing);
+    if (!state.complete) {
+      if (migration !== "093" && !inspectIdentityTenancyMigration(db).complete) {
+        throw restoreMigrationPartialStateError(migration, ["migration 093 prerequisite schema"]);
+      }
+      if (migration === "095" && !inspectAuthenticationMigration(db).complete) {
+        throw restoreMigrationPartialStateError(migration, ["migration 094 prerequisite schema"]);
+      }
+      db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
+      const applied = inspect(db);
+      if (!applied.complete) throw restoreMigrationPartialStateError(migration, applied.missing);
+      logger.info("db", `Applied migration ${file}`);
+    }
   }
 
   enforceReservedBrokerInvariant(db);
