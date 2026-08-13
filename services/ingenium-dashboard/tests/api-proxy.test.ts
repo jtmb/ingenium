@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 import {
+  AUTH_SESSION_COOKIE,
   buildDashboardApiProxyHeaders,
   config,
-  DASHBOARD_API_PROXY_ERROR_CODE,
   DASHBOARD_API_PROXY_ERROR_STATUS,
   DASHBOARD_CSRF_ERROR_CODE,
   DASHBOARD_CSRF_ERROR_STATUS,
@@ -67,6 +67,7 @@ type BrowserHeaders = Record<string, string | undefined>;
  */
 function gatewayHeaders(overrides: BrowserHeaders = {}): Headers {
   const headers = new Headers({
+    Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
     Origin: BROWSER_ORIGIN,
     [DASHBOARD_MARKER_HEADER]: DASHBOARD_MARKER_VALUE,
     "X-Forwarded-Proto": "http",
@@ -98,6 +99,7 @@ function directFixtureRequest(
   path = "/opencode/sessions",
 ): NextRequest {
   const requestHeaders = new Headers({
+    Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
     Origin: DIRECT_FIXTURE_ORIGIN,
     [DASHBOARD_MARKER_HEADER]: DASHBOARD_MARKER_VALUE,
     ...Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined)),
@@ -213,12 +215,12 @@ describe("dashboard authenticated API proxy", () => {
       }),
     );
 
-    expect(response.status).toBe(DASHBOARD_API_PROXY_ERROR_STATUS);
+    expect(response.status).toBe(401);
     expect(response.headers.get("authorization")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: DASHBOARD_API_PROXY_ERROR_CODE,
-        message: "Dashboard API proxy is not configured",
+        code: "UNAUTHORIZED",
+        message: "Authentication is required",
       },
     });
   });
@@ -228,13 +230,12 @@ describe("dashboard authenticated API proxy", () => {
 
     const response = proxy(
       new NextRequest("http://dashboard.test/api/v1/projects?project=global-default", {
-        headers: { Authorization: "Bearer browser-controlled-token" },
+        headers: { Authorization: "Bearer browser-controlled-token", Cookie: `${AUTH_SESSION_COOKIE}=fixture-session` },
       }),
     );
 
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(`Bearer ${TEST_TOKEN}`);
-    expect(response.headers.get("x-middleware-request-authorization")).not.toContain("browser-controlled-token");
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
     expect(response.headers.get("x-middleware-rewrite")).toBeNull();
   });
 
@@ -266,12 +267,7 @@ describe("dashboard authenticated API proxy", () => {
       );
 
       expect(response.headers.get("x-middleware-next")).toBe("1");
-      expect(response.headers.get("x-middleware-request-authorization")).toBe(
-        `Bearer ${TEST_TOKEN}`,
-      );
-      expect(response.headers.get("x-middleware-request-authorization")).not.toContain(
-        "attacker-controlled-token",
-      );
+      expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
       expect(response.headers.get(`x-middleware-request-${DASHBOARD_MARKER_HEADER}`)).toBe(
         DASHBOARD_MARKER_VALUE,
       );
@@ -308,9 +304,7 @@ describe("dashboard authenticated API proxy", () => {
 
     const response = proxy(request);
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(
-      `Bearer ${TEST_TOKEN}`,
-    );
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
   });
 
   it("accepts the Next-generated forwarding defaults for a direct isolated fixture", () => {
@@ -455,14 +449,13 @@ describe("dashboard authenticated API proxy", () => {
         headers: {
           Authorization: "Bearer browser-controlled-token",
           [DASHBOARD_MARKER_HEADER]: "spoofed-marker",
+          Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
         },
       }),
     );
 
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(
-      `Bearer ${TEST_TOKEN}`,
-    );
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
     expect(response.headers.get(`x-middleware-request-${DASHBOARD_MARKER_HEADER}`)).toBe(
       DASHBOARD_MARKER_VALUE,
     );
@@ -476,7 +469,7 @@ describe("dashboard authenticated API proxy", () => {
       new NextRequest("http://dashboard.test/api/v1/projects"),
     );
 
-    expect(response.status).toBe(DASHBOARD_API_PROXY_ERROR_STATUS);
+    expect(response.status).toBe(401);
   });
 
   it("loads a file-only production credential at the proxy boundary", () => {
@@ -485,21 +478,16 @@ describe("dashboard authenticated API proxy", () => {
     expect(process.env.INGENIUM_API_TOKEN).toBeUndefined();
     const response = proxy(
       new NextRequest("http://dashboard.test/api/v1/projects", {
-        headers: { Authorization: "Bearer browser-controlled-token" },
+        headers: { Authorization: "Bearer browser-controlled-token", Cookie: `${AUTH_SESSION_COOKIE}=fixture-session` },
       }),
     );
 
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(
-      `Bearer ${TEST_TOKEN}`,
-    );
-    expect(response.headers.get("x-middleware-request-authorization")).not.toContain(
-      "browser-controlled-token",
-    );
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
   });
 
   it("matches only API traffic, leaving OAuth callbacks and gateway routes untouched", () => {
-    expect(config.matcher).toEqual(["/api/v1", "/api/v1/:path*"]);
+    expect(config.matcher).toEqual(["/((?!_next/static|_next/image|favicon.ico|navigation-prepaint.js).*)"]);
     expect(config.matcher).not.toContain("/auth/callback");
     expect(config.matcher).not.toContain("/_ingenium/health");
     expect(config.matcher).not.toContain("/_ingenium/child-mcp-runtime");

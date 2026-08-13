@@ -159,6 +159,24 @@ Selected items in FileTree also use the token:
 | Nav Links | 13-14px | Medium (500) | `text-sm` |
 | Logo | 18px | Bold (700) | `text-lg font-bold` |
 
+## Authentication and Account UX
+
+- Public authentication routes use one centered `max-w-md` token-surface card on
+  `--color-surface-muted`, with visible labels, browser-appropriate autocomplete,
+  an `aria` status/alert region, and no application navigation behind the form.
+- Login, reset, verification, invitation, MFA, and bootstrap cards use
+  `rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6
+  hover:shadow-md transition-shadow`. Primary submit actions remain blue; provider
+  actions are bordered secondary buttons.
+- Account, security, session, API-token, and organization workflows remain full
+  pages. Settings deep links use route-linked panels rather than duplicating
+  sensitive state in the Settings portal.
+- Recent-authentication prompts use a centered modal, restore trigger focus,
+  close on Escape, clear credentials on close/failure, and never render token or
+  recovery material after the one-time acknowledgement state is dismissed.
+- The responsive top-bar control order is Project, Settings, Account. At 390px,
+  controls shrink without hiding their accessible names or overflowing the page.
+
 ## Layout
 
 | Element | Value | Tailwind |

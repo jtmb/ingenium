@@ -25,6 +25,11 @@ function readStoredProject(key: string): string | null {
   }
 }
 
+export function clearRevokedProjectSelection(): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(GLOBAL_CACHE_KEY); } catch { /* storage is optional */ }
+}
+
 /**
  * Module-level cache for the global project name.
  *
@@ -82,6 +87,7 @@ export interface ProjectResolutionState {
   loading: boolean;
   error: Error | null;
   canClearSelection: boolean;
+  availableProjects?: ProjectSummary[];
 }
 
 type ProjectResolutionResult = Pick<ProjectResolutionState, "project" | "error">;
@@ -208,13 +214,15 @@ export function useProjectResolution(): ProjectResolutionState {
         setState({
           ...resolution,
           loading: false,
-          canClearSelection: preference.hasExplicitPreference && !resolution.project,
+            canClearSelection: preference.hasExplicitPreference && !resolution.project,
+            availableProjects: projects.filter((project) => !project.archived_at),
           requestKey: preference.requestKey,
         });
 
         if (!resolution.project) {
           try {
             localStorage.removeItem(GLOBAL_CACHE_KEY);
+            if (preference.hasExplicitPreference) localStorage.removeItem(STORAGE_KEY);
           } catch {
             // Storage is an optimization only.
           }
@@ -234,7 +242,8 @@ export function useProjectResolution(): ProjectResolutionState {
           project: null,
           loading: false,
           error: error instanceof Error ? error : new Error("Unable to resolve the active project"),
-          canClearSelection: false,
+           canClearSelection: false,
+           availableProjects: [],
           requestKey: preference.requestKey,
         });
       });
@@ -245,7 +254,7 @@ export function useProjectResolution(): ProjectResolutionState {
   // A route change must wait for the matching preference to be validated rather
   // than briefly rendering under the previous route's project.
   if (state.requestKey !== preference.requestKey) {
-    return { project: null, loading: true, error: null, canClearSelection: false };
+    return { project: null, loading: true, error: null, canClearSelection: false, availableProjects: [] };
   }
 
   return state;
@@ -298,13 +307,7 @@ export function ProjectResolutionStatus({ state }: { state: ProjectResolutionSta
           {state.error?.message ?? "The active project could not be resolved."}
         </p>
         {state.canClearSelection && (
-          <button
-            type="button"
-            onClick={clearSelection}
-            className="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)]"
-          >
-            Clear project selection and use server default
-          </button>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">{state.availableProjects?.map((project) => <button key={project.name} type="button" onClick={() => { persistProject(project.name); const url = new URL(window.location.href); url.searchParams.set("project", project.name); window.location.assign(url.toString()); }} className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white">Use {project.name}</button>)}<button type="button" onClick={clearSelection} className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)]">Choose an authorized project</button></div>
         )}
       </div>
     </main>

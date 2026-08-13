@@ -1908,14 +1908,22 @@ function isAuth100AuthenticationSchema(db: Database.Database): boolean {
 function inspectAuthorizationAuditMigration(db: Database.Database): AuthenticationFoundationMigrationState {
   const tables = ["installation_admins", "service_principals", "scoped_api_tokens", "organization_invitations", "security_audit_events"];
   const indexes = ["idx_scoped_api_tokens_user", "idx_scoped_api_tokens_service", "idx_organization_invitations_scope", "idx_security_audit_scope"];
-  const triggers = ["security_audit_events_immutable_update", "security_audit_events_immutable_delete", "security_audit_events_project_organization_insert", "scoped_api_tokens_identity_immutable"];
+  const triggers = [
+    "security_audit_events_immutable_update",
+    "security_audit_events_immutable_delete",
+    "security_audit_events_project_organization_insert",
+    "scoped_api_tokens_identity_immutable",
+    "scoped_api_tokens_project_organization_insert",
+    "scoped_api_tokens_project_organization_update",
+    "organization_invitations_consume_once",
+  ];
   const state = inspectMigrationComponents(db, {
     installation_admins: ["user_id", "created_at"],
     service_principals: ["id", "organization_id", "name", "status", "created_at", "updated_at"],
     scoped_api_tokens: ["id", "user_id", "service_principal_id", "name", "token_prefix", "token_hash", "scopes_json", "organization_id", "project_id", "expires_at", "revoked_at", "last_used_at", "created_at"],
     organization_invitations: ["id", "organization_id", "email_normalized", "role", "token_hash", "expires_at", "accepted_at", "revoked_at", "created_at"],
     security_audit_events: ["id", "actor_type", "actor_id", "action", "organization_id", "project_id", "outcome", "metadata_json", "created_at"],
-  }, indexes, [...triggers, "scoped_api_tokens_project_organization_insert", "scoped_api_tokens_project_organization_update", "organization_invitations_consume_once"]);
+  }, indexes, triggers);
   if (state.any && state.missing.length === 0) {
     state.missing.push(...compareMigrationDefinitions(
       db,
@@ -4140,10 +4148,15 @@ function runMigrations(db: Database.Database): void {
         && state.missing.includes("scoped_api_tokens required columns")
         && state.missing.includes("scoped_api_tokens_project_organization_insert trigger")
         && state.missing.includes("organization_invitations_consume_once trigger");
+      const authorization101Upgrade = migration === "095"
+        && state.missing.length === 1
+        && state.missing[0] === "organization_invitations_consume_once definition";
       if (auth100Upgrade) {
         db.exec(readFileSync(resolve(migrationsDir, "094_authentication_auth101_upgrade.sql"), "utf-8"));
       } else if (authorization100Upgrade) {
         db.exec(readFileSync(resolve(migrationsDir, "095_authorization_auth101_upgrade.sql"), "utf-8"));
+      } else if (authorization101Upgrade) {
+        db.exec(readFileSync(resolve(migrationsDir, "095_authorization_auth103_upgrade.sql"), "utf-8"));
       } else {
         throw restoreMigrationPartialStateError(migration, state.missing);
       }
@@ -4152,7 +4165,7 @@ function runMigrations(db: Database.Database): void {
       if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
         throw restoreMigrationPartialStateError(migration, ["foreign key integrity"]);
       }
-      logger.info("db", `Applied AUTH-101 upgrade for migration ${migration}`);
+      logger.info("db", `Applied authentication upgrade for migration ${migration}`);
       continue;
     }
     if (!state.complete) {

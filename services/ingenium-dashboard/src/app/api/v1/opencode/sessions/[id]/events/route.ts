@@ -1,5 +1,3 @@
-import { loadDashboardApiToken } from "../../../../../../../lib/dashboard-token";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -34,15 +32,6 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const token = loadDashboardApiToken();
-  if (!token) {
-    return jsonError(
-      503,
-      "DASHBOARD_API_PROXY_MISCONFIGURED",
-      "Dashboard API proxy is not configured",
-    );
-  }
-
   const port = apiPort();
   if (!port) {
     return jsonError(
@@ -64,10 +53,9 @@ export async function GET(
   );
   upstreamUrl.search = incomingUrl.search;
 
-  const headers = new Headers({
-    Accept: "text/event-stream",
-    Authorization: `Bearer ${token}`,
-  });
+  const cookie = request.headers.get("cookie");
+  if (!cookie) return jsonError(401, "UNAUTHORIZED", "Authentication is required");
+  const headers = new Headers({ Accept: "text/event-stream", Cookie: cookie });
   const lastEventId = request.headers.get("last-event-id");
   if (lastEventId) headers.set("Last-Event-ID", lastEventId);
 

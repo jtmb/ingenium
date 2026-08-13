@@ -34,6 +34,7 @@ const PUBLIC_LOCAL_AUTH = new Set([
   "POST /api/v1/auth/password/reset",
   "POST /api/v1/auth/email/verify",
   "GET /api/v1/auth/invitations/preview",
+  "GET /api/v1/auth/oidc/providers",
   "POST /api/v1/auth/oidc/start",
   "GET /api/v1/auth/oidc/callback",
 ]);

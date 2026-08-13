@@ -36,6 +36,11 @@ type SettingsPanelDefinition = ComponentType | RouteLinkedPanelDefinition;
  */
 const TAB_PANELS: Record<SettingsTabId, SettingsPanelDefinition> = {
   general: GeneralPanel,
+  account: { destination: "/account", description: "Manage your account profile and password." },
+  security: { destination: "/account#security", description: "Manage authenticator and recovery protection." },
+  sessions: { destination: "/account#sessions", description: "Review and revoke browser sessions and devices." },
+  "api-tokens": { destination: "/account#api-tokens", description: "Create and revoke scoped API tokens." },
+  organizations: { destination: "/organizations", description: "Manage organization members, invitations, roles, and project access." },
   projects: {
     destination: "/projects",
     description: "Create, switch, archive, restore, and purge projects in the Projects workspace.",

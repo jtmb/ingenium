@@ -14,6 +14,7 @@ describe("AUTH-102 canonical API policy", () => {
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "installation", "read"],
     ["DELETE", "/api/v1/projects/example/purge", "project", "admin"],
+    ["GET", "/api/v1/auth/oidc/providers", "public", "read"],
   ] as const)("classifies %s %s", (method, path, target, permission) => {
     expect(policyForRequest({ method, path } as Pick<Request, "method" | "path">)).toMatchObject({ target, permission });
   });

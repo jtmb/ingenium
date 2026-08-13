@@ -39,6 +39,9 @@ export default function ProjectsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [renameProject, setRenameProject] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
   const activeProject = useProject();
   const [activeName, setActiveName] = useState(activeProject);
   const loadRequestRef = useRef(0);
@@ -125,10 +128,10 @@ export default function ProjectsPage() {
 
   const archive = async (n: string) => { await api.projects.archive(n); await load(); };
   const restore = async (n: string) => { await api.projects.restore(n); await load(); };
-  const rename = async (oldName: string) => {
-    const newName = prompt("New name:", oldName);
+  const rename = async (oldName: string, newName = renameValue.trim()) => {
     if (newName && newName !== oldName) {
       await api.projects.update(oldName, newName);
+      setRenameProject(null); setRenameValue("");
       await load();
     }
   };
@@ -139,7 +142,7 @@ export default function ProjectsPage() {
       setConfirmDelete(null);
       await load();
     } catch {
-      alert("Failed to delete project");
+      setActionError("The project could not be deleted.");
       setConfirmDelete(null);
     }
   };
@@ -171,6 +174,7 @@ export default function ProjectsPage() {
       </div>
 
       <div className="space-y-3">
+        {actionError && <p role="alert" className="rounded bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error-text)]">{actionError}</p>}
         {selectedState === "loading" ? (
           <p className="py-8 text-center text-[var(--color-text-muted)]" aria-busy="true">Loading {view} projects...</p>
         ) : selectedState === "error" ? (
@@ -211,7 +215,7 @@ export default function ProjectsPage() {
                   {view === "active" ? (
                     <>
                       {p.name !== activeName && <button type="button" onClick={() => { persistProject(p.name); setActiveName(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">Set Active</button>}
-                      <button type="button" onClick={() => void rename(p.name)} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">Rename</button>
+                       <button type="button" onClick={() => { setRenameProject(p.name); setRenameValue(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">Rename</button>
                       <button type="button" onClick={() => void archive(p.name)} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] sm:flex-none">Archive</button>
                     </>
                   ) : (
@@ -270,6 +274,7 @@ export default function ProjectsPage() {
           );
         })}
       </div>
+      {renameProject && <Overlay isOpen title={`Rename ${renameProject}`} onClose={() => setRenameProject(null)}><form className="space-y-4 p-6" onSubmit={(e) => { e.preventDefault(); void rename(renameProject); }}><label htmlFor="rename-project" className="block text-sm font-medium">Project name</label><input id="rename-project" className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus required /><div className="flex justify-end gap-2"><button type="button" className="rounded border border-[var(--color-border)] px-4 py-2" onClick={() => setRenameProject(null)}>Cancel</button><button className="rounded bg-blue-600 px-4 py-2 text-white">Rename</button></div></form></Overlay>}
 
       {/* Create modal */}
       {showCreate && (

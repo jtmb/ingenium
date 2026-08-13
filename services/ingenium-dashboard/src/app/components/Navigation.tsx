@@ -12,6 +12,7 @@ import {
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import EdgeDrawer from "./EdgeDrawer";
+import { useOptionalAuth } from "@/lib/AuthContext";
 
 // ---------------------------------------------------------------------------
 // Inline SVG icon components (16×16 viewBox)
@@ -237,6 +238,10 @@ function IconGear() {
   );
 }
 
+function IconUsers() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="6" cy="5" r="2" stroke="currentColor" strokeWidth="1.2"/><path d="M2 13c0-2.2 1.8-4 4-4s4 1.8 4 4M10 3.5a2 2 0 010 3M11 9c1.7.4 3 2 3 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+}
+
 function ChevronDown({ open }: { open: boolean }) {
   return (
     <svg
@@ -317,6 +322,7 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: "Projects", href: "/projects", icon: <IconFolder /> },
+      { label: "Organizations", href: "/organizations", icon: <IconUsers /> },
       { label: "Plugins", href: "/plugins", icon: <IconPlug /> },
       { label: "MCP Servers", href: "/mcp-servers", icon: <IconServer /> },
       { label: "Config", href: "/config", icon: <IconGear /> },
@@ -548,6 +554,7 @@ export default function Navigation() {
     mobileCloseRestoresFocus,
   } = useNavContext();
   const pathname = usePathname();
+  const installationAdmin = useOptionalAuth()?.installationAdmin ?? true;
   const sidebarRef = useRef<HTMLDivElement>(null);
   const wasMobileOpenRef = useRef(false);
 
@@ -688,7 +695,7 @@ export default function Navigation() {
         <div className="nav-divider mx-3 my-1 border-t border-[var(--color-nav-border)]" />
 
         <nav className="px-2 py-1 space-y-0.5" aria-label={`${mode === "desktop" ? "Desktop" : "Mobile"} navigation`}>
-          {NAV_GROUPS.map((group) => {
+          {NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => installationAdmin || !["Backups", "Logs", "Status", "Config"].includes(item.label)) })).map((group) => {
             const isOpen = !collapsed[group.id];
             const groupId = `${contentPrefix}-nav-group-${group.id}`;
             return (

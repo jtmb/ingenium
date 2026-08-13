@@ -1,0 +1,6 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import AuthCard from "@/app/components/auth/AuthCard";
+import { api } from "@/lib/api";
+export default function InvitationPage() { const token = useSearchParams().get("token") ?? ""; const [preview, setPreview] = useState<{ organizationName: string; email: string; role: string } | null>(null); const [error, setError] = useState(false); useEffect(() => { void api.auth.invitationPreview(token).then((r) => setPreview(r.data), () => setError(true)); }, [token]); return <AuthCard title="Organization invitation">{error ? <p role="alert">This invitation is invalid or expired.</p> : !preview ? <p aria-busy="true">Loading invitation…</p> : <div className="space-y-4"><p><strong>{preview.organizationName}</strong> invited <strong>{preview.email}</strong> as {preview.role}.</p><button className="w-full rounded bg-blue-600 px-4 py-2 text-white" onClick={async () => { try { await api.auth.acceptInvitation(token); window.location.assign("/"); } catch { window.location.assign(`/login?returnTo=${encodeURIComponent(`/invitation?token=${token}`)}`); } }}>Accept invitation</button></div>}</AuthCard>; }

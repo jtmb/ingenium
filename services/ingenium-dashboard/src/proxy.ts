@@ -10,6 +10,9 @@ import {
   parseExactDashboardOrigin,
 } from "./lib/dashboard-origins";
 import { loadDashboardApiToken } from "./lib/dashboard-token";
+import { safeReturnTo } from "./lib/safe-return-to";
+
+export { safeReturnTo } from "./lib/safe-return-to";
 
 export {
   DASHBOARD_MARKER_HEADER,
@@ -24,13 +27,18 @@ export {
  * callback route without dashboard proxy authentication.
  */
 export const config = {
-  matcher: ["/api/v1", "/api/v1/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|navigation-prepaint.js).*)"],
 };
 
 export const DASHBOARD_API_PROXY_ERROR_CODE = "DASHBOARD_API_PROXY_MISCONFIGURED";
 export const DASHBOARD_API_PROXY_ERROR_STATUS = 503;
 export const DASHBOARD_CSRF_ERROR_CODE = "DASHBOARD_API_PROXY_CSRF_REJECTED";
 export const DASHBOARD_CSRF_ERROR_STATUS = 403;
+export const AUTH_SESSION_COOKIE = "__Host-ingenium_session";
+export const PUBLIC_AUTH_PATHS = new Set([
+  "/login", "/bootstrap", "/forgot-password", "/reset-password",
+  "/verify-email", "/invitation", "/mfa", "/auth/oidc/callback",
+]);
 
 const FORWARDED_ORIGIN_HEADERS = [
   "x-forwarded-host",
@@ -72,7 +80,7 @@ export function getDashboardApiToken(
  */
 export function buildDashboardApiProxyHeaders(
   incoming: Headers,
-  token: string,
+  token: string | null,
 ): Headers {
   const headers = new Headers(incoming);
   headers.delete("authorization");
@@ -84,7 +92,7 @@ export function buildDashboardApiProxyHeaders(
   // treat them as a client identity or proxy-chain assertion.
   for (const header of FORWARDED_ORIGIN_HEADERS) headers.delete(header);
   headers.set(DASHBOARD_MARKER_HEADER, DASHBOARD_MARKER_VALUE);
-  headers.set("authorization", `Bearer ${token}`);
+  if (token) headers.set("authorization", `Bearer ${token}`);
   return headers;
 }
 
@@ -119,6 +127,29 @@ function csrfRejectedResponse(): NextResponse {
       },
     },
   );
+}
+
+function authenticationRequiredResponse(): NextResponse {
+  return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } }, { status: 401, headers: { "Cache-Control": "no-store" } });
+}
+
+export function isPublicAuthPath(pathname: string): boolean {
+  return PUBLIC_AUTH_PATHS.has(pathname);
+}
+
+function protectDashboardPage(request: NextRequest): NextResponse | null {
+  const pathname = request.nextUrl.pathname;
+  if (pathname.startsWith("/api/v1")) return null;
+  const authenticated = Boolean(request.cookies.get(AUTH_SESSION_COOKIE)?.value);
+  if (!authenticated && !isPublicAuthPath(pathname)) {
+    const login = new URL("/login", request.url);
+    login.searchParams.set("returnTo", safeReturnTo(`${pathname}${request.nextUrl.search}`));
+    return NextResponse.redirect(login);
+  }
+  if (authenticated && (pathname === "/login" || pathname === "/bootstrap")) {
+    return NextResponse.redirect(new URL(safeReturnTo(request.nextUrl.searchParams.get("returnTo")), request.url));
+  }
+  return NextResponse.next();
 }
 
 /**
@@ -264,6 +295,14 @@ export function hasValidDashboardMutationContract(request: NextRequest): boolean
  * bearer token is never a browser response header.
  */
 export function proxy(request: NextRequest): NextResponse {
+  const pageResponse = protectDashboardPage(request);
+  if (pageResponse) return pageResponse;
+
+  const browserSession = Boolean(request.cookies.get(AUTH_SESSION_COOKIE)?.value);
+  const publicAuthentication = request.nextUrl.pathname.startsWith("/api/v1/auth/");
+  const operatorBootstrap = request.nextUrl.pathname.startsWith("/api/v1/bootstrap/");
+  if (!browserSession && !publicAuthentication && !operatorBootstrap) return authenticationRequiredResponse();
+
   if (
     isUnsafeDashboardMethod(request.method)
     && !hasValidDashboardMutationContract(request)
@@ -271,8 +310,8 @@ export function proxy(request: NextRequest): NextResponse {
     return csrfRejectedResponse();
   }
 
-  const token = getDashboardApiToken();
-  if (!token) return missingTokenResponse();
+  const token = browserSession || publicAuthentication ? null : getDashboardApiToken();
+  if (!token && !browserSession && !publicAuthentication) return missingTokenResponse();
 
   const headers = buildDashboardApiProxyHeaders(request.headers, token);
   return NextResponse.next({ request: { headers } });

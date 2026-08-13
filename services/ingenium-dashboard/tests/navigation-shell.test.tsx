@@ -25,7 +25,7 @@ const links = [
   ["Home", "/"], ["Chat", "/chat"], ["OpenCode", "/opencode"], ["VS Code", "/vscode"], ["Mail", "/mail"], ["Tasks", "/tasks"], ["Docs", "/docs"],
   ["Skills", "/skills"], ["Agents", "/agents"], ["Observations", "/observations"], ["Personality", "/personality"], ["Context", "/context"], ["Pipeline", "/pipeline"],
   ["Jobs", "/jobs"], ["Backups", "/backups"], ["Logs", "/logs"], ["Usage", "/usage"], ["Status", "/status"],
-  ["Projects", "/projects"], ["Plugins", "/plugins"], ["MCP Servers", "/mcp-servers"], ["Config", "/config"], ["Secrets", "/secrets"],
+  ["Projects", "/projects"], ["Organizations", "/organizations"], ["Plugins", "/plugins"], ["MCP Servers", "/mcp-servers"], ["Config", "/config"], ["Secrets", "/secrets"],
 ] as const;
 
 function renderShell({ includeBackgroundTargets = false }: { includeBackgroundTargets?: boolean } = {}) {
@@ -86,8 +86,8 @@ describe("UI-103 application shell navigation", () => {
   });
 
   it("keeps the trigger before the logo and renders semantic controls for each breakpoint", () => {
-    const layout = read("services/ingenium-dashboard/src/app/layout.tsx");
-    expect(layout.indexOf("<NavigationTrigger />")).toBeLessThan(layout.indexOf('<a href="/"'));
+    const layout = read("services/ingenium-dashboard/src/app/components/DashboardShell.tsx");
+    expect(layout.indexOf("<NavigationTrigger />")).toBeLessThan(layout.indexOf('<Link href="/"'));
 
     renderShell();
 

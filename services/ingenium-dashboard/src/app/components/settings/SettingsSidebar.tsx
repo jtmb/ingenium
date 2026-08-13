@@ -55,6 +55,9 @@ const ICON_PATHS: Record<SettingsTab["icon"], React.JSX.Element> = {
   terminal: (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
   ),
+  key: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a4 4 0 11-7.9 1H3v4h3v3h3v-3h2.1A4 4 0 0115 7z" />
+  ),
 };
 
 /** Static tab icon renderer shared by the settings sidebar buttons. */

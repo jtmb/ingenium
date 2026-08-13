@@ -1,16 +1,11 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { cookies } from "next/headers";
 import Script from "next/script";
 import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
-import MainContainer from "./components/MainContainer";
-import { SettingsLauncher, SettingsOverlay } from "./components/settings";
 import ThemeProvider from "./components/ThemeProvider";
-import ProjectDropdown from "./components/ProjectDropdown";
-import Navigation, { NavigationProvider, NavigationTrigger } from "./components/Navigation";
-import { ProjectProvider } from "../lib/ProjectContext";
+import DashboardShell from "./components/DashboardShell";
 
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
@@ -46,33 +41,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="h-dvh bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] overflow-x-hidden flex flex-col">
         <ThemeProvider>
-          <Suspense fallback={null}>
-            <ProjectProvider>
-              <NavigationProvider>
-                <nav data-nav-background="topbar" className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
-                  <NavigationTrigger />
-                  <a href="/" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</a>
-                  <div className="ml-auto flex items-center gap-3">
-                    <ProjectDropdown />
-                    <SettingsLauncher />
-                  </div>
-                </nav>
-
-                <div className="flex flex-1 min-h-0 min-w-0">
-                  <Navigation />
-                  <div data-nav-background="content" className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
-                    <div className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)]">
-                      <MainContainer>
-                        <Suspense>{children}</Suspense>
-                      </MainContainer>
-                    </div>
-                  </div>
-                </div>
-
-                <SettingsOverlay />
-              </NavigationProvider>
-            </ProjectProvider>
-          </Suspense>
+          <DashboardShell>{children}</DashboardShell>
         </ThemeProvider>
       </body>
     </html>

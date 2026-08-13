@@ -143,7 +143,7 @@ describe("project resolution failures", () => {
       },
     }));
 
-    expect(screen.getByRole("button", { name: "Clear project selection and use server default" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Choose an authorized project" })).toBeTruthy();
   });
 });
 

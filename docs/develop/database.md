@@ -86,7 +86,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–083)
+### Feature Migrations (045–095)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -120,6 +120,11 @@ another Compose project volume.
 | 082 | `082_job_vault_revision_audit.sql` | Adds default-zero, strictly monotonic job revisions for CAS updates and immutable, exact project/job/run-linked vault runtime audit rows. The runtime audit records only fixed action/category/ID/version/timestamp metadata; it has no names, detail, plaintext, configuration, or actor-string linkage. |
 | 083 | `083_restore_plans.sql` | Creates RESTORE-100's immutable server-global plan identities, append-only transition revisions, one-time hash-only confirmation authorizations, append-only stage records/events, and bounded idempotency receipts. SQL triggers enforce preview → authorize → confirm → ready plus the stage-integrity failure path; ready requires a consumed authorization and a component-hash-bound verified stage. Restrictive composite foreign keys prevent deleting a planned source bundle. No trigger or table authorizes active-database replacement; execution is RESTORE-101 scope. |
 | 084 | `084_restore_executor.sql` | Adds RESTORE-101's separately authorized 15-minute execution token, queued run/item ledger, hash-only owner/fence evidence, phase-CAS state graph, bounded idempotency receipts, immutable execution audit, and the RESTORE-100 authorization-ID immutability correction. It is all-or-nothing at startup; partial execution inventory fails closed. |
+
+Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
+a pending invitation may transition exactly once to either accepted or revoked.
+Existing AUTH-101 databases receive the guarded trigger-only upgrade; fresh and
+AUTH-100 upgrade paths install the same canonical definition directly.
 
 ### Mail watcher durability migration (092)
 

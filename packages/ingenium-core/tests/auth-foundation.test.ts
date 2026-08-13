@@ -9,6 +9,7 @@ import { claimBootstrap, BootstrapAlreadyClaimedError, getBootstrapStatus } from
 import { createSession, derivePassword, hashSecurityToken, resolveSession, revokeSession } from "../lib/tools/authentication.js";
 import { appendSecurityAuditEvent } from "../lib/tools/security-audit.js";
 import { createScopedApiToken, createServicePrincipal, resolveScopedApiToken, revokeScopedApiToken } from "../lib/tools/security-tokens.js";
+import { issueInvitation, listInvitations, revokeInvitation } from "../lib/tools/invitations.js";
 import { addOrganizationMember, addProjectMember, BOOTSTRAP_ORGANIZATION_ID, createOrganization, resolveProjectAccess } from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
 import { createUser } from "../lib/tools/identity.js";
@@ -100,6 +101,25 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
     expect(credential.salt).toMatch(/^[0-9a-f]{32}$/);
     expect(credential.scrypt_n).toBeGreaterThanOrEqual(65_536);
     expect(JSON.stringify(credential)).not.toContain("correct horse");
+  });
+
+  it("upgrades AUTH-101 invitation guards and revokes a pending invitation once", () => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    db.exec(`DROP TRIGGER organization_invitations_consume_once;
+      CREATE TRIGGER organization_invitations_consume_once
+      BEFORE UPDATE ON organization_invitations
+      WHEN NEW.id IS NOT OLD.id OR NEW.organization_id IS NOT OLD.organization_id OR NEW.email_normalized IS NOT OLD.email_normalized
+        OR NEW.role IS NOT OLD.role OR NEW.token_hash IS NOT OLD.token_hash OR NEW.expires_at IS NOT OLD.expires_at
+        OR NEW.created_at IS NOT OLD.created_at OR OLD.accepted_at IS NOT NULL OR NEW.accepted_at IS NULL OR NEW.revoked_at IS NOT OLD.revoked_at
+      BEGIN SELECT RAISE(ABORT, 'organization invitation may only be accepted once'); END;`);
+    resetDbForTest();
+    getDb(process.env.INGENIUM_CORE_DB_PATH);
+    issueInvitation(BOOTSTRAP_ORGANIZATION_ID, "invitee@example.test", "member");
+    const invitationId = listInvitations(BOOTSTRAP_ORGANIZATION_ID)[0]!.id;
+
+    expect(revokeInvitation(BOOTSTRAP_ORGANIZATION_ID, invitationId)).toBe(true);
+    expect(revokeInvitation(BOOTSTRAP_ORGANIZATION_ID, invitationId)).toBe(false);
+    expect(listInvitations(BOOTSTRAP_ORGANIZATION_ID)[0]!.revokedAt).not.toBeNull();
   });
 });
 

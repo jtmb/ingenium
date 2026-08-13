@@ -490,6 +490,8 @@ Evidence AUTH-102: source implementation and focused verification establish a ce
   matching `work-complete` after all gates; [ ] replace
   `Evidence AUTH-103: <acceptance evidence placeholder>` with non-empty UI,
   security, deployment, E2E, strict-containment, and visual evidence.
+<!-- (work-started) AUTH-103 2026-08-13T12:00:00Z ingenium-software-engineer-premium -->
+Evidence AUTH-103: Dashboard source implementation adds server-boundary route protection and safe local return targets; cookie/session CSRF handling with stable auth-error classification; public local/OIDC/recovery/invitation/verification/MFA/bootstrap routes; account, session, TOTP/recovery, token, organization/member/invitation, and authorization-filtered project UX; route-linked auth Settings categories; responsive account navigation; and focused source tests. Dashboard, API, and core typechecks passed; 102 focused Dashboard tests, 20 focused API authorization/authentication tests, and 10 focused core authentication/migration tests passed using a repository-safe temporary directory after the host `/tmp` was externally full. Affected Dashboard lint completed with zero errors and 22 existing warning-class findings. Invitation creation/revocation requires recent step-up, and migration 095 upgrades the consume-once trigger so pending invitations can be revoked without weakening terminal-state immutability. Deployment, fixture E2E, strict containment, security review, and 1440x900/390x844 visual evidence remain intentionally deferred by the declared task scope, so no `work-complete` marker is recorded.
 
 #### AUTH-104 — Resource tenancy: projects, mail, providers, and vault items
 

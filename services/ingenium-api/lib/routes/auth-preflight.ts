@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { authentication, invitations, oidcAuthentication, securityAudit, securityTokens } from "ingenium-core";
+import { authentication, authorization, invitations, oidcAuthentication, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
 import { authAttemptRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
@@ -35,6 +35,13 @@ function requireRecentStepUp(req: Request) {
 }
 
 authPreflightRouter.get("/csrf", issuePreAuthCsrf);
+authPreflightRouter.get("/oidc/providers", (_req, res) => {
+  res.json({
+    data: oidcAuthentication.listOidcProviders()
+      .filter((provider) => Boolean(provider.enabled))
+      .map(({ id, name }) => ({ id, name })),
+  });
+});
 
 authPreflightRouter.post("/login", preAuthCsrf, authAttemptRateLimit, async (req, res, next) => {
   try {
@@ -68,7 +75,24 @@ authPreflightRouter.post("/mfa/challenge", preAuthCsrf, authAttemptRateLimit, (r
 
 authPreflightRouter.get("/session", (req, res) => {
   const principal = currentUser(req);
-  res.json({ data: { user: authentication.getUserForSession(principal.session!), session: { id: principal.session!.id, recentStepUp: authentication.hasRecentStepUp(principal.session!) } } });
+  res.json({ data: {
+    user: authentication.getUserForSession(principal.session!),
+    session: {
+      id: principal.session!.id,
+      recentStepUp: authentication.hasRecentStepUp(principal.session!),
+      mfaEnabled: authentication.hasTotp(principal.id),
+    },
+    installationAdmin: authorization.isInstallationAdmin(principal.id),
+  } });
+});
+authPreflightRouter.post("/session/csrf", (req, res) => {
+  currentUser(req);
+  const token = cookie(req, authentication.SESSION_COOKIE_NAME);
+  const rotated = token ? authentication.rotateSession(token) : undefined;
+  if (!rotated) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
+  setSession(res, rotated);
+  res.set("Cache-Control", "no-store");
+  res.json({ data: { csrfToken: rotated.csrfToken } });
 });
 
 authPreflightRouter.post("/session/refresh", (req, res) => {
@@ -88,6 +112,10 @@ authPreflightRouter.post("/logout", (req, res) => {
 });
 
 authPreflightRouter.get("/sessions", (req, res) => res.json({ data: authentication.listSessions(currentUser(req).id) }));
+authPreflightRouter.post("/sessions/revoke-others", (req, res) => {
+  const principal = requireRecentStepUp(req);
+  res.json({ data: { revoked: authentication.revokeAllUserSessions(principal.id, principal.session!.id) } });
+});
 authPreflightRouter.delete("/sessions/:id", (req, res) => {
   if (!authentication.revokeSession(requireRecentStepUp(req).id, req.params.id)) throw new AppError("Session not found", "NOT_FOUND", 404);
   res.status(204).end();
@@ -190,4 +218,10 @@ authPreflightRouter.get("/oidc/callback", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-authPreflightRouter.get("/preflight", (_req, res) => res.json({ data: { authenticated: true } }));
+authPreflightRouter.get("/preflight", (req, res) => {
+  if (req.principal?.type === "user" && !req.principal.session
+    && !req.principal.scopes.includes("auth:preflight") && !req.principal.scopes.includes("auth:*")) {
+    throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
+  }
+  res.json({ data: { authenticated: true } });
+});

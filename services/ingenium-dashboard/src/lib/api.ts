@@ -59,6 +59,58 @@ export class ApiError extends Error {
   }
 }
 
+export type AuthFailure = "session-expired" | "csrf" | "reauth" | "mfa" | "verification" | "access-denied" | null;
+
+export function classifyAuthFailure(status: number, code: string | null): AuthFailure {
+  if (status === 401 || code === "UNAUTHORIZED" || code === "INVALID_TOKEN") return "session-expired";
+  if (code === "CSRF_REJECTED" || code === "PRE_AUTH_CSRF_REJECTED" || code === "DASHBOARD_API_PROXY_CSRF_REJECTED") return "csrf";
+  if (code === "STEP_UP_REQUIRED") return "reauth";
+  if (code === "MFA_REQUIRED") return "mfa";
+  if (code === "EMAIL_VERIFICATION_REQUIRED") return "verification";
+  if (status === 403) return "access-denied";
+  return null;
+}
+
+let sessionCsrfToken: string | null = null;
+let csrfBootstrap: Promise<string | null> | null = null;
+let expiryRedirectStarted = false;
+
+function isUnsafeMethod(method = "GET"): boolean {
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
+}
+
+async function bootstrapSessionCsrf(): Promise<string | null> {
+  if (sessionCsrfToken) return sessionCsrfToken;
+  if (!csrfBootstrap) {
+    csrfBootstrap = fetch(`${getApiBase()}/auth/session/csrf`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { [DASHBOARD_MARKER_HEADER]: DASHBOARD_MARKER_VALUE },
+    })
+      .then(async (response) => response.ok ? (await response.json()).data.csrfToken as string : null)
+      .finally(() => { csrfBootstrap = null; });
+  }
+  sessionCsrfToken = await csrfBootstrap;
+  return sessionCsrfToken;
+}
+
+export function setSessionCsrfToken(value: string | null): void {
+  sessionCsrfToken = value;
+}
+
+export function resetAuthClientForTest(): void {
+  sessionCsrfToken = null;
+  csrfBootstrap = null;
+  expiryRedirectStarted = false;
+}
+
+function redirectExpiredSession(): void {
+  if (expiryRedirectStarted || typeof window === "undefined" || window.location.pathname === "/login") return;
+  expiryRedirectStarted = true;
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.location.assign(`/login?reason=session-expired&returnTo=${encodeURIComponent(returnTo)}`);
+}
+
 /**
  * Parse the `Retry-After` header value into a bounded delay classification.
  * Accepts integer seconds only (the API emits seconds, not HTTP-date).
@@ -101,7 +153,7 @@ function requestHeaderEntries(
   return Object.entries(input);
 }
 
-function buildRequestHeaders(options?: RequestInit): Record<string, string> {
+function buildRequestHeaders(options?: RequestInit, csrfToken?: string | null): Record<string, string> {
   const headers: Record<string, string> = {};
   const suppliedEntries = requestHeaderEntries(options?.headers);
 
@@ -128,6 +180,7 @@ function buildRequestHeaders(options?: RequestInit): Record<string, string> {
   // The marker is required by the proxy for mutations and is canonicalized so
   // a call site cannot replace it with an arbitrary value.
   setRequestHeader(headers, DASHBOARD_MARKER_HEADER, DASHBOARD_MARKER_VALUE);
+  if (csrfToken) setRequestHeader(headers, "X-CSRF-Token", csrfToken);
   return headers;
 }
 
@@ -140,10 +193,11 @@ export function dashboardFetch(
   input: RequestInfo | URL,
   options?: RequestInit,
 ): Promise<Response> {
-  return fetch(input, {
+  return (async () => fetch(input, {
     ...options,
-    headers: buildRequestHeaders(options),
-  });
+    credentials: "same-origin",
+    headers: buildRequestHeaders(options, isUnsafeMethod(options?.method) ? await bootstrapSessionCsrf() : null),
+  }))();
 }
 
 /**
@@ -164,6 +218,7 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     const code = typeof err.error?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(err.error.code)
       ? err.error.code
       : null;
+    if (classifyAuthFailure(res.status, code) === "session-expired") redirectExpiredSession();
     const currentRevision = typeof err.error?.currentRevision === "number"
       && Number.isSafeInteger(err.error.currentRevision)
       && err.error.currentRevision >= 0
@@ -185,6 +240,14 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
 
 /** A project managed by Ingenium. */
 export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string; is_global?: boolean };
+export type AuthUser = { id: string; email_normalized: string; display_name: string; status: "active" | "disabled"; email_verified_at: string | null };
+export type AuthSessionState = { user: AuthUser; session: { id: string; recentStepUp: boolean; mfaEnabled: boolean }; installationAdmin: boolean };
+export type OrganizationSummary = { id: string; name: string; slug: string; status: "active" | "suspended"; role: "owner" | "admin" | "member" | "viewer" };
+export type OrganizationCapabilities = { effectiveRole: OrganizationSummary["role"] | null; canManageMembers: boolean; canManageInvitations: boolean; canManageProjectMembers: boolean };
+export type OrganizationMember = { userId: string; email: string; displayName: string; role: OrganizationSummary["role"]; status: string };
+export type ProjectMember = { userId: string; email: string; displayName: string; role: "editor" | "viewer" };
+export type SessionDevice = { id: string; device_label: string | null; idle_expires_at: string; absolute_expires_at: string; revoked_at: string | null; created_at: string; last_seen_at: string };
+export type ApiTokenSummary = { id: string; name: string; tokenPrefix: string; token?: string; scopes: string[]; expiresAt: string; revokedAt: string | null; lastUsedAt: string | null; createdAt: string };
 
 /** An AI agent skill with its full content.
  * Matches the raw API row shape exactly (the API deliberately preserves raw DB rows):
@@ -1992,6 +2055,52 @@ export type {
  * HTTP operations.
  */
 export const api = {
+  auth: {
+    csrf: () => request<{ data: { csrfToken: string } }>("/auth/csrf"),
+    session: () => request<{ data: AuthSessionState }>("/auth/session"),
+    login: (email: string, password: string, csrfToken: string, deviceLabel?: string) => request<{ data: { user?: AuthUser; csrfToken?: string; mfaRequired?: boolean; challengeToken?: string } }>("/auth/login", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ email, password, deviceLabel }) }),
+    mfaChallenge: (challengeToken: string, code: string, csrfToken: string) => request<{ data: { user: AuthUser; csrfToken: string } }>("/auth/mfa/challenge", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ challengeToken, code }) }),
+    logout: () => request<void>("/auth/logout", { method: "POST" }),
+    forgotPassword: (email: string, csrfToken: string) => request<{ data: { accepted: boolean } }>("/auth/password/forgot", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ email }) }),
+    resetPassword: (token: string, password: string, csrfToken: string) => request<void>("/auth/password/reset", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ token, password }) }),
+    verifyEmail: (token: string, csrfToken: string) => request<void>("/auth/email/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ token }) }),
+    invitationPreview: (token: string) => request<{ data: { organizationName: string; email: string; role: string; expiresAt: string } }>(`/auth/invitations/preview?token=${encodeURIComponent(token)}`),
+    acceptInvitation: (token: string) => request<void>("/auth/invitations/accept", { method: "POST", body: JSON.stringify({ token }) }),
+    oidcProviders: () => request<{ data: Array<{ id: string; name: string }> }>("/auth/oidc/providers"),
+    oidcStart: (providerId: string, csrfToken: string) => request<{ data: { authorizationUrl: string; state: string } }>("/auth/oidc/start", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ providerId }) }),
+    oidcCallback: (state: string, code: string) => request<{ data: { user: AuthUser; csrfToken: string } }>(`/auth/oidc/callback?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}`),
+    sessions: () => request<{ data: SessionDevice[] }>("/auth/sessions"),
+    revokeSession: (id: string) => request<void>(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    revokeOtherSessions: () => request<{ data: { revoked: number } }>("/auth/sessions/revoke-others", { method: "POST" }),
+    stepUp: async (credential: string) => {
+      const response = await request<{ data: { csrfToken: string; recentStepUp: true } }>("/auth/step-up", { method: "POST", body: JSON.stringify({ credential }) });
+      setSessionCsrfToken(response.data.csrfToken);
+      return response;
+    },
+    changePassword: (currentPassword: string, password: string) => request<{ data: { csrfToken: string } }>("/auth/password/change", { method: "POST", body: JSON.stringify({ currentPassword, password }) }),
+    totpEnroll: () => request<{ data: { factorId: string; secret: string } }>("/auth/totp/enroll", { method: "POST" }),
+    totpConfirm: (factorId: string, code: string) => request<{ data: { recoveryCodes: string[]; csrfToken: string } }>("/auth/totp/confirm", { method: "POST", body: JSON.stringify({ factorId, code }) }),
+    totpRemove: (code: string) => request<{ data: { csrfToken: string } }>("/auth/totp", { method: "DELETE", body: JSON.stringify({ code }) }),
+    tokens: () => request<{ data: ApiTokenSummary[] }>("/auth/tokens"),
+    createToken: (input: { name: string; scopes: string[]; expiresAt: string; organizationId?: string; projectId?: string }) => request<{ data: ApiTokenSummary }>("/auth/tokens", { method: "POST", body: JSON.stringify(input) }),
+    revokeToken: (id: string) => request<void>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  },
+  bootstrap: {
+    status: () => request<{ data: { state: "pending" | "claimed"; revision: number } }>("/bootstrap/status"),
+    claim: (email: string, displayName: string, password: string) => request<{ data: { userId: string; organizationId: string } }>("/bootstrap/claim", { method: "POST", body: JSON.stringify({ email, displayName, password }) }),
+  },
+  organizations: {
+    list: () => request<{ data: OrganizationSummary[] }>("/organizations"),
+    members: (id: string) => request<{ data: OrganizationMember[]; capabilities: OrganizationCapabilities }>(`/organizations/${encodeURIComponent(id)}/members`),
+    invitations: (id: string) => request<{ data: Array<{ id: string; email: string; role: string; expiresAt: string; acceptedAt: string | null; revokedAt: string | null }> }>(`/organizations/${encodeURIComponent(id)}/invitations`),
+    invite: (id: string, email: string, role: string) => request<{ data: { invited: true } }>(`/organizations/${encodeURIComponent(id)}/invitations`, { method: "POST", body: JSON.stringify({ email, role }) }),
+    revokeInvitation: (id: string, invitationId: string) => request<void>(`/organizations/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitationId)}`, { method: "DELETE" }),
+    setMemberRole: (id: string, userId: string, role: string) => request<void>(`/organizations/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify({ role }) }),
+    removeMember: (id: string, userId: string) => request<void>(`/organizations/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+    projectMembers: (id: string, project: string) => request<{ data: ProjectMember[]; capabilities: OrganizationCapabilities }>(`/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(project)}/members`),
+    setProjectMember: (id: string, project: string, userId: string, role: string) => request<void>(`/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(userId)}`, { method: "PUT", body: JSON.stringify({ role }) }),
+    removeProjectMember: (id: string, project: string, userId: string) => request<void>(`/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+  },
   projects: {
     list: () => request<{ data: Project[] }>("/projects"),
     create: (name: string) => request<{ data: Project }>("/projects", { method: "POST", body: JSON.stringify({ name }) }),

@@ -42,7 +42,7 @@ const PROJECT_PREFIXES = [
 const PUBLIC_AUTH_PATHS = new Set([
   "GET /api/v1/auth/csrf", "POST /api/v1/auth/login", "POST /api/v1/auth/mfa/challenge",
   "POST /api/v1/auth/password/forgot", "POST /api/v1/auth/password/reset", "POST /api/v1/auth/email/verify",
-  "GET /api/v1/auth/invitations/preview", "POST /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
+  "GET /api/v1/auth/invitations/preview", "GET /api/v1/auth/oidc/providers", "POST /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
 ]);
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -174,8 +174,11 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     decision = authorization.requireInstallationPermission(principal, policy.resource, policy.permission);
     if (policy.target === "private" && req.path.startsWith("/api/v1/auth/") && req.principal.type === "user" && req.principal.session) decision = { allowed: true, visible: true };
     if (policy.target === "private" && req.principal.type === "user" && !req.principal.session
-      && req.method === "GET" && req.path === "/api/v1/auth/preflight"
-      && (req.principal.scopes.includes("auth:preflight") || req.principal.scopes.includes("auth:*"))) decision = { allowed: true, visible: true };
+      && req.method === "GET" && req.path === "/api/v1/auth/preflight") {
+      decision = req.principal.scopes.includes("auth:preflight") || req.principal.scopes.includes("auth:*")
+        ? { allowed: true, visible: true }
+        : { allowed: false, visible: true };
+    }
     if (policy.target === "private" && !req.path.startsWith("/api/v1/auth/")) {
       decision = { allowed: authorization.requirePrivateResourceAccess({ principal }), visible: false };
     }

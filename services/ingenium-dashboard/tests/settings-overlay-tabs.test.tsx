@@ -34,6 +34,11 @@ vi.mock("../src/app/components/settings/panels/ConfigPanel", () => ({
 import SettingsOverlay from "../src/app/components/settings/SettingsOverlay";
 
 const ROUTE_LINKS: Record<string, string> = {
+  account: "/account",
+  security: "/account#security",
+  sessions: "/account#sessions",
+  "api-tokens": "/account#api-tokens",
+  organizations: "/organizations",
   projects: "/projects",
   skills: "/skills",
   tasks: "/tasks",
@@ -48,6 +53,11 @@ const ROUTE_LINKS: Record<string, string> = {
 
 const SETTINGS_TABS = [
   ["general", "General"],
+  ["account", "Account"],
+  ["security", "Security"],
+  ["sessions", "Sessions"],
+  ["api-tokens", "API tokens"],
+  ["organizations", "Organizations"],
   ["projects", "Projects"],
   ["skills", "Skills"],
   ["tasks", "Tasks"],

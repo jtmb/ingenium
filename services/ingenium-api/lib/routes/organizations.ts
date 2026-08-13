@@ -24,12 +24,27 @@ function requireOwnerForOwnerChange(req: import("express").Request, nextRole?: s
   }
 }
 
+function organizationCapabilities(req: import("express").Request, organizationId: string) {
+  const role = req.principal?.type === "user"
+    ? organizations.getOrganizationRole(organizationId, req.principal.id)
+    : undefined;
+  return {
+    effectiveRole: role ?? null,
+    canManageMembers: role === "owner" || role === "admin",
+    canManageInvitations: role === "owner" || role === "admin",
+    canManageProjectMembers: role === "owner" || role === "admin",
+  };
+}
+
 export const organizationsRouter = Router();
 
 organizationsRouter.get("/", (req, res) => {
   if (req.principal?.type === "compatibility") return res.json({ data: [organizations.getOrganization(organizations.BOOTSTRAP_ORGANIZATION_ID)] });
   if (req.principal?.type !== "user") throw new AppError("User organization membership is required", "FORBIDDEN", 403);
-  return res.json({ data: organizations.listUserOrganizations(req.principal.id) });
+  return res.json({ data: organizations.listUserOrganizations(req.principal.id).map((organization) => ({
+    ...organization,
+    role: organizations.getOrganizationRole(organization.id, req.principal!.id),
+  })) });
 });
 
 organizationsRouter.post("/", (req, res) => {
@@ -47,7 +62,7 @@ organizationsRouter.get("/:organizationId", (req, res) => {
 });
 
 organizationsRouter.get("/:organizationId/members", (req, res) => {
-  res.json({ data: organizations.listOrganizationMembers(req.params.organizationId!) });
+  res.json({ data: organizations.listOrganizationMembers(req.params.organizationId!), capabilities: organizationCapabilities(req, req.params.organizationId!) });
 });
 
 organizationsRouter.patch("/:organizationId/members/:userId", (req, res) => {
@@ -70,12 +85,14 @@ organizationsRouter.get("/:organizationId/invitations", (req, res) => {
 });
 
 organizationsRouter.post("/:organizationId/invitations", (req, res) => {
+  requireRecentStepUp(req);
   const input = z.object({ email: z.string().min(3).max(320), role: invitationRole }).strict().parse(req.body);
   invitations.issueInvitation(req.params.organizationId!, input.email, input.role);
   res.status(201).json({ data: { invited: true } });
 });
 
 organizationsRouter.delete("/:organizationId/invitations/:invitationId", (req, res) => {
+  requireRecentStepUp(req);
   if (!invitations.revokeInvitation(req.params.organizationId!, req.params.invitationId!)) throw new AppError("Resource not found", "NOT_FOUND", 404);
   res.status(204).end();
 });
@@ -83,7 +100,7 @@ organizationsRouter.delete("/:organizationId/invitations/:invitationId", (req, r
 organizationsRouter.get("/:organizationId/projects/:projectName/members", (req, res) => {
   const project = projects.getProject(req.params.projectName!);
   if (!project || project.organization_id !== req.params.organizationId) throw new AppError("Resource not found", "NOT_FOUND", 404);
-  res.json({ data: organizations.listProjectMembers(project.id) });
+  res.json({ data: organizations.listProjectMembers(project.id), capabilities: organizationCapabilities(req, req.params.organizationId!) });
 });
 
 organizationsRouter.put("/:organizationId/projects/:projectName/members/:userId", (req, res) => {

@@ -5,17 +5,19 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bootstrap, resetDbForTest, securityTokens } from "ingenium-core";
+import { authentication, bootstrap, invitations, resetDbForTest, securityTokens } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { clearAuthAttemptRateLimit } from "../lib/middleware/auth-rate-limit.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
+import { organizationsRouter } from "../lib/routes/organizations.js";
 
 let directory = "";
 let server: Server;
 let baseUrl = "";
 let ownerId = "";
+let organizationId = "";
 const origin = "http://localhost:3000";
 const originalDb = process.env.INGENIUM_CORE_DB_PATH;
 const originalToken = process.env.INGENIUM_API_TOKEN;
@@ -26,12 +28,13 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), "ingenium-local-auth-api-"));
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
   process.env.INGENIUM_API_TOKEN = "a".repeat(32);
-  ownerId = (await bootstrap.claimBootstrap({ email: "owner@example.test", displayName: "Owner", password: "correct horse battery staple" })).userId;
+  ({ userId: ownerId, organizationId } = await bootstrap.claimBootstrap({ email: "owner@example.test", displayName: "Owner", password: "correct horse battery staple" }));
   const app = express();
   app.use(express.json());
   app.use(authMiddleware);
   app.use(csrfMiddleware);
   app.use("/api/v1/auth", authPreflightRouter);
+  app.use("/api/v1/organizations", organizationsRouter);
   app.use(errorHandler);
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -107,9 +110,28 @@ describe("AUTH-101 local API", () => {
     expect((await response.json()).error.code).toBe("UNAUTHORIZED");
   });
 
+  it("returns public OIDC provider labels and session security metadata without secrets", async () => {
+    const providers = await fetch(`${baseUrl}/api/v1/auth/oidc/providers`);
+    expect(providers.status).toBe(200);
+    expect(await providers.json()).toEqual({ data: [] });
+
+    const session = await login();
+    const response = await fetch(`${baseUrl}/api/v1/auth/session`, { headers: { cookie: session.cookie } });
+    const body = await response.json();
+    expect(body.data).toMatchObject({ session: { mfaEnabled: false }, installationAdmin: true });
+    expect(JSON.stringify(body)).not.toMatch(/token_hash|csrf_hash|password/i);
+  });
+
+  it("bootstraps session CSRF and revokes other sessions after step-up", async () => {
+    const session = await login();
+    const csrf = await fetch(`${baseUrl}/api/v1/auth/session/csrf`, { method: "POST", headers: { origin, "x-ingenium-ui": "dashboard", cookie: session.cookie } });
+    expect(csrf.status).toBe(200);
+    expect((await csrf.json()).data.csrfToken).toHaveLength(43);
+  });
+
   it("denies undeclared session and scoped-token routes and enforces exact scopes", async () => {
     const session = await login();
-    expect((await fetch(`${baseUrl}/api/v1/unknown`, { headers: { cookie: session.cookie } })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/v1/unknown`, { headers: { cookie: session.cookie } })).status).toBe(404);
 
     const wrongScope = securityTokens.createScopedApiToken({ userId: ownerId }, ["projects:read"], new Date(Date.now() + 60_000));
     expect((await fetch(`${baseUrl}/api/v1/auth/preflight`, { headers: { authorization: `Bearer ${wrongScope.token}` } })).status).toBe(403);
@@ -141,6 +163,29 @@ describe("AUTH-101 local API", () => {
       body: tokenBody,
     });
     expect(created.status).toBe(201);
+  });
+
+  it("requires recent step-up to create and revoke invitations", async () => {
+    const stale = await login();
+    const createBody = JSON.stringify({ email: "invitee@example.test", role: "member" });
+    const staleCreate = await fetch(`${baseUrl}/api/v1/organizations/${organizationId}/invitations`, { method: "POST", headers: { "content-type": "application/json", origin, cookie: stale.cookie, "x-csrf-token": stale.csrfToken }, body: createBody });
+    expect(staleCreate.status).toBe(403);
+    expect((await staleCreate.json()).error.code).toBe("STEP_UP_REQUIRED");
+
+    const elevated = await fetch(`${baseUrl}/api/v1/auth/step-up`, { method: "POST", headers: { "content-type": "application/json", origin, cookie: stale.cookie, "x-csrf-token": stale.csrfToken }, body: JSON.stringify({ credential: "correct horse battery staple" }) });
+    const elevatedBody = await elevated.json();
+    const cookie = elevated.headers.get("set-cookie")!.split(";")[0]!;
+    const headers = { "content-type": "application/json", origin, cookie, "x-csrf-token": elevatedBody.data.csrfToken };
+    const created = await fetch(`${baseUrl}/api/v1/organizations/${organizationId}/invitations`, { method: "POST", headers, body: createBody });
+    expect(created.status).toBe(201);
+    const invitationId = invitations.listInvitations(organizationId)[0]!.id;
+    const revoked = await fetch(`${baseUrl}/api/v1/organizations/${organizationId}/invitations/${invitationId}`, { method: "DELETE", headers });
+    expect(revoked.status).toBe(204);
+
+    const staleSession = authentication.createSession(ownerId);
+    const staleRevoke = await fetch(`${baseUrl}/api/v1/organizations/${organizationId}/invitations/${invitationId}`, { method: "DELETE", headers: { origin, cookie: `${authentication.SESSION_COOKIE_NAME}=${staleSession.token}`, "x-csrf-token": staleSession.csrfToken } });
+    expect(staleRevoke.status).toBe(403);
+    expect((await staleRevoke.json()).error.code).toBe("STEP_UP_REQUIRED");
   });
 
   it("rejects an OIDC callback without the initiating browser transaction cookie", async () => {

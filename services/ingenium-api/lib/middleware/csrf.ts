@@ -32,6 +32,11 @@ export function csrfMiddleware(req: Request, _res: Response, next: NextFunction)
   const origin = req.get("origin");
   const dashboardMarker = req.get("x-ingenium-ui");
   const session = req.principal?.type === "user" ? req.principal.session : undefined;
+  if (req.path === "/api/v1/auth/session/csrf" && session
+    && origin && config.dashboardOrigins.includes(origin) && dashboardMarker === DASHBOARD_REQUEST_MARKER) {
+    next();
+    return;
+  }
   if (req.principal && req.principal.type !== "compatibility" && !session) {
     next();
     return;
