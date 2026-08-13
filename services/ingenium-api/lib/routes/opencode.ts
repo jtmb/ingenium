@@ -107,7 +107,18 @@ const SOURCE = "opencode-routes";
 const OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_OAUTH_ATTEMPTS = 100;
 const DEFAULT_OAUTH_CALLBACK_FORWARD_URL = "http://localhost:1455/auth/callback";
-const pendingOAuthAttempts = new Map<string, { attemptID: string; mode: "auto" | "code"; expiresAt: number }>();
+const pendingOAuthAttempts = new Map<string, {
+  attemptID: string;
+  mode: "auto" | "code";
+  expiresAt: number;
+  actorType: "compatibility" | "user" | "service" | "system";
+  actorId: string;
+  organizationId: string | null;
+  ownerKind: "installation" | "user" | "organization";
+  ownerUserId: string | null;
+  providerId: string;
+  runtimeIntent: "shared" | "private";
+}>();
 
 /**
  * The callback is intentionally unauthenticated because OAuth providers redirect
@@ -1225,6 +1236,10 @@ opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res)
     return;
   }
   const providerId = req.params.integrationID!;
+  if (req.body?.owner_kind && req.body.owner_kind !== "installation") {
+    res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
+    return;
+  }
   const saga = await connectNativeProviderCredential(providerId, req.body.key, {
     apply: (key, signal) => opencodeClient.connectIntegrationKey(providerId, key, signal),
     remove: (signal) => opencodeClient.deleteAuth(providerId, undefined, signal),
@@ -1253,6 +1268,10 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth methodID is required" } });
     return;
   }
+  if (req.body?.owner_kind && req.body.owner_kind !== "installation") {
+    res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
+    return;
+  }
   const result = await opencodeClient.beginIntegrationOAuth(req.params.integrationID!, req.body.methodID, inputs);
   if (!isOpenCodeError(result) && !isSafeOAuthUrl(result.data.url)) {
     await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
@@ -1267,6 +1286,15 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
       res.status(502).json({ error: { code: "INVALID_OAUTH_STATE", message: "Provider returned an invalid authorization request" } });
       return;
     }
+    const principal = req.principal;
+    if (!principal) {
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
+      return;
+    }
+    const ownerKind = "installation" as const;
+    const organizationId = "organizationId" in principal ? principal.organizationId ?? null : null;
+    const ownerUserId = null;
     pruneOAuthAttempts();
     if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
       await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
@@ -1277,6 +1305,13 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
       attemptID: result.data.attemptID,
       mode: result.data.mode,
       expiresAt: Math.min(Date.now() + OAUTH_ATTEMPT_TTL_MS, result.data.time.expires),
+      actorType: principal.type === "runtime-service" ? "system" : principal.type,
+      actorId: principal.id,
+      organizationId,
+      ownerKind,
+      ownerUserId,
+      providerId: req.params.integrationID!,
+      runtimeIntent: ownerKind === "installation" ? "shared" : "private",
     });
   }
   sendResult(req, res, result);
@@ -1322,6 +1357,10 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
 
   if (!isSafeIdentifier(req.params.providerID) || (body.key !== undefined && !isValidProviderKey(body.key))) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid API key is required" } });
+    return;
+  }
+  if (body.owner_kind && body.owner_kind !== "installation") {
+    res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
     return;
   }
   if (typeof body.key === "string") {

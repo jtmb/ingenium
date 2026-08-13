@@ -162,6 +162,19 @@ returned. OpenCode synchronization occurs after the durable commit and reports
 warnings rather than rolling back committed state; native auth synchronization uses
 the bounded abort-backed calls described below.
 
+Provider connections record installation, organization, or user ownership, but
+the current OpenCode process is installation-shared. Therefore only
+installation-owned provider credentials may be projected or connected to that
+runtime. Requests that select user or organization ownership are rejected before
+vault writes or OpenCode calls. This prevents a private credential from becoming
+usable by unrelated shared-runtime sessions.
+
+Vault items and folders record organization plus organization/user ownership.
+User-private plaintext is available only to its owner or an explicit grant;
+organization administrators do not gain reveal access implicitly. List/detail,
+update, delete, and reveal operations apply the same resource authorization and
+hide foreign resources as not found. Audit payloads remain metadata-only.
+
 Native provider API-key operations are serialized per provider with at most four
 queued waiters and a 2-second queue deadline. Overflow and expiry return a
 retryable provider-operation response; all OpenCode and compensation calls have a

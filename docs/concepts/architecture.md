@@ -165,6 +165,21 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 - `ingenium-server` runs as an MCP stdio transport with **280 built-in catalog entries** across **30 baseline categories**. Two extension-registered tools bring the built-in catalog to **282**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
 
+### Resource tenancy (AUTH-104)
+
+Projects belong to organizations. Migrations 096 and 097 add explicit ownership
+to vault folders/items, provider connections, mail accounts, credentials, OAuth
+attempts, and organization-qualified mail cache state. Existing identifiers and
+encrypted values are preserved; compatibility rows are assigned to their
+project organization, while ambiguous provider state remains installation-owned.
+
+Organization resources use organization/project roles. User-private resources
+require the owner or an explicit resource grant; organization administrators do
+not receive private plaintext access by role alone. Foreign resource lookups
+return the same not-found response as absent resources. Native and managed
+provider credentials may enter shared OpenCode only when installation-owned;
+private provider ownership fails closed until an isolated provider runtime exists.
+
 ### Git-authoritative external-worktree synchronization
 
 Automatic external-worktree synchronization follows exactly:

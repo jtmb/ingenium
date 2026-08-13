@@ -29,6 +29,9 @@ export interface EmailAttachment {
 /** An email account configuration (credentials stored separately, encrypted). */
 export interface EmailAccount {
   id: string;
+  organizationId?: string;
+  ownerKind?: "user" | "organization";
+  ownerUserId?: string;
   email: string;
   name: string;
   provider: EmailProvider;
@@ -42,6 +45,12 @@ export interface EmailAccount {
   lastSync?: string;
   /** If true, account is hidden from the sidebar dropdown but sync still runs. */
   hidden?: boolean;
+}
+
+export interface EmailOwner {
+  organizationId: string;
+  ownerKind?: "user" | "organization";
+  ownerUserId?: string;
 }
 
 /** OAuth2 token set with expiry tracking. `refreshToken` is empty for MSAL (handles refresh internally). */

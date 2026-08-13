@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextFunction, Request, Response } from "express";
+import { securityAudit } from "ingenium-core";
 import { assertAuthorizationPolicyCoverage, authorizationMiddleware, policyForRequest } from "../lib/authorization-policy.js";
 
 describe("AUTH-102 canonical API policy", () => {
@@ -10,6 +11,10 @@ describe("AUTH-102 canonical API policy", () => {
     ["GET", "/api/v1/tasks", "project", "read"],
     ["POST", "/api/v1/jobs/job/run", "project", "execute"],
     ["GET", "/api/v1/context/conversations", "private", "read"],
+    ["GET", "/api/v1/emails/accounts", "project", "read"],
+    ["POST", "/api/v1/vault/items/item/reveal", "project", "write"],
+    ["PUT", "/api/v1/settings/provider-configs", "installation", "write"],
+    ["POST", "/api/v1/opencode/integrations/openai/connect/key", "installation", "execute"],
     ["GET", "/api/v1/backups", "installation", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "installation", "read"],
@@ -50,7 +55,9 @@ describe("AUTH-102 canonical API policy", () => {
       principal: { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] },
     } as unknown as Request;
     const next = vi.fn();
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
     authorizationMiddleware(req, {} as Response, next);
     expect(next).toHaveBeenCalledOnce();
   });
+
 });

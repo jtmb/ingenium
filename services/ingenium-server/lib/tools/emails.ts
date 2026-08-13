@@ -31,10 +31,9 @@ export async function emailSearch(project: string, account: string, query: strin
 
 /** Read a full email by its UID */
 export async function emailRead(project: string, account: string, uid: number, folder?: string) {
-  const res = await api.get(`/emails/${uid}`, {
-    project, account,
-    folder: folder ?? "INBOX",
-  });
+  const params: Record<string, string> = { project, account };
+  if (folder) params.folder = folder;
+  const res = await api.get(`/emails/${uid}`, params);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -193,10 +192,9 @@ export async function emailOauthExchange(
 
 /** Get LLM-generated email summary (cache-first) */
 export async function emailSummarize(project: string, account: string, uid: number, folder?: string) {
-  const res = await api.get(`/emails/summarize/${uid}`, {
-    project, account,
-    folder: folder ?? "INBOX",
-  });
+  const params: Record<string, string> = { project, account };
+  if (folder) params.folder = folder;
+  const res = await api.get(`/emails/summarize/${uid}`, params);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -222,10 +220,9 @@ export async function emailSetFlags(project: string, account: string, uid: numbe
 
 /** Delete an email (moves to Trash via IMAP) */
 export async function emailDelete(project: string, account: string, uid: number, folder?: string) {
-  await api.del(`/emails/${uid}`, {
-    project, account,
-    folder: folder ?? "INBOX",
-  });
+  const params: Record<string, string> = { project, account };
+  if (folder) params.folder = folder;
+  await api.del(`/emails/${uid}`, params);
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
 }
 
@@ -273,7 +270,7 @@ export async function emailAttachmentGet(
 
   const response = await api.settled.getRaw(
     `/emails/${uid}/attachments/${encodeURIComponent(attachmentId)}`,
-    { project, account, folder: folder ?? "INBOX" },
+    { project, account, ...(folder ? { folder } : {}) },
   );
   if (!response.ok) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };

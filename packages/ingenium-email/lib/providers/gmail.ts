@@ -261,7 +261,7 @@ function walkParts(
 export const GmailProvider = {
   // ── listFolders ─────────────────────────────────────────────────────────
   async listFolders(account: EmailAccount, _tokens: OAuthToken): Promise<EmailFolder[]> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
     const labelMap = await getLabelMap(token);
 
     const folders: EmailFolder[] = [];
@@ -286,7 +286,7 @@ export const GmailProvider = {
     folder: string,
     window: number,
   ): Promise<CachedEmailWrite[]> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
 
     // Resolve folder name → label ID
     const labelId = await findLabelId(token, folder);
@@ -330,7 +330,7 @@ export const GmailProvider = {
     newCursor: string;
     fullResyncRequired?: boolean;
   }> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
 
     // No cursor → full resync required, but fetch current historyId so
     // the next delta poll can work incrementally instead of failing again.
@@ -445,7 +445,7 @@ export const GmailProvider = {
     _tokens: OAuthToken,
     id: string,
   ): Promise<{ html?: string; text?: string; attachments: EmailAttachment[] }> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
 
     const msg = await getMessage(token, id, "full");
     const parts = msg.payload?.parts ?? (msg.payload ? [msg.payload] : []);
@@ -478,7 +478,7 @@ export const GmailProvider = {
     id: string,
     attachmentId: string,
   ): Promise<{ data: Buffer; mimeType: string; filename: string }> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
 
     // Re-fetch the full message and walk its parts to find the matching
     // attachment by attachmentId OR partId (handles both old and new caches).
@@ -519,7 +519,7 @@ export const GmailProvider = {
     _tokens: OAuthToken,
     options: SendOptions,
   ): Promise<void> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
 
     const rfc822 = buildRfc822(account, options);
     const raw = Buffer.from(rfc822, "utf-8").toString("base64url");
@@ -535,7 +535,7 @@ export const GmailProvider = {
     addFolder: string | null,
     removeFolder: string | null,
   ): Promise<void> {
-    const token = await getFreshGmailToken(account.id);
+    const token = await getFreshGmailToken(account.id, account.organizationId);
 
     let addLabelIds: string[] | undefined;
     let removeLabelIds: string[] | undefined;

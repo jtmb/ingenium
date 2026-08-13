@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resetDbForTest } from "ingenium-core";
+import { identity, organizations, resetDbForTest } from "ingenium-core";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import { createItem, deleteItem, initVault, sealVault, unsealVault, updateItem } from "../../../packages/ingenium-core/lib/tools/vault.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
@@ -21,6 +21,9 @@ let firstItemId = "";
 let deletedItemId = "";
 let foreignItemId = "";
 let jobId = "";
+let privateOwnerId = "";
+let organizationAdminId = "";
+let privateItemId = "";
 
 function request(path: string, project: string, init: RequestInit = {}) {
   return fetch(`${baseUrl}/api/v1/jobs${path}${path.includes("?") ? "&" : "?"}project=${project}`, init);
@@ -42,9 +45,26 @@ beforeAll(async () => {
   deletedItemId = createItem(firstProjectId, "api-deleted", "api_key", "deleted-canary");
   foreignItemId = createItem(secondProjectId, "api-foreign", "api_key", "foreign-canary");
   deleteItem(firstProjectId, deletedItemId);
+  privateOwnerId = identity.createUser("job-vault-owner@example.test", "Job Vault Owner").id;
+  organizationAdminId = identity.createUser("job-vault-admin@example.test", "Job Vault Admin").id;
+  organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, privateOwnerId, "member");
+  organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, organizationAdminId, "admin");
+  organizations.addProjectMember(firstProjectId, privateOwnerId, "editor");
+  privateItemId = createItem(firstProjectId, "private-api-reference", "api_key", "private-canary", undefined, undefined, undefined, undefined, {
+    organizationId: organizations.BOOTSTRAP_ORGANIZATION_ID,
+    ownerKind: "user",
+    ownerUserId: privateOwnerId,
+  });
 
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    const userId = req.headers["x-test-user"];
+    req.principal = typeof userId === "string"
+      ? { type: "user", id: userId, scopes: ["user:*"] }
+      : { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    next();
+  });
   app.use("/api/v1/jobs", jobsRouter);
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => {
@@ -135,6 +155,25 @@ describe("VAULT-100 jobs API", () => {
       { status: 422, body: { error: { code: "VAULT_ITEM_NOT_FOUND", message: "A vault item reference is unavailable" } } },
     ]);
     expect((await request(`/${jobId}`, "jobs-vault-api-second")).status).toBe(404);
+  });
+
+  it("does not let an organization admin authorize a user-private vault item", async () => {
+    const create = (userId: string) => request("/", "jobs-vault-api-first", {
+      ...json({
+        name: "Private vault job",
+        agent: "agent",
+        prompt_template: "prompt",
+        vault_item_ids: [privateItemId],
+      }),
+      headers: { "Content-Type": "application/json", "x-test-user": userId },
+    });
+
+    const denied = await create(organizationAdminId);
+    expect(denied.status).toBe(422);
+    expect(await denied.json()).toEqual({
+      error: { code: "VAULT_ITEM_NOT_FOUND", message: "A vault item reference is unavailable" },
+    });
+    expect((await create(privateOwnerId)).status).toBe(201);
   });
 
   it("rejects malformed lists without adding a reference-resolution endpoint", async () => {

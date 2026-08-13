@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { EmailAccount, OAuthToken, EmailFolder } from "./types.js";
+import type { EmailAccount, EmailOwner, OAuthToken, EmailFolder } from "./types.js";
 import { connectAccount, listFolders } from "./imap.js";
 import {
   decryptCredentialValue,
@@ -382,7 +382,7 @@ function storedToAccount(stored: StoredAccount): EmailAccount {
   };
 }
 
-function buildStoredAccount(account: Omit<EmailAccount, "id" | "connected">, id = randomUUID()): StoredAccount {
+function buildStoredAccount(account: Omit<EmailAccount, "id" | "connected">, id: string = randomUUID()): StoredAccount {
   const endpoints = normalizeEmailAccountEndpoints(account.provider, account);
   return {
     id,
@@ -398,6 +398,8 @@ function buildStoredAccount(account: Omit<EmailAccount, "id" | "connected">, id 
 
 /** List all global email accounts, ignoring malformed rows rather than crashing mail startup. */
 export function listAccounts(): EmailAccount[] {
+  const normalized = getEmailRuntime().accounts.listAccounts?.() ?? [];
+  if (normalized.length > 0) return normalized;
   const rows = getEmailRuntime().accounts.listGlobalSettings(SETTINGS_PREFIX);
   return rows.flatMap((value) => {
     try {
@@ -408,7 +410,11 @@ export function listAccounts(): EmailAccount[] {
   });
 }
 
-export function getAccount(accountId: string): EmailAccount | undefined {
+export function getAccount(accountId: string, organizationId?: string): EmailAccount | undefined {
+  const normalized = organizationId
+    ? getEmailRuntime().accounts.getAccount?.(organizationId, accountId)
+    : getEmailRuntime().accounts.listAccounts?.().find((account) => account.id === accountId);
+  if (normalized) return normalized;
   const raw = getEmailRuntime().accounts.getGlobalSetting(settingsKey(accountId));
   if (!raw) return undefined;
   try {
@@ -419,8 +425,15 @@ export function getAccount(accountId: string): EmailAccount | undefined {
 }
 
 /** Persist non-secret account metadata atomically. */
-export function addAccount(account: Omit<EmailAccount, "id" | "connected">): EmailAccount {
+export function addAccount(account: Omit<EmailAccount, "id" | "connected">, owner?: EmailOwner): EmailAccount {
   const stored = buildStoredAccount(account);
+  if (owner) {
+    const normalized = { ...storedToAccount(stored), ...owner };
+    const createAccount = getEmailRuntime().accounts.createAccount;
+    if (!createAccount) throw new Error("Normalized mail account persistence is unavailable");
+    getEmailRuntime().accounts.mutateGlobalSettings(() => createAccount(normalized));
+    return normalized;
+  }
   return getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
     settings.set(settingsKey(stored.id), JSON.stringify(stored));
     return storedToAccount(stored);
@@ -431,8 +444,21 @@ export function addAccount(account: Omit<EmailAccount, "id" | "connected">): Ema
 export function createAccountWithCredentials(
   account: Omit<EmailAccount, "id" | "connected">,
   credentials: { imapPass?: string; smtpPass?: string },
+  owner?: EmailOwner,
 ): EmailAccount {
   const stored = buildStoredAccount(account);
+  if (owner) {
+    const normalized = { ...storedToAccount(stored), ...owner };
+    const { createAccount, setCredential } = getEmailRuntime().accounts;
+    if (!createAccount || !setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    getEmailRuntime().accounts.mutateGlobalSettings(() => {
+      createAccount(normalized);
+      if (credentials.imapPass !== undefined) setCredential(owner.organizationId, stored.id, "imap_password", encryptCredentialValue(credentials.imapPass));
+      if (credentials.smtpPass !== undefined) setCredential(owner.organizationId, stored.id, "smtp_password", encryptCredentialValue(credentials.smtpPass));
+    });
+    resetAuthCircuit(stored.email);
+    return normalized;
+  }
   const result = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
     const guard = assertWritableEncryption(settings, false);
     if (credentials.imapPass !== undefined) stored.imapPass = encryptCredentialValue(credentials.imapPass);
@@ -449,10 +475,23 @@ export function createAccountWithCredentials(
 
 /** Create an OAuth account and encrypted token record in one transaction. */
 export function createOAuthAccountWithTokens(
-  account: Omit<EmailAccount, "id" | "connected">,
+  account: Omit<EmailAccount, "connected"> | Omit<EmailAccount, "id" | "connected">,
   tokens: OAuthToken,
+  owner?: EmailOwner,
 ): EmailAccount {
-  const stored = buildStoredAccount(account);
+  const stored = buildStoredAccount(account, "id" in account ? account.id : undefined);
+  if (owner) {
+    const normalized = { ...storedToAccount(stored), ...owner };
+    const { createAccount, setCredential } = getEmailRuntime().accounts;
+    if (!createAccount || !setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    getEmailRuntime().accounts.mutateGlobalSettings(() => {
+      createAccount(normalized);
+      setCredential(owner.organizationId, stored.id, "oauth_access_token", encryptCredentialValue(tokens.accessToken), JSON.stringify({ expiryDate: tokens.expiryDate, scope: tokens.scope }));
+      setCredential(owner.organizationId, stored.id, "oauth_refresh_token", encryptCredentialValue(tokens.refreshToken), JSON.stringify({ expiryDate: tokens.expiryDate, scope: tokens.scope }));
+    });
+    resetAuthCircuit(stored.email);
+    return normalized;
+  }
   const result = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
     const guard = assertWritableEncryption(settings, false);
     settings.set(settingsKey(stored.id), JSON.stringify(stored));
@@ -466,7 +505,21 @@ export function createOAuthAccountWithTokens(
   return result;
 }
 
-export function removeAccount(accountId: string): void {
+export function removeAccount(accountId: string, organizationId?: string): void {
+  const runtime = getEmailRuntime();
+  const normalized = organizationId
+    ? runtime.accounts.getAccount?.(organizationId, accountId)
+    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  if (normalized?.organizationId) {
+    const { deleteAccount, deleteCredentials } = runtime.accounts;
+    if (!deleteAccount || !deleteCredentials) throw new Error("Normalized mail account deletion is unavailable");
+    runtime.accounts.mutateGlobalSettings(() => {
+      deleteCredentials(normalized.organizationId!, accountId);
+      deleteAccount(normalized.organizationId!, accountId);
+    });
+    resetAuthCircuit(normalized.email);
+    return;
+  }
   const removedEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings, projectId) => {
     const raw = settings.get(settingsKey(accountId));
     if (!raw) return undefined;
@@ -485,7 +538,27 @@ export function removeAccount(accountId: string): void {
 export function storeCredentials(
   accountId: string,
   credentials: { imapPass?: string; smtpPass?: string; tokens?: OAuthToken },
+  organizationId?: string,
 ): void {
+  const runtime = getEmailRuntime();
+  const normalized = organizationId
+    ? runtime.accounts.getAccount?.(organizationId, accountId)
+    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  if (normalized?.organizationId) {
+    const setCredential = runtime.accounts.setCredential;
+    if (!setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    runtime.accounts.mutateGlobalSettings(() => {
+      if (credentials.imapPass !== undefined) setCredential(normalized.organizationId!, accountId, "imap_password", encryptCredentialValue(credentials.imapPass));
+      if (credentials.smtpPass !== undefined) setCredential(normalized.organizationId!, accountId, "smtp_password", encryptCredentialValue(credentials.smtpPass));
+      if (credentials.tokens) {
+        const metadata = JSON.stringify({ expiryDate: credentials.tokens.expiryDate, scope: credentials.tokens.scope });
+        setCredential(normalized.organizationId!, accountId, "oauth_access_token", encryptCredentialValue(credentials.tokens.accessToken), metadata);
+        setCredential(normalized.organizationId!, accountId, "oauth_refresh_token", encryptCredentialValue(credentials.tokens.refreshToken), metadata);
+      }
+    });
+    resetAuthCircuit(normalized.email);
+    return;
+  }
   const accountEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
     const raw = settings.get(settingsKey(accountId));
     if (!raw) throw new Error(`Account ${accountId} not found`);
@@ -507,7 +580,22 @@ export function storeCredentials(
 }
 
 /** Store encrypted OAuth tokens atomically after checking the account still exists. */
-export function storeOAuthTokens(accountId: string, tokens: OAuthToken): void {
+export function storeOAuthTokens(accountId: string, tokens: OAuthToken, organizationId?: string): void {
+  const runtime = getEmailRuntime();
+  const normalized = organizationId
+    ? runtime.accounts.getAccount?.(organizationId, accountId)
+    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  if (normalized?.organizationId) {
+    const setCredential = runtime.accounts.setCredential;
+    if (!setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    const metadata = JSON.stringify({ expiryDate: tokens.expiryDate, scope: tokens.scope });
+    runtime.accounts.mutateGlobalSettings(() => {
+      setCredential(normalized.organizationId!, accountId, "oauth_access_token", encryptCredentialValue(tokens.accessToken), metadata);
+      setCredential(normalized.organizationId!, accountId, "oauth_refresh_token", encryptCredentialValue(tokens.refreshToken), metadata);
+    });
+    resetAuthCircuit(normalized.email);
+    return;
+  }
   const accountEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
     const raw = settings.get(settingsKey(accountId));
     if (!raw) throw new Error(`Account ${accountId} not found`);
@@ -528,8 +616,33 @@ export function storeOAuthTokens(accountId: string, tokens: OAuthToken): void {
 /** Retrieve credentials only when the persisted key-continuity guard is ready. */
 export function getCredentials(
   accountId: string,
+  organizationId?: string,
 ): { password?: string; tokens?: OAuthToken } | undefined {
   const runtime = getEmailRuntime();
+  const normalizedAccount = organizationId
+    ? runtime.accounts.getAccount?.(organizationId, accountId)
+    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  if (normalizedAccount?.organizationId) {
+    const getCredential = runtime.accounts.getCredential;
+    if (!getCredential) return undefined;
+    const password = getCredential(normalizedAccount.organizationId, accountId, "imap_password");
+    const access = getCredential(normalizedAccount.organizationId, accountId, "oauth_access_token");
+    const refresh = getCredential(normalizedAccount.organizationId, accountId, "oauth_refresh_token");
+    try {
+      const metadata = access ? JSON.parse(access.tokenMetadata) as { expiryDate?: number; scope?: string } : {};
+      return {
+        password: password ? decryptCredentialValue(password.encryptedValue) : undefined,
+        tokens: access && refresh ? {
+          accessToken: decryptCredentialValue(access.encryptedValue),
+          refreshToken: decryptCredentialValue(refresh.encryptedValue),
+          expiryDate: metadata.expiryDate ?? 0,
+          scope: metadata.scope ?? "",
+        } : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  }
   const projectId = runtime.accounts.getGlobalProjectId();
   const raw = runtime.accounts.getGlobalSetting(settingsKey(accountId));
   if (!raw) return undefined;
@@ -570,7 +683,22 @@ export async function testConnection(
   }
 }
 
-export function setAccountConnected(accountId: string, connected: boolean): void {
+export function setAccountConnected(accountId: string, connected: boolean, organizationId?: string): void {
+  const runtime = getEmailRuntime();
+  const normalized = organizationId
+    ? runtime.accounts.getAccount?.(organizationId, accountId)
+    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  if (normalized?.organizationId) {
+    const updateAccount = runtime.accounts.updateAccount;
+    if (!updateAccount) throw new Error("Normalized mail account persistence is unavailable");
+    runtime.accounts.mutateGlobalSettings(() => updateAccount({
+      ...normalized,
+      connected,
+      lastSync: connected ? new Date().toISOString() : normalized.lastSync,
+    }));
+    if (connected) resetAuthCircuit(normalized.email);
+    return;
+  }
   const accountEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings, projectId) => {
     const raw = settings.get(settingsKey(accountId));
     if (!raw) throw new Error(`Account ${accountId} not found`);
@@ -586,6 +714,13 @@ export function setAccountConnected(accountId: string, connected: boolean): void
 
 /** Update non-secret metadata while preserving encrypted fields byte-for-byte. */
 export function storeAccount(account: EmailAccount): void {
+  if (account.organizationId) {
+    const updateAccount = getEmailRuntime().accounts.updateAccount;
+    if (!updateAccount) throw new Error("Normalized mail account persistence is unavailable");
+    normalizeEmailAccountEndpoints(account.provider, account);
+    getEmailRuntime().accounts.mutateGlobalSettings(() => updateAccount(account));
+    return;
+  }
   getEmailRuntime().accounts.mutateGlobalSettings((settings, projectId) => {
     const raw = settings.get(settingsKey(account.id));
     if (!raw) throw new Error(`Account ${account.id} not found`);

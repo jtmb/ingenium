@@ -13,6 +13,7 @@ import {
 } from "./vault-crypto.js";
 import { migrateLegacyOAuthClientSecretsForActiveGlobalProject } from "./protected-settings.js";
 import { insertJobVaultRuntimeAudit } from "./jobs.js";
+import { insertResourceAuditEvent } from "./authorization.js";
 
 const VERIFY_DATA = Buffer.from("ingenium-vault-v1");
 const DELETED_POLICY = '{"mode":"deleted"}';
@@ -78,7 +79,24 @@ type VaultItemMetadata = {
   updated_at: string;
   last_accessed_at: string | null;
   access_count: number;
+  organizationId: string;
+  ownerKind: "user" | "organization";
+  ownerUserId: string | null;
 };
+
+export interface VaultActor {
+  type: "compatibility" | "user" | "service" | "system";
+  id?: string | null;
+  requestId?: string | null;
+}
+
+export interface VaultOwnership {
+  organizationId: string;
+  ownerKind: "user" | "organization";
+  ownerUserId?: string | null;
+}
+
+const SYSTEM_ACTOR: VaultActor = { type: "system" };
 
 function dbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./data";
@@ -113,14 +131,30 @@ function insertAudit(
   projectId: string,
   eventType: string,
   itemId: string | null,
-  actor: string,
+  actor: VaultActor,
   details: object,
 ): void {
   const db = getDb(dbPath());
+  const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!project) return;
+  const sourceAuditEventId = insertResourceAuditEvent({
+    organizationId: project.organization_id,
+    projectId,
+    resourceType: itemId ? "vault_item" : "vault",
+    resourceId: itemId,
+    action: eventType,
+    actorType: actor.type,
+    actorId: actor.id,
+    outcome: "success",
+    requestId: actor.requestId,
+  });
   db.prepare(
-    `INSERT INTO vault_audit_log (project_id, event_type, item_id, actor, details, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(projectId, eventType, itemId, actor, JSON.stringify(details), new Date().toISOString());
+    `INSERT INTO vault_audit_log
+       (project_id, organization_id, event_type, item_id, actor, actor_type, actor_id, request_id, source_audit_event_id, details, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT DO NOTHING`,
+  ).run(projectId, project.organization_id, eventType, itemId, actor.id ?? actor.type, actor.type, actor.id ?? null,
+    actor.requestId ?? null, sourceAuditEventId, JSON.stringify(details), new Date().toISOString());
 }
 
 function toMetadata(row: Record<string, unknown>): VaultItemMetadata {
@@ -137,6 +171,9 @@ function toMetadata(row: Record<string, unknown>): VaultItemMetadata {
     updated_at: row.updated_at as string,
     last_accessed_at: (row.last_accessed_at as string | null) ?? null,
     access_count: row.access_count as number,
+    organizationId: row.organization_id as string,
+    ownerKind: row.owner_kind as "user" | "organization",
+    ownerUserId: (row.owner_user_id as string | null) ?? null,
   };
 }
 
@@ -205,7 +242,7 @@ export function unsealVault(projectId: string, passphrase: string): { ok: boolea
 
   if (!verifyHMAC(key, VERIFY_DATA, config.master_key_verify)) {
     key.fill(0);
-    logAudit(projectId, "vault_unseal_failed", null, "system", {});
+    logAudit(projectId, "vault_unseal_failed", null, SYSTEM_ACTOR, {});
     return { ok: false, error: "Invalid passphrase" };
   }
 
@@ -214,7 +251,7 @@ export function unsealVault(projectId: string, passphrase: string): { ok: boolea
   execTransaction(() => {
     getDb(dbPath()).prepare("UPDATE vault_config SET sealed = 0, updated_at = ? WHERE id = 1")
       .run(new Date().toISOString());
-    insertAudit(projectId, "vault_unsealed", null, "system", {});
+    insertAudit(projectId, "vault_unsealed", null, SYSTEM_ACTOR, {});
   });
   checkpointAfterWrite();
   // This is deliberately post-commit: legacy values are migrated only after
@@ -440,6 +477,8 @@ export function createItem(
   tags?: string[],
   urls?: string[],
   username?: string,
+  ownership?: VaultOwnership,
+  actor: VaultActor = SYSTEM_ACTOR,
 ): string {
   if (isSealed()) return "Vault is sealed";
   const dek = generateDEK();
@@ -454,12 +493,17 @@ export function createItem(
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO vault_items
-       (id, project_id, folder_id, name, type, tags, urls, username, encrypted, wrapped_kek, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, projectId, folderId ?? null, name, type, JSON.stringify(tags ?? []), JSON.stringify(urls ?? []), username ?? null, encrypted, wrappedDek, now, now);
+       (id, project_id, organization_id, owner_kind, owner_user_id, folder_id, name, type, tags, urls, username,
+        encrypted, wrapped_kek, created_by_actor_type, created_by_actor_id, created_at, updated_at)
+       SELECT ?, id, COALESCE(?, organization_id), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       FROM projects WHERE id = ?`,
+    ).run(id, ownership?.organizationId ?? null, ownership?.ownerKind ?? "organization",
+      ownership?.ownerKind === "user" ? ownership.ownerUserId ?? actor.id ?? null : null,
+      folderId ?? null, name, type, JSON.stringify(tags ?? []), JSON.stringify(urls ?? []), username ?? null,
+      encrypted, wrappedDek, actor.type, actor.id ?? null, now, now, projectId);
     // Audit events intentionally contain no user-controlled metadata or secret
     // material. The item ID is sufficient to correlate an audited operation.
-    insertAudit(projectId, "secret_created", id, "system", {});
+    insertAudit(projectId, "secret_created", id, actor, {});
   });
   checkpointAfterWrite();
   return id;
@@ -469,14 +513,15 @@ export function createItem(
 export function getItemMetadata(projectId: string, itemId: string): object | null {
   if (isSealed()) return null;
   const row = getDb(dbPath()).prepare(
-    `SELECT id, name, type, folder_id, tags, urls, username, version, created_at, updated_at, last_accessed_at, access_count
+     `SELECT id, name, type, folder_id, tags, urls, username, version, created_at, updated_at, last_accessed_at, access_count,
+             organization_id, owner_kind, owner_user_id
      FROM vault_items WHERE project_id = ? AND id = ? AND access_policy <> ?`,
   ).get(projectId, itemId, DELETED_POLICY) as Record<string, unknown> | undefined;
   return row ? toMetadata(row) : null;
 }
 
 /** Decrypt a vault item and update its access metadata. */
-export function decryptItem(projectId: string, itemId: string): string | null {
+export function decryptItem(projectId: string, itemId: string, actor: VaultActor = SYSTEM_ACTOR): string | null {
   let key: Buffer;
   try {
     key = getMasterKey();
@@ -503,7 +548,7 @@ export function decryptItem(projectId: string, itemId: string): string | null {
       db.prepare(
         "UPDATE vault_items SET last_accessed_at = ?, access_count = access_count + 1 WHERE project_id = ? AND id = ?",
       ).run(now, projectId, itemId);
-      insertAudit(projectId, "secret_read", itemId, "system", {});
+      insertAudit(projectId, "secret_read", itemId, actor, {});
       return plaintext;
     } finally {
       dek.fill(0);
@@ -519,18 +564,20 @@ export function listItems(projectId: string, folderId?: string): object[] {
   const db = getDb(dbPath());
   const rows = folderId === undefined
     ? db.prepare(
-      `SELECT id, name, type, folder_id, tags, urls, username, version, created_at, updated_at, last_accessed_at, access_count
+       `SELECT id, name, type, folder_id, tags, urls, username, version, created_at, updated_at, last_accessed_at, access_count,
+               organization_id, owner_kind, owner_user_id
        FROM vault_items WHERE project_id = ? AND access_policy <> ? ORDER BY name`,
     ).all(projectId, DELETED_POLICY)
     : db.prepare(
-      `SELECT id, name, type, folder_id, tags, urls, username, version, created_at, updated_at, last_accessed_at, access_count
+       `SELECT id, name, type, folder_id, tags, urls, username, version, created_at, updated_at, last_accessed_at, access_count,
+               organization_id, owner_kind, owner_user_id
        FROM vault_items WHERE project_id = ? AND folder_id = ? AND access_policy <> ? ORDER BY name`,
     ).all(projectId, folderId, DELETED_POLICY);
   return (rows as Record<string, unknown>[]).map(toMetadata);
 }
 
 /** Re-encrypt an active vault item under a fresh data encryption key. */
-export function updateItem(projectId: string, itemId: string, value: string): void {
+export function updateItem(projectId: string, itemId: string, value: string, actor: VaultActor = SYSTEM_ACTOR): void {
   if (isSealed()) return;
   const dek = generateDEK();
   const key = getMasterKey();
@@ -545,7 +592,7 @@ export function updateItem(projectId: string, itemId: string, value: string): vo
        SET encrypted = ?, wrapped_kek = ?, version = version + 1, updated_at = ?
        WHERE project_id = ? AND id = ? AND access_policy <> ?`,
     ).run(encrypted, wrappedDek, new Date().toISOString(), projectId, itemId, DELETED_POLICY);
-    if (changed.changes > 0) insertAudit(projectId, "secret_updated", itemId, "system", {});
+    if (changed.changes > 0) insertAudit(projectId, "secret_updated", itemId, actor, {});
   });
   checkpointAfterWrite();
 }
@@ -562,6 +609,7 @@ export function updateItemMetadata(
     urls?: string[];
     username?: string | null;
   },
+  actor: VaultActor = SYSTEM_ACTOR,
 ): boolean {
   if (isSealed()) return false;
 
@@ -588,21 +636,21 @@ export function updateItemMetadata(
        WHERE project_id = ? AND id = ? AND access_policy <> ?`,
     ).run(...values, new Date().toISOString(), projectId, itemId, DELETED_POLICY);
     changed = result.changes > 0;
-    if (changed) insertAudit(projectId, "secret_updated", itemId, "system", {});
+    if (changed) insertAudit(projectId, "secret_updated", itemId, actor, {});
   });
   checkpointAfterWrite();
   return changed;
 }
 
 /** Soft-delete an item by transitioning it to an inaccessible policy state. */
-export function deleteItem(projectId: string, itemId: string): void {
+export function deleteItem(projectId: string, itemId: string, actor: VaultActor = SYSTEM_ACTOR): void {
   // Soft deletion only changes metadata and does not need the master key.
   execTransaction(() => {
     const db = getDb(dbPath());
     const changed = db.prepare(
       "UPDATE vault_items SET access_policy = ?, updated_at = ? WHERE project_id = ? AND id = ? AND access_policy <> ?",
     ).run(DELETED_POLICY, new Date().toISOString(), projectId, itemId, DELETED_POLICY);
-    if (changed.changes > 0) insertAudit(projectId, "secret_deleted", itemId, "system", {});
+    if (changed.changes > 0) insertAudit(projectId, "secret_deleted", itemId, actor, {});
   });
   checkpointAfterWrite();
 }
@@ -612,12 +660,13 @@ export function logAudit(
   projectId: string,
   eventType: string,
   itemId: string | null,
-  actor: string,
+  actor: VaultActor | string,
   _details: object,
 ): void {
   // Keep the persistent audit trail metadata-only even if a future caller
   // accidentally supplies sensitive detail data.
-  execTransaction(() => insertAudit(projectId, eventType, itemId, actor, {}));
+  execTransaction(() => insertAudit(projectId, eventType, itemId,
+    typeof actor === "string" ? { type: actor === "system" ? "system" : "compatibility", id: actor } : actor, {}));
   checkpointAfterWrite();
 }
 

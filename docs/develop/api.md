@@ -244,14 +244,18 @@ observation or trait is not owned by that project.
 
 ### Email
 
-All email routes are prefixed with `/api/v1/emails`. All email data is global (project-level scoping is ignored — email is always global).
+All email routes are prefixed with `/api/v1/emails`. The mail engine is hosted by
+the canonical global runtime, while account access is organization-qualified and
+owner-authorized. Organization-owned accounts use organization/project roles;
+private accounts require the owner or an explicit grant. Unauthorized account
+IDs return `404`.
 
 > 🔴 `GET /accounts` by default returns only non-hidden accounts. Pass `?include_hidden=true` to include hidden accounts.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | **OAuth** | | |
-| GET | `/accounts/oauth/url?provider=` | Get OAuth authorization URL |
+| GET | `/accounts/oauth/url?provider=&owner_kind=&account_id=` | Create a ten-minute organization-qualified, consume-once OAuth attempt and return its authorization URL plus bound account ID |
 | POST | `/accounts/oauth` | Exchange OAuth code for tokens |
 | **Account Management** | | |
 | GET | `/accounts` | List email accounts (`?include_hidden=true` for all) |

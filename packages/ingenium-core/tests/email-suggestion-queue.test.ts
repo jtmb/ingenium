@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, resetDbForTest } from "../lib/db.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
 import { upsertEmailCache } from "../lib/tools/email-cache.js";
 import {
   claimSuggestionJob,
@@ -38,6 +39,13 @@ beforeEach(() => {
   resetDbForTest();
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-email-queue-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
+  const now = new Date().toISOString();
+  getDb(databasePath()).prepare(
+    `INSERT INTO mail_accounts
+     (id, organization_id, owner_kind, email, name, provider, auth_type, config_json,
+      created_by_actor_type, created_at, updated_at)
+     VALUES ('queue-account', ?, 'organization', 'queue@example.test', 'Queue', 'gmail', 'oauth2', '{}', 'system', ?, ?)`,
+  ).run(BOOTSTRAP_ORGANIZATION_ID, now, now);
 });
 
 afterEach(() => {

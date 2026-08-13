@@ -2,7 +2,7 @@
 
 import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
-import type { EmailProvider } from "./types.js";
+import type { EmailOwner, EmailProvider } from "./types.js";
 import { getCredentials, getGlobalProjectId, storeOAuthTokens } from "./accounts.js";
 import { decryptCredentialValue, encryptCredentialValue } from "./credential-crypto.js";
 import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
@@ -52,8 +52,9 @@ export const decryptCredentials = decryptCredentialValue;
 export function storeTokens(
   accountId: string,
   tokens: OAuthToken,
+  organizationId?: string,
 ): void {
-  storeOAuthTokens(accountId, tokens);
+  storeOAuthTokens(accountId, tokens, organizationId);
 }
 
 /**
@@ -68,8 +69,9 @@ export function storeTokens(
 export async function getValidTokens(
   accountId: string,
   provider: EmailProvider,
+  organizationId?: string,
 ): Promise<OAuthToken | null> {
-  const tokens = getCredentials(accountId)?.tokens;
+  const tokens = getCredentials(accountId, organizationId)?.tokens;
   if (!tokens) return null;
 
   // Check if expired (with 60-second buffer to avoid TOCTOU expiry races)
@@ -77,7 +79,7 @@ export async function getValidTokens(
   if (tokens.expiryDate && tokens.expiryDate < now + 60_000) {
     // Auto-refresh
     const refreshed = await refreshAccessToken(provider, tokens.refreshToken);
-    storeTokens(accountId, refreshed);
+    storeTokens(accountId, refreshed, organizationId);
     return refreshed;
   }
 
@@ -123,15 +125,30 @@ async function getMsalApp(projectId: string): Promise<import("@azure/msal-node")
  */
 export async function getOAuthUrl(
   provider: EmailProvider,
+  owner?: Required<Pick<EmailOwner, "organizationId" | "ownerKind">> & Pick<EmailOwner, "ownerUserId"> & {
+    accountId: string;
+    actorType: "compatibility" | "user" | "service" | "system";
+    actorId?: string;
+  },
 ): Promise<{ url: string; state: string }> {
   try {
     const state = crypto.randomBytes(16).toString("hex");
     const pid = getGlobalProjectId();
 
-    // Store state for CSRF validation on callback
-    getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
-      settings.set(`oauth_state_${provider}`, state);
-    });
+    if (owner && (provider === "gmail" || provider === "outlook")) {
+      const createAttempt = getEmailRuntime().accounts.createOAuthAttempt;
+      if (!createAttempt) throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+      const stateHash = crypto.createHash("sha256").update(state).digest("hex");
+      getEmailRuntime().accounts.mutateGlobalSettings(() => createAttempt(stateHash, {
+        ...owner,
+        provider,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      }));
+    } else {
+      getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+        settings.set(`oauth_state_${provider}`, state);
+      });
+    }
 
     if (provider === "gmail") {
       const gClient = await getGoogleClient(pid);
@@ -182,16 +199,26 @@ export async function exchangeCode(
   code: string,
   state: string,
   redirectUri?: string,
+  organizationId?: string,
+  actor?: { type: "compatibility" | "user" | "service" | "system"; id?: string },
 ): Promise<OAuthToken> {
   try {
     const pid = getGlobalProjectId();
-    getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
-      const storedState = settings.get(`oauth_state_${provider}`);
-      if (!storedState || storedState !== state) {
-        throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
-      }
-      settings.delete(`oauth_state_${provider}`);
-    });
+    if (organizationId && (provider === "gmail" || provider === "outlook")) {
+      const consumeAttempt = getEmailRuntime().accounts.consumeOAuthAttempt;
+      const stateHash = crypto.createHash("sha256").update(state).digest("hex");
+      const attempt = consumeAttempt && getEmailRuntime().accounts.mutateGlobalSettings(() =>
+        consumeAttempt(stateHash, organizationId, provider, actor?.type ?? "system", actor?.id, new Date().toISOString()));
+      if (!attempt) throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+    } else {
+      getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+        const storedState = settings.get(`oauth_state_${provider}`);
+        if (!storedState || storedState !== state) {
+          throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+        }
+        settings.delete(`oauth_state_${provider}`);
+      });
+    }
 
     const resolvedRedirectUri = redirectUri ?? getRedirectUri();
 
@@ -251,8 +278,8 @@ export async function exchangeCode(
  *
  * Throws if no stored tokens exist (account needs re-authentication).
  */
-export async function getFreshGmailToken(accountId: string): Promise<string> {
-  const tokens = await getValidTokens(accountId, "gmail");
+export async function getFreshGmailToken(accountId: string, organizationId?: string): Promise<string> {
+  const tokens = await getValidTokens(accountId, "gmail", organizationId);
   if (!tokens) {
     throw new ProviderOperationError("AUTH_REQUIRED", "oauth", false);
   }

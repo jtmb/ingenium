@@ -221,6 +221,7 @@ interface ManagedProviderInput {
   enabled: boolean;
   apiKey?: string;
   allowPrivateNetwork?: boolean;
+  ownerKind?: "installation" | "user" | "organization";
 }
 
 interface SynthesisSelection {
@@ -231,6 +232,7 @@ interface SynthesisSelection {
 interface StoredManagedProvider extends Omit<ManagedProviderInput, "apiKey" | "role" | "roles"> {
   roles: ProviderRoles;
   credentialItemId?: unknown;
+  credentialQuarantined?: boolean;
 }
 
 interface StoredManagedProviderRecord {
@@ -245,6 +247,8 @@ interface StoredManagedProviderRecord {
   enabled?: unknown;
   allowPrivateNetwork?: unknown;
   credentialItemId?: unknown;
+  ownerKind?: unknown;
+  credentialQuarantined?: unknown;
 }
 
 interface ManagedProvider extends Omit<StoredManagedProvider, "credentialItemId"> {
@@ -279,6 +283,42 @@ type VaultItemReader = {
   updateItem(projectId: string, itemId: string, value: string): void;
   deleteItem(projectId: string, itemId: string): void;
 };
+
+function persistProviderConnections(
+  projectId: string,
+  providers: StoredManagedProvider[],
+  principal: import("../middleware/auth.js").RequestPrincipal | undefined,
+): void {
+  const project = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare(
+    "SELECT organization_id FROM projects WHERE id = ?",
+  ).get(projectId) as { organization_id: string } | undefined;
+  if (!project) throw new Error("Provider project is unavailable");
+  const actorType = principal?.type === "runtime-service" ? "system" : principal?.type ?? "system";
+  const actorId = principal?.id ?? null;
+  const now = new Date().toISOString();
+  execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    for (const provider of providers) {
+      const requestedOwner = provider.ownerKind ?? "installation";
+      const ownerKind = requestedOwner === "user" && principal?.type !== "user" ? "installation" : requestedOwner;
+      const organizationId = ownerKind === "installation" ? null : project.organization_id;
+      const ownerUserId = ownerKind === "user" ? principal!.id : null;
+      const id = `${ownerKind}:${organizationId ?? "installation"}:${ownerUserId ?? "shared"}:${provider.id}`;
+      db.prepare(
+        `INSERT INTO provider_connections
+         (id, provider_key, owner_kind, organization_id, owner_user_id, credential_item_id, display_name,
+          provider_type, config_json, enabled, created_by_actor_type, created_by_actor_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'managed', ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET credential_item_id = excluded.credential_item_id,
+           display_name = excluded.display_name, config_json = excluded.config_json, enabled = excluded.enabled,
+           revision = provider_connections.revision + 1, updated_at = excluded.updated_at`,
+      ).run(id, provider.id, ownerKind, organizationId, ownerUserId,
+        typeof provider.credentialItemId === "string" ? provider.credentialItemId : null,
+        provider.name, JSON.stringify(provider), provider.enabled ? 1 : 0, actorType, actorId, now, now);
+    }
+  });
+  checkpointAfterWrite();
+}
 
 const vault = (core as unknown as { vault?: VaultItemReader }).vault;
 const LEGACY_PRIMARY_VAULT_KEY_NAME = "Synthesis Primary API Key";
@@ -371,6 +411,7 @@ function clearLegacyVaultApiKey(projectId: string, providerId: string): void {
  */
 function migrateLegacyProviderKeys(projectId: string): boolean {
   if (!vault || vault.isSealed()) return true;
+  if (!migrateManagedProviderJsonSecrets(projectId)) return false;
   const legacyPrimaryItem = vault.listItems(projectId).find((candidate) => candidate.name === LEGACY_PRIMARY_VAULT_KEY_NAME);
   const legacyPrimaryKey = legacyPrimaryItem?.id ? vault.decryptItem(projectId, legacyPrimaryItem.id) : undefined;
   const legacy: Array<[string, string | undefined]> = [
@@ -413,6 +454,77 @@ function migrateLegacyProviderKeys(projectId: string): boolean {
     }
   }
   return true;
+}
+
+const PROVIDER_SECRET_FIELD = /(?:token|api[_-]?key|client[_-]?secret|password)$/i;
+
+function stripProviderSecrets(value: unknown, secrets: string[]): unknown {
+  if (Array.isArray(value)) return value.map((entry) => stripProviderSecrets(entry, secrets));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) => {
+    if (PROVIDER_SECRET_FIELD.test(key)) {
+      if (typeof entry === "string" && entry.length > 0) secrets.push(entry);
+      return [];
+    }
+    return [[key, stripProviderSecrets(entry, secrets)]];
+  }));
+}
+
+function migrateManagedProviderJsonSecrets(projectId: string): boolean {
+  const raw = settings.getSetting(projectId, "llm_provider_configs");
+  if (!raw) return true;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return true;
+  }
+  if (!Array.isArray(parsed)) return true;
+
+  const keys: Record<string, string> = {};
+  const references = new Map<string, string>();
+  let changed = false;
+  const sanitized = parsed.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const secrets: string[] = [];
+    const provider = stripProviderSecrets(entry, secrets) as Record<string, unknown>;
+    if (secrets.length === 0) return provider;
+    if (typeof provider.id !== "string" || !PROVIDER_ID_PATTERN.test(provider.id)) throw new VaultCredentialWriteError();
+    const distinct = [...new Set(secrets)];
+    keys[provider.id] = distinct.length === 1 ? distinct[0]! : JSON.stringify(distinct);
+    if (typeof provider.credentialItemId === "string") references.set(provider.id, provider.credentialItemId);
+    changed = true;
+    return distinct.length === 1
+      ? provider
+      : { ...provider, enabled: false, credentialQuarantined: true };
+  });
+  if (!changed) return true;
+
+  let staged: ManagedVaultCredentialStage;
+  try {
+    staged = stageManagedVaultApiKeyWrites(projectId, keys, references);
+  } catch {
+    return false;
+  }
+  try {
+    const secured = sanitized.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.id !== "string") return entry;
+      const itemId = staged.references.get(entry.id);
+      return itemId ? { ...entry, credentialItemId: itemId } : entry;
+    });
+    writeProviderSettings(projectId, [["llm_provider_configs", JSON.stringify(secured)]]);
+    persistProviderConnections(projectId, secured.map((provider) => normalizeManagedProvider(provider as StoredManagedProviderRecord)), undefined);
+    return true;
+  } catch {
+    try {
+      writeProviderSettings(projectId, [["llm_provider_configs", raw]]);
+    } catch {
+      // Preserve the encrypted item for operator recovery if desired-state restoration fails.
+      return false;
+    }
+    staged.rollback();
+    return false;
+  }
 }
 
 function parseJsonObject(value: string | undefined): Record<string, string> {
@@ -463,6 +575,8 @@ function normalizeManagedProvider(provider: StoredManagedProviderRecord): Stored
     roles: normalizeRoles(provider.roles, provider.role),
     enabled: provider.enabled === true,
     allowPrivateNetwork: provider.allowPrivateNetwork === true,
+    ownerKind: provider.ownerKind === "user" || provider.ownerKind === "organization" ? provider.ownerKind : "installation",
+    credentialQuarantined: provider.credentialQuarantined === true,
     ...(Object.prototype.hasOwnProperty.call(provider, "credentialItemId")
       ? { credentialItemId: provider.credentialItemId }
       : {}),
@@ -915,6 +1029,9 @@ async function validateManagedProviders(providersToSave: ManagedProviderInput[])
     if (provider.allowPrivateNetwork !== undefined && typeof provider.allowPrivateNetwork !== "boolean") {
       return `${label}.allowPrivateNetwork must be a boolean`;
     }
+    if (provider.ownerKind !== undefined && !["installation", "user", "organization"].includes(provider.ownerKind)) {
+      return `${label}.ownerKind is invalid`;
+    }
     if (provider.baseURL) {
       try {
         await validateEndpointUrl(provider.baseURL, provider.allowPrivateNetwork === true);
@@ -936,7 +1053,10 @@ settingsRouter.get("/provider-configs", (_req, res) => {
     res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
     return;
   }
-  res.json({ data: { providers: getManagedProviders(projectId), synthesis: {
+  res.json({ data: { providers: getManagedProviders(projectId).map((provider) => ({
+    ...provider,
+    effectiveCapabilities: ["read", "write", "use"],
+  })), synthesis: {
     primary: { providerId: settings.getSetting(projectId, "synthesis_provider") || "", modelId: settings.getSetting(projectId, "synthesis_model") || "" },
     secondary: { providerId: settings.getSetting(projectId, "synthesis_backup_provider") || "", modelId: settings.getSetting(projectId, "synthesis_backup_model") || "" },
   } } });
@@ -986,6 +1106,7 @@ settingsRouter.put("/provider-configs", async (req, res) => {
       roles: normalizeRoles(provider.roles, provider.role),
       enabled: provider.enabled,
       allowPrivateNetwork: provider.allowPrivateNetwork === true,
+      ownerKind: provider.ownerKind === "user" || provider.ownerKind === "organization" ? provider.ownerKind : "installation",
     } satisfies Omit<StoredManagedProvider, "credentialItemId">;
     const resolvedKey = provider.apiKey === undefined ? undefined : provider.apiKey.trim();
     if (resolvedKey) resolvedKeys[normalized.id] = resolvedKey;
@@ -1033,6 +1154,15 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     ["synthesis_backup_endpoint", metadata.find((p) => p.id === secondarySelection.providerId)?.baseURL ?? ""],
     ["synthesis_backup_allow_private_network", String(metadata.find((p) => p.id === secondarySelection.providerId)?.allowPrivateNetwork === true)],
   ];
+  if (metadata.some((provider) => provider.ownerKind !== "installation")) {
+    res.status(422).json({
+      error: {
+        code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE",
+        message: "User and organization provider credentials require an isolated provider runtime and cannot be loaded into shared OpenCode.",
+      },
+    });
+    return;
+  }
   let stagedCredentials: ManagedVaultCredentialStage;
   try {
     stagedCredentials = stageManagedVaultApiKeyWrites(projectId, resolvedKeys, previousReferences);
@@ -1071,6 +1201,7 @@ settingsRouter.put("/provider-configs", async (req, res) => {
   let settingsSaved = false;
   try {
     writeProviderSettings(projectId, values);
+    persistProviderConnections(projectId, persistedMetadata, req.principal);
     settingsSaved = true;
     configs.saveConfig(projectId, "global", projectedConfig);
     logger.info("settings", `Projected ${metadata.filter((provider) => provider.enabled).length} managed providers into OpenCode global config`);

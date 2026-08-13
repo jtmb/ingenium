@@ -71,10 +71,10 @@ export function enqueueSuggestionJob(
 
     // Upsert with ON CONFLICT DO NOTHING — skip if already queued
     const result = db.prepare(
-      `INSERT INTO email_suggestion_queue (account_id, folder, uid, created_at, attempts, next_attempt_at)
-       VALUES (?, ?, ?, datetime('now'), 0, datetime('now'))
+      `INSERT INTO email_suggestion_queue (organization_id, account_id, folder, uid, created_at, attempts, next_attempt_at)
+       SELECT organization_id, ?, ?, ?, datetime('now'), 0, datetime('now') FROM mail_accounts WHERE id = ?
        ON CONFLICT(account_id, folder, uid) DO NOTHING`,
-    ).run(accountId, folder, uid);
+    ).run(accountId, folder, uid, accountId);
 
     return result.changes > 0;
   });

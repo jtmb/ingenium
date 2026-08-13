@@ -20,6 +20,13 @@ let itemId: string;
 const projectName = "vault-api-test";
 let projectId: string;
 
+function attachCompatibilityPrincipal(app: express.Express): void {
+  app.use((req, _res, next) => {
+    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    next();
+  });
+}
+
 function vaultPath(path: string): string {
   return `${baseUrl}/api/v1/vault${path}${path.includes("?") ? "&" : "?"}project=${projectName}`;
 }
@@ -33,6 +40,7 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
+  attachCompatibilityPrincipal(app);
   app.use("/api/v1/vault", vaultRouter);
   server = createServer(app);
   await new Promise<void>((resolve) => {
@@ -173,6 +181,29 @@ describe("vault API", () => {
     expect(body.data[0]).toEqual(expect.objectContaining({ version: expect.any(Number) }));
     expect(body.data[0]).not.toHaveProperty("value");
   });
+
+  it("records one canonical and one linked vault audit event for a request replay", async () => {
+    const requestId = "auth104-vault-replay";
+    const create = await fetch(vaultPath("/items"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-request-id": requestId },
+      body: JSON.stringify({ name: `request-replay-${Date.now()}`, type: "note", value: "request-replay-secret" }),
+    });
+    const createdId = (await create.json()).data.id as string;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect((await fetch(vaultPath(`/items/${createdId}/reveal`), {
+        method: "POST",
+        headers: { "x-request-id": requestId },
+      })).status).toBe(200);
+    }
+
+    expect(core.getDb().prepare(
+      "SELECT count(*) AS count FROM resource_audit_events WHERE request_id = ? AND action = 'secret_read' AND resource_id = ?",
+    ).get(requestId, createdId)).toEqual({ count: 1 });
+    expect(core.getDb().prepare(
+      "SELECT count(*) AS count FROM vault_audit_log WHERE request_id = ? AND event_type = 'secret_read' AND item_id = ? AND source_audit_event_id IS NOT NULL",
+    ).get(requestId, createdId)).toEqual({ count: 1 });
+  });
 });
 
 describe("POST /initialize", () => {
@@ -193,6 +224,7 @@ describe("POST /initialize", () => {
 
     const app = express();
     app.use(express.json());
+    attachCompatibilityPrincipal(app);
     app.use("/api/v1/vault", vaultRouter);
     initializationServer = createServer(app);
     await new Promise<void>((resolve) => {

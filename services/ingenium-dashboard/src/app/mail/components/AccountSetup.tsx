@@ -29,6 +29,7 @@ export default function AccountSetup({
   reconnectAccount?: { id: string; email: string; provider: string; authType?: string; imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number };
 }) {
   const [mode, setMode] = useState<"select" | "manual">("select");
+  const [ownerKind, setOwnerKind] = useState<"user" | "organization">("organization");
 
   const [email, setEmail] = useState("");
   const [imapHost, setImapHost] = useState("");
@@ -73,7 +74,9 @@ export default function AccountSetup({
   const handleOAuthRedirect = async (provider: string) => {
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/emails/accounts/oauth/url?project=${encodeURIComponent(project)}&provider=${provider}`);
+      const params = new URLSearchParams({ project, provider, owner_kind: ownerKind });
+      if (reconnectAccount) params.set("account_id", reconnectAccount.id);
+      const res = await dashboardFetch(`${apiBase}/emails/accounts/oauth/url?${params}`);
       const json = await res.json();
       if (!res.ok || !json.data?.url) {
         setError(json.error?.message || "Failed to get OAuth URL — check credentials in Settings");
@@ -81,7 +84,7 @@ export default function AccountSetup({
       }
       localStorage.setItem("oauth_provider", provider);
       localStorage.setItem("oauth_project", project);
-      if (reconnectAccount) localStorage.setItem("oauth_account_id", reconnectAccount.id);
+      if (json.data.accountId) localStorage.setItem("oauth_account_id", json.data.accountId);
       else localStorage.removeItem("oauth_account_id");
       window.location.href = json.data.url;
     } catch (err: any) {
@@ -102,6 +105,7 @@ export default function AccountSetup({
       smtpHost: smtpHost || undefined,
       smtpPort: smtpPort ? parseInt(smtpPort, 10) : undefined,
       appPassword: password,
+      owner_kind: ownerKind,
     };
     let persistedId = accountId;
 
@@ -322,6 +326,16 @@ export default function AccountSetup({
   return (
     <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-4 max-w-xl mx-auto">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{reconnectAccount ? "Update Email Credentials" : "Manual Setup"}</h2>
+
+      {!reconnectAccount && (
+        <label className="block text-sm font-medium text-[var(--color-text-primary)]">
+          Owner
+          <select value={ownerKind} onChange={(event) => setOwnerKind(event.target.value as "user" | "organization")} className="mt-1 w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
+            <option value="organization">Organization</option>
+            <option value="user">Private to me</option>
+          </select>
+        </label>
+      )}
 
       <div>
         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">Email</label>

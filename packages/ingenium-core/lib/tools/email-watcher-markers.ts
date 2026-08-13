@@ -43,10 +43,11 @@ export function remember(
     const db = getDb(dbPath());
     const inserted = db.prepare(
       `INSERT INTO email_watcher_markers
-         (project_id, account_id, folder, uid, created_at, updated_at)
-       VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         (project_id, organization_id, account_id, folder, uid, created_at, updated_at)
+       SELECT ?, organization_id, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       FROM mail_accounts WHERE id = ?
        ON CONFLICT(project_id, account_id, folder, uid) DO NOTHING`,
-    ).run(projectId, accountId, folder, uid);
+    ).run(projectId, accountId, folder, uid, accountId);
 
     if (inserted.changes === 0) {
       const refreshed = db.prepare(

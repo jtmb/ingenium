@@ -8,6 +8,8 @@ import * as childMcpServers from "../lib/tools/child-mcp-servers.js";
 import { MCP_TOOL_CATALOG } from "../lib/tools/mcp-tool-catalog.js";
 import { buildMcpToolConformanceReport } from "../lib/tools/mcp-tool-conformance.js";
 import * as mcpToolStates from "../lib/tools/mcp-tool-states.js";
+import * as identity from "../lib/tools/identity.js";
+import * as organizations from "../lib/tools/organizations.js";
 import * as projects from "../lib/tools/projects.js";
 
 let directory = "";
@@ -28,9 +30,9 @@ function createVaultReference(projectId: string): string {
   const now = new Date().toISOString();
   getDb().prepare(
     `INSERT INTO vault_items
-     (id, project_id, name, type, encrypted, wrapped_kek, created_at, updated_at)
-     VALUES (?, ?, ?, 'api_key', ?, ?, ?, ?)`,
-  ).run(id, projectId, `child-mcp-${id}`, Buffer.from([0]), Buffer.from([0]), now, now);
+     (id, project_id, organization_id, owner_kind, name, type, encrypted, wrapped_kek, created_at, updated_at)
+     SELECT ?, id, organization_id, 'organization', ?, 'api_key', ?, ?, ?, ? FROM projects WHERE id = ?`,
+  ).run(id, `child-mcp-${id}`, Buffer.from([0]), Buffer.from([0]), now, now, projectId);
   return id;
 }
 
@@ -114,6 +116,21 @@ describe("child MCP definitions", () => {
       name: "wrongvault",
       executable: "npx",
       environment: { TOKEN: { vault_item_id: globalVaultItemId } },
+    }), "VAULT_REFERENCE_NOT_FOUND");
+
+    const privateOwner = identity.createUser("child-mcp-private@example.test", "Private Owner");
+    organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, privateOwner.id, "member");
+    const privateVaultItemId = randomUUID();
+    const now = new Date().toISOString();
+    getDb().prepare(
+      `INSERT INTO vault_items
+       (id, project_id, organization_id, owner_kind, owner_user_id, name, type, encrypted, wrapped_kek, created_at, updated_at)
+       VALUES (?, ?, ?, 'user', ?, ?, 'api_key', ?, ?, ?, ?)`,
+    ).run(privateVaultItemId, local.id, local.organization_id, privateOwner.id, `private-${privateVaultItemId}`, Buffer.from([0]), Buffer.from([0]), now, now);
+    expectErrorCode(() => childMcpServers.createChildMcpServer(local.id, {
+      name: "privatevault",
+      executable: "npx",
+      environment: { TOKEN: { vault_item_id: privateVaultItemId } },
     }), "VAULT_REFERENCE_NOT_FOUND");
 
     const localServer = childMcpServers.createChildMcpServer(local.id, {

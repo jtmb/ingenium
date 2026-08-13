@@ -38,6 +38,10 @@ function projectQ(name?: string): string {
 function buildApp(): express.Express {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    next();
+  });
   app.use("/api/v1/settings", settingsRouter);
   app.use("/api/v1/opencode", opencodeRouter);
   return app;
@@ -361,6 +365,39 @@ describe("managed provider blocks", () => {
     expect(vault.decryptItem(project.id, migrated!.id)).toBe("legacy-fixed-credential");
   });
 
+  it("encrypts legacy provider JSON secrets and removes the canary from persisted metadata", async () => {
+    const projectId = projects.getGlobalProject()!.id;
+    const canary = "auth104-managed-provider-json-canary";
+    const warn = vi.spyOn(console, "warn");
+    settings.setSetting(projectId, "llm_provider_configs", JSON.stringify([{
+      id: "legacy-json-provider",
+      name: "Legacy JSON Provider",
+      npm: "@ai-sdk/openai",
+      models: ["legacy-model"],
+      defaultModel: "legacy-model",
+      roles: ["available"],
+      enabled: true,
+      options: { apiKey: canary },
+    }]));
+
+    const { res, body } = await getProviderConfigs();
+    const stored = settings.getSetting(projectId, "llm_provider_configs")!;
+    const metadata = JSON.parse(stored)[0] as { credentialItemId: string };
+
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(body)).not.toContain(canary);
+    expect(stored).not.toContain(canary);
+    expect(stored).not.toMatch(/apiKey|api_key|clientSecret|password/i);
+    expect(vault.decryptItem(projectId, metadata.credentialItemId)).toBe(canary);
+    expect(getDb().prepare("SELECT credential_item_id FROM provider_connections WHERE provider_key = 'legacy-json-provider'").get()).toEqual({ credential_item_id: metadata.credentialItemId });
+    expect(JSON.stringify(getDb().prepare("SELECT config_json FROM provider_connections").all())).not.toContain(canary);
+    expect(JSON.stringify(getDb().prepare("SELECT * FROM resource_audit_events").all())).not.toContain(canary);
+    expect(JSON.stringify(getDb().prepare("SELECT * FROM vault_audit_log").all())).not.toContain(canary);
+    expect(getDb().serialize().toString("utf8")).not.toContain(canary);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(canary);
+    warn.mockRestore();
+  });
+
   it("rejects duplicate IDs and permits one provider in both roles when models differ", async () => {
     const response = await putProviderConfigs([
       providers[0]!,
@@ -416,6 +453,24 @@ describe("managed provider blocks", () => {
   it("rejects provider packages outside the execution allowlist", async () => {
     const response = await putProviderConfigs([{ ...providers[0]!, npm: "untrusted-provider-package" }]);
     expect(response.status).toBe(422);
+  });
+
+  it("does not load private provider credentials into shared OpenCode", async () => {
+    const addAuth = vi.spyOn(opencodeClient, "addAuth");
+    const response = await putProviderConfigs([{
+      ...managedProvider("private-provider", "private-provider-secret"),
+      ownerKind: "user",
+    }]);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE",
+        message: "User and organization provider credentials require an isolated provider runtime and cannot be loaded into shared OpenCode.",
+      },
+    });
+    expect(addAuth).not.toHaveBeenCalled();
+    expect(settings.getSetting(projects.getGlobalProject()!.id, "llm_provider_configs") ?? "").not.toContain("private-provider");
   });
 
   it("normalizes persisted scalar roles to roles arrays", async () => {

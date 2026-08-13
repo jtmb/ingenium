@@ -11,18 +11,23 @@ The email client provides Gmail REST API inbox viewing via thin `fetch()` client
 
 ## Durable account identity
 
-Mail accounts are shared service resources owned by the canonical `global-default`
-project (`is_global=1`), not by an external worktree or selected dashboard
-project. The engine resolves that canonical project on each operation. Account
-metadata, cache, OAuth values, and encrypted app-password values are stored in
-the canonical SQLite database on the `ingenium-data` volume. Rebuilds preserve
-them; changing the Compose project name or using `down -v` does not.
+Mail remains serviced through the canonical `global-default` runtime, but each
+account is owned by an organization or a private user. Account metadata,
+organization-qualified cache rows, OAuth values, and encrypted app-password
+values are stored in the canonical SQLite database on the `ingenium-data`
+volume. Rebuilds preserve them; deleting that volume does not.
 
 Mail API routes resolve the canonical global project before account, cache, or
 provider work begins. The `project` query parameter remains accepted for
 backward compatibility but does not select the mail namespace. If canonical
 global resolution fails, the operation fails closed before a provider request is
 made.
+
+Every account operation resolves the caller's organization and then applies the
+account owner policy. Organization roles can use organization-owned accounts;
+private accounts require their owner or an explicit grant. Foreign and
+unauthorized accounts are returned as not found. Folder names are retained
+unchanged through cache and provider operations.
 
 ### Encryption continuity
 

@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { jobs, jobEventDeliveries, jobSuggestLlm, synthesisLlm, trustedJobEvents } from "ingenium-core";
+import { authorization, getDb, jobs, jobEventDeliveries, jobSuggestLlm, synthesisLlm, trustedJobEvents } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 import { executeSynthesisBroker } from "../opencode-client.js";
 import { resolveSynthesisProviderSelections } from "../synthesis-provider-resolution.js";
+import { toAuthorizationPrincipal } from "../authorization-policy.js";
 
 /**
  * CRUD + execution routes for per-project scheduled jobs.
@@ -49,6 +50,32 @@ function sendVaultReferenceNotFound(res: import("express").Response): void {
   res.status(422).json({
     error: { code: "VAULT_ITEM_NOT_FOUND", message: "A vault item reference is unavailable" },
   });
+}
+
+function canReferenceVaultItems(req: import("express").Request, projectId: string, itemIds: string[] | undefined): boolean {
+  if (!itemIds || itemIds.length === 0) return true;
+  if (!req.principal) return false;
+  const placeholders = itemIds.map(() => "?").join(", ");
+  const rows = getDb().prepare(
+    `SELECT id, organization_id, owner_kind, owner_user_id
+     FROM vault_items WHERE project_id = ? AND access_policy <> ? AND id IN (${placeholders})`,
+  ).all(projectId, '{"mode":"deleted"}', ...itemIds) as Array<{
+    id: string;
+    organization_id: string;
+    owner_kind: "user" | "organization";
+    owner_user_id: string | null;
+  }>;
+  return rows.length === itemIds.length && rows.every((item) => authorization.requireOwnedResourcePermission(
+    toAuthorizationPrincipal(req.principal!),
+    {
+      resourceType: "vault_item",
+      resourceId: item.id,
+      organizationId: item.organization_id,
+      ownerKind: item.owner_kind,
+      ownerUserId: item.owner_user_id,
+    },
+    "read",
+  ).allowed);
 }
 
 function parseExpectedRevision(body: unknown): number | null {
@@ -139,6 +166,10 @@ jobsRouter.post("/", (req, res) => {
   }
   if (!hasValidJobTimeout(body)) {
     sendJobTimeoutValidation(res);
+    return;
+  }
+  if (!canReferenceVaultItems(req, projectId, vaultItemIds)) {
+    sendVaultReferenceNotFound(res);
     return;
   }
 
@@ -388,6 +419,10 @@ jobsRouter.patch("/:id", (req, res) => {
     return;
   }
   if (vaultItemIds !== undefined) fields.vault_item_ids = vaultItemIds;
+  if (!canReferenceVaultItems(req, projectId, vaultItemIds)) {
+    sendVaultReferenceNotFound(res);
+    return;
+  }
 
   let updated;
   try {

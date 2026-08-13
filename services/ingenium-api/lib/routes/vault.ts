@@ -7,6 +7,7 @@ import {
   recoverServerGlobalProviderMetadata,
   rehydrateServerGlobalProviderConnections,
 } from "../server-global-provider-persistence.js";
+import { toAuthorizationPrincipal } from "../authorization-policy.js";
 
 /** Signature that matches the actual vault module in ingenium-core. */
 type VaultService = {
@@ -25,11 +26,13 @@ type VaultService = {
     tags?: string[],
     urls?: string[],
     username?: string,
+    ownership?: core.vault.VaultOwnership,
+    actor?: core.vault.VaultActor,
   ): string;
   getItemMetadata(projectId: string, itemId: string): object | null;
-  decryptItem(projectId: string, itemId: string): string | null;
+  decryptItem(projectId: string, itemId: string, actor?: core.vault.VaultActor): string | null;
   listItems(projectId: string, folderId?: string): object[];
-  updateItem(projectId: string, itemId: string, value: string): void;
+  updateItem(projectId: string, itemId: string, value: string, actor?: core.vault.VaultActor): void;
   updateItemMetadata(projectId: string, itemId: string, updates: {
     name?: string;
     type?: string;
@@ -37,9 +40,9 @@ type VaultService = {
     tags?: string[];
     urls?: string[];
     username?: string | null;
-  }): boolean;
-  deleteItem(projectId: string, itemId: string): void;
-  logAudit(projectId: string, eventType: string, itemId: string | null, actor: string, details: object): void;
+  }, actor?: core.vault.VaultActor): boolean;
+  deleteItem(projectId: string, itemId: string, actor?: core.vault.VaultActor): void;
+  logAudit(projectId: string, eventType: string, itemId: string | null, actor: core.vault.VaultActor | string, details: object): void;
   generatePassword(length?: number): string;
 };
 
@@ -69,8 +72,42 @@ function unavailable(res: Response): boolean {
   return true;
 }
 
-function audit(projectId: string, operation: string, itemId?: string): void {
-  vault?.logAudit(projectId, operation, itemId ?? null, "system", {});
+function vaultActor(req: Request): core.vault.VaultActor {
+  const principal = req.principal;
+  if (!principal) return { type: "system" };
+  return {
+    type: principal.type === "runtime-service" ? "system" : principal.type,
+    id: principal.id,
+    requestId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : undefined,
+  };
+}
+
+function requestedOwnership(req: Request, projectId: string): core.vault.VaultOwnership | null {
+  const project = core.getDb(dbPath()).prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!project) return null;
+  const ownerKind = req.body?.owner_kind === "user" ? "user" : "organization";
+  const ownerUserId = ownerKind === "user" ? req.principal?.type === "user" ? req.principal.id : null : null;
+  if (ownerKind === "user" && !ownerUserId) return null;
+  return { organizationId: project.organization_id, ownerKind, ownerUserId };
+}
+
+function authorizeVaultResource(req: Request, row: { id: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null }, permission?: core.authorization.AuthorizationPermission): boolean {
+  if (!req.principal) return false;
+  return core.authorization.requireOwnedResourcePermission(toAuthorizationPrincipal(req.principal), {
+    resourceType: "vault_item",
+    resourceId: row.id,
+    organizationId: row.organization_id,
+    ownerKind: row.owner_kind,
+    ownerUserId: row.owner_user_id,
+  }, permission ?? req.authorizationPolicy?.permission ?? "read").allowed;
+}
+
+function ownedVaultItem(req: Request, projectId: string, itemId: string, permission?: core.authorization.AuthorizationPermission) {
+  const row = core.getDb(dbPath()).prepare(
+    `SELECT id, organization_id, owner_kind, owner_user_id FROM vault_items
+     WHERE project_id = ? AND id = ? AND access_policy <> ?`,
+  ).get(projectId, itemId, '{"mode":"deleted"}') as { id: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null } | undefined;
+  return row && authorizeVaultResource(req, row, permission) ? row : undefined;
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -102,6 +139,10 @@ function serializeItem(item: any): object {
     updated_at: item.updated_at,
     last_accessed_at: item.last_accessed_at ?? null,
     access_count: item.access_count,
+    organization_id: item.organizationId ?? item.organization_id,
+    owner_kind: item.ownerKind ?? item.owner_kind,
+    owner_user_id: item.ownerUserId ?? item.owner_user_id ?? null,
+    effective_capabilities: ["read", "write", "reveal"],
   };
 }
 
@@ -159,20 +200,26 @@ vaultRouter.get("/status", (req, res) => {
     return;
   }
 
-  // Basic stats computed inline so we don't depend on vault helpers that may
-  // not exist on the core module.
   let itemCount = 0;
   let folderCount = 0;
   try {
     const db = core.getDb(dbPath());
-    itemCount = (
-      db.prepare(
-        "SELECT count(*) as c FROM vault_items WHERE project_id = ? AND access_policy <> ?",
-      ).get(projectId, '{"mode":"deleted"}') as { c: number }
-    )?.c ?? 0;
-    folderCount = (
-      db.prepare("SELECT count(*) as c FROM vault_folders WHERE project_id = ?").get(projectId) as { c: number }
-    )?.c ?? 0;
+    const principal = req.principal;
+    const rows = db.prepare(
+      `SELECT id, organization_id, owner_kind, owner_user_id FROM vault_items
+       WHERE project_id = ? AND access_policy <> ?`,
+    ).all(projectId, '{"mode":"deleted"}') as Array<{ id: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null }>;
+    itemCount = rows.filter((row) => authorizeVaultResource(req, row)).length;
+    const folders = db.prepare(
+      "SELECT id, organization_id, owner_kind, owner_user_id FROM vault_folders WHERE project_id = ?",
+    ).all(projectId) as Array<{ id: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null }>;
+    folderCount = folders.filter((row) => principal && core.authorization.requireOwnedResourcePermission(toAuthorizationPrincipal(principal), {
+      resourceType: "vault_folder",
+      resourceId: row.id,
+      organizationId: row.organization_id,
+      ownerKind: row.owner_kind,
+      ownerUserId: row.owner_user_id,
+    }, "read").allowed).length;
   } catch {
     // stats are best-effort
   }
@@ -222,7 +269,6 @@ vaultRouter.post("/initialize", vaultBruteForceLimiter, (req, res) => {
     return;
   }
 
-  audit(projectId, "vault_unsealed");
   res.status(201).json({ data: { ok: true, unsealed: true } });
 });
 
@@ -262,7 +308,6 @@ vaultRouter.post("/unseal", vaultBruteForceLimiter, (req, res) => {
     return;
   }
 
-  audit(projectId, "vault_unsealed");
   const migration = recoverServerGlobalProviderMetadata();
   void rehydrateServerGlobalProviderConnections().then((rehydration) => {
     core.logger.info("vault", "Server-global provider rehydration completed", { migration, rehydration });
@@ -278,7 +323,7 @@ vaultRouter.post("/seal", (req, res) => {
   if (!projectId) return;
 
   vault!.sealVault();
-  audit(projectId, "vault_sealed");
+  vault!.logAudit(projectId, "vault_sealed", null, vaultActor(req), {});
   res.json({ data: { ok: true } });
 });
 
@@ -292,14 +337,31 @@ vaultRouter.get("/folders", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const folders = core.getDb(dbPath()).prepare(
-    `SELECT f.id, f.name, f.created_at, count(i.id) AS item_count
+  const rows = core.getDb(dbPath()).prepare(
+    `SELECT f.id, f.name, f.created_at, f.organization_id, f.owner_kind, f.owner_user_id
      FROM vault_folders f
-     LEFT JOIN vault_items i ON i.folder_id = f.id AND i.project_id = f.project_id AND i.access_policy <> ?
      WHERE f.project_id = ?
-     GROUP BY f.id, f.name, f.created_at
      ORDER BY f.name`,
-  ).all('{"mode":"deleted"}', projectId);
+  ).all(projectId) as Array<{ id: string; name: string; created_at: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null }>;
+  const principal = req.principal;
+  const folders = rows.filter((row) => principal && core.authorization.requireOwnedResourcePermission(toAuthorizationPrincipal(principal), {
+    resourceType: "vault_folder",
+    resourceId: row.id,
+    organizationId: row.organization_id,
+    ownerKind: row.owner_kind,
+    ownerUserId: row.owner_user_id,
+  }, "read").allowed).map((row) => ({
+    id: row.id,
+    name: row.name,
+    created_at: row.created_at,
+    owner_kind: row.owner_kind,
+    item_count: (vault!.listItems(projectId, row.id) as Array<Record<string, unknown>>).filter((item) => authorizeVaultResource(req, {
+      id: item.id as string,
+      organization_id: item.organizationId as string,
+      owner_kind: item.ownerKind as "user" | "organization",
+      owner_user_id: item.ownerUserId as string | null,
+    })).length,
+  }));
   res.json({ data: folders });
 });
 
@@ -315,12 +377,22 @@ vaultRouter.post("/folders", (req, res) => {
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const ownership = requestedOwnership(req, projectId);
+  if (!ownership) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A user owner requires a user principal" } });
+    return;
+  }
+  const actor = vaultActor(req);
   const db = core.getDb(dbPath());
-  db.prepare(
-    "INSERT INTO vault_folders (id, project_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, projectId, name.trim(), now, now);
-  audit(projectId, "folder_created");
-  res.status(201).json({ data: { id, name: name.trim(), item_count: 0, created_at: now } });
+  core.execTransaction(() => db.prepare(
+    `INSERT INTO vault_folders
+     (id, project_id, organization_id, owner_kind, owner_user_id, name, created_by_actor_type, created_by_actor_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, projectId, ownership.organizationId, ownership.ownerKind, ownership.ownerUserId ?? null,
+    name.trim(), actor.type, actor.id ?? null, now, now));
+  core.checkpointAfterWrite();
+  vault!.logAudit(projectId, "folder_created", id, actor, {});
+  res.status(201).json({ data: { id, name: name.trim(), item_count: 0, owner_kind: ownership.ownerKind, created_at: now } });
 });
 
 vaultRouter.delete("/folders/:id", (req, res) => {
@@ -328,12 +400,17 @@ vaultRouter.delete("/folders/:id", (req, res) => {
   if (!projectId) return;
 
   const db = core.getDb(dbPath());
-  const result = db.prepare("DELETE FROM vault_folders WHERE id = ? AND project_id = ?").run(req.params.id!, projectId);
+  const row = db.prepare("SELECT id, organization_id, owner_kind, owner_user_id FROM vault_folders WHERE id = ? AND project_id = ?")
+    .get(req.params.id!, projectId) as { id: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null } | undefined;
+  const allowed = row && req.principal && core.authorization.requireOwnedResourcePermission(toAuthorizationPrincipal(req.principal), {
+    resourceType: "vault_folder", resourceId: row.id, organizationId: row.organization_id, ownerKind: row.owner_kind, ownerUserId: row.owner_user_id,
+  }, "write").allowed;
+  const result = allowed ? db.prepare("DELETE FROM vault_folders WHERE id = ? AND project_id = ?").run(req.params.id!, projectId) : { changes: 0 };
   if (result.changes === 0) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Folder not found" } });
     return;
   }
-  audit(projectId, "folder_deleted", req.params.id!);
+  vault!.logAudit(projectId, "folder_deleted", req.params.id!, vaultActor(req), {});
   res.status(204).send();
 });
 
@@ -346,7 +423,12 @@ vaultRouter.get("/items", (req, res) => {
   const folderId = typeof req.query.folder_id === "string"
     ? req.query.folder_id
     : typeof req.query.folder === "string" ? req.query.folder : undefined;
-  const items = vault!.listItems(projectId, folderId).map(serializeItem);
+  const items = vault!.listItems(projectId, folderId).filter((item) => authorizeVaultResource(req, {
+    id: (item as any).id,
+    organization_id: (item as any).organizationId,
+    owner_kind: (item as any).ownerKind,
+    owner_user_id: (item as any).ownerUserId,
+  })).map(serializeItem);
   res.json({ data: items, total: items.length });
 });
 
@@ -363,8 +445,12 @@ vaultRouter.post("/items", (req, res) => {
     return;
   }
 
-  const id = vault!.createItem(projectId, name, type, value, folderId, tags, urls, username);
-  audit(projectId, "secret_created", id);
+  const ownership = requestedOwnership(req, projectId);
+  if (!ownership) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A user owner requires a user principal" } });
+    return;
+  }
+  const id = vault!.createItem(projectId, name, type, value, folderId, tags, urls, username, ownership, vaultActor(req));
   res.status(201).json({ data: { id } });
 });
 
@@ -372,7 +458,7 @@ vaultRouter.get("/items/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const item = vault!.getItemMetadata(projectId, req.params.id!);
+  const item = ownedVaultItem(req, projectId, req.params.id!) ? vault!.getItemMetadata(projectId, req.params.id!) : null;
   if (!item) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Vault item not found" } });
     return;
@@ -384,13 +470,12 @@ vaultRouter.post("/items/:id/reveal", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const plaintext = vault!.decryptItem(projectId, req.params.id!);
+  const plaintext = ownedVaultItem(req, projectId, req.params.id!) ? vault!.decryptItem(projectId, req.params.id!, vaultActor(req)) : null;
   if (plaintext === null) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Vault item not found" } });
     return;
   }
 
-  audit(projectId, "secret_revealed", req.params.id!);
   res.set("Cache-Control", "no-store");
   res.set("X-Content-Duration", "30");
   res.json({ data: { value: plaintext } });
@@ -406,8 +491,11 @@ vaultRouter.put("/items/:id", (req, res) => {
     return;
   }
 
-  vault!.updateItem(projectId, req.params.id!, value);
-  audit(projectId, "secret_updated", req.params.id!);
+  if (!ownedVaultItem(req, projectId, req.params.id!, "write")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Vault item not found" } });
+    return;
+  }
+  vault!.updateItem(projectId, req.params.id!, value, vaultActor(req));
   res.json({ data: { ok: true } });
 });
 
@@ -420,14 +508,14 @@ vaultRouter.patch("/items/:id", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name must be a non-empty string" } });
     return;
   }
-  const changed = vault!.updateItemMetadata(projectId, req.params.id!, {
+  const changed = Boolean(ownedVaultItem(req, projectId, req.params.id!, "write")) && vault!.updateItemMetadata(projectId, req.params.id!, {
     name: typeof name === "string" ? name.trim() : undefined,
     type: typeof type === "string" ? type : undefined,
     folderId: req.body.folder_id === null || typeof req.body.folder_id === "string" ? req.body.folder_id : undefined,
     tags: stringList(req.body.tags),
     urls: stringList(req.body.urls),
     username: username === null || typeof username === "string" ? username : undefined,
-  });
+  }, vaultActor(req));
   if (!changed) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Vault item not found" } });
     return;
@@ -438,13 +526,12 @@ vaultRouter.patch("/items/:id", (req, res) => {
 vaultRouter.post("/items/:id/rotate", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!vault!.getItemMetadata(projectId, req.params.id!)) {
+  if (!ownedVaultItem(req, projectId, req.params.id!, "write")) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Vault item not found" } });
     return;
   }
   const password = vault!.generatePassword();
-  vault!.updateItem(projectId, req.params.id!, password);
-  audit(projectId, "secret_rotated", req.params.id!);
+  vault!.updateItem(projectId, req.params.id!, password, vaultActor(req));
   res.set("Cache-Control", "no-store");
   res.json({ data: { value: password } });
 });
@@ -453,8 +540,11 @@ vaultRouter.delete("/items/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  vault!.deleteItem(projectId, req.params.id!);
-  audit(projectId, "secret_deleted", req.params.id!);
+  if (!ownedVaultItem(req, projectId, req.params.id!, "write")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Vault item not found" } });
+    return;
+  }
+  vault!.deleteItem(projectId, req.params.id!, vaultActor(req));
   res.status(204).send();
 });
 
@@ -477,10 +567,19 @@ vaultRouter.get("/audit", (req, res) => {
   const db = core.getDb(dbPath());
   // Do not return free-form audit details. This prevents historical or future
   // caller mistakes from reflecting secret material through an audit read.
-  const logs = db
+  const logs = (db
     .prepare(
-      "SELECT id, event_type, item_id, actor, created_at FROM vault_audit_log WHERE project_id = ? ORDER BY created_at DESC",
+      `SELECT audit.id, audit.event_type, audit.item_id, audit.actor, audit.created_at,
+              item.organization_id, item.owner_kind, item.owner_user_id
+       FROM vault_audit_log audit
+       LEFT JOIN vault_items item ON item.id = audit.item_id AND item.project_id = audit.project_id
+       WHERE audit.project_id = ? ORDER BY audit.created_at DESC`,
     )
-    .all(projectId);
+    .all(projectId) as Array<{ id: string; event_type: string; item_id: string | null; actor: string; created_at: string; organization_id: string | null; owner_kind: "user" | "organization" | null; owner_user_id: string | null }>).filter((row) => !row.item_id || (row.organization_id && row.owner_kind && authorizeVaultResource(req, {
+      id: row.item_id,
+      organization_id: row.organization_id,
+      owner_kind: row.owner_kind,
+      owner_user_id: row.owner_user_id,
+    }))).map(({ organization_id: _organizationId, owner_kind: _ownerKind, owner_user_id: _ownerUserId, ...row }) => row);
   res.json({ data: logs, total: logs.length });
 });

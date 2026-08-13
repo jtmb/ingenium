@@ -25,9 +25,9 @@ function createVaultReference(projectId: string): string {
   const now = new Date().toISOString();
   getDb().prepare(
     `INSERT INTO vault_items
-     (id, project_id, name, type, encrypted, wrapped_kek, created_at, updated_at)
-     VALUES (?, ?, ?, 'api_key', ?, ?, ?, ?)`,
-  ).run(id, projectId, `mcp-route-${id}`, Buffer.from([0]), Buffer.from([0]), now, now);
+     (id, project_id, organization_id, owner_kind, name, type, encrypted, wrapped_kek, created_at, updated_at)
+     SELECT ?, id, organization_id, 'organization', ?, 'api_key', ?, ?, ?, ? FROM projects WHERE id = ?`,
+  ).run(id, `mcp-route-${id}`, Buffer.from([0]), Buffer.from([0]), now, now, projectId);
   return id;
 }
 
@@ -42,6 +42,10 @@ function createVaultSecret(projectId: string, value: string): string {
 async function startRouter(): Promise<string> {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    next();
+  });
   app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
   app.use("/mcp-servers", mcpServersRouter);
   app.use("/mcp-tools", mcpToolsRouter);

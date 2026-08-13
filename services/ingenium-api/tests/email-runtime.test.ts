@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,8 +82,19 @@ describe("email runtime boundary", () => {
     tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-email-runtime-"));
     process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "canonical", "data.db");
     process.env.INGENIUM_HOME = join(tempDir, "home");
-    projects.createProject("global-default", true);
+    const global = projects.createProject("global-default", true);
     configureEmailRuntimeForApi();
+
+    getEmailRuntime().accounts.createAccount!({
+      id: "adapter-cache",
+      organizationId: global.organization_id,
+      ownerKind: "organization",
+      email: "adapter-cache@example.test",
+      name: "Adapter Cache",
+      provider: "gmail",
+      authType: "oauth2",
+      connected: false,
+    });
 
     getEmailRuntime().cache.applyEmailCacheDelta("adapter-cache", {
       upserts: [{ folder: "INBOX", entry: { uid: "delta-message", flags: "[]" } }],
@@ -105,6 +117,16 @@ describe("email runtime boundary", () => {
     process.env.INGENIUM_HOME = join(tempDir, "home");
     const global = projects.createProject("global-default", true);
     configureEmailRuntimeForApi();
+    getEmailRuntime().accounts.createAccount!({
+      id: "adapter-account",
+      organizationId: global.organization_id,
+      ownerKind: "organization",
+      email: "adapter-watcher@example.test",
+      name: "Adapter Watcher",
+      provider: "gmail",
+      authType: "oauth2",
+      connected: false,
+    });
 
     expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
       .toEqual({ alreadyProcessed: false, newlyRecorded: true });
@@ -142,5 +164,87 @@ describe("email runtime boundary", () => {
       clientId: "runtime-protected-client-id",
       clientSecret: secret,
     });
+  });
+
+  it("stores and consumes organization-qualified OAuth attempts exactly once", async () => {
+    resetDbForTest();
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-email-runtime-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "canonical", "data.db");
+    process.env.INGENIUM_HOME = join(tempDir, "home");
+    const global = projects.createProject("global-default", true);
+    configureEmailRuntimeForApi();
+    const runtime = getEmailRuntime().accounts;
+    const state = "oauth-attempt-state";
+    const stateHash = createHash("sha256").update(state).digest("hex");
+
+    runtime.mutateGlobalSettings(() => runtime.createOAuthAttempt!(stateHash, {
+      organizationId: global.organization_id,
+      ownerKind: "organization",
+      accountId: "oauth-account",
+      provider: "gmail",
+      actorType: "system",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }));
+
+    const first = runtime.mutateGlobalSettings(() => runtime.consumeOAuthAttempt!(
+      stateHash,
+      global.organization_id,
+      "gmail",
+      "system",
+      undefined,
+      new Date().toISOString(),
+    ));
+    const replay = runtime.mutateGlobalSettings(() => runtime.consumeOAuthAttempt!(
+      stateHash,
+      global.organization_id,
+      "gmail",
+      "system",
+      undefined,
+      new Date().toISOString(),
+    ));
+
+    expect(first).toMatchObject({ accountId: "oauth-account", organizationId: global.organization_id });
+    expect(replay).toBeUndefined();
+  });
+
+  it("does not let another actor consume an OAuth attempt", () => {
+    resetDbForTest();
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-email-runtime-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "canonical", "data.db");
+    process.env.INGENIUM_HOME = join(tempDir, "home");
+    const global = projects.createProject("global-default", true);
+    configureEmailRuntimeForApi();
+    const runtime = getEmailRuntime().accounts;
+    const stateHash = createHash("sha256").update("actor-bound-state").digest("hex");
+
+    runtime.mutateGlobalSettings(() => runtime.createOAuthAttempt!(stateHash, {
+      organizationId: global.organization_id,
+      ownerKind: "organization",
+      accountId: "actor-bound-account",
+      provider: "gmail",
+      actorType: "user",
+      actorId: "oauth-owner",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }));
+
+    const foreignActor = runtime.mutateGlobalSettings(() => runtime.consumeOAuthAttempt!(
+      stateHash,
+      global.organization_id,
+      "gmail",
+      "user",
+      "oauth-foreign",
+      new Date().toISOString(),
+    ));
+    const owner = runtime.mutateGlobalSettings(() => runtime.consumeOAuthAttempt!(
+      stateHash,
+      global.organization_id,
+      "gmail",
+      "user",
+      "oauth-owner",
+      new Date().toISOString(),
+    ));
+
+    expect(foreignActor).toBeUndefined();
+    expect(owner).toMatchObject({ accountId: "actor-bound-account", actorId: "oauth-owner" });
   });
 });

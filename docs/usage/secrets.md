@@ -147,6 +147,12 @@ The page header has a "Lock Vault" button that re-seals the vault and clears all
 
 The "New item" button opens a CreateItemModal with fields for name, credential value, folder, and notes.
 
+Items and folders may be organization-owned or private to the current user.
+Private item metadata and plaintext are visible only to the owner or an explicit
+resource grant; an organization administrator does not gain reveal access by
+role alone. A folder and its items must have the same owner, and ownership cannot
+be changed through ordinary metadata updates.
+
 ## API Reference
 
 | Endpoint | Method | Purpose |

@@ -58,6 +58,7 @@ function newProvider(index: number): DraftProvider {
     enabled: true,
     allowPrivateNetwork: false,
     apiKeySet: false,
+    ownerKind: "installation",
   };
 }
 
@@ -546,6 +547,12 @@ export default function PipelinePanel() {
                 {!isCollapsed && (
                   <div className="p-4 space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">
+                      <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Owner
+                        <Select value={provider.ownerKind ?? "installation"} onChange={(event) => updateProvider(index, { ownerKind: event.target.value as "installation" })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                          <option value="installation">Installation runtime</option>
+                        </Select>
+                      </label>
                       <label className="text-xs font-medium text-[var(--color-text-secondary)]">
                         Display name
                         <input value={provider.name} onChange={(event) => updateProvider(index, { name: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]" />

@@ -328,6 +328,29 @@ describe("server-global provider persistence", () => {
       expect(nativeCredential("openai")).toBe(secret);
     });
 
+    it("rejects private native provider credentials before shared runtime or vault access", async () => {
+      const connect = vi.spyOn(opencodeClient, "connectIntegrationKey").mockResolvedValue({} as never);
+
+      await withRouter(async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/v1/opencode/integrations/openai/connect/key`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: "private-native-secret", owner_kind: "user" }),
+        });
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({
+          error: {
+            code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE",
+            message: "Private provider credentials cannot be loaded into shared OpenCode.",
+          },
+        });
+      });
+
+      expect(connect).not.toHaveBeenCalled();
+      expect(nativeCredential("openai")).toBeUndefined();
+    });
+
     it("removes a newly stored key after a failed connection and permits a retry", async () => {
       const secret = "retry-provider-secret";
       const connect = vi.spyOn(opencodeClient, "connectIntegrationKey")

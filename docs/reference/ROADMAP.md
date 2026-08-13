@@ -560,6 +560,8 @@ Evidence AUTH-103: Dashboard source implementation adds server-boundary route pr
   `Evidence AUTH-104: <acceptance evidence placeholder>` with non-empty
   migration, tenancy, security, deployment, E2E, and containment evidence.
 
+Evidence AUTH-104: migrations 096/097, ownership and exact-identity manifests, vault/provider/mail authorization boundaries, account/folder preservation, actor-bound consume-once OAuth, shared-runtime provider rejection, secret-free public projections, legacy provider-secret canaries, and exactly-once canonical resource audit linkage pass 7 focused resource-tenancy, 20 core vault, 28 vault API, 59 provider API, and 15 authorization-policy cases plus all affected workspace typechecks. The focused provider run also exposed and fixed a nested WAL checkpoint in project skill auto-copy. DB-isolation source scanning and its negative/clean self-tests pass. Deployment, fixture E2E, strict containment, independent security review, and final marker reconciliation remain pending, so no completion marker is recorded.
+
 #### AUTH-105 — Content tenancy: Docs and private conversations
 
 - **IN_SCOPE:** Add migration `098` for content tenancy. Docs are

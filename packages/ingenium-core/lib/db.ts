@@ -226,6 +226,12 @@ interface AuthenticationFoundationMigrationState {
   missing: string[];
 }
 
+interface ResourceTenancyMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -1730,7 +1736,7 @@ function inspectEmailWatcherMarkersMigration(db: Database.Database): EmailWatche
       missing.push(`${table} → projects foreign key`);
     }
     const foreignKeys = db.prepare(`PRAGMA foreign_key_list('${table}')`).all() as Array<{ table: string }>;
-    if (foreignKeys.some((foreignKey) => foreignKey.table !== "projects")) {
+    if (foreignKeys.some((foreignKey) => foreignKey.table !== "projects" && foreignKey.table !== "organizations")) {
       missing.push(`${table} has unsupported foreign key`);
     }
   }
@@ -1931,6 +1937,85 @@ function inspectAuthorizationAuditMigration(db: Database.Database): Authenticati
       "CREATE TABLE users (id TEXT PRIMARY KEY); CREATE TABLE organizations (id TEXT PRIMARY KEY); CREATE TABLE projects (id TEXT PRIMARY KEY);",
       [...tables, ...indexes, ...triggers],
     ));
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
+function inspectResourceOwnershipMigration(db: Database.Database): ResourceTenancyMigrationState {
+  const state = inspectMigrationComponents(db, {
+    resource_grants: ["id", "organization_id", "resource_type", "resource_id", "grantee_kind", "grantee_id", "permissions_json", "revision"],
+    resource_audit_events: ["id", "organization_id", "project_id", "resource_type", "resource_id", "action", "actor_type", "actor_id", "outcome", "request_id"],
+    provider_connections: ["id", "provider_key", "owner_kind", "organization_id", "owner_user_id", "credential_item_id", "config_json", "revision"],
+    provider_model_policies: ["id", "connection_id", "purpose", "model_id", "revision"],
+    resource_ownership_manifests: ["migration", "organization_id", "counts_json", "ids_json", "phase", "created_at"],
+  }, [
+    "idx_vault_folders_owner_id", "idx_vault_items_owner_id", "idx_resource_grants_resource", "idx_resource_audit_scope", "idx_resource_audit_exactly_once", "idx_vault_audit_exactly_once", "idx_vault_audit_source",
+  ], [
+    "vault_folders_owner_valid_insert", "vault_folders_owner_valid_update", "vault_folders_owner_immutable",
+    "vault_folders_parent_owner_insert", "vault_folders_parent_owner_update",
+    "vault_items_owner_valid_insert", "vault_items_owner_valid_update", "vault_items_owner_immutable",
+    "vault_items_folder_owner_insert", "vault_items_folder_owner_update",
+    "provider_connections_owner_immutable", "provider_connections_owner_valid_insert", "provider_connections_credential_valid_update",
+    "provider_connections_config_secret_free_insert", "provider_connections_config_secret_free_update",
+    "resource_grants_revision_update", "resource_audit_events_immutable_update", "resource_audit_events_immutable_delete", "resource_audit_events_project_organization_insert",
+    "resource_ownership_manifests_immutable_update", "resource_ownership_manifests_immutable_delete",
+  ]);
+  for (const [table, columns] of Object.entries({
+    vault_folders: ["organization_id", "owner_kind", "owner_user_id", "revision", "created_by_actor_type", "created_by_actor_id"],
+    vault_items: ["organization_id", "owner_kind", "owner_user_id", "ownership_revision", "created_by_actor_type", "created_by_actor_id"],
+    vault_audit_log: ["organization_id", "actor_type", "actor_id", "request_id", "source_audit_event_id"],
+  })) {
+    const present = new Set((db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map(({ name }) => name));
+    const found = columns.filter((column) => present.has(column));
+    state.any ||= found.length > 0;
+    for (const column of columns) if (!present.has(column)) state.missing.push(`${table}.${column} column`);
+  }
+  if (state.missing.length === 0) {
+    const unmapped = db.prepare(
+      "SELECT (SELECT count(*) FROM vault_folders WHERE organization_id IS NULL) + (SELECT count(*) FROM vault_items WHERE organization_id IS NULL) AS count",
+    ).get() as { count: number };
+    const manifest = db.prepare("SELECT phase FROM resource_ownership_manifests WHERE migration = 96").get() as { phase: string } | undefined;
+    if (unmapped.count > 0) state.missing.push("vault ownership backfill");
+    if (manifest?.phase !== "verified") state.missing.push("migration 096 verified manifest");
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
+function inspectMailTenancyMigration(db: Database.Database): ResourceTenancyMigrationState {
+  const state = inspectMigrationComponents(db, {
+    mail_accounts: ["id", "organization_id", "owner_kind", "owner_user_id", "email", "provider", "auth_type", "config_json", "revision"],
+    mail_account_credentials: ["organization_id", "account_id", "credential_kind", "encrypted_value", "token_metadata_json", "version"],
+    mail_oauth_attempts: ["state_hash", "organization_id", "owner_kind", "owner_user_id", "account_id", "provider", "actor_type", "actor_id", "expires_at", "consumed_at"],
+  }, [
+    "idx_email_cache_org_account_folder_uid", "idx_email_bodies_org_account_folder_uid",
+    "idx_email_sync_state_org_account_folder", "idx_email_suggestions_org_account_folder_uid",
+    "idx_email_summaries_org_account_folder_uid", "idx_email_suggestion_queue_org_account_folder_uid",
+    "idx_email_watcher_markers_org_account_folder_uid",
+    "idx_mail_oauth_attempts_expiry",
+  ], [
+    "mail_accounts_owner_immutable", "mail_accounts_owner_valid_insert", "mail_accounts_revision_update",
+    "mail_account_credentials_scope_insert", "mail_account_credentials_scope_update",
+    "mail_oauth_attempts_consume_once",
+    "email_cache_account_scope_insert", "email_cache_account_scope_update", "email_bodies_scope_insert",
+    "email_sync_state_scope_insert", "email_sync_state_scope_update", "email_bodies_scope_update",
+    "email_suggestions_scope_insert", "email_suggestions_scope_update", "email_summaries_scope_insert",
+    "email_summaries_scope_update", "email_suggestion_queue_scope_insert", "email_suggestion_queue_scope_update",
+    "email_watcher_markers_scope_insert", "email_watcher_markers_scope_update",
+  ]);
+  const mailTables = ["email_cache", "email_bodies", "email_sync_state", "email_suggestions", "email_summaries", "email_suggestion_queue", "email_watcher_markers"];
+  for (const table of mailTables) {
+    const present = (db.prepare(`SELECT count(*) AS count FROM pragma_table_info('${table}') WHERE name = 'organization_id'`).get() as { count: number }).count > 0;
+    state.any ||= present;
+    if (!present) state.missing.push(`${table}.organization_id column`);
+  }
+  if (state.missing.length === 0) {
+    const predicates = mailTables.map((table) => `(SELECT count(*) FROM ${table} WHERE organization_id IS NULL)`).join(" + ");
+    const unmapped = db.prepare(`SELECT ${predicates} AS count`).get() as { count: number };
+    const manifest = db.prepare("SELECT phase FROM resource_ownership_manifests WHERE migration = 97").get() as { phase: string } | undefined;
+    if (unmapped.count > 0) state.missing.push("mail organization backfill");
+    if (manifest?.phase !== "verified") state.missing.push("migration 097 verified manifest");
   }
   state.complete = state.missing.length === 0;
   return state;
@@ -2908,12 +2993,14 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
-export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095", AuthenticationFoundationMigrationState> {
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097", AuthenticationFoundationMigrationState> {
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   return {
     "093": inspectIdentityTenancyMigration(database),
     "094": inspectAuthenticationMigration(database),
     "095": inspectAuthorizationAuditMigration(database),
+    "096": inspectResourceOwnershipMigration(database),
+    "097": inspectMailTenancyMigration(database),
   };
 }
 
@@ -2975,6 +3062,8 @@ function runMigrations(db: Database.Database): void {
             "093_identity_tenancy.sql",
             "094_authentication.sql",
             "095_authorization_audit.sql",
+            "096_resource_ownership.sql",
+            "097_mail_tenancy.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -4180,6 +4269,29 @@ function runMigrations(db: Database.Database): void {
       if (!applied.complete) throw restoreMigrationPartialStateError(migration, applied.missing);
       logger.info("db", `Applied migration ${file}`);
     }
+  }
+
+  const resourceTenancy = [
+    ["096", "096_resource_ownership.sql", inspectResourceOwnershipMigration],
+    ["097", "097_mail_tenancy.sql", inspectMailTenancyMigration],
+  ] as const;
+  for (const [migration, file, inspect] of resourceTenancy) {
+    const state = inspect(db);
+    if (state.any && !state.complete) throw restoreMigrationPartialStateError(migration, state.missing);
+    if (state.complete) continue;
+    if (migration === "096" && !inspectAuthorizationAuditMigration(db).complete) {
+      throw restoreMigrationPartialStateError(migration, ["migration 095 prerequisite schema"]);
+    }
+    if (migration === "097" && !inspectResourceOwnershipMigration(db).complete) {
+      throw restoreMigrationPartialStateError(migration, ["migration 096 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
+    const applied = inspect(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError(migration, applied.missing);
+    if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError(migration, ["foreign key integrity"]);
+    }
+    logger.info("db", `Applied migration ${file}`);
   }
 
   enforceReservedBrokerInvariant(db);

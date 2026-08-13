@@ -1,4 +1,5 @@
-import { getDb } from "../db.js";
+import { randomUUID } from "node:crypto";
+import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import type { OrganizationRole, Project, ProjectRole } from "../schema.js";
 
 export type AuthorizationPermission = "read" | "write" | "admin" | "execute";
@@ -16,6 +17,29 @@ export interface AuthorizationDecision {
   visible: boolean;
   organizationId?: string;
   projectId?: string;
+}
+
+export type ResourceOwnerKind = "user" | "organization";
+export type OwnedResourceType = "vault_folder" | "vault_item" | "provider_connection" | "mail_account";
+
+export interface OwnedResource {
+  resourceType: OwnedResourceType;
+  resourceId: string;
+  organizationId: string;
+  ownerKind: ResourceOwnerKind;
+  ownerUserId?: string | null;
+}
+
+export interface ResourceAuditEventInput {
+  organizationId?: string | null;
+  projectId?: string | null;
+  resourceType: "vault" | OwnedResourceType;
+  resourceId?: string | null;
+  action: string;
+  actorType: "compatibility" | "user" | "service" | "system";
+  actorId?: string | null;
+  outcome: "success" | "denied" | "failure";
+  requestId?: string | null;
 }
 
 function scopeAllows(scopes: readonly string[], resource: string, permission: AuthorizationPermission): boolean {
@@ -174,4 +198,104 @@ export function requirePrivateResourceAccess(input: {
   return input.principal.type === "browser-user" || input.principal.type === "user-token"
     ? input.ownerUserId === input.principal.id || input.explicitlyShared === true
     : false;
+}
+
+function hasResourceGrant(
+  principal: AuthorizationPrincipal,
+  resource: OwnedResource,
+  permission: AuthorizationPermission,
+): boolean {
+  const granteeKind = principal.type === "service-principal" || principal.type === "runtime-service" ? "service" : "user";
+  const rows = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT permissions_json FROM resource_grants
+     WHERE organization_id = ? AND resource_type = ? AND resource_id = ?
+       AND grantee_kind = ? AND grantee_id = ? AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > ?)`
+  ).all(resource.organizationId, resource.resourceType, resource.resourceId, granteeKind, principal.id, new Date().toISOString()) as Array<{ permissions_json: string }>;
+  return rows.some((row) => {
+    try {
+      const permissions = JSON.parse(row.permissions_json) as unknown;
+      return Array.isArray(permissions) && permissions.some((candidate) => candidate === "*" || candidate === permission
+        || (permission === "read" && candidate === "write") || (permission !== "admin" && candidate === "admin"));
+    } catch {
+      return false;
+    }
+  });
+}
+
+export function requireOwnedResourcePermission(
+  principal: AuthorizationPrincipal,
+  resource: OwnedResource,
+  permission: AuthorizationPermission,
+  options: { breakGlass?: boolean } = {},
+): AuthorizationDecision {
+  if (principal.type === "compatibility") return { allowed: true, visible: true, organizationId: resource.organizationId };
+  if (principal.organizationId && principal.organizationId !== resource.organizationId) return { allowed: false, visible: false };
+  if (options.breakGlass) {
+    const allowed = principal.type === "browser-user" && isInstallationAdmin(principal.id);
+    return { allowed, visible: allowed, organizationId: resource.organizationId };
+  }
+  if (!scopeAllows(principal.scopes, resource.resourceType, permission)
+    && !scopeAllows(principal.scopes, resource.resourceType.split("_")[0]!, permission)) {
+    return { allowed: false, visible: true, organizationId: resource.organizationId };
+  }
+  if (resource.ownerKind === "user") {
+    const owner = (principal.type === "browser-user" || principal.type === "user-token")
+      && resource.ownerUserId === principal.id;
+    const granted = hasResourceGrant(principal, resource, permission);
+    return { allowed: owner || granted, visible: owner || granted, organizationId: resource.organizationId };
+  }
+  return requireOrganizationPermission(principal, resource.organizationId, resource.resourceType.split("_")[0]!, permission);
+}
+
+export function insertResourceAuditEvent(input: ResourceAuditEventInput): string {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  const id = randomUUID();
+  const inserted = db.prepare(
+    `INSERT INTO resource_audit_events
+     (id, organization_id, project_id, resource_type, resource_id, action, actor_type, actor_id, outcome, request_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT DO NOTHING`,
+  ).run(id, input.organizationId ?? null, input.projectId ?? null, input.resourceType, input.resourceId ?? null,
+    input.action, input.actorType, input.actorId ?? null, input.outcome, input.requestId ?? null, new Date().toISOString());
+  if (inserted.changes === 1 || !input.requestId) return id;
+  return (db.prepare(
+    `SELECT id FROM resource_audit_events
+     WHERE request_id = ? AND action = ? AND resource_type = ? AND COALESCE(resource_id, '') = COALESCE(?, '')`,
+  ).get(input.requestId, input.action, input.resourceType, input.resourceId ?? null) as { id: string }).id;
+}
+
+export function appendResourceAuditEvent(input: ResourceAuditEventInput): string {
+  const id = execTransaction(() => insertResourceAuditEvent(input));
+  checkpointAfterWrite();
+  return id;
+}
+
+export function createResourceGrant(input: {
+  resource: OwnedResource;
+  granteeKind: "user" | "service" | "installation";
+  granteeId?: string | null;
+  permissions: AuthorizationPermission[];
+  actorType: "compatibility" | "user" | "service" | "system";
+  actorId?: string | null;
+  expiresAt?: string | null;
+}): string {
+  if (input.permissions.length === 0 || new Set(input.permissions).size !== input.permissions.length) {
+    throw new Error("Resource grant requires unique permissions");
+  }
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    db.prepare(
+      `INSERT INTO resource_grants
+       (id, organization_id, resource_type, resource_id, grantee_kind, grantee_id, permissions_json,
+        granted_by_actor_type, granted_by_actor_id, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, input.resource.organizationId, input.resource.resourceType, input.resource.resourceId,
+      input.granteeKind, input.granteeId ?? null, JSON.stringify(input.permissions), input.actorType,
+      input.actorId ?? null, input.expiresAt ?? null, now, now);
+  });
+  checkpointAfterWrite();
+  return id;
 }

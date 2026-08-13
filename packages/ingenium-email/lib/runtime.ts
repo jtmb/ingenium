@@ -1,4 +1,4 @@
-import type { EmailAccount, OAuthToken } from "./types.js";
+import type { EmailAccount, EmailOwner, OAuthToken } from "./types.js";
 
 export type OAuthClientSecretKey =
   | "oauth_gmail_client_secret"
@@ -75,6 +75,17 @@ export interface WatcherMarkerRememberResult {
   newlyRecorded: boolean;
 }
 
+export interface EmailOAuthAttempt {
+  organizationId: string;
+  ownerKind: "user" | "organization";
+  ownerUserId?: string;
+  accountId: string;
+  provider: "gmail" | "outlook";
+  actorType: "compatibility" | "user" | "service" | "system";
+  actorId?: string;
+  expiresAt: string;
+}
+
 export interface EmailRuntime {
   accounts: {
     getGlobalProjectId(): string;
@@ -82,6 +93,16 @@ export interface EmailRuntime {
     listGlobalSettings(prefix: string): string[];
     mutateGlobalSettings<T>(operation: (settings: EmailSettingsTransaction, projectId: string) => T): T;
     listActiveSettings(prefixes: string[]): Array<{ projectId: string; key: string; value: string }>;
+    listAccounts?(owner?: EmailOwner): EmailAccount[];
+    getAccount?(organizationId: string, accountId: string): EmailAccount | undefined;
+    createAccount?(account: EmailAccount): void;
+    updateAccount?(account: EmailAccount): void;
+    deleteAccount?(organizationId: string, accountId: string): void;
+    getCredential?(organizationId: string, accountId: string, kind: string): { encryptedValue: string; tokenMetadata: string } | undefined;
+    setCredential?(organizationId: string, accountId: string, kind: string, encryptedValue: string, tokenMetadata?: string): void;
+    deleteCredentials?(organizationId: string, accountId: string): void;
+    createOAuthAttempt?(stateHash: string, attempt: EmailOAuthAttempt): void;
+    consumeOAuthAttempt?(stateHash: string, organizationId: string, provider: "gmail" | "outlook", actorType: EmailOAuthAttempt["actorType"], actorId: string | undefined, now: string): EmailOAuthAttempt | undefined;
   };
   settings: {
     getSetting(projectId: string, key: string): string | undefined;
@@ -93,7 +114,7 @@ export interface EmailRuntime {
     listSkills(projectId: string): EmailSkill[];
   };
   cache: {
-    getCachedEmail(accountId: string, folder: string, uid: string): CachedEmail | undefined;
+    getCachedEmail(accountId: string, folder: string, uid: string, organizationId?: string): CachedEmail | undefined;
     getCachedEmailBody(accountId: string, folder: string, uid: string): CachedEmailBody | undefined;
     getCachedSuggestions(accountId: string, folder: string, uid: string): { suggestions_json: string } | undefined;
     getSyncState(accountId: string, folder: string): { last_synced_at: string | null };

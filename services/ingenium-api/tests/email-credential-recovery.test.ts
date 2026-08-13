@@ -53,6 +53,7 @@ vi.mock("ingenium-core", () => ({
   emailCache: { clearCache: clearEmailCache },
   synthesisLlm: {},
   settings: {},
+  projects: { getCanonicalGlobalProject: vi.fn(() => ({ organization_id: "test-organization" })) },
 }));
 
 vi.mock("ingenium-email", () => ({
@@ -86,6 +87,10 @@ let baseUrl: string;
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    next();
+  });
   app.use("/api/v1/emails", emailsRouter);
   server = createServer(app);
   await new Promise<void>((resolve) => {
@@ -121,7 +126,7 @@ describe("PATCH /emails/accounts/:id/credentials", () => {
     expect(storeCredentials).toHaveBeenCalledWith("manual-1", {
       imapPass: "new-secret",
       smtpPass: "new-secret",
-    });
+    }, undefined);
     expect(stopAccountWorker).toHaveBeenCalledWith("manual-1");
     expect(startEngine).toHaveBeenCalledWith();
   });
@@ -254,10 +259,10 @@ describe("DELETE /emails/accounts/:id", () => {
 
     expect(response.status).toBe(204);
     expect(stopAccountWorker).toHaveBeenCalledWith("deleted-account");
-    expect(stopWatcher).toHaveBeenCalledWith("deleted-account");
+    expect(stopWatcher).toHaveBeenCalledWith("global-project", "deleted-account");
     expect(clearWatcherMarkers).toHaveBeenCalledWith("global-project", "deleted-account");
-    expect(removeAccount).toHaveBeenCalledWith("deleted-account");
-    expect(clearEmailCache).toHaveBeenCalledWith("deleted-account");
+    expect(removeAccount).toHaveBeenCalledWith("deleted-account", undefined);
+    expect(clearEmailCache).toHaveBeenCalledWith("deleted-account", undefined);
   });
 });
 

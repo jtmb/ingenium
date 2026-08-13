@@ -136,7 +136,7 @@ export function createProject(name: string, isGlobal = false, organizationId = B
     // Auto-load global skills into new project
     const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL").get() as Project | undefined;
     if (globalProject && globalProject.id !== id) {
-      const count = skills.copySkills(globalProject.id, id);
+      const count = skills.copySkillsInCurrentTransaction(globalProject.id, id);
       if (count > 0) {
         logger.info("projects", `Auto-loaded ${count} global skill(s) into project "${name}"`);
       }

@@ -119,7 +119,7 @@ function assertVaultReferences(projectId: string, environment: ChildMcpServerDef
   const db = getDb(dbPath());
   for (const { vault_item_id: vaultItemId } of Object.values(environment)) {
     const item = db.prepare(
-      "SELECT 1 FROM vault_items WHERE id = ? AND project_id = ? AND access_policy <> ?",
+      "SELECT 1 FROM vault_items WHERE id = ? AND project_id = ? AND owner_kind = 'organization' AND access_policy <> ?",
     ).get(vaultItemId, projectId, DELETED_VAULT_POLICY);
     if (!item) throw new ChildMcpServerError("VAULT_REFERENCE_NOT_FOUND");
   }

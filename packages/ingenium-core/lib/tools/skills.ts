@@ -849,36 +849,34 @@ export function syncAllSkills(projectId: string, db?: any): number {
   return written;
 }
 
-/**
- * Copy all enabled skills from one project to another.
- * Increments revision on newly created skills.
- */
+export function copySkillsInCurrentTransaction(sourceProjectId: string, targetProjectId: string): number {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const sourceSkills = db.prepare(
+    "SELECT * FROM skills WHERE project_id = ? AND enabled = 1 AND archived_at IS NULL"
+  ).all(sourceProjectId) as Skill[];
+  let count = 0;
+  for (const skill of sourceSkills) {
+    if (!isSafeSkillName(skill.name)) continue;
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO skills (id, project_id, name, description, content, category, tags, always_apply, file_tree, revision, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    ).run(
+      randomUUID(), targetProjectId,
+      skill.name, skill.description, skill.content,
+      skill.category ?? null, skill.tags ?? null,
+      skill.always_apply ?? 0,
+      (skill as any).file_tree ?? null,
+      now, now,
+    );
+    count++;
+  }
+  return count;
+}
+
+/** Copy all enabled skills from one project to another. */
 export function copySkills(sourceProjectId: string, targetProjectId: string): number {
-  const count = execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const sourceSkills = db.prepare(
-      "SELECT * FROM skills WHERE project_id = ? AND enabled = 1 AND archived_at IS NULL"
-    ).all(sourceProjectId) as Skill[];
-    let n = 0;
-    for (const skill of sourceSkills) {
-      if (!isSafeSkillName(skill.name)) continue;
-      const now = new Date().toISOString();
-      const id = randomUUID();
-      db.prepare(
-        `INSERT INTO skills (id, project_id, name, description, content, category, tags, always_apply, file_tree, revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-      ).run(
-        id, targetProjectId,
-        skill.name, skill.description, skill.content,
-        skill.category ?? null, skill.tags ?? null,
-        skill.always_apply ?? 0,
-        (skill as any).file_tree ?? null,
-        now, now,
-      );
-      n++;
-    }
-    return n;
-  });
+  const count = execTransaction(() => copySkillsInCurrentTransaction(sourceProjectId, targetProjectId));
   checkpointAfterWrite();
   return count;
 }

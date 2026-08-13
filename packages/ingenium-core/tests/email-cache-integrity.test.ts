@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, resetDbForTest } from "../lib/db.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
 import {
   applyEmailCacheDelta,
   getAccountCursor,
@@ -44,6 +45,13 @@ beforeEach(() => {
   resetDbForTest();
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-email-delta-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
+  const now = new Date().toISOString();
+  getDb(databasePath()).prepare(
+    `INSERT INTO mail_accounts
+     (id, organization_id, owner_kind, email, name, provider, auth_type, config_json,
+      created_by_actor_type, created_at, updated_at)
+     VALUES ('delta-account', ?, 'organization', 'delta@example.test', 'Delta', 'gmail', 'oauth2', '{}', 'system', ?, ?)`,
+  ).run(BOOTSTRAP_ORGANIZATION_ID, now, now);
 });
 
 afterEach(() => {
@@ -145,6 +153,31 @@ describe("migration 088", () => {
       );
       INSERT INTO email_suggestion_queue (account_id, folder, uid, attempts)
       VALUES ('legacy-account', 'Drafts', 'queued-before-088', 2);
+      ALTER TABLE email_suggestion_queue ADD COLUMN organization_id TEXT REFERENCES organizations(id) ON DELETE RESTRICT;
+      UPDATE email_suggestion_queue
+      SET organization_id = '${BOOTSTRAP_ORGANIZATION_ID}'
+      WHERE organization_id IS NULL;
+      CREATE UNIQUE INDEX idx_email_suggestion_queue_org_account_folder_uid
+      ON email_suggestion_queue(organization_id, account_id, folder, uid);
+      CREATE TRIGGER email_suggestion_queue_scope_insert BEFORE INSERT ON email_suggestion_queue
+      WHEN NEW.organization_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM email_cache
+        WHERE organization_id = NEW.organization_id
+          AND account_id = NEW.account_id
+          AND folder = NEW.folder
+          AND uid = NEW.uid
+      )
+       BEGIN SELECT RAISE(ABORT, 'email queue item must match organization cache row'); END;
+       CREATE TRIGGER email_suggestion_queue_scope_update
+       BEFORE UPDATE OF organization_id, account_id, folder, uid ON email_suggestion_queue
+       WHEN NEW.organization_id IS NULL OR NOT EXISTS (
+         SELECT 1 FROM email_cache
+         WHERE organization_id = NEW.organization_id
+           AND account_id = NEW.account_id
+           AND folder = NEW.folder
+           AND uid = NEW.uid
+       )
+       BEGIN SELECT RAISE(ABORT, 'email queue item must match organization cache row'); END;
     `);
 
     resetDbForTest();

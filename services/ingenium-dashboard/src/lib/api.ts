@@ -1284,6 +1284,7 @@ export interface VaultFolder {
   name: string;
   item_count: number;
   created_at: string;
+  owner_kind?: "user" | "organization";
 }
 
 export interface VaultItem {
@@ -1298,6 +1299,10 @@ export interface VaultItem {
   version: number;
   created_at: string;
   updated_at: string;
+  organization_id?: string;
+  owner_kind?: "user" | "organization";
+  owner_user_id?: string | null;
+  effective_capabilities?: string[];
 }
 
 export interface VaultItemDetail extends VaultItem {
@@ -1427,6 +1432,10 @@ export interface ManagedProviderConfig {
   allowPrivateNetwork?: boolean;
   apiKeySet: boolean;
   apiKey?: string;
+  ownerKind?: "installation" | "user" | "organization";
+  organizationId?: string;
+  ownerUserId?: string | null;
+  effectiveCapabilities?: string[];
 }
 
 function isApiRecord(value: unknown): value is Record<string, unknown> {
@@ -1516,6 +1525,10 @@ export function normalizeManagedProviderConfigResponse(value: unknown): {
       allowPrivateNetwork: entry.allowPrivateNetwork === true,
       apiKeySet: entry.apiKeySet === true,
       ...(typeof entry.apiKey === "string" ? { apiKey: entry.apiKey } : {}),
+      ownerKind: entry.ownerKind === "user" || entry.ownerKind === "organization" ? entry.ownerKind : "installation",
+      organizationId: apiString(entry.organizationId) || undefined,
+      ownerUserId: typeof entry.ownerUserId === "string" ? entry.ownerUserId : null,
+      effectiveCapabilities: apiStringArray(entry.effectiveCapabilities),
     }];
   });
   const synthesis = isApiRecord(record.synthesis) ? record.synthesis : {};

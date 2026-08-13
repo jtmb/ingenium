@@ -71,6 +71,13 @@ function dbPath(): string {
   return resolveCoreDbPath();
 }
 
+function accountOrganizationId(db: ReturnType<typeof getDb>, accountId: string): string {
+  const row = db.prepare("SELECT organization_id FROM mail_accounts WHERE id = ? ORDER BY organization_id LIMIT 1")
+    .get(accountId) as { organization_id: string } | undefined;
+  if (!row) throw new Error("Mail account is not normalized for tenancy");
+  return row.organization_id;
+}
+
 function upsertCacheEntries(
   db: ReturnType<typeof getDb>,
   accountId: string,
@@ -78,9 +85,9 @@ function upsertCacheEntries(
 ): number {
   const statement = db.prepare(
     `INSERT INTO email_cache
-       (account_id, folder, uid, subject, from_name, from_addr, date,
-        snippet, flags, has_attachments, envelope_json, labels_json, cached_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       (organization_id, account_id, folder, uid, subject, from_name, from_addr, date,
+         snippet, flags, has_attachments, envelope_json, labels_json, cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(account_id, folder, uid) DO UPDATE SET
        subject = excluded.subject,
        from_name = excluded.from_name,
@@ -94,8 +101,10 @@ function upsertCacheEntries(
        cached_at = datetime('now')`,
   );
   let count = 0;
+  const organizationId = accountOrganizationId(db, accountId);
   for (const { folder, entry } of entries) {
     statement.run(
+      organizationId,
       accountId,
       folder,
       entry.uid,
@@ -176,13 +185,13 @@ export function applyEmailCacheDelta(
     const upserts = upsertCacheEntries(db, accountId, delta.upserts);
     const deletes = deleteCacheEntries(db, accountId, delta.deletes);
     db.prepare(
-      `INSERT INTO email_sync_state (account_id, folder, last_uid, history_id, provider, last_synced_at)
-       VALUES (?, '__account__', '0', ?, ?, datetime('now'))
+      `INSERT INTO email_sync_state (organization_id, account_id, folder, last_uid, history_id, provider, last_synced_at)
+       VALUES (?, ?, '__account__', '0', ?, ?, datetime('now'))
        ON CONFLICT(account_id, folder) DO UPDATE SET
          history_id = excluded.history_id,
          provider = excluded.provider,
          last_synced_at = datetime('now')`,
-    ).run(accountId, delta.historyId, delta.provider);
+    ).run(accountOrganizationId(db, accountId), accountId, delta.historyId, delta.provider);
     return { upserts, deletes };
   });
   checkpointAfterWrite();
@@ -222,11 +231,14 @@ export function getCachedEmail(
   accountId: string,
   folder: string,
   uid: string,
+  organizationId?: string,
 ): CachedEmail | undefined {
   const db = getDb(dbPath());
-  return db.prepare(
-    "SELECT * FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?",
-  ).get(accountId, folder, uid) as CachedEmail | undefined;
+  return organizationId
+    ? db.prepare("SELECT * FROM email_cache WHERE organization_id = ? AND account_id = ? AND folder = ? AND uid = ?")
+      .get(organizationId, accountId, folder, uid) as CachedEmail | undefined
+    : db.prepare("SELECT * FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?")
+      .get(accountId, folder, uid) as CachedEmail | undefined;
 }
 
 // ── Email body cache ───────────────────────────────────────────────────────
@@ -274,14 +286,14 @@ export function upsertEmailBody(
     }
     db.prepare(
       `INSERT INTO email_bodies
-         (account_id, folder, uid, html, text, headers_json, fetched_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+         (organization_id, account_id, folder, uid, html, text, headers_json, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(account_id, folder, uid) DO UPDATE SET
          html = excluded.html,
          text = excluded.text,
          headers_json = excluded.headers_json,
          fetched_at = datetime('now')`,
-    ).run(accountId, folder, uid, html ?? null, text ?? null, headersJson ?? null);
+    ).run(accountOrganizationId(db, accountId), accountId, folder, uid, html ?? null, text ?? null, headersJson ?? null);
   });
   checkpointAfterWrite();
 }
@@ -319,13 +331,13 @@ export function updateSyncState(
   execTransaction(() => {
     const db = getDb(dbPath());
     db.prepare(
-      `INSERT INTO email_sync_state (account_id, folder, last_uid, uidvalidity, last_synced_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
+      `INSERT INTO email_sync_state (organization_id, account_id, folder, last_uid, uidvalidity, last_synced_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(account_id, folder) DO UPDATE SET
          last_uid = excluded.last_uid,
          uidvalidity = excluded.uidvalidity,
          last_synced_at = datetime('now')`,
-    ).run(accountId, folder, lastUid, uidValidity);
+    ).run(accountOrganizationId(db, accountId), accountId, folder, lastUid, uidValidity);
   });
   checkpointAfterWrite();
 }
@@ -377,13 +389,13 @@ export function upsertEmailSuggestions(
     }
     db.prepare(
       `INSERT INTO email_suggestions
-         (account_id, folder, uid, suggestions_json, model, generated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
+         (organization_id, account_id, folder, uid, suggestions_json, model, generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(account_id, folder, uid) DO UPDATE SET
          suggestions_json = excluded.suggestions_json,
          model = excluded.model,
          generated_at = datetime('now')`
-    ).run(accountId, folder, uid, JSON.stringify(suggestions), model);
+    ).run(accountOrganizationId(db, accountId), accountId, folder, uid, JSON.stringify(suggestions), model);
   });
   checkpointAfterWrite();
 }
@@ -433,13 +445,13 @@ export function upsertEmailSummary(
     }
     db.prepare(
       `INSERT INTO email_summaries
-         (account_id, folder, uid, summary_text, model, generated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
+         (organization_id, account_id, folder, uid, summary_text, model, generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(account_id, folder, uid) DO UPDATE SET
          summary_text = excluded.summary_text,
          model = excluded.model,
          generated_at = datetime('now')`
-    ).run(accountId, folder, uid, summaryText, model);
+    ).run(accountOrganizationId(db, accountId), accountId, folder, uid, summaryText, model);
   });
   checkpointAfterWrite();
 }
@@ -512,17 +524,19 @@ export function getUidsMissingBodies(
  * Delete all cached data for an account (both email listings and bodies).
  * Call this when an account is removed or the user wants a fresh sync.
  */
-export function clearCache(accountId: string): { listings: number; bodies: number } {
+export function clearCache(accountId: string, organizationId?: string): { listings: number; bodies: number } {
   const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const bodyResult = db.prepare("DELETE FROM email_bodies WHERE account_id = ?").run(accountId);
+    const scope = organizationId ? "organization_id = ? AND account_id = ?" : "account_id = ?";
+    const parameters = organizationId ? [organizationId, accountId] : [accountId];
+    const bodyResult = db.prepare(`DELETE FROM email_bodies WHERE ${scope}`).run(...parameters);
     // Clean suggestion queue BEFORE email_cache to avoid FK violation from concurrent
     // engine workers. Also clean suggestions and summaries (which FK-reference email_cache).
-    db.prepare("DELETE FROM email_suggestion_queue WHERE account_id = ?").run(accountId);
-    db.prepare("DELETE FROM email_suggestions WHERE account_id = ?").run(accountId);
-    db.prepare("DELETE FROM email_summaries WHERE account_id = ?").run(accountId);
-    const listingResult = db.prepare("DELETE FROM email_cache WHERE account_id = ?").run(accountId);
-    db.prepare("DELETE FROM email_sync_state WHERE account_id = ?").run(accountId);
+    db.prepare(`DELETE FROM email_suggestion_queue WHERE ${scope}`).run(...parameters);
+    db.prepare(`DELETE FROM email_suggestions WHERE ${scope}`).run(...parameters);
+    db.prepare(`DELETE FROM email_summaries WHERE ${scope}`).run(...parameters);
+    const listingResult = db.prepare(`DELETE FROM email_cache WHERE ${scope}`).run(...parameters);
+    db.prepare(`DELETE FROM email_sync_state WHERE ${scope}`).run(...parameters);
     return { listings: listingResult.changes, bodies: bodyResult.changes };
   });
   checkpointAfterWrite();
@@ -573,13 +587,13 @@ export function setAccountCursor(accountId: string, historyId: string, provider:
   execTransaction(() => {
     const db = getDb(dbPath());
     db.prepare(
-      `INSERT INTO email_sync_state (account_id, folder, last_uid, history_id, provider, last_synced_at)
-       VALUES (?, '__account__', '0', ?, ?, datetime('now'))
+      `INSERT INTO email_sync_state (organization_id, account_id, folder, last_uid, history_id, provider, last_synced_at)
+       VALUES (?, ?, '__account__', '0', ?, ?, datetime('now'))
        ON CONFLICT(account_id, folder) DO UPDATE SET
          history_id = excluded.history_id,
          provider = excluded.provider,
          last_synced_at = datetime('now')`,
-    ).run(accountId, historyId, provider);
+    ).run(accountOrganizationId(db, accountId), accountId, historyId, provider);
   });
   checkpointAfterWrite();
 }

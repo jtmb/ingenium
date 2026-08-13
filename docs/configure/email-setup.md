@@ -105,6 +105,13 @@ Once you have obtained OAuth2 credentials:
    - Grant Ingenium permission to access emails
    - Redirects back to callback URL automatically
 
+Choose whether the account is organization-owned or private to the current
+user before starting OAuth or manual setup. OAuth state is stored only as a
+SHA-256 hash in a ten-minute, organization-qualified, consume-once attempt bound
+to that owner and account ID. The callback cannot change the owner/account, and
+replaying or crossing organizations returns a generic not-found/invalid-state
+failure. Tokens remain server-only and are stored under the bound account.
+
 ### Verify Account Setup
 
 After successful authentication, you should see:

@@ -56,10 +56,14 @@ interface WatcherStart {
   promise: Promise<void>;
 }
 
-/** Process-global watcher registry. Keyed by account ID. */
+/** Process-global watcher registry. Keyed by project and account ID. */
 const watchers = new Map<string, WatcherEntry>();
 /** Synchronous startup reservations prevent duplicate listener setup. */
 const startingWatchers = new Map<string, WatcherStart>();
+
+function watcherKey(projectId: string, accountId: string): string {
+  return `${projectId}\u0000${accountId}`;
+}
 
 export function configureWatcherProcessedUidCapacityForTest(capacity?: number): void {
   if (capacity !== undefined && (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > MAX_PROCESSED_UIDS)) {
@@ -82,7 +86,8 @@ export function startWatcher(
   projectId: string,
   accountId: string,
 ): Promise<void> {
-  const current = startingWatchers.get(accountId);
+  const key = watcherKey(projectId, accountId);
+  const current = startingWatchers.get(key);
   if (current) return current.promise;
 
   const start: WatcherStart = {
@@ -94,16 +99,17 @@ export function startWatcher(
     entry: null,
     promise: Promise.resolve(),
   };
-  startingWatchers.set(accountId, start);
+  startingWatchers.set(key, start);
   start.promise = runWatcherStart(start);
   return start.promise;
 }
 
 async function runWatcherStart(start: WatcherStart): Promise<void> {
   let committed = false;
+  const key = watcherKey(start.projectId, start.accountId);
   try {
-    const existing = watchers.get(start.accountId);
-    if (existing) await stopStoredWatcher(start.accountId, existing);
+    const existing = watchers.get(key);
+    if (existing) await stopStoredWatcher(key, existing);
     if (start.cancelled) return;
 
     const account = getAccount(start.accountId);
@@ -144,7 +150,7 @@ async function runWatcherStart(start: WatcherStart): Promise<void> {
     client.on("exists", entry.existsHandler);
     if (start.cancelled) return;
 
-    watchers.set(start.accountId, entry);
+    watchers.set(key, entry);
 
     // Kick off an initial scan to catch messages that arrived before IDLE was registered.
     await scheduleWatcherScan(entry, true);
@@ -154,15 +160,16 @@ async function runWatcherStart(start: WatcherStart): Promise<void> {
     if (!start.cancelled) throw error;
   } finally {
     if (!committed) await cleanupWatcherStart(start);
-    if (startingWatchers.get(start.accountId) === start) startingWatchers.delete(start.accountId);
+    if (startingWatchers.get(key) === start) startingWatchers.delete(key);
   }
 }
 
 async function cleanupWatcherStart(start: WatcherStart): Promise<void> {
+  const key = watcherKey(start.projectId, start.accountId);
   if (start.entry) {
     start.entry.running = false;
     detachExistsListener(start.entry);
-    if (watchers.get(start.accountId) === start.entry) watchers.delete(start.accountId);
+    if (watchers.get(key) === start.entry) watchers.delete(key);
   }
   if (start.client || start.connectStarted) {
     try {
@@ -179,8 +186,13 @@ async function cleanupWatcherStart(start: WatcherStart): Promise<void> {
  * Disconnects the IMAP connection and removes the watcher from the registry.
  * Idempotent — safe to call if no watcher exists.
  */
-export async function stopWatcher(accountId: string): Promise<void> {
-  const starting = startingWatchers.get(accountId);
+export async function stopWatcher(projectId: string, accountId?: string): Promise<void> {
+  const resolvedAccountId = accountId ?? projectId;
+  const key = accountId
+    ? watcherKey(projectId, accountId)
+    : [...startingWatchers.keys(), ...watchers.keys()].find((candidate) => candidate.endsWith(`\u0000${resolvedAccountId}`));
+  if (!key) return;
+  const starting = startingWatchers.get(key);
   if (starting) {
     starting.cancelled = true;
     if (starting.entry) starting.entry.running = false;
@@ -188,20 +200,20 @@ export async function stopWatcher(accountId: string): Promise<void> {
     return;
   }
 
-  const entry = watchers.get(accountId);
+  const entry = watchers.get(key);
   if (!entry) return;
-  await stopStoredWatcher(accountId, entry);
+  await stopStoredWatcher(key, entry);
 }
 
-async function stopStoredWatcher(accountId: string, entry: WatcherEntry): Promise<void> {
+async function stopStoredWatcher(key: string, entry: WatcherEntry): Promise<void> {
   entry.running = false;
   detachExistsListener(entry);
   try {
-    await disconnectAccount(accountId);
+    await disconnectAccount(entry.accountId);
   } catch {
     // Non-fatal: connection may already be closed
   }
-  if (watchers.get(accountId) === entry) watchers.delete(accountId);
+  if (watchers.get(key) === entry) watchers.delete(key);
 }
 
 function detachExistsListener(entry: WatcherEntry): void {
@@ -222,13 +234,18 @@ function detachExistsListener(entry: WatcherEntry): void {
 
 /** Stop every watcher this process owns during API shutdown. */
 export async function stopAllWatchers(): Promise<void> {
-  const accountIds = new Set([...watchers.keys(), ...startingWatchers.keys()]);
-  await Promise.allSettled([...accountIds].map((accountId) => stopWatcher(accountId)));
+  const keys = new Set([...watchers.keys(), ...startingWatchers.keys()]);
+  await Promise.allSettled([...keys].map((key) => {
+    const [projectId, accountId] = key.split("\u0000");
+    return stopWatcher(projectId!, accountId!);
+  }));
 }
 
 /** Get watcher status for an account (whether it's running or stopped). */
-export function getWatcherStatus(accountId: string): { running: boolean } {
-  const entry = watchers.get(accountId);
+export function getWatcherStatus(projectId: string, accountId?: string): { running: boolean } {
+  const entry = accountId
+    ? watchers.get(watcherKey(projectId, accountId))
+    : [...watchers.values()].find((candidate) => candidate.accountId === projectId);
   return { running: entry?.running ?? false };
 }
 
