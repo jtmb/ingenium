@@ -1,6 +1,6 @@
 ---
 title: Ingenium Product Roadmap
-description: Repository-authoritative, execution-ready contracts for the Phase 0 product roadmap.
+description: Repository-authoritative, execution-ready contracts for product and approved multi-user authentication and authorization roadmaps.
 ---
 
 # Ingenium Product Roadmap
@@ -9,6 +9,114 @@ This file is the repository authority for roadmap scope, task identity, executio
 contracts, dependencies, verification, and live markers. Repository Markdown is
 canonical; the Docs Workspace is a projection and is not mutated by this roadmap.
 The archived predecessor is [ROADMAP-2026-07-31-phase-0.md](./archive/ROADMAP-2026-07-31-phase-0.md).
+
+## Approved multi-user authentication and authorization program
+
+The `AUTH-100`–`AUTH-111` contracts below are the approved multi-user release
+program. They extend this existing canonical roadmap; they do not replace the
+earlier roadmap contracts or mutate the Docs Workspace. The completed workflow
+cleanup prerequisite is commit `396b1d9`, which removed phase-commit enforcement;
+ordinary manual commits no longer block execution.
+
+### Confirmed product decisions
+
+- **First release:** local authentication plus OIDC; no public signup. An
+  installation operator performs local bootstrap and recovery. Passkeys and SMS
+  are out of scope.
+- **Organization/project authorization:** organizations own projects. An
+  organization owner or admin can see every project in that organization.
+  Organization members and viewers need explicit project membership. Project
+  roles are `editor` and `viewer`; an organization `viewer` is always capped at
+  read-only, regardless of project membership.
+- **Ownership:** mail, providers, vault items, and private conversations may be
+  private-user or organization-owned. Docs are organization-scoped. Existing
+  data moves into a bootstrap organization and owner without changing existing
+  resource IDs. Ambiguous existing credentials become organization-owned;
+  existing OpenCode content becomes private to the bootstrap owner.
+- **Installation boundary:** installation admins exclusively own backups,
+  restore, raw logs, processes, global configuration, and the runtime fleet.
+  Organization admins do not implicitly gain access to private plaintext.
+- **Runtime:** each user/workspace gets an isolated runtime container shared by
+  that user's Web, CLI, and VS Code surfaces. Launch uses an audience-bound,
+  one-time ticket and a runtime-specific HTTPS root.
+
+### Security and protocol constants
+
+The API is the central principal and authorization boundary. Missing or
+malformed authentication is `401`; an authenticated principal without the
+required permission is `403`; a missing or foreign resource is `404` to avoid
+cross-tenant enumeration. Browser state-changing requests require the exact
+allowed origin and CSRF protection; server-to-server bearer requests remain a
+separate non-browser path. OIDC identity is the unique pair `(issuer,subject)`.
+Session, reset, invitation, launch-ticket, and API-token values are stored or
+handled as hashes where applicable and are never returned after creation.
+
+Passwords and recovery material use scrypt with a memory cost of at least
+64 MiB. The initial timeout policy is:
+
+| Control | Default |
+|---|---:|
+| Session idle | 30 minutes |
+| Session absolute | 12 hours |
+| Step-up authorization | 10 minutes |
+| Password reset | 30 minutes |
+| Email verification | 24 hours |
+| Organization invitation | 7 days |
+| Runtime launch ticket | 60 seconds or less |
+
+The security set includes invitations, email verification/reset, TOTP, one-time
+recovery codes, session/device management, scoped API tokens, immutable audit,
+and step-up authorization. Token values are shown only at creation; persisted
+forms contain hashes, scopes, expiry, and revocation state.
+
+### Tenancy migration contract
+
+The migration sequence is fixed and must be implemented in this order:
+
+| Migration | Boundary |
+|---:|---|
+| 093 | Identity and tenancy |
+| 094 | Authentication |
+| 095 | Authorization and audit |
+| 096 | Resource ownership |
+| 097 | Mail tenancy |
+| 098 | Content tenancy |
+| 099 | Automation tenancy |
+| 100 | Runtime isolation |
+
+Every migration must use a probe-based runner: probe the exact schema signature,
+accept only the complete absent or complete applied state, refuse partial or
+ambiguous state, run transactionally, preserve IDs, and finish with integrity,
+foreign-key, row-count, and ownership checks. The rollout is **expand →
+dual-write/backfill → verify → enforce cutoff**. Reads and writes cannot switch
+to mandatory tenant enforcement until backfill and preservation evidence are
+complete; failed probes or mismatched counts fail closed rather than guessing.
+
+### Later canonical documentation updates
+
+Implementation waves must update only the directly affected sections of the
+canonical repository docs, then rerun their focused link/command checks:
+[API Authentication](../security/api-authentication.md), [Security](../security/index.md),
+[Architecture](../concepts/architecture.md), [API Reference](../develop/api.md),
+[Database Migrations](../develop/database.md), [Testing Guide](../develop/testing.md),
+[Deployment Guide](../operations/deployment.md), [Projects](../configure/projects.md),
+[Dashboard usage](../usage/dashboard.md), [Mail usage](../usage/mail.md),
+[Secrets usage](../usage/secrets.md), [OpenCode usage](../usage/opencode.md), and
+[Credential Rotation](../security/credential-rotation.md). No wave may silently
+export or mutate Docs Workspace pages.
+
+### Per-task completion checklist
+
+Every task in this roadmap has a contract, and its execution record must include
+all three checkable items below. The exact marker syntax remains the append-only
+protocol above; the placeholder is not a live marker:
+
+- `[ ]` append one `work-started` marker after preflight and declared ownership;
+- `[ ]` append one matching `work-complete` marker only after all acceptance
+  gates pass; and
+- `[ ]` replace `Evidence TASK-ID: <acceptance evidence placeholder>` with
+  non-empty evidence covering the task's tests, deployment/health, and applicable
+  security, tenant, migration, or visual gates.
 
 ## Operating model
 
@@ -67,10 +175,852 @@ P0 DOC-100
   -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
   -> P6 REL-100
   -> P7 DOC-101
+  -> A0 AUTH-100 -> A1 AUTH-101 -> A2 AUTH-102 -> A3 AUTH-103 -> A4 AUTH-104
+     -> A5 AUTH-105 -> A6 AUTH-106 -> A7 AUTH-107 -> A8 AUTH-108
+      -> A9 AUTH-109 -> A10 AUTH-110 -> A11 AUTH-111
 ```
 
 The C0-C6 coordination lane is an implementation-gated barrier chain;
 `REL-100` also depends on `COORD-106`, `UI-102`, `CHAT-101`, and `VSCODE-102`.
+The A0-A11 authentication lane is a strict barrier chain. No later tenancy,
+runtime, or enforcement task may start until its predecessor's migration,
+preservation, security, and deployment evidence is complete.
+
+### Program gates
+
+These gates are explicit acceptance requirements, not implied future work:
+
+1. **Deployment/runtime:** every runtime-impacting wave names an authorized
+   Docker/Compose deployment owner who rebuilds and restarts the current merged
+   source, checks supervisor/application health, and probes the actual affected
+   routes and HTTPS roots.
+2. **UI:** AUTH-103 and AUTH-109, plus any changed authentication/authorization
+   route, receive one changed-route visual gate at **1440x900** and **390x844**
+   with accessibility, console/network, and browser-cleanup evidence. AUTH-111
+   also runs the requested passive full-site desktop/mobile sweep.
+3. **Security:** each security boundary receives one bounded current-diff and
+   relevant-dependency review. No history scan is implied; it is permitted only
+   for a confirmed secret or critical explicit trigger. Findings are
+   `BLOCKING`, `FOLLOW_UP`, or `INFORMATIONAL` and are never auto-dispatched.
+4. **Fixture E2E/containment:** the declared production-mode fixture E2E run
+   uses an isolated database, project, credentials, and high-port block, then
+   runs `npx tsx tests/suite-containment-audit.ts --strict`. Skipped or
+   unselected external suites are not passes.
+5. **Tenant isolation:** every wave that moves or authorizes data proves
+   owner/org/project separation with positive and negative fixtures, including
+   private-user versus organization-owned resources and installation-only
+   surfaces.
+6. **Migration preservation:** migrations 093–100 record pre/post IDs, bounded
+   row counts, ownership mappings, schema hashes, `PRAGMA integrity_check`, and
+   `PRAGMA foreign_key_check`; any mismatch blocks the cutoff.
+7. **Final reconciliation:** AUTH-111 reconciles every roadmap marker and
+   TodoWrite item, confirms the changed-file list and canonical-doc links, and
+   records evidence before terminal `PASS`. An open roadmap task or TodoWrite
+   item requires immediate autonomous continuation, not a progress response.
+
+## Authentication and authorization execution contracts
+
+#### AUTH-100 — Foundation: identity, tenancy, and migration runner
+
+- **IN_SCOPE:** Establish the user, organization, organization-membership,
+  project, and project-membership identity model; define the installation-admin
+  boundary; add migration `093` for identity/tenancy; implement the probe-based
+  migration runner and its expand/dual-write/backfill/verify/enforce-cutoff
+  lifecycle; create the deterministic bootstrap organization and local operator
+  owner; preserve all existing resource IDs. Existing ambiguous credentials are
+  organization-owned; existing OpenCode content is private to the bootstrap
+  owner. Public signup is not part of the model.
+- **OUT_OF_SCOPE:** Password/OIDC login flows, TOTP, authorization middleware,
+  dashboard UX, resource-specific backfills, runtime containers, Docs Workspace
+  mutation, and source implementation outside the identity/migration boundary.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `DOC-100`; workflow cleanup prerequisite `396b1d9` is complete.
+- **Acceptance:** A fresh and an existing database each pass the complete/absent
+  probe for migration 093; partial or ambiguous schema refuses startup without
+  mutation; bootstrap org/owner/project mappings are deterministic; existing
+  IDs, bounded counts, ownership mappings, integrity checks, and foreign-key
+  checks are preserved; local operator bootstrap/recovery is explicit; no public
+  signup path is introduced; expand/dual-write/backfill/verify evidence is
+  retained before any enforcement flag is enabled.
+- **STOP_CONDITION:** `PASS` after migration-preservation, focused API/core,
+  deployment/health, tenant-isolation, security, fixture-E2E, and marker checks;
+  otherwise continue in scope or use only the permitted escalation rule.
+- **Escalation:** Only unavailable required database/deployment access,
+  unauthorized destructive migration action, a mutually exclusive identity or
+  bootstrap product decision, genuine ambiguity, or bounded diagnosis that
+  cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  probe fail-closed behavior and bootstrap boundaries.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart the current merged source and health-check actual
+  API routes.
+- **Rollback/safety:** Take a verified pre-migration backup, use transactional
+  probes, preserve source rows and IDs until post-checks pass, and leave the
+  system in expand mode on a failed backfill; never guess ownership or delete
+  ambiguous credentials/content.
+- **Tests:** Migration 093 absent/complete/partial probes; bootstrap/recovery
+  fixtures; ID/count/hash preservation; integrity/FK checks; organization and
+  project isolation; no-signup route checks; deployment health; fixture E2E and
+  strict containment; no-secret logs.
+- **Docs:** This roadmap first; after verified implementation update only the
+  directly affected sections of `docs/concepts/architecture.md`,
+  `docs/develop/database.md`, `docs/security/index.md`, and
+  `docs/operations/deployment.md`.
+- **Exclusive writer territory:** Identity/tenancy schema, migration runner,
+  bootstrap/recovery core/API code, and focused tests; no dashboard, mail,
+  content, MCP, or runtime writer overlap.
+- **Phase/counts:** A0 foundation; 3 writers / 3 nonwriters; premium owns the
+  migration boundary, fast owns isolated fixtures, and docs owns roadmap-only
+  edits; barrier before AUTH-101.
+- **Verification plan:** Run source probes against disposable fresh and copied
+  databases, compare pre/post IDs and ownership manifests, run focused tests,
+  rebuild/restart, health-check actual routes, run tenant-negative fixtures and
+  strict containment once, and fix only the current reproducible root cause
+  before rerunning its smallest proving regression.
+- **Causal remediation rule:** Fix the earliest probe, transaction, identity
+  mapping, or preservation boundary that caused the failure; prove the fix with
+  the named migration or isolation regression, not a downstream exception.
+- **Finding classification:** Data loss, guessed ownership, partial-schema
+  startup, cross-tenant access, or public signup is `BLOCKING`; unrelated
+  historical drift is `FOLLOW_UP`; bounded migration evidence is
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-100: <acceptance evidence placeholder>` with non-empty
+  preservation, deployment, security, isolation, and containment evidence.
+
+#### AUTH-101 — Session identity: local/OIDC authentication and recovery
+
+- **IN_SCOPE:** Add migration `094` for authentication; local password login,
+  OIDC login, OIDC account identity keyed by `(issuer,subject)`, email
+  verification and password reset, local operator bootstrap/recovery, TOTP,
+  one-time recovery codes, session/device management, hashed session/reset/
+  verification/invite/recovery material, and the stated timeout policy: idle
+  session 30m, absolute session 12h, step-up 10m, reset 30m, verification 24h,
+  invitation 7d, launch ticket <=60s. Password derivation uses scrypt with a
+  memory cost of at least 64 MiB.
+- **OUT_OF_SCOPE:** Public signup, passkeys, SMS, organization/project policy
+  enforcement, resource backfills, dashboard visual redesign, MCP, and runtime
+  gateway work.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-100.
+- **Acceptance:** Local and OIDC login create the same authenticated principal
+  model without duplicate `(issuer,subject)` identities; verification/reset,
+  TOTP, recovery-code, session/device-revoke, and operator-recovery paths are
+  one-time/expiry bounded and fail closed; raw secrets/tokens never appear in
+  responses, logs, or persistence; timeout constants are source and runtime
+  verified; no public signup, passkey, or SMS path exists.
+- **STOP_CONDITION:** `PASS` after focused auth tests, security review,
+  deployment/health, fixture E2E, isolation, strict containment, and marker
+  reconciliation; otherwise continue in scope or use permitted escalation.
+- **Escalation:** Only unavailable configured OIDC/provider access after the
+  documented fixture path, unauthorized recovery/destructive action, a genuine
+  login/recovery product decision or ambiguity, or an unreproduced root cause
+  after bounded diagnosis.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  password hashing, token hashing, replay, recovery, and session boundaries.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check the actual login/session routes.
+- **Rollback/safety:** Use disposable users and OIDC fixtures, never real
+  credentials, retain recovery evidence without secret values, and preserve
+  active pre-auth data while rolling back only the auth release boundary.
+- **Tests:** Local/OIDC success and failure, `(issuer,subject)` uniqueness,
+  verification/reset/invite expiry and replay, TOTP/recovery-code one-time use,
+  session/device revoke, scrypt parameter checks, timeout checks, redaction,
+  fixture E2E, deployment health, and strict containment.
+- **Docs:** This roadmap; after verification update `docs/security/index.md`,
+  `docs/security/api-authentication.md`, `docs/develop/api.md`,
+  `docs/develop/variables.md`, and directly affected operations guidance only.
+- **Exclusive writer territory:** Authentication core/API routes, credential
+  tables, session/device logic, and focused tests; no overlap with authorization
+  middleware or dashboard components.
+- **Phase/counts:** A1 session identity; 3 writers / 3 nonwriters; premium owns
+  auth, fast owns fixture clients, and docs owns roadmap-only edits; barrier
+  before AUTH-102.
+- **Verification plan:** Exercise every local/OIDC/recovery/session state with
+  disposable identities, inspect database/log/response redaction, deploy the
+  current merged source, health-check actual routes, run fixture E2E plus strict
+  containment once, and rerun only the smallest regression for each causal fix.
+- **Causal remediation rule:** Repair the first identity lookup, credential
+  derivation, one-time-consumption, expiry, or session-revocation boundary
+  proven by the trace; do not patch a UI symptom or weaken a failed guard.
+- **Finding classification:** Credential/recovery leakage, replay, weak scrypt,
+  duplicate OIDC identity, unbounded session, or forbidden signup/passkey/SMS is
+  `BLOCKING`; provider UX enhancements are `FOLLOW_UP`; bounded auth telemetry is
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-101: <acceptance evidence placeholder>` with non-empty auth,
+  security, deployment, E2E, and containment evidence.
+
+#### AUTH-102 — Authorization: principals, roles, audit, and step-up
+
+- **IN_SCOPE:** Add migration `095` for authorization and audit; establish the
+  central API principal/authorization boundary; define organization/project
+  role evaluation, resource ownership checks, CSRF, step-up authorization, and
+  exact `401`/`403`/`404` semantics. Organization owner/admin see all org
+  projects; organization member/viewer require explicit project membership;
+  project roles are `editor` and `viewer`; an organization viewer is always
+  read-only. Installation admins exclusively own backups/restore/raw logs/
+  processes/global config/runtime fleet. Append immutable audit records without
+  private plaintext.
+- **OUT_OF_SCOPE:** Resource-specific schema backfills, dashboard screens, MCP
+  adapters, runtime containers/gateways, public signup, passkeys, SMS, and
+  authorization decisions not stated here.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-101.
+- **Acceptance:** Every protected API route resolves one principal and one
+  effective scope before data access; the role matrix is enforced consistently;
+  missing/malformed auth returns `401`, insufficient permission returns `403`,
+  and missing/foreign resources return `404`; browser mutations require exact
+  origin/CSRF validation; step-up expires after 10m; installation-only routes
+  reject org admins; org admins cannot implicitly read private-user plaintext;
+  audit records identify actor/action/scope/outcome without secrets or content.
+- **STOP_CONDITION:** `PASS` after authorization matrix, API contract, security
+  review, deployment/health, tenant-isolation fixtures, fixture E2E, strict
+  containment, and marker reconciliation; otherwise continue or escalate only
+  under the permitted rule.
+- **Escalation:** Only an unavailable required API/deployment boundary,
+  unauthorized destructive operation, a mutually exclusive role/privacy
+  decision, genuine ambiguity, or bounded diagnosis without a reproducible root
+  cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` owns the
+  role, CSRF, enumeration, step-up, audit, and installation-boundary review.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and probe the actual protected routes.
+- **Rollback/safety:** Deny by default, preserve existing resource access until
+  each resource is mapped, retain audit evidence, and do not expose plaintext or
+  broaden an org role as a rollback shortcut.
+- **Tests:** Full role/resource matrix, org viewer write denial, membership
+  negatives, installation-admin separation, 401/403/404 contract, CSRF origin
+  cases, step-up expiry/replay, audit immutability/redaction, deployment health,
+  fixture E2E, tenant isolation, and strict containment.
+- **Docs:** This roadmap; after verification update `docs/security/index.md`,
+  `docs/security/api-authentication.md`, `docs/develop/api.md`, and
+  `docs/concepts/architecture.md` only where the shipped boundary is directly
+  described.
+- **Exclusive writer territory:** Principal middleware, authorization policy,
+  audit schema/API, CSRF/step-up enforcement, and focused tests; no resource,
+  dashboard, MCP, or runtime writer overlap.
+- **Phase/counts:** A2 authorization; 3 writers / 3 nonwriters; premium owns
+  policy, fast owns matrix fixtures, and docs owns roadmap-only edits; barrier
+  before AUTH-103 and all resource work.
+- **Verification plan:** Run the complete role/scope/status matrix against
+  disposable organizations and resources, inspect audit/redaction and browser
+  origin evidence, deploy/health-check actual routes, run fixture E2E and strict
+  containment once, and fix/rerun only the proving regression for a causal root.
+- **Causal remediation rule:** Fix the earliest principal resolution, policy
+  evaluation, resource lookup, CSRF, step-up, or audit persistence boundary
+  identified by the failing trace; never turn a forbidden response into a
+  client-side hiding behavior.
+- **Finding classification:** Cross-tenant access, plaintext disclosure,
+  install-boundary bypass, wrong status semantics, CSRF bypass, or audit loss is
+  `BLOCKING`; extra roles or audit views are `FOLLOW_UP`; bounded policy evidence
+  is `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-102: <acceptance evidence placeholder>` with non-empty role,
+  security, audit, deployment, isolation, E2E, and containment evidence.
+
+#### AUTH-103 — Dashboard UX: sign-in, membership, and security controls
+
+- **IN_SCOPE:** Add the dashboard authentication and authorization UX over the
+  central API boundary: local/OIDC sign-in, verification/reset, TOTP/recovery
+  code setup, invitation acceptance, session/device management, step-up prompts,
+  organization/project switcher, membership/role views, clear 401/403/404
+  states, and installation-admin-only navigation. Keep browser bearer tokens
+  server-side and preserve private-plaintext redaction.
+- **OUT_OF_SCOPE:** New auth protocols, public signup, passkeys, SMS, resource
+  schema/backfill work, runtime gateway implementation, Docs Workspace mutation,
+  unrelated dashboard redesign, and weakening API authorization in the client.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** AUTH-102.
+- **Acceptance:** A user can complete local/OIDC sign-in and safe recovery,
+  accept an invitation, manage sessions/devices, satisfy step-up, and switch
+  only among authorized organizations/projects; viewer/member/editor states and
+  401/403/404 errors are accurate; no private plaintext or bearer token reaches
+  browser storage/DOM/logs; changed routes pass accessibility and 1440x900 /
+  390x844 visual checks.
+- **STOP_CONDITION:** `PASS` after focused dashboard/API tests, deployed route
+  health, one security review, fixture E2E, strict containment, changed-route
+  visual evidence, and marker reconciliation; otherwise continue or permitted
+  escalation.
+- **Escalation:** Only unavailable configured browser/deployment/OIDC access,
+  unauthorized destructive action, a genuine UX/product decision or ambiguity,
+  or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed
+  route visual gate and `@ingenium-security-auditor` verifies browser token,
+  CSRF, privacy, and step-up presentation boundaries.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart the current dashboard and health-check actual
+  authentication and project routes.
+- **Rollback/safety:** Preserve typed server errors and drafts, fail closed on
+  missing scope, use fixture identities only, keep screenshots content-free,
+  and roll back only task-owned UX/API client changes.
+- **Tests:** Dashboard component/API tests for every auth and role state,
+  keyboard/accessibility checks, browser storage/network/console redaction,
+  Playwright sign-in/recovery/invite/step-up/project-switch flows, deployed
+  health, 1440x900 and 390x844 screenshots, fixture E2E, and strict containment.
+- **Docs:** This roadmap; after verified behavior update only directly affected
+  `docs/usage/dashboard.md`, `docs/configure/projects.md`,
+  `docs/security/api-authentication.md`, and `docs/develop/api.md` sections.
+- **Exclusive writer territory:** Dashboard auth/session/membership routes,
+  components, and focused tests; no runtime gateway or unrelated route overlap.
+- **Phase/counts:** A3 dashboard UX; 3 writers / 3 nonwriters; fast owns UI,
+  premium owns deployment, and docs owns roadmap-only edits; barrier before
+  resource/content UI consumers.
+- **Verification plan:** Run fixture identities through each visible state,
+  inspect DOM/accessibility/network/console and browser storage, deploy the
+  merged source, health-check actual routes, capture both viewports, run fixture
+  E2E and strict containment once, and rerun only the smallest causal check.
+- **Causal remediation rule:** Fix the first API-to-UI identity, scope, state,
+  storage, focus, or error mapping boundary shown by source and browser evidence;
+  do not mask authorization defects with client-only route guards.
+- **Finding classification:** Token/plaintext exposure, incorrect access affordance,
+  bypassable step-up, broken recovery, or in-scope visual/accessibility failure is
+  `BLOCKING`; unrelated dashboard polish is `FOLLOW_UP`; browser evidence is
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-103: <acceptance evidence placeholder>` with non-empty UI,
+  security, deployment, E2E, strict-containment, and visual evidence.
+
+#### AUTH-104 — Resource tenancy: projects, mail, providers, and vault items
+
+- **IN_SCOPE:** Add migration `096` for resource ownership and migration `097`
+  for mail tenancy. Organizations own projects. Mail accounts/cache/messages/
+  suggestions, provider configurations/credentials, and vault items support
+  private-user or organization ownership. Preserve IDs while backfilling
+  ownership; ambiguous existing credentials become organization-owned. Apply
+  owner/org/project authorization to every resource operation and retain the
+  existing secret-free vault/provider boundaries.
+- **OUT_OF_SCOPE:** Docs and private-conversation content migration, automation,
+  runtime isolation, public signup, passkeys/SMS, new mail providers, crypto
+  redesign, and installation-admin access to org/private plaintext beyond the
+  stated installation boundary.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-102, AUTH-103.
+- **Acceptance:** Migrations 096/097 use complete-schema probes, preserve every
+  resource ID and bounded count, map existing projects to the bootstrap org,
+  map ambiguous credentials to the org, and distinguish private-user from org
+  ownership; authorized owner/org/project roles can perform only permitted
+  operations; foreign resources return safe 404; org admins do not implicitly
+  read private plaintext; vault values and provider keys remain secret-free in
+  responses/logs/audit; mail tenancy preserves folder/account identity.
+- **STOP_CONDITION:** `PASS` after migration preservation, resource isolation,
+  mail/provider/vault security review, deployed health, fixture E2E, strict
+  containment, and marker reconciliation; otherwise continue or permitted
+  escalation.
+- **Escalation:** Only unavailable required mail/provider/vault/deployment access,
+  unauthorized destructive migration or secret action, a mutually exclusive
+  ownership decision, genuine ambiguity, or bounded diagnosis without a
+  reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  credential ownership, vault/provider plaintext boundaries, and tenant leaks.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check actual resource/mail routes.
+- **Rollback/safety:** Use SQLite backup API and disposable accounts/vault data,
+  preserve source rows until hashes/counts/FKs pass, never decrypt during
+  backfill, and do not delete or reassign ambiguous credentials by guess.
+- **Tests:** 096/097 probes and ID/count/hash preservation; org/project/private
+  resource matrix; mail folder/account/cache isolation; provider/vault metadata
+  and no-plaintext checks; deletion/restore safety; deployment health; fixture
+  E2E and strict containment.
+- **Docs:** This roadmap; after verification update directly affected sections of
+  `docs/concepts/architecture.md`, `docs/security/index.md`,
+  `docs/configure/email-setup.md`, `docs/usage/mail.md`, `docs/usage/secrets.md`,
+  `docs/develop/database.md`, and `docs/develop/api.md` only.
+- **Exclusive writer territory:** Resource ownership and mail tenancy core/API,
+  migrations, and focused tests; no content, automation, MCP, or runtime
+  writer overlap.
+- **Phase/counts:** A4 resource tenancy; 3 writers / 3 nonwriters; premium owns
+  resource/migration code, fast owns isolation fixtures, and docs owns
+  roadmap-only edits; barrier before AUTH-105.
+- **Verification plan:** Run fresh/existing migration probes, compare immutable
+  IDs/counts/ownership manifests and SQLite checks, exercise each ownership
+  matrix with disposable data, deploy/health-check actual routes, run fixture
+  E2E and strict containment once, and rerun only the causal proving check.
+- **Causal remediation rule:** Fix the first ownership backfill, folder/account
+  identity, authorization lookup, secret serialization, or FK boundary that
+  loses tenant safety; never add per-resource client exceptions.
+- **Finding classification:** Data loss, cross-tenant mail/provider/vault access,
+  plaintext exposure, wrong ownership, or broken preservation is `BLOCKING`;
+  unsupported provider expansion is `FOLLOW_UP`; migration manifests are
+  `INFORMATIONAL` evidence.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-104: <acceptance evidence placeholder>` with non-empty
+  migration, tenancy, security, deployment, E2E, and containment evidence.
+
+#### AUTH-105 — Content tenancy: Docs and private conversations
+
+- **IN_SCOPE:** Add migration `098` for content tenancy. Docs are
+  organization-scoped. Private conversations support private-user or
+  organization ownership, including messages, checkpoints, context/RAG source
+  links, citations, and OpenCode content. Existing OpenCode content becomes
+  private to the bootstrap owner while preserving IDs. Enforce content access
+  before retrieval, search, indexing, citation, export, checkpoint, and restore
+  paths; org admins do not implicitly read private-user plaintext.
+- **OUT_OF_SCOPE:** Docs Workspace mutation, new RAG providers, transcript
+  export redesign, mail/provider/vault backfill, automation, runtime containers,
+  public signup, passkeys, SMS, and content-body sharing not explicitly owned.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-104.
+- **Acceptance:** Migration 098 has complete/absent probes and preserves every
+  content ID, message order, checkpoint/source linkage, bounded count, and hash;
+  organization Docs are visible only to authorized org principals; private
+  conversations/OpenCode content are visible only to the owner or explicit
+  policy; org admin cannot read private plaintext by role alone; search/RAG,
+  citations, uploads, checkpoints, restore-as-new, and task references enforce
+  the same scope and return safe 404 for foreign content.
+- **STOP_CONDITION:** `PASS` after content-preservation and tenant-isolation
+  tests, security review, deployed route health, fixture E2E, strict containment,
+  and marker reconciliation; otherwise continue or permitted escalation.
+- **Escalation:** Only unavailable required content/deployment access,
+  unauthorized irreversible restore/export, a mutually exclusive content
+  sharing decision, genuine ambiguity, or bounded diagnosis without a
+  reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  plaintext, indexing, citation, and private-content boundaries.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check actual Docs/context/content routes.
+- **Rollback/safety:** Use immutable snapshots and disposable content, preserve
+  source IDs and message order, never expose content in logs or evidence, and
+  fail closed if an ownership mapping is missing.
+- **Tests:** 098 schema probes; content ID/order/link/hash preservation; org Docs
+  and private conversation positive/negative matrices; RAG/search/citation/
+  checkpoint/restore authorization; no-body foreign 404; deployment health;
+  fixture E2E and strict containment.
+- **Docs:** This roadmap; after verification update directly affected sections of
+  `docs/concepts/architecture.md`, `docs/reference/docs-workspace.md`,
+  `docs/usage/docs-workspace.md`, `docs/usage/chat.md`, `docs/develop/api.md`,
+  `docs/develop/database.md`, and `docs/security/index.md` only.
+- **Exclusive writer territory:** Content ownership/backfill, Docs/context/RAG
+  authorization adapters, migration, and focused tests; no automation, MCP, or
+  runtime writer overlap.
+- **Phase/counts:** A5 content tenancy; 3 writers / 3 nonwriters; premium owns
+  content boundaries, fast owns preservation/isolation fixtures, and docs owns
+  roadmap-only edits; barrier before AUTH-106.
+- **Verification plan:** Run migration probes against copied data, compare
+  content/link/hash manifests and SQLite checks, exercise org/private retrieval
+  and indexing negatives, deploy/health-check actual routes, run fixture E2E and
+  strict containment once, and rerun only the smallest causal regression.
+- **Causal remediation rule:** Fix the first content-owner resolution, query,
+  index admission, citation, checkpoint, or export boundary proven to bypass
+  scope; do not redact only the final rendered response.
+- **Finding classification:** Private plaintext leakage, cross-org Docs access,
+  foreign RAG/citation/restore access, or content loss is `BLOCKING`; richer
+  sharing controls are `FOLLOW_UP`; content-free provenance is `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-105: <acceptance evidence placeholder>` with non-empty content
+  preservation, privacy, security, deployment, E2E, and containment evidence.
+
+#### AUTH-106 — Automation tenancy: jobs, tasks, runs, and audit
+
+- **IN_SCOPE:** Add migration `099` for automation tenancy. Scope jobs,
+  schedules, trusted events, deliveries, tasks, runs, logs, vault references,
+  pipeline events, and automation metadata to the principal/org/project/resource
+  owner model. Preserve IDs and history. Installation admins exclusively own
+  raw process/log and global operational surfaces; organization admins do not
+  implicitly read private job prompts, run output, vault plaintext, or private
+  conversation-derived automation content. Keep trusted-event catalogs,
+  bounded retries, and secret-free child environments.
+- **OUT_OF_SCOPE:** New job types, arbitrary webhooks/commands, runtime fleet
+  containers, MCP client behavior, public signup, passkeys/SMS, and unrelated
+  scheduler redesign.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-105.
+- **Acceptance:** Migration 099 complete/absent probes preserve automation IDs,
+  delivery history, task references, and bounded counts; jobs/tasks/runs/logs
+  enforce owner/org/project policy; private automation content is not exposed
+  to org admins by role alone; installation-only raw logs/process/global surfaces
+  reject org principals; trusted events remain exact-match, bounded, durable,
+  project-scoped, and redacted; vault references never expose values.
+- **STOP_CONDITION:** `PASS` after migration preservation, automation isolation,
+  security review, deployment/health, fixture E2E, strict containment, and marker
+  reconciliation; otherwise continue or permitted escalation.
+- **Escalation:** Only unavailable scheduler/deployment access, unauthorized
+  destructive execution, a mutually exclusive automation privacy decision,
+  genuine ambiguity, or bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  raw-log/process/install boundaries, prompt/output redaction, and vault use.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check actual jobs/tasks/service routes.
+- **Rollback/safety:** Use disposable jobs and fixture events, preserve immutable
+  delivery/run evidence, block execution when principal/scope is unavailable,
+  never auto-unseal or log secret/plaintext data, and do not purge history.
+- **Tests:** 099 probes and ID/history preservation; org/private/project job
+  matrix; task/reference isolation; exact trusted-event delivery and retry
+  checks; raw process/log denial; vault redaction; restart/health; fixture E2E
+  and strict containment.
+- **Docs:** This roadmap; after verification update directly affected sections of
+  `docs/operations/jobs.md`, `docs/security/index.md`, `docs/develop/api.md`,
+  `docs/develop/database.md`, `docs/usage/tasks.md`, and `docs/usage/secrets.md`.
+- **Exclusive writer territory:** Automation ownership/backfill, job/task/run
+  authorization, migration, and focused tests; no MCP or runtime writer overlap.
+- **Phase/counts:** A6 automation; 3 writers / 3 nonwriters; premium owns
+  automation, fast owns event/isolation fixtures, and docs owns roadmap-only
+  edits; barrier before AUTH-107.
+- **Verification plan:** Probe copied databases, compare IDs/history/counts and
+  SQLite checks, run exact positive/negative job/task/run fixtures, inspect logs
+  and redaction, deploy/health-check actual routes, run fixture E2E and strict
+  containment once, and rerun only the proving check for a causal fix.
+- **Causal remediation rule:** Fix the first automation ownership, event match,
+  lease, child-environment, output-redaction, or install-scope boundary proven
+  by the durable trace; never permit execution and hide it later.
+- **Finding classification:** Unauthorized execution, private prompt/output or
+  vault leakage, raw-log bypass, data loss, or cross-tenant history access is
+  `BLOCKING`; richer automation features are `FOLLOW_UP`; bounded run evidence is
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-106: <acceptance evidence placeholder>` with non-empty
+  automation preservation, security, deployment, E2E, and containment evidence.
+
+#### AUTH-107 — MCP tenancy: authenticated principal and scoped tools
+
+- **IN_SCOPE:** Carry the authenticated principal, organization, project,
+  ownership, and effective scopes through the MCP server/API boundary; make API
+  tokens scoped, hashed, expiry-bound, revocable, and creation-only visible;
+  filter catalog discovery and invocation by authorization; keep installation
+  tools installation-admin-only; preserve API-first/zero-DB runtime consumers,
+  safe errors, idempotency, and project attestation.
+- **OUT_OF_SCOPE:** New MCP product tools, arbitrary token aliases, runtime
+  containers/gateways, dashboard redesign beyond the auth UX, public signup,
+  passkeys/SMS, and direct database or mutation-REST access from consumers.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-106.
+- **Acceptance:** An authenticated MCP request cannot omit or forge principal,
+  org, project, or scope; scoped API tokens store only hashes and metadata;
+  unauthorized discovery/invocation fails closed with the agreed status/error;
+  installation-only tools reject org principals; private/org-owned resource
+  tools enforce the same policy as REST; no token, prompt, private content, or
+  credential appears in MCP responses/logs; catalog/tool parity remains intact.
+- **STOP_CONDITION:** `PASS` after MCP/API fixture contracts, security review,
+  deployed health, tenant-isolation and token fixtures, fixture E2E, strict
+  containment, and marker reconciliation; otherwise continue or permitted
+  escalation.
+- **Escalation:** Only unavailable required MCP/deployment access, unauthorized
+  destructive token/tool action, a mutually exclusive public tool/scope choice,
+  genuine ambiguity, or bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  token hashing/scopes, tool filtering, install boundary, and redaction.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check actual MCP/API routes.
+- **Rollback/safety:** Deny unknown/missing scope, revoke only disposable fixture
+  tokens, preserve existing catalog IDs and resource ownership, and never grant
+  broad compatibility scope to repair a failing call.
+- **Tests:** Token create/list/revoke/expiry/hash/redaction; org/project/private
+  tool matrix; 401/403/404/error envelopes; discovery/invocation parity;
+  installation-admin denial; API-only DB isolation; deployed MCP smoke; fixture
+  E2E and strict containment.
+- **Docs:** This roadmap; after verified behavior update only directly affected
+  `docs/reference/mcp-tools.md`, `docs/develop/api.md`,
+  `docs/security/api-authentication.md`, and `docs/security/index.md` sections.
+- **Exclusive writer territory:** MCP server/API adapters, scoped-token surface,
+  catalog authorization projection, and focused tests; no runtime or dashboard
+  writer overlap.
+- **Phase/counts:** A7 MCP; 3 writers / 3 nonwriters; premium owns API boundary,
+  fast owns MCP fixtures, and docs owns roadmap-only edits; barrier before
+  AUTH-108.
+- **Verification plan:** Run token and tool matrix fixtures with disposable
+  principals, inspect wire/log redaction and catalog parity, deploy/health-check
+  actual MCP/API routes, run fixture E2E and strict containment once, and rerun
+  only the smallest proving check after a causal fix.
+- **Causal remediation rule:** Fix the first principal propagation, scope
+  resolution, tool filtering, token storage, or serialization boundary proven by
+  the request trace; do not patch individual tool handlers as exceptions.
+- **Finding classification:** Token leakage, scope bypass, install-tool access,
+  cross-tenant invocation, catalog inconsistency, or DB-boundary violation is
+  `BLOCKING`; optional aliases/tools are `FOLLOW_UP`; parity evidence is
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-107: <acceptance evidence placeholder>` with non-empty token,
+  MCP, security, deployment, E2E, and containment evidence.
+
+#### AUTH-108 — Runtime isolation: per-user/workspace containers
+
+- **IN_SCOPE:** Add migration `100` for runtime isolation and implement one
+  isolated runtime container per user/workspace, shared only by that user's Web,
+  CLI, and VS Code sessions. Bind runtime identity to user/workspace/org/project
+  scope, isolate filesystem/process/environment/network state, define lifecycle
+  and cleanup, and enforce installation-admin-only runtime-fleet controls. Launch
+  tickets are audience-bound, one-time, hashed, and expire in 60 seconds or less.
+- **OUT_OF_SCOPE:** Shared multi-user containers, runtime gateway/UI roots,
+  dashboard shell redesign, public signup, passkeys/SMS, unrestricted host
+  access, same-UID isolation claims beyond the declared container boundary, and
+  production destructive fleet cleanup without authorization.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-107.
+- **Acceptance:** Migration 100 probes complete/absent state and preserves runtime
+  ownership IDs/mappings; two users/workspaces cannot observe or mutate each
+  other's filesystem, processes, environment, sockets, sessions, or mounted
+  projects; Web/CLI/VS Code for one principal share the intended isolated runtime;
+  installation admins alone can inspect/control the fleet; launch ticket replay,
+  wrong-audience, wrong-runtime, expired, and foreign-principal use fails closed;
+  cleanup is bounded, owned, auditable, and does not delete another runtime.
+- **STOP_CONDITION:** `PASS` after migration preservation, container isolation,
+  security review, deployed fleet health, fixture E2E, strict containment, and
+  marker reconciliation; otherwise continue or permitted escalation.
+- **Escalation:** Only unavailable required container/fleet/deployment access,
+  unauthorized destructive cleanup, a mutually exclusive runtime trust decision,
+  genuine ambiguity, or bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  container boundaries, ticket binding, host exposure, and fleet privileges.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check the actual runtime control and
+  application paths.
+- **Rollback/safety:** Use disposable runtime containers and preserved volume
+  snapshots, never attach a test runtime to real user data, retain failed
+  cleanup manifests, and stop only identity-proven owned processes/containers.
+- **Tests:** 100 schema probes; two-user/two-workspace isolation; Web/CLI/VS Code
+  shared-runtime checks; ticket hash/TTL/nonce/audience/replay tests; process,
+  filesystem, network, env, and mount negatives; fleet privilege denial;
+  deployment/runtime health; fixture E2E and strict containment.
+- **Docs:** This roadmap; after verification update directly affected sections of
+  `docs/concepts/architecture.md`, `docs/operations/deployment.md`,
+  `docs/security/index.md`, `docs/security/api-authentication.md`,
+  `docs/usage/opencode.md`, and `docs/develop/database.md` only.
+- **Exclusive writer territory:** Runtime lifecycle/isolation core/API,
+  migration, container definitions, and focused tests; no gateway/UI writer
+  overlap.
+- **Phase/counts:** A8 runtime isolation; 3 writers / 3 nonwriters; premium owns
+  runtime, fast owns isolation/cleanup fixtures, and docs owns roadmap-only
+  edits; barrier before AUTH-109.
+- **Verification plan:** Build and run disposable per-user/workspace runtimes,
+  exercise cross-identity negatives and ticket replay/audience cases, inspect
+  process/mount/network evidence, rebuild/restart the current source, health-check
+  actual runtime routes, run fixture E2E and strict containment once, and rerun
+  only the causal proving check.
+- **Causal remediation rule:** Fix the first runtime identity, container
+  namespace, mount, process, network, ticket, or cleanup ownership boundary
+  proven by deployment evidence; never rely on UI hiding or a shared fallback.
+- **Finding classification:** Cross-user visibility/control, ticket replay,
+  host exposure, unsafe cleanup, data loss, or false fleet authorization is
+  `BLOCKING`; capacity tuning is `FOLLOW_UP`; bounded runtime telemetry is
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-108: <acceptance evidence placeholder>` with non-empty runtime,
+  migration, security, deployment, E2E, and containment evidence.
+
+#### AUTH-109 — Runtime gateway/UI: audience roots and launch flow
+
+- **IN_SCOPE:** Provide runtime-specific HTTPS roots for the isolated Web, CLI,
+  and VS Code audiences; issue and consume audience-bound one-time launch tickets
+  with a TTL of 60 seconds or less; route each root only to the matching runtime
+  and principal; strip browser bearer/identity/proxy headers; add dashboard launch,
+  loading, expired-ticket, unavailable, and recovery states; preserve the shared
+  per-user runtime across Web/CLI/VS Code.
+- **OUT_OF_SCOPE:** Shared-origin subpath proxying, browser bearer exposure,
+  public signup, passkeys/SMS, runtime-container implementation, arbitrary
+  iframe permissions, and unrelated dashboard navigation redesign.
+- **Owner:** `@ingenium-software-engineer-fast`.
+- **Dependencies:** AUTH-108.
+- **Acceptance:** Each audience resolves to its own runtime HTTPS root and cannot
+  reach another audience/runtime; a launch ticket is bound to principal,
+  workspace/runtime, audience, origin, nonce, and expiry, is consumed once, and
+  never appears in logs/URLs after exchange; hostile/missing origins, wrong
+  audiences, foreign runtimes, expired/replayed tickets, and direct private
+  upstream access fail closed; Web/CLI/VS Code launch states are accessible and
+  pass changed-route desktop/mobile visual checks.
+- **STOP_CONDITION:** `PASS` after gateway/UI/API tests, security review,
+  deployed runtime health, fixture E2E, strict containment, 1440x900/390x844
+  visual evidence, and marker reconciliation; otherwise continue or permitted
+  escalation.
+- **Escalation:** Only unavailable configured HTTPS/browser/deployment access,
+  unauthorized destructive runtime action, a genuine origin/embedding product
+  decision or ambiguity, or bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns changed
+  route and passive relevant visual checks; `@ingenium-security-auditor` owns
+  origin, ticket, header, CSP, and permission review.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check the actual HTTPS roots and launch
+  routes.
+- **Rollback/safety:** Keep private upstream listeners private, use disposable
+  tickets/runtimes, retain failed gateway evidence, reject unknown hosts/origins,
+  and roll back only gateway/UI changes without deleting runtime volumes.
+- **Tests:** Root/audience routing; ticket hash/TTL/binding/one-time/replay;
+  origin/header/CSP/WebSocket negatives; Web/CLI/VS Code shared-runtime launch;
+  dashboard loading/error/recovery/accessibility; deployed roots/health; fixture
+  E2E; strict containment; 1440x900 and 390x844 screenshots and cleanup.
+- **Docs:** This roadmap; after verification update directly affected sections of
+  `docs/operations/deployment.md`, `docs/security/api-authentication.md`,
+  `docs/security/iframe-sandbox.md`, `docs/usage/opencode.md`,
+  `docs/usage/dashboard.md`, and `docs/concepts/conventions.md` only.
+- **Exclusive writer territory:** Runtime gateway configuration, launch-ticket
+  exchange, dashboard runtime launch components, and focused tests; no overlap
+  with container lifecycle internals.
+- **Phase/counts:** A9 runtime gateway/UI; 3 writers / 3 nonwriters; fast owns
+  dashboard/gateway integration, premium owns deployment, and docs owns
+  roadmap-only edits; barrier before AUTH-110.
+- **Verification plan:** Exercise each audience from the dashboard and direct
+  hostile-origin fixtures, inspect network/console/headers/DOM, deploy the
+  merged source, health-check each actual root, capture both viewports, run fixture
+  E2E and strict containment once, and rerun only the smallest causal regression.
+- **Causal remediation rule:** Fix the earliest host/origin/ticket/audience,
+  header/CSP, runtime URL, or UI state producer shown by gateway and browser
+  evidence; do not hide a routing failure behind a permanent unavailable state.
+- **Finding classification:** Ticket/origin bypass, cross-runtime routing,
+  browser credential leak, private upstream exposure, broken launch, or in-scope
+  visual/accessibility failure is `BLOCKING`; optional root aliases are
+  `FOLLOW_UP`; browser/network evidence is `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-109: <acceptance evidence placeholder>` with non-empty gateway,
+  UI, security, deployment, E2E, strict-containment, and visual evidence.
+
+#### AUTH-110 — Enforcement cutoff: tenant-required reads and writes
+
+- **IN_SCOPE:** Complete expand/dual-write/backfill/verify for migrations
+  093–100, run preservation and isolation audits, then enable the enforcement
+  cutoff across API, dashboard, MCP, mail, providers, vault, Docs, conversations,
+  automation, and runtime paths. Remove project-only/global fallback behavior
+  where it would bypass principal/org/ownership policy; retain installation
+  admin-only operational controls and explicit private/org ownership. Make
+  missing principal, tenant, ownership, or mapping fail closed.
+- **OUT_OF_SCOPE:** New features after cutoff, public signup, passkeys/SMS,
+  broad cleanup of unrelated legacy rows, Docs Workspace mutation, or rollback
+  by deleting migrated data.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-109 and migrations 093–100 complete.
+- **Acceptance:** All migration probes report complete applied state; dual-write
+  and backfill reconcile without ID/count/hash/FK loss; every scoped read/write
+  requires a principal and effective tenant/ownership decision; old fallback
+  paths cannot cross tenants; 401/403/404, CSRF, step-up, installation-only,
+  private-plaintext, scoped-token, and runtime-ticket contracts remain true;
+  failed verification leaves enforcement disabled and preserves recovery evidence.
+- **STOP_CONDITION:** `PASS` after cutoff rehearsal, preservation and tenant
+  isolation matrix, security review, current-source deployment/health, fixture
+  E2E, strict containment, applicable visual regressions, and marker
+  reconciliation; otherwise continue in expand mode or use permitted escalation.
+- **Escalation:** Only unavailable required deployment/database access,
+  unauthorized irreversible cutoff, a mutually exclusive rollout decision,
+  genuine ambiguity, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  bypass search, cutoff fail-closed behavior, and migration evidence.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart current merged source and health-check actual
+  routes before and after the cutoff.
+- **Rollback/safety:** Rehearse on an isolated copied database, snapshot before
+  cutoff, gate enforcement on complete evidence, retain dual-write compatibility
+  for the documented rollback window, and never use a broad fallback or delete
+  source rows to recover.
+- **Tests:** Probe-based migration matrix; dual-write/replay/backfill checks;
+  source-derived legacy-fallback search; full tenant/role/private/install matrix;
+  401/403/404/CSRF/step-up/token/ticket regressions; deployed health; fixture
+  E2E; strict containment; changed-route visual regression where applicable.
+- **Docs:** This roadmap; after verified cutoff update only directly affected
+  `docs/develop/database.md`, `docs/security/api-authentication.md`,
+  `docs/security/index.md`, `docs/concepts/architecture.md`,
+  `docs/develop/api.md`, `docs/operations/deployment.md`, and
+  `docs/develop/testing.md` sections.
+- **Exclusive writer territory:** Enforcement flags/middleware, final backfill
+  reconciliation, migration closure, and focused cutoff tests; no new product
+  feature territory overlap.
+- **Phase/counts:** A10 enforcement cutoff; 3 writers / 3 nonwriters; premium
+  owns cutoff/deployment, fast owns regression fixtures, and docs owns
+  roadmap-only edits; barrier before AUTH-111.
+- **Verification plan:** Run rehearsal and preservation manifests, inspect all
+  legacy fallback call sites, deploy/restart current source, health-check actual
+  routes before/after enabling enforcement, run tenant/security fixture E2E and
+  strict containment once, and fix/rerun only the smallest proving regression.
+- **Causal remediation rule:** Fix the first remaining unscoped read/write,
+  incomplete backfill, stale dual-write, or enforcement-flag boundary proven by
+  the audit; do not add a route-specific bypass.
+- **Finding classification:** Any bypass, data loss, tenant leak, false health,
+  unsafe cutoff, or failed preservation is `BLOCKING`; nonrequired legacy
+  cleanup is `FOLLOW_UP`; rollout manifests are `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+  matching `work-complete` after all gates; [ ] replace
+  `Evidence AUTH-110: <acceptance evidence placeholder>` with non-empty cutoff,
+  migration, security, deployment, E2E, containment, and isolation evidence.
+
+#### AUTH-111 — Release acceptance and final reconciliation
+
+- **IN_SCOPE:** Perform the complete approved multi-user release acceptance over
+  local/OIDC auth, bootstrap/recovery, invitations, verification/reset, TOTP and
+  recovery codes, sessions/devices, scoped API tokens, roles/audit/step-up,
+  resource/content/automation tenancy, MCP, isolated runtimes, audience-bound
+  HTTPS roots, deployment, and directly affected canonical documentation links.
+  Reconcile all roadmap markers, acceptance evidence placeholders, changed paths,
+  and TodoWrite state.
+- **OUT_OF_SCOPE:** New product decisions/features, passkeys, SMS, public signup,
+  unrelated docs cleanup, broad index regeneration, Docs Workspace mutation,
+  destructive production restore, and real credentials in default fixture gates.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** AUTH-110.
+- **Acceptance:** A rebuilt current source is deployed and all required services,
+  application health checks, actual API/dashboard/MCP/runtime HTTPS routes, and
+  process boundaries are healthy; fixture E2E passes with strict containment;
+  tenant isolation and migration-preservation matrices pass; security review
+  records no in-scope blocker; AUTH-103/AUTH-109 desktop/mobile visual gates and
+  the passive full-site sweep pass at 1440x900 and 390x844; directly affected
+  canonical auth/security/architecture/testing/deployment docs have verified
+  links/commands/policy wording; every completed task has evidence and no active
+  marker or TodoWrite item remains unreconciled.
+- **STOP_CONDITION:** `PASS` only after every acceptance item and evidence
+  reconciliation is complete. `STOP` or `CANCELLED` is terminal only when
+  explicitly requested; otherwise continue declared work or use only the
+  permitted escalation rule.
+- **Escalation:** Only unavailable required external credential/access after the
+  configured fixture path, unauthorized destructive action, a mutually exclusive
+  product decision, genuine ambiguity, or bounded diagnosis that cannot reproduce
+  a root cause.
+- **Verification owner:** `@ingenium-qa` owns one declared fixture/release pass;
+  `@ingenium-security-auditor` owns one bounded security pass; and
+  `@ingenium-qa-vision` owns the changed-route and passive desktop/mobile visual
+  gates. They report findings once and never dispatch follow-up work.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart the current merged source, verify image/source
+  provenance, and health-check actual routes and runtime roots.
+- **Rollback/safety:** Use disposable identities, organizations, resources,
+  runtimes, tokens, and tickets; preserve migration/runner/visual evidence;
+  clean only manifest-owned processes/ports/containers; never place secrets in
+  docs, screenshots, logs, or test artifacts; do not mutate production data.
+- **Tests:** Declared fixture production E2E and `npx tsx
+  tests/suite-containment-audit.ts --strict`; migration ID/count/hash/FK
+  preservation; complete tenant/role/private/install matrix; auth/recovery/
+  session/token/ticket security; deployed runtime health and actual routes;
+  1440x900/390x844 changed-route and passive full-site visual checks;
+  accessibility/console/network/browser cleanup; focused canonical-doc link,
+  command, format, append-only, and diff checks; final marker/TodoWrite audit.
+- **Docs:** Update only directly affected canonical repository files, with primary
+  links to `docs/security/api-authentication.md`, `docs/security/index.md`,
+  `docs/concepts/architecture.md`, `docs/develop/api.md`,
+  `docs/develop/database.md`, `docs/develop/testing.md`,
+  `docs/operations/deployment.md`, and relevant usage/configuration pages; never
+  mutate Docs Workspace.
+- **Exclusive writer territory:** Release evidence, final reconciliation, and
+  named directly affected docs only; no implementation writer overlap after
+  AUTH-110.
+- **Phase/counts:** A11 release acceptance; 1 writer / 3 nonwriters; premium owns
+  deployment/evidence, QA owns fixture acceptance, security owns review, and QA
+  vision owns visual gates; serialize any causal remediation in a new declared
+  wave rather than looping reviewers.
+- **Verification plan:** Rebuild/restart the current merged source, health-check
+  actual services/routes/HTTPS roots, run each declared fixture, strict,
+  migration-preservation, tenant-isolation, security, and visual gate once,
+  inspect links/commands/policy wording and browser cleanup, remediate only a
+  reproducible in-scope root cause with its minimum proving regression, then
+  reconcile markers/TodoWrite and every evidence placeholder.
+- **Causal remediation rule:** Name the first failing release boundary, fix only
+  that root cause within scope, rerun the smallest proving check (and the
+  originally declared review only when its boundary changed), then repeat final
+  reconciliation; a failed check alone is never escalation.
+- **Finding classification:** Failed security, isolation, preservation,
+  deployment/health, runtime, visual/accessibility, fixture/containment, link,
+  or final-reconciliation acceptance is `BLOCKING`; unrelated product/docs drift
+  is `FOLLOW_UP`; retained provenance and bounded test telemetry are
+  `INFORMATIONAL`.
+- **Markers/evidence:** [ ] append `work-started` after all predecessors pass;
+  [ ] append matching `work-complete` only after every release gate passes;
+  [ ] replace `Evidence AUTH-111: <acceptance evidence placeholder>` with the
+  complete deployment, health, E2E, strict-containment, tenant-isolation,
+  migration-preservation, security, visual, documentation, and final-reconcile
+  evidence.
 
 Each phase is a barrier. Standard allocation is **3 writers / 3 nonwriters**:
 writers are `@ingenium-docs` (docs territory), `@ingenium-software-engineer-fast`
