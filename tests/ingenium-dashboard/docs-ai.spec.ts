@@ -1,4 +1,4 @@
-import { expect, test, type Route } from "@playwright/test";
+import { expect, test, type Route } from "./fixture";
 
 const LARGE_DOCUMENT = `# Large architecture document\n\n${"bounded documentation content ".repeat(2_600)}`;
 const DOC_PAGE = {

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixture";
 import path from "path";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 import { visualQaArtifactDirectory } from "./visual-qa-artifacts";

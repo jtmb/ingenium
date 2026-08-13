@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixture";
 
 /**
  * E2E tests for the Vault (Secrets) first-run flow.

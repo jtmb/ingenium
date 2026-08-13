@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixture";
 
 /**
  * The default suite owns a high-port fixture, not the loopback-only VS Code

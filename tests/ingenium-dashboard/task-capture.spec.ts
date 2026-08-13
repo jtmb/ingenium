@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type APIResponse, type Page, type Request } from "@playwright/test";
+import { expect, test, type APIRequestContext, type APIResponse, type Page, type Request } from "./fixture";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const runtime = getDefaultSuiteRuntime();

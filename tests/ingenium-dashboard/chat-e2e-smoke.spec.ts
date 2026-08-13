@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixture";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const PIXEL_TOLERANCE = 1;

@@ -24,6 +24,7 @@ import {
   readProcStat,
   type ProcessIdentity,
 } from "./test-run-process-discovery";
+import { writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
 
 export { inspectProcessIdentity, type ProcessIdentity } from "./test-run-process-discovery";
 
@@ -37,6 +38,8 @@ export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
 // this bounded override local to its isolated API process; production retains
 // the configured default of 100 requests/minute.
 export const FIXTURE_API_RATE_LIMIT = 1_000;
+export const FIXTURE_OWNER_EMAIL = "playwright-owner@example.test";
+export const FIXTURE_OWNER_PASSWORD = "Playwright-fixture-password-2026!";
 
 interface CommandResult {
   code: number | null;
@@ -146,6 +149,78 @@ export async function provisionTestRunProject(
   updateTestRunManifest(context.manifestPath, {
     projectProvisionedAt: new Date().toISOString(),
   });
+}
+
+function cookieFromResponse(response: Response, name: string): string {
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+  const prefix = `${name}=`;
+  if (!cookie?.startsWith(prefix) || cookie.length === prefix.length) {
+    throw new Error(`Fixture authentication did not return ${name}`);
+  }
+  return cookie.slice(prefix.length);
+}
+
+async function fixtureRequest(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(FIXTURE_PROJECT_PROVISION_TIMEOUT_MS) });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to authenticate fixture dashboard: ${reason}`);
+  }
+}
+
+export async function provisionTestRunOwner(context: TestRunContext): Promise<void> {
+  const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
+  const operatorHeaders = { Authorization: `Bearer ${TEST_API_TOKEN}`, "Content-Type": "application/json" };
+  const claim = await fixtureRequest(`${apiBase}/bootstrap/claim`, {
+    method: "POST",
+    headers: operatorHeaders,
+    body: JSON.stringify({ email: FIXTURE_OWNER_EMAIL, displayName: "Playwright Owner", password: FIXTURE_OWNER_PASSWORD }),
+  });
+  if (claim.status !== 201 && claim.status !== 409) {
+    throw new Error(`Unable to claim fixture installation: API returned ${claim.status}`);
+  }
+}
+
+export async function createTestRunBrowserStorageState(context: TestRunContext) {
+  const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
+  const dashboardOrigin = `http://127.0.0.1:${context.ports.dashboard}`;
+  const csrf = await fixtureRequest(`${apiBase}/auth/csrf`, { headers: { Origin: dashboardOrigin } });
+  if (!csrf.ok) throw new Error(`Unable to initialize fixture login: API returned ${csrf.status}`);
+  const csrfBody = await csrf.json() as { data?: { csrfToken?: string } };
+  const csrfToken = csrfBody.data?.csrfToken;
+  if (!csrfToken) throw new Error("Fixture login did not return a CSRF token");
+  const preAuthCookie = cookieFromResponse(csrf, "__Host-ingenium_pre_auth");
+
+  const login = await fixtureRequest(`${apiBase}/auth/login`, {
+    method: "POST",
+    headers: {
+      Origin: dashboardOrigin,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+      Cookie: `__Host-ingenium_pre_auth=${preAuthCookie}`,
+    },
+    body: JSON.stringify({ email: FIXTURE_OWNER_EMAIL, password: FIXTURE_OWNER_PASSWORD, deviceLabel: "Playwright fixture" }),
+  });
+  if (!login.ok) throw new Error(`Unable to log in fixture dashboard: API returned ${login.status}`);
+  const sessionToken = cookieFromResponse(login, "__Host-ingenium_session");
+  return {
+    cookies: [{
+      name: "__Host-ingenium_session",
+      value: sessionToken,
+      domain: "127.0.0.1",
+      path: "/",
+      expires: Math.floor(Date.now() / 1000) + 12 * 60 * 60,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Strict",
+    }],
+    origins: [],
+  };
+}
+
+export async function provisionTestRunBrowserSession(context: TestRunContext): Promise<string> {
+  return writeDashboardStorageState(context, await createTestRunBrowserStorageState(context), true);
 }
 
 function npmCommand(): string {
@@ -1258,7 +1333,11 @@ export async function startTestServers(
       // this exact manifest-owned project. This is the boundary before any
       // project-scoped fixture write can occur; there is intentionally no
       // global-project fallback.
-      if (spec.name === "api") await provisionTestRunProject(context);
+      if (spec.name === "api") {
+        await provisionTestRunProject(context);
+        await provisionTestRunOwner(context);
+        await provisionTestRunBrowserSession(context);
+      }
       // The filesystem reservation protects the pre-listener race. The exact
       // readiness response is the ownership-transfer boundary; after it, the
       // child listener itself prevents another process from binding the port.

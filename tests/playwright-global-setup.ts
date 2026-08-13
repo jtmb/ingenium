@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { cleanupStaleTestRuns, readTestRunManifest } from "./test-run-context";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
+import { getDashboardStorageStatePath } from "./ingenium-dashboard/fixture-credentials";
 import {
   installRunSignalHandlers,
   startTestServers,
@@ -27,7 +29,7 @@ export default async function globalSetup(): Promise<void> {
       dashboardEnvironment: runtime.dashboardEnvironment,
     });
     const started = readTestRunManifest(context.manifestPath);
-    if (started.project !== context.project || !started.projectProvisionedAt) {
+    if (started.project !== context.project || !started.projectProvisionedAt || !existsSync(getDashboardStorageStatePath(started))) {
       throw new Error("Default Playwright fixture did not provision its manifest-owned project");
     }
   } catch (error) {

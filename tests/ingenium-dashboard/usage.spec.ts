@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture";
 
 const metric = (value: number | null, availability: "known" | "partial" | "unavailable" = value === null ? "unavailable" : "known") => ({ value, availability });
 

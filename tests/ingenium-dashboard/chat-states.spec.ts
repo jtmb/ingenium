@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixture";
 
 const CHAT_CONFIG_ROUTE = "**/api/v1/opencode/chat-config**";
 const CHAT_CONFIG_ERROR = "The Chat model catalog is temporarily unavailable. Try again later.";

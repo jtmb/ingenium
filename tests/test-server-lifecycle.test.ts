@@ -33,12 +33,17 @@ import globalTeardown from "./playwright-global-teardown";
 import {
   TEST_API_TOKEN,
   FIXTURE_API_RATE_LIMIT,
+  FIXTURE_OWNER_EMAIL,
+  FIXTURE_OWNER_PASSWORD,
   buildProductionArtifacts,
   captureSpawnedChildPgid,
   getServerSpecs,
   installRunSignalHandlers,
   inspectProcessIdentity,
   provisionTestRunProject,
+  createTestRunBrowserStorageState,
+  provisionTestRunBrowserSession,
+  provisionTestRunOwner,
   recoverStoppingTestRun,
   startTestServers,
   stopRunFromManifest,
@@ -47,7 +52,7 @@ import {
   waitForPortClosed,
   waitForReady,
 } from "./test-server-lifecycle";
-import { getDashboardFixtureEnvironment } from "./ingenium-dashboard/fixture-credentials";
+import { getDashboardFixtureEnvironment, getDashboardStorageStatePath } from "./ingenium-dashboard/fixture-credentials";
 
 const manifests: string[] = [];
 const telemetryRoots: string[] = [];
@@ -124,6 +129,69 @@ describe("test server lifecycle contracts", () => {
 
     const manifest = JSON.parse(readFileSync(context.manifestPath, "utf8")) as typeof context;
     expect(manifest.projectProvisionedAt).toBeUndefined();
+  });
+
+  it("claims an isolated owner and creates a fresh browser session", async () => {
+    const context = createTestRunContext({ ports: { api: 45196, dashboard: 45197, fixture: 45198 } });
+    track(context);
+    const csrfToken = "c".repeat(43);
+    const sessionToken = "s".repeat(43);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { csrfToken } }), {
+        status: 200,
+        headers: { "Set-Cookie": `__Host-ingenium_pre_auth=${csrfToken}; Path=/; Secure; HttpOnly` },
+      }))
+      .mockResolvedValueOnce(new Response("{}", {
+        status: 200,
+        headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await provisionTestRunOwner(context);
+    const storageState = await createTestRunBrowserStorageState(context);
+
+    expect(storageState.cookies).toEqual([expect.objectContaining({
+      name: "__Host-ingenium_session",
+      value: sessionToken,
+      secure: true,
+      httpOnly: true,
+    })]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_API_TOKEN}` },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      email: FIXTURE_OWNER_EMAIL,
+      displayName: "Playwright Owner",
+      password: FIXTURE_OWNER_PASSWORD,
+    });
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+      headers: {
+        Origin: `http://127.0.0.1:${context.ports.dashboard}`,
+        Cookie: `__Host-ingenium_pre_auth=${csrfToken}`,
+        "X-CSRF-Token": csrfToken,
+      },
+    });
+  });
+
+  it("persists the fixture browser session inside the run directory", async () => {
+    const context = createTestRunContext({ ports: { api: 45199, dashboard: 45200, fixture: 45210 } });
+    track(context);
+    const csrfToken = "c".repeat(43);
+    const sessionToken = "s".repeat(43);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { csrfToken } }), {
+        status: 200,
+        headers: { "Set-Cookie": `__Host-ingenium_pre_auth=${csrfToken}; Path=/; Secure; HttpOnly` },
+      }))
+      .mockResolvedValueOnce(new Response("{}", {
+        status: 200,
+        headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
+      })));
+
+    expect(await provisionTestRunBrowserSession(context)).toBe(getDashboardStorageStatePath(context));
+    expect(readFileSync(getDashboardStorageStatePath(context), "utf8")).toContain(sessionToken);
   });
 
   it("uses production dashboard startup and explicitly isolates all services", () => {

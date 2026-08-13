@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixture";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 /**

@@ -1,11 +1,11 @@
 import { setTimeout as delay } from "node:timers/promises";
 import {
   expect,
-  test as base,
   type BrowserContext,
   type Response,
   type Route,
 } from "@playwright/test";
+import { test as base } from "./fixture";
 
 export const GATEWAY_REQUESTS_PER_SECOND = 30;
 export const GATEWAY_BURST_REQUESTS = 60;

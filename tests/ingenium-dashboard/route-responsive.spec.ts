@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "./fixture";
 
 const PROJECT = "responsive-fixture";
 const LONG_TOKEN = "responsive-route-long-unbroken-content-".repeat(28);
