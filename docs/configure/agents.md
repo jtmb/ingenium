@@ -22,48 +22,13 @@ route-parity/manual suites require an explicitly declared `FULL_ACCEPTANCE`,
 release, or cross-cutting acceptance gate. `FULL_ACCEPTANCE` means the declared
 acceptance checks, not automatically every repository test.
 
-### Mandatory phase commit boundaries
+### Git and GitHub workflow
 
-The orchestrator owns every declared phase boundary. Each phase declaration
-includes **Phase ID**, **Begin SHA**, and **Expected end commit owner**. This
-applies to implementation, docs, QA-remediation, deployment-remediation,
-acceptance-fix, diagnosis, and review phases, including read-only phases with no
-repository changes.
-
-Before phase work, the owner runs:
-
-```bash
-scripts/phase-commit.sh begin <phase-id>
-```
-
-After the declared verification passes, writers return exact paths and the
-orchestrator explicitly stages only those paths before running:
-
-```bash
-scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'
-```
-
-The begin boundary requires a fully clean worktree, including non-ignored
-untracked files; a dirty pre-phase tree blocks dispatch and never authorizes
-committing unrelated changes. Unknown files, generated artifacts, secrets, and
-another worktree/session's changes are never staged. Amend and hook-bypass
-commits are forbidden. Each phase has exactly one begin marker followed by one
-terminal end/cancel commit; no ordinary commit may occur between those
-boundaries or outside an active phase. The orchestrator creates commits only
-through the helper, which uses standard Git hooks and rejects hook changes to
-the verified index. A failed pre-update hook leaves the phase active. A
-no-change diagnosis/review phase uses `--allow-empty`.
-No next phase dispatch occurs while state is open. Explicit STOP/CANCELLED uses
-clean-tree `scripts/phase-commit.sh cancel <phase-id> [reason]`; a failed end or
-cancel preserves resumable state. Deployment/source changes must be committed
-in the phase's terminal end/cancel commit before the next phase, and final
-reconciliation runs
-`scripts/phase-commit.sh verify-history [baseline..target]` to prove paired
-first-parent history after the active boundary closes. The orchestrator Bash
-permission block denies wildcard/broad Git first, allows the phase helper,
-read-only status/diff/log inspection, explicit staging, and declared
-verification commands, then denies direct commit/ref/push/reset,
-hook/config/index mutation, and amend patterns last.
+Manual and user-created commits are valid and never block continued agent work.
+Before committing, inspect `git status`, `git diff`, and recent `git log`, then
+stage only the intended paths. Use ordinary non-interactive Git for local commits
+and `gh` for GitHub pushes, pull requests, and checks. Never commit unrelated
+changes, rewrite published history, or force-push without explicit authorization.
 
 Before source edits, both software-engineer writers read
 `.opencode/skills/development-conventions/references/useful-comments/guidelines.md`.
@@ -177,7 +142,7 @@ This classification is permission-derived rather than based on task type: Docs a
 | # | Phase | Agent | Action |
 |---|-------|-------|--------|
 | 1 | **Plan** | User / Plan mode | Define the task or generate plan |
-| 2 | **Route** | `@ingenium-orchestrator` | Declare Phase ID, Begin SHA, expected end commit owner, IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification plan, escalation rule, counts, territories, dependencies, and targeted verification owner; begin the phase before dispatch |
+| 2 | **Route** | `@ingenium-orchestrator` | Declare IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification plan, escalation rule, counts, territories, dependencies, and targeted verification owner before dispatch |
 | 3 | **Fast** | `ingenium-software-engineer-fast` | Routine isolated work — single-package scope |
 | 4 | **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work — auth, migrations, Docker, multi-service, cross-package, high-risk |
 | 5 | **Verify** | `@ingenium-qa` | One targeted QA pass after an implementation wave; sole owner of a declared full E2E/container suite |
@@ -224,7 +189,7 @@ Example implementation phase: **5 active, 3 writers** — Fast owns `dashboard/`
 
 ### Finite Task and Phase Declaration
 
-Before dispatch, every task declares **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification plan, and escalation rule. Every phase additionally declares **Phase ID**, **Begin SHA**, and **Expected end commit owner**, then opens with `scripts/phase-commit.sh begin <phase-id>`. The verification plan names targeted checks, deployment/acceptance steps, the bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for every remediation. A check failure or retry count alone never returns **ESCALATE_USER**: reproducible in-scope defects are fixed and reverified automatically. The phase ends only after verification with the explicit `end` command; read-only phases use `--allow-empty`.
+Before dispatch, every task declares **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification plan, and escalation rule. The verification plan names targeted checks, deployment/acceptance steps, the bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for every remediation. A check failure or retry count alone never returns **ESCALATE_USER**: reproducible in-scope defects are fixed and reverified automatically.
 
 Every orchestration phase also declares active count (max 6), writer count (max 3), exclusive territories (zero overlap), dependencies (serialization order), and the targeted verification owner/checks. Findings are **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**; a finding is BLOCKING only when it fails acceptance criteria in user scope or is immediately exploitable changed code. Only in-scope BLOCKING findings reopen work. FOLLOW_UP findings are reported separately and never auto-dispatched. Each remediation must name and address the currently failing root cause.
 
@@ -232,7 +197,7 @@ QA and security each run once after an implementation wave, Docs runs only for d
 
 ### 🔴 Autonomous Roadmap Completion Contract
 
-Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. Before the final response, reconcile roadmap markers and `TodoWrite`, then run `scripts/phase-commit.sh verify-history [baseline..target]` after the final end/cancel as the final pairing/history gate.
+Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. Before the final response, reconcile roadmap markers and `TodoWrite`.
 
 QA and security may report scope-classified BLOCKING/FOLLOW_UP findings once per their declared bounded phase. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. The orchestrator remediates a reproducible in-scope blocker and runs its minimum targeted regression; it does not create another reviewer chain unless the changed review boundary requires the original declared check.
 

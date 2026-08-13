@@ -13,37 +13,13 @@ Verification plan: targeted checks, deployment/acceptance steps, bounded diagnos
 Escalation rule: evidence for one of the five permitted ESCALATE_USER conditions only
 ```
 
-## Phase Commit Contract
+## Git and GitHub Workflow
 
-Every declared implementation, docs, QA-remediation, deployment-remediation,
-acceptance-fix, diagnosis, and review phase has these declaration fields:
-
-```text
-Phase ID: <lowercase phase slug>
-Begin SHA: <recorded by successful begin>
-Expected end commit owner: <one named boundary owner>
-```
-
-The boundary owner runs `scripts/phase-commit.sh begin <phase-id>` before work
-and, after verification, runs
-`scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'`.
-Begin requires a fully clean worktree, including non-ignored untracked files;
-dirty pre-phase work blocks dispatch and never authorizes unrelated commits.
-Writers return exact paths, and only those paths are explicitly staged. Unknown
-files, generated artifacts, secrets, other worktree/session changes, amend
-commits, direct Git mutation, and hook bypasses are forbidden. Each phase has
-exactly one begin marker and one terminal end/cancel commit; no ordinary commit
-may occur between those boundaries or outside an active phase. All commits are
-created by the helper with standard Git hooks enabled. A read-only phase with no
-changes ends with `--allow-empty`.
-
-No next phase may dispatch while state is open. Explicit STOP/CANCELLED uses
-clean-tree `scripts/phase-commit.sh cancel <phase-id> [reason]`; failed end or
-cancel leaves resumable state. Deployment/source changes must be committed in
-the current phase before the next phase. Final reconciliation must pass
-`scripts/phase-commit.sh verify-history [baseline..target]` and prove paired
-first-parent boundaries after end or cancel. Pre-end validation may defer this
-closed-history check while the active boundary remains open.
+Manual and user-created commits are valid and never block continued work. Before
+committing, inspect `git status`, `git diff`, and recent `git log`; stage only
+intended paths and never include unrelated changes. Use ordinary non-interactive
+Git for local commits and `gh` for GitHub pushes, pull requests, and checks. Never
+rewrite published history or force-push without explicit authorization.
 
 ## Findings
 

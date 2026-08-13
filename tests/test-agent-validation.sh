@@ -529,12 +529,6 @@ validate_orchestrator_bash_permissions() {
   declare -A expected_rules=(
     ["*"]='deny'
     ['git *']='deny'
-    ['scripts/phase-commit.sh begin *']='allow'
-    ['scripts/phase-commit.sh end *']='allow'
-    ['scripts/phase-commit.sh cancel *']='allow'
-    ['scripts/phase-commit.sh status']='allow'
-    ['scripts/phase-commit.sh verify-history']='allow'
-    ['scripts/phase-commit.sh verify-history *']='allow'
     ['git status']='allow'
     ['git status *']='allow'
     ['git diff']='allow'
@@ -543,8 +537,8 @@ validate_orchestrator_bash_permissions() {
     ['git log *']='allow'
     ['git add *']='allow'
     ['git rev-parse --short HEAD']='allow'
-    ['git commit']='deny'
-    ['git commit *']='deny'
+    ['git commit -m *']='allow'
+    ['gh *']='allow'
     ['git commit --amend*']='deny'
     ['git commit-tree']='deny'
     ['git commit-tree *']='deny'
@@ -654,7 +648,7 @@ validate_orchestrator_bash_permissions() {
   done
 
   if [[ "$errors" -eq 0 ]]; then
-    pass "orchestrator has deny-by-default bash permissions limited to phase boundaries, Git coordination, and verification"
+    pass "orchestrator has deny-by-default bash permissions limited to ordinary Git/GitHub coordination and verification"
     return 0
   fi
   return 1
@@ -1886,15 +1880,33 @@ if [[ "$causal_policy_errors" -eq 0 ]]; then
   pass "causal task contracts, bounded diagnosis, cancellation, and non-recursive policy invariants hold"
 fi
 
-phase_status=""
-if ! phase_status="$("$REPO_ROOT/scripts/phase-commit.sh" status)"; then
-  fail "phase commit status must be readable"
-elif [[ "$phase_status" == active\ phase:* ]]; then
-  pass "phase commit history is deferred while the active phase is valid"
-elif ! "$REPO_ROOT/scripts/phase-commit.sh" verify-history; then
-  fail "phase commit history must be closed and valid"
+for removed_phase_path in \
+  "$REPO_ROOT/scripts/phase-commit.sh" \
+  "$REPO_ROOT/config/phase-commit.conf" \
+  "$REPO_ROOT/tests/test-phase-commit.sh"; do
+  if [[ -e "$removed_phase_path" ]]; then
+    fail "obsolete phase commit path still exists: ${removed_phase_path#"$REPO_ROOT"/}"
+  fi
+done
+
+ORDINARY_GIT_POLICY_SOURCES=(
+  "${DOCUMENTED_POLICY_SOURCES[@]}"
+  "$REPO_ROOT/docs/develop/testing.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/SKILL.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/finite-task-contract.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/references/orchestrator-flow.md"
+)
+
+if grep -Eqi 'phase-commit|Phase ID|Begin SHA|Expected end commit owner|verify-history|active phase|phase boundary' "${ORDINARY_GIT_POLICY_SOURCES[@]}"; then
+  fail "active workflow authority still contains obsolete phase commit machinery"
+elif ! grep -Fq "Manual and user-created commits are valid" "${DOCUMENTED_POLICY_SOURCES[@]}" || \
+     ! grep -Fq "ordinary non-interactive Git" "${DOCUMENTED_POLICY_SOURCES[@]}" || \
+     ! grep -Fq '`gh`' "${DOCUMENTED_POLICY_SOURCES[@]}" || \
+     ! grep -Fq "never block continued" "${DOCUMENTED_POLICY_SOURCES[@]}"; then
+  fail "active workflow authority does not document the ordinary Git/GitHub workflow"
 else
-  pass "phase commit history is closed and valid"
+  pass "phase commit machinery is removed and ordinary Git/GitHub workflow is authoritative"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then exit 1; fi

@@ -27,24 +27,13 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 - **Mandatory phase declarations** — include active count, writer count, ownership paths, dependencies, verification owner, and targeted checks in the verification plan
 - **Duplicate writer instances** are valid only for separate, non-overlapping territories
 
-## 🔴 HARD RULEs — Phase Commit Boundaries
+## 🔴 HARD RULEs — Git and GitHub Workflow
 
-Every declared implementation, docs, QA-remediation, deployment-remediation,
-acceptance-fix, diagnosis, and review phase begins with
-`scripts/phase-commit.sh begin <phase-id>` and ends after verification with
-`scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'`.
-Each declaration records **Phase ID**, **Begin SHA**, and **Expected end commit
-owner**. A dirty pre-phase tree blocks dispatch. Writers return exact paths and
-the boundary owner stages only those paths; unknown/generated/secret files and
-other worktree changes are never staged, and amend or hook-bypass commits are
-forbidden. Each phase has exactly one begin marker and one terminal end/cancel
-commit; no ordinary commit may occur between those boundaries or outside an
-active phase. All commit creation goes through the phase helper, whose normal
-Git hooks remain enabled. No next phase dispatch occurs while state is open. Explicit
-STOP/CANCELLED uses clean-tree `cancel`; failed boundaries preserve resumable
-state. Deployment/source changes are committed before the next phase, and the
-final gate is `scripts/phase-commit.sh verify-history [baseline..target]` after
-the active boundary has closed.
+Manual and user-created commits are valid and never block continued work. Before
+committing, inspect status, diff, and recent log, then stage only intended paths.
+Use ordinary non-interactive Git for local commits and `gh` for GitHub pushes,
+pull requests, and checks. Never commit unrelated changes, rewrite published
+history, or force-push without explicit authorization.
 
 ## 🔴 HARD RULEs — Bounded Quality Gates
 

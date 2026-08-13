@@ -41,28 +41,14 @@ Every orchestration phase must declare:
 3. **Ownership paths** — each writer's exclusive territory
 4. **Dependencies** — writers that must complete before others start
 5. **Verification owner and plan** — targeted checks, owner, phase number, and declared execution sequence
-6. **Phase ID** — lowercase slug passed to `phase-commit.sh`
-7. **Begin SHA** — recorded after the successful begin marker
-8. **Expected end commit owner** — one named boundary owner
 
-### Mandatory phase boundaries
+### Git and GitHub workflow
 
-Every implementation, docs, QA-remediation, deployment-remediation,
-acceptance-fix, diagnosis, and review phase starts with
-`scripts/phase-commit.sh begin <phase-id>` and ends after verification with
-`scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'`.
-Read-only phases use `--allow-empty` when no repository changes exist. Begin
-requires a clean worktree; dirty pre-phase paths block dispatch and never
-authorize unrelated commits. The orchestrator stages only exact writer-returned
-paths and never stages unknown/generated/secret files or another worktree's
-changes. No next phase starts while state is open. Clean-tree STOP/CANCELLED
-uses `cancel`; boundary failure preserves resumable state. Deployment/source
-changes must be committed in the phase's single terminal end/cancel commit; no
-ordinary commit may occur between the begin and end/cancel markers or outside
-an active phase. All commits go through the helper with standard Git hooks
-enabled, followed by the mandatory
-`scripts/phase-commit.sh verify-history [baseline..target]` reconciliation
-after the boundary closes.
+Manual and user-created commits are valid and never block continued work. Before
+a requested local commit, inspect status, diff, and recent log, then stage only
+intended paths. Use ordinary non-interactive Git locally and `gh` for GitHub
+pushes, pull requests, and checks. Never commit unrelated changes, rewrite
+published history, or force-push without explicit authorization.
 
 Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven; never report completion from source tests alone. Runtime-impacting changes require a named, authorized writer deployment owner with Docker/Compose permission and a deployment wave to rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success, and roadmap markers plus `TodoWrite` are reconciled before the final response.
 
@@ -72,9 +58,6 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 
 ```text
 Phase: "Implement auth + email + dashboard widgets" — Wave 1 (5 active, 3 writers)
-  Phase ID: implement-auth-email-dashboard
-  Begin SHA: recorded by successful `begin`
-  Expected end commit owner: @ingenium-orchestrator
   @ingenium-software-engineer-premium → packages/ingenium-core/auth/     (writer)
   @ingenium-software-engineer-premium → services/ingenium-api/email/    (writer)
   @ingenium-software-engineer-fast    → services/ingenium-dashboard/components/ (writer)

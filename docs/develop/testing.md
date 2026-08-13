@@ -25,45 +25,13 @@ When a focused Playwright run uses the fixture, follow it with
 prove that the run-owned processes and ports were contained. Ordinary feature
 work must not expand into root tests or broad suites.
 
-## Phase-boundary verification and commits
+## Git and GitHub workflow
 
-The orchestrator owns the boundary for every declared implementation, docs,
-QA-remediation, deployment-remediation, acceptance-fix, diagnosis, and review
-phase. The declaration records **Phase ID**, **Begin SHA**, and **Expected end
-commit owner**. The owner begins before work and ends only after the declared
-verification:
-
-```bash
-scripts/phase-commit.sh begin <phase-id>
-# run the declared checks
-scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'
-```
-
-Read-only diagnosis/review phases still require both commands; use
-`--allow-empty` when no repository changes exist. A dirty pre-phase worktree,
-including non-ignored untracked files, blocks dispatch and is not permission to
-commit unrelated changes. Writers return exact paths; the orchestrator stages
-only those paths and never stages unknown files, generated artifacts, secrets,
-or another worktree/session's changes. Each phase has exactly one begin marker
-and one terminal end/cancel commit; no ordinary commit may occur between those
-boundaries or outside an active phase. All commits go through the helper with
-standard Git hooks enabled; the helper revalidates the bound ref/index and
-rejects hook changes to the verified index. Amend and hook-bypass commits are
-not allowed.
-
-No next phase may dispatch while phase state is open. Explicit STOP/CANCELLED
-uses `scripts/phase-commit.sh cancel <phase-id> [reason]` only from a clean tree;
-failed boundary commands preserve resumable state. Deployment/source changes
-made within a phase must be committed in that phase's terminal end/cancel
-commit. Pre-end validation may defer closed-history validation while the active
-boundary is open; the final reconciliation gate is:
-
-```bash
-scripts/phase-commit.sh verify-history [baseline..target]
-```
-
-It must confirm that first-parent phase boundaries are paired and closed.
-Run it after end or cancel and before dispatching the next phase.
+Manual and user-created commits are valid and never block continued work. Before
+committing, inspect `git status`, `git diff`, and recent `git log`, then stage only
+the intended paths. Use ordinary non-interactive Git for local commits and `gh`
+for GitHub pushes, pull requests, and checks. Never commit unrelated changes,
+rewrite published history, or force-push without explicit authorization.
 
 ## Context-native upload verification
 

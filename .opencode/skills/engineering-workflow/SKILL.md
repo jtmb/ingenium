@@ -29,45 +29,13 @@ While any roadmap task or `TodoWrite` item remains open, the orchestrator must n
 
 Every agent task must self-verify: run typechecks, tests, lints before returning results. Never ask the user to verify — do it yourself. No simulated testing.
 
-### 🔴 Mandatory Phase Commit Boundaries
+### 🔴 Git and GitHub Workflow
 
-The configured `scripts/phase-commit.sh` contract is mandatory for every
-declared implementation, docs, QA-remediation, deployment-remediation, and
-acceptance-fix phase. Read-only diagnosis and review phases also require both
-boundaries, even when they produce no repository changes:
-
-```bash
-scripts/phase-commit.sh begin <phase-id>
-scripts/phase-commit.sh end [--allow-empty] <phase-id> '<semantic commit message>'
-```
-
-`begin` runs before work, records the begin SHA, and opens protected state only
-from a fully clean worktree, including non-ignored untracked files. A dirty
-pre-phase tree blocks dispatch; it is never permission to commit unrelated
-changes. Writers return exact paths, and the orchestrator stages only those
-intended paths before `end`. Unknown files, generated artifacts, secrets,
-another worktree/session's changes, amend commits, and hook bypasses are never
-accepted. A verified no-change phase uses `--allow-empty`.
-
-Each phase has exactly one begin marker followed by one terminal end or cancel
-commit. No ordinary commit may occur between those boundaries or outside an
-active phase; the orchestrator creates commits only through the phase helper.
-Its Bash permissions are ordered for last-match semantics: wildcard/broad Git
-denials, helper and read-only inspection allows, then direct commit/ref/push/
-reset, hook/config/index mutation, and amend denials. The helper uses standard
-Git hooks, revalidates the bound ref and index after each pre-update hook, and
-rejects hook changes to the verified index; a failed pre-update hook leaves the
-phase active for correction.
-
-No next phase dispatch is allowed while state is open. Explicit STOP/CANCELLED
-uses only `scripts/phase-commit.sh cancel <phase-id> [reason]` from a clean tree;
-it does not absorb dirty work. A failed end or cancel preserves resumable phase
-state, and a failed begin writes no state. Deployment/source changes made within
-a phase must be in its end commit before the next phase. Final reconciliation
-must pass `scripts/phase-commit.sh verify-history [baseline..target]` with every
-first-parent begin paired to its matching end or authorized cancel.
-The history check may be deferred during pre-end validation while the active
-boundary is open, but must pass after end or cancel and before the next phase.
+Manual and user-created commits are valid and never block continued work. Before
+committing, inspect `git status`, `git diff`, and recent `git log`; stage only
+intended paths and never include unrelated changes. Use ordinary non-interactive
+Git for local commits and `gh` for GitHub pushes, pull requests, and checks. Never
+rewrite published history or force-push without explicit authorization.
 
 ### 🔴 Isolate Before You Fix
 
@@ -95,14 +63,11 @@ Valid example: one phase with Fast, Docs, and Browser writers plus QA, Explore, 
 
 Every phase declaration must record:
 
-1. **Phase ID** — lowercase slug passed to `phase-commit.sh`
-2. **Begin SHA** — recorded after the successful begin marker
-3. **Expected end commit owner** — one named boundary owner
-4. **Active count** — total subagents (max 6)
-5. **Writer count** — total writers (max 3)
-6. **Exclusive territories** — file/directory ownership per writer; zero overlap
-7. **Dependencies** — serialization order for writers sharing territories across waves
-8. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
+1. **Active count** — total subagents (max 6)
+2. **Writer count** — total writers (max 3)
+3. **Exclusive territories** — file/directory ownership per writer; zero overlap
+4. **Dependencies** — serialization order for writers sharing territories across waves
+5. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
 
 ### 🔴 Agent Output Must Be Direct and Uncensored
 
