@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import { context, contextConversations, contextRag } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { authorization, context, contextConversations, contextRag, getDb } from "ingenium-core";
+import { requestAuthorizationPrincipal, requestContentActor, requireContentAccess, requireProject } from "../helpers.js";
 import { executeSynthesisBroker } from "../opencode-client.js";
 
 /**
@@ -76,6 +76,12 @@ function listOptions(req: Request): { limit?: number; cursor?: string } {
   };
 }
 
+function contextOwnerScope(req: Request): string | null | undefined {
+  if (!req.authorizationPolicy) return undefined;
+  const principal = requestAuthorizationPrincipal(req);
+  return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
+}
+
 function sendContextRagError(res: Response, error: unknown): void {
   if (!(error instanceof contextRag.ContextRagError)) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to process context RAG data" } });
@@ -91,6 +97,7 @@ function sendContextRagError(res: Response, error: unknown): void {
     UPLOAD_SIZE_MISMATCH: 413,
     IDEMPOTENCY_KEY_REUSED: 409,
     CHECKPOINT_RAG_SOURCE_NOT_FOUND: 404,
+    CONTENT_SCOPE_CONFLICT: 409,
     LEARNING_NO_INPUT: 409,
   };
   const messageByCode: Record<contextRag.ContextRagErrorCode, string> = {
@@ -103,6 +110,7 @@ function sendContextRagError(res: Response, error: unknown): void {
     UPLOAD_SIZE_MISMATCH: "Uploaded content exceeds the declared or allowed size",
     IDEMPOTENCY_KEY_REUSED: "Idempotency key was already used with a different request",
     CHECKPOINT_RAG_SOURCE_NOT_FOUND: "Checkpoint RAG source was not found",
+    CONTENT_SCOPE_CONFLICT: "Matching content exists outside the authenticated content scope",
     LEARNING_NO_INPUT: "No current learning input is available",
   };
   res.status(statusByCode[error.code]).json({
@@ -133,6 +141,33 @@ function contextRagSourceCreateDto(result: contextRag.ContextRagUploadResult) {
   return { ...source, deduplicated: result.deduplicated };
 }
 
+function requireContextSource(req: Request, res: Response, projectId: string, sourceId: string): boolean {
+  const source = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT id, organization_id, project_id, visibility, owner_user_id FROM rag_sources WHERE id = ? AND project_id = ?",
+  ).get(sourceId, projectId) as { id: string; organization_id: string; project_id: string; visibility: "organization" | "project" | "restricted"; owner_user_id: string | null } | undefined;
+  if (!source) return false;
+  return requireContentAccess(req, res, {
+    resourceType: "rag_source", resourceId: source.id,
+    organizationId: source.organization_id, projectId: source.project_id,
+    visibility: source.visibility, ownerUserId: source.owner_user_id,
+  });
+}
+
+function requireContextUpload(req: Request, res: Response, projectId: string, uploadId: string): boolean {
+  const upload = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT id, organization_id, project_id, visibility, owner_user_id FROM context_rag_upload_sessions WHERE id = ? AND project_id = ?",
+  ).get(uploadId, projectId) as { id: string; organization_id: string; project_id: string; visibility: "organization" | "project" | "restricted"; owner_user_id: string | null } | undefined;
+  if (!upload) {
+    res.status(404).json({ error: { code: "UPLOAD_NOT_FOUND", message: "Context upload was not found" } });
+    return false;
+  }
+  return requireContentAccess(req, res, {
+    resourceType: "rag_source", resourceId: upload.id,
+    organizationId: upload.organization_id, projectId: upload.project_id,
+    visibility: upload.visibility, ownerUserId: upload.owner_user_id,
+  });
+}
+
 function checkpointForProject(
   projectId: string,
   conversationId: string,
@@ -145,7 +180,11 @@ contextRouter.post("/uploads", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const result = contextRag.ingestContextRagDocument(projectId, req.body ?? {});
+    const actor = requestContentActor(req, projectId);
+    const result = contextRag.ingestContextRagDocument(projectId, {
+      ...(req.body ?? {}), organizationId: actor?.organizationId,
+      ownerUserId: actor?.ownerUserId, visibility: actor?.ownerUserId ? "restricted" : "project",
+    });
     res.status(result.deduplicated ? 200 : 201).json({ data: contextRagUploadDto(result) });
   } catch (error) {
     sendContextRagError(res, error);
@@ -158,7 +197,11 @@ contextRouter.post("/sources", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const result = contextRag.ingestContextRagDocument(projectId, req.body ?? {});
+    const actor = requestContentActor(req, projectId);
+    const result = contextRag.ingestContextRagDocument(projectId, {
+      ...(req.body ?? {}), organizationId: actor?.organizationId,
+      ownerUserId: actor?.ownerUserId, visibility: actor?.ownerUserId ? "restricted" : "project",
+    });
     res.status(result.deduplicated ? 200 : 201).json({ data: contextRagSourceCreateDto(result) });
   } catch (error) {
     sendContextRagError(res, error);
@@ -170,7 +213,11 @@ contextRouter.post("/uploads/chunked", (req, res) => {
   if (!projectId) return;
   try {
     const body = mutationInput(req);
-    const result = contextRag.createContextRagUploadSession(projectId, body);
+    const actor = requestContentActor(req, projectId);
+    const result = contextRag.createContextRagUploadSession(projectId, {
+      ...body, organizationId: actor?.organizationId,
+      ownerUserId: actor?.ownerUserId, visibility: actor?.ownerUserId ? "restricted" : "project",
+    });
     if (result.upload && result.source) {
       res.status(200).json({ data: { ...contextRagUploadDto({ upload: result.upload, source: result.source, deduplicated: true }), session: null } });
       return;
@@ -198,6 +245,7 @@ contextRouter.post("/uploads/chunked", (req, res) => {
 contextRouter.post("/uploads/:uploadId/chunks", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireContextUpload(req, res, projectId, req.params.uploadId!)) return;
   try {
     const result = contextRag.appendContextRagUploadChunk(projectId, req.params.uploadId!, req.body ?? {});
     res.status(result.idempotent ? 200 : 201).json({
@@ -211,6 +259,7 @@ contextRouter.post("/uploads/:uploadId/chunks", (req, res) => {
 contextRouter.post("/uploads/:uploadId/complete", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireContextUpload(req, res, projectId, req.params.uploadId!)) return;
   try {
     const result = contextRag.completeContextRagUpload(projectId, req.params.uploadId!);
     res.json({ data: contextRagUploadDto(result) });
@@ -222,7 +271,7 @@ contextRouter.post("/uploads/:uploadId/complete", (req, res) => {
 contextRouter.get("/uploads", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const page = contextRag.listContextRagUploads(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0);
+  const page = contextRag.listContextRagUploads(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0, contextOwnerScope(req));
   res.json({
     data: page.data.map(contextRagUploadDto),
     total: page.total,
@@ -234,7 +283,7 @@ contextRouter.get("/uploads", (req, res) => {
 contextRouter.get("/sources", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const page = contextRag.listContextRagSources(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0);
+  const page = contextRag.listContextRagSources(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0, contextOwnerScope(req));
   res.json(page);
 });
 
@@ -246,6 +295,7 @@ function searchContextSources(req: Request, res: Response): void {
       projectId,
       typeof req.query.q === "string" ? req.query.q : "",
       req.query.limit === undefined ? 20 : Number(req.query.limit),
+      contextOwnerScope(req),
     );
     res.json({ data: result.citations, total: result.citations.length });
   } catch (error) {
@@ -261,6 +311,7 @@ function searchContextSourceMetadata(req: Request, res: Response): void {
       projectId,
       typeof req.query.q === "string" ? req.query.q : "",
       req.query.limit === undefined ? 20 : Number(req.query.limit),
+      contextOwnerScope(req),
     );
     const seen = new Set<string>();
     const sources = results.flatMap((hit) => {
@@ -280,7 +331,7 @@ contextRouter.get("/sources/search", searchContextSourceMetadata);
 contextRouter.get("/sources/summary", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const page = contextRag.listContextRagSources(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0);
+  const page = contextRag.listContextRagSources(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0, contextOwnerScope(req));
   res.json({
     ...page,
     data: page.data.map(({ id, title, provenance, createdAt }) => ({ id, title, provenance, createdAt })),
@@ -291,7 +342,8 @@ contextRouter.get("/sources/:sourceId", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const source = contextRag.getContextRagSource(projectId, req.params.sourceId!);
-  if (!source) {
+  if (!source || !requireContextSource(req, res, projectId, req.params.sourceId!)) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "CONTEXT_SOURCE_NOT_FOUND", message: "Context source not found" } });
     return;
   }
@@ -305,7 +357,7 @@ contextRouter.post("/rag/ask", async (req, res) => {
   if (!projectId) return;
   try {
     const question = req.body?.question;
-    const result = contextRag.searchContextRag(projectId, question, 10);
+    const result = contextRag.searchContextRag(projectId, question, 10, contextOwnerScope(req));
     if (result.results.length === 0) {
       res.json({ data: { answer: "I don't have enough context to answer that question.", citations: [] } });
       return;
@@ -338,7 +390,7 @@ contextRouter.post("/rag/ask", async (req, res) => {
 contextRouter.get("/learning/current", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const learning = contextRag.getCurrentLearningContext(projectId, Number(req.query.limit) || 20);
+  const learning = contextRag.getCurrentLearningContext(projectId, Number(req.query.limit) || 20, contextOwnerScope(req));
   res.json({ data: learning });
 });
 
@@ -346,7 +398,7 @@ contextRouter.post("/learning/ingest", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const result = contextRag.ingestCurrentLearningContext(projectId, req.body ?? {});
+    const result = contextRag.ingestCurrentLearningContext(projectId, req.body ?? {}, contextOwnerScope(req));
     if (result.noOp) {
       res.json({ data: { noOp: true, reason: result.reason, learning: result.learning } });
       return;
@@ -363,11 +415,37 @@ contextRouter.post("/conversations", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const conversation = contextConversations.createContextConversation(projectId, mutationInput(req));
+    const actor = requestContentActor(req, projectId);
+    const input = mutationInput(req);
+    const conversation = contextConversations.createContextConversation(projectId, {
+      ...input,
+      organizationId: actor?.organizationId,
+      ownerUserId: actor?.ownerUserId,
+      visibility: input.visibility ?? (actor?.ownerUserId ? "private" : "project"),
+    });
     res.status(201).json({ data: conversation });
   } catch (error) {
     sendConversationError(res, error);
   }
+});
+
+contextRouter.param("conversationId", (req, res, next, conversationId) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const conversation = contextConversations.getContextConversation(projectId, conversationId);
+  if (!conversation) {
+    res.status(404).json({ error: { code: "CONVERSATION_NOT_FOUND", message: "Context conversation not found" } });
+    return;
+  }
+  if (!requireContentAccess(req, res, {
+    resourceType: "context_conversation",
+    resourceId: conversation.id,
+    organizationId: conversation.organization_id,
+    projectId: conversation.project_id,
+    visibility: conversation.visibility,
+    ownerUserId: conversation.owner_user_id,
+  })) return;
+  next();
 });
 
 // Preview is content-free and side-effect free. It never supplies an implicit
@@ -376,7 +454,16 @@ contextRouter.post("/conversations/maintenance/preview", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    res.json({ data: contextConversations.previewContextMaintenance(projectId, req.body ?? {}) });
+    const principal = requestAuthorizationPrincipal(req);
+    const data = contextConversations.previewContextMaintenance(projectId, req.body ?? {}).filter((candidate) => {
+      const conversation = contextConversations.getContextConversation(projectId, candidate.conversationId);
+      return conversation && authorization.requireContentPermission(principal, {
+        resourceType: "context_conversation", resourceId: conversation.id,
+        organizationId: conversation.organization_id, projectId: conversation.project_id,
+        visibility: conversation.visibility, ownerUserId: conversation.owner_user_id,
+      }, req.authorizationPolicy?.permission ?? "read").allowed;
+    });
+    res.json({ data });
   } catch (error) {
     sendConversationError(res, error);
   }
@@ -386,7 +473,14 @@ contextRouter.get("/conversations", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    res.json({ data: contextConversations.listContextConversations(projectId, listOptions(req)) });
+    const principal = requestAuthorizationPrincipal(req);
+    const page = contextConversations.listContextConversations(projectId, listOptions(req));
+    page.data = page.data.filter((conversation) => authorization.requireContentPermission(principal, {
+      resourceType: "context_conversation", resourceId: conversation.id,
+      organizationId: conversation.organization_id, projectId: conversation.project_id,
+      visibility: conversation.visibility, ownerUserId: conversation.owner_user_id,
+    }, req.authorizationPolicy?.permission ?? "read").allowed);
+    res.json({ data: page });
   } catch (error) {
     sendConversationError(res, error);
   }

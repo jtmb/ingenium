@@ -1,12 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projects, resetDbForTest } from "ingenium-core";
+import { identity, organizations, projects, resetDbForTest } from "ingenium-core";
 import { contextRouter } from "../lib/routes/context.js";
+import { ragRouter } from "../lib/routes/rag.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 
 const directory = mkdtempSync(join(tmpdir(), "ingenium-context-conversations-api-"));
 const databasePath = join(directory, "data.db");
@@ -268,5 +271,71 @@ describe("immutable context conversation API", () => {
     });
     expect(appendArchived.status).toBe(409);
     expect((await json(appendArchived)).error.code).toBe("CONVERSATION_ARCHIVED");
+  });
+
+  it("returns a body-free 404 when an organization administrator requests another user's private conversation", async () => {
+    const owner = identity.createUser("api-private-owner@example.test", "API Private Owner");
+    const admin = identity.createUser("api-content-admin@example.test", "API Content Admin");
+    organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, owner.id, "admin");
+    organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, admin.id, "admin");
+    const authorized = express();
+    authorized.use(express.json());
+    authorized.use((req, _res, next) => {
+      const userId = req.header("x-test-user")!;
+      req.principal = { type: "user", id: userId, email: `${userId}@example.test`, scopes: ["*"], session: { id: `session-${userId}` } } as any;
+      next();
+    });
+    authorized.use(authorizationMiddleware);
+    authorized.use("/api/v1/context", contextRouter);
+    authorized.use("/api/v1/rag", ragRouter);
+    const isolated = createServer(authorized);
+    await new Promise<void>((resolve) => isolated.listen(0, "127.0.0.1", resolve));
+    const isolatedUrl = `http://127.0.0.1:${(isolated.address() as AddressInfo).port}/api/v1/context`;
+    try {
+      const create = await fetch(`${isolatedUrl}/conversations?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-user": owner.id }, body: JSON.stringify({ title: "private API body" }),
+      });
+      expect(create.status).toBe(201);
+      const conversation = (await json(create)).data;
+      const denied = await fetch(`${isolatedUrl}/conversations/${conversation.id}?project=${projectName}`, { headers: { "x-test-user": admin.id } });
+      expect(denied.status).toBe(404);
+      expect(JSON.stringify(await json(denied))).not.toContain("private API body");
+
+      const source = await fetch(`${isolatedUrl}/uploads?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-user": owner.id },
+        body: JSON.stringify({ title: "private source", content: "private-rag-canary" }),
+      });
+      expect(source.status).toBe(201);
+      const sourceId = (await json(source)).data.source.id;
+      const ownerSearch = await fetch(`${isolatedUrl}/rag/search?project=${projectName}&q=private-rag-canary`, { headers: { "x-test-user": owner.id } });
+      expect((await json(ownerSearch)).data).toContainEqual(expect.objectContaining({ sourceId }));
+      const deniedSearch = await fetch(`${isolatedUrl}/rag/search?project=${projectName}&q=private-rag-canary`, { headers: { "x-test-user": admin.id } });
+      expect(await json(deniedSearch)).toMatchObject({ data: [] });
+      const deniedSource = await fetch(`${isolatedUrl}/sources/${sourceId}?project=${projectName}`, { headers: { "x-test-user": admin.id } });
+      expect(deniedSource.status).toBe(404);
+      expect(JSON.stringify(await json(deniedSource))).not.toContain("private-rag-canary");
+      const deniedGenericSource = await fetch(`${isolatedUrl.replace("/context", "/rag")}/sources/${sourceId}?project=${projectName}`, { headers: { "x-test-user": admin.id } });
+      expect(deniedGenericSource.status).toBe(404);
+      expect(JSON.stringify(await json(deniedGenericSource))).not.toContain("private-rag-canary");
+
+      const chunk = "private-chunk-canary";
+      const chunked = await fetch(`${isolatedUrl}/uploads/chunked?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-user": owner.id },
+        body: JSON.stringify({
+          title: "private chunked source", expectedHash: createHash("sha256").update(chunk).digest("hex"),
+          expectedBytes: Buffer.byteLength(chunk), chunkCount: 1,
+        }),
+      });
+      expect(chunked.status).toBe(201);
+      const uploadId = (await json(chunked)).data.session.id;
+      const deniedChunk = await fetch(`${isolatedUrl}/uploads/${uploadId}/chunks?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-user": admin.id },
+        body: JSON.stringify({ ordinal: 0, content: chunk }),
+      });
+      expect(deniedChunk.status).toBe(404);
+      expect(JSON.stringify(await json(deniedChunk))).not.toContain(chunk);
+    } finally {
+      await new Promise<void>((resolve) => isolated.close(() => resolve()));
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { authorization, projects } from "ingenium-core";
+import { authorization, getDb, projects } from "ingenium-core";
 
 /**
  * Express middleware helper that reads the `project` query parameter,
@@ -26,6 +26,7 @@ export function requireProject(req: Request, res: Response): string | null {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${name}' not found. Create it first via POST /api/v1/projects or the dashboard.` } });
     return null;
   }
+  if (!req.authorizationPolicy) return project.id;
   const principal = req.principal;
   if (!principal) {
     res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
@@ -45,6 +46,50 @@ export function requireProject(req: Request, res: Response): string | null {
     return null;
   }
   return project.id;
+}
+
+export function requestContentActor(req: Request, projectId: string): { organizationId: string; ownerUserId: string | null } | null {
+  const project = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT organization_id FROM projects WHERE id = ? AND archived_at IS NULL",
+  ).get(projectId) as { organization_id: string } | undefined;
+  if (!project) return null;
+  return {
+    organizationId: project.organization_id,
+    ownerUserId: req.principal?.type === "user" ? req.principal.id : null,
+  };
+}
+
+export function requestAuthorizationPrincipal(req: Request): authorization.AuthorizationPrincipal {
+  const principal = req.principal;
+  if (!principal) return { type: "compatibility", id: "direct-router", scopes: ["*"] };
+  return {
+    type: principal.type === "user" ? (principal.session ? "browser-user" : "user-token") : principal.type === "service" ? "service-principal" : principal.type,
+    id: principal.id,
+    scopes: principal.scopes,
+    organizationId: "organizationId" in principal ? principal.organizationId : undefined,
+    projectId: "projectId" in principal ? principal.projectId : undefined,
+  };
+}
+
+export function requireContentAccess(
+  req: Request,
+  res: Response,
+  scope: authorization.ContentScope,
+): boolean {
+  if (!req.authorizationPolicy) return true;
+  const decision = authorization.requireContentPermission(
+    requestAuthorizationPrincipal(req),
+    scope,
+    req.authorizationPolicy.permission,
+  );
+  if (decision.allowed) return true;
+  res.status(decision.visible ? 403 : 404).json({
+    error: {
+      code: decision.visible ? "FORBIDDEN" : "NOT_FOUND",
+      message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found",
+    },
+  });
+  return false;
 }
 
 /**

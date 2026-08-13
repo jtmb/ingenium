@@ -232,11 +232,20 @@ interface ResourceTenancyMigrationState {
   missing: string[];
 }
 
+interface ContentTenancyMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
   id: string;
   project_id: string;
+  organization_id: string | null;
+  owner_user_id: string | null;
+  visibility: "private" | "organization" | "project";
   title: string;
   request_hash: string;
   idempotency_key: string | null;
@@ -2021,6 +2030,70 @@ function inspectMailTenancyMigration(db: Database.Database): ResourceTenancyMigr
   return state;
 }
 
+function inspectContentTenancyMigration(db: Database.Database): ContentTenancyMigrationState {
+  const state = inspectMigrationComponents(db, {
+    content_shares: ["id", "organization_id", "resource_type", "resource_id", "grantee_kind", "grantee_id", "permission", "revoked_at"],
+    content_audit_events: ["id", "organization_id", "owner_user_id", "resource_type", "resource_id", "action", "actor_type", "actor_id", "outcome", "created_at"],
+    content_tenancy_manifests: ["migration", "organization_id", "counts_json", "identities_json", "phase", "created_at"],
+  }, [
+    "idx_docs_spaces_org_id", "idx_docs_spaces_org_slug", "idx_docs_templates_org_id", "idx_docs_templates_org_name",
+    "idx_docs_tags_org_id", "idx_docs_tags_org_slug",
+    "idx_docs_pages_org_id", "idx_docs_pages_org_space_id", "idx_docs_pages_org_space_slug",
+    "idx_rag_sources_scope_id", "idx_rag_sources_visibility", "idx_context_conversations_scope_id",
+    "idx_context_conversations_visibility", "idx_content_shares_lookup", "idx_observations_scope",
+    "idx_personality_scope", "idx_pipeline_events_scope", "idx_content_audit_scope", "idx_context_rag_sessions_scope",
+  ], [
+    "docs_spaces_org_required_insert", "docs_spaces_org_immutable", "docs_templates_org_required_insert",
+    "docs_tags_org_required_insert", "docs_pages_scope_insert", "docs_pages_scope_update",
+    "docs_templates_org_immutable", "docs_tags_org_immutable", "docs_drafts_scope_insert", "docs_drafts_scope_update",
+    "docs_versions_scope_insert", "docs_versions_scope_update", "docs_comments_scope_insert", "docs_comments_scope_update",
+    "docs_attachments_scope_insert", "docs_attachments_scope_update", "docs_page_links_scope_insert", "docs_page_links_scope_update",
+    "docs_page_projects_scope_insert", "docs_page_projects_scope_update", "docs_page_tags_scope_insert", "docs_page_tags_scope_update",
+    "docs_repository_pages_scope_insert", "docs_repository_pages_scope_update", "rag_sources_scope_insert",
+    "rag_sources_scope_immutable", "context_conversations_scope_insert", "context_checkpoint_rag_scope_insert",
+    "context_rag_sessions_scope_insert", "context_rag_sessions_scope_immutable",
+    "content_shares_immutable_update", "observations_scope_insert",
+    "observations_scope_immutable", "personality_scope_insert", "personality_scope_immutable",
+    "pipeline_events_scope_insert", "content_audit_immutable_update", "content_audit_immutable_delete",
+    "content_tenancy_manifests_immutable_update", "content_tenancy_manifests_immutable_delete",
+  ]);
+  const columnsByTable: Record<string, string[]> = {
+    docs_spaces: ["organization_id"], docs_templates: ["organization_id"], docs_tags: ["organization_id"],
+    docs_pages: ["organization_id"], docs_page_drafts: ["organization_id"], docs_page_versions: ["organization_id"],
+    docs_comments: ["organization_id"], docs_attachments: ["organization_id"], docs_page_links: ["organization_id"],
+    docs_page_projects: ["organization_id"], docs_page_tags: ["organization_id"], docs_repository_pages: ["organization_id"],
+    rag_sources: ["organization_id", "visibility", "owner_user_id"],
+    context_rag_upload_sessions: ["organization_id", "owner_user_id", "visibility"],
+    context_conversations: ["organization_id", "owner_user_id", "visibility"],
+    observations: ["organization_id", "owner_user_id", "visibility"],
+    personality_traits: ["organization_id", "owner_user_id", "visibility"],
+    pipeline_events: ["organization_id", "owner_user_id", "visibility"],
+  };
+  for (const [table, columns] of Object.entries(columnsByTable)) {
+    const present = new Set((db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map(({ name }) => name));
+    const found = columns.filter((column) => present.has(column));
+    state.any ||= found.length > 0;
+    for (const column of columns) if (!present.has(column)) state.missing.push(`${table}.${column} column`);
+  }
+  if (state.missing.length === 0) {
+    const unmapped = db.prepare(
+      `SELECT
+        (SELECT count(*) FROM docs_spaces WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM docs_pages WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM rag_sources WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM context_rag_upload_sessions WHERE organization_id IS NULL OR (visibility = 'restricted') <> (owner_user_id IS NOT NULL))
+        + (SELECT count(*) FROM context_conversations WHERE organization_id IS NULL OR (visibility = 'private' AND owner_user_id IS NULL))
+        + (SELECT count(*) FROM observations WHERE organization_id IS NULL OR (visibility = 'private' AND owner_user_id IS NULL))
+        + (SELECT count(*) FROM personality_traits WHERE organization_id IS NULL OR (visibility = 'private' AND owner_user_id IS NULL)) AS count`,
+    ).get() as { count: number };
+    const manifest = db.prepare("SELECT phase FROM content_tenancy_manifests WHERE migration = 98").get() as { phase: string } | undefined;
+    if (unmapped.count > 0) state.missing.push("content ownership backfill");
+    if (manifest?.phase !== "verified") state.missing.push("migration 098 verified manifest");
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
   const tables: Record<string, string[]> = {
     synthesis_batches: [
@@ -2374,7 +2447,13 @@ function buildContextMigrationRepairData(db: Database.Database): ContextMigratio
   }
   assertContextRepairDatabaseIntegrity(db, "preflight");
 
-  const projectIds = new Set((db.prepare("SELECT id FROM projects").all() as Array<{ id: string }>).map((row) => row.id));
+  const contentTenancyAvailable = hasContextConversationColumns(db, "projects", ["organization_id"])
+    && hasContextConversationColumns(db, "rag_sources", ["organization_id", "visibility", "owner_user_id"]);
+  const projectRows = (contentTenancyAvailable
+    ? db.prepare("SELECT id, organization_id FROM projects").all()
+    : db.prepare("SELECT id, NULL AS organization_id FROM projects").all()) as Array<{ id: string; organization_id: string | null }>;
+  const projectOrganizations = new Map(projectRows.map((row) => [row.id, row.organization_id]));
+  const projectIds = new Set(projectOrganizations.keys());
   const conversations = conversationRows.map((row) => {
     const id = requiredContextString(contextColumnValue(row, conversationColumns, "id"), "context_conversations.id");
     const projectId = requiredContextString(
@@ -2411,9 +2490,19 @@ function buildContextMigrationRepairData(db: Database.Database): ContextMigratio
       16384,
       "{}",
     );
+    const storedVisibility = contextColumnValue(row, conversationColumns, "visibility");
+    const visibility: RepairedContextConversation["visibility"] = contentTenancyAvailable
+      && (storedVisibility === "private" || storedVisibility === "organization")
+      ? storedVisibility
+      : "project";
     return {
       id,
       project_id: projectId,
+      organization_id: projectOrganizations.get(projectId)!,
+      owner_user_id: contentTenancyAvailable && typeof contextColumnValue(row, conversationColumns, "owner_user_id") === "string"
+        ? contextColumnValue(row, conversationColumns, "owner_user_id") as string
+        : null,
+      visibility,
       title,
       request_hash: contextHashValue(
         contextColumnValue(row, conversationColumns, "request_hash"),
@@ -2734,6 +2823,9 @@ const CONTEXT_MIGRATION_REPAIR_STAGING_SQL = `
 CREATE TABLE context_conversations__g3 (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  owner_user_id TEXT,
+  visibility TEXT NOT NULL CHECK(visibility IN ('private', 'organization', 'project')),
   title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 256),
   request_hash TEXT NOT NULL CHECK(length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
   idempotency_key TEXT CHECK(idempotency_key IS NULL OR (length(idempotency_key) BETWEEN 1 AND 128 AND idempotency_key NOT GLOB '*[^A-Za-z0-9._:-]*')),
@@ -2743,7 +2835,9 @@ CREATE TABLE context_conversations__g3 (
   created_at TEXT NOT NULL,
   UNIQUE(project_id, id),
   UNIQUE(project_id, idempotency_key),
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE RESTRICT
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+  FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE RESTRICT,
+  FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
 CREATE TABLE context_messages__g3 (
   id TEXT PRIMARY KEY,
@@ -2823,11 +2917,15 @@ ALTER TABLE context_checkpoints__g3 RENAME TO context_checkpoints;
 ALTER TABLE context_checkpoint_rag_sources__g3 RENAME TO context_checkpoint_rag_sources;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_sources_project_id ON rag_sources(project_id, id);
 CREATE INDEX idx_context_conversations_project_created ON context_conversations(project_id, created_at DESC, id DESC);
+CREATE UNIQUE INDEX idx_context_conversations_scope_id ON context_conversations(organization_id, project_id, id);
+CREATE INDEX idx_context_conversations_visibility ON context_conversations(organization_id, owner_user_id, visibility, created_at DESC, id DESC);
 CREATE INDEX idx_context_messages_conversation_sequence ON context_messages(project_id, conversation_id, sequence ASC);
 CREATE INDEX idx_context_checkpoints_conversation_sequence ON context_checkpoints(project_id, conversation_id, sequence DESC);
 CREATE INDEX idx_context_checkpoint_rag_sources_source ON context_checkpoint_rag_sources(project_id, rag_source_id);
 CREATE VIRTUAL TABLE context_messages_fts USING fts5(content, content='context_messages', content_rowid='rowid', tokenize='unicode61');
 CREATE TRIGGER context_conversations_immutable_update BEFORE UPDATE ON context_conversations BEGIN SELECT RAISE(ABORT, 'context_conversations rows are immutable — UPDATE rejected'); END;
+CREATE TRIGGER context_conversations_scope_insert BEFORE INSERT ON context_conversations WHEN NEW.organization_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id) OR (NEW.visibility = 'private' AND NEW.owner_user_id IS NULL) OR (NEW.owner_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = NEW.organization_id AND user_id = NEW.owner_user_id AND status = 'active')) BEGIN SELECT RAISE(ABORT, 'invalid context conversation scope'); END;
+CREATE TRIGGER context_checkpoint_rag_scope_insert BEFORE INSERT ON context_checkpoint_rag_sources WHEN NOT EXISTS (SELECT 1 FROM context_checkpoints checkpoint JOIN context_conversations conversation ON conversation.project_id = checkpoint.project_id AND conversation.id = checkpoint.conversation_id JOIN rag_sources source ON source.id = NEW.rag_source_id WHERE checkpoint.project_id = NEW.project_id AND checkpoint.id = NEW.checkpoint_id AND source.organization_id = conversation.organization_id AND ((conversation.visibility = 'private' AND source.visibility = 'restricted' AND source.owner_user_id = conversation.owner_user_id) OR (conversation.visibility = 'organization' AND source.visibility = 'organization') OR (conversation.visibility = 'project' AND source.visibility = 'project' AND source.project_id = conversation.project_id))) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG source scope mismatch'); END;
 CREATE TRIGGER context_conversations_immutable_delete BEFORE DELETE ON context_conversations BEGIN SELECT RAISE(ABORT, 'context_conversations rows are immutable — DELETE rejected'); END;
 CREATE TRIGGER context_messages_immutable_update BEFORE UPDATE ON context_messages BEGIN SELECT RAISE(ABORT, 'context_messages rows are immutable — UPDATE rejected'); END;
 CREATE TRIGGER context_messages_immutable_delete BEFORE DELETE ON context_messages BEGIN SELECT RAISE(ABORT, 'context_messages rows are immutable — DELETE rejected'); END;
@@ -2843,6 +2941,16 @@ CREATE TRIGGER rag_chunks_context_checkpoint_immutable_update BEFORE UPDATE ON r
 CREATE TRIGGER rag_chunks_context_checkpoint_immutable_delete BEFORE DELETE ON rag_chunks WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link JOIN rag_sources source ON source.id = link.rag_source_id WHERE source.id = old.source_id) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG chunks are immutable — DELETE rejected'); END;
 INSERT INTO context_messages_fts(context_messages_fts) VALUES ('rebuild');
 `;
+
+const PRE_CONTENT_TENANCY_CONTEXT_REPAIR_STAGING_SQL = CONTEXT_MIGRATION_REPAIR_STAGING_SQL
+  .replace("  organization_id TEXT NOT NULL,\n  owner_user_id TEXT,\n  visibility TEXT NOT NULL CHECK(visibility IN ('private', 'organization', 'project')),\n", "")
+  .replace(",\n  FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE RESTRICT,\n  FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE RESTRICT", "");
+
+const PRE_CONTENT_TENANCY_CONTEXT_REPAIR_FINALIZE_SQL = CONTEXT_MIGRATION_REPAIR_FINALIZE_SQL
+  .replace("CREATE UNIQUE INDEX idx_context_conversations_scope_id ON context_conversations(organization_id, project_id, id);\n", "")
+  .replace("CREATE INDEX idx_context_conversations_visibility ON context_conversations(organization_id, owner_user_id, visibility, created_at DESC, id DESC);\n", "")
+  .replace("CREATE TRIGGER context_conversations_scope_insert BEFORE INSERT ON context_conversations WHEN NEW.organization_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id) OR (NEW.visibility = 'private' AND NEW.owner_user_id IS NULL) OR (NEW.owner_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = NEW.organization_id AND user_id = NEW.owner_user_id AND status = 'active')) BEGIN SELECT RAISE(ABORT, 'invalid context conversation scope'); END;\n", "")
+  .replace("CREATE TRIGGER context_checkpoint_rag_scope_insert BEFORE INSERT ON context_checkpoint_rag_sources WHEN NOT EXISTS (SELECT 1 FROM context_checkpoints checkpoint JOIN context_conversations conversation ON conversation.project_id = checkpoint.project_id AND conversation.id = checkpoint.conversation_id JOIN rag_sources source ON source.id = NEW.rag_source_id WHERE checkpoint.project_id = NEW.project_id AND checkpoint.id = NEW.checkpoint_id AND source.organization_id = conversation.organization_id AND ((conversation.visibility = 'private' AND source.visibility = 'restricted' AND source.owner_user_id = conversation.owner_user_id) OR (conversation.visibility = 'organization' AND source.visibility = 'organization') OR (conversation.visibility = 'project' AND source.visibility = 'project' AND source.project_id = conversation.project_id))) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG source scope mismatch'); END;\n", "");
 
 function contextRepairArtifactsExist(db: Database.Database): boolean {
   const artifacts = [
@@ -2868,24 +2976,28 @@ function repairContextConversationMigration(
     throw contextRepairError("reserved G3 staging artifacts already exist; preserve the database and restore from a verified backup");
   }
   const repair = buildContextMigrationRepairData(db);
+  const contentTenancyAvailable = hasContextConversationColumns(db, "projects", ["organization_id"])
+    && hasContextConversationColumns(db, "rag_sources", ["organization_id", "visibility", "owner_user_id"]);
   const migrationSql = readFileSync(resolve(migrationsDir, "067_context_migration_repair.sql"), "utf-8");
   const foreignKeys = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };
   db.pragma("foreign_keys = OFF");
   try {
     db.transaction(() => {
       db.exec(migrationSql);
-      db.exec(CONTEXT_MIGRATION_REPAIR_STAGING_SQL);
+      db.exec(contentTenancyAvailable ? CONTEXT_MIGRATION_REPAIR_STAGING_SQL : PRE_CONTENT_TENANCY_CONTEXT_REPAIR_STAGING_SQL);
 
-      const insertConversation = db.prepare(
-        `INSERT INTO context_conversations__g3
+      const insertConversation = db.prepare(contentTenancyAvailable
+        ? `INSERT INTO context_conversations__g3
+         (id, project_id, organization_id, owner_user_id, visibility, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        : `INSERT INTO context_conversations__g3
          (id, project_id, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const row of repair.conversations) {
-        insertConversation.run(
-          row.id, row.project_id, row.title, row.request_hash, row.idempotency_key,
-          row.tags, row.priority, row.metadata, row.created_at,
-        );
+        insertConversation.run(...(contentTenancyAvailable
+          ? [row.id, row.project_id, row.organization_id, row.owner_user_id, row.visibility, row.title, row.request_hash, row.idempotency_key,
+            row.tags, row.priority, row.metadata, row.created_at]
+          : [row.id, row.project_id, row.title, row.request_hash, row.idempotency_key, row.tags, row.priority, row.metadata, row.created_at]));
       }
 
       const insertMessage = db.prepare(
@@ -2927,7 +3039,7 @@ function repairContextConversationMigration(
         );
       }
 
-      db.exec(CONTEXT_MIGRATION_REPAIR_FINALIZE_SQL);
+      db.exec(contentTenancyAvailable ? CONTEXT_MIGRATION_REPAIR_FINALIZE_SQL : PRE_CONTENT_TENANCY_CONTEXT_REPAIR_FINALIZE_SQL);
       db.prepare(
         `INSERT INTO context_migration_repairs (id, repaired_at, source_schema_hash, row_counts)
          VALUES (1, ?, ?, ?)
@@ -2993,7 +3105,7 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
-export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097", AuthenticationFoundationMigrationState> {
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098", AuthenticationFoundationMigrationState> {
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   return {
     "093": inspectIdentityTenancyMigration(database),
@@ -3001,6 +3113,7 @@ export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "09
     "095": inspectAuthorizationAuditMigration(database),
     "096": inspectResourceOwnershipMigration(database),
     "097": inspectMailTenancyMigration(database),
+    "098": inspectContentTenancyMigration(database),
   };
 }
 
@@ -3063,7 +3176,8 @@ function runMigrations(db: Database.Database): void {
             "094_authentication.sql",
             "095_authorization_audit.sql",
             "096_resource_ownership.sql",
-            "097_mail_tenancy.sql",
+             "097_mail_tenancy.sql",
+             "098_content_tenancy.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -3239,7 +3353,11 @@ function runMigrations(db: Database.Database): void {
     const traitsSql = db.prepare(
       "SELECT sql FROM sqlite_master WHERE type='table' AND name='personality_traits'"
     ).get() as { sql: string } | undefined;
-    if (traitsSql && observationsCreateSql && observationsCreateSql.sql.includes("auto-observer") && !traitsSql.sql.includes("017_rebuilt")) {
+    const traitsContentTenancyColumn = db.prepare(
+      "SELECT count(*) AS count FROM pragma_table_info('personality_traits') WHERE name = 'organization_id'",
+    ).get() as { count: number };
+    if (traitsSql && observationsCreateSql && observationsCreateSql.sql.includes("auto-observer")
+      && traitsContentTenancyColumn.count === 0 && !traitsSql.sql.includes("017_rebuilt")) {
       const sql = readFileSync(resolve(migrationsDir, "017_fix_trait_fk.sql"), "utf-8");
       db.pragma("foreign_keys = OFF");
       db.exec(sql);
@@ -3264,7 +3382,7 @@ function runMigrations(db: Database.Database): void {
     const traits019Sql = db.prepare(
       "SELECT sql FROM sqlite_master WHERE type='table' AND name='personality_traits'"
     ).get() as { sql: string } | undefined;
-    if (traits019Sql && !traits019Sql.sql.includes("019_fk_setnull")) {
+    if (traits019Sql && traitsContentTenancyColumn.count === 0 && !traits019Sql.sql.includes("019_fk_setnull")) {
       const sql = readFileSync(resolve(migrationsDir, "019_trait_exemplar_fk_setnull.sql"), "utf-8");
       db.pragma("foreign_keys = OFF");
       db.exec(sql);
@@ -3614,15 +3732,10 @@ function runMigrations(db: Database.Database): void {
       "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='pipeline_events'"
     ).get() as { count: number };
     if (pipeline045Check.count > 0) {
-      // Probe: try inserting a test row with skill_created type.
-      // If the CHECK constraint rejects it, the migration has not been applied.
-      try {
-        db.prepare(
-          "INSERT INTO pipeline_events (project_id, event_type, event_source, title, created_at) VALUES ('__migration_probe__', 'skill_created', 'synthesis', 'probe', ?)"
-        ).run(new Date().toISOString());
-        db.prepare("DELETE FROM pipeline_events WHERE project_id='__migration_probe__'").run();
-      } catch {
-        // skill_created is rejected by the old CHECK constraint — apply migration
+      const pipelineSql = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_events'",
+      ).get() as { sql?: string } | undefined;
+      if (!pipelineSql?.sql?.includes("skill_created")) {
         const sql = readFileSync(resolve(migrationsDir, "045_pipeline_event_types.sql"), "utf-8");
         db.exec(sql);
         logger.info("db", "Applied migration 045_pipeline_event_types.sql");
@@ -4292,6 +4405,21 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError(migration, ["foreign key integrity"]);
     }
     logger.info("db", `Applied migration ${file}`);
+  }
+
+  const contentTenancy = inspectContentTenancyMigration(db);
+  if (contentTenancy.any && !contentTenancy.complete) throw restoreMigrationPartialStateError("098", contentTenancy.missing);
+  if (!contentTenancy.complete) {
+    if (!inspectMailTenancyMigration(db).complete) {
+      throw restoreMigrationPartialStateError("098", ["migration 097 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "098_content_tenancy.sql"), "utf-8"));
+    const applied = inspectContentTenancyMigration(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError("098", applied.missing);
+    if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("098", ["foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 098_content_tenancy.sql");
   }
 
   enforceReservedBrokerInvariant(db);

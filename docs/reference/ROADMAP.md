@@ -626,6 +626,8 @@ Evidence AUTH-104: migrations 096/097, ownership and exact-identity manifests, v
   `Evidence AUTH-105: <acceptance evidence placeholder>` with non-empty content
   preservation, privacy, security, deployment, E2E, and containment evidence.
 
+Evidence AUTH-105: source implementation adds migration 098 complete/partial probes, fail-closed bootstrap-owner preflight, organization-local Docs uniqueness, bootstrap-org Docs/RAG backfill, immutable private context ownership, restricted direct/chunked Context uploads with owner-filtered list/search/read paths, restricted checkpoint-source SQL guards, private-by-default learning scope, owner-scoped dashboard summaries and timeline children, bounded pipeline metadata, normalized shares, content-free audit, and focused preservation/isolation tests. Affected core/API typechecks, 132 focused core cases, 155 focused API cases, targeted API regressions, DB-isolation enforcement, and diff checks pass with `/dev/shm` temporary storage. The serialized API workspace run reached 883 passing tests and exposed four unrelated environment/fixture groups: MCP child discovery, OAuth callback authentication, restore fixtures requiring literal `/tmp`, and pre-existing mail-tenancy fixture setup. Its two in-scope content regressions and the mail fixture setup were remediated and pass. Deployment, full fixture E2E, visual gates, independent security review, strict containment, and final marker reconciliation are not claimed and remain pending.
+
 #### AUTH-106 — Automation tenancy: jobs, tasks, runs, and audit
 
 - **IN_SCOPE:** Add migration `099` for automation tenancy. Scope jobs,

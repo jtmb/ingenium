@@ -17,6 +17,22 @@ Security documentation and procedures for the Ingenium system.
 | [LLM Endpoint SSRF Protection](#llm-endpoint-ssrf-protection) | DNS-level validation of LLM provider endpoints, private-network blocking, and opt-in bypass |
 | [Vault Security Model](#vault-security-model) | scrypt key derivation, AES-256-GCM envelope encryption, passphrase-is-key design, no recovery |
 
+## Content tenancy
+
+Docs are organization-scoped. Private context, RAG, observation, and personality
+content is non-enumerating: a foreign ID returns the same not-found response as
+an absent ID, and organization administrators do not gain user-private plaintext
+access by role alone. Scope predicates are applied in SQL before retrieval;
+foreign rows are not fetched and filtered afterward.
+
+Conversation ownership is immutable and inherited by messages, checkpoints,
+restore branches, and checkpoint RAG links. RAG source visibility is explicit;
+there is no global-project search fallback. Sharing uses normalized grants rather
+than a polymorphic body ACL, and archive/restore/export/delete/share audit rows
+contain actor and identifiers only, never content. Docs AI derives organization,
+project, and provider authority from authenticated server state and rejects body
+authority overrides.
+
 ## LLM Endpoint SSRF Protection
 
 **Source**: `packages/ingenium-core/lib/tools/endpoint-policy.ts`

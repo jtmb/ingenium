@@ -30,16 +30,19 @@ export function storeObservation(
   source?: Observation["source"],
   context?: string,
   sessionId?: string,
+  scope?: { organizationId: string; ownerUserId?: string | null; visibility?: "private" | "organization" },
 ): Observation {
   const storedSource = ObservationSourceSchema.parse(source ?? "agent");
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
     const insertResult = db.prepare(
-      `INSERT INTO observations (project_id, observation_type, content, importance, source, context, session_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO observations
+       (project_id, organization_id, owner_user_id, visibility, observation_type, content, importance, source, context, session_id, created_at, updated_at)
+       SELECT id, organization_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM projects WHERE id = ?`
     ).run(
-      projectId,
+      scope?.ownerUserId ?? null,
+      scope?.visibility ?? (scope?.ownerUserId ? "private" : "organization"),
       observationType,
       content,
       importance ?? 5,
@@ -48,6 +51,7 @@ export function storeObservation(
       sessionId ?? null,
       now,
       now,
+      projectId,
     );
     return db.prepare("SELECT * FROM observations WHERE id = ?").get(insertResult.lastInsertRowid) as Observation;
   });
@@ -59,12 +63,13 @@ export function storeObservation(
       projectId,
       "observation_created",
       storedSource === "agent" ? "agent" : "plugin",
-      `Agent observed: ${content.substring(0, 80)}`,
-      content,
+      "Observation recorded",
+      undefined,
       { observation_type: observationType, importance: importance ?? 5, source: storedSource },
       undefined,
       sessionId,
       importance ?? 5,
+      { ownerUserId: scope?.ownerUserId ?? null, visibility: scope?.visibility ?? (scope?.ownerUserId ? "private" : "organization") },
     );
   } catch (_) {
     // Non-fatal — pipeline events should never block observations
@@ -82,11 +87,16 @@ export function getObservations(
   status?: Observation["status"],
   type?: Observation["observation_type"],
   limit = 50,
+  ownerUserId?: string | null,
 ): Observation[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
 
   const clauses: string[] = ["project_id = ?"];
   const params: any[] = [projectId];
+  if (ownerUserId !== undefined) {
+    clauses.push(ownerUserId === null ? "visibility = 'organization'" : "(visibility = 'organization' OR owner_user_id = ?)");
+    if (ownerUserId !== null) params.push(ownerUserId);
+  }
 
   if (status) {
     clauses.push("status = ?");
@@ -109,25 +119,26 @@ export function getObservations(
  * from raw user input (special chars like `*`, `"`, `-` in unexpected places).
  * Returns empty array if the query is invalid after sanitization.
  */
-export function searchObservations(projectId: string, query: string, limit = 50): Observation[] {
+export function searchObservations(projectId: string, query: string, limit = 50, ownerUserId?: string | null): Observation[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   const sanitized = sanitizeFts5Query(query);
   if (!sanitized) return [];
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null ? " AND o.visibility = 'organization'" : " AND (o.visibility = 'organization' OR o.owner_user_id = ?)";
   return db.prepare(
     `SELECT o.* FROM observations o
      INNER JOIN observations_fts fts ON fts.rowid = o.id
-     WHERE o.project_id = ? AND observations_fts MATCH ?
+     WHERE o.project_id = ? AND observations_fts MATCH ?${scope}
      ORDER BY rank
      LIMIT ?`
-  ).all(projectId, sanitized, limit) as Observation[];
+  ).all(...(ownerUserId === undefined || ownerUserId === null ? [projectId, sanitized, limit] : [projectId, sanitized, ownerUserId, limit])) as Observation[];
 }
 
 /** Retrieve a single observation by ID within its owning project. */
-export function getObservation(projectId: string, id: number): Observation | undefined {
+export function getObservation(projectId: string, id: number, ownerUserId?: string | null): Observation | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
-  return db.prepare(
-    "SELECT * FROM observations WHERE project_id = ? AND id = ?"
-  ).get(projectId, id) as Observation | undefined;
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null ? " AND visibility = 'organization'" : " AND (visibility = 'organization' OR owner_user_id = ?)";
+  return db.prepare(`SELECT * FROM observations WHERE project_id = ? AND id = ?${scope}`)
+    .get(...(ownerUserId === undefined || ownerUserId === null ? [projectId, id] : [projectId, id, ownerUserId])) as Observation | undefined;
 }
 
 /**
@@ -153,6 +164,7 @@ export function updateObservation(
   projectId: string,
   id: number,
   data: Partial<Pick<Observation, "status" | "importance" | "content" | "context" | "observation_type">>,
+  ownerUserId?: string | null,
 ): Observation | null {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   const now = new Date().toISOString();
@@ -167,10 +179,12 @@ export function updateObservation(
   if (data.observation_type !== undefined) { sets.push("observation_type = ?"); params.push(data.observation_type); }
 
   params.push(projectId, id);
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null ? " AND visibility = 'organization'" : " AND (visibility = 'organization' OR owner_user_id = ?)";
+  if (ownerUserId !== undefined && ownerUserId !== null) params.push(ownerUserId);
 
   const transactionResult = execTransaction(() => {
     const result = db.prepare(
-      `UPDATE observations SET ${sets.join(", ")} WHERE project_id = ? AND id = ?`
+      `UPDATE observations SET ${sets.join(", ")} WHERE project_id = ? AND id = ?${scope}`
     ).run(...params);
     if (result.changes === 0) return null;
     return db.prepare(
@@ -215,12 +229,12 @@ export function getUnprocessedBatch(projectId: string, limit = 50): Observation[
  * Hard-delete a single observation by ID, scoped to project.
  * Returns true if a row was actually deleted.
  */
-export function deleteObservation(projectId: string, id: number): boolean {
+export function deleteObservation(projectId: string, id: number, ownerUserId?: string | null): boolean {
   const ok = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
-    const result = db.prepare(
-      "DELETE FROM observations WHERE project_id = ? AND id = ?"
-    ).run(projectId, id);
+    const scope = ownerUserId === undefined ? "" : ownerUserId === null ? " AND visibility = 'organization'" : " AND (visibility = 'organization' OR owner_user_id = ?)";
+    const result = db.prepare(`DELETE FROM observations WHERE project_id = ? AND id = ?${scope}`)
+      .run(...(ownerUserId === undefined || ownerUserId === null ? [projectId, id] : [projectId, id, ownerUserId]));
     return result.changes > 0;
   });
   checkpointAfterWrite();
@@ -232,12 +246,12 @@ export function deleteObservation(projectId: string, id: number): boolean {
  * Used to reset observations when re-running extraction after fixing the pipeline.
  * Returns the number of deleted rows.
  */
-export function deleteObservationsBySource(projectId: string, source: string): number {
+export function deleteObservationsBySource(projectId: string, source: string, ownerUserId?: string | null): number {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
-    const deleteResult = db.prepare(
-      "DELETE FROM observations WHERE project_id = ? AND source = ?"
-    ).run(projectId, source);
+    const scope = ownerUserId === undefined ? "" : ownerUserId === null ? " AND visibility = 'organization'" : " AND (visibility = 'organization' OR owner_user_id = ?)";
+    const deleteResult = db.prepare(`DELETE FROM observations WHERE project_id = ? AND source = ?${scope}`)
+      .run(...(ownerUserId === undefined || ownerUserId === null ? [projectId, source] : [projectId, source, ownerUserId]));
     return deleteResult.changes;
   });
   checkpointAfterWrite();

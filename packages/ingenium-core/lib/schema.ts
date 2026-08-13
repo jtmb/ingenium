@@ -742,6 +742,9 @@ export const CreateContextConversationInputSchema = z.object({
   priority: z.number().int().min(0).max(10).default(5),
   metadata: ContextMetadataInputSchema.default({}),
   idempotencyKey: ContextIdempotencyKeySchema.optional(),
+  organizationId: z.string().uuid().optional(),
+  ownerUserId: z.string().uuid().nullable().optional(),
+  visibility: z.enum(["private", "organization", "project"]).default("project"),
 }).strict();
 export type CreateContextConversationInput = z.input<typeof CreateContextConversationInputSchema>;
 
@@ -817,6 +820,9 @@ export type ContextConversationArchiveInput = z.input<typeof ContextConversation
 export const ContextConversationSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string().uuid(),
+  organization_id: z.string().uuid(),
+  owner_user_id: z.string().uuid().nullable(),
+  visibility: z.enum(["private", "organization", "project"]),
   title: z.string().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH),
   tags: z.string().max(CONTEXT_TAGS_MAX_BYTES),
   priority: z.coerce.number().int().min(0).max(10),
@@ -1074,6 +1080,9 @@ export type ObservationSource = z.infer<typeof ObservationSourceSchema>;
 export interface Observation {
   id: number;
   project_id: string;
+  organization_id: string;
+  owner_user_id?: string | null;
+  visibility: "private" | "organization";
   observation_type: "correction" | "preference" | "pattern" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "error" | "goal";
   content: string;
   importance: number;
@@ -1140,6 +1149,9 @@ export interface SynthesisStatus {
 export interface PersonalityTrait {
   id: number;
   project_id: string;
+  organization_id: string;
+  owner_user_id?: string | null;
+  visibility: "private" | "organization";
   trait_type: "communication_style" | "code_preference" | "workflow_pattern" | "terminology" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
   trait_value: string;
   display_label?: string;
@@ -1219,6 +1231,9 @@ export interface Config {
 export interface PipelineEvent {
   id: number;
   project_id: string;
+  organization_id: string;
+  owner_user_id?: string | null;
+  visibility: "private" | "organization";
   event_type: "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_completed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "proposal_created" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "proposal_applied" | "proposal_rolled_back" | "plugin_initialized" | "plugin_error";
   event_source: "agent" | "plugin" | "synthesis" | "system";
   title: string;
@@ -1313,6 +1328,9 @@ export interface BackupRestorePlanRecord {
 export interface RagSource {
   id: string;
   project_id: string;
+  organization_id: string;
+  visibility: "organization" | "project" | "restricted";
+  owner_user_id: string | null;
   title: string;
   source_type: "file" | "text" | "url";
   source_path: string | null;

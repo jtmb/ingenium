@@ -222,7 +222,7 @@ describe("immutable context conversations", () => {
       `INSERT INTO context_checkpoint_rag_sources
        (project_id, checkpoint_id, rag_source_id, ordinal, metadata, created_at)
        VALUES (?, ?, ?, ?, '{}', ?)`,
-    ).run(first.id, checkpoint.checkpoint.id, randomUUID(), 1, new Date().toISOString())).toThrow(/FOREIGN KEY/);
+    ).run(first.id, checkpoint.checkpoint.id, randomUUID(), 1, new Date().toISOString())).toThrow(/FOREIGN KEY|scope mismatch/);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
@@ -434,6 +434,17 @@ describe("immutable context conversations", () => {
         .run(checkpointId, projectId, conversationId, messageId, createdAt);
       legacy.prepare("INSERT INTO context_checkpoint_rag_sources VALUES (?, ?, ?)")
         .run(checkpointId, sourceId, createdAt);
+      legacy.exec(readFileSync(join(migrations, "093_identity_tenancy.sql"), "utf8"));
+      const ownerId = randomUUID();
+      legacy.prepare(
+        "INSERT INTO users (id, email_normalized, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(ownerId, "pre-065-owner@example.test", "Pre-065 Owner", createdAt, createdAt);
+      legacy.prepare(
+        "INSERT INTO organization_memberships (organization_id, user_id, role, created_at, updated_at) VALUES (?, ?, 'owner', ?, ?)",
+      ).run("00000000-0000-4000-8000-000000000093", ownerId, createdAt, createdAt);
+      legacy.prepare(
+        "UPDATE bootstrap_state SET state = 'claimed', owner_user_id = ?, claimed_at = ?, revision = 1, updated_at = ? WHERE singleton = 1",
+      ).run(ownerId, createdAt, createdAt);
     } finally {
       legacy.close();
     }

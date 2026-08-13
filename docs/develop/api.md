@@ -210,7 +210,11 @@ mutually exclusive with a full `proposedState.fileTree` snapshot.
 ### Observations
 Observation and personality endpoints require a valid `?project=<name>` query
 parameter. Detail and mutation routes return `404 Not Found` when the requested
-observation or trait is not owned by that project.
+observation or trait is not visible to the authenticated owner and project scope.
+New behavior observations and traits are user-private by default; callers may
+request explicit `visibility: "organization"` for organization automation.
+List, search, stats, profile, and mutation queries apply owner/organization scope
+in SQL before returning rows.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -510,6 +514,12 @@ warnings without rolling back the durable desired state; native auth calls use t
 | GET | `/api/v1/pipeline/timeline` | Get grouped timeline |
 
 ### Documentation (Docs Workspace)
+
+Docs routes derive organization authority from the authenticated principal.
+Spaces, pages, child records, templates, slugs, search, counts, trash, imports,
+exports, comments, and attachments are organization-scoped. Foreign IDs return
+`404`; no route accepts body-supplied organization/project/provider authority for
+Docs AI.
 All routes prefixed with `/api/v1/docs`. See [Docs Workspace Reference](../reference/docs-workspace.md) for the full 52-endpoint catalog.
 
 ### Vault (Secrets Manager)
@@ -710,6 +720,17 @@ the same `409 MAINTENANCE_AUTHORIZATION_INVALID` response without reflecting
 the token or conversation content.
 
 ### RAG (Retrieval-Augmented Generation)
+
+RAG sources carry `organization_id`, visibility (`organization`, `project`, or
+`restricted`), and an owner for restricted sources. Search, ask, stats, export,
+and checkpoint admission use authorization-derived scopes/source IDs. There is
+no implicit global-project inclusion, and cross-organization source IDs fail at
+the SQL/API boundary.
+Context direct and chunked uploads created by an authenticated user are
+restricted to that user; list, metadata lookup, search, and ask omit foreign
+restricted sources, chunk mutation rejects foreign upload sessions, and direct
+lookup returns a safe not-found response. Current-learning retrieval and explicit
+snapshot ingestion apply the same owner-derived scope.
 All routes prefixed with `/api/v1/rag`.
 
 | Method | Endpoint | Purpose |

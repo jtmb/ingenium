@@ -180,6 +180,36 @@ return the same not-found response as absent resources. Native and managed
 provider credentials may enter shared OpenCode only when installation-owned;
 private provider ownership fails closed until an isolated provider runtime exists.
 
+### Content tenancy (AUTH-105)
+
+Migration 098 makes Docs spaces, templates, and tags organization roots. Pages,
+drafts, versions, comments, attachments, backlinks, project links, repository
+page identities, and page tags inherit the root organization; SQL triggers reject
+cross-organization parents and links. Existing Docs content belongs to the
+bootstrap organization, and each organization receives a default organization
+space. There is no automatic global Personal-space fallback.
+
+RAG sources and pending chunked-upload sessions carry organization ownership and
+`organization`, `project`, or `restricted` visibility. Authenticated Context
+uploads are restricted to their user from session creation through retrieval;
+chunk mutation, search, listing, and current-learning snapshots apply the same
+owner filter. Retrieval no longer includes the
+global project implicitly. Published Docs pages index into their owning organization, and
+checkpoint links must match the immutable conversation scope at the SQL boundary.
+
+Immutable context conversation roots carry organization, owner, and
+`private`/`organization`/`project` visibility. Messages, checkpoints, restores,
+and RAG bindings inherit that root; restore-as-new preserves ownership. Existing
+conversation content is private to the claimed bootstrap owner, while missing
+private ownership fails the migration probe closed. Normalized content shares
+are explicit and content-free audit records cover sharing, archive, restore,
+export, and delete operations.
+
+Behavior observations and personality traits are user-private by default, with
+explicit organization scope for automation. Pipeline events carry bounded scope
+metadata and observation events no longer copy private observation text into
+their title or description.
+
 ### Git-authoritative external-worktree synchronization
 
 Automatic external-worktree synchronization follows exactly:

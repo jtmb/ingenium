@@ -32,6 +32,12 @@ This selector is separate from Chat's server-owned authority. The banner
 tools, provider/model configuration, and other global Chat mutations. Changing
 the Context project does not redirect those tools.
 
+Immutable Context conversations created by authenticated users are private by
+default. Their messages, checkpoints, restore branches, and cited restricted RAG
+sources remain bound to the conversation owner. Organization/project-visible
+conversation scope must be selected explicitly; foreign private IDs are returned
+as not found and organization administrators do not implicitly read them.
+
 ## Quick Start
 
 ```bash

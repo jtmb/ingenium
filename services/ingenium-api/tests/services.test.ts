@@ -221,8 +221,8 @@ describe("GET /api/v1/services/status — applications", () => {
     );
     expect(docsApp).toBeDefined();
     expect(docsApp.state).toBe("healthy");
-    expect(docsApp.description).toContain("1 space(s), 1 page(s)");
-    expect(docsApp.detail).toContain("1 spaces, 1 pages");
+    expect(docsApp.description).toContain("2 space(s), 1 page(s)");
+    expect(docsApp.detail).toContain("2 spaces, 1 pages");
   });
 
   it("tasks-board becomes healthy when tasks exist in global-default", async () => {

@@ -5,8 +5,9 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects } from "ingenium-core";
+import { identity, organizations, personality, pipelineEvents, projects } from "ingenium-core";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 
 const emailMocks = vi.hoisted(() => ({
   listAccounts: vi.fn(() => []),
@@ -277,6 +278,57 @@ describe("GET /api/v1/dashboard/summary", () => {
       expect(body.unavailable).toContain("tasks");
     } finally {
       throwTasksList = false;
+    }
+  });
+
+  it("scopes private learning and activity to the authenticated user", async () => {
+    const first = identity.createUser("dashboard-first@example.test", "Dashboard First");
+    const second = identity.createUser("dashboard-second@example.test", "Dashboard Second");
+    for (const user of [first, second]) {
+      organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, user.id, "member");
+      organizations.addProjectMember(projectId, user.id, "editor");
+    }
+    personality.upsertTrait(projectId, "communication_style", "first-private", undefined, 0.8, undefined, undefined, { ownerUserId: first.id, visibility: "private" });
+    personality.upsertTrait(projectId, "code_preference", "second-private", undefined, 0.8, undefined, undefined, { ownerUserId: second.id, visibility: "private" });
+    personality.upsertTrait(projectId, "workflow_pattern", "organization-visible", undefined, 0.8, undefined, undefined, { visibility: "organization" });
+    pipelineEvents.logEvent(projectId, "trait_created", "synthesis", "First private activity", undefined, undefined, undefined, undefined, undefined, { ownerUserId: first.id, visibility: "private" });
+    pipelineEvents.logEvent(projectId, "skill_created", "synthesis", "Second private activity", undefined, undefined, undefined, undefined, undefined, { ownerUserId: second.id, visibility: "private" });
+    pipelineEvents.logEvent(projectId, "synthesis_completed", "synthesis", "Organization activity");
+
+    const authorized = express();
+    authorized.use(express.json());
+    authorized.use((req, _res, next) => {
+      const userId = req.header("x-test-user")!;
+      req.principal = { type: "user", id: userId, scopes: ["*"], session: { id: `session-${userId}` } } as any;
+      next();
+    });
+    authorized.use(authorizationMiddleware);
+    authorized.use("/api/v1/dashboard", dashboardRouter);
+    const isolated = createServer(authorized);
+    await new Promise<void>((resolve) => isolated.listen(0, "127.0.0.1", resolve));
+    const isolatedUrl = `http://127.0.0.1:${(isolated.address() as AddressInfo).port}/api/v1/dashboard/summary?project=${projectName}`;
+    try {
+      for (const [viewer, ownTitle, foreignTitle] of [
+        [first, "First private activity", "Second private activity"],
+        [second, "Second private activity", "First private activity"],
+      ] as const) {
+        const response = await nativeFetch(isolatedUrl, { headers: { "x-test-user": viewer.id } });
+        expect(response.status).toBe(200);
+        const summary = await response.json();
+        expect(summary.data.learning.displayTraitsCount).toBe(2);
+        const titles = summary.data.activity.map((item: { title: string }) => item.title);
+        expect(titles).toEqual(expect.arrayContaining([ownTitle, "Organization activity"]));
+        expect(titles).not.toContain(foreignTitle);
+      }
+      const compatibilityResponse = await nativeFetch(`${baseUrl}/api/v1/dashboard/summary?project=${projectName}`);
+      const compatibilitySummary = await compatibilityResponse.json();
+      expect(compatibilitySummary.data.learning.displayTraitsCount).toBe(1);
+      const compatibilityTitles = compatibilitySummary.data.activity.map((item: { title: string }) => item.title);
+      expect(compatibilityTitles).toContain("Organization activity");
+      expect(compatibilityTitles).not.toContain("First private activity");
+      expect(compatibilityTitles).not.toContain("Second private activity");
+    } finally {
+      await new Promise<void>((resolve) => isolated.close(() => resolve()));
     }
   });
 });

@@ -377,8 +377,8 @@ function applyTraitStage(
       const exemplar = exemplarId === undefined ? undefined : batchObservations.get(exemplarId);
       const existing = db.prepare(
         `SELECT * FROM personality_traits
-         WHERE project_id = ? AND trait_type = ? AND trait_value = ?`,
-      ).get(projectId, proposed.trait_type, proposed.trait_value) as PersonalityTrait | undefined;
+         WHERE project_id = ? AND owner_user_id IS ? AND visibility = ? AND trait_type = ? AND trait_value = ?`,
+      ).get(projectId, exemplar?.owner_user_id ?? null, exemplar?.visibility ?? "organization", proposed.trait_type, proposed.trait_value) as PersonalityTrait | undefined;
 
       if (existing) {
         const updates = ["confidence = ?", "updated_at = ?"];
@@ -399,11 +399,12 @@ function applyTraitStage(
         const confidence = Math.min(0.15, Math.max(0.10, proposed.confidence_hint));
         db.prepare(
           `INSERT INTO personality_traits (
-            project_id, trait_type, trait_value, display_label, confidence,
+            project_id, organization_id, owner_user_id, visibility, trait_type, trait_value, display_label, confidence,
             exemplar_observation_id, exemplar_text, source, is_active, metadata, created_at, updated_at
-          ) VALUES (?, ?, ?, NULL, ?, ?, ?, 'synthesis', 1, NULL, ?, ?)`,
+          ) SELECT id, organization_id, ?, ?, ?, ?, NULL, ?, ?, ?, 'synthesis', 1, NULL, ?, ? FROM projects WHERE id = ?`,
         ).run(
-          projectId,
+          exemplar?.owner_user_id ?? null,
+          exemplar?.visibility ?? "organization",
           proposed.trait_type,
           proposed.trait_value,
           confidence,
@@ -411,6 +412,7 @@ function applyTraitStage(
           exemplar?.content ?? null,
           now,
           now,
+          projectId,
         );
         applied.created++;
       }
@@ -863,6 +865,14 @@ export async function runDurableSynthesis(
         result.traits_created += applied.created;
         result.traits_updated += applied.updated;
         result.observations_skipped += applied.skipped;
+        if (synthesisEventId !== undefined) {
+          for (let index = 0; index < applied.created; index++) {
+            logEvent(projectId, "trait_created", "synthesis", "Trait created", undefined, { batch_id: current.batch.id }, synthesisEventId, sessionId);
+          }
+          for (let index = 0; index < applied.updated; index++) {
+            logEvent(projectId, "trait_updated", "synthesis", "Trait updated", undefined, { batch_id: current.batch.id }, synthesisEventId, sessionId);
+          }
+        }
       } catch (error) {
         if (error instanceof SynthesisBatchOwnershipError) {
           result.summary = "Synthesis batch lease changed while applying traits.";

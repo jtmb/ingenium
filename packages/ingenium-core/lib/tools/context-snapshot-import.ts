@@ -244,10 +244,12 @@ function conversationSummary(db: ReturnType<typeof getDb>, projectId: string, co
   };
 }
 
-function requireProject(db: ReturnType<typeof getDb>, projectId: string): void {
-  if (!db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
+function requireProject(db: ReturnType<typeof getDb>, projectId: string): string {
+  const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!project) {
     throw new ContextSnapshotImportError("PROJECT_NOT_FOUND");
   }
+  return project.organization_id;
 }
 
 function isArchived(db: ReturnType<typeof getDb>, projectId: string, conversationId: string): boolean {
@@ -560,7 +562,7 @@ export function importContextConversationSnapshot(
     const finishPrefixQueryTiming = (): void => {
       prefixQueryMs = toBoundedContextSnapshotTimingMs(performance.now() - prefixQueryStartedAt);
     };
-    requireProject(db, projectId);
+    const organizationId = requireProject(db, projectId);
     const existingMappingRow = db.prepare(
       `SELECT * FROM context_conversation_sources
        WHERE project_id = ? AND source_key = ?`,
@@ -640,11 +642,12 @@ export function importContextConversationSnapshot(
       const metadata = conversationMetadata(snapshot);
       db.prepare(
         `INSERT INTO context_conversations
-         (id, project_id, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, organization_id, owner_user_id, visibility, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
+         VALUES (?, ?, ?, NULL, 'project', ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         conversationId,
         projectId,
+        organizationId,
         snapshot.title,
         conversationRequestHash(snapshot, metadata),
         deterministicConversationIdempotencyKey(projectId, snapshot.sourceKey),

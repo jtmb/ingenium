@@ -86,7 +86,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–097)
+### Feature Migrations (045–098)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -122,6 +122,7 @@ another Compose project volume.
 | 084 | `084_restore_executor.sql` | Adds RESTORE-101's separately authorized 15-minute execution token, queued run/item ledger, hash-only owner/fence evidence, phase-CAS state graph, bounded idempotency receipts, immutable execution audit, and the RESTORE-100 authorization-ID immutability correction. It is all-or-nothing at startup; partial execution inventory fails closed. |
 | 096 | `096_resource_ownership.sql` | Adds resource grants/audit, explicit organization/user ownership for vault folders/items, provider connections/model policies, immutable ownership guards, and an immutable bounded-count/exact-ID manifest. Existing encrypted vault material is not decrypted or re-encrypted. |
 | 097 | `097_mail_tenancy.sql` | Adds owned mail accounts, separately encrypted credential rows, organization-qualified consume-once OAuth attempts and mail cache state, scope/FK triggers, and an immutable bounded-count/exact-account-ID manifest. Existing account IDs, ciphertext, folder names, and cache identity are preserved. |
+| 098 | `098_content_tenancy.sql` | Adds organization-rooted Docs, authorization-scoped RAG visibility, immutable context ownership, private-by-default observations/personality, bounded pipeline scope, normalized content shares, content-free audit, child-scope triggers, and an immutable ID/hash/count manifest. Partial state is refused by startup probes. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

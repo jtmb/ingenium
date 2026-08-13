@@ -1,11 +1,12 @@
 import { Router } from "express";
-import { docs, repositoryDocs, MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE, getDb, execTransaction, checkpointAfterWrite } from "ingenium-core";
+import { authorization, docs, organizations, repositoryDocs, MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE, getDb, execTransaction, checkpointAfterWrite } from "ingenium-core";
 import formidable from "formidable";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync, createReadStream, statSync } from "node:fs";
 import { resolve, extname, basename, sep } from "node:path";
 import { realpathSync } from "node:fs";
 import { requireProject } from "../helpers.js";
+import { authorizationPrincipal } from "../authorization-policy.js";
 
 // Converts snake_case core types → camelCase wire format.
 // Never leak raw DB rows to clients. All routes use these mappers before responding.
@@ -204,6 +205,49 @@ function nowISO(): string {
  */
 export const router = Router();
 
+function organizationId(req: any, res: any): string | null {
+  const requestPrincipal = req.principal ?? { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+  const supplied = typeof req.query.organization_id === "string" ? req.query.organization_id : undefined;
+  const principal = authorizationPrincipal(requestPrincipal);
+  const target = supplied ?? principal.organizationId ?? organizations.BOOTSTRAP_ORGANIZATION_ID;
+  if (!req.authorizationPolicy) return target;
+  if (!target) {
+    res.status(400).json({ error: { code: "BAD_REQUEST", message: "organization_id is required" } });
+    return null;
+  }
+  const decision = authorization.requireOrganizationPermission(principal, target, "docs", req.authorizationPolicy?.permission ?? "read");
+  if (!decision.allowed) {
+    res.status(decision.visible ? 403 : 404).json({ error: { code: decision.visible ? "FORBIDDEN" : "NOT_FOUND", message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found" } });
+    return null;
+  }
+  return target;
+}
+
+router.use((req, res, next) => {
+  if (req.path === "/repository/sync") return next();
+  const orgId = organizationId(req, res);
+  if (!orgId) return;
+  const spaceId = Number(req.params.spaceId ?? (req.path.match(/^\/spaces\/(\d+)/)?.[1]) ?? req.query.spaceId ?? req.body?.spaceId);
+  const pageId = Number(req.params.id ?? (req.path.match(/^\/pages\/(\d+)/)?.[1]));
+  const templateId = Number(req.path.match(/^\/templates\/(\d+)/)?.[1]);
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  const hasContentTenancy = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'content_tenancy_manifests'").get());
+  if (!hasContentTenancy) return next();
+  if (Number.isInteger(spaceId) && spaceId > 0 && !db.prepare("SELECT 1 FROM docs_spaces WHERE id = ? AND organization_id = ?").get(spaceId, orgId)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+    return;
+  }
+  if (Number.isInteger(pageId) && pageId > 0 && !db.prepare("SELECT 1 FROM docs_pages WHERE id = ? AND organization_id = ?").get(pageId, orgId)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+    return;
+  }
+  if (Number.isInteger(templateId) && templateId > 0 && !db.prepare("SELECT 1 FROM docs_templates WHERE id = ? AND organization_id = ?").get(templateId, orgId)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+    return;
+  }
+  next();
+});
+
 
 // POST /repository/sync?project=... — repository-authoritative Markdown manifest
 // The API receives content only as an authenticated manifest and never resolves
@@ -246,10 +290,12 @@ router.post("/repository/sync", (req, res) => {
 // GET /spaces — list all spaces OR lookup by slug
 router.get("/spaces", (_req, res) => {
   try {
+    const orgId = organizationId(_req, res);
+    if (!orgId) return;
     // Slug lookup: GET /spaces?slug=...
     const slug = _req.query.slug as string | undefined;
     if (slug) {
-      const space = docs.getSpaceBySlug(slug);
+      const space = docs.getSpaceBySlug(slug, orgId);
       if (!space) {
         res.status(404).json({ error: { code: "NOT_FOUND", message: `Space with slug '${slug}' not found` } });
         return;
@@ -258,13 +304,7 @@ router.get("/spaces", (_req, res) => {
       return;
     }
 
-    const spaces = docs.listSpaces();
-    if (spaces.length === 0) {
-      docs.createSpace("Personal", "personal", "Your personal documentation space", "user");
-      const created = docs.listSpaces();
-      res.json({ data: created.map(mapSpace), total: created.length });
-      return;
-    }
+    const spaces = docs.listSpaces(orgId);
     res.json({ data: spaces.map(mapSpace), total: spaces.length });
   } catch (err: any) {
     if (err.code && err.message) {
@@ -280,13 +320,15 @@ router.get("/spaces", (_req, res) => {
 
 router.get("/search", (req, res) => {
   try {
+    const orgId = organizationId(req, res);
+    if (!orgId) return;
     const query = req.query.q as string;
     if (!query) {
       res.status(400).json({ error: { code: "BAD_REQUEST", message: "q parameter is required" } });
       return;
     }
     const spaceId = parseOptionalInt(req.query.spaceId as string);
-    const results = docs.searchPages(query, spaceId);
+    const results = docs.searchPages(query, spaceId, orgId);
     res.json({ data: results.map(mapSearchResult), total: results.length });
   } catch (err: any) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
@@ -297,7 +339,8 @@ router.get("/search", (req, res) => {
 
 router.get("/tags", (_req, res) => {
   try {
-    const tags = docs.listAllTags();
+    const orgId = organizationId(_req, res); if (!orgId) return;
+    const tags = docs.listAllTags(orgId);
     res.json({ data: tags.map(mapTag), total: tags.length });
   } catch (err: any) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
@@ -308,7 +351,8 @@ router.get("/tags", (_req, res) => {
 
 router.get("/templates", (_req, res) => {
   try {
-    const templates = docs.listTemplates();
+    const orgId = organizationId(_req, res); if (!orgId) return;
+    const templates = docs.listTemplates(orgId);
     res.json({ data: templates.map(mapTemplate), total: templates.length });
   } catch (err: any) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
@@ -317,12 +361,13 @@ router.get("/templates", (_req, res) => {
 
 router.post("/templates", (req, res) => {
   try {
+    const orgId = organizationId(req, res); if (!orgId) return;
     const { name, content, description, category } = req.body;
     if (!name || content === undefined) {
       res.status(400).json({ error: { code: "BAD_REQUEST", message: "name and content are required" } });
       return;
     }
-    const template = docs.createTemplate(name, content, description, category);
+    const template = docs.createTemplate(orgId, name, content, description, category);
     res.status(201).json({ data: mapTemplate(template) });
   } catch (err: any) {
     if (err.message?.includes("UNIQUE")) {
@@ -337,7 +382,8 @@ router.post("/templates", (req, res) => {
 
 router.get("/favorites", (_req, res) => {
   try {
-    const favs = docs.listFavorites();
+    const orgId = organizationId(_req, res); if (!orgId) return;
+    const favs = docs.listFavorites(orgId);
     res.json({ data: favs.map(mapPage), total: favs.length });
   } catch (err: any) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
@@ -384,7 +430,8 @@ router.post("/import", (req, res) => {
       return;
     }
 
-    const space = docs.getSpace(sid);
+    const orgId = organizationId(req, res); if (!orgId) return;
+    const space = docs.getSpace(sid, orgId);
     if (!space) {
       res.status(404).json({ error: { code: "NOT_FOUND", message: `Space ${sid} not found` } });
       return;
@@ -406,7 +453,8 @@ router.post("/import", (req, res) => {
 
 router.get("/stats", (_req, res) => {
   try {
-    const stats = docs.getDocStats();
+    const orgId = organizationId(_req, res); if (!orgId) return;
+    const stats = docs.getDocStats(orgId);
     res.json({ data: mapStats(stats) });
   } catch (err: any) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
@@ -454,9 +502,11 @@ function mapTree(node: any): any {
 // GET /spaces/:id
 router.get("/spaces/:id", (req, res) => {
   try {
+    const orgId = organizationId(req, res);
+    if (!orgId) return;
     const id = parseIntParam(req.params.id, "Space ID", res);
     if (id === null) return;
-    const space = docs.getSpace(id);
+    const space = docs.getSpace(id, orgId);
     if (!space) {
       res.status(404).json({ error: { code: "NOT_FOUND", message: `Space ${id} not found` } });
       return;
@@ -470,12 +520,14 @@ router.get("/spaces/:id", (req, res) => {
 // POST /spaces
 router.post("/spaces", (req, res) => {
   try {
+    const orgId = organizationId(req, res);
+    if (!orgId) return;
     const { name, slug, description, icon } = req.body;
     if (!name || !slug) {
       res.status(400).json({ error: { code: "BAD_REQUEST", message: "name and slug are required" } });
       return;
     }
-    const space = docs.createSpace(name, slug, description, icon);
+    const space = docs.createSpace(orgId, name, slug, description, icon);
     res.status(201).json({ data: mapSpace(space) });
   } catch (err: any) {
     if (err.message?.includes("UNIQUE")) {

@@ -14,14 +14,13 @@ import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from 
 import type { RagSource, RagSearchResult } from "../schema.js";
 import type { Chunk } from "./rag-chunker.js";
 import { chunkText } from "./rag-chunker.js";
-import { getGlobalProject } from "./projects.js";
 
 function dbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
 }
 
 export interface RagPage<T> { data: T[]; total: number; limit: number; offset: number; }
-export interface IngestSourceOptions { sourceType?: "file" | "text" | "url"; sourcePath?: string; mimeType?: string; metadata?: Record<string, unknown>; priority?: number; tags?: string[]; }
+export interface IngestSourceOptions { sourceType?: "file" | "text" | "url"; sourcePath?: string; mimeType?: string; metadata?: Record<string, unknown>; priority?: number; tags?: string[]; visibility?: "organization" | "project" | "restricted"; ownerUserId?: string | null; organizationId?: string; }
 
 /** Raised when Context history has made a source immutable. */
 export class RagSourceImmutableError extends Error {
@@ -38,6 +37,11 @@ export interface TransactionalRagIngestResult {
 
 function sha256(content: string | Buffer): string { return createHash("sha256").update(content).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
+function projectOrganizationId(db: ReturnType<typeof getDb>, projectId: string): string {
+  const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!project) throw new Error("RAG project not found");
+  return project.organization_id;
+}
 
 /** Stable tags applied to every repository-authoritative Markdown source. */
 export const REPOSITORY_DOC_RAG_TAGS = ["repository-managed", "repository-doc"] as const;
@@ -154,9 +158,9 @@ export function upsertRepositoryDocSourceInTransaction(
   } else {
     db.prepare(
       `INSERT INTO rag_sources
-       (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, 'file', ?, NULL, 'text/markdown', 0, ?, ?, ?)`,
-    ).run(sourceId, input.projectId, input.title, sourcePath, metadata, now(), now());
+       (id, project_id, organization_id, visibility, title, source_type, source_path, source_hash, mime_type, byte_size, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, 'organization', ?, 'file', ?, NULL, 'text/markdown', 0, ?, ?, ?)`,
+    ).run(sourceId, input.projectId, projectOrganizationId(db, input.projectId), input.title, sourcePath, metadata, now(), now());
   }
 
   if (reindexed) {
@@ -190,7 +194,10 @@ export function ingestCanonicalSourceInTransaction(
     assertSourceMutable(db, id);
     db.prepare("UPDATE rag_sources SET title = ?, source_type = ?, mime_type = ?, metadata = ?, updated_at = ? WHERE id = ?").run(title, options.sourceType ?? "text", options.mimeType ?? null, JSON.stringify(options.metadata ?? {}), now(), id);
   } else {
-    db.prepare("INSERT INTO rag_sources (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)").run(id, projectId, title, options.sourceType ?? "text", sourcePath, options.mimeType ?? null, JSON.stringify(options.metadata ?? {}), now(), now());
+    const organizationId = projectOrganizationId(db, projectId);
+    if (options.organizationId && options.organizationId !== organizationId) throw new Error("RAG organization scope mismatch");
+    const visibility = options.visibility ?? "project";
+    db.prepare("INSERT INTO rag_sources (id, project_id, organization_id, visibility, owner_user_id, title, source_type, source_path, source_hash, mime_type, byte_size, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)").run(id, projectId, organizationId, visibility, options.ownerUserId ?? null, title, options.sourceType ?? "text", sourcePath, options.mimeType ?? null, JSON.stringify(options.metadata ?? {}), now(), now());
   }
   replaceSourceContentInTransaction(db, id, content, chunks, options);
   return {
@@ -210,11 +217,12 @@ export function ingestCanonicalSource(projectId: string, title: string, content:
 /**
  * BM25 full-text search across all sources in a project.
  */
-export function searchChunks(projectId: string, query: string, limit = 20, includeGlobal = true): RagSearchResult[] {
+export function searchChunks(projectId: string, query: string, limit = 20, includeOrganization = false, ownerUserId?: string | null): RagSearchResult[] {
   const sanitized = sanitizeFts5Query(query);
   if (!sanitized) return [];
-  const globalProjectId = includeGlobal ? getGlobalProject()?.id ?? null : null;
-
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null
+    ? " AND s.visibility <> 'restricted'"
+    : " AND (s.visibility <> 'restricted' OR s.owner_user_id = ?)";
   return getDb(dbPath()).prepare(
     `SELECT c.rowid AS _rowid, c.id, c.source_id, c.chunk_index, c.content, c.token_count,
             c.heading_path, c.priority, c.tags, c.created_at,
@@ -224,10 +232,14 @@ export function searchChunks(projectId: string, query: string, limit = 20, inclu
      FROM rag_chunks_fts
      INNER JOIN rag_chunks c ON c.rowid = rag_chunks_fts.rowid
      INNER JOIN rag_sources s ON s.id = c.source_id
-       WHERE (s.project_id = ? OR (? IS NOT NULL AND s.project_id = ?)) AND rag_chunks_fts MATCH ?
+         WHERE ((s.project_id = ? AND (s.visibility <> 'organization' OR ? = 1))
+            OR (? = 1 AND s.visibility = 'organization' AND s.organization_id = (SELECT organization_id FROM projects WHERE id = ?)))
+           AND rag_chunks_fts MATCH ?${scope}
        ORDER BY c.priority DESC, rank ASC, s.updated_at DESC, s.id ASC, c.chunk_index ASC, c.id ASC
       LIMIT ?`,
-   ).all(projectId, globalProjectId, globalProjectId, sanitized, Math.max(1, limit)) as RagSearchResult[];
+    ).all(...(ownerUserId === undefined || ownerUserId === null
+      ? [projectId, includeOrganization ? 1 : 0, includeOrganization ? 1 : 0, projectId, sanitized, Math.max(1, limit)]
+      : [projectId, includeOrganization ? 1 : 0, includeOrganization ? 1 : 0, projectId, sanitized, ownerUserId, Math.max(1, limit)])) as RagSearchResult[];
 }
 
 /** Search only an explicit, project-owned set of sources. Never includes global data. */
@@ -262,10 +274,14 @@ export function searchContextUploadChunks(
   projectId: string,
   query: string,
   limit = 20,
+  ownerUserId?: string | null,
 ): RagSearchResult[] {
   const sanitized = sanitizeFts5Query(query);
   if (!sanitized) return [];
   const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null
+    ? " AND s.visibility <> 'restricted'"
+    : " AND (s.visibility <> 'restricted' OR s.owner_user_id = ?)";
   return getDb(dbPath()).prepare(
     `SELECT c.rowid AS _rowid, c.id, c.source_id, c.chunk_index, c.content, c.token_count,
             c.heading_path, c.priority, c.tags, c.created_at,
@@ -277,10 +293,12 @@ export function searchContextUploadChunks(
      INNER JOIN rag_sources s ON s.id = c.source_id
      INNER JOIN context_rag_uploads upload
        ON upload.project_id = s.project_id AND upload.rag_source_id = s.id
-     WHERE s.project_id = ? AND rag_chunks_fts MATCH ?
+      WHERE s.project_id = ? AND rag_chunks_fts MATCH ?${scope}
       ORDER BY c.priority DESC, rank ASC, s.updated_at DESC, s.id ASC, c.chunk_index ASC, c.id ASC
      LIMIT ?`,
-  ).all(projectId, sanitized, safeLimit) as RagSearchResult[];
+  ).all(...(ownerUserId === undefined || ownerUserId === null
+    ? [projectId, sanitized, safeLimit]
+    : [projectId, sanitized, ownerUserId, safeLimit])) as RagSearchResult[];
 }
 
 /**
@@ -298,10 +316,12 @@ export function deleteSource(sourceId: string): void {
 /**
  * List all sources for a project.
  */
-export function listSources(projectId: string, limit = 50, offset = 0): RagPage<RagSource> {
+export function listSources(projectId: string, limit = 50, offset = 0, ownerUserId?: string | null): RagPage<RagSource> {
   const db = getDb(dbPath()); const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100); const safeOffset = Math.max(Math.trunc(offset), 0);
-  const total = (db.prepare("SELECT count(*) AS total FROM rag_sources WHERE project_id = ?").get(projectId) as { total: number }).total;
-  const data = db.prepare("SELECT * FROM rag_sources WHERE project_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?").all(projectId, safeLimit, safeOffset) as RagSource[];
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null ? " AND visibility <> 'restricted'" : " AND (visibility <> 'restricted' OR owner_user_id = ?)";
+  const params = ownerUserId === undefined || ownerUserId === null ? [projectId] : [projectId, ownerUserId];
+  const total = (db.prepare(`SELECT count(*) AS total FROM rag_sources WHERE project_id = ?${scope}`).get(...params) as { total: number }).total;
+  const data = db.prepare(`SELECT * FROM rag_sources WHERE project_id = ?${scope} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`).all(...params, safeLimit, safeOffset) as RagSource[];
   return { data, total, limit: safeLimit, offset: safeOffset };
 }
 
@@ -338,7 +358,7 @@ export function indexConfiguredDocs(globalProjectId: string, root = process.env.
     const content = readFileSync(real, "utf8");
     const old = getDb(dbPath()).prepare("SELECT source_hash FROM rag_sources WHERE project_id = ? AND source_path = ?").get(globalProjectId, path) as { source_hash: string | null } | undefined;
     if (old?.source_hash === sha256(content)) { unchanged++; continue; }
-    ingestCanonicalSource(globalProjectId, basename(file), content, { sourceType: "file", sourcePath: path, metadata: { kind: "file", repositoryPath: path, provenance: "configured-docs-root" } }); indexed++;
+    ingestCanonicalSource(globalProjectId, basename(file), content, { visibility: "organization", sourceType: "file", sourcePath: path, metadata: { kind: "file", repositoryPath: path, provenance: "configured-docs-root" } }); indexed++;
   }
   const stale = getDb(dbPath()).prepare("SELECT id, source_path FROM rag_sources WHERE project_id = ? AND source_type = 'file' AND source_path LIKE 'docs/%'").all(globalProjectId) as Array<{ id: string; source_path: string }>;
   let deleted = 0; for (const source of stale) if (!active.has(source.source_path)) { deleteSource(source.id); deleted++; }
@@ -346,7 +366,7 @@ export function indexConfiguredDocs(globalProjectId: string, root = process.env.
 }
 
 /** Keep a published Docs Workspace page synchronized at its lifecycle boundary. */
-export function indexPublishedDoc(page: { id: number; title: string; slug: string; content: string; status: string }): void {
+export function indexPublishedDoc(page: { id: number; space_id?: number; title: string; slug: string; content: string; status: string }): void {
   const db = getDb(dbPath());
   const managed = db.prepare(
     "SELECT rag_source_id FROM docs_repository_pages WHERE page_id = ?",
@@ -358,13 +378,16 @@ export function indexPublishedDoc(page: { id: number; title: string; slug: strin
     if (page.status !== "published" && managed.rag_source_id) deleteSource(managed.rag_source_id);
     return;
   }
-  const global = getGlobalProject();
-  if (!global) return;
+  const space = db.prepare("SELECT organization_id FROM docs_spaces WHERE id = ?").get(page.space_id) as { organization_id: string } | undefined;
+  if (!space) return;
+  const project = db.prepare("SELECT id FROM projects WHERE organization_id = ? AND is_global = 1 AND archived_at IS NULL").get(space.organization_id) as { id: string } | undefined
+    ?? db.prepare("SELECT id FROM projects WHERE organization_id = ? AND archived_at IS NULL ORDER BY created_at, id LIMIT 1").get(space.organization_id) as { id: string } | undefined;
+  if (!project) return;
   const sourcePath = `docs-page:${page.id}`;
   if (page.status !== "published") {
-    const source = db.prepare("SELECT id FROM rag_sources WHERE project_id = ? AND source_path = ?").get(global.id, sourcePath) as { id: string } | undefined;
+    const source = db.prepare("SELECT id FROM rag_sources WHERE organization_id = ? AND source_path = ?").get(space.organization_id, sourcePath) as { id: string } | undefined;
     if (source) deleteSource(source.id);
     return;
   }
-  ingestCanonicalSource(global.id, page.title, page.content, { sourceType: "text", sourcePath, metadata: { kind: "docs_page", pageId: page.id, slug: page.slug, provenance: "docs-workspace" } });
+  ingestCanonicalSource(project.id, page.title, page.content, { organizationId: space.organization_id, visibility: "organization", sourceType: "text", sourcePath, metadata: { kind: "docs_page", pageId: page.id, slug: page.slug, provenance: "docs-workspace" } });
 }

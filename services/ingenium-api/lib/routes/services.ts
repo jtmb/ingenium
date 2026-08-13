@@ -270,7 +270,7 @@ function buildServiceDetail(info: Record<string, string>): ServiceDetail {
 async function getDocsStatus(): Promise<AppInfo> {
   try {
     const stats = docs.getDocStats();
-    const total = stats.spaces + stats.pages + stats.drafts;
+    const total = stats.pages + stats.drafts;
     if (total === 0) {
       return { name: "docs-workspace", state: "idle", description: "Documentation workspace", detail: "No documents yet — create a space to begin", required: false };
     }

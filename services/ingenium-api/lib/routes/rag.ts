@@ -13,11 +13,11 @@
  *   POST   /export               — Export all RAG sources as JSON
  */
 
-import { Router, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { getDb, execTransaction, checkpointAfterWrite, logger, projects, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
-import { requireProject } from "../helpers.js";
+import { requestAuthorizationPrincipal, requireContentAccess, requireProject } from "../helpers.js";
 
 export const ragRouter = Router();
 
@@ -30,6 +30,22 @@ function dbPath(): string {
 }
 
 const SOURCE = "rag-routes";
+
+function ownerScope(req: Request): string | null | undefined {
+  if (!req.authorizationPolicy) return undefined;
+  const principal = requestAuthorizationPrincipal(req);
+  return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
+}
+
+function requireSource(req: Request, res: Response, projectId: string): any | null {
+  const source = getDb(dbPath()).prepare("SELECT * FROM rag_sources WHERE id = ? AND project_id = ?")
+    .get(req.params.id!, projectId) as any;
+  if (!source) return null;
+  return requireContentAccess(req, res, {
+    resourceType: "rag_source", resourceId: source.id, organizationId: source.organization_id,
+    projectId: source.project_id, visibility: source.visibility, ownerUserId: source.owner_user_id,
+  }) ? source : null;
+}
 
 /** Resolve format string to a valid source_type column value. */
 function normalizeSourceType(format?: string): "text" | "file" | "url" {
@@ -97,9 +113,9 @@ ragRouter.post("/sources", (req, res) => {
 
   execTransaction(() => {
     db.prepare(
-      `INSERT INTO rag_sources (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, 0, ?, datetime('now'), datetime('now'))`,
-    ).run(id, projectId, title.trim(), sourceTypeVal, typeof text === "string" ? text.length : 0, metadata);
+      `INSERT INTO rag_sources (id, project_id, organization_id, visibility, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
+       SELECT ?, id, organization_id, 'project', ?, ?, NULL, NULL, NULL, ?, 0, ?, datetime('now'), datetime('now') FROM projects WHERE id = ?`,
+    ).run(id, title.trim(), sourceTypeVal, typeof text === "string" ? text.length : 0, metadata, projectId);
   });
   checkpointAfterWrite();
 
@@ -131,7 +147,7 @@ ragRouter.get("/sources", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0);
+  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0, ownerScope(req));
   res.json({
     data: sources.data.map((s) => ({
       id: s.id,
@@ -156,12 +172,10 @@ ragRouter.get("/sources/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const db = getDb(dbPath());
-  const source = db.prepare(
-    "SELECT * FROM rag_sources WHERE id = ? AND project_id = ?",
-  ).get(req.params.id!, projectId) as any;
+  const source = requireSource(req, res, projectId);
 
   if (!source) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Source not found" } });
     return;
   }
@@ -189,12 +203,10 @@ ragRouter.delete("/sources/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const db = getDb(dbPath());
-  const existing = db.prepare(
-    "SELECT 1 FROM rag_sources WHERE id = ? AND project_id = ?",
-  ).get(req.params.id!, projectId);
+  const existing = requireSource(req, res, projectId);
 
   if (!existing) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Source not found" } });
     return;
   }
@@ -226,12 +238,10 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const db = getDb(dbPath());
-  const source = db.prepare(
-    "SELECT * FROM rag_sources WHERE id = ? AND project_id = ?",
-  ).get(req.params.id!, projectId) as any;
+  const source = requireSource(req, res, projectId);
 
   if (!source) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Source not found" } });
     return;
   }
@@ -292,7 +302,7 @@ ragRouter.get("/search", (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit as string ?? "20", 10) || 20, 1), 100);
 
   try {
-    const results = rag.searchChunks(projectId, q, limit, true);
+    const results = rag.searchChunks(projectId, q, limit, true, ownerScope(req));
 
     res.json({
       data: results.map((r, i) => ({
@@ -329,7 +339,7 @@ ragRouter.post("/ask", async (req, res) => {
   }
 
   // Step 1: Search for relevant chunks
-  const results = rag.searchChunks(projectId, question, 10, true);
+  const results = rag.searchChunks(projectId, question, 10, true, ownerScope(req));
 
   if (results.length === 0) {
     res.json({
@@ -437,9 +447,7 @@ ragRouter.post("/export", (req, res) => {
 
   const db = getDb(dbPath());
 
-  const sources = db.prepare(
-    "SELECT * FROM rag_sources WHERE project_id = ? ORDER BY created_at DESC",
-  ).all(projectId) as any[];
+  const sources = rag.listSources(projectId, 100, 0, ownerScope(req)).data;
 
   const exportData = sources.map((source) => {
     const chunks = db.prepare(

@@ -9,6 +9,12 @@ description: Using the documentation workspace — creating, editing, publishing
 
 An immersive 3-pane docs workspace at `/docs` for creating, editing, and managing documentation pages organized into spaces. Each page supports a draft-first lifecycle, hierarchical nesting, rich metadata (tags, backlinks, comments, version history, attachments, project links), and full-text search.
 
+Spaces belong to the authenticated organization. The workspace lists and searches
+only that organization's spaces and pages; IDs and slugs from another organization
+behave as not found. Existing installations retain their Docs IDs and content in
+the bootstrap organization. New organizations receive an organization default
+space instead of an automatic global Personal space.
+
 ## How to Use
 
 1. Navigate to `/docs` in the dashboard (or `/docs?space=<id>` to open a specific space)

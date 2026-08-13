@@ -75,11 +75,17 @@ beforeAll(async () => {
   sourceInstance = getOpenCodeUsageSourceInstance();
   chatSourceId = tasks.createChatTaskSourceId(sourceInstance, "upstream-project", "session-1");
   usage.mapOpenCodeProject(sourceInstance, "upstream-project", globalProject.id);
-  getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  db.prepare(
+    `INSERT INTO mail_accounts
+     (id, organization_id, owner_kind, email, name, provider, auth_type, config_json, created_by_actor_type, created_at, updated_at)
+     VALUES (?, ?, 'organization', ?, ?, 'custom', 'app_password', '{}', 'compatibility', ?, ?)`,
+  ).run("account-a", globalProject.organization_id, "task-source@example.test", "Task source", new Date().toISOString(), new Date().toISOString());
+  db.prepare(
     `INSERT INTO email_cache
-     (account_id, folder, uid, subject, snippet, envelope_json, cached_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run("account-a", "INBOX", "42", "Secret subject", "Secret snippet", '{"authorization":"secret"}', "2026-08-01T00:00:00.000Z");
+     (organization_id, account_id, folder, uid, subject, snippet, envelope_json, cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(globalProject.organization_id, "account-a", "INBOX", "42", "Secret subject", "Secret snippet", '{"authorization":"secret"}', "2026-08-01T00:00:00.000Z");
 
   const app = express();
   app.use(express.json());
@@ -107,10 +113,16 @@ describe("task source reference API", () => {
   it("captures email and context sources atomically, idempotently, and without source-content leakage", async () => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
     db.prepare(
+      `INSERT INTO mail_accounts
+       (id, organization_id, owner_kind, email, name, provider, auth_type, config_json, created_by_actor_type, created_at, updated_at)
+       VALUES (?, ?, 'organization', ?, ?, 'custom', 'app_password', '{}', 'compatibility', ?, ?)`,
+    ).run("capture-account", globalProject.organization_id, "capture@example.test", "Capture", new Date().toISOString(), new Date().toISOString());
+    db.prepare(
       `INSERT INTO email_cache
-       (account_id, folder, uid, subject, snippet, envelope_json, cached_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (organization_id, account_id, folder, uid, subject, snippet, envelope_json, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
+      globalProject.organization_id,
       "capture-account",
       "Archive/2026",
       "capture-42",

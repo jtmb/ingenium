@@ -63,21 +63,22 @@ describe("context RAG ingestion", () => {
       content: string,
     ) => {
       const hash = createHash("sha256").update(content).digest("hex");
-      db.prepare(
-        `INSERT INTO rag_sources
-         (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
-         VALUES (?, ?, ?, 'text', ?, ?, 'text/plain', ?, 1, ?, ?, ?)`,
-      ).run(
-        sourceId,
-        first.id,
-        `Source ${sourceId}`,
-        `context-upload:${uploadId}`,
-        hash,
-        Buffer.byteLength(content),
-        JSON.stringify({ kind: "context_upload", contextMetadata: {} }),
-        createdAt,
-        createdAt,
-      );
+       db.prepare(
+         `INSERT INTO rag_sources
+          (id, project_id, organization_id, visibility, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
+          SELECT ?, id, organization_id, 'project', ?, 'text', ?, ?, 'text/plain', ?, 1, ?, ?, ?
+          FROM projects WHERE id = ?`,
+       ).run(
+         sourceId,
+         `Source ${sourceId}`,
+         `context-upload:${uploadId}`,
+         hash,
+         Buffer.byteLength(content),
+         JSON.stringify({ kind: "context_upload", contextMetadata: {} }),
+         createdAt,
+         createdAt,
+         first.id,
+       );
       db.prepare(
         `INSERT INTO rag_chunks
          (id, source_id, chunk_index, content, token_count, heading_path, priority, tags, created_at)

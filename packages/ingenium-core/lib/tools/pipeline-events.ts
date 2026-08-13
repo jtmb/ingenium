@@ -18,15 +18,17 @@ export function logEvent(
   parentEventId?: number,
   sessionId?: string,
   importance?: number,
+  scope?: { ownerUserId?: string | null; visibility?: "private" | "organization" },
 ): PipelineEvent {
   const event = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
     const result = db.prepare(
-      `INSERT INTO pipeline_events (project_id, event_type, event_source, title, description, data, parent_event_id, session_id, importance, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO pipeline_events (project_id, organization_id, owner_user_id, visibility, event_type, event_source, title, description, data, parent_event_id, session_id, importance, created_at)
+       SELECT id, organization_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM projects WHERE id = ?`
     ).run(
-      projectId,
+      scope?.ownerUserId ?? null,
+      scope?.visibility ?? (scope?.ownerUserId ? "private" : "organization"),
       eventType,
       eventSource,
       title,
@@ -36,6 +38,7 @@ export function logEvent(
       sessionId ?? null,
       importance ?? 5,
       now,
+      projectId,
     );
     return db.prepare("SELECT * FROM pipeline_events WHERE id = ?").get(result.lastInsertRowid) as PipelineEvent;
   });
@@ -56,6 +59,7 @@ export function getEvents(
     limit?: number;
     since?: string;        // ISO timestamp — only events after this
     parentEventId?: number; // only children of a specific event
+    ownerUserId?: string | null;
   },
 ): PipelineEvent[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
@@ -77,6 +81,10 @@ export function getEvents(
   if (options?.parentEventId !== undefined) {
     clauses.push("parent_event_id = ?");
     params.push(options.parentEventId);
+  }
+  if (options?.ownerUserId !== undefined) {
+    clauses.push(options.ownerUserId === null ? "visibility = 'organization'" : "(visibility = 'organization' OR owner_user_id = ?)");
+    if (options.ownerUserId !== null) params.push(options.ownerUserId);
   }
 
   const limit = options?.limit ?? 100;
@@ -102,6 +110,7 @@ export function getTimeline(
     source?: PipelineEvent["event_source"];
     limit?: number;
     since?: string;
+    ownerUserId?: string | null;
   },
 ): PipelineEvent[] {
   const parents = getEvents(projectId, {
@@ -110,7 +119,7 @@ export function getTimeline(
   });
 
   for (const parent of parents) {
-    const children = getEvents(projectId, { parentEventId: parent.id });
+    const children = getEvents(projectId, { parentEventId: parent.id, ownerUserId: options?.ownerUserId });
     if (children.length > 0) {
       const parsed = parent.data ? JSON.parse(parent.data) : {};
       parsed.children = children;

@@ -10,14 +10,14 @@ describe("AUTH-102 canonical API policy", () => {
   it.each([
     ["GET", "/api/v1/tasks", "project", "read"],
     ["POST", "/api/v1/jobs/job/run", "project", "execute"],
-    ["GET", "/api/v1/context/conversations", "private", "read"],
+    ["GET", "/api/v1/context/conversations", "project", "read"],
     ["GET", "/api/v1/emails/accounts", "project", "read"],
     ["POST", "/api/v1/vault/items/item/reveal", "project", "write"],
     ["PUT", "/api/v1/settings/provider-configs", "installation", "write"],
     ["POST", "/api/v1/opencode/integrations/openai/connect/key", "installation", "execute"],
     ["GET", "/api/v1/backups", "installation", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
-    ["GET", "/api/v1/docs/spaces", "installation", "read"],
+    ["GET", "/api/v1/docs/spaces", "organization", "read"],
     ["DELETE", "/api/v1/projects/example/purge", "project", "admin"],
     ["GET", "/api/v1/auth/oidc/providers", "public", "read"],
   ] as const)("classifies %s %s", (method, path, target, permission) => {

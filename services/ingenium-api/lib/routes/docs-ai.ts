@@ -40,8 +40,11 @@ interface AIRequestBody {
   title?: unknown;
   // Subset of content to operate on (for rewrite/grammar fixes on selection)
   selectedText?: unknown;
-  /** Never accepted: Docs AI always uses the server-resolved global project. */
+  /** Never accepted: Docs AI authority is derived from the authenticated principal. */
   project?: unknown;
+  organizationId?: unknown;
+  providerId?: unknown;
+  modelId?: unknown;
 }
 
 /**
@@ -198,17 +201,11 @@ function sendGlobalProjectUnavailable(res: Response): void {
   sendDocsAiError(res, 503, DOCS_AI_ERRORS.globalProjectUnavailable);
 }
 
-function resolveDocsGlobalProjectId(res: Response): string | null {
-  try {
-    const globalProject = projects.getGlobalProject();
-    if (globalProject) return globalProject.id;
-  } catch {
-    logger.warn("docs-ai", "Documentation AI rejected because global project resolution failed");
-    sendGlobalProjectUnavailable(res);
-    return null;
-  }
-  sendGlobalProjectUnavailable(res);
-  return null;
+function resolveDocsProjectId(res: Response): string | null {
+  let project: { id: string } | undefined;
+  try { project = projects.getGlobalProject(); } catch { sendGlobalProjectUnavailable(res); return null; }
+  if (!project) { sendGlobalProjectUnavailable(res); return null; }
+  return project.id;
 }
 
 // ── POST /ai ───────────────────────────────────────────────────────────────────
@@ -221,7 +218,7 @@ router.post("/ai", async (req: Request, res: Response) => {
       sendDocsAiError(res, 400, DOCS_AI_ERRORS.invalidRequest);
       return;
     }
-    const { action, content, title, selectedText, project } = req.body as AIRequestBody;
+    const { action, content, title, selectedText, project, organizationId } = req.body as AIRequestBody;
 
     const hasContent = typeof content === "string" && content.trim().length > 0;
     const hasTitle = typeof title === "string" && title.trim().length > 0;
@@ -249,12 +246,12 @@ router.post("/ai", async (req: Request, res: Response) => {
     // context must never select the authority for globally scoped Docs AI.
     // Reject an attempted body override instead of silently accepting a
     // conflicting authority hint.
-    if (project !== undefined) {
+    if (project !== undefined || organizationId !== undefined) {
       sendDocsAiError(res, 422, DOCS_AI_ERRORS.projectConflict);
       return;
     }
 
-    const projectId = resolveDocsGlobalProjectId(res);
+    const projectId = resolveDocsProjectId(res);
     if (!projectId) return;
 
     let catalog: Awaited<ReturnType<typeof getChatProviderCatalog>>;

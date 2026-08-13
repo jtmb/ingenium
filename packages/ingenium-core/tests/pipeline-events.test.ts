@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProject } from "../lib/tools/projects.js";
 import { logEvent, getEvents, getTimeline } from "../lib/tools/pipeline-events.js";
+import { createUser } from "../lib/tools/identity.js";
+import { addOrganizationMember, BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
 
 let tempDir: string;
 let projectId: string;
@@ -104,6 +106,22 @@ describe("pipeline events", () => {
       return false;
     });
     expect(hasChildren).toBe(true);
+  });
+
+  it("applies the requesting owner scope to timeline children", () => {
+    const viewer = createUser("timeline-viewer@example.test", "Timeline Viewer");
+    const foreign = createUser("timeline-foreign@example.test", "Timeline Foreign");
+    addOrganizationMember(BOOTSTRAP_ORGANIZATION_ID, viewer.id, "member");
+    addOrganizationMember(BOOTSTRAP_ORGANIZATION_ID, foreign.id, "member");
+    const parent = logEvent(projectId, "synthesis_started", "synthesis", "Scoped parent");
+    logEvent(projectId, "trait_created", "synthesis", "Foreign private child", undefined, undefined, parent.id, undefined, undefined, {
+      ownerUserId: foreign.id,
+      visibility: "private",
+    });
+
+    const scopedParent = getTimeline(projectId, { ownerUserId: viewer.id }).find((event) => event.id === parent.id);
+    expect(scopedParent).toBeDefined();
+    expect(JSON.parse(scopedParent!.data ?? "{}").children).toBeUndefined();
   });
 
   it("limits results", () => {

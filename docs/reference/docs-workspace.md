@@ -16,6 +16,14 @@ description: Canonical contract for the Documentation Workspace API — routes, 
 
 This reference defines the canonical contract for the Docs Workspace API, models, and behavior rules. It is the single source of truth for all callers (Dashboard, MCP tools, third-party clients).
 
+AUTH-105 scopes every space, template, and tag to one organization. Pages and all
+child records inherit that organization and cannot be reparented or linked across
+it. Existing content is bootstrap-organization content, not user-private content.
+The API does not create a global Personal space on first list; migration 098
+provisions an organization default space instead. List, slug, search, count,
+trash, import/export, comment, attachment, template, RAG, and Docs AI operations
+apply the authenticated organization scope before retrieval.
+
 ## Documentation authority and agent policy
 
 Repository Markdown under `docs/**/*.md` is the normal documentation authority.
@@ -111,12 +119,13 @@ MCP callers, and explicitly authorized workflows.
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER PK | Auto-increment ID |
+| organization_id | TEXT FK | Owning organization; immutable |
 | name | TEXT UNIQUE | Display name (e.g., "Engineering") |
 | slug | TEXT UNIQUE | URL-safe slug (e.g., "engineering") |
 | description | TEXT | Optional description |
 | icon | TEXT | Icon name for UI (default: "folder") |
 | sort_order | INTEGER | Display sort order |
-| is_global | INTEGER | All spaces are global (default: 1) |
+| is_global | INTEGER | Legacy display field; tenancy is defined by `organization_id` |
 | created_at | TEXT | ISO timestamp |
 | updated_at | TEXT | ISO timestamp |
 

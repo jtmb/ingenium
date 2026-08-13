@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { synthesis, personality, tasks, jobs, settings, pipelineEvents, observations, getDb, logger } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requestContentActor, requireProject } from "../helpers.js";
 import type { EngineStatus } from "ingenium-email";
 import { getEmailClientStatus, getSynthesisStatus } from "../application-health.js";
 
@@ -114,7 +114,7 @@ function dbPath(): string {
 
 // ── Existing module helpers ────────────────────────────────────────────────────
 
-function fetchLearning(projectId: string, globalProjectId: string): {
+function fetchLearning(projectId: string, globalProjectId: string, ownerUserId: string | null): {
   learning: LearningSummary | null;
   unavailable: string[];
 } {
@@ -133,7 +133,7 @@ function fetchLearning(projectId: string, globalProjectId: string): {
 
   // Personality traits (display gate ≥0.30 is handled by getProfile)
   try {
-    const profile = personality.getProfile(projectId);
+    const profile = personality.getProfile(projectId, { ownerUserId });
     learning.displayTraitsCount = profile.length;
   } catch (err: any) {
     logger.error("dashboard", `Failed to fetch personality profile: ${err.message}`);
@@ -548,14 +548,14 @@ function fetchResume(projectId: string): {
 /**
  * Activity timeline — recent pipeline events mapped to user-facing activity types.
  */
-function fetchActivity(projectId: string): {
+function fetchActivity(projectId: string, ownerUserId: string | null): {
   activity: ActivityItem[] | null;
   unavailable: string[];
 } {
   const unavailable: string[] = [];
 
   try {
-    const events = pipelineEvents.getEvents(projectId, { limit: 50 });
+    const events = pipelineEvents.getEvents(projectId, { limit: 50, ownerUserId });
     const activity: ActivityItem[] = [];
 
     for (const evt of events) {
@@ -783,9 +783,10 @@ dashboardRouter.get("/summary", async (req, res) => {
 
   const allUnavailable: string[] = [];
   const data: Partial<DashboardData> = {};
+  const ownerUserId = requestContentActor(req, projectId)?.ownerUserId ?? null;
 
   // Existing modules (synchronous)
-  const learningResult = fetchLearning(projectId, "global-default");
+  const learningResult = fetchLearning(projectId, "global-default", ownerUserId);
   data.learning = learningResult.learning;
   allUnavailable.push(...learningResult.unavailable);
 
@@ -815,7 +816,7 @@ dashboardRouter.get("/summary", async (req, res) => {
   allUnavailable.push(...resumeResult.unavailable);
 
   // Activity timeline (synchronous — uses pipelineEvents)
-  const activityResult = fetchActivity(projectId);
+  const activityResult = fetchActivity(projectId, ownerUserId);
   data.activity = activityResult.activity;
   allUnavailable.push(...activityResult.unavailable);
 

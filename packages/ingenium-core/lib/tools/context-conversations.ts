@@ -248,6 +248,12 @@ function readCheckpointRagSource(row: unknown): ContextCheckpointRagSource {
   return parsed.data;
 }
 
+function projectOrganizationId(db: Db, projectId: string): string {
+  const row = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!row) throw new ContextConversationError("CONVERSATION_NOT_FOUND");
+  return row.organization_id;
+}
+
 function numberField(row: unknown, field: string): number {
   const value = (row as Record<string, unknown>)[field];
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
@@ -646,6 +652,9 @@ export function createContextConversation(
     tags: value.tags,
     priority: value.priority,
     metadata: value.metadata,
+    organizationId: value.organizationId ?? null,
+    ownerUserId: value.ownerUserId ?? null,
+    visibility: value.visibility,
   });
   const result = execTransaction(() => {
     const db = getDb(dbPath());
@@ -657,13 +666,18 @@ export function createContextConversation(
 
     const id = randomUUID();
     const createdAt = now();
+    const organizationId = projectOrganizationId(db, projectId);
+    if (value.organizationId && value.organizationId !== organizationId) {
+      throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+    }
+    if (value.visibility === "private" && !value.ownerUserId) throw new ContextConversationError("INVALID_CONTEXT_INPUT");
     const inserted = db.prepare(
       `INSERT INTO context_conversations
-       (id, project_id, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, project_id, organization_id, owner_user_id, visibility, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(project_id, idempotency_key) DO NOTHING`,
     ).run(
-      id, projectId, value.title, hash, value.idempotencyKey ?? null,
+      id, projectId, organizationId, value.ownerUserId ?? null, value.visibility, value.title, hash, value.idempotencyKey ?? null,
       JSON.stringify(value.tags), value.priority, JSON.stringify(value.metadata), createdAt,
     );
     if (inserted.changes === 0 && value.idempotencyKey) {
@@ -771,8 +785,13 @@ export function createContextCheckpoint(
     if (value.ragSourceIds.length > 0) {
       const placeholders = value.ragSourceIds.map(() => "?").join(",");
       const owned = db.prepare(
-        `SELECT id FROM rag_sources WHERE project_id = ? AND id IN (${placeholders})`,
-      ).all(projectId, ...value.ragSourceIds) as Array<{ id: string }>;
+        `SELECT source.id FROM rag_sources source
+         JOIN context_conversations conversation ON conversation.project_id = ? AND conversation.id = ?
+         WHERE source.id IN (${placeholders}) AND source.organization_id = conversation.organization_id
+           AND ((conversation.visibility = 'private' AND source.visibility = 'restricted' AND source.owner_user_id = conversation.owner_user_id)
+             OR (conversation.visibility = 'organization' AND source.visibility = 'organization')
+             OR (conversation.visibility = 'project' AND source.visibility = 'project' AND source.project_id = conversation.project_id))`,
+      ).all(projectId, conversationId, ...value.ragSourceIds) as Array<{ id: string }>;
       if (owned.length !== value.ragSourceIds.length) {
         throw new ContextConversationError("RAG_SOURCE_NOT_FOUND");
       }
@@ -1327,11 +1346,12 @@ export function restoreContextCheckpoint(
     const createdAt = now();
     const insertedConversation = db.prepare(
       `INSERT INTO context_conversations
-       (id, project_id, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, project_id, organization_id, owner_user_id, visibility, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(project_id, idempotency_key) DO NOTHING`,
     ).run(
-      restoredId, projectId, restoredTitle, hash, value.idempotencyKey ?? null,
+      restoredId, projectId, sourceConversation.organization_id, sourceConversation.owner_user_id,
+      sourceConversation.visibility, restoredTitle, hash, value.idempotencyKey ?? null,
       sourceConversation.tags, sourceConversation.priority, JSON.stringify(restoredMetadata), createdAt,
     );
     if (insertedConversation.changes === 0 && value.idempotencyKey) {

@@ -41,6 +41,7 @@ export type ContextRagErrorCode =
   | "UPLOAD_SIZE_MISMATCH"
   | "IDEMPOTENCY_KEY_REUSED"
   | "CHECKPOINT_RAG_SOURCE_NOT_FOUND"
+  | "CONTENT_SCOPE_CONFLICT"
   | "LEARNING_NO_INPUT";
 
 /** Stable errors that intentionally never interpolate uploaded content. */
@@ -59,6 +60,9 @@ export interface ContextRagDocumentInput {
   tags?: string[];
   metadata?: ContextMetadata;
   sourceReference?: string;
+  organizationId?: string;
+  ownerUserId?: string | null;
+  visibility?: "organization" | "project" | "restricted";
 }
 
 export interface CreateContextRagUploadSessionInput {
@@ -72,6 +76,9 @@ export interface CreateContextRagUploadSessionInput {
   metadata?: ContextMetadata;
   sourceReference?: string;
   idempotencyKey?: string;
+  organizationId?: string;
+  ownerUserId?: string | null;
+  visibility?: "organization" | "project" | "restricted";
 }
 
 export interface ContextRagUpload {
@@ -125,6 +132,9 @@ export interface ContextRagUploadSession {
   rag_source_id: string | null;
   created_at: string;
   completed_at: string | null;
+  organization_id: string;
+  owner_user_id: string | null;
+  visibility: "organization" | "project" | "restricted";
 }
 
 export interface ContextRagUploadSessionResult {
@@ -190,6 +200,9 @@ interface NormalizedDocument {
   tags: string[];
   metadata: ContextMetadata;
   sourceReference: string | null;
+  organizationId?: string;
+  ownerUserId?: string | null;
+  visibility?: "organization" | "project" | "restricted";
 }
 
 function dbPath(): string {
@@ -360,6 +373,9 @@ function normalizeDocument(input: unknown, maxBytes: number): NormalizedDocument
     tags: normalizeTags(value.tags),
     metadata: normalizeMetadata(value.metadata),
     sourceReference: normalizeSourceReference(value.sourceReference),
+    organizationId: typeof value.organizationId === "string" ? value.organizationId : undefined,
+    ownerUserId: typeof value.ownerUserId === "string" ? value.ownerUserId : value.ownerUserId === null ? null : undefined,
+    visibility: value.visibility === "organization" || value.visibility === "project" || value.visibility === "restricted" ? value.visibility : undefined,
   };
 }
 
@@ -387,6 +403,9 @@ function parseUpload(row: unknown): ContextRagUpload {
 function parseSession(row: unknown): ContextRagUploadSession {
   const value = row as Record<string, unknown>;
   if (typeof value.id !== "string" || typeof value.project_id !== "string"
+    || typeof value.organization_id !== "string"
+    || (value.owner_user_id !== null && typeof value.owner_user_id !== "string")
+    || !["organization", "project", "restricted"].includes(String(value.visibility))
     || typeof value.title !== "string" || typeof value.expected_hash !== "string"
     || typeof value.expected_bytes !== "number" || typeof value.chunk_count !== "number"
     || typeof value.mime_type !== "string" || typeof value.priority !== "number"
@@ -401,6 +420,9 @@ function parseSession(row: unknown): ContextRagUploadSession {
   return {
     id: value.id,
     project_id: value.project_id,
+    organization_id: value.organization_id,
+    owner_user_id: value.owner_user_id === null ? null : String(value.owner_user_id),
+    visibility: value.visibility as ContextRagUploadSession["visibility"],
     title: value.title,
     expected_hash: value.expected_hash,
     expected_bytes: value.expected_bytes,
@@ -491,11 +513,18 @@ const contextRagSourceSelect = `
     ON source.project_id = upload.project_id AND source.id = upload.rag_source_id`;
 
 /** Retrieve one project-owned context source without exposing document bodies. */
-export function getContextRagSource(projectId: string, sourceId: string): ContextRagSource | undefined {
+export function getContextRagSource(projectId: string, sourceId: string, ownerUserId?: string | null): ContextRagSource | undefined {
+  const scope = sourceScope(ownerUserId);
   const row = getDb(dbPath()).prepare(
-    `${contextRagSourceSelect} WHERE upload.project_id = ? AND source.id = ?`,
-  ).get(projectId, sourceId);
+    `${contextRagSourceSelect} WHERE upload.project_id = ? AND source.id = ?${scope.sql}`,
+  ).get(projectId, sourceId, ...scope.params);
   return row ? parseContextRagSource(row) : undefined;
+}
+
+function sourceScope(ownerUserId?: string | null): { sql: string; params: string[] } {
+  if (ownerUserId === undefined) return { sql: "", params: [] };
+  if (ownerUserId === null) return { sql: " AND source.visibility <> 'restricted'", params: [] };
+  return { sql: " AND (source.visibility <> 'restricted' OR source.owner_user_id = ?)", params: [ownerUserId] };
 }
 
 /** List project-owned context source metadata without exposing document bodies. */
@@ -503,18 +532,22 @@ export function listContextRagSources(
   projectId: string,
   limit = 20,
   offset = 0,
+  ownerUserId?: string | null,
 ): { data: ContextRagSource[]; total: number; limit: number; offset: number } {
   const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 20;
   const safeOffset = Number.isFinite(offset) ? Math.max(Math.trunc(offset), 0) : 0;
   const db = getDb(dbPath());
+  const scope = sourceScope(ownerUserId);
   const total = (db.prepare(
-    "SELECT count(*) AS total FROM context_rag_uploads WHERE project_id = ?",
-  ).get(projectId) as { total: number }).total;
+    `SELECT count(*) AS total FROM context_rag_uploads upload
+     JOIN rag_sources source ON source.project_id = upload.project_id AND source.id = upload.rag_source_id
+     WHERE upload.project_id = ?${scope.sql}`,
+  ).get(projectId, ...scope.params) as { total: number }).total;
   const data = db.prepare(
     `${contextRagSourceSelect}
-     WHERE upload.project_id = ?
+     WHERE upload.project_id = ?${scope.sql}
      ORDER BY upload.created_at DESC, upload.id DESC LIMIT ? OFFSET ?`,
-  ).all(projectId, safeLimit, safeOffset).map(parseContextRagSource);
+  ).all(projectId, ...scope.params, safeLimit, safeOffset).map(parseContextRagSource);
   return { data, total, limit: safeLimit, offset: safeOffset };
 }
 
@@ -524,6 +557,21 @@ function getUploadByHash(db: Db, projectId: string, contentHash: string): Contex
      WHERE project_id = ? AND content_hash = ?`,
   ).get(projectId, contentHash);
   return row ? parseUpload(row) : undefined;
+}
+
+function getScopedUploadByHash(
+  db: Db,
+  projectId: string,
+  contentHash: string,
+  scope: { ownerUserId?: string | null; visibility?: "organization" | "project" | "restricted" },
+): ContextRagUpload | undefined {
+  const upload = getUploadByHash(db, projectId, contentHash);
+  if (!upload || scope.visibility === undefined) return upload;
+  const source = requireSource(db, projectId, upload.rag_source_id);
+  if (source.visibility !== scope.visibility || source.owner_user_id !== (scope.ownerUserId ?? null)) {
+    throw new ContextRagError("CONTENT_SCOPE_CONFLICT");
+  }
+  return upload;
 }
 
 function getUploadById(db: Db, projectId: string, uploadId: string): ContextRagUpload | undefined {
@@ -550,7 +598,7 @@ function insertUploadAndSourceInTransaction(
   uploadId: string,
   createdAt: string,
 ): ContextRagUploadResult {
-  const existing = getUploadByHash(db, projectId, document.contentHash);
+  const existing = getScopedUploadByHash(db, projectId, document.contentHash, document);
   if (existing) {
     return {
       upload: existing,
@@ -578,6 +626,9 @@ function insertUploadAndSourceInTransaction(
       priority: document.priority,
       tags: document.tags,
       metadata: sourceMetadata,
+      organizationId: document.organizationId,
+      ownerUserId: document.ownerUserId,
+      visibility: document.visibility,
     },
   );
   if (!sourceResult.changed) throw new Error("Unexpected context RAG source deduplication state");
@@ -627,6 +678,9 @@ function normalizeSessionInput(input: unknown): {
   sourceReference: string | null;
   idempotencyKey: string | null;
   requestHash: string;
+  organizationId?: string;
+  ownerUserId?: string | null;
+  visibility?: "organization" | "project" | "restricted";
 } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
@@ -645,6 +699,8 @@ function normalizeSessionInput(input: unknown): {
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(idempotencyKey))) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
   }
+  const visibility: "organization" | "project" | "restricted" | undefined =
+    value.visibility === "organization" || value.visibility === "project" || value.visibility === "restricted" ? value.visibility : undefined;
   const normalized = {
     title: normalizeTitle(value.title),
     expectedHash: value.expectedHash,
@@ -656,6 +712,9 @@ function normalizeSessionInput(input: unknown): {
     metadata: normalizeMetadata(value.metadata),
     sourceReference: normalizeSourceReference(value.sourceReference),
     idempotencyKey,
+    organizationId: typeof value.organizationId === "string" ? value.organizationId : undefined,
+    ownerUserId: typeof value.ownerUserId === "string" ? value.ownerUserId : value.ownerUserId === null ? null : undefined,
+    visibility,
   };
   return {
     ...normalized,
@@ -669,6 +728,9 @@ function normalizeSessionInput(input: unknown): {
       tags: normalized.tags,
       metadata: normalized.metadata,
       sourceReference: normalized.sourceReference,
+      organizationId: normalized.organizationId ?? null,
+      ownerUserId: normalized.ownerUserId ?? null,
+      visibility: normalized.visibility ?? "project",
     }),
   };
 }
@@ -688,6 +750,10 @@ export function createContextRagUploadSession(
       ).get(projectId, value.idempotencyKey);
       if (matching) {
         const session = parseSession(matching);
+        if (value.visibility !== undefined
+          && (session.visibility !== value.visibility || session.owner_user_id !== (value.ownerUserId ?? null))) {
+          throw new ContextRagError("CONTENT_SCOPE_CONFLICT");
+        }
         const raw = matching as { request_hash: string };
         if (raw.request_hash !== value.requestHash) throw new ContextRagError("IDEMPOTENCY_KEY_REUSED");
         if (session.rag_source_id) {
@@ -703,7 +769,7 @@ export function createContextRagUploadSession(
         return { session, upload: null, source: null, deduplicated: false, written: false };
       }
     }
-    const duplicate = getUploadByHash(db, projectId, value.expectedHash);
+    const duplicate = getScopedUploadByHash(db, projectId, value.expectedHash, value);
     if (duplicate) {
       return {
         session: null,
@@ -717,13 +783,15 @@ export function createContextRagUploadSession(
     const createdAt = now();
     db.prepare(
       `INSERT INTO context_rag_upload_sessions
-       (id, project_id, title, expected_hash, expected_bytes, chunk_count, mime_type,
-         priority, tags, metadata, source_reference, request_hash, idempotency_key, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+       (id, project_id, organization_id, owner_user_id, visibility, title, expected_hash, expected_bytes, chunk_count, mime_type,
+          priority, tags, metadata, source_reference, request_hash, idempotency_key, status, created_at)
+         SELECT ?, id, COALESCE(?, organization_id), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?
+         FROM projects WHERE id = ?`,
     ).run(
-      id, projectId, value.title, value.expectedHash, value.expectedBytes, value.chunkCount,
+      id, value.organizationId ?? null, value.ownerUserId ?? null, value.visibility ?? "project",
+      value.title, value.expectedHash, value.expectedBytes, value.chunkCount,
       value.mimeType, value.priority, JSON.stringify(value.tags), JSON.stringify(value.metadata),
-      value.sourceReference, value.requestHash, value.idempotencyKey, createdAt,
+      value.sourceReference, value.requestHash, value.idempotencyKey, createdAt, projectId,
     );
     return {
       session: parseSession(db.prepare(
@@ -821,7 +889,7 @@ export function completeContextRagUpload(
       throw new ContextRagError("UPLOAD_SIZE_MISMATCH");
     }
     if (sha256(content) !== session.expected_hash) throw new ContextRagError("UPLOAD_HASH_MISMATCH");
-    const duplicate = getUploadByHash(db, projectId, session.expected_hash);
+    const duplicate = getScopedUploadByHash(db, projectId, session.expected_hash, session);
     const completedAt = now();
     if (duplicate) {
       db.prepare(
@@ -849,6 +917,9 @@ export function completeContextRagUpload(
       tags: normalizeTags(JSON.parse(session.tags)),
       metadata: parseJsonObject(session.metadata),
       sourceReference: session.source_reference,
+      organizationId: session.organization_id,
+      ownerUserId: session.owner_user_id,
+      visibility: session.visibility,
     };
     const created = insertUploadAndSourceInTransaction(
       db, projectId, document, "chunked_upload", uploadId, completedAt,
@@ -872,17 +943,23 @@ export function listContextRagUploads(
   projectId: string,
   limit = 20,
   offset = 0,
+  ownerUserId?: string | null,
 ): { data: ContextRagUploadResult[]; total: number; limit: number; offset: number } {
   const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 20;
   const safeOffset = Number.isFinite(offset) ? Math.max(Math.trunc(offset), 0) : 0;
   const db = getDb(dbPath());
+  const scope = sourceScope(ownerUserId);
   const total = (db.prepare(
-    "SELECT count(*) AS total FROM context_rag_uploads WHERE project_id = ?",
-  ).get(projectId) as { total: number }).total;
+    `SELECT count(*) AS total FROM context_rag_uploads upload
+     JOIN rag_sources source ON source.project_id = upload.project_id AND source.id = upload.rag_source_id
+     WHERE upload.project_id = ?${scope.sql}`,
+  ).get(projectId, ...scope.params) as { total: number }).total;
   const uploads = db.prepare(
-    `SELECT * FROM context_rag_uploads WHERE project_id = ?
-     ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
-  ).all(projectId, safeLimit, safeOffset).map(parseUpload);
+    `SELECT upload.* FROM context_rag_uploads upload
+     JOIN rag_sources source ON source.project_id = upload.project_id AND source.id = upload.rag_source_id
+     WHERE upload.project_id = ?${scope.sql}
+     ORDER BY upload.created_at DESC, upload.id DESC LIMIT ? OFFSET ?`,
+  ).all(projectId, ...scope.params, safeLimit, safeOffset).map(parseUpload);
   return {
     data: uploads.map((upload) => ({
       upload,
@@ -1008,6 +1085,7 @@ export function searchContextRagResults(
   projectId: string,
   query: string,
   limit = 20,
+  ownerUserId?: string | null,
 ): RagSearchResult[] {
   if (typeof query !== "string" || query.trim().length === 0 || query.length > 512) {
     throw new ContextRagError("INVALID_CONTEXT_RAG_INPUT");
@@ -1016,7 +1094,7 @@ export function searchContextRagResults(
   return boundedRelevanceSearch(
     query,
     safeLimit,
-    (candidate, candidateLimit) => searchContextUploadChunks(projectId, candidate, candidateLimit),
+    (candidate, candidateLimit) => searchContextUploadChunks(projectId, candidate, candidateLimit, ownerUserId),
   );
 }
 
@@ -1025,8 +1103,9 @@ export function searchContextRag(
   projectId: string,
   query: string,
   limit = 20,
+  ownerUserId?: string | null,
 ): { results: RagSearchResult[]; citations: ContextRagCitation[] } {
-  const results = searchContextRagResults(projectId, query, limit);
+  const results = searchContextRagResults(projectId, query, limit, ownerUserId);
   return { results, citations: citationsFromResults(projectId, results) };
 }
 
@@ -1055,25 +1134,29 @@ export function searchContextCheckpointRag(
 }
 
 /** Retrieve bounded current observations and traits with source timestamps. */
-export function getCurrentLearningContext(projectId: string, limit = 20): CurrentLearningContext {
+export function getCurrentLearningContext(projectId: string, limit = 20, ownerUserId?: string | null): CurrentLearningContext {
   const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 50);
   const db = getDb(dbPath());
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null
+    ? " AND visibility = 'organization'"
+    : " AND (visibility = 'organization' OR owner_user_id = ?)";
+  const parameters = ownerUserId === undefined || ownerUserId === null ? [projectId] : [projectId, ownerUserId];
   const observations = db.prepare(
     `SELECT id, observation_type, content, importance, source, status, created_at, updated_at
-     FROM observations WHERE project_id = ?
+     FROM observations WHERE project_id = ?${scope}
      ORDER BY updated_at DESC, id DESC LIMIT ?`,
-  ).all(projectId, safeLimit) as CurrentLearningContext["observations"];
+  ).all(...parameters, safeLimit) as CurrentLearningContext["observations"];
   const traits = db.prepare(
     `SELECT id, trait_type, trait_value, display_label, confidence, source, created_at, updated_at
-     FROM personality_traits WHERE project_id = ? AND is_active = 1
+     FROM personality_traits WHERE project_id = ? AND is_active = 1${scope}
      ORDER BY updated_at DESC, id DESC LIMIT ?`,
-  ).all(projectId, safeLimit) as CurrentLearningContext["traits"];
+  ).all(...parameters, safeLimit) as CurrentLearningContext["traits"];
   const latestInput = db.prepare(
-    "SELECT MAX(updated_at) AS latest FROM observations WHERE project_id = ?",
-  ).get(projectId) as { latest: string | null };
+    `SELECT MAX(updated_at) AS latest FROM observations WHERE project_id = ?${scope}`,
+  ).get(...parameters) as { latest: string | null };
   const latestTrait = db.prepare(
-    "SELECT MAX(updated_at) AS latest FROM personality_traits WHERE project_id = ?",
-  ).get(projectId) as { latest: string | null };
+    `SELECT MAX(updated_at) AS latest FROM personality_traits WHERE project_id = ?${scope}`,
+  ).get(...parameters) as { latest: string | null };
   return {
     observations,
     traits,
@@ -1089,6 +1172,7 @@ export function getCurrentLearningContext(projectId: string, limit = 20): Curren
 export function ingestCurrentLearningContext(
   projectId: string,
   input: { observationIds?: number[]; title?: string } = {},
+  ownerUserId?: string | null,
 ): { noOp: boolean; reason?: "NO_CURRENT_LEARNING"; learning: CurrentLearningContext; result?: ContextRagUploadResult } {
   if (input.observationIds !== undefined && (!Array.isArray(input.observationIds)
     || input.observationIds.length === 0 || input.observationIds.length > 50
@@ -1097,17 +1181,21 @@ export function ingestCurrentLearningContext(
   }
   const db = getDb(dbPath());
   const ids = input.observationIds === undefined ? undefined : [...new Set(input.observationIds)];
+  const scope = ownerUserId === undefined ? "" : ownerUserId === null
+    ? " AND visibility = 'organization'"
+    : " AND (visibility = 'organization' OR owner_user_id = ?)";
+  const scopeParameters = ownerUserId === undefined || ownerUserId === null ? [] : [ownerUserId];
   const observations = ids === undefined
     ? db.prepare(
       `SELECT id, observation_type, content, importance, source, status, created_at, updated_at
-       FROM observations WHERE project_id = ? ORDER BY updated_at DESC, id DESC LIMIT 50`,
-    ).all(projectId) as CurrentLearningContext["observations"]
+       FROM observations WHERE project_id = ?${scope} ORDER BY updated_at DESC, id DESC LIMIT 50`,
+    ).all(projectId, ...scopeParameters) as CurrentLearningContext["observations"]
     : db.prepare(
       `SELECT id, observation_type, content, importance, source, status, created_at, updated_at
-       FROM observations WHERE project_id = ? AND id IN (${ids.map(() => "?").join(",")})
+       FROM observations WHERE project_id = ? AND id IN (${ids.map(() => "?").join(",")})${scope}
        ORDER BY updated_at DESC, id DESC`,
-    ).all(projectId, ...ids) as CurrentLearningContext["observations"];
-  const learning = getCurrentLearningContext(projectId, 50);
+    ).all(projectId, ...ids, ...scopeParameters) as CurrentLearningContext["observations"];
+  const learning = getCurrentLearningContext(projectId, 50, ownerUserId);
   if (observations.length === 0 && learning.traits.length === 0) {
     return { noOp: true, reason: "NO_CURRENT_LEARNING", learning };
   }
@@ -1139,6 +1227,8 @@ export function ingestCurrentLearningContext(
       latestTraitAt: learning.latestTraitAt,
     },
     sourceReference: `learning:${learning.latestInputAt ?? "none"}`,
+    ownerUserId: ownerUserId ?? undefined,
+    visibility: ownerUserId ? "restricted" : "project",
   }, "learning_snapshot");
   return { noOp: false, learning, result };
 }

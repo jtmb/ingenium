@@ -1,9 +1,13 @@
 import { Router } from "express";
 import { observations, synthesisLlm, logger, ObservationSourceSchema } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requestContentActor, requireProject } from "../helpers.js";
 
 /** Handles /api/v1/observations — CRUD for self-learning observations with FTS5 search and LLM enrichment. */
 export const observationsRouter = Router();
+
+function ownerScope(req: Parameters<typeof requestContentActor>[0], projectId: string): string | null | undefined {
+  return req.authorizationPolicy ? requestContentActor(req, projectId)?.ownerUserId ?? null : undefined;
+}
 
 observationsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
@@ -16,6 +20,7 @@ observationsRouter.get("/", (req, res) => {
     (status as any) || undefined,
     (type as any) || undefined,
     limit,
+    ownerScope(req, projectId),
   );
   res.json({ data: list, total: list.length });
 });
@@ -29,7 +34,7 @@ observationsRouter.get("/search", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "query (q) is required" } });
     return;
   }
-  const results = observations.searchObservations(projectId, query);
+  const results = observations.searchObservations(projectId, query, 50, ownerScope(req, projectId));
   res.json({ data: results, total: results.length });
 });
 
@@ -46,7 +51,17 @@ observationsRouter.post("/", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid observation source" } });
     return;
   }
-  const entry = observations.storeObservation(projectId, observation_type, content, importance, parsedSource.data, context, session_id);
+  const actor = requestContentActor(req, projectId);
+  const visibility = req.body.visibility === "organization" ? "organization" : actor?.ownerUserId ? "private" : "organization";
+  if (visibility === "private" && !actor?.ownerUserId) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Private observations require a user principal" } });
+    return;
+  }
+  const entry = observations.storeObservation(projectId, observation_type, content, importance, parsedSource.data, context, session_id, {
+    organizationId: actor!.organizationId,
+    ownerUserId: visibility === "private" ? actor!.ownerUserId : null,
+    visibility,
+  });
   res.status(201).json({ data: entry });
 });
 
@@ -55,7 +70,7 @@ observationsRouter.get("/stats", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const pending = observations.countUnprocessed(projectId);
-  const all = observations.getObservations(projectId);
+  const all = observations.getObservations(projectId, undefined, undefined, 50, ownerScope(req, projectId));
   res.json({ data: { total: all.length, pending } });
 });
 
@@ -67,7 +82,7 @@ observationsRouter.get("/:id", (req, res) => {
     res.status(400).json({ error: { code: "INVALID_ID", message: "Observation ID must be a number" } });
     return;
   }
-  const entry = observations.getObservation(projectId, id);
+  const entry = observations.getObservation(projectId, id, ownerScope(req, projectId));
   if (!entry) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
     return;
@@ -88,7 +103,7 @@ observationsRouter.patch("/:id", (req, res) => {
   const update: any = {};
   if (status !== undefined) update.status = status;
   if (importance !== undefined) update.importance = importance;
-  const result = observations.updateObservation(projectId, id, update);
+  const result = observations.updateObservation(projectId, id, update, ownerScope(req, projectId));
   if (!result) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
     return;
@@ -150,7 +165,7 @@ observationsRouter.delete("/:id", (req, res) => {
     res.status(400).json({ error: { code: "INVALID_ID", message: "Observation ID must be a number" } });
     return;
   }
-  const deleted = observations.deleteObservation(projectId, id);
+  const deleted = observations.deleteObservation(projectId, id, ownerScope(req, projectId));
   if (!deleted) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
     return;
@@ -167,6 +182,6 @@ observationsRouter.delete("/", (req, res) => {
     res.status(400).json({ error: { code: "MISSING_SOURCE", message: "source query parameter is required for bulk delete" } });
     return;
   }
-  const count = observations.deleteObservationsBySource(projectId, source);
+  const count = observations.deleteObservationsBySource(projectId, source, ownerScope(req, projectId));
   res.json({ data: { deleted: count } });
 });

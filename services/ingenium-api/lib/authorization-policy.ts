@@ -27,11 +27,11 @@ export const PUBLIC_POLICY: AuthorizationPolicy = { action: "public.read", resou
 
 const INSTALLATION_PREFIXES = [
   "/api/v1/backups", "/api/v1/logs", "/api/v1/services", "/api/v1/config",
-  "/api/v1/opencode", "/api/v1/bootstrap", "/api/v1/docs",
+  "/api/v1/opencode", "/api/v1/bootstrap",
 ];
 const ADMIN_PROJECT_PREFIXES = ["/api/v1/mcp-tools", "/api/v1/mcp-servers"];
 const INSTALLATION_PROJECT_PREFIXES = ["/api/v1/config"];
-const PRIVATE_PREFIXES = ["/api/v1/context"];
+const PRIVATE_PREFIXES: string[] = [];
 const PROJECT_PREFIXES = [
   "/api/v1/skills", "/api/v1/tasks", "/api/v1/coordination", "/api/v1/context",
   "/api/v1/plugins", "/api/v1/servers", "/api/v1/settings", "/api/v1/agents",
@@ -86,6 +86,10 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     return { action: `providers.${permission}`, resource: "providers", permission, target: "installation", sensitive: true };
   }
   if (req.path === "/api/v1/docs/repository/sync") return { action: "repository-sync.execute", resource: "repository-sync", permission: "execute", target: "project", sensitive: true };
+  if (req.path.startsWith("/api/v1/docs")) {
+    const permission = permissionFor(req as Request);
+    return { action: `docs.${permission}`, resource: "docs", permission, target: "organization", sensitive: permission !== "read" };
+  }
   if (PRIVATE_PREFIXES.some((prefix) => req.path.startsWith(prefix))) {
     const permission = permissionFor(req as Request);
     return { action: `${resourceFor(req.path)}.${permission}`, resource: resourceFor(req.path), permission, target: "private", sensitive: true };

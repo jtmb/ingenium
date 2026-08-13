@@ -321,6 +321,7 @@ function resolveRepositoryProjectNameInTransaction(db: ReturnType<typeof getDb>,
 
 function buildRepositorySpacePlan(
   db: ReturnType<typeof getDb>,
+  organizationId: string,
   projectName: string,
   managedPages: ManagedRepositoryPage[],
   hasNewPages: boolean,
@@ -336,8 +337,8 @@ function buildRepositorySpacePlan(
     if (!existing) throw new RepositoryDocsSpaceConflictError();
 
     const collision = db.prepare(
-      "SELECT id FROM docs_spaces WHERE (name = ? OR slug = ?) AND id <> ? LIMIT 1",
-    ).get(name, slug, existing.id);
+      "SELECT id FROM docs_spaces WHERE organization_id = ? AND (name = ? OR slug = ?) AND id <> ? LIMIT 1",
+    ).get(organizationId, name, slug, existing.id);
     if (collision) throw new RepositoryDocsSpaceConflictError();
 
     return {
@@ -350,12 +351,14 @@ function buildRepositorySpacePlan(
 
   if (!hasNewPages) return { action: "none", name, slug };
 
-  const collision = db.prepare("SELECT id FROM docs_spaces WHERE name = ? OR slug = ? LIMIT 1").get(name, slug);
+  const collision = db.prepare("SELECT id FROM docs_spaces WHERE organization_id = ? AND (name = ? OR slug = ?) LIMIT 1").get(organizationId, name, slug);
   if (collision) throw new RepositoryDocsSpaceConflictError();
   return { action: "created", name, slug };
 }
 
 function buildPlan(db: ReturnType<typeof getDb>, projectId: string, manifest: RepositoryDocsManifest): SyncPlan {
+  const organization = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!organization) throw new RepositoryDocsProjectError();
   const projectName = resolveRepositoryProjectNameInTransaction(db, projectId);
   const existing = getManagedPages(db, projectId);
   const existingByPath = new Map(existing.map((record) => [record.source_path, record]));
@@ -421,7 +424,7 @@ function buildPlan(db: ReturnType<typeof getDb>, projectId: string, manifest: Re
   return {
     active,
     archived,
-    space: buildRepositorySpacePlan(db, projectName, existing, active.some((planned) => !planned.existing)),
+    space: buildRepositorySpacePlan(db, organization.organization_id, projectName, existing, active.some((planned) => !planned.existing)),
   };
 }
 
@@ -480,6 +483,7 @@ function resultForPlan(plan: SyncPlan, dryRun: boolean): RepositoryDocsSyncResul
 
 function reconcileRepositorySpaceInTransaction(
   db: ReturnType<typeof getDb>,
+  organizationId: string,
   space: RepositoryDocsSpacePlan,
   timestamp: string,
 ): number | undefined {
@@ -494,9 +498,9 @@ function reconcileRepositorySpaceInTransaction(
   }
 
   const insert = db.prepare(
-    `INSERT INTO docs_spaces (name, slug, description, icon, sort_order, is_global, created_at, updated_at)
-     VALUES (?, ?, ?, 'folder', 0, 0, ?, ?)`,
-  ).run(space.name, space.slug, "Repository-authoritative documentation", timestamp, timestamp);
+    `INSERT INTO docs_spaces (organization_id, name, slug, description, icon, sort_order, is_global, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'folder', 0, 0, ?, ?)`,
+  ).run(organizationId, space.name, space.slug, "Repository-authoritative documentation", timestamp, timestamp);
   return Number(insert.lastInsertRowid);
 }
 
@@ -515,12 +519,13 @@ function ensureManagedTagsInTransaction(db: ReturnType<typeof getDb>, pageId: nu
   // The page was created/loaded in this transaction, and tag rows are resolved
   // before linking, satisfying the parent-existence guard for this FK child row.
   for (const name of REPOSITORY_DOC_PAGE_TAGS) {
-    db.prepare("INSERT INTO docs_tags (name, slug) VALUES (?, ?) ON CONFLICT(slug) DO NOTHING").run(name, name);
-    const tag = db.prepare("SELECT id FROM docs_tags WHERE slug = ?").get(name) as { id: number } | undefined;
+    const page = db.prepare("SELECT organization_id FROM docs_pages WHERE id = ?").get(pageId) as { organization_id: string };
+    db.prepare("INSERT INTO docs_tags (organization_id, name, slug) VALUES (?, ?, ?) ON CONFLICT(organization_id, slug) DO NOTHING").run(page.organization_id, name, name);
+    const tag = db.prepare("SELECT id FROM docs_tags WHERE slug = ? AND organization_id = ?").get(name, page.organization_id) as { id: number } | undefined;
     if (!tag) throw new Error("Managed documentation tag is unavailable");
     db.prepare(
-      "INSERT INTO docs_page_tags (page_id, tag_id) VALUES (?, ?) ON CONFLICT(page_id, tag_id) DO NOTHING",
-    ).run(pageId, tag.id);
+      "INSERT INTO docs_page_tags (organization_id, page_id, tag_id) VALUES (?, ?, ?) ON CONFLICT(page_id, tag_id) DO NOTHING",
+    ).run(page.organization_id, pageId, tag.id);
   }
 }
 
@@ -529,15 +534,18 @@ function ensureProjectLinkInTransaction(db: ReturnType<typeof getDb>, pageId: nu
   const page = db.prepare("SELECT 1 FROM docs_pages WHERE id = ?").get(pageId);
   if (!project || !page) throw new Error("Managed documentation parent is unavailable");
   db.prepare(
-    "INSERT INTO docs_page_projects (page_id, project_id) VALUES (?, ?) ON CONFLICT(page_id, project_id) DO NOTHING",
-  ).run(pageId, projectId);
+    "INSERT INTO docs_page_projects (organization_id, page_id, project_id) SELECT organization_id, ?, ? FROM projects WHERE id = ? ON CONFLICT(page_id, project_id) DO NOTHING",
+  ).run(pageId, projectId, projectId);
 }
 
 function applyPlanInTransaction(projectId: string, plan: SyncPlan): RepositoryDocsSyncResult {
   const db = getDb(dbPath());
   const result = resultForPlan(plan, false);
   const timestamp = now();
-  const spaceId = reconcileRepositorySpaceInTransaction(db, plan.space, timestamp);
+  const organization = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+  if (!organization) throw new RepositoryDocsProjectError();
+  const organizationId = organization.organization_id;
+  const spaceId = reconcileRepositorySpaceInTransaction(db, organizationId, plan.space, timestamp);
   if (spaceId !== undefined) result.space.id = spaceId;
   const resolvedPages = new Map<string, ManagedRepositoryPage>();
 
@@ -551,13 +559,13 @@ function applyPlanInTransaction(projectId: string, plan: SyncPlan): RepositoryDo
       if (spaceId === undefined) throw new Error("Repository documentation space is unavailable");
       const insert = db.prepare(
         `INSERT INTO docs_pages
-         (space_id, parent_page_id, title, slug, content, revision, status, sort_order, created_at, updated_at)
-         VALUES (?, NULL, ?, ?, ?, 1, 'published', 0, ?, ?)`,
-      ).run(spaceId!, planned.title, initialSlugInTransaction(db, planned.entry.path), planned.entry.content, timestamp, timestamp);
+         (organization_id, space_id, parent_page_id, title, slug, content, revision, status, sort_order, created_at, updated_at)
+         VALUES (?, ?, NULL, ?, ?, ?, 1, 'published', 0, ?, ?)`,
+      ).run(organizationId, spaceId!, planned.title, initialSlugInTransaction(db, planned.entry.path), planned.entry.content, timestamp, timestamp);
       pageId = Number(insert.lastInsertRowid);
       db.prepare(
-        "INSERT INTO docs_page_versions (page_id, revision, title, content, created_at) VALUES (?, 1, ?, ?, ?)",
-      ).run(pageId, planned.title, planned.entry.content, timestamp);
+        "INSERT INTO docs_page_versions (organization_id, page_id, revision, title, content, created_at) VALUES (?, ?, 1, ?, ?, ?)",
+      ).run(organizationId, pageId, planned.title, planned.entry.content, timestamp);
       record = {
         page_id: pageId, project_id: projectId, source_path: planned.entry.path, source_hash: planned.entry.sha256,
         rag_source_id: null, managed_tags: JSON.stringify(REPOSITORY_DOC_PAGE_TAGS), space_id: spaceId!, parent_page_id: null,
@@ -566,9 +574,9 @@ function applyPlanInTransaction(projectId: string, plan: SyncPlan): RepositoryDo
       };
       db.prepare(
         `INSERT INTO docs_repository_pages
-         (page_id, project_id, source_path, source_hash, rag_source_id, managed_tags, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
-      ).run(pageId, projectId, planned.entry.path, planned.entry.sha256, JSON.stringify(REPOSITORY_DOC_PAGE_TAGS), timestamp, timestamp);
+         (organization_id, page_id, project_id, source_path, source_hash, rag_source_id, managed_tags, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+      ).run(organizationId, pageId, projectId, planned.entry.path, planned.entry.sha256, JSON.stringify(REPOSITORY_DOC_PAGE_TAGS), timestamp, timestamp);
       contentChanged = true;
     } else {
       pageId = record.page_id;
@@ -577,8 +585,8 @@ function applyPlanInTransaction(projectId: string, plan: SyncPlan): RepositoryDo
       if (contentChanged) {
         const nextRevision = record.revision + 1;
         db.prepare(
-          "INSERT INTO docs_page_versions (page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?)",
-        ).run(pageId, nextRevision, planned.title, planned.entry.content, timestamp);
+          "INSERT INTO docs_page_versions (organization_id, page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(organizationId, pageId, nextRevision, planned.title, planned.entry.content, timestamp);
         db.prepare(
           `UPDATE docs_pages SET title = ?, content = ?, revision = ?, status = 'published', updated_at = ? WHERE id = ?`,
         ).run(planned.title, planned.entry.content, nextRevision, timestamp, pageId);

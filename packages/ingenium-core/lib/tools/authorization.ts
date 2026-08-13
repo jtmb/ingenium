@@ -21,6 +21,16 @@ export interface AuthorizationDecision {
 
 export type ResourceOwnerKind = "user" | "organization";
 export type OwnedResourceType = "vault_folder" | "vault_item" | "provider_connection" | "mail_account";
+export type ContentVisibility = "private" | "organization" | "project";
+
+export interface ContentScope {
+  resourceType: "context_conversation" | "rag_source";
+  resourceId: string;
+  organizationId: string;
+  projectId: string;
+  visibility: ContentVisibility | "restricted";
+  ownerUserId?: string | null;
+}
 
 export interface OwnedResource {
   resourceType: OwnedResourceType;
@@ -198,6 +208,40 @@ export function requirePrivateResourceAccess(input: {
   return input.principal.type === "browser-user" || input.principal.type === "user-token"
     ? input.ownerUserId === input.principal.id || input.explicitlyShared === true
     : false;
+}
+
+function hasContentShare(principal: AuthorizationPrincipal, resource: ContentScope, permission: AuthorizationPermission): boolean {
+  const grantees: Array<["user" | "organization" | "project", string]> = [];
+  if (principal.type === "browser-user" || principal.type === "user-token") grantees.push(["user", principal.id]);
+  if (principal.organizationId) grantees.push(["organization", principal.organizationId]);
+  if (principal.projectId) grantees.push(["project", principal.projectId]);
+  return grantees.some(([kind, id]) => Boolean(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT 1 FROM content_shares
+     WHERE organization_id = ? AND resource_type = ? AND resource_id = ?
+       AND grantee_kind = ? AND grantee_id = ? AND revoked_at IS NULL
+       AND (permission = ? OR permission = 'write')`,
+  ).get(resource.organizationId, resource.resourceType, resource.resourceId, kind, id, permission)));
+}
+
+export function requireContentPermission(
+  principal: AuthorizationPrincipal,
+  resource: ContentScope,
+  permission: AuthorizationPermission,
+): AuthorizationDecision {
+  if (principal.type === "compatibility") {
+    return { allowed: true, visible: true, organizationId: resource.organizationId, projectId: resource.projectId };
+  }
+  if (principal.organizationId && principal.organizationId !== resource.organizationId) return { allowed: false, visible: false };
+  const shared = hasContentShare(principal, resource, permission);
+  if (resource.visibility === "private" || resource.visibility === "restricted") {
+    const owner = (principal.type === "browser-user" || principal.type === "user-token") && principal.id === resource.ownerUserId;
+    const allowed = (owner || shared) && scopeAllows(principal.scopes, resource.resourceType.split("_")[0]!, permission);
+    return { allowed, visible: allowed, organizationId: resource.organizationId, projectId: resource.projectId };
+  }
+  const decision = resource.visibility === "project"
+    ? requireProjectPermission(principal, resource.projectId, resource.resourceType.split("_")[0]!, permission)
+    : requireOrganizationPermission(principal, resource.organizationId, resource.resourceType.split("_")[0]!, permission);
+  return decision.allowed || !shared ? decision : { allowed: true, visible: true, organizationId: resource.organizationId, projectId: resource.projectId };
 }
 
 function hasResourceGrant(
