@@ -10,6 +10,18 @@ export const TOOL_STATE_GATE_CODES = {
 } as const;
 
 export type ToolState = "enabled" | "disabled" | "unavailable";
+export interface ToolAuthorizationPolicy {
+  action: string;
+  resource: string;
+  permission: "read" | "write" | "admin" | "execute";
+  target: "installation" | "organization" | "project" | "private";
+  scopes: readonly string[];
+  launcherBinding: "required" | "none";
+}
+export interface ToolAuthorizationState {
+  state: ToolState;
+  policy?: ToolAuthorizationPolicy;
+}
 
 export interface ProjectStateAttestation {
   project: string;
@@ -25,6 +37,17 @@ const MAX_MCP_API_ERROR_TEXT_BYTES = 512;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function getToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy | null {
+  if (!isRecord(value)
+    || typeof value.action !== "string" || value.action.length === 0
+    || typeof value.resource !== "string" || value.resource.length === 0
+    || !["read", "write", "admin", "execute"].includes(value.permission as string)
+    || !["installation", "organization", "project", "private"].includes(value.target as string)
+    || !Array.isArray(value.scopes) || value.scopes.length === 0 || !value.scopes.every((scope) => typeof scope === "string" && scope.length > 0)
+    || (value.launcherBinding !== "required" && value.launcherBinding !== "none")) return null;
+  return value as unknown as ToolAuthorizationPolicy;
 }
 
 /**
@@ -119,6 +142,33 @@ export function stateGatedHandler(
           ? "This tool is disabled for the project."
           : "The tool state could not be verified.",
       );
+    } catch (error) {
+      if (error instanceof ApiHttpError) return apiHttpErrorResult(error);
+      if (error instanceof ApiUnavailableError) return apiUnavailableResult();
+      throw error;
+    }
+  };
+}
+
+export function policyStateGatedHandler(
+  toolName: string,
+  launcherProject: string | null,
+  checkState: (toolName: string, project: string) => Promise<ToolAuthorizationState>,
+  handler: (args: any) => Promise<any>,
+) {
+  return async (args: any) => {
+    try {
+      if (!launcherProject) return toolStateError(TOOL_STATE_GATE_CODES.project, "A valid launcher project identity is required.");
+      const result = await checkState(toolName, launcherProject);
+      if (result.state !== "enabled") return toolStateError(
+        result.state === "disabled" ? TOOL_STATE_GATE_CODES.disabled : TOOL_STATE_GATE_CODES.unavailable,
+        result.state === "disabled" ? "This tool is disabled for the project." : "The tool state could not be verified.",
+      );
+      if (!result.policy) return toolStateError(TOOL_STATE_GATE_CODES.unavailable, "The tool authorization policy could not be verified.");
+      if (result.policy.launcherBinding === "required" && args?.project !== launcherProject) {
+        return toolStateError(TOOL_STATE_GATE_CODES.project, "The requested project does not match the launcher binding.");
+      }
+      return await handler(result.policy.launcherBinding === "required" ? { ...args, project: launcherProject } : args);
     } catch (error) {
       if (error instanceof ApiHttpError) return apiHttpErrorResult(error);
       if (error instanceof ApiUnavailableError) return apiUnavailableResult();

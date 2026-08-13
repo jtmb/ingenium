@@ -19,9 +19,11 @@ import {
 } from "../lib/tool-visibility.js";
 import {
   getProjectStateAttestation,
+  getToolAuthorizationPolicy,
   launcherBoundStateGatedHandler,
   ProjectStateAttestor,
-  stateGatedHandler,
+  policyStateGatedHandler,
+  type ToolAuthorizationState,
 } from "../lib/tool-state-gate.js";
 import {
   ChildMcpGateway,
@@ -94,6 +96,20 @@ async function checkToolEnabled(
   }
 }
 
+async function checkToolAuthorization(toolName: string, project: string): Promise<ToolAuthorizationState> {
+  try {
+    const res = await api.settled.getToolState(toolName, project);
+    const policy = getToolAuthorizationPolicy(res.data?.authorization);
+    if (!res.ok || !projectStateAttestor.attest(project, res.payload)
+      || typeof res.data?.enabled !== "boolean" || !policy) {
+      return { state: "unavailable" };
+    }
+    return { state: res.data.enabled ? "enabled" : "disabled", policy };
+  } catch {
+    return { state: "unavailable" };
+  }
+}
+
 /**
  * Wraps a tool handler to check if the tool is enabled for the project before executing.
  * This is the gateway through which ALL tool invocations flow — the
@@ -104,12 +120,7 @@ function wrapHandler(
   toolName: string,
   handler: (args: any) => Promise<any>,
 ) {
-  return stateGatedHandler(
-    toolName,
-    (args) => resolveChildMcpProjectIdentity(args?.project),
-    checkToolEnabled,
-    handler,
-  );
+  return policyStateGatedHandler(toolName, launcherProject, checkToolAuthorization, handler);
 }
 
 /** Catalog-global tools are toggled by the launcher project without exposing it in their schema. */
@@ -118,13 +129,7 @@ function wrapLauncherScopedHandler(
   launcherProject: string | null,
   handler: (args: any) => Promise<any>,
 ) {
-  return stateGatedHandler(
-    toolName,
-    () => launcherProject,
-    checkToolEnabled,
-    handler,
-    "A valid launcher project identity is required.",
-  );
+  return policyStateGatedHandler(toolName, launcherProject, checkToolAuthorization, handler);
 }
 
 /** A filesystem-backed import may only act in the launcher-bound project. */

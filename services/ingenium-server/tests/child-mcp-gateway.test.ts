@@ -70,7 +70,18 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
     },
     async toolEnabled(_project, toolName) {
       checkedTools.push(toolName);
-      return { state: toolState, attestation };
+      return {
+        state: toolState,
+        attestation,
+        policy: {
+          action: "child-mcp.execute",
+          resource: "child-mcp",
+          permission: "execute",
+          target: "project",
+          scopes: ["child-mcp:execute"],
+          launcherBinding: "required",
+        },
+      };
     },
   };
   return {

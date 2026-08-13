@@ -15,6 +15,7 @@ export interface McpToolCatalogEntry {
   projectScope: "per-project" | "global";
   defaultEnabled: boolean;
   apiEndpoints: string[]; // e.g. ["GET /api/v1/skills"]
+  authorization?: import("./mcp-authorization-policy.js").McpAuthorizationPolicy;
 }
 
 // ── Category-level endpoint maps (shared by all tools in that category) ──
@@ -175,10 +176,10 @@ const PLUGINS_ENDPOINTS = [
 ];
 
 const PROVIDERS_ENDPOINTS = [
-  "GET /opencode/providers",
-  "POST /opencode/auth/:providerID",
-  "DELETE /opencode/auth/:providerID",
-  "GET /opencode/auth/status",
+  "GET /api/v1/opencode/providers",
+  "POST /api/v1/opencode/auth/:providerID",
+  "DELETE /api/v1/opencode/auth/:providerID",
+  "GET /api/v1/opencode/auth/status",
 ];
 
 const SERVERS_ENDPOINTS = [
@@ -802,7 +803,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_synthesis_cross_project",
     category: "Synthesis",
     description: "Trigger cross-project synthesis — evaluates patterns across all projects and promotes shared patterns to the global-default project.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: SYNTHESIS_ENDPOINTS,
   },
@@ -1044,17 +1045,17 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   },
 
   // ── Task Coordination (4) ─────────────────────────────
-  { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
-  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot with optimistic revision control.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
-  { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
-  { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: [] },
+  { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["GET /api/v1/coordination/snapshot"] },
+  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot with optimistic revision control.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
+  { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/batch"] },
+  { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/release"] },
 
   // ── Plans (3) ────────────────────────────────────────
   {
     name: "ingenium_plan_save",
     category: "Plans",
     description: "Save a context entry with optional tags and priority.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
@@ -1062,7 +1063,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_plan_search",
     category: "Plans",
     description: "Full-text search across context entries.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
@@ -1070,7 +1071,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_plan_list",
     category: "Plans",
     description: "List plan/context entries.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
@@ -2519,6 +2520,9 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: DOCS_ENDPOINTS,
   },
 ];
+
+import { explicitMcpAuthorizationPolicy } from "./mcp-authorization-policy.js";
+for (const entry of MCP_TOOL_CATALOG) entry.authorization = explicitMcpAuthorizationPolicy(entry.name, entry.category);
 
 // ── Derived helpers ────────────────────────────────────
 

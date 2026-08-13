@@ -4,6 +4,88 @@ import type { EffectiveProjectAccess, OrganizationRole, ProjectRole } from "../s
 
 export const BOOTSTRAP_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000093";
 
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  slug: string;
+  status: "active" | "suspended";
+}
+
+export interface OrganizationMember {
+  organizationId: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  role: OrganizationRole;
+  status: "active" | "suspended";
+}
+
+export function getOrganization(organizationId: string): OrganizationSummary | undefined {
+  return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT id, name, slug, status FROM organizations WHERE id = ?",
+  ).get(organizationId) as OrganizationSummary | undefined;
+}
+
+export function getOrganizationRole(organizationId: string, userId: string): OrganizationRole | undefined {
+  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT role FROM organization_memberships
+     WHERE organization_id = ? AND user_id = ? AND status = 'active'`,
+  ).get(organizationId, userId) as { role: OrganizationRole } | undefined)?.role;
+}
+
+export function listUserOrganizations(userId: string): OrganizationSummary[] {
+  return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT organizations.id, organizations.name, organizations.slug, organizations.status
+     FROM organizations JOIN organization_memberships ON organization_memberships.organization_id = organizations.id
+     WHERE organization_memberships.user_id = ? AND organization_memberships.status = 'active'
+     ORDER BY organizations.name, organizations.id`,
+  ).all(userId) as OrganizationSummary[];
+}
+
+export function listOrganizationMembers(organizationId: string): OrganizationMember[] {
+  return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT organization_memberships.organization_id AS organizationId,
+            organization_memberships.user_id AS userId, users.email_normalized AS email,
+            users.display_name AS displayName, organization_memberships.role, organization_memberships.status
+     FROM organization_memberships JOIN users ON users.id = organization_memberships.user_id
+     WHERE organization_memberships.organization_id = ?
+     ORDER BY users.email_normalized, users.id`,
+  ).all(organizationId) as OrganizationMember[];
+}
+
+export function setOrganizationMemberRole(organizationId: string, userId: string, role: OrganizationRole): boolean {
+  const changed = execTransaction(() => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "UPDATE organization_memberships SET role = ?, updated_at = ? WHERE organization_id = ? AND user_id = ?",
+  ).run(role, new Date().toISOString(), organizationId, userId).changes === 1);
+  if (changed) checkpointAfterWrite();
+  return changed;
+}
+
+export function removeOrganizationMember(organizationId: string, userId: string): boolean {
+  const changed = execTransaction(() => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "DELETE FROM organization_memberships WHERE organization_id = ? AND user_id = ?",
+  ).run(organizationId, userId).changes === 1);
+  if (changed) checkpointAfterWrite();
+  return changed;
+}
+
+export function listProjectMembers(projectId: string): Array<{ userId: string; email: string; displayName: string; role: ProjectRole }> {
+  return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT project_memberships.user_id AS userId, users.email_normalized AS email,
+            users.display_name AS displayName, project_memberships.role
+     FROM project_memberships JOIN users ON users.id = project_memberships.user_id
+     WHERE project_memberships.project_id = ? ORDER BY users.email_normalized, users.id`,
+  ).all(projectId) as Array<{ userId: string; email: string; displayName: string; role: ProjectRole }>;
+}
+
+export function removeProjectMember(projectId: string, userId: string): boolean {
+  const changed = execTransaction(() => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "DELETE FROM project_memberships WHERE project_id = ? AND user_id = ?",
+  ).run(projectId, userId).changes === 1);
+  if (changed) checkpointAfterWrite();
+  return changed;
+}
+
 export function addOrganizationMember(organizationId: string, userId: string, role: OrganizationRole): void {
   execTransaction(() => {
     const now = new Date().toISOString();

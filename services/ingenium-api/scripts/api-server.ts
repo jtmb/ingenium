@@ -9,6 +9,7 @@ import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { rateLimit } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
@@ -51,6 +52,7 @@ import { usageRouter } from "../lib/routes/usage.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
 import { coordinationRouter } from "../lib/routes/coordination.js";
 import { bootstrapRouter } from "../lib/routes/bootstrap.js";
+import { organizationsRouter } from "../lib/routes/organizations.js";
 import {
   defaultMcpServerProjection,
   isPackagedMcpLauncher,
@@ -127,6 +129,7 @@ app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 
 app.use(rateLimit);
 app.use(authMiddleware);
 app.use(csrfMiddleware);
+app.use(authorizationMiddleware);
 
 // OpenAI redirects the browser to localhost:1455/auth/callback. The Nginx
 // listener on that port proxies only this exact GET path. authMiddleware owns
@@ -139,6 +142,7 @@ app.get("/api/v1/health", (_req, res) => {
 });
 app.use("/api/v1/auth", authPreflightRouter);
 app.use("/api/v1/bootstrap", bootstrapRouter);
+app.use("/api/v1/organizations", organizationsRouter);
 
 // Mounted after bearer/CSRF protection. Its dedicated octet-stream media type
 // avoids the global JSON parser and it owns its own bounded raw parser.

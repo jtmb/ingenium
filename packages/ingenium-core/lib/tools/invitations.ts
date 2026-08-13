@@ -6,6 +6,29 @@ import { normalizeEmail } from "./identity.js";
 
 type InvitationRole = Exclude<OrganizationRole, "owner">;
 
+export function listInvitations(organizationId: string): Array<{ id: string; email: string; role: InvitationRole; expiresAt: string; acceptedAt: string | null; revokedAt: string | null }> {
+  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT id, email_normalized, role, expires_at, accepted_at, revoked_at
+     FROM organization_invitations WHERE organization_id = ? ORDER BY created_at DESC, id DESC LIMIT 100`,
+  ).all(organizationId) as Array<{ id: string; email_normalized: string; role: InvitationRole; expires_at: string; accepted_at: string | null; revoked_at: string | null }>).map((row) => ({
+    id: row.id,
+    email: row.email_normalized,
+    role: row.role,
+    expiresAt: row.expires_at,
+    acceptedAt: row.accepted_at,
+    revokedAt: row.revoked_at,
+  }));
+}
+
+export function revokeInvitation(organizationId: string, invitationId: string): boolean {
+  const changed = execTransaction(() => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `UPDATE organization_invitations SET revoked_at = ?
+     WHERE id = ? AND organization_id = ? AND accepted_at IS NULL AND revoked_at IS NULL`,
+  ).run(new Date().toISOString(), invitationId, organizationId).changes === 1);
+  if (changed) checkpointAfterWrite();
+  return changed;
+}
+
 export function issueInvitation(organizationId: string, email: string, role: InvitationRole): string {
   const token = randomBytes(32).toString("base64url");
   execTransaction(() => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(

@@ -12,7 +12,9 @@ import {
   getProjectStateAttestation,
   ProjectStateAttestor,
   toolStateError,
+  getToolAuthorizationPolicy,
   type ProjectStateAttestation,
+  type ToolAuthorizationPolicy,
   type ToolState,
 } from "./tool-state-gate.js";
 import {
@@ -58,6 +60,7 @@ export interface ChildMcpGatewayApi {
   toolEnabled(project: string, toolName: string): Promise<{
     state: ToolState;
     attestation: ProjectStateAttestation | null;
+    policy: ToolAuthorizationPolicy | null;
   }>;
 }
 
@@ -134,11 +137,14 @@ export const childMcpGatewayApi: ChildMcpGatewayApi = {
       const response = await api.settled.getToolState(toolName, project);
       const attestation = getProjectStateAttestation(response.payload, project);
       if (!response.ok || !attestation || !isRecord(response.data) || typeof response.data.enabled !== "boolean") {
-        return { state: "unavailable", attestation: null };
+        return { state: "unavailable", attestation: null, policy: null };
       }
-      return { state: response.data.enabled ? "enabled" : "disabled", attestation };
+      const policy = getToolAuthorizationPolicy(response.data.authorization);
+      return policy?.launcherBinding === "required" && policy.target === "project"
+        ? { state: response.data.enabled ? "enabled" : "disabled", attestation, policy }
+        : { state: "unavailable", attestation: null, policy: null };
     } catch {
-      return { state: "unavailable", attestation: null };
+      return { state: "unavailable", attestation: null, policy: null };
     }
   },
 };
@@ -404,7 +410,7 @@ export class ChildMcpGateway {
     for (const tool of discovered) {
       const response = await this.apiClient.toolEnabled(this.project!, canonicalToolName(definition.name, tool.name));
       if (this.projectStateAttestor.attest(this.project!, response.attestation)
-        && response.state === "enabled") visible.push(tool);
+        && response.state === "enabled" && response.policy?.launcherBinding === "required") visible.push(tool);
     }
     const desired = new Map(visible.map((tool) => [canonicalToolName(definition.name, tool.name), tool]));
     for (const [name, tool] of this.tools) {
@@ -477,6 +483,9 @@ export class ChildMcpGateway {
     const response = await this.apiClient.toolEnabled(this.project, canonicalName);
     if (!this.projectStateAttestor.attest(this.project, response.attestation)) {
       return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool state could not be verified.");
+    }
+    if (response.policy?.launcherBinding !== "required" || response.policy.target !== "project") {
+      return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool authorization policy could not be verified.");
     }
     if (response.state === "disabled") {
       return safeError("TOOL_DISABLED", "This child MCP tool is disabled for the project.");

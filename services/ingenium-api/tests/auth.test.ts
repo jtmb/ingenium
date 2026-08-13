@@ -5,7 +5,7 @@
  *   1. Timing-safe comparison using crypto.timingSafeEqual
  *   2. Length-differing token handling (padding avoids throw)
  *   3. Mandatory authentication when the API token is not configured
- *   4. 401 vs 403 distinction
+ *   4. Invalid credentials return 401 while authorization denials return 403
  *   5. Exact OAuth callback public allowlist
  */
 
@@ -112,7 +112,7 @@ describe("authMiddleware — timing-safe comparison", () => {
     }
   });
 
-  it("throws 403 when bearer token does not match", () => {
+  it("throws 401 when bearer token does not match", () => {
     process.env.INGENIUM_API_TOKEN = validToken;
     const req = makeReq("Bearer wrong-token-xyz");
     const res = makeRes();
@@ -122,8 +122,8 @@ describe("authMiddleware — timing-safe comparison", () => {
       authMiddleware(req as Request, res as Response, next);
       expect.fail("Should have thrown");
     } catch (err: any) {
-      expect(err.statusCode ?? err.status).toBe(403);
-      expect(err.code ?? err.message).toMatch(/FORBIDDEN/i);
+      expect(err.statusCode ?? err.status).toBe(401);
+      expect(err.code ?? err.message).toMatch(/INVALID_TOKEN/i);
     }
   });
 
@@ -149,21 +149,21 @@ describe("authMiddleware — timing-safe comparison", () => {
     const res = makeRes();
     const next = vi.fn();
 
-    // Short provided token should not throw — just 403
+    // Short provided token should not throw — just 401
     try {
       authMiddleware(reqShort as Request, res as Response, next);
-      expect.fail("Should have thrown 403");
+      expect.fail("Should have thrown 401");
     } catch (err: any) {
-      expect(err.statusCode ?? err.status).toBe(403);
+      expect(err.statusCode ?? err.status).toBe(401);
     }
 
     // Long provided token (longer than actual) should not throw — just 403
     const reqLong = makeReq("Bearer this-is-a-much-longer-token-than-the-actual-one-xxxxxxxxxx");
     try {
       authMiddleware(reqLong as Request, res as Response, next);
-      expect.fail("Should have thrown 403");
+      expect.fail("Should have thrown 401");
     } catch (err: any) {
-      expect(err.statusCode ?? err.status).toBe(403);
+      expect(err.statusCode ?? err.status).toBe(401);
     }
   });
 
@@ -177,7 +177,7 @@ describe("authMiddleware — timing-safe comparison", () => {
       authMiddleware(req as Request, res as Response, next);
       expect.fail("Should have thrown");
     } catch (err: any) {
-      expect(err.statusCode ?? err.status).toBe(403);
+      expect(err.statusCode ?? err.status).toBe(401);
     }
   });
 

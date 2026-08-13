@@ -227,7 +227,12 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
 
   // Returns the catalog default if no explicit state row exists for this tool.
   const enabled = mcpToolStates.getToolState(projectId, toolName);
-  res.json({ project, project_id: projectId, data: { tool_name: toolName, enabled } });
+  const policy = mcpToolStates.getAllTools(projectId).get(toolName)?.authorization;
+  if (!policy) {
+    res.status(503).json({ error: { code: "TOOL_POLICY_UNAVAILABLE", message: "The tool authorization policy is unavailable." } });
+    return;
+  }
+  res.json({ project, project_id: projectId, data: { tool_name: toolName, enabled, authorization: policy } });
   });
 
 // NOTE: /category/:category must be registered before /:name so "category" is not captured as :name

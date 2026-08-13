@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { projects } from "ingenium-core";
+import { authorization, projects } from "ingenium-core";
 
 /**
  * Express middleware helper that reads the `project` query parameter,
@@ -24,6 +24,24 @@ export function requireProject(req: Request, res: Response): string | null {
   const project = projects.getProject(name);
   if (!project || project.archived_at) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${name}' not found. Create it first via POST /api/v1/projects or the dashboard.` } });
+    return null;
+  }
+  const principal = req.principal;
+  if (!principal) {
+    res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
+    return null;
+  }
+  const permission = req.authorizationPolicy?.permission ?? "read";
+  const resource = req.authorizationPolicy?.resource ?? "projects";
+  const decision = authorization.requireProjectPermission({
+    type: principal.type === "user" ? (principal.session ? "browser-user" : "user-token") : principal.type === "service" ? "service-principal" : principal.type,
+    id: principal.id,
+    scopes: principal.scopes,
+    organizationId: "organizationId" in principal ? principal.organizationId : undefined,
+    projectId: "projectId" in principal ? principal.projectId : undefined,
+  }, project.id, resource, permission);
+  if (!decision.allowed) {
+    res.status(decision.visible ? 403 : 404).json({ error: { code: decision.visible ? "FORBIDDEN" : "NOT_FOUND", message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found" } });
     return null;
   }
   return project.id;

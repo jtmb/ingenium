@@ -421,10 +421,12 @@ Evidence AUTH-101: focused core/API tests pass for exact AUTH-100 schema upgrade
   install-boundary bypass, wrong status semantics, CSRF bypass, or audit loss is
   `BLOCKING`; extra roles or audit views are `FOLLOW_UP`; bounded policy evidence
   is `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
+- **Markers/evidence:** [x] appended `work-started` after preflight; [ ] append
+  matching `work-complete` only after all release gates; [x] replaced
   `Evidence AUTH-102: <acceptance evidence placeholder>` with non-empty role,
   security, audit, deployment, isolation, E2E, and containment evidence.
+<!-- (work-started) AUTH-102 2026-08-13T15:00:00Z ingenium-software-engineer-premium -->
+Evidence AUTH-102: source implementation and focused verification establish a centralized fail-closed API policy, core role/scope/bound authorization, authorization-aware project lookup/listing, step-up-protected organization administration, exact authorization status semantics, immutable content-free audit evidence, and explicit fail-closed MCP authorization metadata with launcher binding. Core/API/server typechecks and focused authorization, route, catalog-parity, and tool-state tests pass. Release completion remains pending security review, deployment/health, tenant-isolation fixtures, fixture E2E, strict containment, and final marker reconciliation; no `work-complete` marker is valid until those gates pass.
 
 #### AUTH-103 — Dashboard UX: sign-in, membership, and security controls
 

@@ -12,6 +12,8 @@ export * as contextSnapshotImport from "./tools/context-snapshot-import.js";
 export * as projects from "./tools/projects.js";
 export * as identity from "./tools/identity.js";
 export * as organizations from "./tools/organizations.js";
+export * as authorization from "./tools/authorization.js";
+export * as mcpAuthorizationPolicy from "./tools/mcp-authorization-policy.js";
 export * as authentication from "./tools/authentication.js";
 export * as oidcAuthentication from "./tools/oidc-authentication.js";
 export * as bootstrap from "./tools/bootstrap.js";

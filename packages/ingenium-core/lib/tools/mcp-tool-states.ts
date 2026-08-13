@@ -8,6 +8,7 @@ import {
   getCategoryOrder,
 } from "./mcp-tool-catalog.js";
 import { listEffectiveChildMcpTools } from "./child-mcp-servers.js";
+import { childMcpAuthorizationPolicy } from "./mcp-authorization-policy.js";
 
 /**
  * MCP tool state — per-project enable/disable persistence for individual tools.
@@ -40,6 +41,7 @@ export function getAllTools(projectId?: string) {
       projectScope: tool.scope === "global" ? "global" : "per-project",
       defaultEnabled: true,
       apiEndpoints: [],
+      authorization: childMcpAuthorizationPolicy(),
     });
   }
   return catalog;

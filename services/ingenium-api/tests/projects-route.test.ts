@@ -11,6 +11,7 @@ import { resetEmailRuntimeForTest } from "ingenium-email";
 import { getEmailEncryptionKeyFingerprint } from "../../../packages/ingenium-email/lib/credential-crypto.js";
 import { configureEmailRuntimeForApi } from "../lib/email-runtime.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { migrateEmailAccountsToGlobal } from "../lib/routes/emails.js";
@@ -59,6 +60,17 @@ async function startAuthenticatedRouter(): Promise<string> {
       resolve(`http://127.0.0.1:${(server!.address() as AddressInfo).port}`);
     });
   });
+}
+
+async function startPolicyRouter(principal: import("../lib/middleware/auth.js").RequestPrincipal): Promise<string> {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { req.principal = principal; next(); });
+  app.use(authorizationMiddleware);
+  app.use("/api/v1/projects", projectsRouter);
+  app.use(errorHandler);
+  server = createServer(app);
+  return await new Promise<string>((resolve) => server!.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server!.address() as AddressInfo).port}`)));
 }
 
 function authenticatedJsonHeaders(): HeadersInit {
@@ -305,5 +317,49 @@ describe("project route validation", () => {
     expect(projects.setProjectGlobal(external.name, true)).toBe(true);
     expect(projects.setProjectGlobal(canonical.name, true)).toBe(true);
     expect(projects.getFormerGlobalProjectIds(canonical.id)).toEqual([external.id]);
+  });
+});
+
+describe("project restore authorization", () => {
+  it("authorizes the archived target identity rather than the query project", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-project-restore-authz-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
+    process.env.INGENIUM_HOME = join(tempDir, "home");
+    const { identity, organizations } = await import("ingenium-core");
+    const organizationA = organizations.createOrganization("Organization A", "restore-org-a");
+    const organizationB = organizations.createOrganization("Organization B", "restore-org-b");
+    const adminA = identity.createUser("restore-admin-a@example.test", "Admin A");
+    organizations.addOrganizationMember(organizationA, adminA.id, "admin");
+    const projectA = projects.createProject("restore-project-a", false, organizationA);
+    const projectB = projects.createProject("restore-project-b", false, organizationB);
+    projects.archiveProject(projectB.name);
+
+    const baseUrl = await startPolicyRouter({ type: "user", id: adminA.id, scopes: ["user:*"] });
+    const response = await fetch(`${baseUrl}/api/v1/projects/${projectB.name}/restore?project=${projectA.name}`, { method: "POST" });
+    expect(response.status).toBe(404);
+    expect(projects.getProject(projectB.name)?.archived_at).toBeTruthy();
+  });
+
+  it("allows same-org admin and compatibility restore while unknown stays non-enumerating", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-project-restore-authz-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
+    process.env.INGENIUM_HOME = join(tempDir, "home");
+    const { identity, organizations } = await import("ingenium-core");
+    const organization = organizations.createOrganization("Restore Same", "restore-same");
+    const admin = identity.createUser("restore-same@example.test", "Restore Same");
+    organizations.addOrganizationMember(organization, admin.id, "admin");
+    const first = projects.createProject("restore-same-first", false, organization);
+    projects.archiveProject(first.name);
+
+    let baseUrl = await startPolicyRouter({ type: "user", id: admin.id, scopes: ["user:*"] });
+    expect((await fetch(`${baseUrl}/api/v1/projects/${first.name}/restore`, { method: "POST" })).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/v1/projects/unknown-restore/restore`, { method: "POST" })).status).toBe(404);
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    server = undefined;
+
+    const second = projects.createProject("restore-compatibility", false, organization);
+    projects.archiveProject(second.name);
+    baseUrl = await startPolicyRouter({ type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] });
+    expect((await fetch(`${baseUrl}/api/v1/projects/${second.name}/restore?project=unknown-authority`, { method: "POST" })).status).toBe(200);
   });
 });

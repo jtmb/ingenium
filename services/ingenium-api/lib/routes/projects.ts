@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { projects } from "ingenium-core";
+import { authorization, projects } from "ingenium-core";
+import { authorizeProjectRestoreTarget } from "../authorization-policy.js";
 
 const CANONICAL_GLOBAL_PROJECT_NAME = "global-default";
 
@@ -30,13 +31,20 @@ export const projectsRouter = Router();
 // NOTE: Literal-path sub-routes (/archive, /purge) are registered before /:name
 // to avoid Express route capture.
 
-projectsRouter.get("/", (_req, res) => {
-  const list = projects.listProjects();
+projectsRouter.get("/", (req, res) => {
+  const principal = req.principal ?? { type: "compatibility" as const, id: "legacy-server-bearer" as const, scopes: ["legacy:*"] as const };
+  const list = authorization.listAuthorizedProjects({
+    type: principal.type === "user" ? (principal.session ? "browser-user" : "user-token") : principal.type === "service" ? "service-principal" : principal.type,
+    id: principal.id,
+    scopes: principal.scopes,
+    organizationId: "organizationId" in principal ? principal.organizationId : undefined,
+    projectId: "projectId" in principal ? principal.projectId : undefined,
+  });
   res.json({ data: list });
 });
 
 projectsRouter.post("/", (req, res) => {
-  const { name, is_global } = req.body;
+  const { name, is_global, organization_id } = req.body;
   if (!requireSafeProjectName(name, res)) return;
   if (is_global !== undefined && typeof is_global !== "boolean") {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "is_global must be a boolean when provided" } });
@@ -50,7 +58,7 @@ projectsRouter.post("/", (req, res) => {
     rejectGlobalProjectLifecycle(res);
     return;
   }
-  const project = projects.createProject(name);
+  const project = projects.createProject(name, false, typeof organization_id === "string" ? organization_id : undefined);
   res.status(201).json({ data: project });
 });
 
@@ -69,8 +77,15 @@ projectsRouter.patch("/:name", (req, res) => {
   res.json({ data: updated });
 });
 
-projectsRouter.get("/archive", (_req, res) => {
-  const list = projects.listArchivedProjects();
+projectsRouter.get("/archive", (req, res) => {
+  const principal = req.principal ?? { type: "compatibility" as const, id: "legacy-server-bearer" as const, scopes: ["legacy:*"] as const };
+  const list = authorization.listAuthorizedProjects({
+    type: principal.type === "user" ? (principal.session ? "browser-user" : "user-token") : principal.type === "service" ? "service-principal" : principal.type,
+    id: principal.id,
+    scopes: principal.scopes,
+    organizationId: "organizationId" in principal ? principal.organizationId : undefined,
+    projectId: "projectId" in principal ? principal.projectId : undefined,
+  }, true);
   res.json({ data: list });
 });
 
@@ -110,13 +125,25 @@ projectsRouter.delete("/:name/purge", (req, res) => {
 // Reverses an archive — only works for projects in archived state
 projectsRouter.post("/:name/restore", (req, res) => {
   if (!requireSafeProjectName(req.params.name, res)) return;
-  if (hasGlobalRole(req.params.name!)) {
+  let target = req.authorizedProjectTarget;
+  if (!target && req.principal) {
+    target = authorizeProjectRestoreTarget(req.principal, req.params.name!);
+  }
+  if (!target && !req.principal) {
+    const project = projects.getProject(req.params.name!);
+    if (project) target = { id: project.id, name: project.name, organizationId: project.organization_id, archived: Boolean(project.archived_at), isGlobal: Boolean(project.is_global) };
+  }
+  if (!target || target.name !== req.params.name || !target.archived) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+    return;
+  }
+  if (target.isGlobal) {
     rejectGlobalProjectLifecycle(res);
     return;
   }
-  const restored = projects.unarchiveProject(req.params.name!);
+  const restored = projects.unarchiveProjectById(target.id);
   if (!restored) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: `Archived project '${req.params.name}' not found` } });
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
     return;
   }
   res.json({ data: { restored: true } });

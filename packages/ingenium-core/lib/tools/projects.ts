@@ -110,7 +110,7 @@ function projectDirectory(name: string): string {
   return candidate;
 }
 
-export function createProject(name: string, isGlobal = false): Project {
+export function createProject(name: string, isGlobal = false, organizationId = BOOTSTRAP_ORGANIZATION_ID): Project {
   assertProjectName(name);
   // Idempotent: return existing project on container restart
   const existing = getProject(name);
@@ -131,7 +131,7 @@ export function createProject(name: string, isGlobal = false): Project {
     db.prepare(
       `INSERT INTO projects (id, name, path, is_global, created_at, updated_at, organization_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now, BOOTSTRAP_ORGANIZATION_ID);
+    ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now, organizationId);
     if (isGlobal) recordGlobalProjectTransition(db, id, "became_global", now);
     // Auto-load global skills into new project
     const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL").get() as Project | undefined;
@@ -183,6 +183,26 @@ export function unarchiveProject(name: string): boolean {
     db.prepare("UPDATE projects SET archived_at = NULL, is_global = ? WHERE name = ?")
       .run(restoreAsGlobal ? 1 : 0, name);
     if (restoreAsGlobal) recordGlobalProjectTransition(db, (existing as Project).id, "became_global", now);
+    return true;
+  });
+  if (changed) checkpointAfterWrite();
+  return changed;
+}
+
+/** Restore one archived immutable project identity without re-resolving a caller-supplied name. */
+export function unarchiveProjectById(projectId: string): boolean {
+  const changed = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = db.prepare("SELECT * FROM projects WHERE id = ? AND archived_at IS NOT NULL").get(projectId) as Project | undefined;
+    if (!existing) return false;
+    const activeGlobal = db.prepare(
+      "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
+    ).get(existing.id) as { id: string } | undefined;
+    const restoreAsGlobal = Boolean(existing.is_global) && !activeGlobal;
+    const now = new Date().toISOString();
+    db.prepare("UPDATE projects SET archived_at = NULL, is_global = ?, updated_at = ? WHERE id = ? AND archived_at IS NOT NULL")
+      .run(restoreAsGlobal ? 1 : 0, now, projectId);
+    if (restoreAsGlobal) recordGlobalProjectTransition(db, existing.id, "became_global", now);
     return true;
   });
   if (changed) checkpointAfterWrite();

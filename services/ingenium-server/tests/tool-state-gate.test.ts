@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ProjectStateAttestor,
+  getToolAuthorizationPolicy,
   launcherBoundStateGatedHandler,
+  policyStateGatedHandler,
   responseProjectMatches,
   stateGatedHandler,
   TOOL_STATE_GATE_CODES,
@@ -125,5 +127,24 @@ describe("stateGatedHandler", () => {
       content: [{ text: expect.stringContaining(TOOL_STATE_GATE_CODES.unavailable) }],
     });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed without policy and enforces launcher binding before dispatch", async () => {
+    const handler = vi.fn(async () => ({ content: [{ type: "text", text: "called" }] }));
+    const missing = policyStateGatedHandler("ingenium_fixture", "launcher", async () => ({ state: "enabled" }), handler);
+    await expect(missing({ project: "launcher" })).resolves.toMatchObject({ isError: true, content: [{ text: expect.stringContaining(TOOL_STATE_GATE_CODES.unavailable) }] });
+
+    const bound = policyStateGatedHandler("ingenium_fixture", "launcher", async () => ({
+      state: "enabled",
+      policy: { action: "tasks.read", resource: "tasks", permission: "read", target: "project", scopes: ["tasks:read"], launcherBinding: "required" },
+    }), handler);
+    await expect(bound({ project: "foreign" })).resolves.toMatchObject({ isError: true, content: [{ text: expect.stringContaining(TOOL_STATE_GATE_CODES.project) }] });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed authorization metadata", () => {
+    expect(getToolAuthorizationPolicy({ action: "tasks.read", resource: "tasks", permission: "read", target: "project", scopes: [], launcherBinding: "required" })).toBeNull();
+    expect(getToolAuthorizationPolicy({ action: "tasks.read", resource: "tasks", permission: "owner", target: "project", scopes: ["tasks:read"], launcherBinding: "required" })).toBeNull();
+    expect(getToolAuthorizationPolicy({ action: "tasks.read", resource: "tasks", permission: "read", target: "project", scopes: ["tasks:read"], launcherBinding: "required" })).toMatchObject({ permission: "read", target: "project" });
   });
 });
