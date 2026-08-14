@@ -120,6 +120,7 @@ export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeSco
     result[lower] = value;
   }
   result.host = scope.host;
+  if (scope.audience === "cli") result["x-ingenium-authenticated-user"] = "runtime";
   if (websocket) {
     result.connection = "Upgrade";
     result.upgrade = "websocket";

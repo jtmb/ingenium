@@ -25,7 +25,7 @@ describe("AUTH-109 runtime gateway", () => {
     expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test:443` } })).toBeUndefined();
   });
 
-  it("strips browser credentials, identity, and proxy-chain headers on HTTP and WebSocket requests", () => {
+  it("strips browser identity and injects only the fixed CLI identity", () => {
     const scope = runtimeScope({ headers: { host: `cli--${runtimeId}.runtime.example.test` } })!;
     const headers = sanitizedHeaders({
       authorization: "Bearer browser-controlled",
@@ -43,9 +43,12 @@ describe("AUTH-109 runtime gateway", () => {
     expect(headers).not.toHaveProperty("cookie");
     expect(headers).not.toHaveProperty("forwarded");
     expect(headers).not.toHaveProperty("x-forwarded-for");
-    expect(headers).not.toHaveProperty("x-ingenium-authenticated-user");
+    expect(headers["x-ingenium-authenticated-user"]).toBe("runtime");
     expect(headers).not.toHaveProperty("x-ingenium-audience");
     expect(headers).not.toHaveProperty("x-ingenium-private-network");
+    const webScope = runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test` } })!;
+    expect(sanitizedHeaders({ "x-ingenium-authenticated-user": "admin" }, webScope))
+      .not.toHaveProperty("x-ingenium-authenticated-user");
   });
 
   it("uses a host-only secure audience cookie and a restrictive frame policy", () => {
