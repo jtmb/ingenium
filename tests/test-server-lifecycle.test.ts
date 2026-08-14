@@ -53,6 +53,11 @@ import {
   waitForPortClosed,
   waitForReady,
 } from "./test-server-lifecycle";
+import {
+  FIXTURE_PROJECT_HEADER,
+  FIXTURE_RUN_NONCE_HEADER,
+  directApiAuthHeaders,
+} from "./fixture-api-auth";
 import { getDashboardFixtureEnvironment, getDashboardStorageStatePath } from "./ingenium-dashboard/fixture-credentials";
 
 const manifests: string[] = [];
@@ -115,6 +120,8 @@ describe("test server lifecycle contracts", () => {
         headers: {
           Authorization: `Bearer ${TEST_API_TOKEN}`,
           [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+          [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
+          [FIXTURE_PROJECT_HEADER]: context.project,
           "Content-Type": "application/json",
         },
       });
@@ -164,6 +171,8 @@ describe("test server lifecycle contracts", () => {
       headers: {
         Authorization: `Bearer ${TEST_API_TOKEN}`,
         [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+        [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
+        [FIXTURE_PROJECT_HEADER]: context.project,
       },
     });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
@@ -228,8 +237,22 @@ describe("test server lifecycle contracts", () => {
     expect(specs[2]!.readinessHeaders).toBeUndefined();
     expect(specs[0]!.readinessHeaders?.Authorization).toBe(`Bearer ${TEST_API_TOKEN}`);
     expect(specs[0]!.readinessHeaders?.[FIXTURE_INTERNAL_SERVICE_HEADER]).toBe("1");
+    expect(specs[0]!.readinessHeaders?.[FIXTURE_RUN_NONCE_HEADER]).toBe(context.runNonce);
+    expect(specs[0]!.readinessHeaders?.[FIXTURE_PROJECT_HEADER]).toBe(context.project);
     expect(specs[1]!.env.SOME_SECRET).toBeUndefined();
     expect(specs[2]!.env.INGENIUM_API_TOKEN).toBeUndefined();
+  });
+
+  it("adds the internal marker only to explicitly bound fixture API calls", () => {
+    expect(directApiAuthHeaders(TEST_API_TOKEN)).toEqual({
+      Authorization: `Bearer ${TEST_API_TOKEN}`,
+    });
+    expect(directApiAuthHeaders(TEST_API_TOKEN)).not.toHaveProperty(FIXTURE_INTERNAL_SERVICE_HEADER);
+    expect(() => directApiAuthHeaders(TEST_API_TOKEN, {
+      mode: "fixture",
+      runNonce: "not-a-run-nonce",
+      project: "global-default",
+    })).toThrow(/run-owned nonce and project/);
   });
 
   it("captures the pre-existing process baseline before a fixture child can launch", async () => {

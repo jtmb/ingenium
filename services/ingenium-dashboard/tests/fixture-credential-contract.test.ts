@@ -144,6 +144,7 @@ describe("dashboard fixture credential boundary", () => {
         headers: {
           Authorization: `Bearer ${testToken}`,
           "x-ingenium-fixture-run-nonce": context.runNonce,
+          "x-ingenium-fixture-project": context.project,
           "x-ingenium-internal-service": "1",
         },
       }),

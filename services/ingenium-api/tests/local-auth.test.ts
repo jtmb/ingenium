@@ -23,6 +23,7 @@ const originalDb = process.env.INGENIUM_CORE_DB_PATH;
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTestMode = process.env.INGENIUM_API_TEST_MODE;
 const originalRunNonce = process.env.INGENIUM_TEST_RUN_NONCE;
+const originalProject = process.env.INGENIUM_PROJECT;
 
 beforeEach(async () => {
   resetDbForTest();
@@ -51,6 +52,7 @@ afterEach(async () => {
   if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN; else process.env.INGENIUM_API_TOKEN = originalToken;
   if (originalTestMode === undefined) delete process.env.INGENIUM_API_TEST_MODE; else process.env.INGENIUM_API_TEST_MODE = originalTestMode;
   if (originalRunNonce === undefined) delete process.env.INGENIUM_TEST_RUN_NONCE; else process.env.INGENIUM_TEST_RUN_NONCE = originalRunNonce;
+  if (originalProject === undefined) delete process.env.INGENIUM_PROJECT; else process.env.INGENIUM_PROJECT = originalProject;
 });
 
 async function preAuth(): Promise<{ token: string; cookie: string }> {
@@ -96,6 +98,7 @@ describe("AUTH-101 local API", () => {
     const nonce = "10000000-0000-4000-8000-000000000108";
     process.env.INGENIUM_API_TEST_MODE = "1";
     process.env.INGENIUM_TEST_RUN_NONCE = nonce;
+    process.env.INGENIUM_PROJECT = "playwright-test-auth108";
     const headers = {
       authorization: `Bearer ${"a".repeat(32)}`,
       "x-ingenium-internal-service": "1",
@@ -106,7 +109,11 @@ describe("AUTH-101 local API", () => {
 
     const accepted = await fetch(`${baseUrl}/api/v1/auth/fixture-session`, {
       method: "POST",
-      headers: { ...headers, "x-ingenium-fixture-run-nonce": nonce },
+      headers: {
+        ...headers,
+        "x-ingenium-fixture-run-nonce": nonce,
+        "x-ingenium-fixture-project": "playwright-test-auth108",
+      },
     });
     expect(accepted.status).toBe(200);
     expect(accepted.headers.get("set-cookie")).toMatch(/__Host-ingenium_session=.*Secure; HttpOnly; SameSite=Strict/);

@@ -54,6 +54,7 @@ export async function GET(request: Request): Promise<Response> {
       headers: {
         Authorization: `Bearer ${fixture.token}`,
         "x-ingenium-fixture-run-nonce": fixture.nonce,
+        "x-ingenium-fixture-project": fixture.project,
         "x-ingenium-internal-service": "1",
       },
       cache: "no-store",

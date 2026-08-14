@@ -22,6 +22,7 @@ describe("dashboard route inventory", () => {
       "/mcp-servers",
       "/observations",
       "/opencode",
+      "/organizations",
       "/personality",
       "/pipeline",
       "/plugins",

@@ -25,15 +25,19 @@ import {
   type ProcessIdentity,
 } from "./test-run-process-discovery";
 import { writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
+import {
+  FIXTURE_INTERNAL_SERVICE_HEADER,
+  TEST_API_TOKEN,
+  testRunApiAuthHeaders,
+} from "./fixture-api-auth";
 
 export { inspectProcessIdentity, type ProcessIdentity } from "./test-run-process-discovery";
+export { FIXTURE_INTERNAL_SERVICE_HEADER, TEST_API_TOKEN } from "./fixture-api-auth";
 
 export const SERVER_START_TIMEOUT_MS = 45_000;
 export const SERVER_STOP_TIMEOUT_MS = 8_000;
 export const PRODUCTION_BUILD_TIMEOUT_MS = 180_000;
 export const READINESS_REQUEST_TIMEOUT_MS = 1_000;
-export const TEST_API_TOKEN = "A".repeat(48);
-export const FIXTURE_INTERNAL_SERVICE_HEADER = "x-ingenium-internal-service";
 export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
 // The serialized fixture suite creates deliberate browser/API traffic. Keep
 // this bounded override local to its isolated API process; production retains
@@ -88,6 +92,8 @@ export interface TestServerLifecycleOptions {
   spawnServer?: (spec: ServerSpec) => ChildProcess;
   /** Server-only dashboard credential produced by the suite runtime. */
   dashboardEnvironment?: Readonly<Record<string, string>>;
+  /** Release parent stdio/handles after a manifest-owned external lease starts. */
+  detachAfterStart?: boolean;
   /**
    * Test-only failure injection for the first durable process-record hand-off.
    * The default remains the real run-context writer.
@@ -126,11 +132,7 @@ export async function provisionTestRunProject(
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${TEST_API_TOKEN}`,
-        [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
-        "Content-Type": "application/json",
-      },
+      headers: { ...testRunApiAuthHeaders(context), "Content-Type": "application/json" },
       body: JSON.stringify({ name: context.project, is_global: false }),
       signal: controller.signal,
     });
@@ -173,11 +175,7 @@ async function fixtureRequest(url: string, init: RequestInit): Promise<Response>
 
 export async function provisionTestRunOwner(context: TestRunContext): Promise<void> {
   const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
-  const operatorHeaders = {
-    Authorization: `Bearer ${TEST_API_TOKEN}`,
-    [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
-    "Content-Type": "application/json",
-  };
+  const operatorHeaders = { ...testRunApiAuthHeaders(context), "Content-Type": "application/json" };
   const claim = await fixtureRequest(`${apiBase}/bootstrap/claim`, {
     method: "POST",
     headers: operatorHeaders,
@@ -308,10 +306,7 @@ export function getServerSpecs(
         INGENIUM_API_RATE_LIMIT: String(FIXTURE_API_RATE_LIMIT),
       }),
       readinessUrl: `http://127.0.0.1:${context.ports.api}/api/v1/health`,
-      readinessHeaders: {
-        Authorization: `Bearer ${TEST_API_TOKEN}`,
-        [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
-      },
+      readinessHeaders: testRunApiAuthHeaders(context),
     },
     {
       name: "dashboard",
@@ -794,12 +789,12 @@ export async function waitForReady(
   throw new Error(`${spec.name} did not become ready at ${spec.readinessUrl}`);
 }
 
-function spawnServer(spec: ServerSpec): ChildProcess {
+function spawnServer(spec: ServerSpec, ignoreOutput = false): ChildProcess {
   const child = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
     env: spec.env,
     detached: process.platform !== "win32",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ignoreOutput ? "ignore" : ["ignore", "pipe", "pipe"],
   });
   captureSpawnedChildPgid(child);
   const output = { value: "" };
@@ -1270,7 +1265,7 @@ export async function startTestServers(
 
     updateTestRunManifest(context.manifestPath, { status: "starting", processes: [] });
     for (const spec of specs) {
-      const child = options.spawnServer?.(spec) ?? spawnServer(spec);
+      const child = options.spawnServer?.(spec) ?? spawnServer(spec, options.detachAfterStart === true);
       captureSpawnedChildPgid(child);
       if (!child.pid) {
         try {
@@ -1354,6 +1349,9 @@ export async function startTestServers(
       transferTestRunPortOwnership(context.manifestPath, spec.port);
     }
     updateTestRunManifest(context.manifestPath, { status: "running" });
+    if (options.detachAfterStart) {
+      for (const { child } of running) child.unref();
+    }
   } catch (error) {
     const diagnostics: unknown[] = [];
     let manifestUsable = false;

@@ -30,10 +30,12 @@ test("bootstraps a clean QA Vision browser into the isolated fixture session", a
   if (!baseURL) throw new Error("Fixture dashboard URL is unavailable");
   const context = await browser.newContext();
   const page = await context.newPage();
-  const browserAuthorizationHeaders: string[] = [];
+  const browserServerOnlyHeaders: Array<Record<string, string>> = [];
   page.on("request", (request) => {
-    const authorization = request.headers().authorization;
-    if (authorization) browserAuthorizationHeaders.push(authorization);
+    const headers = request.headers();
+    const serverOnly = Object.fromEntries(Object.entries(headers).filter(([name]) =>
+      name === "authorization" || name.startsWith("x-ingenium-fixture-") || name === "x-ingenium-internal-service"));
+    if (Object.keys(serverOnly).length > 0) browserServerOnlyHeaders.push(serverOnly);
   });
   try {
     const fixtureUrl = new URL("/test-fixture/session", baseURL);
@@ -41,7 +43,7 @@ test("bootstraps a clean QA Vision browser into the isolated fixture session", a
     await page.goto(fixtureUrl.toString());
     expect(new URL(page.url()).searchParams.get("project")).toMatch(/^playwright-test-/);
     expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ingenium_session")).toBe(true);
-    expect(browserAuthorizationHeaders).toEqual([]);
+    expect(browserServerOnlyHeaders).toEqual([]);
   } finally {
     await context.close();
   }

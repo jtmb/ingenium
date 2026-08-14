@@ -657,6 +657,36 @@ describe("suite containment audit", () => {
     expect(strictFailures(report).some((failure) => failure.includes(context.telemetryPath!))).toBe(false);
   });
 
+  it("inspects canonical historical temp roots when the current TMPDIR differs", async () => {
+    if (process.platform === "win32" || !existsSync("/tmp") || !existsSync("/var/tmp")) return;
+    const originalTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = "/tmp";
+    resetTestRunContextForTests();
+    const context = createContextWithReservedPortRetry({
+      applyEnvironment: false,
+      tempRoot: "/tmp",
+      now: () => new Date("2020-01-01T00:00:00.000Z"),
+    });
+    contexts.push(context);
+    rmSync(context.manifestPath, { force: true });
+
+    try {
+      process.env.TMPDIR = "/var/tmp";
+      resetTestRunContextForTests();
+      const report = await auditContainment({ includeRepositoryTelemetry: true });
+
+      expect(report.telemetryErrors.some((error) => error.includes(context.telemetryPath!))).toBe(false);
+      expect(report.telemetry.find(({ runId }) => runId === context.runId)).toMatchObject({
+        manifestState: "missing",
+        evidenceDisposition: "historical-inert",
+      });
+    } finally {
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+      resetTestRunContextForTests();
+    }
+  });
+
   it("does not suppress fresh missing-manifest telemetry or malformed retained evidence", async () => {
     const context = createContextWithReservedPortRetry({
       applyEnvironment: false,
@@ -730,6 +760,32 @@ describe("suite containment audit", () => {
       `manifestless temp evidence retained (unowned, not deleted): ${evidence}`,
     );
     expect(existsSync(evidence)).toBe(true);
+  });
+
+  it("preserves unowned evidence in a historical temp root when TMPDIR changes", async () => {
+    if (process.platform === "win32" || !existsSync("/tmp") || !existsSync("/var/tmp")) return;
+    const originalTmpdir = process.env.TMPDIR;
+    const evidence = mkdtempSync(join("/tmp", `${TEST_RUN_TEMP_PREFIX}unowned-historical-`));
+    temporaryManifestlessEvidence.push(evidence);
+    try {
+      process.env.TMPDIR = "/var/tmp";
+      resetTestRunContextForTests();
+      const report = await auditContainment({
+        manifestPath: "",
+        telemetryPaths: [],
+        includeRepositoryTelemetry: false,
+      });
+
+      expect(report.unownedTempEntries).toContain(evidence);
+      expect(report.informational).toContain(
+        `manifestless temp evidence retained (unowned, not deleted): ${evidence}`,
+      );
+      expect(existsSync(evidence)).toBe(true);
+    } finally {
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+      resetTestRunContextForTests();
+    }
   });
 
   it("removes only the exact symlink-free nested test-results residual after stable inventory proof", () => {

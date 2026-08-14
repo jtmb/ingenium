@@ -6,16 +6,16 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   TEST_RUN_MANIFEST_ENV,
   TEST_RUN_TELEMETRY_ENV,
   getCanonicalRepoRoot,
+  getContainmentAuditTempRoots,
   getTestRunArtifactRoot,
   getTestRunTelemetryPath,
-  readTestRunManifest,
-  readTestRunTelemetry,
+  readTestRunManifestForContainmentAudit,
+  readTestRunTelemetryForContainmentAudit,
   type TestRunManifest,
   type TestRunProcess,
   type TestRunPreexistingProcessBaseline,
@@ -167,7 +167,7 @@ function preexistingProcessBaselinesMatch(
 function checkTelemetryManifest(entry: TestRunTelemetry, repoRoot: string): TelemetryManifestCheck {
   if (!existsSync(entry.manifestPath)) return { state: "missing", error: "manifest is missing" };
   try {
-    const manifest = readTestRunManifest(entry.manifestPath);
+    const manifest = readTestRunManifestForContainmentAudit(entry.manifestPath);
     const identityMatches = manifest.runId === entry.runId
       && manifest.runNonce === entry.runNonce
       && manifest.repoRoot === repoRoot
@@ -281,19 +281,20 @@ function auditTemp(resolvedManifestPaths: Set<string> = new Set()): {
   manifestBacked: string[];
   manifestless: string[];
 } {
-  const entries = readdirSync(tmpdir(), { withFileTypes: true });
   const prefix = process.env.INGENIUM_AUDIT_TEMP_PREFIX ?? DEFAULT_TEMP_PREFIX;
   const manifestBacked: string[] = [];
   const manifestless: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
-    const path = join(tmpdir(), entry.name);
-    const manifestPath = join(path, "run-manifest.json");
-    if (resolvedManifestPaths.has(manifestPath)) continue;
-    if (optionalLstat(manifestPath)) manifestBacked.push(path);
-    else manifestless.push(path);
+  for (const root of getContainmentAuditTempRoots()) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+      const path = join(root, entry.name);
+      const manifestPath = join(path, "run-manifest.json");
+      if (resolvedManifestPaths.has(manifestPath)) continue;
+      if (optionalLstat(manifestPath)) manifestBacked.push(path);
+      else manifestless.push(path);
+    }
   }
-  return { manifestBacked, manifestless };
+  return { manifestBacked: [...new Set(manifestBacked)], manifestless: [...new Set(manifestless)] };
 }
 
 function auditProcesses(): { activeHandles: number; rssBytes: number } {
@@ -595,7 +596,7 @@ function loadManifest(repoRoot: string, configuredManifestPath = process.env[TES
   if (!manifestPath) return {};
   if (!existsSync(manifestPath)) return { error: `manifest is missing: ${manifestPath}` };
   try {
-    const manifest = readTestRunManifest(manifestPath);
+    const manifest = readTestRunManifestForContainmentAudit(manifestPath);
     if (manifest.repoRoot !== repoRoot) return { error: "manifest repository root does not match the canonical artifact root" };
     return { manifest };
   } catch (error) {
@@ -716,7 +717,7 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   for (const path of telemetryPaths) {
     if (isLegacyEvidencePath(path, repoRoot)) continue;
     try {
-      telemetry.push(readTestRunTelemetry(path, repoRoot));
+      telemetry.push(readTestRunTelemetryForContainmentAudit(path, repoRoot));
     } catch (error) {
       telemetryErrors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
     }

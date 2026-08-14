@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { repositoryRoot } from "./route-inventory";
+import { readDashboardApiTokenFile } from "../../services/ingenium-dashboard/src/lib/dashboard-token";
 
 const TARGET_ENVIRONMENT_VARIABLES = [
   "INGENIUM_ROUTE_PARITY_URL",
@@ -58,18 +59,19 @@ export function productionDashboardRoute(path: string): string {
   return route.toString();
 }
 
-export function productionApiHealthRequest(): { url: string; headers: Record<string, string> } {
+export function productionApiHealthRequest(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): { url: string; headers: Record<string, string> } {
   const raw = API_TARGET_ENVIRONMENT_VARIABLES
-    .map((name) => process.env[name]?.trim())
+    .map((name) => environment[name]?.trim())
     .find((value): value is string => Boolean(value));
   if (!raw) {
     throw new Error(`Set ${API_TARGET_ENVIRONMENT_VARIABLES.join(" or ")} to the authenticated production API root`);
   }
 
-  const token = process.env.INGENIUM_API_TOKEN?.trim();
-  if (!token || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
-    throw new Error("INGENIUM_API_TOKEN must contain the production API preflight credential");
-  }
+  const tokenFile = environment.INGENIUM_API_TOKEN_FILE?.trim();
+  if (!tokenFile) throw new Error("INGENIUM_API_TOKEN_FILE must name the protected production API credential");
+  const token = readDashboardApiTokenFile(tokenFile);
 
   let target: URL;
   try {

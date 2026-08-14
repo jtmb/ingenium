@@ -133,6 +133,21 @@ browser session cookie, and redirects to the run-owned project. The route is
 `404` outside test mode; neither the API bearer nor fixture credentials enter
 the browser.
 
+Start a bounded visual fixture without printing or passing a credential to the
+visual agent:
+
+```bash
+npx tsx tests/visual-fixture.ts start --timeout-seconds 1800
+```
+
+The command returns JSON containing the exact `runId`, fixture-only `url`, lease
+timeout, and credential-free cleanup command. Open the returned URL in a fresh
+browser. Run the returned cleanup command immediately after visual QA; the
+detached guardian performs the same manifest-owned cleanup when the lease
+expires. The production `http://localhost:3000/test-fixture/session` remains
+unavailable because the deployed dashboard has no fixture mode, nonce, project,
+or run-owned credential file.
+
 ### Mutation-origin contract
 
 Fixture mutations run against a direct dashboard listener with a dynamically
@@ -400,21 +415,23 @@ creates API credentials or mutation requests. It requires an already-running
 production dashboard gateway and an explicit opt-in:
 
 ```bash
-RUN_DASHBOARD_ROUTE_PARITY=1 \
-INGENIUM_ROUTE_PARITY_URL=http://localhost:3000 \
-INGENIUM_E2E_API_URL=http://127.0.0.1:4097/api/v1 \
-INGENIUM_API_TOKEN=<operator-provided-token> \
-npx playwright test --config=tests/dashboard-route-parity/playwright.config.ts
+npx tsx tests/run-dashboard-route-parity.ts
 ```
 
 `INGENIUM_PRODUCTION_DASHBOARD_URL` and `INGENIUM_E2E_DASHBOARD_URL` are
 compatibility aliases for the target URL. The target must be an absolute HTTP(S)
 root origin with no credentials, query, fragment, or shared sub-path. The suite
-uses `INGENIUM_E2E_API_URL` and the
-server-side `INGENIUM_API_TOKEN` only for its authenticated health preflight;
-that bearer is never installed in the browser or sent to the dashboard origin.
+uses `INGENIUM_E2E_API_URL` and reads the rotated credential from the owner-only
+`INGENIUM_API_TOKEN_FILE` only for its authenticated health preflight. When no
+host token file is configured, the wrapper copies the running control plane's
+protected `/run/ingenium-secrets/api-token` into a mode-0600 temporary file,
+passes only that path to Playwright, and removes it in `finally`. Override the
+source with `INGENIUM_ROUTE_PARITY_TOKEN_CONTAINER` and
+`INGENIUM_ROUTE_PARITY_SERVER_TOKEN_FILE`. The credential is never a command
+argument, literal environment value, terminal output, browser setting, or
+dashboard-origin header.
 The suite
-loads the production `.next` route manifests, derives the canonical 23 primary
+loads the production `.next` route manifests, derives the canonical 24 primary
 routes from dashboard navigation, checks settings deep links and supported query
 variants, rejects retired routes, and smoke-renders every route through the
 gateway. Its inventory is deterministic: primary routes come from the navigation

@@ -426,6 +426,22 @@ export function getApprovedTempRoot(): string {
   return realpathSync(tmpdir());
 }
 
+/** Read-only containment inspection also recognizes canonical OS temp roots used by older runs. */
+export function getContainmentAuditTempRoots(): string[] {
+  const candidates = [getApprovedTempRoot(), ...(process.platform === "win32" ? [] : ["/tmp", "/var/tmp"])];
+  const roots = new Set<string>();
+  for (const candidate of candidates) {
+    try {
+      const resolved = resolve(candidate);
+      const metadata = lstatSync(resolved);
+      if (metadata.isDirectory() && !metadata.isSymbolicLink() && realpathSync(resolved) === resolved) roots.add(resolved);
+    } catch {
+      // A platform temp root is approved only when it exists canonically.
+    }
+  }
+  return [...roots];
+}
+
 /**
  * Port reservations live in one canonical OS-temp directory shared by all
  * runner processes. The reservation is an atomic directory creation, not a
@@ -651,20 +667,30 @@ function assertApprovedTempRoot(tempRoot: string): string {
   return canonicalTempRoot;
 }
 
-function assertManifestCandidatePath(manifestPath: string): string {
+function approvedRootForPath(path: string, approvedRoots: readonly string[]): string | undefined {
+  return [...approvedRoots]
+    .sort((left, right) => right.length - left.length)
+    .find((root) => pathIsInside(root, path));
+}
+
+function assertManifestCandidatePath(
+  manifestPath: string,
+  approvedRoots: readonly string[] = [getApprovedTempRoot()],
+): { path: string; approvedRoot: string } {
   if (typeof manifestPath !== "string" || !isAbsolute(manifestPath) || /[\u0000-\u001f\u007f]/.test(manifestPath)) {
     throw new Error("Test-run manifest path must be an absolute, control-character-free path");
   }
   const resolvedPath = resolve(manifestPath);
-  if (basename(resolvedPath) !== "run-manifest.json" || !pathIsInside(getApprovedTempRoot(), resolvedPath)) {
+  const approvedRoot = approvedRootForPath(resolvedPath, approvedRoots);
+  if (basename(resolvedPath) !== "run-manifest.json" || !approvedRoot) {
     throw new Error(`Refusing to read a manifest outside the approved temp root: ${manifestPath}`);
   }
-  assertNoSymlinkedAncestors(dirname(resolvedPath), getApprovedTempRoot(), "test-run manifest");
+  assertNoSymlinkedAncestors(dirname(resolvedPath), approvedRoot, "test-run manifest");
   const canonicalPath = realpathSync(resolvedPath);
-  if (canonicalPath !== resolvedPath || !pathIsInside(getApprovedTempRoot(), canonicalPath)) {
+  if (canonicalPath !== resolvedPath || !pathIsInside(approvedRoot, canonicalPath)) {
     throw new Error("Refusing to read a symlinked or relocated test-run manifest");
   }
-  return resolvedPath;
+  return { path: resolvedPath, approvedRoot };
 }
 
 function assertAbsolutePath(value: unknown, name: string): asserts value is string {
@@ -673,8 +699,7 @@ function assertAbsolutePath(value: unknown, name: string): asserts value is stri
   }
 }
 
-function assertSafeRunDirectory(manifest: TestRunManifest): void {
-  const approvedRoot = getApprovedTempRoot();
+function assertSafeRunDirectory(manifest: TestRunManifest, approvedRoot = getApprovedTempRoot()): void {
   const canonicalRepoRoot = getCanonicalRepoRoot(manifest.repoRoot);
   assertAbsolutePath(manifest.tempRoot, "tempRoot");
   assertAbsolutePath(manifest.runDir, "runDir");
@@ -1229,7 +1254,11 @@ function writeCreationFailureDiagnostic(input: {
   writeOwnedJson(diagnosticPath, diagnostic, input.artifactRoot, "test-run creation failure diagnostic");
 }
 
-export function readTestRunTelemetry(telemetryPath: string, expectedRepoRoot = getCanonicalRepoRoot()): TestRunTelemetry {
+function readTestRunTelemetryFromRoots(
+  telemetryPath: string,
+  expectedRepoRoot: string,
+  approvedTempRoots: readonly string[],
+): TestRunTelemetry {
   assertAbsolutePath(telemetryPath, "telemetryPath");
   const resolvedPath = resolve(telemetryPath);
   const repoRoot = getCanonicalRepoRoot(expectedRepoRoot);
@@ -1251,16 +1280,28 @@ export function readTestRunTelemetry(telemetryPath: string, expectedRepoRoot = g
   }
   assertNoSymlinkedAncestors(dirname(resolvedPath), artifactRoot, "runner telemetry");
   const telemetryManifestPath = resolve(telemetry.manifestPath);
+  const approvedTempRoot = approvedRootForPath(telemetryManifestPath, approvedTempRoots);
   if (basename(telemetryManifestPath) !== "run-manifest.json"
     || !basename(dirname(telemetryManifestPath)).startsWith(TEST_RUN_TEMP_PREFIX)
-    || !pathIsInside(getApprovedTempRoot(), telemetryManifestPath)) {
+    || !approvedTempRoot) {
     throw new Error("Runner telemetry manifest path is outside the approved temp root");
   }
-  assertNoSymlinkedAncestors(dirname(telemetryManifestPath), getApprovedTempRoot(), "runner telemetry manifest");
+  assertNoSymlinkedAncestors(dirname(telemetryManifestPath), approvedTempRoot, "runner telemetry manifest");
   if (existsSync(telemetryManifestPath) && realpathSync(telemetryManifestPath) !== telemetryManifestPath) {
     throw new Error("Runner telemetry manifest path is symlinked");
   }
   return telemetry;
+}
+
+export function readTestRunTelemetry(telemetryPath: string, expectedRepoRoot = getCanonicalRepoRoot()): TestRunTelemetry {
+  return readTestRunTelemetryFromRoots(telemetryPath, expectedRepoRoot, [getApprovedTempRoot()]);
+}
+
+export function readTestRunTelemetryForContainmentAudit(
+  telemetryPath: string,
+  expectedRepoRoot = getCanonicalRepoRoot(),
+): TestRunTelemetry {
+  return readTestRunTelemetryFromRoots(telemetryPath, expectedRepoRoot, getContainmentAuditTempRoots());
 }
 
 export function markTestRunProcessCleared(
@@ -1481,7 +1522,7 @@ function isUuid(value: unknown): value is string {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function parseManifest(value: string): TestRunContext {
+function parseManifest(value: string, approvedRoot = getApprovedTempRoot()): TestRunContext {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -1588,7 +1629,7 @@ function parseManifest(value: string): TestRunContext {
         || !isAbsolute(reservation.path)
         || /[\u0000-\u001f\u007f]/.test(reservation.path)
         || (reservation.state !== "reserved" && reservation.state !== "transferred")
-        || reservation.path !== getTestRunPortLockPath(reservation.port)) {
+        || reservation.path !== join(approvedRoot, TEST_RUN_PORT_LOCK_ROOT, `port-${reservation.port}.lock`)) {
         throw new Error("Invalid test-run port reservation");
       }
       reservationPorts.add(reservation.port);
@@ -1606,12 +1647,22 @@ function parseManifest(value: string): TestRunContext {
 }
 
 export function readTestRunManifest(manifestPath: string): TestRunContext {
-  const resolvedPath = assertManifestCandidatePath(manifestPath);
-  const manifest = parseManifest(readFileSync(resolvedPath, "utf8"));
-  if (resolve(manifest.manifestPath) !== resolvedPath) {
+  const candidate = assertManifestCandidatePath(manifestPath);
+  const manifest = parseManifest(readFileSync(candidate.path, "utf8"), candidate.approvedRoot);
+  if (resolve(manifest.manifestPath) !== candidate.path) {
     throw new Error("Test-run manifest path does not match its contents");
   }
-  assertSafeRunDirectory(manifest);
+  assertSafeRunDirectory(manifest, candidate.approvedRoot);
+  return manifest;
+}
+
+export function readTestRunManifestForContainmentAudit(manifestPath: string): TestRunContext {
+  const candidate = assertManifestCandidatePath(manifestPath, getContainmentAuditTempRoots());
+  const manifest = parseManifest(readFileSync(candidate.path, "utf8"), candidate.approvedRoot);
+  if (resolve(manifest.manifestPath) !== candidate.path) {
+    throw new Error("Test-run manifest path does not match its contents");
+  }
+  assertSafeRunDirectory(manifest, candidate.approvedRoot);
   return manifest;
 }
 

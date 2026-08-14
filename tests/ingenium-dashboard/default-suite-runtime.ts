@@ -1,4 +1,4 @@
-import { TEST_API_TOKEN } from "../test-server-lifecycle";
+import { TEST_API_TOKEN, testRunApiAuthHeaders } from "../fixture-api-auth";
 import {
   getTestRunContext,
   getTestRunDashboardUrl,
@@ -39,7 +39,7 @@ export function getDefaultSuiteRuntime(): DefaultSuiteRuntime {
     dashboardRoute: (route = "/") => getTestRunDashboardUrl(context, route),
     apiBase: `http://127.0.0.1:${context.ports.api}/api/v1`,
     project: context.project,
-    apiHeaders: { authorization: `Bearer ${TEST_API_TOKEN}` },
+    apiHeaders: testRunApiAuthHeaders(context),
     dashboardEnvironment,
   };
 }

@@ -253,7 +253,7 @@ test.describe("Production dashboard route parity", () => {
     expect(inventory.canonicalNavigationRoutes).toContain("/usage");
     expect(inventory.canonicalNavigationRoutes).toContain("/vscode");
     expect(retiredRouteExpectation).toEqual([]);
-    expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(23);
+    expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(24);
   });
 
   test("uses the explicit 14-ID settings deep-link inventory", () => {

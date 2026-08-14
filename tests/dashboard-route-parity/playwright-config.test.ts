@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { productionApiHealthRequest } from "./runtime";
 
 const repositoryRoot = process.cwd();
@@ -39,23 +40,26 @@ describe("dashboard route parity Playwright config", () => {
   });
 
   it("uses the configured authenticated API endpoint only for health preflight", () => {
-    const originalUrl = process.env.INGENIUM_E2E_API_URL;
-    const originalToken = process.env.INGENIUM_API_TOKEN;
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-route-parity-token-"));
+    const tokenFile = join(directory, "api-token");
+    writeFileSync(tokenFile, `${"A".repeat(48)}\n`, { mode: 0o600 });
+    chmodSync(tokenFile, 0o600);
     try {
-      process.env.INGENIUM_E2E_API_URL = "http://127.0.0.1:4097/api/v1";
-      process.env.INGENIUM_API_TOKEN = "A".repeat(48);
-      expect(productionApiHealthRequest()).toEqual({
+      expect(productionApiHealthRequest({
+        INGENIUM_E2E_API_URL: "http://127.0.0.1:4097/api/v1",
+        INGENIUM_API_TOKEN_FILE: tokenFile,
+        INGENIUM_API_TOKEN: "literal-placeholder-must-not-be-used",
+      })).toEqual({
         url: "http://127.0.0.1:4097/api/v1/health",
         headers: { Authorization: `Bearer ${"A".repeat(48)}` },
       });
 
-      delete process.env.INGENIUM_API_TOKEN;
-      expect(() => productionApiHealthRequest()).toThrow(/INGENIUM_API_TOKEN/);
+      expect(() => productionApiHealthRequest({
+        INGENIUM_E2E_API_URL: "http://127.0.0.1:4097/api/v1",
+        INGENIUM_API_TOKEN: "A".repeat(48),
+      })).toThrow(/INGENIUM_API_TOKEN_FILE/);
     } finally {
-      if (originalUrl === undefined) delete process.env.INGENIUM_E2E_API_URL;
-      else process.env.INGENIUM_E2E_API_URL = originalUrl;
-      if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
-      else process.env.INGENIUM_API_TOKEN = originalToken;
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

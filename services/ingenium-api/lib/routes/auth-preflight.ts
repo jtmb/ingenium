@@ -41,6 +41,7 @@ authPreflightRouter.post("/fixture-session", (req, res) => {
     && typeof expectedNonce === "string"
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(expectedNonce)
     && req.get("x-ingenium-fixture-run-nonce") === expectedNonce
+    && req.get("x-ingenium-fixture-project") === process.env.INGENIUM_PROJECT
     && req.get("x-ingenium-internal-service") === "1"
     && req.principal?.type === "compatibility"
     && req.headers.cookie === undefined
