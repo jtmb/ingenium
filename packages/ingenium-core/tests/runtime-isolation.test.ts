@@ -8,19 +8,24 @@ import { createUser } from "../lib/tools/identity.js";
 import { createOrganization } from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
 import { createServicePrincipal } from "../lib/tools/security-tokens.js";
+import { createSession } from "../lib/tools/authentication.js";
 import { createMcpCredential, resolveMcpCredential } from "../lib/tools/mcp-credentials.js";
 import {
   authorizeWorkspace,
   bindRuntimeCapability,
   claimRuntimeLease,
   createRuntimeInstance,
+  consumeRuntimeBrowserLaunchTicket,
   consumeRuntimeLaunchTicket,
   getRuntimeForWorkspace,
   markExpiredRuntimeOrphans,
   issueRuntimeLaunchTicket,
+  issueRuntimeBrowserLaunchTicket,
   recordRuntimeActivity,
   recordRuntimeHealth,
+  resolveRuntimeBrowserSession,
   revokeRuntimeCapability,
+  revokeRuntimeBrowserSessionsForUser,
   RuntimeConflictError,
   transitionRuntime,
 } from "../lib/tools/runtimes.js";
@@ -64,6 +69,7 @@ describe("AUTH-108 runtime isolation", () => {
     const path = process.env.INGENIUM_CORE_DB_PATH!;
     const database = getDb(path);
     expect(getAuthenticationFoundationMigrationStatus()["101"]).toEqual({ any: true, complete: true, missing: [] });
+    expect(getAuthenticationFoundationMigrationStatus()["102"]).toEqual({ any: true, complete: true, missing: [] });
     database.exec("DROP TRIGGER runtime_instances_scope_insert");
     resetDbForTest();
 
@@ -224,5 +230,72 @@ describe("AUTH-108 runtime isolation", () => {
     expect(consumeRuntimeLaunchTicket({ token: issued.token, runtimeId: runtime.id, ownerUserId: first.user.id, audience: "web", now: new Date("2026-08-13T00:01:00.001Z") })).toBeUndefined();
     expect(consumeRuntimeLaunchTicket({ token: issued.token, runtimeId: runtime.id, ownerUserId: first.user.id, audience: "web", now: issuedAt })).toMatchObject({ runtimeId: runtime.id, audience: "web" });
     expect(consumeRuntimeLaunchTicket({ token: issued.token, runtimeId: runtime.id, ownerUserId: first.user.id, audience: "web", now: issuedAt })).toBeUndefined();
+  });
+
+  it("binds browser tickets and sessions to the exact audience, host, auth session, and revocation generation", () => {
+    const first = tenancy("browser-tickets");
+    authorizeWorkspace({ id: "workspace-browser", organizationId: first.organizationId, projectId: first.project.id, ownerUserId: first.user.id, storagePath: "/srv/browser/one" });
+    let runtime = createRuntimeInstance("workspace-browser", limits);
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "PROVISIONING", actorType: "manager", actorId: "manager" });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "manager" });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "reconciler" });
+    const now = new Date("2026-08-13T00:00:00.000Z");
+    const authSession = createSession(first.user.id, now);
+    const exchangeProof = "p".repeat(43);
+    const issued = issueRuntimeBrowserLaunchTicket({
+      runtimeId: runtime.id,
+      ownerUserId: first.user.id,
+      authSessionId: authSession.session.id,
+      audience: "web",
+      rootDomain: "runtime.example.test",
+      launcherOrigin: "https://dashboard.example.test",
+      exchangeProof,
+      now,
+    });
+    const persisted = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT token_hash, nonce_hash FROM runtime_browser_launch_tickets WHERE runtime_id = ?",
+    ).get(runtime.id);
+    expect(JSON.stringify(persisted)).not.toContain(exchangeProof);
+    expect(consumeRuntimeBrowserLaunchTicket({ ...issued, exchangeProof, audience: "cli", now })).toBeUndefined();
+    expect(consumeRuntimeBrowserLaunchTicket({ ...issued, exchangeProof, host: `web--${runtime.id}.other.example.test`, now })).toBeUndefined();
+    expect(consumeRuntimeBrowserLaunchTicket({ ...issued, exchangeProof, origin: "https://evil.example.test", now })).toBeUndefined();
+    expect(consumeRuntimeBrowserLaunchTicket({ ...issued, exchangeProof, launcherOrigin: "https://evil.example.test", now })).toBeUndefined();
+
+    const expiringProof = "e".repeat(43);
+    const expiring = issueRuntimeBrowserLaunchTicket({
+      runtimeId: runtime.id,
+      ownerUserId: first.user.id,
+      authSessionId: authSession.session.id,
+      audience: "cli",
+      rootDomain: "runtime.example.test",
+      launcherOrigin: "https://dashboard.example.test",
+      exchangeProof: expiringProof,
+      now,
+    });
+    expect(consumeRuntimeBrowserLaunchTicket({ ...expiring, exchangeProof: expiringProof, now: new Date("2026-08-13T00:01:00.001Z") })).toBeUndefined();
+
+    const exchanged = consumeRuntimeBrowserLaunchTicket({ exchangeProof, audience: issued.audience, origin: issued.origin, host: issued.host, launcherOrigin: issued.launcherOrigin, now });
+    expect(exchanged?.session).toMatchObject({ runtimeId: runtime.id, workspaceId: "workspace-browser", audience: "web", host: issued.host });
+    expect(consumeRuntimeBrowserLaunchTicket({ exchangeProof, audience: issued.audience, origin: issued.origin, host: issued.host, launcherOrigin: issued.launcherOrigin, now })).toBeUndefined();
+    expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "cli", host: issued.host, origin: issued.origin, now })).toBeUndefined();
+    expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "web", host: issued.host, origin: issued.origin, now })?.backendName).toBe(runtime.backendName);
+
+    revokeRuntimeBrowserSessionsForUser(first.user.id, now);
+    expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "web", host: issued.host, origin: issued.origin, now })).toBeUndefined();
+
+    const replacementProof = "r".repeat(43);
+    const afterLogout = issueRuntimeBrowserLaunchTicket({
+      runtimeId: runtime.id,
+      ownerUserId: first.user.id,
+      authSessionId: authSession.session.id,
+      audience: "vscode",
+      rootDomain: "runtime.example.test",
+      launcherOrigin: "https://dashboard.example.test",
+      exchangeProof: replacementProof,
+      now,
+    });
+    const replacement = consumeRuntimeBrowserLaunchTicket({ ...afterLogout, exchangeProof: replacementProof, now })!;
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "REVOKED", actorType: "manager", actorId: "manager" });
+    expect(resolveRuntimeBrowserSession({ token: replacement.token, audience: "vscode", host: afterLogout.host, origin: afterLogout.origin, now })).toBeUndefined();
   });
 });

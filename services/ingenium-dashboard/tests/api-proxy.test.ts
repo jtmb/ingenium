@@ -16,6 +16,7 @@ import {
   externalOriginFromForwardedHeaders,
   getDashboardApiToken,
   hasValidDashboardMutationContract,
+  isRuntimeGatewayPrivatePath,
   proxy,
 } from "@/proxy";
 
@@ -161,6 +162,46 @@ describe("dashboard authenticated API proxy", () => {
 
     expect(headers.get("x-ingenium-child-mcp-runtime")).toBeNull();
     expect(JSON.stringify(Array.from(headers.entries()))).not.toContain(secretCanary);
+  });
+
+  it("strips every runtime-gateway service assertion from dashboard traffic", () => {
+    const secretCanary = "runtime-gateway-secret-canary";
+    const headers = buildDashboardApiProxyHeaders(new Headers({
+      "x-ingenium-audience": "runtime-gateway",
+      "x-ingenium-private-network": secretCanary,
+      "x-ingenium-runtime-gateway": secretCanary,
+      "x-ingenium-workspace": secretCanary,
+      "x-ingenium-launcher-worktree": secretCanary,
+    }), "server-token");
+
+    for (const name of ["x-ingenium-audience", "x-ingenium-private-network", "x-ingenium-runtime-gateway", "x-ingenium-workspace", "x-ingenium-launcher-worktree"]) {
+      expect(headers.get(name)).toBeNull();
+    }
+    expect(JSON.stringify(Array.from(headers.entries()))).not.toContain(secretCanary);
+  });
+
+  it.each(["exchange", "validate"])("denies the gateway-private %s route before Dashboard authentication or rewriting", async (operation) => {
+    const secretCanary = "private-backend-token-canary";
+    const path = `/api/v1/runtimes/gateway/${operation}`;
+    expect(isRuntimeGatewayPrivatePath(path)).toBe(true);
+    const response = proxy(new NextRequest(`http://dashboard.test${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secretCanary}`,
+        Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
+        Origin: BROWSER_ORIGIN,
+        "x-ingenium-ui": DASHBOARD_MARKER_VALUE,
+        "x-ingenium-audience": "runtime-gateway",
+        "x-ingenium-private-network": "runtime-gateway",
+      },
+    }));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("x-middleware-next")).toBeNull();
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    const body = await response.text();
+    expect(body).toContain("NOT_FOUND");
+    expect(body).not.toMatch(/backendName|sessionToken|private-backend-token-canary/);
   });
 
   it.each(["development", "test", "production"])(

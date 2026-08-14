@@ -42,6 +42,12 @@ function hasConfiguredOpenCodeOrigins() {
   );
 }
 
+function runtimeWildcardOrigin() {
+  const domain = (process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN || "").trim().toLowerCase().replace(/^\./, "");
+  if (!domain || domain.length > 200 || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/.test(domain) || domain.includes("..") || !domain.includes(".")) return "";
+  return `https://*.${domain}`;
+}
+
 const VSCODE_GATEWAY_ORIGIN = "http://vscode.localhost:3000";
 
 // Production bundles and builds with explicit public origins are gateway
@@ -62,6 +68,7 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_OPENCODE_WEB_URL: publicOpenCodeOrigin("NEXT_PUBLIC_OPENCODE_WEB_URL"),
     NEXT_PUBLIC_OPENCODE_CLI_URL: publicOpenCodeOrigin("NEXT_PUBLIC_OPENCODE_CLI_URL"),
+    NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: (process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN || "").trim(),
   },
 
   /**
@@ -90,6 +97,7 @@ const nextConfig = {
     const apiPort = process.env.INGENIUM_API_PORT || "4097";
     const gatewayMode = isGatewayMode();
     const configuredFrameOrigins = configuredHttpsFrameOrigins();
+    const runtimeOrigin = runtimeWildcardOrigin();
     return [
       {
         source: "/(.*)",
@@ -114,11 +122,12 @@ const nextConfig = {
               "object-src 'none'; " +
               "img-src 'self' data: blob:; " +
               "font-src 'self' data:; " +
-              "connect-src 'self' http://localhost:" + apiPort + "; " +
+              "connect-src 'self' http://localhost:" + apiPort + (runtimeOrigin ? ` ${runtimeOrigin}` : "") + "; " +
               "frame-src 'self'" +
               (gatewayMode ? "" : " http://localhost:4098 http://localhost:4099") +
                " http://opencode.localhost:3000 http://cli.localhost:3000 " + VSCODE_GATEWAY_ORIGIN +
               (configuredFrameOrigins.length > 0 ? ` ${[...new Set(configuredFrameOrigins)].join(" ")}` : "") +
+              (runtimeOrigin ? ` ${runtimeOrigin}` : "") +
               "; " +
               "frame-ancestors 'self'; " +
               "base-uri 'self'; " +

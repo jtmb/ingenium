@@ -236,7 +236,10 @@ tmpfs mounts. CPU, memory, PID, process, and tmpfs-disk limits are mandatory. We
 CLI, and VS Code processes within one runtime intentionally share that runtime's state.
 Migration 101 also provides hash-only, audience-bound launch-ticket storage and
 one-time, at-most-60-second issue/consume primitives. Browser exchange, origin binding,
-runtime-specific roots, and launch UI remain AUTH-109 work.
+runtime-specific roots, and launch UI are completed by AUTH-109 migration 102. The
+unprivileged HTTPS gateway has a narrow credential and no Docker socket. Host-only
+audience cookies and generation-checked sessions bind the runtime root to the
+originating dashboard auth session; logout/revoke closes streams and reconnects.
 
 ### Content tenancy (AUTH-105)
 

@@ -17,7 +17,8 @@ describe("standalone OpenCode hydration boundary", () => {
   it("renders the same non-iframe startup surface during SSR", () => {
     const html = renderToStaticMarkup(React.createElement(StandalonePage));
 
-    expect(html).toContain("OpenCode is starting up");
+    expect(html).toContain("Preparing your isolated");
+    expect(html).toContain("OpenCode");
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("/opencode-web/");
     expect(html).not.toContain("/opencode-cli/");

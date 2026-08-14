@@ -171,6 +171,15 @@ async function inspectControlPlane(): Promise<DockerInspect> {
   return inspected.data;
 }
 
+async function inspectRuntimeGateway(): Promise<DockerInspect> {
+  const container = environment("INGENIUM_RUNTIME_GATEWAY_CONTAINER");
+  const inspected = await dockerRequest<DockerInspect>("GET", `/containers/${encodeURIComponent(container)}/json`);
+  if (inspected.status !== 200 || inspected.data?.Config?.Labels?.["com.ingenium.runtime-gateway"] !== "true") {
+    throw new Error("Runtime gateway container identity is invalid");
+  }
+  return inspected.data;
+}
+
 async function connectControlPlane(network: string): Promise<void> {
   const inspected = await inspectControlPlane();
   const container = environment("INGENIUM_CONTROL_PLANE_CONTAINER");
@@ -182,6 +191,20 @@ async function connectControlPlane(network: string): Promise<void> {
   const verified = await dockerRequest<DockerNetworkInspect>("GET", `/networks/${encodeURIComponent(network)}`);
   if (verified.status !== 200 || !inspected.Id || !verified.data?.Containers?.[inspected.Id]) {
     throw new Error("Control-plane runtime network attachment is invalid");
+  }
+}
+
+async function connectRuntimeGateway(network: string): Promise<void> {
+  const inspected = await inspectRuntimeGateway();
+  const container = environment("INGENIUM_RUNTIME_GATEWAY_CONTAINER");
+  const connected = await dockerRequest("POST", `/networks/${encodeURIComponent(network)}/connect`, {
+    Container: container,
+    EndpointConfig: { Aliases: ["ingenium-runtime-gateway"] },
+  });
+  if (connected.status !== 200 && connected.status !== 403) throw new Error("Runtime gateway network attachment failed");
+  const verified = await dockerRequest<DockerNetworkInspect>("GET", `/networks/${encodeURIComponent(network)}`);
+  if (verified.status !== 200 || !inspected.Id || !verified.data?.Containers?.[inspected.Id]) {
+    throw new Error("Runtime gateway network attachment is invalid");
   }
 }
 
@@ -230,12 +253,16 @@ async function removeRuntimeResources(runtimeId: string): Promise<void> {
   const endpoints = Object.keys(inspectedNetwork.data.Containers ?? {});
   if (endpoints.length > 0) {
     const controlPlane = await inspectControlPlane();
-    if (!controlPlane.Id || endpoints.some((id) => id !== controlPlane.Id)) throw new Error("Runtime network has foreign endpoints");
-    const disconnected = await dockerRequest("POST", `/networks/${encodeURIComponent(network)}/disconnect`, {
-      Container: environment("INGENIUM_CONTROL_PLANE_CONTAINER"),
-      Force: false,
-    });
-    if (disconnected.status !== 200 && disconnected.status !== 404) throw new Error("Control-plane runtime network detach failed");
+    const gateway = await inspectRuntimeGateway();
+    const owned = new Set([controlPlane.Id, gateway.Id].filter((id): id is string => Boolean(id)));
+    if (owned.size !== 2 || endpoints.some((id) => !owned.has(id))) throw new Error("Runtime network has foreign endpoints");
+    for (const container of [environment("INGENIUM_CONTROL_PLANE_CONTAINER"), environment("INGENIUM_RUNTIME_GATEWAY_CONTAINER")]) {
+      const disconnected = await dockerRequest("POST", `/networks/${encodeURIComponent(network)}/disconnect`, {
+        Container: container,
+        Force: false,
+      });
+      if (disconnected.status !== 200 && disconnected.status !== 404) throw new Error("Runtime network detach failed");
+    }
   }
   const removedNetwork = await dockerRequest("DELETE", `/networks/${encodeURIComponent(network)}`);
   if (removedNetwork.status !== 204 && removedNetwork.status !== 404) throw new Error("Runtime network removal failed");
@@ -252,6 +279,7 @@ async function provisionRuntime(input: RuntimeProvisionRequest, mappings: Return
   const spec = buildRuntimeContainerSpec(input, mapping, config);
   await ensureRuntimeNetwork(config.network, input.runtimeId);
   await connectControlPlane(config.network);
+  await connectRuntimeGateway(config.network);
   const expectedLabels = runtimeLabels(input);
   const prior = await inspectRuntime(input.runtimeId);
   if (prior) {

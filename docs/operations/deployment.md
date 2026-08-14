@@ -17,7 +17,8 @@ Docker Compose provides two explicit deployment profiles:
   processes.
 - `production` separates the control plane from a private Docker-socket-owning
   runtime manager and builds one isolated `user-runtime` container per authorized
-  owner/workspace. AUTH-109 browser routing is not yet included in this profile.
+  owner/workspace. A separate unprivileged runtime gateway terminates wildcard TLS
+  and routes authenticated Web, CLI, and VS Code audiences without a Docker socket.
 
 The compatibility container runs:
 
@@ -98,10 +99,11 @@ logs, observations, or diagnostics.
 
 ### Isolated production runtime profile
 
-Build the immutable runtime image before starting the control plane. The manager
-credential must be a regular owner-only file containing 43–128 base64url characters;
-the Compose default `/dev/null` is deliberately nonfunctional. Set
-`INGENIUM_RUNTIME_MANAGER_TOKEN_FILE` to its absolute host path.
+Build the immutable runtime image before starting the control plane. The manager and
+runtime-gateway credentials must be distinct regular owner-only files containing
+43–128 base64url characters; the Compose `/dev/null` defaults are deliberately
+nonfunctional. Configure an exact runtime root domain and a read-only wildcard
+certificate/key covering that domain.
 
 Copy `config/runtime-workspaces.example.json` to an operator-controlled file and add
 only approved mappings. Every mapping has `id`, the exact host `hostPath` later mounted
@@ -133,20 +135,38 @@ services:
 ```bash
 export IMAGE_REVISION="$(git rev-parse HEAD)"
 export INGENIUM_RUNTIME_MANAGER_TOKEN_FILE='/run/secrets/ingenium-runtime-manager'
+export INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE='/run/secrets/ingenium-runtime-gateway'
 export INGENIUM_RUNTIME_WORKSPACE_MAP_FILE='/etc/ingenium/runtime-workspaces.json'
+export INGENIUM_RUNTIME_ROOT_DOMAIN='runtime.example.com'
+export INGENIUM_RUNTIME_TLS_CERT_FILE='/run/secrets/runtime-wildcard.crt'
+export INGENIUM_RUNTIME_TLS_KEY_FILE='/run/secrets/runtime-wildcard.key'
+export DASHBOARD_ALLOWED_ORIGINS='https://dashboard.example.com'
 
 docker compose --profile runtime-build build runtime-image
-docker compose --profile production -f docker-compose.yml -f docker-compose.runtime.override.yml up --build -d control-plane runtime-manager
+docker compose --profile production -f docker-compose.yml -f docker-compose.runtime.override.yml up --build -d control-plane runtime-gateway runtime-manager
 ```
 
 Only `runtime-manager` mounts `/var/run/docker.sock`; never add that mount to the
-control plane or a user runtime. The manager port and runtime ports 4098/4099/4100
-remain un-published. Each runtime receives a dedicated Docker network, exact worktree
+control plane, runtime gateway, or a user runtime. The manager port and runtime ports
+4098/4099/4100 remain un-published. The gateway alone publishes HTTPS 443 from its
+unprivileged 8443 listener. Each runtime receives a dedicated Docker network, exact worktree
 mount, read-only root filesystem, private HOME/XDG tmpfs, and bounded resources.
 The manager transfers the scoped runtime capability through attached container stdin;
 the entrypoint atomically installs it as an owner-only file on the private runtime
 tmpfs before any supervised service starts. It is never an environment value, image
 layer, or writable-root archive.
+
+The manager attaches only the identity-labeled control plane and runtime gateway to a
+runtime network. The gateway accepts exact `<audience>--<runtime-id>.<domain>` Hosts,
+redeems a browser-generated one-time proof over its narrow `runtime-gateway` audience
+credential through the API boundary, and sets one
+host-only `Secure`, `HttpOnly`, `SameSite=Strict` audience cookie. Requests and
+WebSocket handshakes require a live session; logout and runtime revoke advance the
+generation and close streams or reconnects.
+
+The API boundary strips caller-supplied gateway/private-network assertions and writes
+the private marker only after validating the distinct gateway credential and exact
+exchange/validate route. The Dashboard proxy denies those routes before rewriting.
 
 ---
 

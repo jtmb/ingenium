@@ -2,12 +2,21 @@ import { Request, Response, NextFunction } from "express";
 import { AppError } from "./errors.js";
 import { apiTokensEqual, loadApiToken } from "./api-token.js";
 import { authentication, mcpCredentials, securityTokens } from "ingenium-core";
+import { loadRuntimeGatewayToken, runtimeGatewayTokensEqual } from "../runtime-gateway-auth.js";
 
 export type RequestPrincipal =
   | { type: "compatibility"; id: "legacy-server-bearer"; scopes: readonly ["legacy:*"] }
   | { type: "user"; id: string; scopes: readonly string[]; session?: authentication.AuthSession; tokenId?: string; organizationId?: string | null; projectId?: string | null }
   | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null; projectIds?: readonly string[]; audience?: mcpCredentials.McpCredentialAudience; workspaceId?: string; launcherWorktree?: string }
-  | { type: "runtime-service"; id: string; scopes: readonly string[]; organizationId?: string | null; projectId?: string | null };
+  | { type: "runtime-service"; id: "runtime-gateway"; scopes: readonly ["runtime-gateway:exchange"]; audience: "runtime-gateway"; network: "runtime-gateway" };
+
+export const RUNTIME_GATEWAY_AUDIENCE = "runtime-gateway";
+export const RUNTIME_GATEWAY_NETWORK_HEADER = "x-ingenium-private-network";
+export const RUNTIME_GATEWAY_NETWORK_VALUE = "runtime-gateway";
+
+export function isRuntimeGatewayPrivateRequest(req: Pick<Request, "method" | "path">): boolean {
+  return req.method === "POST" && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate)$/.test(req.path);
+}
 
 declare global {
   namespace Express {
@@ -75,6 +84,34 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
   }
 
   const authHeader = req.headers.authorization;
+  if (req.path.startsWith("/api/v1/runtimes/gateway/")) {
+    if (!isRuntimeGatewayPrivateRequest(req)
+      || req.get("x-ingenium-audience") !== RUNTIME_GATEWAY_AUDIENCE
+      || req.get(RUNTIME_GATEWAY_NETWORK_HEADER) !== RUNTIME_GATEWAY_NETWORK_VALUE
+      || req.headers.cookie !== undefined
+      || req.get("origin") !== undefined) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    let gatewayToken: string;
+    try {
+      gatewayToken = loadRuntimeGatewayToken();
+    } catch {
+      throw new AppError("Runtime gateway authentication is not configured", "API_AUTH_NOT_CONFIGURED", 503);
+    }
+    if (!authHeader?.startsWith("Bearer ") || !runtimeGatewayTokensEqual(authHeader.slice(7), gatewayToken)) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    req.principal = {
+      type: "runtime-service",
+      id: "runtime-gateway",
+      scopes: ["runtime-gateway:exchange"],
+      audience: RUNTIME_GATEWAY_AUDIENCE,
+      network: RUNTIME_GATEWAY_NETWORK_VALUE,
+    };
+    next();
+    return;
+  }
+
   const sessionToken = cookieValue(req, authentication.SESSION_COOKIE_NAME);
   if (!authHeader && sessionToken) {
     const session = authentication.resolveSession(sessionToken, new Date(), true);

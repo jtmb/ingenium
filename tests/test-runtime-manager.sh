@@ -8,6 +8,7 @@ fixture_id="$(node -e 'process.stdout.write(require("node:crypto").randomUUID().
 runtime_id="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
 project="ingenium-runtime-manager-${fixture_id}"
 export CONTROL_PLANE_CONTAINER="${project}-control-plane"
+export RUNTIME_GATEWAY_CONTAINER="${project}-runtime-gateway"
 export CONTROL_PLANE_HOST_PORT="$(node -e 'const server=require("node:net").createServer(); server.listen(0,"127.0.0.1",()=>{process.stdout.write(String(server.address().port));server.close();})')"
 export MANAGER_HOST_PORT="$(node -e 'const server=require("node:net").createServer(); server.listen(0,"127.0.0.1",()=>{process.stdout.write(String(server.address().port));server.close();})')"
 export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"

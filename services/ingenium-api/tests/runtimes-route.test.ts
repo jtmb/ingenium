@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getDb, identity, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
+import { authentication, getDb, identity, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
 import { runtimesRouter } from "../lib/routes/runtimes.js";
 import { reconcileRuntimes } from "../lib/runtime-reconciler.js";
 
@@ -17,6 +17,7 @@ let directory = "";
 let managerFailure = false;
 let managerRuntimeState = "running";
 let managerRequests: string[] = [];
+let browserSession: ReturnType<typeof authentication.createSession> | null = null;
 const token = "a".repeat(43);
 
 function listen(server: Server): Promise<string> {
@@ -25,7 +26,7 @@ function listen(server: Server): Promise<string> {
   }));
 }
 
-function createWorkspace(id: string): void {
+function createWorkspace(id: string) {
   const user = identity.createUser(`${id}@example.test`, id);
   const organizationId = organizations.createOrganization(id, id);
   const timestamp = new Date().toISOString();
@@ -40,6 +41,7 @@ function createWorkspace(id: string): void {
     ownerUserId: user.id,
     storagePath: `/srv/approved/${id}`,
   });
+  return { user, project };
 }
 
 beforeAll(async () => {
@@ -70,6 +72,10 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    if (browserSession) req.principal = { type: "user", id: browserSession.session.user_id, scopes: ["user:*"], session: browserSession.session };
+    next();
+  });
   app.use("/api/v1/runtimes", runtimesRouter);
   api = createServer(app);
   apiBase = await listen(api);
@@ -79,6 +85,8 @@ beforeEach(() => {
   managerFailure = false;
   managerRuntimeState = "running";
   managerRequests = [];
+  browserSession = null;
+  process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
   process.env.INGENIUM_CORE_DB_PATH = join(directory, `data-${crypto.randomUUID()}`);
   resetDbForTest();
 });
@@ -86,6 +94,7 @@ beforeEach(() => {
 afterEach(() => {
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
+  delete process.env.INGENIUM_RUNTIME_ROOT_DOMAIN;
 });
 
 afterAll(async () => {
@@ -183,5 +192,52 @@ describe("AUTH-108 runtime routes", () => {
     await reconcileRuntimes();
 
     expect(runtimes.getRuntimeInstance(runtime.id)?.state).toBe("FAILED");
+  });
+
+  it("returns opaque browser status and atomically exchanges a browser launch ticket", async () => {
+    const scope = createWorkspace("runtime-route-browser");
+    browserSession = authentication.createSession(scope.user.id);
+    const provisioned = await fetch(`${apiBase}/api/v1/runtimes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: "runtime-route-browser" }),
+    });
+    expect(provisioned.status).toBe(202);
+    let runtime = runtimes.getRuntimeForWorkspace("runtime-route-browser")!;
+    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "test" });
+
+    const status = await fetch(`${apiBase}/api/v1/runtimes/browser/status`);
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toEqual({ data: { status: "ready" } });
+
+    const launched = await fetch(`${apiBase}/api/v1/runtimes/browser/launch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://dashboard.example.test" },
+      body: JSON.stringify({ audience: "web", exchangeProof: "p".repeat(43) }),
+    });
+    expect(launched.status).toBe(201);
+    const descriptor = (await launched.json() as { data: { launchUrl: string; status: string } }).data;
+    expect(descriptor).toEqual({ launchUrl: `https://web--${runtime.id}.runtime.example.test/__ingenium/exchange`, status: "ready" });
+    expect(JSON.stringify(descriptor)).not.toMatch(/backend|sessionToken|ticket|token/i);
+    const launchOrigin = new URL(descriptor.launchUrl).origin;
+
+    const mismatch = await fetch(`${apiBase}/api/v1/runtimes/gateway/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exchangeProof: "p".repeat(43), audience: "cli", origin: launchOrigin, host: new URL(launchOrigin).host, launcherOrigin: "https://dashboard.example.test" }),
+    });
+    expect(mismatch.status).toBe(401);
+    const exchanged = await fetch(`${apiBase}/api/v1/runtimes/gateway/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exchangeProof: "p".repeat(43), audience: "web", origin: launchOrigin, host: new URL(launchOrigin).host, launcherOrigin: "https://dashboard.example.test" }),
+    });
+    expect(exchanged.status).toBe(200);
+    const replay = await fetch(`${apiBase}/api/v1/runtimes/gateway/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exchangeProof: "p".repeat(43), audience: "web", origin: launchOrigin, host: new URL(launchOrigin).host, launcherOrigin: "https://dashboard.example.test" }),
+    });
+    expect(replay.status).toBe(401);
   });
 });

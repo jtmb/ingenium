@@ -126,6 +126,7 @@ another Compose project volume.
 | 099 | `099_automation_tenancy.sql` | Adds immutable organization/project automation ownership, service principals, execution grants, event provenance, scheduler fairness, and migration evidence. |
 | 100 | `100_mcp_credentials.sql` | Adds AUTH-107 hash-only MCP/service/runtime/repository-sync credentials with mandatory audience, scope, organization/project grants, workspace/worktree, expiry, service-principal security epoch, rotation/revocation, last-used metadata, and immutable SQL guards. |
 | 101 | `101_runtime_isolation.sql` | Adds AUTH-108 authorized-workspace mappings, one runtime per workspace, revisioned runtime lifecycle/leases/limits, runtime capability bindings, hash-only one-time audience launch tickets, append-only activity, exact-schema probes, and verified backfill evidence. |
+| 102 | `102_runtime_browser_sessions.sql` | Adds AUTH-109 runtime browser generations, exact auth-session/workspace/runtime/audience/origin/host hash-only launch tickets, and hash-only revocable browser sessions with one-time consumption and generation invalidation. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

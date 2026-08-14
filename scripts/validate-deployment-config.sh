@@ -18,6 +18,7 @@ vscode_runner="${repo_root}/scripts/start-vscode.sh"
 vscode_theme_manifest="${repo_root}/config/vscode-extensions/ingenium.system-theme-defaults/package.json"
 vscode_proxy="${repo_root}/nginx/proxy-vscode.conf"
 vault_secret_root_validator="${repo_root}/scripts/validate-vault-job-secret-root.sh"
+runtime_gateway="${repo_root}/services/ingenium-api/scripts/runtime-gateway.ts"
 
 require_file() {
   path="$1"
@@ -74,7 +75,7 @@ reject_path() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy" "$vault_secret_root_validator"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy" "$vault_secret_root_validator" "$runtime_gateway"; do
   require_file "$path"
 done
 
@@ -200,6 +201,9 @@ fi
 require_literal "$compose_file" 'INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token'
 require_literal "$compose_file" 'INGENIUM_RUNTIME_WORKSPACE_MAP_FILE=/etc/ingenium/runtime-workspaces.json'
 require_literal "$compose_file" 'INGENIUM_RUNTIME_NETWORK_PREFIX=ingenium-runtime-'
+require_literal "$compose_file" 'INGENIUM_RUNTIME_API_URL=http://ingenium-control-plane:4097/api/v1/'
+require_literal "$runtime_gateway" '"X-Ingenium-Audience": "runtime-gateway"'
+reject_literal "$runtime_gateway" '"X-Ingenium-Runtime-Gateway": "1"'
 opencode_password_wires="$(grep -F -c -- 'OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}' "$compose_file")"
 if [ "$opencode_password_wires" -ne 2 ]; then
   echo "ERROR: compatibility and production control plane must both require the protected OpenCode server credential"

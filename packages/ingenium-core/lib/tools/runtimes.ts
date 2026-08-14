@@ -63,6 +63,24 @@ export interface RuntimeLaunchTicket {
   createdAt: string;
 }
 
+export interface RuntimeBrowserSession {
+  id: string;
+  runtimeId: string;
+  workspaceId: string;
+  organizationId: string;
+  projectId: string;
+  ownerUserId: string;
+  authSessionId: string;
+  audience: RuntimeLaunchAudience;
+  origin: string;
+  host: string;
+  generation: number;
+  expiresAt: string;
+  lastSeenAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
 export class RuntimeConflictError extends Error {
   constructor(readonly code: "REVISION_CONFLICT" | "STATE_CONFLICT" | "LEASE_CONFLICT" | "QUOTA_EXCEEDED" | "SCOPE_UNAVAILABLE") {
     super(code);
@@ -85,6 +103,15 @@ type RuntimeRow = {
 type RuntimeLaunchTicketRow = {
   id: string; runtime_id: string; organization_id: string; project_id: string; owner_user_id: string;
   audience: RuntimeLaunchAudience; expires_at: string; consumed_at: string | null; created_at: string;
+};
+type RuntimeBrowserTicketRow = {
+  id: string; runtime_id: string; workspace_id: string; organization_id: string; project_id: string;
+  owner_user_id: string; auth_session_id: string; audience: RuntimeLaunchAudience; origin: string; host: string;
+  launcher_origin: string;
+  generation: number; expires_at: string; consumed_at: string | null; created_at: string;
+};
+type RuntimeBrowserSessionRow = RuntimeBrowserTicketRow & {
+  last_seen_at: string; revoked_at: string | null;
 };
 
 const ACTIVE_STATES: readonly RuntimeState[] = ["PROVISIONING", "STARTING", "READY", "IDLE", "STOPPING"];
@@ -120,6 +147,20 @@ function normalizeStoragePath(value: string): string {
     throw new Error("Invalid workspace storage path");
   }
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+function normalizeRuntimeRootDomain(value: string): string {
+  const domain = value.trim().toLowerCase().replace(/^\./, "");
+  if (domain.length < 3 || domain.length > 200 || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/.test(domain)
+    || domain.includes("..") || !domain.includes(".")) throw new Error("Invalid runtime root domain");
+  return domain;
+}
+
+export function runtimeAudienceOrigin(runtimeId: string, audience: RuntimeLaunchAudience, rootDomain: string): { origin: string; host: string } {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runtimeId)
+    || !["web", "cli", "vscode"].includes(audience)) throw new Error("Invalid runtime browser scope");
+  const host = `${audience}--${runtimeId.toLowerCase()}.${normalizeRuntimeRootDomain(rootDomain)}`;
+  return { host, origin: `https://${host}` };
 }
 
 function workspaceDto(row: WorkspaceRow): AuthorizedWorkspace {
@@ -212,7 +253,9 @@ export function createRuntimeInstance(workspaceId: string, limits: RuntimeLimits
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, workspace.id, workspace.organization_id, workspace.project_id, workspace.owner_user_id,
         limits.cpuMillis, limits.memoryBytes, limits.pidsLimit, limits.diskBytes, limits.processLimit,
-        `ingenium-runtime-${id.replaceAll("-", "")}`, workspace.security_epoch, timestamp, timestamp);
+         `ingenium-runtime-${id.replaceAll("-", "")}`, workspace.security_epoch, timestamp, timestamp);
+    db.prepare("INSERT INTO runtime_browser_generations (runtime_id, generation, updated_at) VALUES (?, ?, ?)")
+      .run(id, workspace.security_epoch, timestamp);
     return runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(id) as RuntimeRow);
   });
   checkpointAfterWrite();
@@ -303,6 +346,12 @@ export function transitionRuntime(input: {
         input.toState === "STOPPED" || revoked ? 1 : 0, timestamp, timestamp, current.id, current.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
     const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
+    if (revoked) {
+      db.prepare("UPDATE runtime_browser_generations SET generation = generation + 1, updated_at = ? WHERE runtime_id = ?")
+        .run(timestamp, current.id);
+      db.prepare("UPDATE runtime_browser_sessions SET revoked_at = ? WHERE runtime_id = ? AND revoked_at IS NULL")
+        .run(timestamp, current.id);
+    }
     appendEvent(updated, revoked ? "revoked" : "state_changed", input.actorType, input.actorId, current.state);
     return runtimeDto(updated);
   });
@@ -486,4 +535,173 @@ export function consumeRuntimeLaunchTicket(input: {
   });
   if (consumed) checkpointAfterWrite();
   return consumed;
+}
+
+function browserSessionDto(row: RuntimeBrowserSessionRow): RuntimeBrowserSession {
+  return {
+    id: row.id,
+    runtimeId: row.runtime_id,
+    workspaceId: row.workspace_id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    ownerUserId: row.owner_user_id,
+    authSessionId: row.auth_session_id,
+    audience: row.audience,
+    origin: row.origin,
+    host: row.host,
+    generation: row.generation,
+    expiresAt: row.expires_at,
+    lastSeenAt: row.last_seen_at,
+    revokedAt: row.revoked_at,
+    createdAt: row.created_at,
+  };
+}
+
+export function issueRuntimeBrowserLaunchTicket(input: {
+  runtimeId: string;
+  ownerUserId: string;
+  authSessionId: string;
+  audience: RuntimeLaunchAudience;
+  rootDomain: string;
+  launcherOrigin: string;
+  exchangeProof: string;
+  ttlMs?: number;
+  now?: Date;
+}): { runtimeId: string; workspaceId: string; audience: RuntimeLaunchAudience; origin: string; host: string; launcherOrigin: string; expiresAt: string } {
+  const ttlMs = input.ttlMs ?? 60_000;
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1_000 || ttlMs > 60_000
+    || !/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof)) throw new Error("Invalid runtime browser launch ticket");
+  const scope = runtimeAudienceOrigin(input.runtimeId, input.audience, input.rootDomain);
+  const launcher = new URL(input.launcherOrigin);
+  if (launcher.origin !== input.launcherOrigin || launcher.username || launcher.password
+    || (launcher.protocol !== "https:" && !(launcher.protocol === "http:" && ["localhost", "127.0.0.1"].includes(launcher.hostname)))) {
+    throw new Error("Invalid runtime launcher origin");
+  }
+  const issued = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const runtime = db.prepare(`SELECT r.*, g.generation FROM runtime_instances r
+      JOIN runtime_browser_generations g ON g.runtime_id = r.id
+      JOIN auth_sessions s ON s.id = ? AND s.user_id = r.owner_user_id AND s.revoked_at IS NULL
+      WHERE r.id = ? AND r.owner_user_id = ? AND r.state IN ('READY', 'IDLE')`)
+      .get(input.authSessionId, input.runtimeId, input.ownerUserId) as (RuntimeRow & { generation: number }) | undefined;
+    if (!runtime) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const createdAt = input.now ?? new Date();
+    const expiresAt = new Date(createdAt.getTime() + ttlMs).toISOString();
+    db.prepare(`INSERT INTO runtime_browser_launch_tickets
+      (id, runtime_id, workspace_id, organization_id, project_id, owner_user_id, auth_session_id, launcher_origin,
+       audience, origin, host, token_hash, nonce_hash, generation, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      randomUUID(), runtime.id, runtime.workspace_id, runtime.organization_id, runtime.project_id, runtime.owner_user_id,
+      input.authSessionId, input.launcherOrigin, input.audience, scope.origin, scope.host,
+      sha256(randomBytes(32).toString("base64url")), sha256(input.exchangeProof), runtime.generation,
+      expiresAt, createdAt.toISOString(),
+    );
+    return { workspaceId: runtime.workspace_id, expiresAt };
+  });
+  checkpointAfterWrite();
+  return { runtimeId: input.runtimeId, workspaceId: issued.workspaceId, audience: input.audience, ...scope, launcherOrigin: input.launcherOrigin, expiresAt: issued.expiresAt };
+}
+
+export function consumeRuntimeBrowserLaunchTicket(input: {
+  exchangeProof: string;
+  audience: RuntimeLaunchAudience;
+  origin: string;
+  host: string;
+  launcherOrigin: string;
+  now?: Date;
+}): { session: RuntimeBrowserSession; token: string } | undefined {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof) || !["web", "cli", "vscode"].includes(input.audience)) return undefined;
+  const now = input.now ?? new Date();
+  const browserToken = `rbs_${randomBytes(32).toString("base64url")}`;
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const row = db.prepare(`SELECT t.* FROM runtime_browser_launch_tickets t
+      JOIN runtime_instances r ON r.id = t.runtime_id
+      JOIN authorized_workspaces w ON w.id = t.workspace_id
+      JOIN auth_sessions a ON a.id = t.auth_session_id
+      JOIN runtime_browser_generations g ON g.runtime_id = t.runtime_id
+      WHERE t.nonce_hash = ? AND t.audience = ? AND t.origin = ? AND t.host = ? AND t.launcher_origin = ?
+        AND t.consumed_at IS NULL AND t.expires_at > ? AND t.generation = g.generation
+        AND r.state IN ('READY', 'IDLE') AND r.workspace_id = t.workspace_id
+        AND r.organization_id = t.organization_id AND r.project_id = t.project_id AND r.owner_user_id = t.owner_user_id
+        AND w.status = 'authorized' AND w.security_epoch = r.security_epoch
+        AND a.user_id = t.owner_user_id AND a.revoked_at IS NULL
+        AND a.idle_expires_at > ? AND a.absolute_expires_at > ?`).get(
+      sha256(input.exchangeProof), input.audience, input.origin, input.host, input.launcherOrigin,
+      now.toISOString(), now.toISOString(), now.toISOString(),
+    ) as RuntimeBrowserTicketRow | undefined;
+    if (!row || db.prepare("UPDATE runtime_browser_launch_tickets SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL")
+      .run(now.toISOString(), row.id).changes !== 1) return undefined;
+    const authExpiry = db.prepare("SELECT absolute_expires_at FROM auth_sessions WHERE id = ?")
+      .get(row.auth_session_id) as { absolute_expires_at: string };
+    const runtimeExpiry = db.prepare("SELECT absolute_expires_at FROM runtime_instances WHERE id = ?")
+      .get(row.runtime_id) as { absolute_expires_at: string | null };
+    const expiresAt = [authExpiry.absolute_expires_at, runtimeExpiry.absolute_expires_at]
+      .filter((value): value is string => Boolean(value)).sort()[0]!;
+    const id = randomUUID();
+    db.prepare(`INSERT INTO runtime_browser_sessions
+      (id, runtime_id, workspace_id, organization_id, project_id, owner_user_id, auth_session_id, audience,
+       origin, host, token_hash, generation, expires_at, last_seen_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      id, row.runtime_id, row.workspace_id, row.organization_id, row.project_id, row.owner_user_id,
+      row.auth_session_id, row.audience, row.origin, row.host, sha256(browserToken), row.generation,
+      expiresAt, now.toISOString(), now.toISOString(),
+    );
+    return browserSessionDto(db.prepare("SELECT * FROM runtime_browser_sessions WHERE id = ?").get(id) as RuntimeBrowserSessionRow);
+  });
+  if (!result) return undefined;
+  checkpointAfterWrite();
+  return { session: result, token: browserToken };
+}
+
+export function resolveRuntimeBrowserSession(input: {
+  token: string;
+  audience: RuntimeLaunchAudience;
+  host: string;
+  origin?: string;
+  now?: Date;
+  touch?: boolean;
+}): { session: RuntimeBrowserSession; backendName: string } | undefined {
+  if (!/^rbs_[A-Za-z0-9_-]{43}$/.test(input.token) || !["web", "cli", "vscode"].includes(input.audience)) return undefined;
+  const now = input.now ?? new Date();
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  const row = db.prepare(`SELECT s.*, r.backend_name FROM runtime_browser_sessions s
+    JOIN runtime_instances r ON r.id = s.runtime_id
+    JOIN authorized_workspaces w ON w.id = s.workspace_id
+    JOIN auth_sessions a ON a.id = s.auth_session_id
+    JOIN runtime_browser_generations g ON g.runtime_id = s.runtime_id
+    WHERE s.token_hash = ? AND s.audience = ? AND s.host = ?
+      AND (? IS NULL OR s.origin = ?) AND s.revoked_at IS NULL AND s.expires_at > ?
+      AND s.generation = g.generation AND r.state IN ('READY', 'IDLE')
+      AND r.workspace_id = s.workspace_id AND r.organization_id = s.organization_id
+      AND r.project_id = s.project_id AND r.owner_user_id = s.owner_user_id
+      AND w.status = 'authorized' AND w.security_epoch = r.security_epoch
+      AND a.user_id = s.owner_user_id AND a.revoked_at IS NULL
+      AND a.idle_expires_at > ? AND a.absolute_expires_at > ?`).get(
+    sha256(input.token), input.audience, input.host, input.origin ?? null, input.origin ?? null,
+    now.toISOString(), now.toISOString(), now.toISOString(),
+  ) as (RuntimeBrowserSessionRow & { backend_name: string }) | undefined;
+  if (!row) return undefined;
+  if (input.touch) {
+    execTransaction(() => db.prepare("UPDATE runtime_browser_sessions SET last_seen_at = ? WHERE id = ? AND revoked_at IS NULL")
+      .run(now.toISOString(), row.id));
+    checkpointAfterWrite();
+    row.last_seen_at = now.toISOString();
+  }
+  return { session: browserSessionDto(row), backendName: row.backend_name };
+}
+
+export function revokeRuntimeBrowserSessionsForUser(userId: string, now = new Date()): number {
+  const changed = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const timestamp = now.toISOString();
+    db.prepare(`UPDATE runtime_browser_generations SET generation = generation + 1, updated_at = ?
+      WHERE runtime_id IN (SELECT id FROM runtime_instances WHERE owner_user_id = ?)`).run(timestamp, userId);
+    db.prepare(`UPDATE runtime_browser_launch_tickets SET consumed_at = ?
+      WHERE owner_user_id = ? AND consumed_at IS NULL`).run(timestamp, userId);
+    return db.prepare("UPDATE runtime_browser_sessions SET revoked_at = ? WHERE owner_user_id = ? AND revoked_at IS NULL")
+      .run(timestamp, userId).changes;
+  });
+  checkpointAfterWrite();
+  return changed;
 }

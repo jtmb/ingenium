@@ -7,7 +7,7 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 ## Overview
 
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface** for interacting with the Ingenium MCP tools. The dashboard root (`http://localhost:3000/`), Web root (`http://opencode.localhost:3000/`), and CLI root (`http://cli.localhost:3000/`) are local Windows↔WSL gateway roots and do not use HTTP Basic Auth or browser bearer tokens. Direct host ports 4098/4099 are private and are not supported.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The compatibility profile retains its local `.localhost` roots. Production allocates the current user's ready workspace and launches exact `web--<runtime-id>.<runtime-domain>` and `cli--<runtime-id>.<runtime-domain>` HTTPS roots. Direct 4098/4099 ports remain private.
 
 The supported runtime is OpenCode **1.18.9**. Docker verifies the pinned
 archive SHA-256 and executable version, while package compatibility tests verify
@@ -20,8 +20,8 @@ For the conversational chat interface, see [Ingenium Chat](/chat).
 
 ## OpenCode Web/CLI Mode Switch
 
-- **Web mode** — Embeds the root `opencode.localhost:3000` gateway. It is not served under `/opencode-web/`; root-relative assets and WebSockets make a subpath proxy unreliable.
-- **CLI mode** — Embeds the root `cli.localhost:3000` gateway. It is not served under `/opencode-cli/`; the terminal shares backend session state with Web mode.
+- **Web mode** — Redeems a browser-generated one-time `web` exchange proof before embedding its runtime HTTPS root.
+- **CLI mode** — Redeems a distinct `cli` proof for the same runtime container; it shares process/worktree state, not the Web cookie.
 - **Mode switch** — A right-edge glass tab toggles between modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` switches between modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
@@ -75,13 +75,14 @@ tokens, or transport diagnostics.
 
 Web and CLI sessions share the same backend process state.
 
-In the AUTH-108 production profile, Web, CLI, and VS Code processes for one
+In the production profile, Web, CLI, and VS Code processes for one
 owner/workspace run in the same isolated `user-runtime` container and share only that
 runtime's HOME/worktree/session state. Different runtimes use different containers
-and Docker networks. Runtime-specific browser roots and the complete launch-ticket
-exchange land in AUTH-109; AUTH-108 supplies only the hash-only ticket storage and
-issue/consume primitives. Until the gateway work lands, this section's existing local
-gateway flow describes the `compatibility` profile.
+and Docker networks. The dashboard reads per-user runtime status, creates an opaque
+body-only proof, and receives only the audience launch URL/status from the API. It
+never receives the private backend, runtime capability, or runtime session token.
+Expired and unavailable states are retryable; iframe, pop-out, and standalone views
+use the same exchange, and logout/revoke invalidates reconnects.
 
 ### Repository synchronization
 

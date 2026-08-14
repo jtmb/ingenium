@@ -916,10 +916,26 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   browser credential leak, private upstream exposure, broken launch, or in-scope
   visual/accessibility failure is `BLOCKING`; optional root aliases are
   `FOLLOW_UP`; browser/network evidence is `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
+- **Markers/evidence:** [x] appended `work-started` after preflight; [ ] append
   matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-109: <acceptance evidence placeholder>` with non-empty gateway,
-  UI, security, deployment, E2E, strict-containment, and visual evidence.
+  `Evidence AUTH-109: <acceptance evidence placeholder>` after all gates.
+  Evidence AUTH-109 (implementation wave): migration 102 exact-schema probes and
+  focused core/API tests cover hash-only ticket/session storage, <=60-second expiry,
+  exact auth-session/workspace/runtime/audience/origin/host binding, mismatch, replay,
+  and generation revoke. Gateway tests cover exact Hosts, host-only secure audience
+  cookies, CSP, WebSocket Origin/header spoof stripping, and backend/token isolation.
+  Dashboard runtime-launch/CSP tests cover dynamic status, exchange, unavailable
+  recovery, and wildcard roots. Core/API/dashboard typechecks, focused tests, and
+  static Compose validation are the implementation gate. Live deployment, fixture
+  E2E, strict containment, QA/security review, and visual evidence remain open for
+  the later premium deployment owner and no `work-complete` is claimed.
+  Boundary hardening evidence: gateway-private exchange/validate now require the
+  dedicated gateway credential, exact `runtime-gateway` audience, and API-boundary-
+  overwritten private-network marker. Public ingress and Dashboard proxy strip forged
+  assertions; Dashboard denies both routes. Focused API tests reject browser sessions,
+  API user tokens, compatibility/installation principals, and forged markers while
+  accepting the gateway principal. Launch responses expose only URL/status; canaries
+  reject backend, ticket, token, and session-token leakage.
 
 #### AUTH-110 — Enforcement cutoff: tenant-required reads and writes
 
@@ -2158,3 +2174,5 @@ Evidence RESTORE-100: migration083 inventory tests passed 4/4, API restore-contr
 <!-- (work-started) RESTORE-101 2026-08-03T08:09:32Z ingenium-docs -->
 
 **RESTORE-101 decision/work-started marker (2026-08-03 UTC; `ingenium-docs`):** With RESTORE-100 complete, IN_SCOPE is migration084 executor authorization/run/events using a second one-time live token; a fixed Supervisor restore-maintenance process; an external authenticated journal/control capsule; quiesce, `pre_restore` snapshot, recoverable two-DB swap, migration/capsule rehydrate, health/rollback/crash recovery, and bounded timeouts; plus API/MCP authorize/execute/status/audit surfaces. All destructive gates use disposable Compose fixtures only and never normal volumes. OUT_OF_SCOPE is RESTORE-102 UI/automatic triggers, other resources, live operator restore, and off-host execution. No real-volume apply or RESTORE-102 work.
+
+<!-- (work-started) AUTH-109 2026-08-14T00:00:00Z ingenium-software-engineer-premium -->

@@ -30,8 +30,10 @@ RUN sh scripts/validate-deployment-config.sh
 # private OpenCode/ttyd listeners.
 ARG NEXT_PUBLIC_OPENCODE_WEB_URL="http://opencode.localhost:3000/"
 ARG NEXT_PUBLIC_OPENCODE_CLI_URL="http://cli.localhost:3000/"
+ARG NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN=""
 ENV NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL}
 ENV NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL}
+ENV NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN=${NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN}
 RUN npm run build
 
 RUN npm prune --omit=dev
@@ -215,6 +217,11 @@ FROM runtime-base AS runtime-manager
 USER appuser
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=10s CMD ["node", "/app/scripts/runtime-manager-healthcheck.mjs"]
 ENTRYPOINT ["node", "/app/services/ingenium-api/dist/scripts/runtime-manager.js"]
+
+FROM runtime-base AS runtime-gateway
+USER appuser
+EXPOSE 8443
+ENTRYPOINT ["node", "/app/services/ingenium-api/dist/scripts/runtime-gateway.js"]
 
 FROM runtime-base AS control-plane
 ENV INGENIUM_DEPLOYMENT_MODE=control-plane

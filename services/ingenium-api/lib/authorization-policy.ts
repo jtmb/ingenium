@@ -3,7 +3,7 @@ import { authentication, authorization, projects, securityAudit } from "ingenium
 import { AppError } from "./middleware/errors.js";
 import type { RequestPrincipal } from "./middleware/auth.js";
 
-export type PolicyTarget = "installation" | "organization" | "project" | "private" | "public";
+export type PolicyTarget = "installation" | "organization" | "project" | "private" | "gateway-private" | "public";
 export type PolicyPermission = authorization.AuthorizationPermission;
 
 export interface AuthorizationPolicy {
@@ -64,6 +64,13 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   if (req.path === "/api/v1/health") return { action: "health.read", resource: "health", permission: "read", target: "installation" };
   if (req.path.startsWith("/_ingenium/")) return { action: "child-mcp.execute", resource: "child-mcp", permission: "execute", target: "project", sensitive: true };
   if (req.path.startsWith("/api/v1/auth/")) return { action: `auth.${permissionFor(req as Request)}`, resource: "auth", permission: permissionFor(req as Request), target: "private", sensitive: !READ_METHODS.has(req.method) };
+  if (/^\/api\/v1\/runtimes\/gateway\/(exchange|validate)$/.test(req.path)) {
+    return { action: "runtimes.gateway.execute", resource: "runtime-gateway", permission: "execute", target: "gateway-private", sensitive: true };
+  }
+  if (req.path.startsWith("/api/v1/runtimes/browser/")) {
+    const permission = permissionFor(req as Request);
+    return { action: `runtimes.${permission}`, resource: "runtimes", permission, target: "private", sensitive: permission !== "read" };
+  }
   if (req.path.startsWith("/api/v1/organizations")) {
     const permission = permissionFor(req as Request);
     return { action: `organizations.${permission}`, resource: "organizations", permission, target: "organization", sensitive: permission !== "read", stepUp: permission === "admin" };
@@ -192,6 +199,16 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
   req.authorizationPolicy = policy;
   if (policy.target === "public") return next();
   if (!req.principal) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
+  if (policy.target === "gateway-private") {
+    if (req.principal.type !== "runtime-service" || req.principal.id !== "runtime-gateway"
+      || req.principal.audience !== "runtime-gateway" || req.principal.network !== "runtime-gateway"
+      || !req.principal.scopes.includes("runtime-gateway:exchange")) {
+      audit(req.principal, policy, "denied");
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    audit(req.principal, policy, "success");
+    return next();
+  }
   if (req.principal.type === "compatibility") {
     audit(req.principal, policy, "success");
     return next();

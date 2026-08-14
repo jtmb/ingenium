@@ -11,14 +11,15 @@ const initialNodeEnv = process.env.NODE_ENV;
 
 async function loadNextConfig(): Promise<NextConfigForTest> {
   vi.resetModules();
-  const module = await import("../next.config.js");
-  return module.default as NextConfigForTest;
+  const configModule = await import("../next.config.js");
+  return configModule.default as NextConfigForTest;
 }
 
 afterEach(() => {
   delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
   delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
   delete process.env.INGENIUM_API_PORT;
+  delete process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN;
   if (initialNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = initialNodeEnv;
 });
@@ -90,5 +91,16 @@ describe("Next.js gateway configuration", () => {
     expect(csp).not.toContain("opencode.example.com");
     expect(csp).not.toContain("cli.example.com");
     expect(csp).not.toContain("secret");
+  });
+
+  it("adds only a validated runtime wildcard to frame and exchange policies", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
+    const csp = await contentSecurityPolicy(await loadNextConfig());
+    expect(csp).toContain("connect-src 'self' http://localhost:4097 https://*.runtime.example.test");
+    expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000 https://*.runtime.example.test");
+
+    process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.example.test/path";
+    expect(await contentSecurityPolicy(await loadNextConfig())).not.toContain("https://*.runtime.example.test/path");
   });
 });

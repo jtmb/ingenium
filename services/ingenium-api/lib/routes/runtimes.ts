@@ -14,6 +14,18 @@ const workspaceInput = z.object({
   storagePath: z.string().min(1).max(1024),
 }).strict();
 const runtimeInput = z.object({ workspaceId: z.string().min(1).max(256) }).strict();
+const browserLaunchInput = z.object({
+  audience: z.enum(["web", "cli", "vscode"]),
+  exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+}).strict();
+const gatewayExchangeInput = z.object({
+  exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  audience: z.enum(["web", "cli", "vscode"]),
+  origin: z.string().url().max(512),
+  host: z.string().min(1).max(253),
+  launcherOrigin: z.string().url().max(512),
+}).strict();
+const gatewayValidateInput = gatewayExchangeInput.omit({ exchangeProof: true, launcherOrigin: true }).extend({ sessionToken: z.string().min(32).max(512) }).strict();
 
 function numberSetting(name: string, fallback: number, minimum: number): number {
   const raw = process.env[name]?.trim();
@@ -59,6 +71,93 @@ function runtimeError(res: import("express").Response, error: unknown): void {
   }
   res.status(503).json({ error: { code: "RUNTIME_UNAVAILABLE", message: "Runtime service is unavailable" } });
 }
+
+function browserPrincipal(req: import("express").Request): { id: string; sessionId: string } {
+  if (req.principal?.type !== "user" || !req.principal.session) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+  return { id: req.principal.id, sessionId: req.principal.session.id };
+}
+
+function runtimeRootDomain(): string {
+  const value = process.env.INGENIUM_RUNTIME_ROOT_DOMAIN?.trim();
+  if (!value) throw new Error("Runtime browser roots are not configured");
+  return value;
+}
+
+runtimesRouter.get("/browser/status", (req, res) => {
+  try {
+    const principal = browserPrincipal(req);
+    const owned = runtimes.listRuntimeInstances(principal.id);
+    const status = owned.some((runtime) => runtime.state === "READY" || runtime.state === "IDLE")
+      ? "ready"
+      : owned.some((runtime) => runtime.state === "PROVISIONING" || runtime.state === "STARTING") ? "starting" : "unavailable";
+    res.set("Cache-Control", "no-store");
+    res.json({ data: { status } });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.post("/browser/launch", (req, res) => {
+  const parsed = browserLaunchInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime launch request is invalid" } });
+    return;
+  }
+  try {
+    const principal = browserPrincipal(req);
+    const runtime = runtimes.listRuntimeInstances(principal.id)
+      .find((candidate) => candidate.state === "READY" || candidate.state === "IDLE");
+    if (!runtime) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const ticket = runtimes.issueRuntimeBrowserLaunchTicket({
+      ...parsed.data,
+      runtimeId: runtime.id,
+      ownerUserId: principal.id,
+      authSessionId: principal.sessionId,
+      rootDomain: runtimeRootDomain(),
+      launcherOrigin: req.get("origin") ?? "",
+    });
+    res.set("Cache-Control", "no-store");
+    res.status(201).json({ data: { launchUrl: `${ticket.origin}/__ingenium/exchange`, status: "ready" } });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.post("/gateway/exchange", (req, res) => {
+  const parsed = gatewayExchangeInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime exchange request is invalid" } });
+    return;
+  }
+  const exchanged = runtimes.consumeRuntimeBrowserLaunchTicket(parsed.data);
+  if (!exchanged) {
+    res.status(401).json({ error: { code: "INVALID_LAUNCH_TICKET", message: "Runtime launch ticket is invalid or expired" } });
+    return;
+  }
+  res.set("Cache-Control", "no-store");
+  res.json({ data: { sessionToken: exchanged.token, session: exchanged.session } });
+});
+
+runtimesRouter.post("/gateway/validate", (req, res) => {
+  const parsed = gatewayValidateInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime session request is invalid" } });
+    return;
+  }
+  const resolved = runtimes.resolveRuntimeBrowserSession({
+    token: parsed.data.sessionToken,
+    audience: parsed.data.audience,
+    host: parsed.data.host,
+    origin: parsed.data.origin,
+    touch: true,
+  });
+  if (!resolved) {
+    res.status(401).json({ error: { code: "INVALID_RUNTIME_SESSION", message: "Runtime browser session is invalid" } });
+    return;
+  }
+  res.set("Cache-Control", "no-store");
+  res.json({ data: { backendName: resolved.backendName, session: resolved.session } });
+});
 
 runtimesRouter.get("/", (_req, res) => {
   res.json({ data: runtimes.listRuntimeInstances() });

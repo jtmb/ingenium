@@ -39,6 +39,7 @@ services:
       INGENIUM_USER_RUNTIME_IMAGE: ${RUNTIME_IMAGE:?RUNTIME_IMAGE is required}
       INGENIUM_RUNTIME_NETWORK_PREFIX: ${RUNTIME_NETWORK_PREFIX:?RUNTIME_NETWORK_PREFIX is required}
       INGENIUM_CONTROL_PLANE_CONTAINER: ${CONTROL_PLANE_CONTAINER}
+      INGENIUM_RUNTIME_GATEWAY_CONTAINER: ${RUNTIME_GATEWAY_CONTAINER:?RUNTIME_GATEWAY_CONTAINER is required}
       INGENIUM_RUNTIME_API_URL: http://ingenium-control-plane:4096/api/v1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -51,6 +52,14 @@ services:
     cap_drop: [ALL]
     ports:
       - 127.0.0.1:${MANAGER_HOST_PORT:?MANAGER_HOST_PORT is required}:4110
+
+  runtime-gateway:
+    image: node:22.23.1-bookworm-slim
+    container_name: ${RUNTIME_GATEWAY_CONTAINER:?RUNTIME_GATEWAY_CONTAINER is required}
+    labels:
+      com.ingenium.runtime-gateway: "true"
+    command: ["node", "-e", "setInterval(() => {}, 60000)"]
+    networks: [runtime-control]
 
 networks:
   runtime-control:

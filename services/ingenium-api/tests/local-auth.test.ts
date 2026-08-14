@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authentication, bootstrap, invitations, resetDbForTest, securityTokens } from "ingenium-core";
+import { authentication, bootstrap, invitations, projects, resetDbForTest, runtimes, securityTokens } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -99,8 +99,21 @@ describe("AUTH-101 local API", () => {
     const sessionCsrf = (await login.json()).data.csrfToken;
     const rejected = await fetch(`${baseUrl}/api/v1/auth/logout`, { method: "POST", headers: { origin, cookie: sessionCookie } });
     expect(rejected.status).toBe(403);
+    const authToken = sessionCookie.split("=")[1]!;
+    const authSession = authentication.resolveSession(authToken)!;
+    const project = projects.createProject("logout-runtime", false, organizationId);
+    runtimes.authorizeWorkspace({ id: "logout-runtime", organizationId, projectId: project.id, ownerUserId: ownerId, storagePath: "/srv/logout-runtime" });
+    let runtime = runtimes.createRuntimeInstance("logout-runtime", { cpuMillis: 1_000, memoryBytes: 1_073_741_824, pidsLimit: 256, diskBytes: 2_147_483_648, processLimit: 128 });
+    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "PROVISIONING", actorType: "manager", actorId: "test" });
+    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "test" });
+    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "test" });
+    const exchangeProof = "p".repeat(43);
+    const ticket = runtimes.issueRuntimeBrowserLaunchTicket({ runtimeId: runtime.id, ownerUserId: ownerId, authSessionId: authSession.id, audience: "web", rootDomain: "runtime.example.test", launcherOrigin: origin, exchangeProof });
+    const browser = runtimes.consumeRuntimeBrowserLaunchTicket({ exchangeProof, audience: "web", origin: ticket.origin, host: ticket.host, launcherOrigin: origin })!;
+    expect(runtimes.resolveRuntimeBrowserSession({ token: browser.token, audience: "web", origin: ticket.origin, host: ticket.host })).toBeDefined();
     const accepted = await fetch(`${baseUrl}/api/v1/auth/logout`, { method: "POST", headers: { origin, cookie: sessionCookie, "x-csrf-token": sessionCsrf } });
     expect(accepted.status).toBe(204);
+    expect(runtimes.resolveRuntimeBrowserSession({ token: browser.token, audience: "web", origin: ticket.origin, host: ticket.host })).toBeUndefined();
   });
 
   it("returns standardized 401 and WWW-Authenticate for missing credentials", async () => {

@@ -21,6 +21,7 @@ import {
   isValidApiToken,
   loadApiToken,
 } from "../lib/middleware/api-token.js";
+import { runtimeGatewayIngressHeaders } from "../lib/runtime-gateway-auth.js";
 
 // We test the middleware in isolation — mock Express req/res/next
 // and the timing-safe crypto primitive.
@@ -28,15 +29,20 @@ import {
 describe("authMiddleware — timing-safe comparison", () => {
   const originalEnv = process.env.INGENIUM_API_TOKEN;
   const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+  const originalRuntimeGatewayTokenFile = process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
   const validToken = "a".repeat(32);
+  const gatewayToken = "g".repeat(43);
+  const temporaryDirectories: string[] = [];
 
   beforeEach(() => {
     delete process.env.INGENIUM_API_TOKEN;
     delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
     if (originalEnv !== undefined) {
       process.env.INGENIUM_API_TOKEN = originalEnv;
     } else {
@@ -46,6 +52,11 @@ describe("authMiddleware — timing-safe comparison", () => {
       process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
     } else {
       delete process.env.INGENIUM_API_TOKEN_FILE;
+    }
+    if (originalRuntimeGatewayTokenFile !== undefined) {
+      process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE = originalRuntimeGatewayTokenFile;
+    } else {
+      delete process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
     }
   });
 
@@ -66,6 +77,15 @@ describe("authMiddleware — timing-safe comparison", () => {
 
   function makeRes(): Partial<Response> {
     return {} as Partial<Response>;
+  }
+
+  function configureRuntimeGatewayToken(): void {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-runtime-gateway-auth-"));
+    temporaryDirectories.push(directory);
+    const tokenFile = join(directory, "token");
+    writeFileSync(tokenFile, gatewayToken, { mode: 0o600 });
+    chmodSync(tokenFile, 0o600);
+    process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE = tokenFile;
   }
 
   it("fails closed when INGENIUM_API_TOKEN is not configured", () => {
@@ -146,6 +166,81 @@ describe("authMiddleware — timing-safe comparison", () => {
       type: "compatibility",
       id: "legacy-server-bearer",
       scopes: ["legacy:*"],
+    });
+  });
+
+  it.each(["exchange", "validate"])("authenticates runtime gateway %s only with its separate file credential", (operation) => {
+    configureRuntimeGatewayToken();
+    const req = makeReq(`Bearer ${gatewayToken}`, "POST", `/api/v1/runtimes/gateway/${operation}`);
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "runtime-gateway",
+      "x-ingenium-private-network": "runtime-gateway",
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+    const next = vi.fn();
+
+    authMiddleware(req as Request, makeRes() as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect((req as Request).principal).toEqual({
+      type: "runtime-service",
+      id: "runtime-gateway",
+      scopes: ["runtime-gateway:exchange"],
+      audience: "runtime-gateway",
+      network: "runtime-gateway",
+    });
+  });
+
+  it.each([
+    { name: "browser session", auth: undefined, headers: { cookie: "__Host-ingenium_session=browser-session" } },
+    { name: "API user token", auth: `Bearer ing_${"u".repeat(12)}_${"t".repeat(43)}`, headers: {} },
+    { name: "installation principal", auth: `Bearer ${validToken}`, headers: { "x-ingenium-internal-service": "1" } },
+    { name: "Dashboard proxy", auth: `Bearer ${validToken}`, headers: { cookie: "__Host-ingenium_session=browser-session", origin: "https://dashboard.example.test", "x-ingenium-ui": "dashboard", "x-ingenium-internal-service": "1" } },
+  ])("hides gateway-private routes from a $name", ({ auth, headers }) => {
+    configureRuntimeGatewayToken();
+    const req = makeReq(auth, "POST", "/api/v1/runtimes/gateway/validate");
+    req.headers = {
+      ...req.headers,
+      ...headers,
+      "x-ingenium-audience": "runtime-gateway",
+      "x-ingenium-private-network": "runtime-gateway",
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+
+    expect(() => authMiddleware(req as Request, makeRes() as Response, vi.fn())).toThrowError(expect.objectContaining({
+      statusCode: 404,
+      code: "NOT_FOUND",
+    }));
+  });
+
+  it("rejects a valid gateway credential when the ingress marker is missing or forged", () => {
+    configureRuntimeGatewayToken();
+    for (const marker of [undefined, "browser-forged"]) {
+      const req = makeReq(`Bearer ${gatewayToken}`, "POST", "/api/v1/runtimes/gateway/exchange");
+      req.headers = { ...req.headers, "x-ingenium-audience": "runtime-gateway", "x-ingenium-private-network": marker };
+      req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+      expect(() => authMiddleware(req as Request, makeRes() as Response, vi.fn())).toThrowError(expect.objectContaining({ statusCode: 404 }));
+    }
+  });
+
+  it("overwrites gateway trust headers and removes browser assertions at ingress", () => {
+    const headers = runtimeGatewayIngressHeaders({
+      cookie: "__Host-ingenium_session=forged",
+      origin: "https://dashboard.example.test",
+      "x-csrf-token": "forged",
+      "x-ingenium-audience": "mcp",
+      "x-ingenium-internal-service": "1",
+      "x-ingenium-private-network": "browser-forged",
+      "x-ingenium-runtime-gateway": "1",
+      "x-ingenium-ui": "dashboard",
+      "x-request-id": "request-id",
+    });
+
+    expect(headers).toEqual({
+      "x-request-id": "request-id",
+      "x-ingenium-audience": "runtime-gateway",
+      "x-ingenium-private-network": "runtime-gateway",
     });
   });
 

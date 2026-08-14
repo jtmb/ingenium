@@ -19,6 +19,10 @@ describe("AUTH-102 canonical API policy", () => {
     ["GET", "/api/v1/backups", "installation", "read"],
     ["GET", "/api/v1/runtimes", "installation", "read"],
     ["POST", "/api/v1/runtimes", "installation", "write"],
+    ["GET", "/api/v1/runtimes/browser/status", "private", "read"],
+    ["POST", "/api/v1/runtimes/browser/launch", "private", "write"],
+    ["POST", "/api/v1/runtimes/gateway/exchange", "gateway-private", "execute"],
+    ["POST", "/api/v1/runtimes/gateway/validate", "gateway-private", "execute"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
@@ -62,6 +66,44 @@ describe("AUTH-102 canonical API policy", () => {
     vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
     authorizationMiddleware(req, {} as Response, next);
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it.each(["exchange", "validate"])("allows the runtime gateway principal on its private %s contract", (operation) => {
+    const req = {
+      method: "POST",
+      path: `/api/v1/runtimes/gateway/${operation}`,
+      principal: {
+        type: "runtime-service",
+        id: "runtime-gateway",
+        scopes: ["runtime-gateway:exchange"],
+        audience: "runtime-gateway",
+        network: "runtime-gateway",
+      },
+    } as unknown as Request;
+    const next = vi.fn();
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+
+    authorizationMiddleware(req, {} as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["browser user", { type: "user", id: "user-id", scopes: ["user:*"], session: { id: "session-id" } }],
+    ["API user token", { type: "user", id: "user-id", scopes: ["runtimes:*"] }],
+    ["compatibility installation", { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] }],
+    ["installation service", { type: "service", id: "service-id", tokenId: "token-id", scopes: ["*"], organizationId: null, projectId: null }],
+    ["forged runtime service", { type: "runtime-service", id: "runtime-gateway", scopes: ["runtime-gateway:exchange"], audience: "runtime-gateway", network: "browser-forged" }],
+  ])("denies gateway-private routes to a %s principal", (_name, principal) => {
+    const req = { method: "POST", path: "/api/v1/runtimes/gateway/validate", principal } as unknown as Request;
+    const next = vi.fn();
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+
+    expect(() => authorizationMiddleware(req, {} as Response, next)).toThrowError(expect.objectContaining({
+      statusCode: 404,
+      code: "NOT_FOUND",
+    }));
+    expect(next).not.toHaveBeenCalled();
   });
 
   it.each(["mcp", "repository-sync"] as const)("allows %s service credentials to run exact preflight", (audience) => {

@@ -8,11 +8,11 @@ description: Iframe sandbox configuration, risk assessment, and deferred securit
 > **Status**: Baseline was implemented in W2 — all four OpenCode iframes previously had
 > `sandbox="allow-scripts allow-same-origin"`. The `sandbox` attribute has been **removed**
 > from all OpenCode iframes in Phase 2: OpenCode is trusted first-party content embedded
-> via local loopback gateway roots or configured HTTPS origins. The same-origin proxy rewrites
+> via local compatibility roots or authenticated runtime-specific HTTPS origins. The same-origin proxy rewrites
 > (`/opencode-web/`, `/opencode-cli/`) were also removed. The Email HTML iframe retains
 > its separate sandbox policy (no `allow-scripts`). CSP/frame-ancestor policy remains
-> deferred pending runtime testing.
-> **Last updated**: 2026-08-02
+> are enforced by the AUTH-109 runtime gateway.
+> **Last updated**: 2026-08-14
 
 ---
 
@@ -24,12 +24,18 @@ additional standalone iframes in `services/ingenium-dashboard/src/app/standalone
 **All four OpenCode iframes have had the `sandbox` attribute removed** — OpenCode is
 trusted first-party content embedded via local gateway roots or configured HTTPS origins.
 
-The `/vscode` route adds one trusted separate-origin code-server iframe. Its exact
+The compatibility `/vscode` route adds one trusted separate-origin code-server iframe. Its exact
 local origin is `http://vscode.localhost:3000/` on the established port-`3000`
 virtual-host gateway; code-server remains private at `127.0.0.1:4100`. It is also
 unsandboxed and requests only `allow="clipboard-write"`. The local Windows/WSL
 profile assumes localhost-only use and is unsupported for LAN, remote, shared, or
 untrusted users; no host `3002` or public `4100` exposure is supported.
+
+Production instead uses exact runtime-specific HTTPS roots. Each root is selected by
+audience and runtime UUID, requires a redeemed host-only audience session, strips
+browser credentials/identity/proxy headers, and emits a gateway-owned
+`frame-ancestors` policy restricted to configured dashboard origins. WebSocket Origin
+must equal the exact runtime origin; private 4098/4099/4100 listeners stay unpublished.
 
 This VS Code surface is administrator-grade local access. code-server is
 preinstalled, but Restricted Mode disables the pinned extension until the user
@@ -224,11 +230,12 @@ The `allow="clipboard-write"` Permissions Policy attribute is retained,
 enabling OpenCode Web and ttyd to write to the clipboard (copy code blocks,
 terminal output).
 
-### Deferred Items (CSP)
+### Runtime framing policy
 
-Although the sandbox has been removed, CSP `frame-ancestors` headers on
-the opencode-web and ttyd responses remain a deferred security enhancement
-— they would prevent other sites from framing these services. Not yet implemented.
+The runtime gateway removes conflicting upstream `X-Frame-Options`, preserves an
+upstream CSP where present, and adds a second `frame-ancestors` policy containing only
+the configured dashboard origins. Dashboard CSP permits only the validated runtime
+wildcard for `frame-src` and ticket-exchange `connect-src`.
 
 ### Tokens Permanently Excluded (Sandbox Not Needed)
 

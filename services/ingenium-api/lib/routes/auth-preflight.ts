@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { authentication, authorization, invitations, mcpCredentials, oidcAuthentication, securityAudit, securityTokens } from "ingenium-core";
+import { authentication, authorization, invitations, mcpCredentials, oidcAuthentication, runtimes, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
 import { authAttemptRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
@@ -106,6 +106,7 @@ authPreflightRouter.post("/session/refresh", (req, res) => {
 
 authPreflightRouter.post("/logout", (req, res) => {
   const principal = currentUser(req);
+  runtimes.revokeRuntimeBrowserSessionsForUser(principal.id);
   authentication.revokeSession(principal.id, principal.session!.id);
   res.set("Set-Cookie", `${authentication.SESSION_COOKIE_NAME}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`);
   res.status(204).end();

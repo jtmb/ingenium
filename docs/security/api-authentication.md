@@ -82,11 +82,22 @@ The runtime-manager bearer is a different owner-only file shared only by the con
 plane and manager. It authorizes the manager's narrow health/provision/inspect/stop
 API and is not a user-runtime capability.
 
-Migration 101 launch tickets are separate random credentials stored only as token and
-nonce hashes. They are bound to one owner, runtime, and `web`, `cli`, or `vscode`
-audience, expire within 60 seconds, and can be consumed once while the workspace and
-runtime remain active. AUTH-109 owns browser exchange, origin binding, runtime roots,
-and keeping the ticket out of post-exchange URLs and logs.
+Migration 102 completes browser launch with browser-generated exchange proofs and
+random session values stored only as hashes. A launch record binds the exact dashboard auth session, owner, workspace,
+runtime, organization, project, audience, HTTPS origin, Host, nonce, generation, and
+expiry. It expires within 60 seconds and is consumed atomically once. The API returns
+only the audience launch URL and opaque status; the proof travels only in request
+bodies and no session token or private backend identity reaches dashboard code.
+
+The gateway exchanges it for a host-only `__Host-ingenium_runtime_<audience>` cookie
+with `Secure`, `HttpOnly`, and `SameSite=Strict`. Every request and WebSocket handshake
+revalidates the generation and originating auth session. Logout, session/runtime/
+workspace revoke, expiry, and generation changes fail closed. The gateway's narrow
+owner-only bearer is distinct from installation, manager, and runtime credentials.
+Only the API boundary accepts its `runtime-gateway` audience and overwrites the
+private-network marker after credential validation. Browser sessions, API user tokens,
+installation compatibility principals, and the Dashboard proxy receive `404` on the
+gateway-private exchange and validation routes.
 
 ### Host and container seeding
 

@@ -65,8 +65,8 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 |------|---------|
 | `/` | Home — operational dashboard with live metrics |
 | `/chat` | Ingenium Chat — standalone conversational agent interface |
-| `/opencode` | Embedded OpenCode Web/CLI iframes |
-| `/vscode` | Local-only VS Code workspace through `http://vscode.localhost:3000/` |
+| `/opencode` | Runtime-specific authenticated OpenCode Web/CLI audiences |
+| `/vscode` | Runtime-specific authenticated VS Code audience |
 | `/projects` | Project management |
 | `/skills` | Skills grid with detail overlay |
 | `/docs` | Documentation workspace |
@@ -124,6 +124,12 @@ modal is open. Settings follows the same focus, Escape, and scroll-lock
 behavior.
 
 ### VS Code workspace
+
+In production, `/vscode` uses the same per-user/workspace runtime as OpenCode but
+redeems a distinct browser-generated `vscode` proof and host-only audience cookie. Loading, starting,
+expired-ticket, unavailable, retry, iframe, pop-out, and standalone states use the
+per-user runtime status/launch API rather than global Supervisor health. The browser
+receives only the launch URL/status, never the private code-server address or a runtime/API bearer or session token.
 
 Open `/vscode` from the Workspace navigation group or directly by URL. The page
 embeds code-server through the established port-`3000` virtual-host gateway at

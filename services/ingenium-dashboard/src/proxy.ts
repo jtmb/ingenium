@@ -53,6 +53,11 @@ const FORWARDED_ORIGIN_HEADERS = [
  */
 const SERVER_ONLY_HANDOFF_HEADERS = [
   "x-ingenium-child-mcp-runtime",
+  "x-ingenium-audience",
+  "x-ingenium-private-network",
+  "x-ingenium-runtime-gateway",
+  "x-ingenium-workspace",
+  "x-ingenium-launcher-worktree",
 ] as const;
 
 type ProxyEnvironment = Readonly<Record<string, string | undefined>>;
@@ -132,6 +137,14 @@ function csrfRejectedResponse(): NextResponse {
 
 function authenticationRequiredResponse(): NextResponse {
   return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } }, { status: 401, headers: { "Cache-Control": "no-store" } });
+}
+
+function gatewayPrivateResponse(): NextResponse {
+  return NextResponse.json({ error: { code: "NOT_FOUND", message: "Resource not found" } }, { status: 404, headers: { "Cache-Control": "no-store" } });
+}
+
+export function isRuntimeGatewayPrivatePath(pathname: string): boolean {
+  return pathname.startsWith("/api/v1/runtimes/gateway/");
 }
 
 export function isPublicAuthPath(pathname: string): boolean {
@@ -298,6 +311,7 @@ export function hasValidDashboardMutationContract(request: NextRequest): boolean
 export function proxy(request: NextRequest): NextResponse {
   const pageResponse = protectDashboardPage(request);
   if (pageResponse) return pageResponse;
+  if (isRuntimeGatewayPrivatePath(request.nextUrl.pathname)) return gatewayPrivateResponse();
 
   const browserSession = Boolean(request.cookies.get(AUTH_SESSION_COOKIE)?.value);
   const publicAuthentication = request.nextUrl.pathname.startsWith("/api/v1/auth/");

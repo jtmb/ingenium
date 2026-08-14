@@ -2323,6 +2323,54 @@ function inspectRuntimeIsolationMigration(db: Database.Database): RuntimeIsolati
   return state;
 }
 
+const RUNTIME_BROWSER_TABLES: Record<string, string[]> = {
+  runtime_browser_generations: ["runtime_id", "generation", "updated_at"],
+  runtime_browser_launch_tickets: [
+    "id", "runtime_id", "workspace_id", "organization_id", "project_id", "owner_user_id", "auth_session_id", "launcher_origin",
+    "audience", "origin", "host", "token_hash", "nonce_hash", "generation", "expires_at", "consumed_at", "created_at",
+  ],
+  runtime_browser_sessions: [
+    "id", "runtime_id", "workspace_id", "organization_id", "project_id", "owner_user_id", "auth_session_id",
+    "audience", "origin", "host", "token_hash", "generation", "expires_at", "last_seen_at", "revoked_at", "created_at",
+  ],
+};
+const RUNTIME_BROWSER_INDEXES = [
+  "idx_runtime_browser_tickets_expiry", "idx_runtime_browser_sessions_runtime", "idx_runtime_browser_sessions_auth",
+];
+const RUNTIME_BROWSER_TRIGGERS = [
+  "runtime_browser_ticket_scope_insert", "runtime_browser_ticket_consume_once", "runtime_browser_ticket_immutable_delete",
+  "runtime_browser_session_scope_insert", "runtime_browser_session_update", "runtime_browser_session_immutable_delete",
+];
+
+function inspectRuntimeBrowserMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const state = inspectMigrationComponents(db, RUNTIME_BROWSER_TABLES, RUNTIME_BROWSER_INDEXES, RUNTIME_BROWSER_TRIGGERS);
+  if (!state.any || state.missing.length > 0) return state;
+  state.missing.push(...compareMigrationDefinitions(db, "102_runtime_browser_sessions.sql", `
+    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE organizations (id TEXT PRIMARY KEY);
+    CREATE TABLE projects (id TEXT PRIMARY KEY);
+    CREATE TABLE authorized_workspaces (
+      id TEXT PRIMARY KEY, organization_id TEXT, project_id TEXT, owner_user_id TEXT,
+      status TEXT, security_epoch INTEGER
+    );
+    CREATE TABLE auth_sessions (
+      id TEXT PRIMARY KEY, user_id TEXT, security_epoch INTEGER, revoked_at TEXT
+    );
+    CREATE TABLE runtime_instances (
+      id TEXT PRIMARY KEY, workspace_id TEXT, organization_id TEXT, project_id TEXT, owner_user_id TEXT,
+      state TEXT, security_epoch INTEGER,
+      UNIQUE(id, workspace_id, organization_id, project_id, owner_user_id)
+    );
+  `, [...Object.keys(RUNTIME_BROWSER_TABLES), ...RUNTIME_BROWSER_INDEXES, ...RUNTIME_BROWSER_TRIGGERS]));
+  if (state.missing.length === 0) {
+    const missingGenerations = db.prepare(`SELECT count(*) AS count FROM runtime_instances r
+      WHERE NOT EXISTS (SELECT 1 FROM runtime_browser_generations g WHERE g.runtime_id = r.id)`).get() as { count: number };
+    if (missingGenerations.count > 0) state.missing.push("runtime browser generations backfill");
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
   const tables: Record<string, string[]> = {
     synthesis_batches: [
@@ -3335,7 +3383,7 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
-export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099" | "100" | "101", AuthenticationFoundationMigrationState> {
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099" | "100" | "101" | "102", AuthenticationFoundationMigrationState> {
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   return {
     "093": inspectIdentityTenancyMigration(database),
@@ -3347,6 +3395,7 @@ export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "09
     "099": inspectAutomationTenancyMigration(database),
     "100": inspectMcpCredentialMigration(database),
     "101": inspectRuntimeIsolationMigration(database),
+    "102": inspectRuntimeBrowserMigration(database),
   };
 }
 
@@ -4700,6 +4749,23 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("101", ["foreign key integrity"]);
     }
     logger.info("db", "Applied migration 101_runtime_isolation.sql");
+  }
+
+  const runtimeBrowserMigration = inspectRuntimeBrowserMigration(db);
+  if (runtimeBrowserMigration.any && !runtimeBrowserMigration.complete) {
+    throw restoreMigrationPartialStateError("102", runtimeBrowserMigration.missing);
+  }
+  if (!runtimeBrowserMigration.complete) {
+    if (!inspectRuntimeIsolationMigration(db).complete) {
+      throw restoreMigrationPartialStateError("102", ["migration 101 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "102_runtime_browser_sessions.sql"), "utf-8"));
+    const applied = inspectRuntimeBrowserMigration(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError("102", applied.missing);
+    if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("102", ["foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 102_runtime_browser_sessions.sql");
   }
 
   enforceReservedBrokerInvariant(db);

@@ -70,6 +70,12 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_RUNTIME_PROCESS_LIMIT` | `128` | runtime routes | Default per-runtime aggregate process/PID ceiling. The manager applies the lower of this value and `INGENIUM_RUNTIME_PIDS_LIMIT` as Docker's cgroup PID limit. |
 | `INGENIUM_RUNTIME_IDLE_LEASE_MS` | `1800000` | runtime routes | Idle runtime lease duration. |
 | `INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS` | `28800000` | runtime routes | Absolute runtime lifetime and capability expiry. |
+| `INGENIUM_RUNTIME_ROOT_DOMAIN` | _(required in production)_ | control plane, runtime gateway, dashboard build | DNS suffix covered by the operator wildcard certificate. Runtime roots are exactly `web--<runtime-id>`, `cli--<runtime-id>`, and `vscode--<runtime-id>` below this suffix. |
+| `NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN` | _(set from `INGENIUM_RUNTIME_ROOT_DOMAIN` at build)_ | dashboard CSP | Public DNS suffix used only for the runtime wildcard frame/connect CSP sources; it contains no credential. |
+| `INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE` | _(required in production)_ | control plane, runtime gateway | Owner-only file containing the gateway's narrow API exchange/validation bearer, distinct from manager and installation credentials. |
+| `INGENIUM_RUNTIME_GATEWAY_PORT` | `8443` | runtime gateway | Unprivileged HTTPS listener mapped to host port 443 by the production profile. |
+| `INGENIUM_RUNTIME_TLS_CERT_FILE` | _(required in production)_ | runtime gateway | Read-only wildcard certificate chain for `*.<INGENIUM_RUNTIME_ROOT_DOMAIN>`. |
+| `INGENIUM_RUNTIME_TLS_KEY_FILE` | _(required in production)_ | runtime gateway | Read-only wildcard private key; never mounted into the manager, control plane, dashboard, or user runtime. |
 
 ## MCP Server (`services/ingenium-server`)
 
@@ -108,9 +114,10 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `OPENCODE_SERVER_URL` | `http://localhost:4098` | `ingenium-api` (opencode client) | Base URL of the OpenCode web server |
 | `INGENIUM_RUNTIME_MANAGER_PORT` | `4110` | private runtime manager | Manager listen port on the internal control network; it is never published to the host. |
 | `INGENIUM_RUNTIME_WORKSPACE_MAP_FILE` | `/etc/ingenium/runtime-workspaces.json` | private runtime manager | Root-controlled version-1 JSON map of workspace IDs to exact host and validation paths. |
-| `INGENIUM_RUNTIME_API_URL` | `http://ingenium-control-plane:4096/api/v1` in Compose | private runtime manager | Private API URL injected into user-runtime containers after strict hostname/path validation. |
+| `INGENIUM_RUNTIME_API_URL` | manager: `http://ingenium-control-plane:4096/api/v1`; gateway: `http://ingenium-control-plane:4097/api/v1/` | private runtime manager and runtime gateway | User-runtime capability traffic uses private Express after strict hostname/path validation. Gateway-private exchange/validation uses the authenticated API boundary so it can overwrite the private-network marker. |
 | `INGENIUM_USER_RUNTIME_IMAGE` | `ingenium-user-runtime:$IMAGE_REVISION` in Compose | private runtime manager | Exact image reference used for isolated runtime containers. |
 | `INGENIUM_RUNTIME_NETWORK_PREFIX` | `ingenium-runtime-` | private runtime manager | Prefix for one identity-labeled Docker network per runtime. |
+| `INGENIUM_RUNTIME_GATEWAY_CONTAINER` | `ingenium-runtime-gateway` in Compose | private runtime manager | Exact identity-labeled unprivileged gateway attached to each runtime network; it has no Docker socket. |
 | `INGENIUM_CONTROL_PLANE_CONTAINER` | `ingenium-control-plane` | private runtime manager | Exact identity-labeled control-plane container attached to each dedicated runtime network. |
 | `DOCKER_GID` | `999` | production Compose runtime manager | Host Docker-socket group ID added only to the unprivileged runtime-manager container; set it to the socket's actual group ID when different. |
 

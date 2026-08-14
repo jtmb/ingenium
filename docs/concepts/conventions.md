@@ -16,11 +16,14 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.
 - **Session sharing**: Web iframe and CLI ttyd sessions share the same backend process state; direct host attachment to the private upstream ports is not part of the browser-facing contract.
+- **Production runtime roots**: Each audience uses exact HTTPS `<audience>--<runtime-id>.<INGENIUM_RUNTIME_ROOT_DOMAIN>`. A browser-generated body-only proof redeems a one-time launch record before iframe/pop-out navigation; the API returns only the launch URL/status, and fixed global health, session tokens, and backend URLs are not exposed.
+- **Audience sessions**: Web, CLI, and VS Code use distinct host-only secure cookies. Host, runtime, workspace, owner, auth session, origin, audience, and revocation generation must match.
 - **Workspace** (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 
 ## VS Code workspace
 
 - **Origin** — `/vscode` and `/standalone?page=vscode` use the exact local root `http://vscode.localhost:3000/` on the established port-`3000` virtual-host gateway.
+- **Production origin** — The isolated profile uses `https://vscode--<runtime-id>.<runtime-domain>/`, sharing the user's runtime container but not Web/CLI audience cookies.
 - **Boundary** — code-server listens privately at `127.0.0.1:4100`; no host `3002` or public `4100` endpoint is supported. The default Windows/WSL firewall and localhost-forwarding assumption is for local use only, not LAN, remote, shared, or untrusted access.
 - **Embedding** — The trusted separate-origin iframe is unsandboxed and requests only `allow="clipboard-write"`; the page also offers a standalone/new-tab fallback. code-server provides the `/workspace` terminal and stock Open VSX/user-managed extension flow.
 - **Theme defaults** — Use the code-free built-in `configurationDefaults` contribution to enable system color detection with **Dark Modern** and **Light Modern**. User and workspace settings override these defaults; never mutate User `settings.json` or workspace settings to enforce a theme.

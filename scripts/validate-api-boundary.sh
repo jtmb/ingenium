@@ -20,6 +20,7 @@ csrf_middleware="${repo_root}/services/ingenium-api/lib/middleware/csrf.ts"
 api_server="${repo_root}/services/ingenium-api/scripts/api-server.ts"
 scheduler="${repo_root}/services/ingenium-api/lib/scheduler.ts"
 gateway="${repo_root}/nginx/gateway.conf"
+dashboard_nginx_proxy="${repo_root}/nginx/proxy-dashboard.conf"
 callback_proxy="${repo_root}/nginx/proxy-oauth-callback.conf"
 bootstrap="${repo_root}/scripts/bootstrap-local-secrets.sh"
 boundary_proxy="${repo_root}/scripts/api-boundary-proxy.mjs"
@@ -58,7 +59,7 @@ reject_pattern() {
   fi
 }
 
-for path in "$compose_file" "$dockerfile" "$gitignore" "$dockerignore" "$entrypoint" "$run_api" "$healthcheck" "$api_probe" "$dashboard_runner" "$dashboard_proxy" "$dashboard_token" "$auth_middleware" "$api_token_middleware" "$csrf_middleware" "$api_server" "$scheduler" "$gateway" "$callback_proxy" "$bootstrap" "$boundary_proxy" "$boundary_proxy_runner" "$supervisor_config"; do
+for path in "$compose_file" "$dockerfile" "$gitignore" "$dockerignore" "$entrypoint" "$run_api" "$healthcheck" "$api_probe" "$dashboard_runner" "$dashboard_proxy" "$dashboard_token" "$auth_middleware" "$api_token_middleware" "$csrf_middleware" "$api_server" "$scheduler" "$gateway" "$dashboard_nginx_proxy" "$callback_proxy" "$bootstrap" "$boundary_proxy" "$boundary_proxy_runner" "$supervisor_config"; do
   require_file "$path"
 done
 
@@ -98,12 +99,19 @@ require_literal "$dashboard_token" 'return readDashboardApiTokenFile(configuredF
 reject_pattern "$dashboard_token" '(^|[^_[:alnum:]])INGENIUM_API_TOKEN([^_[:alnum:]]|$)'
 require_literal "$boundary_proxy_runner" 'exec env -i'
 require_literal "$boundary_proxy_runner" 'INGENIUM_API_TOKEN_FILE="$token_file"'
+require_literal "$boundary_proxy_runner" 'INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE="$runtime_gateway_token_file"'
 require_literal "$boundary_proxy_runner" 'INGENIUM_API_UPSTREAM_PORT="4096"'
-require_literal "$boundary_proxy" 'forwarded.authorization = `Bearer ${installationRequest ? token : providedToken}`;'
+require_literal "$boundary_proxy" 'forwarded.authorization = `Bearer ${principal === "installation" ? token : providedToken}`;'
 require_literal "$boundary_proxy" 'const providedToken = incomingBearerToken(request.headers);'
 require_literal "$boundary_proxy" 'const installationRequest = apiTokensEqual(providedToken, token);'
 require_literal "$boundary_proxy" 'normalizedName === "x-ingenium-internal-service"'
+require_literal "$boundary_proxy" 'normalizedName === "x-ingenium-private-network"'
+require_literal "$boundary_proxy" 'runtimeGatewayIngressHeaders(forwarded)'
+require_literal "$boundary_proxy" 'gatewayPrefix && !gatewayRequest'
 require_literal "$boundary_proxy" 'server.listen(proxyPort, "0.0.0.0"'
+require_literal "$dashboard_proxy" 'isRuntimeGatewayPrivatePath(request.nextUrl.pathname)'
+require_literal "$dashboard_nginx_proxy" 'proxy_set_header X-Ingenium-Audience "";'
+require_literal "$dashboard_nginx_proxy" 'proxy_set_header X-Ingenium-Private-Network "";'
 require_literal "$supervisor_config" '[program:ingenium-api-boundary]'
 require_literal "$supervisor_config" 'command=/app/scripts/run-api-boundary-proxy.sh'
 require_literal "$bootstrap" 'chmod 0600 "$env_file"'
