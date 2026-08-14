@@ -283,6 +283,10 @@ accepts a file path, command, or target override. The executor creates a safety
 snapshot, performs the verified paired swap, or rolls back before normal
 services restart. Preserve the source bundle throughout; container-start
 recovery consumes signed journals before Supervisor can start database users.
+In `control-plane` mode the executor refuses with `HOLDER_REFUSED` while any
+runtime is provisioning, starting, ready, idle, or stopping. Stop all isolated
+runtimes first; runtime HOME/XDG state is ephemeral tmpfs and is not part of the
+database backup bundle.
 
 ---
 

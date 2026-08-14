@@ -48,7 +48,7 @@ compose_command() (
 )
 
 compose() {
-  compose_command -p "$PROJECT" --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" "$@"
+  compose_command -p "$PROJECT" --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" "$@"
 }
 
 cleanup() {
@@ -91,7 +91,7 @@ mkdir -p "$RUN_HOME/repos" "$RUN_HOME/.local/share/opencode" "$ALTERNATE_PROJECT
 cp "$REPO_ROOT/opencode.json" "$ALTERNATE_PROJECT_DIRECTORY/opencode.json"
 
 assert_default_compose_contract() {
-  compose_command --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config --format json | node -e '
+  compose_command --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config --format json | node -e '
     const config = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     if (config.name !== "ingenium") throw new Error(`expected canonical project name ingenium, got ${String(config.name)}`);
     const expected = new Map([

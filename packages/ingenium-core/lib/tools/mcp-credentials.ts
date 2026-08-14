@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { hashSecurityToken } from "./authentication.js";
@@ -186,6 +186,26 @@ function insertMcpCredential(
       JSON.stringify(grants), normalizeText(input.workspaceId, 256, "workspace binding"),
       normalizeWorktree(input.launcherWorktree), principal.security_epoch, input.expiresAt.toISOString(),
       input.createdByUserId, createdAt);
+  const runtimeSchema = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'authorized_workspaces'",
+  ).get();
+  if (runtimeSchema) {
+    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(input.workspaceId) as {
+      organization_id: string; project_id: string; owner_user_id: string; storage_path: string; security_epoch: number;
+    } | undefined;
+    if (!workspace) {
+      const storagePath = normalizeWorktree(input.launcherWorktree);
+      db.prepare(`INSERT INTO authorized_workspaces
+        (id, organization_id, project_id, owner_user_id, storage_path, storage_mapping_hash, security_epoch, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(input.workspaceId, input.organizationId, input.projectId, input.createdByUserId, storagePath,
+          createHash("sha256").update(`${input.workspaceId}\0${storagePath}`).digest("hex"), principal.security_epoch, createdAt, createdAt);
+    } else if (workspace.organization_id !== input.organizationId || workspace.project_id !== input.projectId
+      || workspace.owner_user_id !== input.createdByUserId || workspace.storage_path !== normalizeWorktree(input.launcherWorktree)
+      || workspace.security_epoch !== principal.security_epoch) {
+      throw new Error("Credential workspace binding is unavailable");
+    }
+  }
   return toCredential(db.prepare(`${SELECT_CREDENTIAL} WHERE mcp_credentials.id = ?`).get(id) as CredentialRow);
 }
 
@@ -200,11 +220,28 @@ export function resolveMcpCredential(token: string, audience: McpCredentialAudie
   let hash: string;
   try { hash = hashSecurityToken(token); } catch { return undefined; }
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-  const row = db.prepare(`${SELECT_CREDENTIAL} JOIN service_principals ON service_principals.id = mcp_credentials.service_principal_id
-    WHERE mcp_credentials.token_hash = ? AND mcp_credentials.audience = ? AND mcp_credentials.revoked_at IS NULL
-      AND mcp_credentials.expires_at > ? AND service_principals.status = 'active'
-      AND service_principals.security_epoch = mcp_credentials.security_epoch`)
-    .get(hash, audience, now.toISOString()) as CredentialRow | undefined;
+  const timestamp = now.toISOString();
+  const runtimeScope = audience === "runtime" ? `
+      JOIN runtime_capability_bindings ON runtime_capability_bindings.mcp_credential_id = mcp_credentials.id
+      JOIN runtime_instances ON runtime_instances.id = runtime_capability_bindings.runtime_id
+      JOIN authorized_workspaces ON authorized_workspaces.id = runtime_instances.workspace_id` : "";
+  const runtimePredicate = audience === "runtime" ? `
+      AND runtime_capability_bindings.revoked_at IS NULL AND runtime_capability_bindings.expires_at > ?
+      AND runtime_instances.state IN ('PROVISIONING','STARTING','READY','IDLE')
+      AND runtime_instances.organization_id = mcp_credentials.organization_id
+      AND runtime_instances.project_id = mcp_credentials.project_id
+      AND runtime_instances.owner_user_id = mcp_credentials.created_by_user_id
+      AND runtime_instances.workspace_id = mcp_credentials.workspace_id
+      AND runtime_instances.security_epoch = mcp_credentials.security_epoch
+      AND runtime_capability_bindings.security_epoch = mcp_credentials.security_epoch
+      AND authorized_workspaces.status = 'authorized'
+      AND authorized_workspaces.security_epoch = mcp_credentials.security_epoch` : "";
+  const row = db.prepare(`${SELECT_CREDENTIAL}${runtimeScope}
+      JOIN service_principals ON service_principals.id = mcp_credentials.service_principal_id
+      WHERE mcp_credentials.token_hash = ? AND mcp_credentials.audience = ? AND mcp_credentials.revoked_at IS NULL
+        AND mcp_credentials.expires_at > ? AND service_principals.status = 'active'
+        AND service_principals.security_epoch = mcp_credentials.security_epoch${runtimePredicate}`)
+    .get(hash, audience, timestamp, ...(audience === "runtime" ? [timestamp] : [])) as CredentialRow | undefined;
   if (!row) return undefined;
   execTransaction(() => db.prepare("UPDATE mcp_credentials SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL")
     .run(now.toISOString(), row.id));

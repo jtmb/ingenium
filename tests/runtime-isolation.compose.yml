@@ -1,0 +1,76 @@
+services:
+  runtime-one:
+    image: ${RUNTIME_IMAGE:?RUNTIME_IMAGE is required}
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      RUNTIME_CANARY: one
+    volumes:
+      - ${RUNTIME_ONE_WORKSPACE:?RUNTIME_ONE_WORKSPACE is required}:/workspace:rw
+    tmpfs:
+      - /home/appuser:rw,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=8388608,uid=1000,gid=1000,mode=0700
+    networks: [runtime-one]
+    entrypoint: ["node", "-e"]
+    command:
+      - |
+        const fs = require("node:fs");
+        const http = require("node:http");
+        fs.writeFileSync("/workspace/one", "one", { mode: 0o600 });
+        fs.writeFileSync("/home/appuser/state", "one", { mode: 0o600 });
+        const server = http.createServer((_request, response) => response.end("one"));
+        server.listen(4098, "0.0.0.0");
+        setTimeout(async () => {
+          const environment = fs.readFileSync("/proc/1/environ", "utf8");
+          if (!environment.includes("RUNTIME_CANARY=one") || environment.includes("RUNTIME_CANARY=two")) process.exit(1);
+          try {
+            await fetch("http://runtime-two:4098", { signal: AbortSignal.timeout(1000) });
+            process.exit(1);
+          } catch {
+            fs.writeFileSync("/workspace/verified", "one", { mode: 0o600 });
+          }
+        }, 500);
+        setTimeout(() => server.close(() => process.exit(0)), 15000);
+
+  runtime-two:
+    image: ${RUNTIME_IMAGE:?RUNTIME_IMAGE is required}
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      RUNTIME_CANARY: two
+    volumes:
+      - ${RUNTIME_TWO_WORKSPACE:?RUNTIME_TWO_WORKSPACE is required}:/workspace:rw
+    tmpfs:
+      - /home/appuser:rw,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=8388608,uid=1000,gid=1000,mode=0700
+    networks: [runtime-two]
+    entrypoint: ["node", "-e"]
+    command:
+      - |
+        const fs = require("node:fs");
+        const http = require("node:http");
+        fs.writeFileSync("/workspace/two", "two", { mode: 0o600 });
+        fs.writeFileSync("/home/appuser/state", "two", { mode: 0o600 });
+        const server = http.createServer((_request, response) => response.end("two"));
+        server.listen(4098, "0.0.0.0");
+        setTimeout(async () => {
+          const environment = fs.readFileSync("/proc/1/environ", "utf8");
+          if (!environment.includes("RUNTIME_CANARY=two") || environment.includes("RUNTIME_CANARY=one")) process.exit(1);
+          try {
+            await fetch("http://runtime-one:4098", { signal: AbortSignal.timeout(1000) });
+            process.exit(1);
+          } catch {
+            fs.writeFileSync("/workspace/verified", "two", { mode: 0o600 });
+          }
+        }, 500);
+        setTimeout(() => server.close(() => process.exit(0)), 15000);
+
+networks:
+  runtime-one:
+    internal: true
+  runtime-two:
+    internal: true

@@ -20,6 +20,7 @@ export * as bootstrap from "./tools/bootstrap.js";
 export * as securityAudit from "./tools/security-audit.js";
 export * as securityTokens from "./tools/security-tokens.js";
 export * as mcpCredentials from "./tools/mcp-credentials.js";
+export * as runtimes from "./tools/runtimes.js";
 export * as invitations from "./tools/invitations.js";
 export * as plugins from "./tools/plugins.js";
 export * as servers from "./tools/servers.js";

@@ -36,7 +36,7 @@ rendered_config="$(
   OPENCODE_SERVER_PASSWORD=compose-config-validation-password \
   INGENIUM_EMAIL_ENCRYPTION_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   IMAGE_REVISION="$REVISION" \
-  docker compose --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config
+  docker compose --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config
 )"
 
 expected_mount=$'        source: /tmp/ingenium-workspace-contract-home/repos\n        target: /workspace'
@@ -47,7 +47,7 @@ if env -u HOME \
   OPENCODE_SERVER_PASSWORD=compose-config-validation-password \
   INGENIUM_EMAIL_ENCRYPTION_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   IMAGE_REVISION="$REVISION" \
-  docker compose --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config; then
+  docker compose --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config; then
   fail 'Compose config succeeded without HOME'
 fi
 

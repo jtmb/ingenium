@@ -214,6 +214,30 @@ Dynamic child MCP tools inherit the parent's exact project and scope ceiling; pl
 runtime handoff additionally requires the dedicated `runtime` audience and
 `child-mcp:runtime`.
 
+### Per-user/workspace runtime isolation (AUTH-108)
+
+Migration 101 binds each authorized workspace and runtime to one organization,
+project, owner, immutable storage mapping, security epoch, and revisioned lifecycle.
+Runtime capabilities are hash-only AUTH-107 credentials and resolve only while their
+binding, workspace, service principal, epoch, expiry, and runtime state all remain
+valid. Provisioning failure and explicit revoke invalidate the capability immediately.
+
+The production Compose profile separates the control plane, the private runtime
+manager, and the `user-runtime` image. Only the manager receives the Docker socket.
+It accepts an owner-only manager credential, validates an operator-maintained exact
+workspace map against dedicated bind mounts, and creates one dedicated Docker network
+and container per runtime. The control plane is attached to each runtime network for
+private API/OpenCode traffic; user runtimes never share a network with each other and
+publish no host ports.
+
+Each runtime mounts only its approved worktree at `/workspace`. Its root filesystem is
+read-only; HOME, XDG, OpenCode, VS Code, temporary, and capability state are private
+tmpfs mounts. CPU, memory, PID, process, and tmpfs-disk limits are mandatory. Web,
+CLI, and VS Code processes within one runtime intentionally share that runtime's state.
+Migration 101 also provides hash-only, audience-bound launch-ticket storage and
+one-time, at-most-60-second issue/consume primitives. Browser exchange, origin binding,
+runtime-specific roots, and launch UI remain AUTH-109 work.
+
 ### Content tenancy (AUTH-105)
 
 Migration 098 makes Docs spaces, templates, and tags organization roots. Pages,

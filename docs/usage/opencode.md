@@ -75,6 +75,14 @@ tokens, or transport diagnostics.
 
 Web and CLI sessions share the same backend process state.
 
+In the AUTH-108 production profile, Web, CLI, and VS Code processes for one
+owner/workspace run in the same isolated `user-runtime` container and share only that
+runtime's HOME/worktree/session state. Different runtimes use different containers
+and Docker networks. Runtime-specific browser roots and the complete launch-ticket
+exchange land in AUTH-109; AUTH-108 supplies only the hash-only ticket storage and
+issue/consume primitives. Until the gateway work lands, this section's existing local
+gateway flow describes the `compatibility` profile.
+
 ### Repository synchronization
 
 The external-worktree path is Git → `@ingenium/extension` resource-sync plugin

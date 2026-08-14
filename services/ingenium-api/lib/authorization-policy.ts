@@ -27,7 +27,7 @@ export const PUBLIC_POLICY: AuthorizationPolicy = { action: "public.read", resou
 
 const INSTALLATION_PREFIXES = [
   "/api/v1/backups", "/api/v1/logs", "/api/v1/services", "/api/v1/config",
-  "/api/v1/opencode", "/api/v1/bootstrap",
+  "/api/v1/opencode", "/api/v1/bootstrap", "/api/v1/runtimes",
 ];
 const ADMIN_PROJECT_PREFIXES = ["/api/v1/mcp-tools", "/api/v1/mcp-servers"];
 const INSTALLATION_PROJECT_PREFIXES = ["/api/v1/config"];

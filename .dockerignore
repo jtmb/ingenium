@@ -6,6 +6,7 @@
 .gitmodules
 .github/
 .vscode/
+.tmp/
 .idea/
 
 # Secrets and credentials

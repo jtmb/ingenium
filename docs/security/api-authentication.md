@@ -67,6 +67,27 @@ step-up; plaintext appears only in the create/rotate response. Restart OpenCode 
 replacing either protected credential file. The project must already exist so
 its immutable UUID can be included in the credential grant.
 
+### Isolated runtime capability
+
+The control plane issues a separate `runtime` audience credential for an authorized
+runtime and transfers it as `/run/ingenium-runtime/capability` only through the private
+runtime manager. The owner-only file is on a dedicated tmpfs and is never placed in a
+container environment variable or image layer. Resolution additionally requires an
+active capability binding, authorized workspace, matching owner/org/project/workspace
+and security epochs, an unexpired credential, and a runtime in `PROVISIONING`,
+`STARTING`, `READY`, or `IDLE`. Provisioning failure, stop/revoke cleanup, wrong
+audience, expiry, or epoch mismatch fails on the next API call.
+
+The runtime-manager bearer is a different owner-only file shared only by the control
+plane and manager. It authorizes the manager's narrow health/provision/inspect/stop
+API and is not a user-runtime capability.
+
+Migration 101 launch tickets are separate random credentials stored only as token and
+nonce hashes. They are bound to one owner, runtime, and `web`, `cli`, or `vscode`
+audience, expire within 60 seconds, and can be consumed once while the workspace and
+runtime remain active. AUTH-109 owns browser exchange, origin binding, runtime roots,
+and keeping the ticket out of post-exchange URLs and logs.
+
 ### Host and container seeding
 
 - **Host:** `scripts/bootstrap-local-secrets.sh` seeds only the installation

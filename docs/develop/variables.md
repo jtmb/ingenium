@@ -20,12 +20,18 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands |
 | `INGENIUM_PROJECT` | _(none; required for external MCP)_ | extension plugins | Display locator for a credential-authorized immutable project UUID. It is not authority and must match a credential project grant. |
+| `INGENIUM_PROJECT_ID` | _(runtime-injected)_ | isolated runtime launchers | Immutable project UUID for the current isolated runtime. |
+| `INGENIUM_ORGANIZATION_ID` | _(runtime-injected)_ | isolated runtime launchers | Immutable organization UUID for the current isolated runtime. |
 | `INGENIUM_WORKTREE` | current working directory | extension launcher and `ingenium-init-project` | Exact launcher worktree binding checked by the API on scoped requests. |
 | `INGENIUM_WORKSPACE_ID` | _(none; required for external MCP)_ | extension launcher, MCP server | Stable workspace binding checked by the API. |
 | `INGENIUM_MCP_CREDENTIAL` | _(none)_ | extension and MCP server | One-time-issued scoped credential; never persist plaintext in tracked config. |
 | `INGENIUM_MCP_CREDENTIAL_FILE` | `.opencode/.ingenium-mcp-credential` (`.opencode/.ingenium-repository-sync-credential` for the container repository-sync launcher) | extension and MCP server | Owner-only scoped-credential file selected for the declared audience. External runtimes do not read the installation bearer. |
 | `INGENIUM_MCP_AUDIENCE` | `mcp` | extension and MCP server | Credential audience: `mcp`, `runtime`, or `repository-sync`. |
 | `INGENIUM_RUNTIME_CREDENTIAL_FILE` | `.opencode/.ingenium-runtime-credential` | MCP server child-runtime handoff | Optional owner-only dedicated `runtime` audience credential. It is used only for the private child environment handoff and must match the parent project/workspace/worktree binding. |
+| `INGENIUM_RUNTIME_CREDENTIAL` | _(none)_ | MCP server | Optional in-memory runtime credential used by tests/internal launchers; production isolated runtimes use the protected capability file instead. |
+| `INGENIUM_RUNTIME_ID` | _(runtime-injected)_ | isolated runtime launchers | Immutable runtime UUID. |
+| `INGENIUM_RUNTIME_OWNER_ID` | _(runtime-injected)_ | isolated runtime launchers | Immutable user UUID that owns the runtime. |
+| `INGENIUM_RUNTIME_BIND_HOST` | `127.0.0.1`; `0.0.0.0` inside an isolated runtime | ttyd and code-server launchers | Private listener bind selected by the trusted runtime entrypoint. Runtime ports remain un-published. |
 | `INGENIUM_INTERNAL_SERVICE` | _(none)_ | internal MCP/server launchers | Explicit internal-service compatibility marker permitting the installation bearer. Never set for external user runtimes. |
 
 ## Extension (`packages/ingenium-extension`)
@@ -52,6 +58,18 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `SYNTHESIS_ENDPOINT` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis endpoint URL (used when no provider config is saved in DB) |
 | `SYNTHESIS_ALLOW_PRIVATE_NETWORK` | `false` | `synthesis-llm.ts` | When `true`, bypasses SSRF protection for the synthesis endpoint. Required for local inference servers (Ollama, LM Studio, vLLM). |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | extraction engine | OpenCode SQLite DB path for server-side extraction |
+| `INGENIUM_DEPLOYMENT_MODE` | `compatibility` | API runtime mode, entrypoint, restore executor | `compatibility`, `control-plane`, or internal `user-runtime`. Control-plane restore refuses to run while any runtime is non-terminal. |
+| `INGENIUM_RUNTIME_MANAGER_URL` | _(required in control-plane mode)_ | `runtime-manager-client.ts` | Private HTTP origin for the runtime manager; credentials and paths in the URL are rejected. |
+| `INGENIUM_RUNTIME_MANAGER_TOKEN_FILE` | _(required in control-plane mode)_ | control plane, runtime manager, manager health check | Canonical owner-only regular file containing the private manager bearer. The same protected file is mounted read-only into both services. |
+| `INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS` | `15000` | `runtime-reconciler.ts` | Runtime health, lease, idle, and orphan reconciliation interval; minimum 1000 ms. |
+| `INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER` | `2` | runtime routes | Maximum active runtime instances per owner. |
+| `INGENIUM_RUNTIME_CPU_MILLIS` | `1000` | runtime routes | Default per-runtime CPU quota in millicores. |
+| `INGENIUM_RUNTIME_MEMORY_BYTES` | `1073741824` | runtime routes | Default per-runtime memory limit. |
+| `INGENIUM_RUNTIME_PIDS_LIMIT` | `256` | runtime routes | Default per-runtime PID limit. |
+| `INGENIUM_RUNTIME_DISK_BYTES` | `2147483648` | runtime routes | Default size of the private HOME tmpfs. |
+| `INGENIUM_RUNTIME_PROCESS_LIMIT` | `128` | runtime routes | Default per-runtime aggregate process/PID ceiling. The manager applies the lower of this value and `INGENIUM_RUNTIME_PIDS_LIMIT` as Docker's cgroup PID limit. |
+| `INGENIUM_RUNTIME_IDLE_LEASE_MS` | `1800000` | runtime routes | Idle runtime lease duration. |
+| `INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS` | `28800000` | runtime routes | Absolute runtime lifetime and capability expiry. |
 
 ## MCP Server (`services/ingenium-server`)
 
@@ -88,6 +106,13 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `IMAGE_REVISION` | _(required; `git rev-parse HEAD`)_ | Docker Compose build arg, Docker OCI label | Lowercase 40-character SHA for the checkout being built. Compose cannot derive it, so export it before every Compose command. It is public provenance metadata, never a credential. |
 | `IMAGE_SOURCE` | `https://github.com/jtmb/ingenium` | Docker Compose build arg, Docker OCI label | Public credential-free HTTPS repository URL recorded as OCI source metadata. |
 | `OPENCODE_SERVER_URL` | `http://localhost:4098` | `ingenium-api` (opencode client) | Base URL of the OpenCode web server |
+| `INGENIUM_RUNTIME_MANAGER_PORT` | `4110` | private runtime manager | Manager listen port on the internal control network; it is never published to the host. |
+| `INGENIUM_RUNTIME_WORKSPACE_MAP_FILE` | `/etc/ingenium/runtime-workspaces.json` | private runtime manager | Root-controlled version-1 JSON map of workspace IDs to exact host and validation paths. |
+| `INGENIUM_RUNTIME_API_URL` | `http://ingenium-control-plane:4096/api/v1` in Compose | private runtime manager | Private API URL injected into user-runtime containers after strict hostname/path validation. |
+| `INGENIUM_USER_RUNTIME_IMAGE` | `ingenium-user-runtime:$IMAGE_REVISION` in Compose | private runtime manager | Exact image reference used for isolated runtime containers. |
+| `INGENIUM_RUNTIME_NETWORK_PREFIX` | `ingenium-runtime-` | private runtime manager | Prefix for one identity-labeled Docker network per runtime. |
+| `INGENIUM_CONTROL_PLANE_CONTAINER` | `ingenium-control-plane` | private runtime manager | Exact identity-labeled control-plane container attached to each dedicated runtime network. |
+| `DOCKER_GID` | `999` | production Compose runtime manager | Host Docker-socket group ID added only to the unprivileged runtime-manager container; set it to the socket's actual group ID when different. |
 
 > Multer file uploads for `/api/v1/opencode/upload` are stored at `/tmp/ingenium-chat-uploads/`.
 

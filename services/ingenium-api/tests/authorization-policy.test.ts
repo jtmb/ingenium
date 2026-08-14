@@ -17,6 +17,8 @@ describe("AUTH-102 canonical API policy", () => {
     ["PUT", "/api/v1/settings/provider-configs", "installation", "write"],
     ["POST", "/api/v1/opencode/integrations/openai/connect/key", "installation", "execute"],
     ["GET", "/api/v1/backups", "installation", "read"],
+    ["GET", "/api/v1/runtimes", "installation", "read"],
+    ["POST", "/api/v1/runtimes", "installation", "write"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],

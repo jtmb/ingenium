@@ -5,8 +5,10 @@ name: ingenium
 
 services:
   ingenium:
+    profiles: ["compatibility"]
     build:
       context: .
+      target: compatibility
       # NEXT_PUBLIC_* values are embedded into the Next.js dashboard during
       # image creation. They are deliberately non-secret gateway origins.
       args:
@@ -76,8 +78,130 @@ services:
       retries: 5
       start_period: 90s
 
+  control-plane:
+    profiles: ["production"]
+    build:
+      context: .
+      target: control-plane
+      args:
+        NEXT_PUBLIC_OPENCODE_WEB_URL: "${NEXT_PUBLIC_OPENCODE_WEB_URL:-http://opencode.localhost:3000/}"
+        NEXT_PUBLIC_OPENCODE_CLI_URL: "${NEXT_PUBLIC_OPENCODE_CLI_URL:-http://cli.localhost:3000/}"
+        IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
+        IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+    restart: unless-stopped
+    container_name: ingenium-control-plane
+    labels:
+      com.ingenium.control-plane: "true"
+    ports:
+      - "3000:3000"
+      - "127.0.0.1:4097:4097"
+      - "127.0.0.1:1455:1455"
+    environment:
+      - INGENIUM_DEPLOYMENT_MODE=control-plane
+      # Loaded from the operator environment or ignored mode-0600 .env file;
+      # never bake this server-side credential into source or an image layer.
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}
+      - INGENIUM_API_TOKEN=${INGENIUM_API_TOKEN:-}
+      - INGENIUM_API_TOKEN_FILE=${INGENIUM_API_TOKEN_FILE:-}
+      - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
+      - INGENIUM_API_PORT=4096
+      - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
+      - INGENIUM_RUNTIME_MANAGER_URL=http://runtime-manager:4110/
+      - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token
+      - INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS=${INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS:-15000}
+      - INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER=${INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER:-2}
+      - INGENIUM_RUNTIME_CPU_MILLIS=${INGENIUM_RUNTIME_CPU_MILLIS:-1000}
+      - INGENIUM_RUNTIME_MEMORY_BYTES=${INGENIUM_RUNTIME_MEMORY_BYTES:-1073741824}
+      - INGENIUM_RUNTIME_PIDS_LIMIT=${INGENIUM_RUNTIME_PIDS_LIMIT:-256}
+      - INGENIUM_RUNTIME_DISK_BYTES=${INGENIUM_RUNTIME_DISK_BYTES:-2147483648}
+      - INGENIUM_RUNTIME_PROCESS_LIMIT=${INGENIUM_RUNTIME_PROCESS_LIMIT:-128}
+      - INGENIUM_RUNTIME_IDLE_LEASE_MS=${INGENIUM_RUNTIME_IDLE_LEASE_MS:-1800000}
+      - INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS=${INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS:-28800000}
+      - INGENIUM_BACKUPS_DIR=${INGENIUM_BACKUPS_DIR:-}
+      - INGENIUM_BACKUP_SIGNING_KEY_FILE=${INGENIUM_BACKUP_SIGNING_KEY_FILE:-}
+      - INGENIUM_RESTORE_STAGING_DIR=${INGENIUM_RESTORE_STAGING_DIR:-}
+      - DASHBOARD_ALLOWED_ORIGINS=${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
+      - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:?INGENIUM_EMAIL_ENCRYPTION_KEY (64 hex chars) is required}
+      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/mail/oauth/callback}
+    volumes:
+      - control-plane-data:/app/.ingenium
+      - control-plane-opencode-config:/home/appuser/.config
+      - control-plane-opencode-data:/home/appuser/.local
+      - ./opencode.json:/app/opencode.json:ro
+      - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
+    networks:
+      - runtime-control
+      - control-egress
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "/app/scripts/healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  runtime-manager:
+    profiles: ["production"]
+    build:
+      context: .
+      target: runtime-manager
+      args:
+        IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
+        IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+    restart: unless-stopped
+    user: "1000:1000"
+    group_add:
+      - "${DOCKER_GID:-999}"
+    environment:
+      - INGENIUM_RUNTIME_MANAGER_PORT=4110
+      - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token
+      - INGENIUM_RUNTIME_WORKSPACE_MAP_FILE=/etc/ingenium/runtime-workspaces.json
+      - INGENIUM_USER_RUNTIME_IMAGE=ingenium-user-runtime:${IMAGE_REVISION}
+      - INGENIUM_RUNTIME_NETWORK_PREFIX=ingenium-runtime-
+      - INGENIUM_CONTROL_PLANE_CONTAINER=ingenium-control-plane
+      - INGENIUM_RUNTIME_API_URL=http://ingenium-control-plane:4096/api/v1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
+      - "${INGENIUM_RUNTIME_WORKSPACE_MAP_FILE:-./config/runtime-workspaces.example.json}:/etc/ingenium/runtime-workspaces.json:ro"
+    networks:
+      - runtime-control
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  runtime-image:
+    profiles: ["runtime-build"]
+    image: ingenium-user-runtime:${IMAGE_REVISION}
+    build:
+      context: .
+      target: user-runtime
+      args:
+        IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
+        IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+    entrypoint: ["/bin/true"]
+
 volumes:
   ingenium-data:
   opencode-config:
   opencode-data:
   vscode-data:
+  control-plane-data:
+  control-plane-opencode-config:
+  control-plane-opencode-data:
+
+networks:
+  runtime-control:
+    name: ingenium-runtime-control
+    internal: true
+  control-egress:
+    name: ingenium-control-egress

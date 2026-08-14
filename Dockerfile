@@ -36,7 +36,7 @@ RUN npm run build
 
 RUN npm prune --omit=dev
 
-FROM node:22-slim AS runtime
+FROM node:22-slim AS runtime-base
 
 # Keep provenance as build arguments because `.git` is excluded from the build
 # context. The revision must be a lowercase full SHA for deployment comparison;
@@ -156,11 +156,11 @@ RUN chmod 0555 /app/packages/ingenium-extension/dist/scripts/init-project.js && 
 
 # Supervisor and the entrypoint resolve these explicit `/app` paths at runtime;
 # copy only their declared scripts instead of retaining the builder source tree.
-COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
+COPY --chown=appuser:appuser supervisord.conf control-plane-supervisord.conf runtime-supervisord.conf ./
 COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
 # `/dev/shm` is a container-runtime tmpfs. Do not create this VAULT-101 root at
 # build time: the entrypoint provisions and validates it on every container start.
-COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/
+COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/
 COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf
 COPY --chown=root:root --chmod=0555 scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh ./scripts/validate-vault-job-secret-root.sh
@@ -206,6 +206,22 @@ RUN mkdir -p /home/appuser/vscode-data/user-data /home/appuser/vscode-data/exten
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 
-EXPOSE 3000 4097 1455
+FROM runtime-base AS user-runtime
+USER appuser
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=90s CMD ["/app/scripts/runtime-healthcheck.sh"]
+ENTRYPOINT ["/app/scripts/runtime-entrypoint.sh"]
 
+FROM runtime-base AS runtime-manager
+USER appuser
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=10s CMD ["node", "/app/scripts/runtime-manager-healthcheck.mjs"]
+ENTRYPOINT ["node", "/app/services/ingenium-api/dist/scripts/runtime-manager.js"]
+
+FROM runtime-base AS control-plane
+ENV INGENIUM_DEPLOYMENT_MODE=control-plane
+EXPOSE 3000 4097 1455
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+FROM runtime-base AS compatibility
+ENV INGENIUM_DEPLOYMENT_MODE=compatibility
+EXPOSE 3000 4097 1455
 ENTRYPOINT ["/app/entrypoint.sh"]

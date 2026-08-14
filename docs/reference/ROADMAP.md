@@ -833,10 +833,27 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   host exposure, unsafe cleanup, data loss, or false fleet authorization is
   `BLOCKING`; capacity tuning is `FOLLOW_UP`; bounded runtime telemetry is
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-108: <acceptance evidence placeholder>` with non-empty runtime,
-  migration, security, deployment, E2E, and containment evidence.
+- **Markers/evidence:** [x] `work-started` preflight completed; [ ] matching
+  `work-complete` remains open pending production deployment, strict containment,
+  QA, and security-review gates.
+  Evidence AUTH-108 (implementation wave): migration 101 and focused core tests
+  cover exact schema, partial-schema refusal, ownership, CAS lifecycle, capability
+  scope/revocation, and orphan recovery. Focused API/extension tests cover container
+  specifications, route success/4xx/manager-failure cleanup, runtime OpenCode target
+  selection, restore refusal, protected capability files, and service status. Core,
+  API, extension, and server typechecks, shell syntax, all three Compose profile
+  renders, and the `user-runtime`, control-plane, and runtime-manager image builds
+  pass. A disposable two-container Compose fixture proves separate environment,
+  network, and workspace mounts with no published ports and confirms owned cleanup.
+  A second disposable fixture exercises the real authenticated runtime manager,
+  capability handoff, all three private runtime services through a control-plane
+  peer, and identity-owned container/network removal. The focused core and API
+  suites now include launch-ticket binding/replay checks, installation-level fleet
+  policy classification, and exited-container reconciliation. Strict containment
+  was attempted but remains blocked by retained historical telemetry rooted across
+  both `/tmp` and `/var/tmp` plus pre-existing unverified listeners on 3000, 4097,
+  and 1455; the runtime fixtures themselves left no owned containers or networks.
+  Full production deployment, QA, and security review remain open and are not claimed.
 
 #### AUTH-109 — Runtime gateway/UI: audience roots and launch flow
 

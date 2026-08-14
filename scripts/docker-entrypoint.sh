@@ -9,6 +9,13 @@
 # - Supervisord is exec'd so it receives container lifecycle signals as PID 1
 set -eu
 
+DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}"
+case "$DEPLOYMENT_MODE" in
+  compatibility|control-plane) ;;
+  *) echo "ERROR: INGENIUM_DEPLOYMENT_MODE must be compatibility or control-plane"; exit 1 ;;
+esac
+export INGENIUM_DEPLOYMENT_MODE="$DEPLOYMENT_MODE"
+
 # VAULT-101: this must run as root before any supervised API process exists.
 # The validator creates only its exact tmpfs child and never enumerates secrets.
 if [ "$(id -u)" -ne 0 ]; then
@@ -362,6 +369,8 @@ chown root:root "$RESTORE_MAINTENANCE_DIR" "$RESTORE_JOURNAL_KEY_FILE"
 chmod 0700 "$RESTORE_MAINTENANCE_DIR"
 chmod 0600 "$RESTORE_JOURNAL_KEY_FILE"
 
+# Compatibility mode retains the historical single-user OpenCode/VS Code state.
+if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
 # Seed OpenCode config with Ingenium MCP on first start
 OC_CONFIG="/home/appuser/.config/opencode/opencode.jsonc"
 if [ ! -f "$OC_CONFIG" ]; then
@@ -489,6 +498,7 @@ done
 # Repair only regular non-symlink Markdown profiles before appuser runs
 # repository initialization; secrets and configuration stay untouched.
 /app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"
+fi
 
 # Refuse to start if a templating or package change made the gateway unsafe.
 # Validate as the supervised Nginx user so validation cannot leave root-owned
@@ -498,4 +508,7 @@ runuser -u appuser -- env -i \
   /app/scripts/validate-gateway-config.sh
 
 # Start supervisord as PID 1 after all startup setup has completed.
+if [ "$DEPLOYMENT_MODE" = "control-plane" ]; then
+  exec supervisord -c /app/control-plane-supervisord.conf
+fi
 exec supervisord -c /app/supervisord.conf

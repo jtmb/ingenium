@@ -53,6 +53,7 @@ import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
 import { coordinationRouter } from "../lib/routes/coordination.js";
 import { bootstrapRouter } from "../lib/routes/bootstrap.js";
 import { organizationsRouter } from "../lib/routes/organizations.js";
+import { runtimesRouter } from "../lib/routes/runtimes.js";
 import {
   defaultMcpServerProjection,
   isPackagedMcpLauncher,
@@ -64,10 +65,12 @@ import { recoverVaultSecretRunDirectories } from "../lib/job-runner.js";
 import { startBackupScheduler } from "../lib/backup-scheduler.js";
 import { createApiLifecycle, installShutdownSignalHandlers, type ApiLifecycle } from "../lib/lifecycle.js";
 import { startMailMaintenance } from "../lib/mail-maintenance.js";
-import { shouldStartBackgroundSchedulers, shouldStartMailMaintenance } from "../lib/runtime-mode.js";
+import { isControlPlaneMode, shouldStartBackgroundSchedulers, shouldStartMailMaintenance } from "../lib/runtime-mode.js";
 import { startRestoreMaintenance } from "../lib/restore-supervisor.js";
 import { configureEmailRuntimeForApi } from "../lib/email-runtime.js";
 import { recoverServerGlobalProviderMetadata } from "../lib/server-global-provider-persistence.js";
+import { runtimeOpenCodeContext } from "../lib/runtime-opencode-context.js";
+import { startRuntimeReconciler } from "../lib/runtime-reconciler.js";
 
 configureEmailRuntimeForApi();
 
@@ -174,7 +177,7 @@ app.use("/api/v1/commands", commandsRouter);
 app.use("/api/v1/config", configRouter);
 app.use("/api/v1/mcp-tools", mcpToolsRouter);
 app.use("/api/v1/logs", logsRouter);
-app.use("/api/v1/opencode", opencodeRouter);
+app.use("/api/v1/opencode", runtimeOpenCodeContext, opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
 
@@ -186,6 +189,7 @@ app.use("/api/v1/docs", docsAiRouter);
 app.use("/api/v1/backups", backupsRouter);
 app.use("/api/v1/rag", ragRouter);
 app.use("/api/v1/usage", usageRouter);
+app.use("/api/v1/runtimes", runtimesRouter);
 
 // Error handler must be registered AFTER all routes — Express 4 does not catch errors
 // from middleware registered below the error handler.
@@ -205,7 +209,8 @@ export function recoverInterruptedJobRunsAtStartup(): number {
 }
 
 function runStartupMaintenance(lifecycle: ApiLifecycle): void {
-  logger.info("api", `ingenium-api listening privately on 127.0.0.1:${config.port}`);
+  const host = isControlPlaneMode() ? "0.0.0.0" : "127.0.0.1";
+  logger.info("api", `ingenium-api listening privately on ${host}:${config.port}`);
 
   // Ensure global-default exists before schedulers or mail maintenance use it.
   const globalProjectId = ensureGlobalProject();
@@ -252,6 +257,10 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
     startBackupScheduler();
   } else {
     logger.info("api", "Background schedulers disabled by API test/maintenance mode");
+  }
+
+  if (isControlPlaneMode()) {
+    lifecycle.registerCleanup("runtime-reconciler", startRuntimeReconciler());
   }
 
   if (shouldStartMailMaintenance()) {
@@ -341,7 +350,7 @@ export function startApiServer(): ApiServerHandle | null {
     return null;
   }
 
-  const server = app.listen(config.port, "127.0.0.1");
+  const server = app.listen(config.port, isControlPlaneMode() ? "0.0.0.0" : "127.0.0.1");
   const lifecycle = createApiLifecycle(server);
   const disposeSignals = installShutdownSignalHandlers(lifecycle);
   const disposeFatalHandlers = installFatalErrorHandlers(lifecycle);

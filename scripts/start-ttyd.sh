@@ -16,7 +16,7 @@ exec env -i \
   XDG_DATA_HOME="/home/appuser/.local/share" \
   OPENCODE_SERVER_PASSWORD="" \
   ttyd \
-    --interface 127.0.0.1 \
+    --interface "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}" \
     --port 4099 \
     --writable \
     --check-origin \

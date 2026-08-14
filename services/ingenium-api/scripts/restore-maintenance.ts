@@ -28,7 +28,9 @@ import {
   closeDbForMaintenance,
   getDb,
   projects,
+  runtimes,
 } from "ingenium-core";
+import { hasActiveRuntimeForRestore } from "../lib/restore-runtime-guard.js";
 
 const PROGRAM = "restore-maintenance";
 const JOURNAL_FILE = "journal.json";
@@ -46,8 +48,13 @@ const PHASES = new Set([
   "opencode_rollback", "opencode_installed", "pair_committed", "rehydrated", "restarting", "completed",
   "rolling_back", "rolled_back", "rollback_failed",
 ]);
-const USER_PROGRAMS = ["ttyd-opencode", "vscode", "opencode-web", "ingenium-api"] as const;
-const RESTART_PROGRAMS = ["ingenium-api", "opencode-web", "ttyd-opencode", "vscode"] as const;
+const CONTROL_PLANE_MODE = process.env.INGENIUM_DEPLOYMENT_MODE === "control-plane";
+const USER_PROGRAMS: readonly string[] = CONTROL_PLANE_MODE
+  ? ["ingenium-api"]
+  : ["ttyd-opencode", "vscode", "opencode-web", "ingenium-api"];
+const RESTART_PROGRAMS: readonly string[] = CONTROL_PLANE_MODE
+  ? ["ingenium-api"]
+  : ["ingenium-api", "opencode-web", "ttyd-opencode", "vscode"];
 
 type Phase = "claimed" | "quiescing" | "snapshotting" | "swapping" | "buffers_written" | "ingenium_rollback" | "ingenium_installed"
   | "opencode_rollback" | "opencode_installed" | "pair_committed" | "rehydrated" | "restarting" | "completed"
@@ -686,7 +693,7 @@ function removeTransientPair(parents: TargetParents, paths: TargetPaths, root: s
 }
 
 async function supervisor(method: "startProcess" | "stopProcess" | "getProcessInfo", program: string): Promise<string> {
-  if (![...USER_PROGRAMS, "restore-maintenance"].includes(program as typeof USER_PROGRAMS[number])) {
+  if (![...USER_PROGRAMS, "restore-maintenance"].includes(program)) {
     throw new MaintenanceError("SUPERVISOR_FAILED");
   }
   const response = await fetch("http://127.0.0.1:9001/RPC2", {
@@ -862,6 +869,9 @@ async function execute(): Promise<void> {
   const global = projects.getGlobalProject();
   try {
     if (!global) return;
+    if (CONTROL_PLANE_MODE && hasActiveRuntimeForRestore(runtimes.listRuntimeInstances())) {
+      throw new MaintenanceError("HOLDER_REFUSED");
+    }
     const queued = backups.listQueuedRestoreExecutions(global.id)[0];
     if (!queued) return;
     releaseLock = acquireLock(root, queued.id);

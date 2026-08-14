@@ -10,6 +10,8 @@ entrypoint="${repo_root}/scripts/docker-entrypoint.sh"
 windows_helper="${repo_root}/scripts/windows-loopback-transport.ps1"
 env_example="${repo_root}/.env.example"
 supervisor_config="${repo_root}/supervisord.conf"
+control_plane_supervisor_config="${repo_root}/control-plane-supervisord.conf"
+runtime_supervisor_config="${repo_root}/runtime-supervisord.conf"
 image_provenance_validator="${repo_root}/scripts/validate-image-provenance.mjs"
 opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.mjs"
 vscode_runner="${repo_root}/scripts/start-vscode.sh"
@@ -72,7 +74,7 @@ reject_path() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy" "$vault_secret_root_validator"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy" "$vault_secret_root_validator"; do
   require_file "$path"
 done
 
@@ -91,7 +93,11 @@ reject_literal "$dockerfile" "ENV IMAGE_REVISION"
 reject_literal "$dockerfile" "ENV IMAGE_SOURCE"
 reject_literal "$dockerfile" "/usr/local/bin/xdg-open"
 require_literal "$dockerfile" "FROM node:22-slim AS builder"
-require_literal "$dockerfile" "FROM node:22-slim AS runtime"
+require_literal "$dockerfile" "FROM node:22-slim AS runtime-base"
+require_literal "$dockerfile" "FROM runtime-base AS user-runtime"
+require_literal "$dockerfile" "FROM runtime-base AS runtime-manager"
+require_literal "$dockerfile" "FROM runtime-base AS control-plane"
+require_literal "$dockerfile" "FROM runtime-base AS compatibility"
 reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
 require_literal "$dockerfile" "RUN node -e 'require(\"better-sqlite3\")'"
 require_literal "$dockerfile" "RUN npm run build"
@@ -175,12 +181,30 @@ require_literal "$compose_file" "driver: local"
 require_literal "$compose_file" "max-size: \"10m\""
 reject_literal "$compose_file" "4098:4098"
 reject_literal "$compose_file" "4099:4099"
-reject_literal "$compose_file" "security_opt:"
+require_literal "$compose_file" "security_opt:"
+require_literal "$compose_file" "cap_drop:"
 reject_literal "$compose_file" "seccomp=unconfined"
 reject_literal "$dockerfile" "seccomp=unconfined"
 reject_literal "$supervisor_config" "seccomp=unconfined"
 reject_literal "$dockerfile" "NOPASSWD:ALL"
 reject_literal "$dockerfile" "sudo"
+require_literal "$compose_file" 'profiles: ["compatibility"]'
+require_literal "$compose_file" 'profiles: ["production"]'
+require_literal "$compose_file" 'profiles: ["runtime-build"]'
+require_literal "$compose_file" '/var/run/docker.sock:/var/run/docker.sock'
+socket_mounts="$(grep -F -c -- '/var/run/docker.sock:/var/run/docker.sock' "$compose_file")"
+if [ "$socket_mounts" -ne 1 ]; then
+  echo "ERROR: exactly one Docker socket mount is required"
+  exit 1
+fi
+require_literal "$compose_file" 'INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token'
+require_literal "$compose_file" 'INGENIUM_RUNTIME_WORKSPACE_MAP_FILE=/etc/ingenium/runtime-workspaces.json'
+require_literal "$compose_file" 'INGENIUM_RUNTIME_NETWORK_PREFIX=ingenium-runtime-'
+opencode_password_wires="$(grep -F -c -- 'OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}' "$compose_file")"
+if [ "$opencode_password_wires" -ne 2 ]; then
+  echo "ERROR: compatibility and production control plane must both require the protected OpenCode server credential"
+  exit 1
+fi
 
 reject_literal "$compose_file" "INGENIUM_GATEWAY_PASSWORD"
 reject_literal "$compose_file" "INGENIUM_GATEWAY_BCRYPT_COST"
@@ -213,6 +237,23 @@ require_literal "${repo_root}/scripts/run-api.sh" 'backup_dir="${INGENIUM_BACKUP
 require_literal "${repo_root}/scripts/run-api.sh" '*[![:space:]]*) ;;'
 require_literal "${repo_root}/scripts/run-api.sh" '*) backup_dir="/app/.ingenium/backups" ;;'
 require_literal "${repo_root}/scripts/run-api.sh" 'INGENIUM_BACKUPS_DIR="$backup_dir"'
+require_literal "${repo_root}/scripts/run-api.sh" 'deployment_mode="${INGENIUM_DEPLOYMENT_MODE:?INGENIUM_DEPLOYMENT_MODE is required}"'
+require_literal "${repo_root}/scripts/run-api.sh" 'INGENIUM_DEPLOYMENT_MODE="$deployment_mode"'
+for runtime_setting in \
+  INGENIUM_RUNTIME_MANAGER_URL \
+  INGENIUM_RUNTIME_MANAGER_TOKEN_FILE \
+  INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS \
+  INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER \
+  INGENIUM_RUNTIME_CPU_MILLIS \
+  INGENIUM_RUNTIME_MEMORY_BYTES \
+  INGENIUM_RUNTIME_PIDS_LIMIT \
+  INGENIUM_RUNTIME_DISK_BYTES \
+  INGENIUM_RUNTIME_PROCESS_LIMIT \
+  INGENIUM_RUNTIME_IDLE_LEASE_MS \
+  INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS; do
+  require_literal "${repo_root}/scripts/run-api.sh" ": \"\${${runtime_setting}:?${runtime_setting} is required in control-plane mode}\""
+  require_literal "${repo_root}/scripts/run-api.sh" "${runtime_setting}=\"\${${runtime_setting}"
+done
 require_literal "${repo_root}/scripts/run-dashboard.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "$supervisor_config" "command=/app/scripts/run-api.sh"
 require_literal "$supervisor_config" "command=/app/scripts/run-api-boundary-proxy.sh"
@@ -271,7 +312,7 @@ reject_literal "$vscode_runner" "https://"
 reject_literal "$vscode_runner" "http://"
 reject_literal "$vscode_runner" '--install-extension sst-dev.opencode'
 reject_pattern "$vscode_runner" 'rm[[:space:]].*extensions'
-require_literal "$vscode_runner" '--bind-addr 127.0.0.1:4100'
+require_literal "$vscode_runner" '--bind-addr "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}:4100"'
 require_literal "$vscode_runner" '--auth none'
 require_literal "$vscode_runner" '--disable-telemetry'
 require_literal "$vscode_runner" '--disable-update-check'
@@ -343,7 +384,7 @@ done
 require_literal "${repo_root}/scripts/healthcheck.sh" "exec runuser -u appuser -- env -i"
 require_literal "${repo_root}/scripts/healthcheck.sh" "node /app/scripts/probe-api.mjs"
 require_literal "${repo_root}/scripts/healthcheck.sh" "validate-vault-job-secret-root.sh verify"
-require_literal "${repo_root}/scripts/healthcheck.sh" "ttyd-opencode vscode; do"
+require_literal "${repo_root}/scripts/healthcheck.sh" 'programs="$programs opencode-web ttyd-opencode vscode"'
 require_literal "${repo_root}/scripts/healthcheck.sh" "require_restore_maintenance_safe"
 require_literal "$entrypoint" "recover-restore-maintenance.sh"
 require_literal "$dockerfile" "appuser-gid"

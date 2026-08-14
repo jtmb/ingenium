@@ -8,6 +8,7 @@ const RUNTIME_API_TOKEN_FILE = "/run/ingenium-secrets/api-token";
 const MCP_CREDENTIAL_FILE_NAME = ".ingenium-mcp-credential";
 const REPOSITORY_SYNC_CREDENTIAL_FILE_NAME = ".ingenium-repository-sync-credential";
 const RUNTIME_CREDENTIAL_FILE_NAME = ".ingenium-runtime-credential";
+const RUNTIME_CAPABILITY_FILE = "/run/ingenium-runtime/capability";
 
 function normalizedApiToken(value: string | undefined): string | undefined {
   const token = value?.trim();
@@ -90,8 +91,11 @@ function resolveApiCredential(): { token?: string; installation: boolean } {
 }
 
 function resolveRuntimeCredential(): string | undefined {
+  const configured = process.env.INGENIUM_RUNTIME_CREDENTIAL_FILE;
   return normalizedApiToken(process.env.INGENIUM_RUNTIME_CREDENTIAL)
-    ?? readTokenFile(process.env.INGENIUM_RUNTIME_CREDENTIAL_FILE ?? `.opencode/${RUNTIME_CREDENTIAL_FILE_NAME}`, RUNTIME_CREDENTIAL_FILE_NAME);
+    ?? (configured === RUNTIME_CAPABILITY_FILE
+      ? readPrivateTokenFile(configured)
+      : readTokenFile(configured ?? `.opencode/${RUNTIME_CREDENTIAL_FILE_NAME}`, RUNTIME_CREDENTIAL_FILE_NAME));
 }
 
 /**

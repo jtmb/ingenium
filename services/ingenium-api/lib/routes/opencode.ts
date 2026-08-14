@@ -30,6 +30,7 @@ import {
 } from "../chat-provider-catalog.js";
 import { normalizeMcpStatusResponse } from "../mcp-status.js";
 import { isSafeBrowserIdentifier, isSafeBrowserLabel, isSafeMcpServerName } from "../browser-safe-scalars.js";
+import { currentOpenCodeRuntimeTarget } from "../runtime-opencode-context.js";
 
 /* ── File upload configuration ── */
 
@@ -250,7 +251,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
  * Returns 503 if missing so the caller gets a clear signal.
  */
 function guardPassword(req: any, res: any): boolean {
-  if (!process.env.OPENCODE_SERVER_PASSWORD) {
+  if (!process.env.OPENCODE_SERVER_PASSWORD && !currentOpenCodeRuntimeTarget()) {
     logger.warn(SOURCE, `Route blocked: OPENCODE_SERVER_PASSWORD not configured`, {
       method: req.method,
       path: req.originalUrl,

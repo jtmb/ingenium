@@ -15,6 +15,7 @@ if [ "${1:-}" != "--clean-env" ]; then
     HOME="/home/appuser" \
     XDG_CONFIG_HOME="/home/appuser/.config" \
     XDG_DATA_HOME="/home/appuser/.local/share" \
+    INGENIUM_RUNTIME_BIND_HOST="${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}" \
     /bin/sh "$0" --clean-env
 fi
 
@@ -98,7 +99,7 @@ if ! has_expected_extension "$extension_list"; then
 fi
 
 exec /usr/local/bin/code-server \
-  --bind-addr 127.0.0.1:4100 \
+  --bind-addr "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}:4100" \
   --auth none \
   --disable-telemetry \
   --disable-update-check \

@@ -244,6 +244,12 @@ interface ContentTenancyMigrationState {
   missing: string[];
 }
 
+interface RuntimeIsolationMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -1814,6 +1820,7 @@ function compareMigrationDefinitions(
   if (!expected) {
     const reference = new Database(":memory:");
     try {
+      reference.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
       reference.exec(prerequisiteSql);
       reference.exec(readFileSync(resolve(import.meta.dirname ?? __dirname, "../data/migrations", migrationFile), "utf-8"));
       expected = new Map(objectNames.map((name) => {
@@ -2253,6 +2260,67 @@ function inspectMcpCredentialMigration(db: Database.Database): AuthenticationFou
     ));
   }
   return { any, complete: missing.length === 0, missing };
+}
+
+const RUNTIME_ISOLATION_TABLES: Record<string, string[]> = {
+  authorized_workspaces: ["id", "organization_id", "project_id", "owner_user_id", "storage_path", "storage_mapping_hash", "status", "security_epoch", "created_at", "updated_at"],
+  runtime_instances: ["id", "workspace_id", "organization_id", "project_id", "owner_user_id", "state", "revision", "lease_owner_hash", "lease_expires_at", "idle_expires_at", "absolute_expires_at", "cpu_millis", "memory_bytes", "pids_limit", "disk_bytes", "process_limit", "backend_name", "backend_container_id", "security_epoch", "active_connections", "active_generations", "last_authenticated_activity_at", "last_backend_health_at", "created_at", "updated_at", "stopped_at"],
+  runtime_capability_bindings: ["id", "runtime_id", "mcp_credential_id", "organization_id", "project_id", "owner_user_id", "workspace_id", "security_epoch", "expires_at", "revoked_at", "created_at"],
+  runtime_launch_tickets: ["id", "runtime_id", "organization_id", "project_id", "owner_user_id", "audience", "token_hash", "nonce_hash", "expires_at", "consumed_at", "created_at"],
+  runtime_activity_events: ["id", "runtime_id", "event_type", "from_state", "to_state", "revision", "actor_type", "actor_id", "created_at"],
+  runtime_isolation_manifests: ["id", "migration", "workspace_count", "runtime_count", "phase", "foreign_key_violations", "created_at"],
+};
+const RUNTIME_ISOLATION_INDEXES = [
+  "idx_runtime_instances_scope", "idx_runtime_instances_owner_state", "idx_runtime_instances_lease", "idx_runtime_activity_runtime_created",
+  "idx_runtime_capability_active",
+  "idx_runtime_instances_launch_scope", "idx_runtime_launch_tickets_runtime_expiry",
+];
+const RUNTIME_ISOLATION_TRIGGERS = [
+  "authorized_workspaces_scope_insert", "authorized_workspaces_mapping_immutable", "runtime_instances_scope_insert",
+  "runtime_instances_identity_immutable", "runtime_capability_scope_insert", "runtime_capability_immutable_update",
+  "runtime_launch_ticket_scope_insert", "runtime_launch_ticket_consume_once", "runtime_launch_ticket_immutable_delete",
+  "runtime_activity_immutable_update", "runtime_activity_immutable_delete", "runtime_manifest_immutable_update",
+  "runtime_manifest_immutable_delete",
+];
+
+function inspectRuntimeIsolationMigration(db: Database.Database): RuntimeIsolationMigrationState {
+  const state = inspectMigrationComponents(db, RUNTIME_ISOLATION_TABLES, RUNTIME_ISOLATION_INDEXES, RUNTIME_ISOLATION_TRIGGERS);
+  if (!state.any || state.missing.length > 0) return state;
+  const objects = [...Object.keys(RUNTIME_ISOLATION_TABLES), ...RUNTIME_ISOLATION_INDEXES, ...RUNTIME_ISOLATION_TRIGGERS];
+  state.missing.push(...compareMigrationDefinitions(db, "101_runtime_isolation.sql", `
+    CREATE TABLE organizations (id TEXT PRIMARY KEY);
+    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE projects (id TEXT PRIMARY KEY, organization_id TEXT, archived_at TEXT);
+    CREATE TABLE organization_memberships (organization_id TEXT, user_id TEXT, status TEXT);
+    CREATE TABLE mcp_credentials (
+      id TEXT PRIMARY KEY, kind TEXT, audience TEXT, organization_id TEXT, project_id TEXT,
+      workspace_id TEXT, launcher_worktree TEXT, security_epoch INTEGER, expires_at TEXT,
+      revoked_at TEXT, created_by_user_id TEXT, token_hash TEXT, created_at TEXT
+    );
+  `, objects));
+  if (state.missing.length === 0) {
+    const unmapped = db.prepare(`SELECT count(*) AS count FROM mcp_credentials c
+      WHERE NOT EXISTS (SELECT 1 FROM authorized_workspaces w WHERE w.id = c.workspace_id
+        AND w.organization_id = c.organization_id AND w.project_id = c.project_id
+        AND w.owner_user_id = c.created_by_user_id AND w.storage_path = c.launcher_worktree
+        AND w.storage_mapping_hash = sha256(c.workspace_id || char(0) || c.launcher_worktree))`).get() as { count: number };
+    const invalidBindings = db.prepare(`SELECT count(*) AS count FROM runtime_capability_bindings b
+      JOIN runtime_instances r ON r.id = b.runtime_id JOIN mcp_credentials c ON c.id = b.mcp_credential_id
+      WHERE c.kind <> 'runtime' OR c.audience <> 'runtime' OR r.workspace_id <> c.workspace_id
+        OR r.organization_id <> c.organization_id OR r.project_id <> c.project_id OR r.owner_user_id <> c.created_by_user_id`).get() as { count: number };
+    const manifest = db.prepare("SELECT phase, foreign_key_violations, workspace_count, runtime_count FROM runtime_isolation_manifests WHERE migration = 101").get() as {
+      phase: string; foreign_key_violations: number; workspace_count: number; runtime_count: number;
+    } | undefined;
+    if (unmapped.count > 0) state.missing.push("runtime workspace backfill");
+    if (invalidBindings.count > 0) state.missing.push("runtime capability backfill");
+    if (manifest && ((db.prepare("SELECT count(*) AS count FROM authorized_workspaces").get() as { count: number }).count < manifest.workspace_count
+      || (db.prepare("SELECT count(*) AS count FROM runtime_instances").get() as { count: number }).count < manifest.runtime_count)) {
+      state.missing.push("runtime ownership backfill counts");
+    }
+    if (manifest?.phase !== "verified" || manifest.foreign_key_violations !== 0) state.missing.push("migration 101 verified manifest");
+  }
+  state.complete = state.missing.length === 0;
+  return state;
 }
 
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
@@ -3251,6 +3319,7 @@ export function getDb(dbPath?: string): Database.Database {
   mkdirSync(dir, { recursive: true });
 
   db = new Database(resolvedDbPath);
+  db.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
   db.pragma("journal_mode = WAL");
   db.pragma("busy_timeout = 5000");
   db.pragma("foreign_keys = ON");
@@ -3266,7 +3335,7 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
-export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099" | "100", AuthenticationFoundationMigrationState> {
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099" | "100" | "101", AuthenticationFoundationMigrationState> {
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   return {
     "093": inspectIdentityTenancyMigration(database),
@@ -3277,6 +3346,7 @@ export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "09
     "098": inspectContentTenancyMigration(database),
     "099": inspectAutomationTenancyMigration(database),
     "100": inspectMcpCredentialMigration(database),
+    "101": inspectRuntimeIsolationMigration(database),
   };
 }
 
@@ -4613,6 +4683,23 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("100", ["foreign key integrity"]);
     }
     logger.info("db", "Applied migration 100_mcp_credentials.sql");
+  }
+
+  const runtimeIsolationMigration = inspectRuntimeIsolationMigration(db);
+  if (runtimeIsolationMigration.any && !runtimeIsolationMigration.complete) {
+    throw restoreMigrationPartialStateError("101", runtimeIsolationMigration.missing);
+  }
+  if (!runtimeIsolationMigration.complete) {
+    if (!inspectMcpCredentialMigration(db).complete) {
+      throw restoreMigrationPartialStateError("101", ["migration 100 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "101_runtime_isolation.sql"), "utf-8"));
+    const applied = inspectRuntimeIsolationMigration(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError("101", applied.missing);
+    if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("101", ["foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 101_runtime_isolation.sql");
   }
 
   enforceReservedBrokerInvariant(db);

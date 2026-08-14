@@ -11,7 +11,15 @@ description: Docker deployment guide — services, ports, volumes, health checks
 
 ## Overview
 
-Ingenium uses **single-container deployment** via Docker Compose. A single container runs **supervisord** managing seven processes:
+Docker Compose provides two explicit deployment profiles:
+
+- `compatibility` keeps the established single container and seven supervised
+  processes.
+- `production` separates the control plane from a private Docker-socket-owning
+  runtime manager and builds one isolated `user-runtime` container per authorized
+  owner/workspace. AUTH-109 browser routing is not yet included in this profile.
+
+The compatibility container runs:
 
 1. **API boundary** (host-loopback :4097 → private Express :4096)
 2. **Dashboard** (Next.js on :3000)
@@ -41,11 +49,11 @@ export INGENIUM_EMAIL_ENCRYPTION_KEY='...'
 # commands, so IMAGE_REVISION is required for every Compose invocation.
 export IMAGE_REVISION="$(git rev-parse HEAD)"
 
-# Start all services (with build)
-docker compose up --build
+# Start the established local compatibility profile (with build)
+docker compose --profile compatibility up --build
 
 # Start without rebuild
-docker compose up
+docker compose --profile compatibility up
 
 # Stop all services
 docker compose down
@@ -54,8 +62,8 @@ docker compose down
 docker compose logs -f
 
 # Execute commands inside container
-docker compose exec ingenium npm run test
-docker compose exec ingenium npm run check
+docker compose --profile compatibility exec ingenium npm run test
+docker compose --profile compatibility exec ingenium npm run check
 ```
 
 After a detached deployment, verify the running image metadata without dumping
@@ -69,7 +77,7 @@ Seed the internal installation credential before starting the deployment:
 
 ```bash
 ./scripts/bootstrap-local-secrets.sh
-docker compose up --build -d
+docker compose --profile compatibility up --build -d
 ```
 
 The script creates or updates only the mode-`0600` `.env`. It never copies the
@@ -87,6 +95,58 @@ probe, and email watcher read the protected file as needed; services do not
 need the credential in their inherited environment. Symlinks, non-regular files,
 and unsafe permissions are rejected. Credential contents are never part of
 logs, observations, or diagnostics.
+
+### Isolated production runtime profile
+
+Build the immutable runtime image before starting the control plane. The manager
+credential must be a regular owner-only file containing 43–128 base64url characters;
+the Compose default `/dev/null` is deliberately nonfunctional. Set
+`INGENIUM_RUNTIME_MANAGER_TOKEN_FILE` to its absolute host path.
+
+Copy `config/runtime-workspaces.example.json` to an operator-controlled file and add
+only approved mappings. Every mapping has `id`, the exact host `hostPath` later mounted
+at `/workspace`, and a distinct `validationPath` mounted read-only into the manager.
+Supply those validation mounts with an operator Compose override; startup rejects
+missing dedicated mounts, symlinks, writable map files, duplicate IDs, and source/root
+mismatches.
+
+```json
+{
+  "version": 1,
+  "workspaces": [
+    {
+      "id": "workspace-uuid-or-stable-id",
+      "hostPath": "/srv/ingenium-workspaces/example",
+      "validationPath": "/mnt/approved-workspaces/example"
+    }
+  ]
+}
+```
+
+```yaml
+services:
+  runtime-manager:
+    volumes:
+      - /srv/ingenium-workspaces/example:/mnt/approved-workspaces/example:ro
+```
+
+```bash
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+export INGENIUM_RUNTIME_MANAGER_TOKEN_FILE='/run/secrets/ingenium-runtime-manager'
+export INGENIUM_RUNTIME_WORKSPACE_MAP_FILE='/etc/ingenium/runtime-workspaces.json'
+
+docker compose --profile runtime-build build runtime-image
+docker compose --profile production -f docker-compose.yml -f docker-compose.runtime.override.yml up --build -d control-plane runtime-manager
+```
+
+Only `runtime-manager` mounts `/var/run/docker.sock`; never add that mount to the
+control plane or a user runtime. The manager port and runtime ports 4098/4099/4100
+remain un-published. Each runtime receives a dedicated Docker network, exact worktree
+mount, read-only root filesystem, private HOME/XDG tmpfs, and bounded resources.
+The manager transfers the scoped runtime capability through attached container stdin;
+the entrypoint atomically installs it as an owner-only file on the private runtime
+tmpfs before any supervised service starts. It is never an environment value, image
+layer, or writable-root archive.
 
 ---
 

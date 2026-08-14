@@ -42,6 +42,19 @@ launcher-worktree bounds. Repository sync is least-privilege; private child runt
 handoff requires its own runtime audience. Tool filtering is not the authorization
 boundary: every API route re-evaluates the server-derived principal.
 
+## Runtime isolation
+
+AUTH-108 gives each owner/workspace a distinct container, network namespace,
+process tree, HOME/XDG/OpenCode/VS Code tmpfs, capability file, and exact worktree
+mount. Runtime containers are non-root, read-only-root, capability-dropped,
+resource-limited, publish no host ports, and never receive the installation bearer,
+vault/backup secrets, or Docker socket. Only the private runtime-manager service has
+the socket; it validates exact labels before stop/remove and never exposes a general
+Docker proxy. The control plane can reach each dedicated runtime network, while one
+user runtime cannot address another runtime network. Runtime launch-ticket primitives
+store only token/nonce hashes and enforce owner, runtime, audience, expiry, active
+scope, and one-time consumption; browser origin exchange remains AUTH-109.
+
 ## LLM Endpoint SSRF Protection
 
 **Source**: `packages/ingenium-core/lib/tools/endpoint-policy.ts`

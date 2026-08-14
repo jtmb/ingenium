@@ -39,7 +39,7 @@ Set the required secrets before starting. Keep them in your shell or an ignored 
 export OPENCODE_SERVER_PASSWORD='choose-a-server-password'
 export INGENIUM_API_TOKEN='<generate-a-32-to-128-character-base64url-token>'
 export INGENIUM_EMAIL_ENCRYPTION_KEY='64-hex-or-base64url-characters'
-docker compose up --build
+docker compose --profile compatibility up --build
 ```
 
 The deployed database is `/app/.ingenium/data` on the `ingenium-data` named
@@ -68,7 +68,7 @@ build-time browser configuration; if you use remote/LAN access, set both to
 operator-managed authenticated root HTTPS origins before building. Do not set
 them only after the container starts.
 
-This starts all services in a single container:
+This starts the `compatibility` profile in a single container:
 - **Dashboard root** on http://localhost:3000 (WSL-forwardable local gateway, no Basic Auth)
 - **OpenCode Web root** on http://opencode.localhost:3000 (no Basic Auth)
 - **OpenCode CLI root** on http://cli.localhost:3000 (no Basic Auth)
@@ -110,7 +110,7 @@ it to browser JavaScript. The exact OAuth callback exception is
 callback listener, which forwards only that exact path to private Express
 `4096`; other paths are rejected.
 
-A source/config or build-time-origin change requires `docker compose up --build -d`; a secret-only change normally requires `docker compose up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099 as a workaround.
+A source/config or build-time-origin change requires `docker compose --profile compatibility up --build -d`; a secret-only change normally requires `docker compose --profile compatibility up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099 as a workaround. The separate AUTH-108 `production` profile is documented in [Deployment](deployment.md#isolated-production-runtime-profile); its runtime-specific browser routing remains AUTH-109 work.
 
 If the API boundary returns `401`, the bearer header is missing or malformed;
 `403` means the token is wrong. If the dashboard proxy returns `503`, its

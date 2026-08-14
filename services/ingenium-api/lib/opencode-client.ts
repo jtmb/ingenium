@@ -1,5 +1,6 @@
 import { logger } from "ingenium-core";
 import { config } from "../config/index.js";
+import { currentOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
 
 /**
  * Server-side typed HTTP client for the OpenCode v1.18.9 REST API.
@@ -502,8 +503,9 @@ export async function request<T>(
     safeProviderOperation?: SafeProviderOperation;
   } = {},
 ): Promise<OpenCodeResult<T>> {
-  const auth = buildAuthHeader();
-  if (!auth) {
+  const target = currentOpenCodeRuntimeTarget();
+  const auth = target ? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null) : buildAuthHeader();
+  if (!target && !auth) {
     return {
       error: {
         message: "OPENCODE_SERVER_PASSWORD is not configured",
@@ -522,7 +524,7 @@ export async function request<T>(
   } = opts;
 
   // Build URL with query params
-  let url = `${config.opencodeUrl}${path}`;
+  let url = `${target?.baseUrl ?? config.opencodeUrl}${path}`;
   if (query) {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query)) {
@@ -534,10 +536,8 @@ export async function request<T>(
     if (qs) url += `?${qs}`;
   }
 
-  const headers: Record<string, string> = {
-    Authorization: auth,
-    Accept: "application/json",
-  };
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (auth) headers.Authorization = auth;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -662,8 +662,9 @@ async function streamRequest(
   query?: Record<string, string | number | undefined>,
   extraHeaders?: Record<string, string>,
 ): Promise<ReadableStream<Uint8Array> | OpenCodeErrorShape> {
-  const auth = buildAuthHeader();
-  if (!auth) {
+  const target = currentOpenCodeRuntimeTarget();
+  const auth = target ? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null) : buildAuthHeader();
+  if (!target && !auth) {
     return {
       error: {
         message: "OPENCODE_SERVER_PASSWORD is not configured",
@@ -672,7 +673,7 @@ async function streamRequest(
     };
   }
 
-  let url = `${config.opencodeUrl}${path}`;
+  let url = `${target?.baseUrl ?? config.opencodeUrl}${path}`;
   if (query) {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query)) {
@@ -683,11 +684,8 @@ async function streamRequest(
   }
 
   try {
-    const headers: Record<string, string> = {
-      Authorization: auth,
-      Accept: "text/event-stream",
-      ...extraHeaders,
-    };
+    const headers: Record<string, string> = { Accept: "text/event-stream", ...extraHeaders };
+    if (auth) headers.Authorization = auth;
     const response = await fetch(url, {
       method: "GET",
       headers,

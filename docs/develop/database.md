@@ -86,7 +86,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–100)
+### Feature Migrations (045–101)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -125,6 +125,7 @@ another Compose project volume.
 | 098 | `098_content_tenancy.sql` | Adds organization-rooted Docs, authorization-scoped RAG visibility, immutable context ownership, private-by-default observations/personality, bounded pipeline scope, normalized content shares, content-free audit, child-scope triggers, and an immutable ID/hash/count manifest. Partial state is refused by startup probes. |
 | 099 | `099_automation_tenancy.sql` | Adds immutable organization/project automation ownership, service principals, execution grants, event provenance, scheduler fairness, and migration evidence. |
 | 100 | `100_mcp_credentials.sql` | Adds AUTH-107 hash-only MCP/service/runtime/repository-sync credentials with mandatory audience, scope, organization/project grants, workspace/worktree, expiry, service-principal security epoch, rotation/revocation, last-used metadata, and immutable SQL guards. |
+| 101 | `101_runtime_isolation.sql` | Adds AUTH-108 authorized-workspace mappings, one runtime per workspace, revisioned runtime lifecycle/leases/limits, runtime capability bindings, hash-only one-time audience launch tickets, append-only activity, exact-schema probes, and verified backfill evidence. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

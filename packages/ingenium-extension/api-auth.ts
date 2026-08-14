@@ -6,6 +6,7 @@ const REPOSITORY_SYNC_TOKEN_FILE_NAME = ".ingenium-repository-sync-credential";
 const TOKEN_FILE_REFERENCE = /^\{file:([^{}\u0000\r\n]+)\}$/;
 const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 5_000;
+const RUNTIME_CAPABILITY_FILE = "/run/ingenium-runtime/capability";
 
 /** Startup probes remain deliberately small and finite so plugin loading cannot hang. */
 export const EXTENSION_STARTUP_READINESS_ATTEMPTS = 3;
@@ -73,7 +74,10 @@ function readWorktreeTokenFile(worktree: string | undefined, reference = `.openc
 
 function configuredTokenFile(worktree: string | undefined, reference: string | undefined): string | undefined {
   if (!reference) return readWorktreeTokenFile(worktree);
-  if (isAbsolute(reference)) return readProtectedTokenFile(reference);
+  if (isAbsolute(reference)) {
+    if (process.env.INGENIUM_MCP_AUDIENCE === "runtime" && reference !== RUNTIME_CAPABILITY_FILE) return undefined;
+    return readProtectedTokenFile(reference);
+  }
   return readWorktreeTokenFile(worktree, reference);
 }
 

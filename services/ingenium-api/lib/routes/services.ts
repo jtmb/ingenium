@@ -1,11 +1,13 @@
 import { Router } from "express";
-import { logger, settings, synthesis, docs, tasks, projects } from "ingenium-core";
+import { logger, settings, synthesis, docs, tasks, projects, runtimes } from "ingenium-core";
 import {
   getEmailClientStatus,
   getSynthesisStatus,
   hasRequiredApplicationIssue,
   type ApplicationHealth,
 } from "../application-health.js";
+import { runtimeManagerHealth } from "../runtime-manager-client.js";
+import { isControlPlaneMode } from "../runtime-mode.js";
 
 /** Handles /api/v1/services — supervisord process status, logs, and application health checks (email-client, synthesis-engine). */
 export const servicesRouter = Router();
@@ -318,6 +320,19 @@ async function getTasksStatus(): Promise<AppInfo> {
   }
 }
 
+async function getRuntimeFleetStatus(): Promise<AppInfo> {
+  const instances = runtimes.listRuntimeInstances();
+  const healthy = await runtimeManagerHealth();
+  const active = instances.filter((runtime) => ["PROVISIONING", "STARTING", "READY", "IDLE", "STOPPING"].includes(runtime.state)).length;
+  return {
+    name: "runtime-manager",
+    state: healthy ? "healthy" : "error",
+    description: "Per-user workspace runtime fleet",
+    detail: healthy ? `${active} active runtime(s)` : "Private runtime manager unavailable",
+    required: true,
+  };
+}
+
 /** GET /api/v1/services/status — live supervisord process states + application health */
 servicesRouter.get("/status", async (_req, res): Promise<void> => {
   // Always fetch application health checks (independent from supervisord)
@@ -328,6 +343,7 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
       getSynthesisStatus(),
       getDocsStatus(),
       getTasksStatus(),
+      ...(isControlPlaneMode() ? [getRuntimeFleetStatus()] : []),
     ]);
   } catch {
     // Individual errors are caught inside each function; this is defense-in-depth

@@ -14,6 +14,7 @@ if [ "${INGENIUM_HEALTHCHECK_CLEAN_ENV:-}" != "1" ]; then
   exec runuser -u appuser -- env -i \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     HOME="/home/appuser" \
+    INGENIUM_DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}" \
     INGENIUM_API_TOKEN_FILE="${INGENIUM_API_TOKEN_FILE:-/run/ingenium-secrets/api-token}" \
     INGENIUM_HEALTHCHECK_CLEAN_ENV="1" \
     /bin/sh "$0"
@@ -106,7 +107,11 @@ require_cli_root_ok() {
   fi
 }
 
-for program in ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway opencode-web ttyd-opencode vscode; do
+programs="ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway"
+if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
+  programs="$programs opencode-web ttyd-opencode vscode"
+fi
+for program in $programs; do
   require_running "$program"
 done
 
@@ -114,16 +119,16 @@ require_restore_maintenance_safe
 require_vault_job_secret_root
 require_api_ok
 require_http_ok "dashboard" "http://127.0.0.1:3001/"
-require_http_ok "OpenCode Web" "http://127.0.0.1:4098/"
-require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
 require_gateway_status "dashboard gateway" "localhost" "/tasks" "200"
 require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/" "200"
 require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/projects" "200"
-require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
-# code-server redirects its root to the mounted workspace selector. Verify both
-# the root gateway behavior and the final workbench document.
-require_gateway_status "VS Code gateway root" "vscode.localhost" "/" "302"
-require_gateway_status "VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"
-require_vscode_gateway_csp
-require_ttyd_gateway_health
-require_cli_root_ok
+if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
+  require_http_ok "OpenCode Web" "http://127.0.0.1:4098/"
+  require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
+  require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
+  require_gateway_status "VS Code gateway root" "vscode.localhost" "/" "302"
+  require_gateway_status "VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"
+  require_vscode_gateway_csp
+  require_ttyd_gateway_health
+  require_cli_root_ok
+fi

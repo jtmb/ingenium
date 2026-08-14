@@ -9,6 +9,19 @@ function isEnabled(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";
 }
 
+export type DeploymentMode = "compatibility" | "control-plane" | "user-runtime";
+
+export function deploymentMode(environment: NodeJS.ProcessEnv = process.env): DeploymentMode {
+  const value = environment.INGENIUM_DEPLOYMENT_MODE?.trim();
+  if (!value) return "compatibility";
+  if (value === "compatibility" || value === "control-plane" || value === "user-runtime") return value;
+  throw new Error("INGENIUM_DEPLOYMENT_MODE is invalid");
+}
+
+export function isControlPlaneMode(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return deploymentMode(environment) === "control-plane";
+}
+
 export function isApiTestMode(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.NODE_ENV === "test" || isEnabled(environment.INGENIUM_API_TEST_MODE);
 }
