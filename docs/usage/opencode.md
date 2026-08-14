@@ -31,10 +31,10 @@ For the conversational chat interface, see [Ingenium Chat](/chat).
 
 Direct attachment to host ports 4098 and 4099 is intentionally unavailable; those listeners remain private. Use the local roots on gateway port `3000` (`opencode.localhost:3000` and `cli.localhost:3000`), which Windows reaches through WSL localhost forwarding. For LAN or remote deployments, an operator must provide a separate TLS-authenticated operator profile protecting the dashboard and both dedicated root HTTPS origins, then configure `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` before rebuilding. The Windows helper only verifies existing gateway reachability and does not configure transport automatically.
 
-The API also requires `INGENIUM_API_TOKEN`. Do not put it in tracked
-`opencode.json`/`opencode.jsonc`. The OpenCode MCP extension can use the
-ignored, owner-only `.opencode/.ingenium-api-token` fallback (mode `0600`) when
-the environment variable is unavailable. Dashboard API calls use a server-side
+The installation API uses `INGENIUM_API_TOKEN` internally, while external OpenCode
+MCP uses a scoped credential from the ignored, owner-only
+`.opencode/.ingenium-mcp-credential` file (mode `0600`). Do not put plaintext
+credentials in tracked `opencode.json`/`opencode.jsonc`. Dashboard API calls use a server-side
 proxy that injects the token; browser code never receives it. The loopback API
 boundary is `127.0.0.1:4097`. OAuth on `127.0.0.1:1455` reaches Nginx and then
 private Express `4096`; the auth middleware allowlists only the exact
@@ -50,19 +50,18 @@ service build path. Build it before starting a local OpenCode session:
 npm run build --workspace=packages/ingenium-extension
 ```
 
-The launcher checks the protected token source and project identity before it
-loads the stdio transport. Local sessions derive a validated project name from
-their worktree unless `INGENIUM_PROJECT` explicitly overrides it. Docker is the
-only `/workspace` session, so its generated OpenCode config explicitly uses
-`global-default`. This avoids a clone-specific local project value while never
-silently treating an external worktree as the global namespace.
+The launcher checks the scoped credential and explicit project/workspace/worktree
+bindings before loading the transport. `INGENIUM_PROJECT` is a display locator;
+the API-authorized project UUID is authoritative. The project must exist before
+credential issuance because its immutable UUID is part of the credential grant.
 
 The container also projects its persistent global config at startup so the
-`auto-observer`, `observer`, and `resource-sync` plugins all resolve the
-owner-only worktree token file. `ingenium-init-project` preflights that bearer
-path before it provisions a project or syncs repository resources. The shared
+`auto-observer`, `observer`, and `resource-sync` plugins resolve the owner-only
+`.opencode/.ingenium-repository-sync-credential`, while the MCP child resolves
+`.opencode/.ingenium-mcp-credential`. `ingenium-init-project` preflights the
+repository-sync credential before it syncs repository resources. The shared
 extension project resolver uses the same authenticated preflight before its
-initial project provision, with a finite retry only for transient API
+project attestation, with a finite retry only for transient API
 unavailability. Authentication failures fail closed; diagnostics never emit the
 token, URL, HTTP detail, response body, or browser-accessible credential data.
 Container OpenCode startup also performs a finite authenticated API readiness

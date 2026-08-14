@@ -19,8 +19,14 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands |
-| `INGENIUM_PROJECT` | _(none — required to override worktree)_ | extension plugins | **Extension session override.** When set, takes priority over worktree-derived project name. Required when the worktree path is `/workspace` (container mount) — see architecture docs. Never defaults to `global-default` in code; the Docker entrypoint sets this explicitly. |
-| `INGENIUM_WORKTREE` | current working directory | extension launcher and `ingenium-init-project` | Explicit worktree root for protected token-file lookup and project derivation. The container launcher explicitly sets `/workspace`; external sessions should omit it or set their own worktree and retain the normal project-isolation precedence. |
+| `INGENIUM_PROJECT` | _(none; required for external MCP)_ | extension plugins | Display locator for a credential-authorized immutable project UUID. It is not authority and must match a credential project grant. |
+| `INGENIUM_WORKTREE` | current working directory | extension launcher and `ingenium-init-project` | Exact launcher worktree binding checked by the API on scoped requests. |
+| `INGENIUM_WORKSPACE_ID` | _(none; required for external MCP)_ | extension launcher, MCP server | Stable workspace binding checked by the API. |
+| `INGENIUM_MCP_CREDENTIAL` | _(none)_ | extension and MCP server | One-time-issued scoped credential; never persist plaintext in tracked config. |
+| `INGENIUM_MCP_CREDENTIAL_FILE` | `.opencode/.ingenium-mcp-credential` (`.opencode/.ingenium-repository-sync-credential` for the container repository-sync launcher) | extension and MCP server | Owner-only scoped-credential file selected for the declared audience. External runtimes do not read the installation bearer. |
+| `INGENIUM_MCP_AUDIENCE` | `mcp` | extension and MCP server | Credential audience: `mcp`, `runtime`, or `repository-sync`. |
+| `INGENIUM_RUNTIME_CREDENTIAL_FILE` | `.opencode/.ingenium-runtime-credential` | MCP server child-runtime handoff | Optional owner-only dedicated `runtime` audience credential. It is used only for the private child environment handoff and must match the parent project/workspace/worktree binding. |
+| `INGENIUM_INTERNAL_SERVICE` | _(none)_ | internal MCP/server launchers | Explicit internal-service compatibility marker permitting the installation bearer. Never set for external user runtimes. |
 
 ## Extension (`packages/ingenium-extension`)
 
@@ -34,8 +40,8 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 |----------|---------|---------|-------------|
 | `INGENIUM_API_PORT` | `4096` in Docker (`4097` standalone) | `config/index.ts` | Private Express API listen port in the container; public host bearer boundary remains `127.0.0.1:4097`. |
 | `INGENIUM_API_RATE_LIMIT` | `100` | `lib/middleware/rate-limit.ts` | Max requests per minute per IP |
-| `INGENIUM_API_TOKEN` | _(required; no default)_ | entrypoint, API boundary, `lib/middleware/auth.ts`, dashboard server proxy | Mandatory 32–128 character base64url bearer token. Bootstrap input is consumed into a protected runtime file and unset before supervisord; never place it in tracked OpenCode config. |
-| `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; runtime default `/run/ingenium-secrets/api-token` in container)_ | entrypoint, API boundary, API, dashboard, health probe, email watcher, extension plugins | Protected regular token file alternative to the inline variable. Must not be a symlink; runtime file is mode `0600` in a mode `0700` directory. Extension plugins accept only the owner-only worktree-relative fallback or a protected absolute file. Supports API access after supervised services clear inherited credential environment variables. |
+| `INGENIUM_API_TOKEN` | _(required; no default)_ | entrypoint, API boundary, API, dashboard server proxy | Internal installation bearer only. It must not appear in user runtimes or external extension config. |
+| `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; runtime default `/run/ingenium-secrets/api-token` in container)_ | entrypoint, API boundary, API, dashboard, health probe, internal services | Protected installation-token file. External MCP uses `INGENIUM_MCP_CREDENTIAL_FILE`. |
 | `DASHBOARD_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | dashboard `proxy.ts`, API `config/index.ts`, supervised launchers | Comma-separated **exact** HTTP(S) dashboard origins accepted by both dashboard-proxy CSRF and API CORS/CSRF. Entries cannot include paths, credentials, query/fragment, whitespace, or wildcards. |
 | `CORS_ORIGIN` | _(legacy single-origin fallback only)_ | `config/index.ts` | Backward-compatible non-container fallback when `DASHBOARD_ALLOWED_ORIGINS` is unset. New deployments must configure the explicit allowlist. |
 | `INGENIUM_AUTH_ENCRYPTION_KEY_FILE` | _(required for TOTP and OIDC login)_ | `packages/ingenium-core/lib/tools/authentication.ts` | Owner-only regular file containing exactly one base64url-encoded 256-bit key. Used only for authentication-factor and transient OIDC PKCE encryption; independent of vault seal state. |

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  bindingAllowsTool,
   ProjectStateAttestor,
   getToolAuthorizationPolicy,
   launcherBoundStateGatedHandler,
@@ -146,5 +147,25 @@ describe("stateGatedHandler", () => {
     expect(getToolAuthorizationPolicy({ action: "tasks.read", resource: "tasks", permission: "read", target: "project", scopes: [], launcherBinding: "required" })).toBeNull();
     expect(getToolAuthorizationPolicy({ action: "tasks.read", resource: "tasks", permission: "owner", target: "project", scopes: ["tasks:read"], launcherBinding: "required" })).toBeNull();
     expect(getToolAuthorizationPolicy({ action: "tasks.read", resource: "tasks", permission: "read", target: "project", scopes: ["tasks:read"], launcherBinding: "required" })).toMatchObject({ permission: "read", target: "project" });
+  });
+
+  it("matches inherited scope strength used by API authorization", () => {
+    const binding = {
+      project: "project",
+      projectId: "project-id",
+      organizationId: "organization-id",
+      workspaceId: "workspace-id",
+      launcherWorktree: "/workspace",
+      scopes: ["tasks:write", "repository:sync"],
+    };
+    expect(bindingAllowsTool(binding, {
+      action: "tasks.read", resource: "tasks", permission: "read", target: "project", scopes: ["tasks:read"], launcherBinding: "required",
+    })).toBe(true);
+    expect(bindingAllowsTool(binding, {
+      action: "repository.execute", resource: "repository", permission: "execute", target: "project", scopes: ["repository:sync"], launcherBinding: "required",
+    })).toBe(true);
+    expect(bindingAllowsTool(binding, {
+      action: "vault.read", resource: "vault", permission: "read", target: "project", scopes: ["vault:read"], launcherBinding: "required",
+    })).toBe(false);
   });
 });

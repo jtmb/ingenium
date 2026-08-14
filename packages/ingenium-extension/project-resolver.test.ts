@@ -12,18 +12,21 @@ const token = "r".repeat(32);
 const apiBase = "http://api.test/api/v1";
 let worktree = "";
 let originalProject: string | undefined;
+let originalWorkspace: string | undefined;
 
 function writeProtectedToken(directory: string, value = token): void {
   const opencode = join(directory, ".opencode");
   mkdirSync(opencode, { recursive: true });
-  const tokenPath = join(opencode, ".ingenium-api-token");
+  const tokenPath = join(opencode, ".ingenium-mcp-credential");
   writeFileSync(tokenPath, `${value}\n`, { mode: 0o600 });
   chmodSync(tokenPath, 0o600);
 }
 
 beforeEach(() => {
   originalProject = process.env.INGENIUM_PROJECT;
+  originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
   process.env.INGENIUM_PROJECT = "external-startup-project";
+  process.env.INGENIUM_WORKSPACE_ID = "workspace-fixture";
   worktree = mkdtempSync(join(tmpdir(), "ingenium-project-readiness-"));
   writeProtectedToken(worktree);
   resetEnsuredProjects();
@@ -32,13 +35,15 @@ beforeEach(() => {
 afterEach(() => {
   if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
   else process.env.INGENIUM_PROJECT = originalProject;
+  if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+  else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
   resetEnsuredProjects();
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
 });
 
 describe("extension project startup readiness", () => {
-  it("performs a finite authenticated readiness retry before the first project provision", async () => {
+  it("performs a finite authenticated readiness retry before project attestation", async () => {
     let preflightAttempts = 0;
     const sleep = vi.fn(async () => undefined);
     const request = vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -46,10 +51,13 @@ describe("extension project startup readiness", () => {
       expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
       if (path.endsWith("/auth/preflight")) {
         preflightAttempts += 1;
-        return new Response("not ready", { status: preflightAttempts < 3 ? 503 : 200 });
+        return new Response(preflightAttempts < 3 ? "not ready" : JSON.stringify({ data: {
+          scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
+          audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree, restartRequiredOnCredentialChange: true,
+        } }), { status: preflightAttempts < 3 ? 503 : 200, headers: { "Content-Type": "application/json" } });
       }
-      expect(path).toBe("/api/v1/projects");
-      return new Response(null, { status: 201 });
+      expect(path).toBe("/api/v1/projects/external-startup-project/detail");
+      return Response.json({ data: { project: { id: "project-id" } } });
     });
 
     await expect(ensureExtensionProject(worktree, apiBase, undefined, {
@@ -63,7 +71,7 @@ describe("extension project startup readiness", () => {
       "/api/v1/auth/preflight",
       "/api/v1/auth/preflight",
       "/api/v1/auth/preflight",
-      "/api/v1/projects",
+      "/api/v1/projects/external-startup-project/detail",
     ]);
   });
 
@@ -95,9 +103,15 @@ describe("extension project startup readiness", () => {
     try {
       const seenTokens: string[] = [];
       const request = vi.fn(async (url: string | URL, init?: RequestInit) => {
-        seenTokens.push(new Headers(init?.headers).get("Authorization") ?? "");
+        const authorization = new Headers(init?.headers).get("Authorization") ?? "";
+        seenTokens.push(authorization);
         const path = new URL(String(url)).pathname;
-        return new Response(null, { status: path.endsWith("/auth/preflight") ? 200 : 409 });
+        if (path.endsWith("/auth/preflight")) return new Response(JSON.stringify({ data: {
+          scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
+          audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: authorization === `Bearer ${secondToken}` ? secondWorktree : worktree,
+          restartRequiredOnCredentialChange: true,
+        } }), { status: 200, headers: { "Content-Type": "application/json" } });
+        return Response.json({ data: { project: { id: "project-id" } } });
       });
 
       await ensureExtensionProject(worktree, apiBase, undefined, { request: request as unknown as typeof fetch, readiness: { retryDelayMs: 0 } });
@@ -112,5 +126,41 @@ describe("extension project startup readiness", () => {
     } finally {
       rmSync(secondWorktree, { recursive: true, force: true });
     }
+  });
+
+  it("rejects a forged project locator when returned metadata does not match the credential grant", async () => {
+    const request = vi.fn(async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/auth/preflight")) return Response.json({ data: {
+        scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
+        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+        restartRequiredOnCredentialChange: true,
+      } });
+      return Response.json({ data: { project: { id: "different-project-id" } } });
+    });
+
+    await expect(ensureExtensionProject(worktree, apiBase, undefined, {
+      request: request as unknown as typeof fetch,
+      readiness: { retryDelayMs: 0 },
+    })).rejects.toMatchObject({ failure: "not_found" });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not create a missing project because credential grants require an existing project", async () => {
+    const request = vi.fn(async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/auth/preflight")) return Response.json({ data: {
+        scopes: ["projects:read", "projects:create"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
+        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+        restartRequiredOnCredentialChange: true,
+      } });
+      return new Response(null, { status: 404 });
+    });
+
+    await expect(ensureExtensionProject(worktree, apiBase, undefined, {
+      request: request as unknown as typeof fetch,
+      readiness: { retryDelayMs: 0 },
+    })).rejects.toMatchObject({ failure: "not_found" });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

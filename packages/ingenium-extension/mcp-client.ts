@@ -114,12 +114,16 @@ function bridgeEnvironment(worktree: string, requestedProject?: string): { proje
     INGENIUM_PROJECT: project,
     INGENIUM_WORKTREE: resolve(worktree),
   };
-  const configuredToken = process.env.INGENIUM_API_TOKEN;
+  const configuredToken = process.env.INGENIUM_MCP_CREDENTIAL;
   if (configuredToken && (TOKEN.test(configuredToken) || TOKEN_REFERENCE.test(configuredToken))) {
-    environment.INGENIUM_API_TOKEN = configuredToken;
+    environment.INGENIUM_MCP_CREDENTIAL = configuredToken;
   } else {
-    environment.INGENIUM_API_TOKEN_FILE = process.env.INGENIUM_API_TOKEN_FILE ?? ".opencode/.ingenium-api-token";
+    environment.INGENIUM_MCP_CREDENTIAL_FILE = process.env.INGENIUM_MCP_CREDENTIAL_FILE ?? ".opencode/.ingenium-mcp-credential";
   }
+  environment.INGENIUM_MCP_AUDIENCE = process.env.INGENIUM_MCP_AUDIENCE ?? "mcp";
+  if (process.env.INGENIUM_RUNTIME_CREDENTIAL_FILE) environment.INGENIUM_RUNTIME_CREDENTIAL_FILE = process.env.INGENIUM_RUNTIME_CREDENTIAL_FILE;
+  if (!process.env.INGENIUM_WORKSPACE_ID) throw new McpBridgeError("authentication");
+  environment.INGENIUM_WORKSPACE_ID = process.env.INGENIUM_WORKSPACE_ID;
   return { project, environment };
 }
 

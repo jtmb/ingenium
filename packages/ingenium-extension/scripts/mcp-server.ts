@@ -16,7 +16,7 @@ export interface McpLauncherOptions {
   ensureProject?: (worktree: string, apiBase: string, project: string) => Promise<string>;
 }
 
-const MISSING_TOKEN_MESSAGE = "Ingenium MCP could not read a protected API token. Run scripts/bootstrap-local-secrets.sh for local development or configure INGENIUM_API_TOKEN_FILE.";
+const MISSING_TOKEN_MESSAGE = "Ingenium MCP could not read a protected scoped credential. Configure INGENIUM_MCP_CREDENTIAL_FILE.";
 const INVALID_PROJECT_MESSAGE = "Ingenium MCP could not resolve a safe project identity. Set INGENIUM_PROJECT to a valid project name.";
 const TRANSPORT_LOAD_MESSAGE = "Ingenium MCP launcher is incomplete. Build @ingenium/extension before starting OpenCode.";
 
@@ -36,7 +36,7 @@ export function preflightMcpLauncher(
     return { ok: false, message: INVALID_PROJECT_MESSAGE };
   }
 
-  if (!apiRequestHeaders(resolvedWorktree).has("Authorization")) {
+  if (!apiRequestHeaders(resolvedWorktree).has("Authorization") || !process.env.INGENIUM_WORKSPACE_ID) {
     return { ok: false, message: MISSING_TOKEN_MESSAGE };
   }
 
@@ -75,14 +75,16 @@ export async function runMcpLauncher(
     // The packaged transport resolves its project from the process environment.
     // Preserve the validated preflight result rather than repeating resolution
     // after its dynamic import has started.
-    process.env.INGENIUM_PROJECT = preflight.project;
     const ensureProject = options.ensureProject ?? ((resolvedWorktree: string, apiBase: string, project: string) =>
       ensureExtensionProject(resolvedWorktree, apiBase, project));
-    await ensureProject(
-      resolve(worktree),
+    const resolvedWorktree = resolve(worktree);
+    const project = await ensureProject(
+      resolvedWorktree,
       process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1",
       preflight.project,
     );
+    process.env.INGENIUM_PROJECT = project;
+    process.env.INGENIUM_WORKTREE = resolvedWorktree;
     const importTransport = options.importTransport ?? ((transportUrl: URL) => import(transportUrl.href));
     await importTransport(getMcpTransportUrl());
     return 0;

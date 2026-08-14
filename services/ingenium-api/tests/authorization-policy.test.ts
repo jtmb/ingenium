@@ -11,12 +11,13 @@ describe("AUTH-102 canonical API policy", () => {
     ["GET", "/api/v1/tasks", "project", "read"],
     ["POST", "/api/v1/jobs/job/run", "project", "execute"],
     ["GET", "/api/v1/jobs/runs/run-id/logs", "installation", "read"],
-    ["GET", "/api/v1/context/conversations", "project", "read"],
-    ["GET", "/api/v1/emails/accounts", "project", "read"],
+    ["GET", "/api/v1/context/conversations", "private", "read"],
+    ["GET", "/api/v1/emails/accounts", "private", "read"],
     ["POST", "/api/v1/vault/items/item/reveal", "project", "write"],
     ["PUT", "/api/v1/settings/provider-configs", "installation", "write"],
     ["POST", "/api/v1/opencode/integrations/openai/connect/key", "installation", "execute"],
     ["GET", "/api/v1/backups", "installation", "read"],
+    ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
     ["DELETE", "/api/v1/projects/example/purge", "project", "admin"],
@@ -58,6 +59,30 @@ describe("AUTH-102 canonical API policy", () => {
     const next = vi.fn();
     vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
     authorizationMiddleware(req, {} as Response, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it.each(["mcp", "repository-sync"] as const)("allows %s service credentials to run exact preflight", (audience) => {
+    const req = {
+      method: "GET",
+      path: "/api/v1/auth/preflight",
+      principal: {
+        type: "service",
+        id: "service-id",
+        tokenId: "credential-id",
+        scopes: ["projects:read"],
+        organizationId: "organization-id",
+        projectId: "project-id",
+        projectIds: ["project-id"],
+        audience,
+        workspaceId: "workspace-id",
+        launcherWorktree: "/workspace",
+      },
+    } as unknown as Request;
+    const next = vi.fn();
+
+    authorizationMiddleware(req, {} as Response, next);
+
     expect(next).toHaveBeenCalledOnce();
   });
 

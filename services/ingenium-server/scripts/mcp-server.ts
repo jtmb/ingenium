@@ -23,6 +23,7 @@ import {
   launcherBoundStateGatedHandler,
   ProjectStateAttestor,
   policyStateGatedHandler,
+  type LauncherAuthorizationBinding,
   type ToolAuthorizationState,
 } from "../lib/tool-state-gate.js";
 import {
@@ -245,14 +246,23 @@ server.registerTool = ((name: string, toolConfig: Parameters<typeof server.regis
 }) as typeof server.registerTool;
 
 const childToolHost = server as unknown as ChildMcpToolHost;
-const childGateway = mcpReportMode ? null : new ChildMcpGateway(
-  childToolHost,
-  launcherProject,
-  childMcpGatewayApi,
-  undefined,
-  undefined,
-  projectStateAttestor,
-);
+let childGateway: ChildMcpGateway | null = null;
+
+function launcherAuthorizationBinding(value: unknown): LauncherAuthorizationBinding | null {
+  if (!value || typeof value !== "object") return null;
+  const binding = value as Record<string, unknown>;
+  if (!launcherProject || typeof binding.projectId !== "string" || typeof binding.organizationId !== "string"
+    || typeof binding.workspaceId !== "string" || typeof binding.launcherWorktree !== "string"
+    || !Array.isArray(binding.scopes) || !binding.scopes.every((scope) => typeof scope === "string")) return null;
+  return {
+    project: launcherProject,
+    projectId: binding.projectId,
+    organizationId: binding.organizationId,
+    workspaceId: binding.workspaceId,
+    launcherWorktree: binding.launcherWorktree,
+    scopes: binding.scopes as string[],
+  };
+}
 
 server.registerTool(
   "setting_get",
@@ -2970,6 +2980,20 @@ installToolVisibilityProjection(server, toolVisibility);
 async function main() {
   const transport = new StdioServerTransport();
   await toolVisibility.prepare();
+  if (!mcpReportMode) {
+    const preflight = await api.get("/auth/preflight");
+    const binding = launcherAuthorizationBinding(preflight.data);
+    if (!binding) throw new Error("MCP_LAUNCHER_BINDING_UNAVAILABLE");
+    childGateway = new ChildMcpGateway(
+      childToolHost,
+      launcherProject,
+      childMcpGatewayApi,
+      undefined,
+      undefined,
+      projectStateAttestor,
+      binding,
+    );
+  }
   await server.connect(transport);
   await toolVisibility.start();
   if (childGateway) await childGateway.start();

@@ -4,9 +4,8 @@ set -eu
 
 /app/scripts/wait-for-opencode.sh
 
-# Keep the browser-facing terminal free of inherited credentials. The gateway
-# supplies the fixed identity, while the MCP child reads the protected token
-# through its worktree-relative path rather than an inline bearer value.
+# Keep the browser-facing terminal free of inherited credentials. OpenCode's
+# server process owns MCP/plugin access; this process is only an attach client.
 # The empty OpenCode password is intentional: browser authentication belongs
 # to the local gateway. ttyd's loopback bind, origin check, and injected header
 # keep the browser-to-terminal boundary in that gateway.
@@ -16,10 +15,6 @@ exec env -i \
   XDG_CONFIG_HOME="/home/appuser/.config" \
   XDG_DATA_HOME="/home/appuser/.local/share" \
   OPENCODE_SERVER_PASSWORD="" \
-  INGENIUM_API_URL="http://localhost:4097/api/v1" \
-  INGENIUM_API_TOKEN_FILE=".opencode/.ingenium-api-token" \
-  INGENIUM_WORKTREE="/workspace" \
-  INGENIUM_PROJECT="global-default" \
   ttyd \
     --interface 127.0.0.1 \
     --port 4099 \

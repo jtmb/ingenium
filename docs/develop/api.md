@@ -41,7 +41,10 @@ arrive without a local bearer credential:
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/v1/auth/preflight` | Authenticated capability probe for extension-managed onboarding. Returns `{ data: { authenticated: true } }`; it does not disclose token configuration, credentials, upstream diagnostics, or HTTP details on failure. |
+| GET | `/api/v1/auth/preflight` | Authenticated capability probe. Scoped credentials receive server-derived scopes, audience, organization/project grants, workspace/worktree binding, and restart guidance. Invalid credentials return `401`, missing scope `403`, and inaccessible bindings `404`; failures never disclose credential or upstream details. |
+| GET/POST | `/api/v1/auth/mcp-credentials` | List redacted metadata or issue a scoped service/runtime/repository-sync credential. Human issuance requires recent step-up; plaintext is returned once. `servicePrincipalId` is optional and omission creates the credential's service principal atomically. |
+| POST | `/api/v1/auth/mcp-credentials/:id/rotate` | Issue a replacement and immediately revoke the prior credential. Requires recent step-up; plaintext is returned once. |
+| DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Requires recent step-up. |
 
 ## Startup Behavior
 

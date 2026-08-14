@@ -15,6 +15,8 @@ import {
   getToolAuthorizationPolicy,
   type ProjectStateAttestation,
   type ToolAuthorizationPolicy,
+  type LauncherAuthorizationBinding,
+  bindingAllowsTool,
   type ToolState,
 } from "./tool-state-gate.js";
 import {
@@ -247,6 +249,7 @@ export class ChildMcpGateway {
     manager?: ChildMcpRuntimeManager,
     private readonly reconcileIntervalMs = CHILD_MCP_RECONCILE_INTERVAL_MS,
     private readonly projectStateAttestor = new ProjectStateAttestor(),
+    private readonly parentBinding?: LauncherAuthorizationBinding,
   ) {
     this.manager = manager ?? new ChildMcpRuntimeManager();
   }
@@ -410,7 +413,9 @@ export class ChildMcpGateway {
     for (const tool of discovered) {
       const response = await this.apiClient.toolEnabled(this.project!, canonicalToolName(definition.name, tool.name));
       if (this.projectStateAttestor.attest(this.project!, response.attestation)
-        && response.state === "enabled" && response.policy?.launcherBinding === "required") visible.push(tool);
+        && response.state === "enabled" && response.policy?.launcherBinding === "required"
+        && (!this.parentBinding || (response.attestation?.project_id === this.parentBinding.projectId
+          && bindingAllowsTool(this.parentBinding, response.policy)))) visible.push(tool);
     }
     const desired = new Map(visible.map((tool) => [canonicalToolName(definition.name, tool.name), tool]));
     for (const [name, tool] of this.tools) {
@@ -485,6 +490,10 @@ export class ChildMcpGateway {
       return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool state could not be verified.");
     }
     if (response.policy?.launcherBinding !== "required" || response.policy.target !== "project") {
+      return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool authorization policy could not be verified.");
+    }
+    if (this.parentBinding && (response.attestation?.project_id !== this.parentBinding.projectId
+      || !bindingAllowsTool(this.parentBinding, response.policy))) {
       return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool authorization policy could not be verified.");
     }
     if (response.state === "disabled") {

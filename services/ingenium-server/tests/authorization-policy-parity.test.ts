@@ -45,7 +45,7 @@ describe("AUTH-102 MCP policy parity", () => {
   it("corrects security-relevant route/catalog scope drift", () => {
     const byName = new Map(MCP_TOOL_CATALOG.map((tool) => [tool.name, tool]));
     expect(byName.get("ingenium_backup_create")?.authorization?.target).toBe("installation");
-    expect(byName.get("ingenium_docs_get_page")?.authorization?.target).toBe("installation");
+    expect(byName.get("ingenium_docs_get_page")?.authorization?.target).toBe("organization");
     expect(byName.get("ingenium_synthesis_cross_project")?.projectScope).toBe("global");
     expect(byName.get("ingenium_coordination_status")?.apiEndpoints).toEqual(["GET /api/v1/coordination/snapshot"]);
     expect(byName.get("ingenium_context_message_retrieve")?.authorization?.target).toBe("private");

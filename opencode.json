@@ -37,8 +37,11 @@
       "environment": {
         "PATH": "/home/brajam/.local/bin:/usr/local/bin:/usr/bin:/bin",
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_API_TOKEN": "{file:.opencode/.ingenium-api-token}",
-        "INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token",
+        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
+        "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+        "INGENIUM_MCP_AUDIENCE": "mcp",
+        "INGENIUM_PROJECT": "ingenium",
+        "INGENIUM_WORKSPACE_ID": "ingenium-local-workspace",
         "INGENIUM_API_TIMEOUT": "10000",
         "LOG_LEVEL": "info"
       }

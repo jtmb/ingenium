@@ -9,7 +9,8 @@ The built-in catalog contains **282 tools** across **30 baseline categories**:
 280 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
-Every tool needs a **project** name (except where noted).
+Every tool needs a **project** display locator (except where noted). The locator
+must resolve to a project UUID granted by the authenticated credential.
 
 The canonical catalog (source of truth) lives at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
@@ -44,6 +45,11 @@ fails closed and treats the tool as disabled. The server refreshes this
 projection periodically, after state refresh/reconnect, and emits a
 tool-list-changed notification when the visible set changes.
 
+Visibility is also authorization-derived. The server exposes only tools allowed
+by the parent credential's audience/scopes/project grants, while the API remains
+final authority for every invocation. `TOOL_DISABLED` and catalog policy parity
+are unchanged.
+
 Tools with no persisted state use their catalog `defaultEnabled` value; an
 unknown tool or state never inherits an enabled default and fails closed. For
 project-scoped state requests, the API requires and echoes both the requested
@@ -70,9 +76,9 @@ toggle path in `tests/ingenium-dashboard/mcp-tool-controls.spec.ts`.
 
 The built-in Ingenium transport is the packaged
 `@ingenium/extension` launcher. Before exposing its stdio tool catalog, it
-requires a protected API token and one safe project identity. Local worktrees
-derive the project unless `INGENIUM_PROJECT` is set; the Docker `/workspace`
-session explicitly uses `global-default`. Run
+requires a protected scoped credential and explicit project, workspace, and exact
+launcher-worktree bindings. External sessions do not inherit the installation
+bearer or derive authority from a basename. Run
 `npm run build --workspace=packages/ingenium-extension` after changing the
 launcher or transport. A safe read smoke test is `ingenium_health_check`; it
 does not require a project argument. Authentication, unavailable transport, and

@@ -25,65 +25,71 @@ INGENIUM_API_TOKEN=<generated-base64url-token>
 The placeholder above is not a usable credential. Never replace it in a
 tracked file with a real value.
 
-The API expects `Authorization: Bearer <token>`. Missing or malformed headers
-return `401`; a supplied but incorrect token returns `403`. If the API process
+The API expects `Authorization: Bearer <token>`. Missing, malformed, invalid,
+expired, or revoked bearer credentials return `401`; authenticated credentials
+with insufficient scope return `403`. If the API process
 has no configured token, management requests fail closed with `503` rather than
 falling back to unauthenticated development behavior.
 
 ## Local token-file lifecycle and permissions
 
 For host development, run `scripts/bootstrap-local-secrets.sh`. It creates or
-updates the ignored `.env` and creates `.opencode/.ingenium-api-token` when it
-is missing. It uses `umask 077`, writes both files as mode `0600`, rejects
-symlinks and non-regular files, and refuses to overwrite a token file that does
-not match `.env`. It never prints the secret. Treat a mismatch or unsafe path as
-a deployment error; do not work around it by weakening permissions.
+updates only the ignored mode-`0600` `.env` installation credential and never
+projects that broad bearer into `.opencode`. It never prints the secret.
 
 The token file must be a regular file, owner-readable, inaccessible to group and
 other users, and owned by the running user. The MCP loaders also require the
 file to be below the real worktree `.opencode` directory, reject symlinks,
 control characters, whitespace, oversized values, and arbitrary file paths.
 
-## OpenCode MCP token file
+## Scoped OpenCode MCP credential
 
-The OpenCode extension may use a protected, worktree-local fallback file when
-`INGENIUM_API_TOKEN` is absent from the MCP process environment:
+External OpenCode and extension processes use a scoped credential, not the
+installation bearer:
 
 ```text
-.opencode/.ingenium-api-token
+.opencode/.ingenium-mcp-credential
+.opencode/.ingenium-repository-sync-credential
 ```
 
 The file is ignored by Git and must be a regular, owner-readable-only file
 (mode `0600`), owned by the current user, below the current worktree's real
 `.opencode` directory. Symlinks, unsafe permissions, invalid characters, and
-oversized values are ignored. A valid `INGENIUM_API_TOKEN` environment value is
-authoritative; otherwise the extension uses the protected fallback (or the
-explicit protected `INGENIUM_API_TOKEN_FILE` reference). The extension never
-exposes the token to callers or logs.
+oversized values are ignored. Use `INGENIUM_MCP_CREDENTIAL_FILE`, with explicit
+project/workspace/worktree and audience bindings. The broad installation bearer is
+accepted only from explicit internal services and is never a user-runtime fallback.
+
+Scoped values are random 256-bit secrets stored only as SHA-256 hashes. Metadata
+includes audience, scopes, organization, immutable project grants, workspace,
+launcher worktree, expiry, service-principal security epoch, last-used time, and
+rotation/revocation state. Human issue, rotate, and revoke operations require recent
+step-up; plaintext appears only in the create/rotate response. Restart OpenCode after
+replacing either protected credential file. The project must already exist so
+its immutable UUID can be included in the credential grant.
 
 ### Host and container seeding
 
-- **Host:** `scripts/bootstrap-local-secrets.sh` seeds the local ignored file
-  from `INGENIUM_API_TOKEN` in `.env`, preserving an existing matching file.
+- **Host:** `scripts/bootstrap-local-secrets.sh` seeds only the installation
+  credential in `.env`. A recently stepped-up installation administrator issues
+  scoped MCP and repository-sync credentials through `/api/v1/auth/mcp-credentials`.
 - **Container:** the entrypoint accepts either bootstrap source, validates it,
   copies it atomically to `/run/ingenium-secrets/api-token`, sets the runtime
   directory to `0700` and the token file to `0600` owned by `appuser`, then
-  unsets the inline token before supervisord starts. It also atomically seeds
-  `/workspace/.opencode/.ingenium-api-token` with the same value and verifies
-  mode, ownership, and byte equivalence. A symlink or non-file at either
-  protected path stops startup.
+  unsets the inline token before supervisord starts. It removes only a recognized
+  historical `/workspace/.opencode/.ingenium-api-token`; an unsafe or mismatched
+  legacy path stops startup rather than being consumed.
 
-The container's first-start OpenCode config contains only the relative token
-file reference; it does not contain the token bytes. The runtime API, boundary,
+The container's first-start OpenCode config contains only the relative scoped
+MCP credential reference; it does not contain token bytes. The runtime API, boundary,
 and dashboard processes read the protected runtime file instead of inheriting
 the bootstrap secret.
 
 On every container start, the entrypoint projects the container-owned Ingenium
 MCP and plugin entries into the persistent global OpenCode config. This replaces
 the legacy `skill-sync` bootstrap entry with `resource-sync` and configures the
-`auto-observer`, `observer`, and `resource-sync` sources to resolve the same
-protected worktree token file. The projection removes an accidental inline
-`INGENIUM_API_TOKEN` value from the Ingenium MCP environment, preserves unrelated
+`auto-observer`, `observer`, and `resource-sync` sources without projecting the
+installation bearer. The projection removes accidental `INGENIUM_API_TOKEN` and
+`INGENIUM_API_TOKEN_FILE` entries from the Ingenium MCP environment, preserves unrelated
 operator settings, and never logs credential contents.
 
 Do not add the token to a tracked `opencode.json` or `opencode.jsonc`. Those
@@ -102,9 +108,10 @@ extension and restart OpenCode when plugin or config sources change.
 authenticated `GET /api/v1/auth/preflight` before a project is created or a
 repository projection begins. Extension startup permits at most three probes,
 each capped at one second and separated by a 250 ms delay; only an unavailable
-API is retried. `401` and `403` are safely classified as authentication
-failures and fail closed immediately. Diagnostics contain only a stable safe
-category (`authentication`, `unavailable`, `invalid_target`, or `rejected`) and
+API is retried. Invalid/revoked/expired/wrong-audience credentials return `401`,
+insufficient scope returns `403`, and inaccessible bindings return `404`.
+Diagnostics contain only a stable safe category (`authentication`, `scope`,
+`not_found`, `unavailable`, `invalid_target`, or `rejected`) and
 never print a token source, API URL, status, response body, or bearer value. If a later
 session lifecycle event succeeds after a transient startup failure, the
 resource-sync plugin emits the `extension_project_init_recovered` event.
@@ -164,9 +171,11 @@ and canonical marker for the internal rewrite.
 ## Direct loopback API behavior
 
 The published `127.0.0.1:4097` endpoint is the loopback API boundary, not a
-raw unauthenticated Express listener. The boundary validates the caller's
-Bearer token (`401` for missing/malformed, `403` for wrong), strips and
-replaces it, and forwards to Express on private container port `4096`.
+raw unauthenticated Express listener. The boundary rejects missing or malformed
+bearers with `401` and forwards scoped bearers to Express for validation; invalid,
+expired, or revoked bearers also receive `401`, while insufficient scope receives
+`403`. Only the matched installation bearer is replaced and marked as an internal
+request before forwarding to private container port `4096`.
 Express also enforces the bearer credential. Loopback alone is never a bypass;
 do not publish `4096` or use OpenCode ports `4098`/`4099` as an API workaround.
 
@@ -217,15 +226,18 @@ remote access.
 ## Rotation and restart procedure
 
 1. Generate a replacement API token without printing it or committing it.
-2. Update the deployment secret or ignored `.env` value, then update the host
-   fallback file through `scripts/bootstrap-local-secrets.sh` if it is used.
+2. Update the deployment secret or ignored `.env` value through
+   `scripts/bootstrap-local-secrets.sh` if it is used.
 3. Recreate/restart the container so the boundary proxy, API, and dashboard
    server load the replacement token.
-4. If OpenCode uses the fallback file, replace `.opencode/.ingenium-api-token`
-   atomically, restore mode `0600`, and restart OpenCode so its MCP process
-   reloads the credential.
-5. Verify an authenticated API request and the dashboard/MCP path, then revoke
-   the old token. Do not record either token in verification output.
+4. The scoped credential rotation endpoint creates the replacement and revokes
+   the prior credential atomically before returning the replacement plaintext;
+   there is no overlap window. Stop the affected client, rotate, immediately
+   replace the corresponding owner-only `.opencode` file, and restart it. If an
+   overlap is required, create a separate credential, install and verify it, then
+   revoke the old credential instead of using the rotation endpoint.
+5. Verify an authenticated API request and the dashboard/MCP path. Do not record
+   either credential in verification output.
 
 Runtime secret changes do not require an image rebuild, but they do require a
 service restart/recreation. Source, proxy, or build-time browser-origin

@@ -65,16 +65,17 @@ its labels or reading deployment secrets:
 ./scripts/validate-image-provenance.mjs "$IMAGE_REVISION"
 ```
 
-For the in-container OpenCode MCP configuration, seed the ignored token file before starting OpenCode:
+Seed the internal installation credential before starting the deployment:
 
 ```bash
 ./scripts/bootstrap-local-secrets.sh
 docker compose up --build -d
 ```
 
-The script creates `.env` and `.opencode/.ingenium-api-token` only when needed,
-keeps both mode `0600`, rejects unsafe paths, and refuses a mismatched existing
-token. Do not print the generated value.
+The script creates or updates only the mode-`0600` `.env`. It never copies the
+installation bearer into OpenCode. Issue scoped MCP and repository-sync
+credentials after browser bootstrap and store them in owner-only ignored files.
+Do not print generated values.
 
 ### Protected token-file runtime
 
@@ -329,7 +330,7 @@ Web and CLI sessions share the same backend process state.
 
 ### Build, restart, rollback, and image provenance
 
-`NEXT_PUBLIC_*` values are inlined by Next.js during the image build. Changing them in a running container does nothing; set both values before `docker compose up --build -d`. `OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` (or `INGENIUM_API_TOKEN_FILE`) are required to start the deployment. The API token is injected by the loopback boundary proxy and dashboard server; it is never a browser setting. After a secret-only change, recreate/restart the container so the entrypoint reseeds `/run/ingenium-secrets/api-token` and `/workspace/.opencode/.ingenium-api-token`, and every process reloads the token. A source, proxy, Dockerfile, or build-time-origin change requires `docker compose up --build -d`; an environment-only secret change does not. After a build or gateway change, restart and verify the dashboard plus both local OpenCode roots from the actual browser path. If verification fails, roll back the image and build-time configuration; never publish the private 4098/4099 listeners as a workaround.
+`NEXT_PUBLIC_*` values are inlined by Next.js during the image build. Changing them in a running container does nothing; set both values before `docker compose up --build -d`. `OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` (or `INGENIUM_API_TOKEN_FILE`) are required to start the deployment. The API token is injected only for trusted internal boundary/dashboard requests; it is never a browser or OpenCode setting. After an installation-secret change, recreate/restart the container so the entrypoint reseeds `/run/ingenium-secrets/api-token`. After a scoped OpenCode credential change, replace the owner-only scoped file and restart OpenCode. A source, proxy, Dockerfile, or build-time-origin change requires `docker compose up --build -d`; an environment-only secret change does not. After a build or gateway change, restart and verify the dashboard plus both local OpenCode roots from the actual browser path. If verification fails, roll back the image and build-time configuration; never publish the private 4098/4099 listeners as a workaround.
 
 Every Compose command requires `IMAGE_REVISION`, a lowercase 40-character SHA
 from the checkout being deployed. Export it once per shell before running

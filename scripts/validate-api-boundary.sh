@@ -99,16 +99,16 @@ reject_pattern "$dashboard_token" '(^|[^_[:alnum:]])INGENIUM_API_TOKEN([^_[:alnu
 require_literal "$boundary_proxy_runner" 'exec env -i'
 require_literal "$boundary_proxy_runner" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 require_literal "$boundary_proxy_runner" 'INGENIUM_API_UPSTREAM_PORT="4096"'
-require_literal "$boundary_proxy" 'forwarded.authorization = `Bearer ${token}`;'
+require_literal "$boundary_proxy" 'forwarded.authorization = `Bearer ${installationRequest ? token : providedToken}`;'
 require_literal "$boundary_proxy" 'const providedToken = incomingBearerToken(request.headers);'
-require_literal "$boundary_proxy" 'if (!apiTokensEqual(providedToken, token)) {'
+require_literal "$boundary_proxy" 'const installationRequest = apiTokensEqual(providedToken, token);'
+require_literal "$boundary_proxy" 'normalizedName === "x-ingenium-internal-service"'
 require_literal "$boundary_proxy" 'server.listen(proxyPort, "0.0.0.0"'
 require_literal "$supervisor_config" '[program:ingenium-api-boundary]'
 require_literal "$supervisor_config" 'command=/app/scripts/run-api-boundary-proxy.sh'
 require_literal "$bootstrap" 'chmod 0600 "$env_file"'
-require_literal "$bootstrap" 'chmod 0600 "$token_file"'
 require_literal "$bootstrap" '.env must not be a symbolic link'
-require_literal "$bootstrap" '.opencode/.ingenium-api-token must not be a symbolic link'
+reject_literal "$bootstrap" '.ingenium-api-token'
 reject_literal "$bootstrap" 'INGENIUM_EMAIL_ENCRYPTION_KEY='
 
 require_literal "$auth_middleware" 'isPublicOAuthCallbackRequest'
@@ -129,7 +129,7 @@ if [ "$auth_line" -ge "$callback_line" ]; then
   echo "ERROR: OAuth callback must be routed through the explicit auth allowlist"
   exit 1
 fi
-require_literal "$scheduler" 'headers: { Authorization: `Bearer ${token}` }'
+require_literal "$scheduler" 'headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" }'
 require_literal "$healthcheck" 'exec runuser -u appuser -- env -i'
 require_literal "$healthcheck" 'node /app/scripts/probe-api.mjs'
 require_literal "$healthcheck" 'validate-vault-job-secret-root.sh verify'

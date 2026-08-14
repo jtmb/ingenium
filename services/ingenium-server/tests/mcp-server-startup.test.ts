@@ -23,7 +23,9 @@ describe("MCP server startup", () => {
     const source = readFileSync(SERVER_SOURCE_PATH, "utf8");
 
     expect(source).toContain('const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";');
-    expect(source).toContain("const childGateway = mcpReportMode ? null : new ChildMcpGateway(");
+    expect(source).toContain("let childGateway: ChildMcpGateway | null = null;");
+    expect(source).toContain('const preflight = await api.get("/auth/preflight");');
+    expect(source).toContain("binding,");
     expect(source).toContain("if (childGateway) await childGateway.start();");
     expect(source).toContain("if (childGateway) await childGateway.shutdown();");
   });

@@ -14,6 +14,7 @@ import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Request, Response, NextFunction } from "express";
+import { mcpCredentials } from "ingenium-core";
 import { authMiddleware, isPublicLocalAuthRequest, isPublicOAuthCallbackRequest } from "../lib/middleware/auth.js";
 import {
   ApiTokenConfigurationError,
@@ -35,6 +36,7 @@ describe("authMiddleware — timing-safe comparison", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (originalEnv !== undefined) {
       process.env.INGENIUM_API_TOKEN = originalEnv;
     } else {
@@ -52,11 +54,13 @@ describe("authMiddleware — timing-safe comparison", () => {
     method = "GET",
     path = "/api/v1/health",
   ): Partial<Request> {
+    const headers = authHeader === undefined ? {} : { authorization: authHeader };
     return {
       ip: "127.0.0.1",
       method,
       path,
-      headers: authHeader === undefined ? {} : { authorization: authHeader },
+      headers,
+      get(name: string) { return (headers as Record<string, string | undefined>)[name.toLowerCase()]; },
     } as Partial<Request>;
   }
 
@@ -130,6 +134,8 @@ describe("authMiddleware — timing-safe comparison", () => {
   it("calls next() when the correct bearer token is provided", () => {
     process.env.INGENIUM_API_TOKEN = validToken;
     const req = makeReq(`Bearer ${validToken}`);
+    req.headers = { ...req.headers, "x-ingenium-internal-service": "1" };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
     const res = makeRes();
     let called = false;
     const next: NextFunction = () => { called = true; };
@@ -141,6 +147,88 @@ describe("authMiddleware — timing-safe comparison", () => {
       id: "legacy-server-bearer",
       scopes: ["legacy:*"],
     });
+  });
+
+  it("resolves a scoped MCP credential only with exact audience and launcher bounds", () => {
+    process.env.INGENIUM_API_TOKEN = validToken;
+    const scopedToken = `ing_${"b".repeat(12)}_${"c".repeat(43)}`;
+    const resolveCredential = vi.spyOn(mcpCredentials, "resolveMcpCredential").mockReturnValue({
+      id: "credential-id",
+      servicePrincipalId: "service-id",
+      kind: "service",
+      audience: "mcp",
+      name: "fixture",
+      tokenPrefix: `ing_${"b".repeat(12)}`,
+      scopes: ["projects:read"],
+      organizationId: "organization-id",
+      projectId: "project-id",
+      projectIds: ["project-id"],
+      projectName: "project",
+      workspaceId: "workspace-id",
+      launcherWorktree: "/workspace/project",
+      securityEpoch: 0,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      revokedAt: null,
+      rotatedToId: null,
+      lastUsedAt: null,
+      createdByUserId: "user-id",
+      createdAt: new Date().toISOString(),
+    });
+    const req = makeReq(`Bearer ${scopedToken}`);
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "mcp",
+      "x-ingenium-workspace": "workspace-id",
+      "x-ingenium-launcher-worktree": "/workspace/project",
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+    const next = vi.fn();
+
+    authMiddleware(req as Request, makeRes() as Response, next);
+
+    expect(resolveCredential).toHaveBeenCalledWith(scopedToken, "mcp");
+    expect(next).toHaveBeenCalledOnce();
+    expect((req as Request).principal).toMatchObject({ type: "service", id: "service-id", projectIds: ["project-id"] });
+  });
+
+  it("returns not-found semantics when a scoped credential launcher bound is forged", () => {
+    const scopedToken = `ing_${"d".repeat(12)}_${"e".repeat(43)}`;
+    vi.spyOn(mcpCredentials, "resolveMcpCredential").mockReturnValue({
+      id: "credential-id", servicePrincipalId: "service-id", kind: "service", audience: "mcp", name: "fixture",
+      tokenPrefix: `ing_${"d".repeat(12)}`, scopes: ["projects:read"], organizationId: "organization-id",
+      projectId: "project-id", projectIds: ["project-id"], projectName: "project", workspaceId: "workspace-id",
+      launcherWorktree: "/workspace/project", securityEpoch: 0, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      revokedAt: null, rotatedToId: null, lastUsedAt: null, createdByUserId: "user-id", createdAt: new Date().toISOString(),
+    });
+    const req = makeReq(`Bearer ${scopedToken}`);
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "mcp",
+      "x-ingenium-workspace": "forged-workspace",
+      "x-ingenium-launcher-worktree": "/workspace/project",
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+
+    expect(() => authMiddleware(req as Request, makeRes() as Response, vi.fn())).toThrowError(expect.objectContaining({
+      statusCode: 404,
+      code: "NOT_FOUND",
+    }));
+  });
+
+  it("recognizes an internal installation token before scoped ing_ token parsing", () => {
+    const installationToken = `ing_${"f".repeat(12)}_${"g".repeat(43)}`;
+    process.env.INGENIUM_API_TOKEN = installationToken;
+    const resolveCredential = vi.spyOn(mcpCredentials, "resolveMcpCredential");
+    const req = makeReq(`Bearer ${installationToken}`);
+    req.headers = { ...req.headers, "x-ingenium-internal-service": "1" };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+    const next = vi.fn();
+
+    authMiddleware(req as Request, makeRes() as Response, next);
+
+    expect(resolveCredential).not.toHaveBeenCalled();
+    expect((req as Request).principal?.type).toBe("compatibility");
+    expect(next).toHaveBeenCalledOnce();
   });
 
   it("handles tokens of different lengths without throwing (padding)", () => {

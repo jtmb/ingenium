@@ -1,12 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "./errors.js";
 import { apiTokensEqual, loadApiToken } from "./api-token.js";
-import { authentication, securityTokens } from "ingenium-core";
+import { authentication, mcpCredentials, securityTokens } from "ingenium-core";
 
 export type RequestPrincipal =
   | { type: "compatibility"; id: "legacy-server-bearer"; scopes: readonly ["legacy:*"] }
   | { type: "user"; id: string; scopes: readonly string[]; session?: authentication.AuthSession; tokenId?: string; organizationId?: string | null; projectId?: string | null }
-  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null }
+  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null; projectIds?: readonly string[]; audience?: mcpCredentials.McpCredentialAudience; workspaceId?: string; launcherWorktree?: string }
   | { type: "runtime-service"; id: string; scopes: readonly string[]; organizationId?: string | null; projectId?: string | null };
 
 declare global {
@@ -84,6 +84,46 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     return;
   }
 
+  if (isInternalInstallationRequest(req)) {
+    let installationToken: string;
+    try {
+      installationToken = loadApiToken();
+    } catch {
+      throw new AppError("API authentication is not configured", "API_AUTH_NOT_CONFIGURED", 503);
+    }
+    if (!authHeader?.startsWith("Bearer ") || !apiTokensEqual(authHeader.slice(7), installationToken)) {
+      throw new AppError("Invalid authorization token", "INVALID_TOKEN", 401);
+    }
+    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    next();
+    return;
+  }
+
+  if (authHeader?.startsWith("Bearer ing_") && req.get("x-ingenium-audience")) {
+    const audience = req.get("x-ingenium-audience");
+    if (audience !== "mcp" && audience !== "runtime" && audience !== "repository-sync") {
+      throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
+    }
+    const resolved = mcpCredentials.resolveMcpCredential(authHeader.slice(7), audience);
+    if (!resolved) throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
+    if (req.get("x-ingenium-workspace") !== resolved.workspaceId || req.get("x-ingenium-launcher-worktree") !== resolved.launcherWorktree) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    req.principal = {
+      type: "service",
+      id: resolved.servicePrincipalId,
+      scopes: resolved.scopes,
+      tokenId: resolved.id,
+      organizationId: resolved.organizationId,
+      projectId: resolved.projectId,
+      projectIds: resolved.projectIds,
+      audience: resolved.audience,
+      workspaceId: resolved.workspaceId,
+      launcherWorktree: resolved.launcherWorktree,
+    };
+    next();
+    return;
+  }
   if (authHeader?.startsWith("Bearer ing_")) {
     const resolved = securityTokens.resolveScopedApiToken(authHeader.slice(7));
     if (!resolved) throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
@@ -107,6 +147,9 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
   const provided = authHeader.slice(7);
   if (!apiTokensEqual(provided, token)) throw new AppError("Invalid authorization token", "INVALID_TOKEN", 401);
 
-  req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
-  next();
+  throw new AppError("Invalid authorization token", "INVALID_TOKEN", 401);
+}
+
+function isInternalInstallationRequest(req: Request): boolean {
+  return req.get("x-ingenium-internal-service") === "1";
 }

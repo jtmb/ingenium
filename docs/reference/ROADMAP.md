@@ -759,14 +759,22 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   cross-tenant invocation, catalog inconsistency, or DB-boundary violation is
   `BLOCKING`; optional aliases/tools are `FOLLOW_UP`; parity evidence is
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-107: <acceptance evidence placeholder>` with non-empty token,
-  MCP, security, deployment, E2E, and containment evidence.
+- **Markers/evidence:** [x] `work-started` preflight completed; [ ] matching
+  `work-complete` remains open because deployment, E2E, containment, and external
+  reviewer gates were explicitly out of scope.
+  Evidence AUTH-107: migration 100 and seven focused core credential tests prove
+  exact-schema idempotency, partial/ambiguous schema refusal, and hash-only 256-bit
+  issue/list/rotate/revoke, expiry, audience, least-privilege repository sync, and
+  service-principal security epoch invalidation. Focused API/server/extension tests
+  prove safe 401/403/404 classification, launcher project binding, authorization-
+  filtered policy state, child inheritance, compatibility internal-only behavior,
+  and token redaction. Core/API/server/extension typechecks and DB-isolation checks
+  pass. Deployment, Playwright, Docker, visual, fixture E2E, strict containment,
+  QA, and security review were not run under this task's declared exclusions.
 
 #### AUTH-108 — Runtime isolation: per-user/workspace containers
 
-- **IN_SCOPE:** Add migration `100` for runtime isolation and implement one
+- **IN_SCOPE:** Add migration `101` for runtime isolation and implement one
   isolated runtime container per user/workspace, shared only by that user's Web,
   CLI, and VS Code sessions. Bind runtime identity to user/workspace/org/project
   scope, isolate filesystem/process/environment/network state, define lifecycle
@@ -778,7 +786,7 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   production destructive fleet cleanup without authorization.
 - **Owner:** `@ingenium-software-engineer-premium`.
 - **Dependencies:** AUTH-107.
-- **Acceptance:** Migration 100 probes complete/absent state and preserves runtime
+- **Acceptance:** Migration 101 probes complete/absent state and preserves runtime
   ownership IDs/mappings; two users/workspaces cannot observe or mutate each
   other's filesystem, processes, environment, sockets, sessions, or mounted
   projects; Web/CLI/VS Code for one principal share the intended isolated runtime;
@@ -799,7 +807,7 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
 - **Rollback/safety:** Use disposable runtime containers and preserved volume
   snapshots, never attach a test runtime to real user data, retain failed
   cleanup manifests, and stop only identity-proven owned processes/containers.
-- **Tests:** 100 schema probes; two-user/two-workspace isolation; Web/CLI/VS Code
+- **Tests:** 101 schema probes; two-user/two-workspace isolation; Web/CLI/VS Code
   shared-runtime checks; ticket hash/TTL/nonce/audience/replay tests; process,
   filesystem, network, env, and mount negatives; fleet privilege denial;
   deployment/runtime health; fixture E2E and strict containment.

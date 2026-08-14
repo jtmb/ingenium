@@ -31,7 +31,7 @@ const INSTALLATION_PREFIXES = [
 ];
 const ADMIN_PROJECT_PREFIXES = ["/api/v1/mcp-tools", "/api/v1/mcp-servers"];
 const INSTALLATION_PROJECT_PREFIXES = ["/api/v1/config"];
-const PRIVATE_PREFIXES: string[] = [];
+const PRIVATE_PREFIXES = ["/api/v1/context", "/api/v1/emails"];
 const PROJECT_PREFIXES = [
   "/api/v1/skills", "/api/v1/tasks", "/api/v1/coordination", "/api/v1/context",
   "/api/v1/plugins", "/api/v1/servers", "/api/v1/settings", "/api/v1/agents",
@@ -62,7 +62,7 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   const route = `${req.method} ${req.path}`;
   if ((req.method === "GET" && req.path === "/auth/callback") || PUBLIC_AUTH_PATHS.has(route)) return PUBLIC_POLICY;
   if (req.path === "/api/v1/health") return { action: "health.read", resource: "health", permission: "read", target: "installation" };
-  if (req.path.startsWith("/_ingenium/")) return { action: "runtime.execute", resource: "runtime", permission: "execute", target: "installation", sensitive: true };
+  if (req.path.startsWith("/_ingenium/")) return { action: "child-mcp.execute", resource: "child-mcp", permission: "execute", target: "project", sensitive: true };
   if (req.path.startsWith("/api/v1/auth/")) return { action: `auth.${permissionFor(req as Request)}`, resource: "auth", permission: permissionFor(req as Request), target: "private", sensitive: !READ_METHODS.has(req.method) };
   if (req.path.startsWith("/api/v1/organizations")) {
     const permission = permissionFor(req as Request);
@@ -88,7 +88,13 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     const permission = permissionFor(req as Request);
     return { action: `providers.${permission}`, resource: "providers", permission, target: "installation", sensitive: true };
   }
-  if (req.path === "/api/v1/docs/repository/sync") return { action: "repository-sync.execute", resource: "repository-sync", permission: "execute", target: "project", sensitive: true };
+  if (req.path === "/api/v1/docs/repository/sync") return { action: "repository.sync", resource: "repository", permission: "execute", target: "project", sensitive: true };
+  if (req.method === "GET" && (req.path === "/api/v1/mcp-tools" || req.path === "/api/v1/mcp-tools/catalog")) {
+    return { action: "projects.read", resource: "projects", permission: "read", target: "project" };
+  }
+  if (req.method === "GET" && /^\/api\/v1\/mcp-tools\/[^/]+\/state$/.test(req.path)) {
+    return { action: "projects.read", resource: "projects", permission: "read", target: "project" };
+  }
   if (req.path.startsWith("/api/v1/docs")) {
     const permission = permissionFor(req as Request);
     return { action: `docs.${permission}`, resource: "docs", permission, target: "organization", sensitive: permission !== "read" };
@@ -97,7 +103,7 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     const permission = permissionFor(req as Request);
     return { action: `${resourceFor(req.path)}.${permission}`, resource: resourceFor(req.path), permission, target: "private", sensitive: true };
   }
-  if (req.path.startsWith("/api/v1/emails") || req.path.startsWith("/api/v1/vault")) {
+  if (req.path.startsWith("/api/v1/vault")) {
     const permission = permissionFor(req as Request);
     return { action: `${resourceFor(req.path)}.${permission}`, resource: resourceFor(req.path), permission, target: "project", sensitive: true };
   }
@@ -123,6 +129,7 @@ export function toAuthorizationPrincipal(principal: RequestPrincipal): authoriza
     scopes: principal.scopes,
     organizationId: "organizationId" in principal ? principal.organizationId : undefined,
     projectId: "projectId" in principal ? principal.projectId : undefined,
+    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
   };
 }
 
@@ -189,6 +196,12 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     audit(req.principal, policy, "success");
     return next();
   }
+  const servicePreflight = req.method === "GET" && req.path === "/api/v1/auth/preflight";
+  if (req.principal.type === "service" && req.principal.audience === "repository-sync" && !servicePreflight
+    && policy.resource !== "repository" && policy.resource !== "repository-sync" && policy.resource !== "projects"
+    && policy.resource !== "mcp-tools" && policy.resource !== "docs" && policy.resource !== "child-mcp") {
+    throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
+  }
   const principal = toAuthorizationPrincipal(req.principal);
   let decision: authorization.AuthorizationDecision;
   if (policy.target === "installation" || policy.target === "private") {
@@ -200,8 +213,15 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
         ? { allowed: true, visible: true }
         : { allowed: false, visible: true };
     }
+    if (policy.target === "private" && req.principal.type === "service" && servicePreflight) {
+      decision = req.principal.scopes.includes("projects:read") || req.principal.scopes.includes("projects:*")
+        || req.principal.scopes.includes("*")
+        ? { allowed: true, visible: true }
+        : { allowed: false, visible: true };
+    }
     if (policy.target === "private" && !req.path.startsWith("/api/v1/auth/")) {
-      decision = { allowed: authorization.requirePrivateResourceAccess({ principal }), visible: false };
+      const browserUser = principal.type === "browser-user";
+      decision = { allowed: browserUser, visible: browserUser };
     }
   } else if (policy.target === "organization") {
     const organizationId = requestedOrganizationId(req, req.principal);

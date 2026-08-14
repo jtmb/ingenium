@@ -7,7 +7,8 @@ set -eu
 worktree="${INGENIUM_WORKTREE:-/workspace}"
 project="${INGENIUM_PROJECT:-global-default}"
 api_url="${INGENIUM_API_URL:-http://localhost:4097/api/v1}"
-token_file="${INGENIUM_API_TOKEN_FILE:-.opencode/.ingenium-api-token}"
+credential_file="${INGENIUM_MCP_CREDENTIAL_FILE:-.opencode/.ingenium-repository-sync-credential}"
+workspace_id="${INGENIUM_WORKSPACE_ID:-global-default-workspace}"
 
 if [ "$(id -u)" -eq 0 ]; then
   # Repair only public, regular agent profiles while still privileged. This
@@ -21,7 +22,9 @@ if [ "$(id -u)" -eq 0 ]; then
     INGENIUM_WORKTREE="$worktree" \
     INGENIUM_PROJECT="$project" \
     INGENIUM_API_URL="$api_url" \
-    INGENIUM_API_TOKEN_FILE="$token_file" \
+    INGENIUM_MCP_CREDENTIAL_FILE="$credential_file" \
+    INGENIUM_MCP_AUDIENCE="repository-sync" \
+    INGENIUM_WORKSPACE_ID="$workspace_id" \
     node /app/packages/ingenium-extension/dist/scripts/init-project.js "$@"
 fi
 
@@ -33,5 +36,7 @@ exec env -i \
   INGENIUM_WORKTREE="$worktree" \
   INGENIUM_PROJECT="$project" \
   INGENIUM_API_URL="$api_url" \
-  INGENIUM_API_TOKEN_FILE="$token_file" \
+  INGENIUM_MCP_CREDENTIAL_FILE="$credential_file" \
+  INGENIUM_MCP_AUDIENCE="repository-sync" \
+  INGENIUM_WORKSPACE_ID="$workspace_id" \
   node /app/packages/ingenium-extension/dist/scripts/init-project.js "$@"

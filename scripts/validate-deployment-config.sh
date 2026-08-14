@@ -242,12 +242,13 @@ require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
 require_literal "$entrypoint" '"/app/packages/ingenium-extension/plugins/resource-sync.ts"'
 require_literal "$entrypoint" '"/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"'
 require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE=".opencode/.ingenium-repository-sync-credential"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_AUDIENCE="repository-sync"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/workspace"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_OPENCODE_START_CLEAN_ENV="1"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKSPACE_ID="global-default-workspace"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'attempts=10'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/probe-api.mjs'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'exec opencode serve --port 4098 --hostname 127.0.0.1'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'opencode serve --port 4098 --hostname 127.0.0.1'
 reject_literal "${repo_root}/scripts/start-opencode-web.sh" 'opencode web'
 require_literal "$vscode_runner" 'VSCODE_DATA_DIR="/home/appuser/vscode-data"'
 require_literal "$vscode_runner" 'VSCODE_EXTENSION_FILE="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"'
@@ -294,7 +295,8 @@ require_literal "$vscode_theme_manifest" '"workbench.preferredDarkColorTheme": "
 require_literal "$vscode_theme_manifest" '"workbench.preferredLightColorTheme": "Light Modern"'
 reject_pattern "$vscode_theme_manifest" '"(main|browser|activationEvents|scripts|dependencies|devDependencies|permissions|workbench\.colorTheme|security\.workspace\.trust|update\.)"'
 require_literal "${repo_root}/scripts/run-init-project.sh" 'project="${INGENIUM_PROJECT:-global-default}"'
-require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_API_TOKEN_FILE="$token_file"'
+require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="$credential_file"'
+require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_MCP_AUDIENCE="repository-sync"'
 require_literal "${repo_root}/scripts/run-init-project.sh" '/app/scripts/normalize-agent-profiles.sh "$worktree/.opencode/agents"'
 require_literal "${repo_root}/scripts/normalize-agent-profiles.sh" 'exec node "$script_dir/project-agent-profiles.mjs" "$@"'
 require_literal "${repo_root}/scripts/project-agent-profiles.mjs" "constants.O_NOFOLLOW"
@@ -328,6 +330,9 @@ for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.
 done
 for script in run-gateway.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
   reject_literal "${repo_root}/scripts/${script}" "INGENIUM_API_TOKEN="
+done
+for script in run-init-project.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
+  reject_literal "${repo_root}/scripts/${script}" "INGENIUM_API_TOKEN_FILE"
 done
 for script in run-dashboard.sh run-gateway.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
   reject_literal "${repo_root}/scripts/${script}" "INGENIUM_EMAIL_ENCRYPTION_KEY"

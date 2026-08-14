@@ -41,7 +41,7 @@ afterEach(async () => {
 describe("extension authentication preflight", () => {
   it("confirms only successful authentication", async () => {
     const response = await fetch(`${baseUrl}/api/v1/auth/preflight`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
     });
 
     expect(response.status).toBe(200);

@@ -92,6 +92,7 @@ export function buildDashboardApiProxyHeaders(
   // treat them as a client identity or proxy-chain assertion.
   for (const header of FORWARDED_ORIGIN_HEADERS) headers.delete(header);
   headers.set(DASHBOARD_MARKER_HEADER, DASHBOARD_MARKER_VALUE);
+  headers.set("x-ingenium-internal-service", "1");
   if (token) headers.set("authorization", `Bearer ${token}`);
   return headers;
 }

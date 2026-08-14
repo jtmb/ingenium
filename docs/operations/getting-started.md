@@ -48,19 +48,19 @@ project name across invocations (for example, always use
 `docker compose -p ingenium ...`) and never use `docker compose down -v` for a
 normal restart; otherwise Docker can select or create an empty volume.
 
-For a local host MCP client, seed the ignored fallback file from `.env` before
-starting OpenCode:
+Seed the internal installation credential before starting the deployment:
 
 ```bash
 ./scripts/bootstrap-local-secrets.sh
 ```
 
-This creates `.opencode/.ingenium-api-token` only when absent, uses mode `0600`,
-rejects symlinks/non-files, and refuses a file whose value does not match
-`INGENIUM_API_TOKEN`. In the container, the entrypoint validates the bootstrap
-secret, atomically creates `/run/ingenium-secrets/api-token` and
-`/workspace/.opencode/.ingenium-api-token` as `appuser`-owned mode-`0600` files,
-then removes the inline token from the supervised process environment.
+This creates or updates only the ignored mode-`0600` `.env`; it does not expose
+the installation bearer to OpenCode. In the container, the entrypoint validates
+the bootstrap secret, atomically creates `/run/ingenium-secrets/api-token`, then
+removes the inline token from the supervised process environment. After browser
+bootstrap and recent step-up, issue separate MCP and repository-sync credentials
+and store them as owner-only `.opencode/.ingenium-mcp-credential` and
+`.opencode/.ingenium-repository-sync-credential` files.
 
 `OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` are required. The
 `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` settings are
@@ -102,8 +102,8 @@ curl --config "${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf" \
 The referenced curl config is provisioned from the secret store and must be a
 regular mode-0600 owner-only file containing the bearer header; do not paste a
 real token into shell history, process arguments, or documentation. OpenCode MCP
-may instead read the ignored `.opencode/.ingenium-api-token` file when it is a
-regular mode-0600 owner-only file; tracked `opencode.json` must remain
+reads only its ignored scoped credential file when it is a regular mode-0600
+owner-only file; tracked `opencode.json` must remain
 credential-free. The dashboard injects its token server-side and never sends
 it to browser JavaScript. The exact OAuth callback exception is
 `GET http://localhost:1455/auth/callback`. Host port `1455` reaches the Nginx

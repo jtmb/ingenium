@@ -181,12 +181,16 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   const existingIngenium = isRecord(mcp.ingenium) ? mcp.ingenium : {};
   const environment = isRecord(existingIngenium.environment) ? { ...existingIngenium.environment } : {};
 
-  // Config is persistent and may predate protected token files. Remove any
-  // accidental inline bearer value and install only the relative protected path.
+  // Config is persistent and may predate scoped credentials. Remove every
+  // installation-bearer projection and install only the scoped MCP reference.
   delete environment.INGENIUM_API_TOKEN;
+  delete environment.INGENIUM_API_TOKEN_FILE;
   environment.INGENIUM_API_URL = "http://localhost:4097/api/v1";
-  environment.INGENIUM_API_TOKEN_FILE = ".opencode/.ingenium-api-token";
+  environment.INGENIUM_MCP_CREDENTIAL = "{file:.opencode/.ingenium-mcp-credential}";
+  environment.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
+  environment.INGENIUM_MCP_AUDIENCE = "mcp";
   environment.INGENIUM_PROJECT = "global-default";
+  environment.INGENIUM_WORKSPACE_ID = "global-default-workspace";
   environment.INGENIUM_WORKTREE = "/workspace";
   mcp.ingenium = {
     ...existingIngenium,

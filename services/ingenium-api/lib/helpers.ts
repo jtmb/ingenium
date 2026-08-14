@@ -40,6 +40,7 @@ export function requireProject(req: Request, res: Response): string | null {
     scopes: principal.scopes,
     organizationId: "organizationId" in principal ? principal.organizationId : undefined,
     projectId: "projectId" in principal ? principal.projectId : undefined,
+    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
   }, project.id, resource, permission);
   if (!decision.allowed) {
     res.status(decision.visible ? 403 : 404).json({ error: { code: decision.visible ? "FORBIDDEN" : "NOT_FOUND", message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found" } });
@@ -68,6 +69,7 @@ export function requestAuthorizationPrincipal(req: Request): authorization.Autho
     scopes: principal.scopes,
     organizationId: "organizationId" in principal ? principal.organizationId : undefined,
     projectId: "projectId" in principal ? principal.projectId : undefined,
+    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
   };
 }
 

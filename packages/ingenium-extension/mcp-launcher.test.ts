@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { getMcpTransportUrl, preflightMcpLauncher, runMcpLauncher } from "./scripts/mcp-server.js";
@@ -12,20 +12,23 @@ const temporaryDirectories: string[] = [];
 let originalProject: string | undefined;
 let originalToken: string | undefined;
 let originalTokenFile: string | undefined;
+let originalWorkspace: string | undefined;
 
 function writeProtectedToken(value = "a".repeat(32)): void {
-  const tokenPath = join(worktree, ".opencode", ".ingenium-api-token");
+  const tokenPath = join(worktree, ".opencode", ".ingenium-mcp-credential");
   writeFileSync(tokenPath, `${value}\n`, { mode: 0o600 });
   chmodSync(tokenPath, 0o600);
 }
 
 beforeEach(() => {
   originalProject = process.env.INGENIUM_PROJECT;
-  originalToken = process.env.INGENIUM_API_TOKEN;
-  originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+  originalToken = process.env.INGENIUM_MCP_CREDENTIAL;
+  originalTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
   delete process.env.INGENIUM_PROJECT;
-  delete process.env.INGENIUM_API_TOKEN;
-  delete process.env.INGENIUM_API_TOKEN_FILE;
+  delete process.env.INGENIUM_MCP_CREDENTIAL;
+  delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  process.env.INGENIUM_WORKSPACE_ID = "launcher-workspace";
   worktree = mkdtempSync(join(tmpdir(), "ingenium-mcp-launcher-"));
   mkdirSync(join(worktree, ".opencode"));
 });
@@ -33,10 +36,12 @@ beforeEach(() => {
 afterEach(() => {
   if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
   else process.env.INGENIUM_PROJECT = originalProject;
-  if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
-  else process.env.INGENIUM_API_TOKEN = originalToken;
-  if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
-  else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+  if (originalToken === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL;
+  else process.env.INGENIUM_MCP_CREDENTIAL = originalToken;
+  if (originalTokenFile === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  else process.env.INGENIUM_MCP_CREDENTIAL_FILE = originalTokenFile;
+  if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+  else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -50,16 +55,16 @@ describe("packaged Ingenium MCP launcher", () => {
 
     expect(preflightMcpLauncher(worktree)).toEqual({
       ok: false,
-      message: "Ingenium MCP could not read a protected API token. Run scripts/bootstrap-local-secrets.sh for local development or configure INGENIUM_API_TOKEN_FILE.",
+      message: "Ingenium MCP could not read a protected scoped credential. Configure INGENIUM_MCP_CREDENTIAL_FILE.",
     });
   });
 
-  it("uses the validated worktree identity when no local project override is set", () => {
+  it("requires an explicit credential-bound project locator", () => {
     writeProtectedToken();
 
     expect(preflightMcpLauncher(worktree)).toEqual({
-      ok: true,
-      project: basename(worktree),
+      ok: false,
+      message: "Ingenium MCP could not resolve a safe project identity. Set INGENIUM_PROJECT to a valid project name.",
     });
   });
 
@@ -68,8 +73,8 @@ describe("packaged Ingenium MCP launcher", () => {
     temporaryDirectories.push(parent);
     const containerWorktree = join(parent, "workspace");
     mkdirSync(join(containerWorktree, ".opencode"), { recursive: true });
-    writeFileSync(join(containerWorktree, ".opencode", ".ingenium-api-token"), `${"a".repeat(32)}\n`, { mode: 0o600 });
-    chmodSync(join(containerWorktree, ".opencode", ".ingenium-api-token"), 0o600);
+    writeFileSync(join(containerWorktree, ".opencode", ".ingenium-mcp-credential"), `${"a".repeat(32)}\n`, { mode: 0o600 });
+    chmodSync(join(containerWorktree, ".opencode", ".ingenium-mcp-credential"), 0o600);
 
     expect(preflightMcpLauncher(containerWorktree)).toEqual({
       ok: false,
@@ -91,10 +96,12 @@ describe("packaged Ingenium MCP launcher", () => {
       "packages/ingenium-extension/dist/scripts/mcp-server.js",
     ]);
     expect(localConfig.mcp.ingenium.command.join(" ")).not.toContain("services/ingenium-server/dist");
-    expect(localConfig.mcp.ingenium.environment.INGENIUM_API_TOKEN).toBe("{file:.opencode/.ingenium-api-token}");
-    expect(localConfig.mcp.ingenium.environment.INGENIUM_PROJECT).toBeUndefined();
+    expect(localConfig.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL).toBe("{file:.opencode/.ingenium-mcp-credential}");
+    expect(localConfig.mcp.ingenium.environment.INGENIUM_PROJECT).toBe("ingenium");
     expect(entrypoint).toContain('"command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"]');
+    expect(entrypoint).toContain('"INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}"');
     expect(entrypoint).toContain('"INGENIUM_PROJECT": "global-default"');
+    expect(entrypoint).not.toContain('"INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token"');
     expect(dockerfile).toContain('"command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"]');
   });
 
@@ -106,12 +113,13 @@ describe("packaged Ingenium MCP launcher", () => {
 
   it("provisions the validated project before importing the packaged transport", async () => {
     writeProtectedToken();
+    process.env.INGENIUM_PROJECT = "launcher-project";
     let projectDuringImport: string | undefined;
     let importedTransport: URL | undefined;
     const ensureProject = vi.fn(async (resolvedWorktree: string, apiBase: string, project: string) => {
       expect(resolvedWorktree).toBe(worktree);
       expect(apiBase).toBe("http://localhost:4097/api/v1");
-      expect(project).toBe(basename(worktree));
+      expect(project).toBe("launcher-project");
       return project;
     });
 
@@ -123,7 +131,7 @@ describe("packaged Ingenium MCP launcher", () => {
       },
     })).resolves.toBe(0);
 
-    expect(projectDuringImport).toBe(basename(worktree));
+    expect(projectDuringImport).toBe("launcher-project");
     expect(importedTransport).toEqual(getMcpTransportUrl());
     expect(ensureProject).toHaveBeenCalledOnce();
   });

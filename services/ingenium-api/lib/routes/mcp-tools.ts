@@ -1,5 +1,5 @@
 import { Router, type Response } from "express";
-import { mcpToolStates } from "ingenium-core";
+import { authorization, mcpToolStates } from "ingenium-core";
 import {
   buildMcpUsefulnessReport,
   createMcpUsefulnessCollector,
@@ -9,6 +9,7 @@ import {
   type McpUsefulnessReportCollector,
 } from "../mcp-usefulness-collector.js";
 import { requireProject } from "../helpers.js";
+import { toAuthorizationPrincipal } from "../authorization-policy.js";
 
 /** Handles /api/v1/mcp-tools — tool catalog queries and per-project enable/disable state. */
 export interface McpToolsRouterOptions {
@@ -102,6 +103,23 @@ function effectiveTools(projectId: string): McpUsefulnessCatalogEntry[] {
   });
 }
 
+function authorizedCatalog(req: import("express").Request, projectId: string) {
+  if (!req.authorizationPolicy) return mcpToolStates.getAllTools(projectId);
+  const principal = req.principal;
+  if (!principal) return new Map();
+  return new Map(Array.from(mcpToolStates.getAllTools(projectId).entries()).filter(([, tool]) => {
+    const policy = tool.authorization;
+    if (!policy) return false;
+    if (principal.type === "compatibility") return true;
+    const authorizationPrincipal = toAuthorizationPrincipal(principal);
+    if (policy.target === "installation") return authorization.requireInstallationPermission(authorizationPrincipal, policy.resource, policy.permission).allowed;
+    if (policy.target === "organization") return authorization.requireOrganizationPermission(authorizationPrincipal,
+      "organizationId" in principal && principal.organizationId ? principal.organizationId : "", policy.resource, policy.permission).allowed;
+    if (policy.target === "private") return false;
+    return authorization.requireProjectPermission(authorizationPrincipal, projectId, policy.resource, policy.permission).allowed;
+  }));
+}
+
 function isBusy(error: unknown): error is McpUsefulnessCollectionError {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "MCP_REPORT_BUSY";
 }
@@ -142,7 +160,7 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
   router.get("/catalog", (req, res) => {
   const projectId = req.query.project === undefined ? undefined : requireProject(req, res) ?? undefined;
   if (req.query.project !== undefined && !projectId) return;
-  const catalog = mcpToolStates.getAllTools(projectId);
+  const catalog = projectId ? authorizedCatalog(req, projectId) : mcpToolStates.getAllTools(projectId);
   const entries = Array.from(catalog.values());
   res.json({
     data: entries,
@@ -153,7 +171,7 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
   router.get("/catalog/:name", (req, res) => {
   const projectId = req.query.project === undefined ? undefined : requireProject(req, res) ?? undefined;
   if (req.query.project !== undefined && !projectId) return;
-  const catalog = mcpToolStates.getAllTools(projectId);
+  const catalog = projectId ? authorizedCatalog(req, projectId) : mcpToolStates.getAllTools(projectId);
   const entry = catalog.get(req.params.name!);
   if (!entry) {
     res.status(404).json({
@@ -203,10 +221,17 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
 
   const includeCategories = req.query.include_categories === "true";
   if (includeCategories) {
-    const tools = mcpToolStates.listCategorizedTools(projectId);
+    const authorized = authorizedCatalog(req, projectId);
+    const tools = mcpToolStates.listCategorizedTools(projectId).map((category) => ({
+      ...category,
+      tools: category.tools.filter((tool) => authorized.has(tool.tool_name)),
+      total_count: category.tools.filter((tool) => authorized.has(tool.tool_name)).length,
+      enabled_count: category.tools.filter((tool) => tool.enabled && authorized.has(tool.tool_name)).length,
+    })).filter((category) => category.total_count > 0);
     res.json({ project, project_id: projectId, data: tools, total: tools.reduce((s, g) => s + g.total_count, 0) });
   } else {
-    const tools = mcpToolStates.listToolStatesWithDefaults(projectId);
+    const authorized = authorizedCatalog(req, projectId);
+    const tools = mcpToolStates.listToolStatesWithDefaults(projectId).filter((tool) => authorized.has(tool.tool_name));
     res.json({ project, project_id: projectId, data: tools, total: tools.length });
   }
   });
@@ -230,6 +255,10 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
   const policy = mcpToolStates.getAllTools(projectId).get(toolName)?.authorization;
   if (!policy) {
     res.status(503).json({ error: { code: "TOOL_POLICY_UNAVAILABLE", message: "The tool authorization policy is unavailable." } });
+    return;
+  }
+  if (!authorizedCatalog(req, projectId).has(toolName)) {
+    res.status(403).json({ error: { code: "FORBIDDEN", message: "The authenticated principal cannot perform this action" } });
     return;
   }
   res.json({ project, project_id: projectId, data: { tool_name: toolName, enabled, authorization: policy } });

@@ -1,7 +1,8 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 
-const TOKEN_FILE_NAME = ".ingenium-api-token";
+const TOKEN_FILE_NAME = ".ingenium-mcp-credential";
+const REPOSITORY_SYNC_TOKEN_FILE_NAME = ".ingenium-repository-sync-credential";
 const TOKEN_FILE_REFERENCE = /^\{file:([^{}\u0000\r\n]+)\}$/;
 const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 5_000;
@@ -39,7 +40,11 @@ function readProtectedTokenFile(tokenPath: string): string | undefined {
   }
 }
 
-function readWorktreeTokenFile(worktree: string | undefined, reference = `.opencode/${TOKEN_FILE_NAME}`): string | undefined {
+function credentialFileName(): string {
+  return process.env.INGENIUM_MCP_AUDIENCE === "repository-sync" ? REPOSITORY_SYNC_TOKEN_FILE_NAME : TOKEN_FILE_NAME;
+}
+
+function readWorktreeTokenFile(worktree: string | undefined, reference = `.opencode/${credentialFileName()}`): string | undefined {
   if (!worktree || !isAbsolute(worktree)) return undefined;
   if (isAbsolute(reference)) return undefined;
 
@@ -53,7 +58,7 @@ function readWorktreeTokenFile(worktree: string | undefined, reference = `.openc
     if (!opencodeStat.isDirectory() || opencodeStat.isSymbolicLink()) return undefined;
 
     const tokenPath = resolve(worktreeRoot, reference);
-    const expectedTokenPath = resolve(opencodeDir, TOKEN_FILE_NAME);
+    const expectedTokenPath = resolve(opencodeDir, credentialFileName());
     if (tokenPath !== expectedTokenPath || !isContainedBy(opencodeDir, tokenPath)) return undefined;
     const tokenLinkStat = lstatSync(tokenPath);
     if (!tokenLinkStat.isFile() || tokenLinkStat.isSymbolicLink()) return undefined;
@@ -85,13 +90,16 @@ export function apiRequestHeaders(worktree?: string, headers?: HeadersInit): Hea
   // below may be sent to the API.
   requestHeaders.delete("Authorization");
   requestHeaders.delete("Proxy-Authorization");
-  const configuredToken = process.env.INGENIUM_API_TOKEN;
+  const configuredToken = process.env.INGENIUM_MCP_CREDENTIAL;
   const placeholder = configuredToken?.match(TOKEN_FILE_REFERENCE)?.[1];
   const token = placeholder !== undefined
     ? configuredTokenFile(worktree, placeholder)
     : normalizeToken(configuredToken)
-      ?? configuredTokenFile(worktree, process.env.INGENIUM_API_TOKEN_FILE);
+      ?? configuredTokenFile(worktree, process.env.INGENIUM_MCP_CREDENTIAL_FILE);
   if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+  requestHeaders.set("X-Ingenium-Audience", process.env.INGENIUM_MCP_AUDIENCE ?? "mcp");
+  if (process.env.INGENIUM_WORKSPACE_ID) requestHeaders.set("X-Ingenium-Workspace", process.env.INGENIUM_WORKSPACE_ID);
+  if (worktree) requestHeaders.set("X-Ingenium-Launcher-Worktree", resolve(worktree));
   return requestHeaders;
 }
 
@@ -100,9 +108,21 @@ export interface ApiAuthenticationPreflightResult {
   error?: "Unable to authenticate with Ingenium API";
   /** Safe category only; it never contains a status, URL, response body, or credential detail. */
   failure?: ApiAuthenticationFailureKind;
+  binding?: ApiAuthenticationBinding;
 }
 
-export type ApiAuthenticationFailureKind = "authentication" | "unavailable" | "invalid_target";
+export type ApiAuthenticationFailureKind = "authentication" | "scope" | "not_found" | "unavailable" | "invalid_target";
+
+export interface ApiAuthenticationBinding {
+  scopes: string[];
+  organizationId: string;
+  projectId: string;
+  projectIds: string[];
+  audience: "mcp" | "runtime" | "repository-sync";
+  workspaceId: string;
+  launcherWorktree: string;
+  restartRequiredOnCredentialChange: true;
+}
 
 export interface ApiAuthenticationPreflightOptions {
   timeoutMs?: number;
@@ -140,6 +160,26 @@ function failedPreflight(failure: ApiAuthenticationFailureKind): ApiAuthenticati
   return { authenticated: false, error: "Unable to authenticate with Ingenium API", failure };
 }
 
+function preflightHeaders(worktree?: string): Headers {
+  const headers = apiRequestHeaders(worktree);
+  headers.set("X-Ingenium-Audience", process.env.INGENIUM_MCP_AUDIENCE ?? "mcp");
+  if (process.env.INGENIUM_WORKSPACE_ID) headers.set("X-Ingenium-Workspace", process.env.INGENIUM_WORKSPACE_ID);
+  if (worktree) headers.set("X-Ingenium-Launcher-Worktree", resolve(worktree));
+  return headers;
+}
+
+function authenticationBinding(value: unknown): ApiAuthenticationBinding | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const data = "data" in value && value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : value as Record<string, unknown>;
+  if (!Array.isArray(data.scopes) || !data.scopes.every((scope) => typeof scope === "string")
+    || typeof data.organizationId !== "string" || typeof data.projectId !== "string"
+    || !Array.isArray(data.projectIds) || !data.projectIds.every((project) => typeof project === "string")
+    || (data.audience !== "mcp" && data.audience !== "runtime" && data.audience !== "repository-sync")
+    || typeof data.workspaceId !== "string" || typeof data.launcherWorktree !== "string"
+    || data.restartRequiredOnCredentialChange !== true) return undefined;
+  return data as unknown as ApiAuthenticationBinding;
+}
+
 function sleepFor(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -159,11 +199,16 @@ export async function preflightApiAuthentication(
 
   try {
     const response = await request(`${base}/auth/preflight`, {
-      headers: apiRequestHeaders(worktree),
+      headers: preflightHeaders(worktree),
       signal: AbortSignal.timeout(boundedInteger(options.timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS, 1, DEFAULT_PREFLIGHT_TIMEOUT_MS)),
     });
-    if (response.status === 200) return { authenticated: true };
-    if (response.status === 401 || response.status === 403) return failedPreflight("authentication");
+    if (response.status === 200) {
+      const binding = authenticationBinding(await response.json().catch(() => null));
+      return binding ? { authenticated: true, binding } : failedPreflight("authentication");
+    }
+    if (response.status === 401) return failedPreflight("authentication");
+    if (response.status === 403) return failedPreflight("scope");
+    if (response.status === 404) return failedPreflight("not_found");
   } catch {
     // Error details can contain a URL or transport diagnostic. Deliberately
     // collapse every failure into the same caller-safe response.

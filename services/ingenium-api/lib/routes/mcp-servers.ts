@@ -112,7 +112,11 @@ function publicRuntimeDefinitions(projectId: string) {
  */
 function isTrustedChildMcpRuntimeRequest(req: Request): boolean {
   return req.get(CHILD_MCP_RUNTIME_HANDOFF_HEADER) === CHILD_MCP_RUNTIME_HANDOFF_VALUE
-    && req.get("x-ingenium-ui") === undefined;
+    && req.get("x-ingenium-ui") === undefined
+    && req.principal?.type === "service"
+    && req.principal.audience === "runtime"
+    && req.principal.scopes.includes("child-mcp:runtime")
+    && req.principal.projectId !== null;
 }
 
 function sendTrustedRuntimeNotFound(response: Response): void {

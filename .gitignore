@@ -42,6 +42,9 @@ build/
 # Local resource-sync state
 .opencode/.ingenium-sync-state.json
 .opencode/.ingenium-api-token
+.opencode/.ingenium-mcp-credential
+.opencode/.ingenium-repository-sync-credential
+.opencode/.ingenium-runtime-credential
 
 # Editor and temporary files
 .agents/.lm-studio-env

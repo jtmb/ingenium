@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -7,6 +7,11 @@ import { readFileSync } from "node:fs";
 
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+const originalInternalService = process.env.INGENIUM_INTERNAL_SERVICE;
+const originalRuntimeCredential = process.env.INGENIUM_RUNTIME_CREDENTIAL;
+const originalMcpCredential = process.env.INGENIUM_MCP_CREDENTIAL;
+const originalMcpCredentialFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+const originalMcpAudience = process.env.INGENIUM_MCP_AUDIENCE;
 
 function errorResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), { status });
@@ -17,11 +22,22 @@ afterEach(() => {
   else process.env.INGENIUM_API_TOKEN = originalToken;
   if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
   else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+  if (originalInternalService === undefined) delete process.env.INGENIUM_INTERNAL_SERVICE;
+  else process.env.INGENIUM_INTERNAL_SERVICE = originalInternalService;
+  if (originalRuntimeCredential === undefined) delete process.env.INGENIUM_RUNTIME_CREDENTIAL;
+  else process.env.INGENIUM_RUNTIME_CREDENTIAL = originalRuntimeCredential;
+  if (originalMcpCredential === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL;
+  else process.env.INGENIUM_MCP_CREDENTIAL = originalMcpCredential;
+  if (originalMcpCredentialFile === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  else process.env.INGENIUM_MCP_CREDENTIAL_FILE = originalMcpCredentialFile;
+  if (originalMcpAudience === undefined) delete process.env.INGENIUM_MCP_AUDIENCE;
+  else process.env.INGENIUM_MCP_AUDIENCE = originalMcpAudience;
   vi.unstubAllGlobals();
   vi.resetModules();
 });
 
 describe("Ingenium API client authentication", () => {
+  beforeEach(() => { process.env.INGENIUM_INTERNAL_SERVICE = "1"; });
   it("adds the configured bearer credential to API requests", async () => {
     process.env.INGENIUM_API_TOKEN = "test-server-token";
     const fetchMock = vi.fn().mockResolvedValue({
@@ -157,6 +173,7 @@ describe("Ingenium API client authentication", () => {
 
   it("uses the dedicated server-only child-MCP runtime handoff outside the dashboard API namespace", async () => {
     process.env.INGENIUM_API_TOKEN = "test-server-token";
+    process.env.INGENIUM_RUNTIME_CREDENTIAL = "test-server-token";
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -245,6 +262,38 @@ describe("Ingenium API client authentication", () => {
       await api.get("/health");
 
       expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("Authorization")).toBe("Bearer test-file-token");
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves only the repository-sync credential file for that audience", async () => {
+    const originalCwd = process.cwd();
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-server-repository-auth-"));
+    const opencodeDir = join(worktree, ".opencode");
+    mkdirSync(opencodeDir);
+    writeFileSync(join(opencodeDir, ".ingenium-mcp-credential"), "wrong-mcp-token\n", { mode: 0o600 });
+    writeFileSync(join(opencodeDir, ".ingenium-repository-sync-credential"), "repository-token\n", { mode: 0o600 });
+    process.chdir(worktree);
+    delete process.env.INGENIUM_MCP_CREDENTIAL;
+    process.env.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-repository-sync-credential";
+    process.env.INGENIUM_MCP_AUDIENCE = "repository-sync";
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { ok: true } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const { api } = await import("../lib/client.js");
+      await api.get("/health");
+      const headers = new Headers(fetchMock.mock.calls[0]![1].headers);
+      expect(headers.get("Authorization")).toBe("Bearer repository-token");
+      expect(headers.get("X-Ingenium-Audience")).toBe("repository-sync");
+      expect(headers.has("X-Ingenium-Internal-Service")).toBe(false);
     } finally {
       process.chdir(originalCwd);
       rmSync(worktree, { recursive: true, force: true });

@@ -1,12 +1,10 @@
 #!/bin/sh
-# Create only a missing local API credential without touching the email
-# encryption key. The resulting files are ignored by Git and mode 0600.
+# Create only a missing installation API credential without touching the email
+# encryption key. Scoped OpenCode credentials are issued separately by the API.
 set -eu
 
 repo_root="${1:-$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)}"
 env_file="${repo_root}/.env"
-opencode_dir="${repo_root}/.opencode"
-token_file="${opencode_dir}/.ingenium-api-token"
 
 fail() {
   echo "ERROR: $1"
@@ -94,32 +92,3 @@ if [ -z "$api_token" ]; then
 elif ! valid_api_token "$api_token"; then
   fail "INGENIUM_API_TOKEN in .env must contain 32 to 128 base64url characters"
 fi
-
-# Keep a protected host OpenCode token-file fallback without placing the token
-# in tracked opencode.json. Never overwrite a mismatched value: that would
-# silently rotate a credential and break a running deployment.
-if [ -L "$opencode_dir" ]; then
-  fail ".opencode must not be a symbolic link"
-fi
-if [ -e "$opencode_dir" ] && [ ! -d "$opencode_dir" ]; then
-  fail ".opencode must be a directory"
-fi
-mkdir -p "$opencode_dir"
-if [ -L "$opencode_dir" ]; then
-  fail ".opencode must not be a symbolic link"
-fi
-if [ -L "$token_file" ]; then
-  fail ".opencode/.ingenium-api-token must not be a symbolic link"
-fi
-if [ -e "$token_file" ] && [ ! -f "$token_file" ]; then
-  fail ".opencode/.ingenium-api-token must be a regular file"
-fi
-if [ -f "$token_file" ]; then
-  existing_token="$(tr -d '\r\n' < "$token_file")"
-  if [ "$existing_token" != "$api_token" ]; then
-    fail ".opencode/.ingenium-api-token does not match INGENIUM_API_TOKEN in .env"
-  fi
-else
-  printf '%s\n' "$api_token" > "$token_file"
-fi
-chmod 0600 "$token_file"

@@ -39,12 +39,17 @@ projectsRouter.get("/", (req, res) => {
     scopes: principal.scopes,
     organizationId: "organizationId" in principal ? principal.organizationId : undefined,
     projectId: "projectId" in principal ? principal.projectId : undefined,
+    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
   });
   res.json({ data: list });
 });
 
 projectsRouter.post("/", (req, res) => {
   const { name, is_global, organization_id } = req.body;
+  if (req.principal?.type === "service" && !req.principal.scopes.includes("projects:create")) {
+    res.status(403).json({ error: { code: "FORBIDDEN", message: "The authenticated principal cannot perform this action" } });
+    return;
+  }
   if (!requireSafeProjectName(name, res)) return;
   if (is_global !== undefined && typeof is_global !== "boolean") {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "is_global must be a boolean when provided" } });
@@ -85,6 +90,7 @@ projectsRouter.get("/archive", (req, res) => {
     scopes: principal.scopes,
     organizationId: "organizationId" in principal ? principal.organizationId : undefined,
     projectId: "projectId" in principal ? principal.projectId : undefined,
+    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
   }, true);
   res.json({ data: list });
 });

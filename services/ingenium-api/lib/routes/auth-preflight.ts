@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { authentication, authorization, invitations, oidcAuthentication, securityAudit, securityTokens } from "ingenium-core";
+import { authentication, authorization, invitations, mcpCredentials, oidcAuthentication, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
 import { authAttemptRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
@@ -199,6 +199,70 @@ authPreflightRouter.delete("/tokens/:id", (req, res) => {
   res.status(204).end();
 });
 
+const McpCredentialSchema = z.object({
+  servicePrincipalId: z.string().uuid().optional(),
+  kind: z.enum(["service", "runtime", "repository-sync"]),
+  audience: z.enum(["mcp", "runtime", "repository-sync"]),
+  name: z.string().min(1).max(128),
+  scopes: z.array(z.string()).min(1).max(64),
+  organizationId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  projectIds: z.array(z.string().uuid()).min(1).max(32).optional(),
+  workspaceId: z.string().min(1).max(256),
+  launcherWorktree: z.string().min(1).max(1024),
+  expiresAt: z.string().datetime(),
+}).strict();
+
+authPreflightRouter.get("/mcp-credentials", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ data: mcpCredentials.listMcpCredentials(currentUser(req).id) });
+});
+authPreflightRouter.post("/mcp-credentials", (req, res) => {
+  const principal = requireRecentStepUp(req);
+  const input = McpCredentialSchema.parse(req.body);
+  const decision = authorization.requireOrganizationPermission({
+    type: "browser-user",
+    id: principal.id,
+    scopes: principal.scopes,
+  }, input.organizationId, "credentials", "admin");
+  if (!decision.allowed) {
+    throw new AppError(decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found",
+      decision.visible ? "FORBIDDEN" : "NOT_FOUND", decision.visible ? 403 : 404);
+  }
+  let credential: ReturnType<typeof mcpCredentials.createMcpCredential>;
+  try {
+    credential = mcpCredentials.createMcpCredential({
+      ...input,
+      servicePrincipalName: `MCP ${input.name}`.slice(0, 128),
+      expiresAt: new Date(input.expiresAt),
+      createdByUserId: principal.id,
+    });
+  } catch {
+    throw new AppError("Credential request is invalid", "VALIDATION_ERROR", 422);
+  }
+  res.set("Cache-Control", "no-store");
+  res.status(201).location(`/api/v1/auth/mcp-credentials/${credential.id}`).json({ data: credential });
+});
+authPreflightRouter.post("/mcp-credentials/:id/rotate", (req, res) => {
+  const principal = requireRecentStepUp(req);
+  const input = z.object({ expiresAt: z.string().datetime().optional() }).strict().parse(req.body);
+  let credential: ReturnType<typeof mcpCredentials.rotateMcpCredential>;
+  try {
+    credential = mcpCredentials.rotateMcpCredential(req.params.id, principal.id, input.expiresAt ? new Date(input.expiresAt) : undefined);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Credential not found") throw new AppError("Credential not found", "NOT_FOUND", 404);
+    throw new AppError("Credential request is invalid", "VALIDATION_ERROR", 422);
+  }
+  res.set("Cache-Control", "no-store");
+  res.status(201).json({ data: credential });
+});
+authPreflightRouter.delete("/mcp-credentials/:id", (req, res) => {
+  if (!mcpCredentials.revokeMcpCredential(req.params.id, requireRecentStepUp(req).id)) {
+    throw new AppError("Credential not found", "NOT_FOUND", 404);
+  }
+  res.status(204).end();
+});
+
 authPreflightRouter.post("/oidc/start", preAuthCsrf, async (req, res, next) => {
   try {
     const { transactionToken, ...result } = await oidcAuthentication.beginOidcAuthorization(z.object({ providerId: z.string().uuid() }).strict().parse(req.body).providerId);
@@ -223,5 +287,24 @@ authPreflightRouter.get("/preflight", (req, res) => {
     && !req.principal.scopes.includes("auth:preflight") && !req.principal.scopes.includes("auth:*")) {
     throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
   }
-  res.json({ data: { authenticated: true } });
+  if (req.principal?.type === "service" && !req.principal.scopes.includes("projects:read")
+    && !req.principal.scopes.includes("projects:*") && !req.principal.scopes.includes("*")) {
+    throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
+  }
+  const principal = req.principal;
+  res.set("Cache-Control", "no-store");
+  res.json({ data: {
+    authenticated: true,
+    ...(principal?.type === "service" ? {
+      principal: { type: principal.type, id: principal.id },
+      scopes: principal.scopes,
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      projectIds: principal.projectIds ?? (principal.projectId ? [principal.projectId] : []),
+      audience: principal.audience,
+      workspaceId: principal.workspaceId,
+      launcherWorktree: principal.launcherWorktree,
+      restartRequiredOnCredentialChange: true,
+    } : {}),
+  } });
 });

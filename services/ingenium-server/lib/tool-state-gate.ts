@@ -23,6 +23,15 @@ export interface ToolAuthorizationState {
   policy?: ToolAuthorizationPolicy;
 }
 
+export interface LauncherAuthorizationBinding {
+  project: string;
+  projectId: string;
+  organizationId: string;
+  workspaceId: string;
+  launcherWorktree: string;
+  scopes: readonly string[];
+}
+
 export interface ProjectStateAttestation {
   project: string;
   project_id: string;
@@ -175,6 +184,15 @@ export function policyStateGatedHandler(
       throw error;
     }
   };
+}
+
+export function bindingAllowsTool(binding: LauncherAuthorizationBinding, policy: ToolAuthorizationPolicy): boolean {
+  return policy.scopes.some((scope) => binding.scopes.includes(scope)
+    || binding.scopes.includes("*")
+    || binding.scopes.includes(`${policy.resource}:*`)
+    || binding.scopes.includes(`${policy.resource}:admin`)
+    || (policy.permission === "read" && binding.scopes.includes(`${policy.resource}:write`))
+    || (policy.permission === "execute" && binding.scopes.includes(`${policy.resource}:sync`)));
 }
 
 /** Bind filesystem-backed operations and their state check to the launcher project. */

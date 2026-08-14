@@ -823,7 +823,7 @@ async function startRestoredUsers(): Promise<void> {
   if (!tokenPath) throw new MaintenanceError("HEALTH_FAILED");
   const token = readFileSync(tokenPath, "utf8").trim();
   const response = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new MaintenanceError("HEALTH_FAILED");

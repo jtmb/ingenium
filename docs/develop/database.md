@@ -86,7 +86,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–098)
+### Feature Migrations (045–100)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -123,6 +123,8 @@ another Compose project volume.
 | 096 | `096_resource_ownership.sql` | Adds resource grants/audit, explicit organization/user ownership for vault folders/items, provider connections/model policies, immutable ownership guards, and an immutable bounded-count/exact-ID manifest. Existing encrypted vault material is not decrypted or re-encrypted. |
 | 097 | `097_mail_tenancy.sql` | Adds owned mail accounts, separately encrypted credential rows, organization-qualified consume-once OAuth attempts and mail cache state, scope/FK triggers, and an immutable bounded-count/exact-account-ID manifest. Existing account IDs, ciphertext, folder names, and cache identity are preserved. |
 | 098 | `098_content_tenancy.sql` | Adds organization-rooted Docs, authorization-scoped RAG visibility, immutable context ownership, private-by-default observations/personality, bounded pipeline scope, normalized content shares, content-free audit, child-scope triggers, and an immutable ID/hash/count manifest. Partial state is refused by startup probes. |
+| 099 | `099_automation_tenancy.sql` | Adds immutable organization/project automation ownership, service principals, execution grants, event provenance, scheduler fairness, and migration evidence. |
+| 100 | `100_mcp_credentials.sql` | Adds AUTH-107 hash-only MCP/service/runtime/repository-sync credentials with mandatory audience, scope, organization/project grants, workspace/worktree, expiry, service-principal security epoch, rotation/revocation, last-used metadata, and immutable SQL guards. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

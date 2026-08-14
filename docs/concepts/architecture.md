@@ -20,7 +20,7 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 - If the global project cannot be created (DB error, permissions), the API logs a warning and degrades gracefully — the health endpoint and non-global routes still work, but the mail sync scheduler skips with the log message `Skipping mail sync — no global project configured`
 
 ### External Sessions
-- **Project name**: Derived from the worktree directory name (e.g., `gh-llm-bootstrap` for a repo cloned to `/home/user/repos/gh-llm-bootstrap`)
+- **Project name**: A display locator that must resolve to an immutable project UUID granted by the scoped credential
 - **Used by**: External OpenCode sessions (CLI, VS Code) that connect via the `@ingenium/extension` plugins
 - **Plugin target**: The `INGENIUM_PROJECT` environment variable in the MCP server's `opencode.json` entry controls which project extension plugins write to
 - **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the observer, skill-sync, and auto-observer plugins
@@ -29,14 +29,11 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 
 When an external OpenCode session (CLI, VS Code) loads the `@ingenium/extension` plugins, the extension's **resource-sync** module (`packages/ingenium-extension/resource-sync.ts`) calls `ensureExtensionProject()` which:
 
-1. **Resolves the project name** via `resolveExtensionProject()` with this priority:
-   - `process.env.INGENIUM_PROJECT` (explicit override — Docker containers use this for `global-default`)
-   - Worktree directory basename (e.g., `gh-llm-bootstrap` for `/home/user/repos/gh-llm-bootstrap`)
-   - **Throws** if the worktree basename is `"workspace"` (the container mount path) — the user must set `INGENIUM_PROJECT` explicitly
-2. **Provisions the project** via `POST /api/v1/projects` — if the project already exists, the `409 Conflict` response is accepted as idempotent success
-3. **Returns the project name** for use in all subsequent API calls
+1. Requires explicit project, workspace, and exact launcher-worktree bindings.
+2. Authenticates the scoped credential and receives the server-derived principal, organization, immutable project grants, scopes, and audience.
+3. Resolves the display locator to the immutable UUID already granted to the credential; mismatched or missing targets remain `404`.
 
-> 🔴 **Never defaults to `global-default`.** The resolver explicitly throws if it cannot determine a valid project name, preventing cross-project data pollution when multiple worktrees share the same server.
+> 🔴 **Never defaults or derives authority from a basename.** Names locate; server-issued UUID grants authorize.
 
 ### Global-Default Semantics
 
@@ -200,6 +197,22 @@ those snapshots before secret resolution or process handling. Revoked principals
 and stale job, execution-grant, or vault-grant revisions fail closed. User-private
 jobs and tasks remain owner-only, while raw run logs/process surfaces remain
 installation-admin operations.
+
+### MCP credential tenancy (AUTH-107)
+
+External MCP and extension processes use hash-only, 256-bit credentials bound to
+one audience, organization, immutable project grant set, workspace, exact launcher
+worktree, expiry, scopes, and service-principal security epoch. Plaintext is returned
+only at issue/rotation. Revocation, rotation, expiry, and epoch changes take effect on
+the next API call. The installation bearer remains available only to explicit internal
+services and is not projected into user runtimes.
+
+Repository-sync credentials contain exactly `repository:sync` and `projects:read`.
+They cannot reach vault, mail, backups, or other product resources. Tool discovery is
+filtered by authorization as an optimization; API policy remains final authority.
+Dynamic child MCP tools inherit the parent's exact project and scope ceiling; plaintext
+runtime handoff additionally requires the dedicated `runtime` audience and
+`child-mcp:runtime`.
 
 ### Content tenancy (AUTH-105)
 

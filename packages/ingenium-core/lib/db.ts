@@ -1946,11 +1946,14 @@ function inspectAuthorizationAuditMigration(db: Database.Database): Authenticati
     security_audit_events: ["id", "actor_type", "actor_id", "action", "organization_id", "project_id", "outcome", "metadata_json", "created_at"],
   }, indexes, triggers);
   if (state.any && state.missing.length === 0) {
+    const authorizationTables = db.prepare("SELECT 1 FROM pragma_table_info('service_principals') WHERE name = 'security_epoch'").get()
+      ? tables.filter((table) => table !== "service_principals")
+      : tables;
     state.missing.push(...compareMigrationDefinitions(
       db,
       "095_authorization_audit.sql",
       "CREATE TABLE users (id TEXT PRIMARY KEY); CREATE TABLE organizations (id TEXT PRIMARY KEY); CREATE TABLE projects (id TEXT PRIMARY KEY);",
-      [...tables, ...indexes, ...triggers],
+      [...authorizationTables, ...indexes, ...triggers],
     ));
   }
   state.complete = state.missing.length === 0;
@@ -2183,6 +2186,73 @@ function inspectAutomationTenancyMigration(db: Database.Database): AutomationTen
   }
   state.complete = state.missing.length === 0;
   return state;
+}
+
+const MCP_CREDENTIAL_COLUMNS = [
+  "id", "service_principal_id", "kind", "audience", "name", "token_prefix", "token_hash", "scopes_json",
+  "organization_id", "project_id", "project_grants_json", "workspace_id", "launcher_worktree", "security_epoch",
+  "expires_at", "revoked_at", "rotated_to_id", "last_used_at", "created_by_user_id", "created_at",
+] as const;
+const MCP_CREDENTIAL_INDEXES = ["idx_mcp_credentials_principal", "idx_mcp_credentials_project"] as const;
+const MCP_CREDENTIAL_TRIGGERS = ["mcp_credentials_scope_insert", "mcp_credentials_immutable"] as const;
+
+function inspectMcpCredentialMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const missing: string[] = [];
+  const expectedObjects = ["mcp_credentials", ...MCP_CREDENTIAL_INDEXES, ...MCP_CREDENTIAL_TRIGGERS];
+  const namedObjects = db.prepare(
+    `SELECT name, type FROM sqlite_master WHERE name IN (${expectedObjects.map(() => "?").join(",")})`,
+  ).all(...expectedObjects) as Array<{ name: string; type: string }>;
+  const objectTypes = new Map(namedObjects.map(({ name, type }) => [name, type]));
+  const securityEpochColumn = (db.prepare("PRAGMA table_info('service_principals')").all() as Array<{
+    name: string; type: string; notnull: number; dflt_value: string | null; pk: number;
+  }>).find(({ name }) => name === "security_epoch");
+  const servicePrincipalTable = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'service_principals'",
+  ).get() as { sql?: string } | undefined;
+  const securityEpochPresent = securityEpochColumn !== undefined;
+  const any = namedObjects.length > 0 || securityEpochPresent;
+
+  if (objectTypes.get("mcp_credentials") !== "table") missing.push("mcp_credentials table");
+  else {
+    const actualColumns = (db.prepare("PRAGMA table_info('mcp_credentials')").all() as Array<{ name: string }>).map(({ name }) => name);
+    const actual = new Set(actualColumns);
+    for (const column of MCP_CREDENTIAL_COLUMNS) {
+      if (!actual.has(column)) missing.push(`mcp_credentials.${column} column`);
+    }
+    for (const column of actualColumns) {
+      if (!(MCP_CREDENTIAL_COLUMNS as readonly string[]).includes(column)) missing.push(`mcp_credentials.${column} unexpected column`);
+    }
+  }
+  if (!securityEpochPresent) missing.push("service_principals.security_epoch column");
+  else if (securityEpochColumn.type.toUpperCase() !== "INTEGER" || securityEpochColumn.notnull !== 1
+    || securityEpochColumn.dflt_value !== "0" || securityEpochColumn.pk !== 0
+    || !servicePrincipalTable?.sql
+    || !normalizeSchemaSql(servicePrincipalTable.sql).includes("security_epoch integer not null default 0 check(security_epoch >= 0)")) {
+    missing.push("service_principals.security_epoch definition");
+  }
+  for (const index of MCP_CREDENTIAL_INDEXES) if (objectTypes.get(index) !== "index") missing.push(`${index} index`);
+  for (const trigger of MCP_CREDENTIAL_TRIGGERS) if (objectTypes.get(trigger) !== "trigger") missing.push(`${trigger} trigger`);
+
+  if (missing.length === 0) {
+    missing.push(...compareMigrationDefinitions(
+      db,
+      "100_mcp_credentials.sql",
+      `CREATE TABLE organizations (id TEXT PRIMARY KEY);
+       CREATE TABLE projects (id TEXT PRIMARY KEY);
+       CREATE TABLE users (id TEXT PRIMARY KEY);
+       CREATE TABLE service_principals (
+         id TEXT PRIMARY KEY CHECK(length(id) = 36),
+         organization_id TEXT REFERENCES organizations(id) ON DELETE RESTRICT,
+         name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 128),
+         status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'revoked')),
+         created_at TEXT NOT NULL CHECK(length(created_at) BETWEEN 1 AND 64),
+         updated_at TEXT NOT NULL CHECK(length(updated_at) BETWEEN 1 AND 64),
+         UNIQUE(organization_id, name)
+       );`,
+      ["mcp_credentials", ...MCP_CREDENTIAL_INDEXES, ...MCP_CREDENTIAL_TRIGGERS],
+    ));
+  }
+  return { any, complete: missing.length === 0, missing };
 }
 
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
@@ -3196,7 +3266,7 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
-export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099", AuthenticationFoundationMigrationState> {
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099" | "100", AuthenticationFoundationMigrationState> {
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   return {
     "093": inspectIdentityTenancyMigration(database),
@@ -3206,6 +3276,7 @@ export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "09
     "097": inspectMailTenancyMigration(database),
     "098": inspectContentTenancyMigration(database),
     "099": inspectAutomationTenancyMigration(database),
+    "100": inspectMcpCredentialMigration(database),
   };
 }
 
@@ -4528,6 +4599,20 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("099", ["foreign key integrity"]);
     }
     logger.info("db", "Applied migration 099_automation_tenancy.sql");
+  }
+
+  const mcpCredentialMigration = inspectMcpCredentialMigration(db);
+  if (mcpCredentialMigration.any && !mcpCredentialMigration.complete) {
+    throw restoreMigrationPartialStateError("100", mcpCredentialMigration.missing);
+  }
+  if (!mcpCredentialMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "100_mcp_credentials.sql"), "utf-8"));
+    const applied = inspectMcpCredentialMigration(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError("100", applied.missing);
+    if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("100", ["foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 100_mcp_credentials.sql");
   }
 
   enforceReservedBrokerInvariant(db);

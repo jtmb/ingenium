@@ -5,6 +5,9 @@ const TOKEN_FILE_NAME = ".ingenium-api-token";
 const TOKEN_FILE_REFERENCE = /^\{file:([^{}\u0000\r\n]+)\}$/;
 const MAX_TOKEN_LENGTH = 4096;
 const RUNTIME_API_TOKEN_FILE = "/run/ingenium-secrets/api-token";
+const MCP_CREDENTIAL_FILE_NAME = ".ingenium-mcp-credential";
+const REPOSITORY_SYNC_CREDENTIAL_FILE_NAME = ".ingenium-repository-sync-credential";
+const RUNTIME_CREDENTIAL_FILE_NAME = ".ingenium-runtime-credential";
 
 function normalizedApiToken(value: string | undefined): string | undefined {
   const token = value?.trim();
@@ -39,7 +42,7 @@ function readPrivateTokenFile(tokenPath: string): string | undefined {
  * Arbitrary file references are rejected so an untrusted OpenCode config cannot
  * turn this process into a general-purpose file reader.
  */
-function readTokenFile(reference: string): string | undefined {
+function readTokenFile(reference: string, expectedFileName: string): string | undefined {
   // The entrypoint owns this fixed owner-private file; arbitrary absolute paths remain rejected.
   if (isAbsolute(reference)) return reference === RUNTIME_API_TOKEN_FILE ? readPrivateTokenFile(reference) : undefined;
 
@@ -53,7 +56,7 @@ function readTokenFile(reference: string): string | undefined {
     if (!opencodeStat.isDirectory() || opencodeStat.isSymbolicLink()) return undefined;
 
     const tokenPath = resolve(worktreeRoot, reference);
-    const expectedTokenPath = resolve(opencodeDir, TOKEN_FILE_NAME);
+    const expectedTokenPath = resolve(opencodeDir, expectedFileName);
     if (tokenPath !== expectedTokenPath || !isContainedBy(opencodeDir, tokenPath)) return undefined;
 
     const tokenLinkStat = lstatSync(tokenPath);
@@ -66,14 +69,29 @@ function readTokenFile(reference: string): string | undefined {
   }
 }
 
-/** Resolve an explicit token first, then the tracked protected-file fallback. */
-function resolveApiToken(): string | undefined {
-  const configuredToken = process.env.INGENIUM_API_TOKEN;
+/** Resolve a scoped credential first; installation fallback requires an explicit internal launcher. */
+function resolveApiCredential(): { token?: string; installation: boolean } {
+  const credentialFileName = process.env.INGENIUM_MCP_AUDIENCE === "repository-sync"
+    ? REPOSITORY_SYNC_CREDENTIAL_FILE_NAME
+    : MCP_CREDENTIAL_FILE_NAME;
+  const configuredToken = process.env.INGENIUM_MCP_CREDENTIAL;
   const placeholder = configuredToken?.match(TOKEN_FILE_REFERENCE)?.[1];
-  if (placeholder !== undefined) return readTokenFile(placeholder);
+  const scopedToken = placeholder !== undefined
+    ? readTokenFile(placeholder, credentialFileName)
+    : normalizedApiToken(configuredToken)
+      ?? readTokenFile(process.env.INGENIUM_MCP_CREDENTIAL_FILE ?? `.opencode/${credentialFileName}`, credentialFileName);
+  if (scopedToken) return { token: scopedToken, installation: false };
 
-  return normalizedApiToken(configuredToken)
-    ?? readTokenFile(process.env.INGENIUM_API_TOKEN_FILE ?? `.opencode/${TOKEN_FILE_NAME}`);
+  const installationToken = process.env.INGENIUM_INTERNAL_SERVICE === "1"
+    ? normalizedApiToken(process.env.INGENIUM_API_TOKEN)
+      ?? readTokenFile(process.env.INGENIUM_API_TOKEN_FILE ?? `.opencode/${TOKEN_FILE_NAME}`, TOKEN_FILE_NAME)
+    : undefined;
+  return { token: installationToken, installation: installationToken !== undefined };
+}
+
+function resolveRuntimeCredential(): string | undefined {
+  return normalizedApiToken(process.env.INGENIUM_RUNTIME_CREDENTIAL)
+    ?? readTokenFile(process.env.INGENIUM_RUNTIME_CREDENTIAL_FILE ?? `.opencode/${RUNTIME_CREDENTIAL_FILE_NAME}`, RUNTIME_CREDENTIAL_FILE_NAME);
 }
 
 /**
@@ -92,9 +110,18 @@ export const config = {
 };
 
 /** Add API authentication without exposing the configured token to callers. */
-export function apiRequestHeaders(headers?: HeadersInit): Headers {
+export function apiRequestHeaders(headers?: HeadersInit, audience = process.env.INGENIUM_MCP_AUDIENCE ?? "mcp"): Headers {
   const requestHeaders = new Headers(headers);
-  const token = resolveApiToken();
+  const credential = audience === "runtime"
+    ? { token: resolveRuntimeCredential(), installation: false }
+    : resolveApiCredential();
+  const token = credential.token;
   if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+  requestHeaders.set("X-Ingenium-Audience", audience);
+  if (process.env.INGENIUM_WORKSPACE_ID) requestHeaders.set("X-Ingenium-Workspace", process.env.INGENIUM_WORKSPACE_ID);
+  if (process.env.INGENIUM_WORKTREE) requestHeaders.set("X-Ingenium-Launcher-Worktree", process.env.INGENIUM_WORKTREE);
+  if (credential.installation) {
+    requestHeaders.set("X-Ingenium-Internal-Service", "1");
+  }
   return requestHeaders;
 }

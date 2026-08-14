@@ -10,6 +10,7 @@ export interface AuthorizationPrincipal {
   scopes: readonly string[];
   organizationId?: string | null;
   projectId?: string | null;
+  projectIds?: readonly string[];
 }
 
 export interface AuthorizationDecision {
@@ -55,6 +56,8 @@ export interface ResourceAuditEventInput {
 function scopeAllows(scopes: readonly string[], resource: string, permission: AuthorizationPermission): boolean {
   return scopes.some((scope) => scope === "*" || scope === "user:*" || scope === `${resource}:*`
     || scope === `${resource}:${permission}` || (permission === "read" && scope === `${resource}:write`)
+    || (permission === "execute" && scope === `${resource}:sync`)
+    || (resource === "projects" && permission === "write" && scope === "projects:create")
     || (permission !== "admin" && scope === `${resource}:admin`));
 }
 
@@ -127,10 +130,11 @@ export function requireProjectPermission(
   ).get(projectId) as { id: string; organization_id: string } | undefined;
   if (!project) return { allowed: false, visible: false };
   if (principal.type === "compatibility") return { allowed: true, visible: true, projectId, organizationId: project.organization_id };
-  if (principal.projectId && principal.projectId !== projectId) return { allowed: false, visible: false };
+  const projectGrants = principal.projectIds ?? (principal.projectId ? [principal.projectId] : []);
+  if (projectGrants.length > 0 && !projectGrants.includes(projectId)) return { allowed: false, visible: false };
   if (principal.organizationId && principal.organizationId !== project.organization_id) return { allowed: false, visible: false };
   if (principal.type === "service-principal" || principal.type === "runtime-service") {
-    const visible = principal.projectId === projectId || (!principal.projectId && principal.organizationId === project.organization_id);
+    const visible = projectGrants.includes(projectId) || (projectGrants.length === 0 && principal.organizationId === project.organization_id);
     return { allowed: visible && scopeAllows(principal.scopes, resource, permission), visible, projectId, organizationId: project.organization_id };
   }
   const access = projectAccess(principal.id, projectId);
@@ -158,7 +162,8 @@ export function requireProjectLifecyclePermission(
   ).get(projectId) as { id: string; organization_id: string } | undefined;
   if (!project) return { allowed: false, visible: false };
   if (principal.type === "compatibility") return { allowed: true, visible: true, projectId, organizationId: project.organization_id };
-  if (principal.projectId && principal.projectId !== projectId) return { allowed: false, visible: false };
+  const projectGrants = principal.projectIds ?? (principal.projectId ? [principal.projectId] : []);
+  if (projectGrants.length > 0 && !projectGrants.includes(projectId)) return { allowed: false, visible: false };
   if (principal.organizationId && principal.organizationId !== project.organization_id) return { allowed: false, visible: false };
   const organization = requireOrganizationPermission(principal, project.organization_id, "projects", "admin");
   return organization.allowed
@@ -177,9 +182,13 @@ export function listAuthorizedProjects(principal: AuthorizationPrincipal, archiv
   }
   if (principal.type === "service-principal" || principal.type === "runtime-service") {
     if (!scopeAllows(principal.scopes, "projects", "read")) return [];
-    if (principal.projectId) return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
-      `SELECT * FROM projects WHERE id = ? AND ${archivePredicate}`,
-    ).all(principal.projectId) as Project[];
+    const projectGrants = principal.projectIds ?? (principal.projectId ? [principal.projectId] : []);
+    if (projectGrants.length > 0) {
+      const placeholders = projectGrants.map(() => "?").join(",");
+      return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+        `SELECT * FROM projects WHERE id IN (${placeholders}) AND ${archivePredicate} ORDER BY created_at DESC`,
+      ).all(...projectGrants) as Project[];
+    }
     if (!principal.organizationId) return [];
     return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
       `SELECT * FROM projects WHERE organization_id = ? AND ${archivePredicate} ORDER BY created_at DESC`,

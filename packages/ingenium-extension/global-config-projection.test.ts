@@ -108,11 +108,15 @@ describe("container OpenCode global-config projection", () => {
     expect(config.mcp.ingenium.environment).toMatchObject({
       CUSTOM_VALUE: "preserved",
       INGENIUM_API_URL: "http://localhost:4097/api/v1",
-      INGENIUM_API_TOKEN_FILE: ".opencode/.ingenium-api-token",
+      INGENIUM_MCP_CREDENTIAL: "{file:.opencode/.ingenium-mcp-credential}",
+      INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
+      INGENIUM_MCP_AUDIENCE: "mcp",
       INGENIUM_PROJECT: "global-default",
+      INGENIUM_WORKSPACE_ID: "global-default-workspace",
       INGENIUM_WORKTREE: "/workspace",
     });
     expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN).toBeUndefined();
+    expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN_FILE).toBeUndefined();
     expect(config.plugin).toEqual([
       "@other/ponytail",
       "@dietrichgebert/ponytail-extra",

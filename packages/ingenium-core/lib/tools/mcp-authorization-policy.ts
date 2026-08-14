@@ -81,14 +81,20 @@ export function explicitMcpAuthorizationPolicy(toolName: string, category: strin
   const transportName = toolName.startsWith("ingenium_") ? toolName.slice("ingenium_".length) : toolName;
   if (!READ.has(transportName) && !ADMIN.has(transportName) && !EXECUTE.has(transportName) && !WRITE.has(transportName)) throw new Error(`Missing explicit MCP authorization policy: ${toolName}`);
   const permission: AuthorizationPermission = ADMIN.has(transportName) ? "admin" : EXECUTE.has(transportName) ? "execute" : READ.has(transportName) ? "read" : "write";
-  const target: McpPolicyTarget = PRIVATE.has(transportName) ? "private" : PROJECT.has(transportName) ? "project" : INSTALLATION.has(transportName) ? "installation" : ORGANIZATION.has(transportName) ? "organization" : "project";
-  const resource = category.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const target: McpPolicyTarget = PRIVATE.has(transportName) ? "private"
+    : PROJECT.has(transportName) ? "project"
+    : transportName.startsWith("docs_") ? "organization"
+    : transportName.startsWith("vault_") ? "project"
+    : INSTALLATION.has(transportName) ? "installation"
+    : ORGANIZATION.has(transportName) ? "organization"
+    : "project";
+  const resource = transportName === "repository_sync" ? "repository" : category.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return {
     action: `${resource}.${permission}`,
     resource,
     permission,
     target,
-    scopes: [`${resource}:${permission}`],
+    scopes: [transportName === "repository_sync" ? "repository:sync" : `${resource}:${permission}`],
     launcherBinding: UNBOUND.has(transportName) || target === "installation" ? "none" : "required",
   };
 }

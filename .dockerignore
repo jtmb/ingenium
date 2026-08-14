@@ -13,6 +13,9 @@
 .env.*
 !.env.example
 .opencode/.ingenium-api-token
+.opencode/.ingenium-mcp-credential
+.opencode/.ingenium-repository-sync-credential
+.opencode/.ingenium-runtime-credential
 *.key
 **/*.key
 *.pem

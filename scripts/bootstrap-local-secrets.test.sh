@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Deterministic regression test for bootstrap token-file parent-path safety.
+# Deterministic regression test that bootstrap does not project the installation
+# bearer into the OpenCode worktree.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BOOTSTRAP="$REPO_ROOT/scripts/bootstrap-local-secrets.sh"
 TEST_ROOT="$(mktemp -d)"
-OUTSIDE_DIR="$(mktemp -d)"
 
 cleanup() {
-  rm -f "$TEST_ROOT/.env" "$TEST_ROOT/.opencode"
-  rmdir "$TEST_ROOT" "$OUTSIDE_DIR"
+  rm -f "$TEST_ROOT/.env"
+  rmdir "$TEST_ROOT"
 }
 trap cleanup EXIT
 
@@ -18,14 +18,14 @@ fail() {
   exit 1
 }
 
-ln -s "$OUTSIDE_DIR" "$TEST_ROOT/.opencode"
+sh "$BOOTSTRAP" "$TEST_ROOT"
 
-if sh "$BOOTSTRAP" "$TEST_ROOT"; then
-  fail "bootstrap accepted a symlinked .opencode parent"
+if [ -e "$TEST_ROOT/.opencode" ]; then
+  fail "bootstrap projected the installation bearer into .opencode"
 fi
 
-if [ -e "$OUTSIDE_DIR/.ingenium-api-token" ]; then
-  fail "bootstrap wrote a token through the symlinked .opencode parent"
+if ! grep -q '^INGENIUM_API_TOKEN=[A-Za-z0-9_-]\{32,128\}$' "$TEST_ROOT/.env"; then
+  fail "bootstrap did not create a valid installation token"
 fi
 
-printf 'PASS: bootstrap rejects symlinked .opencode token parent\n'
+printf 'PASS: bootstrap keeps the installation bearer out of OpenCode\n'

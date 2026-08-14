@@ -311,7 +311,7 @@ async function request(path: string, opts: RequestOptions, retries = canRetry(pa
       const init: RequestInit = {
         method: opts.method,
         signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: apiRequestHeaders({ "Content-Type": opts.contentType ?? "application/json" }),
+        headers: apiRequestHeaders({ "Content-Type": opts.contentType ?? "application/json" }, opts.trustedChildMcpRuntime ? "runtime" : undefined),
       };
       if (opts.trustedChildMcpRuntime) {
         (init.headers as Headers).set(

@@ -3,8 +3,9 @@
  *
  * The dashboard, in-container OpenCode plugins, and loopback host MCP clients
  * use this boundary while Express remains private on localhost:4096. The proxy
- * validates each incoming Bearer credential before replacing it with the
- * upstream credential; network locality alone is never a bypass.
+ * validates each incoming Bearer shape. Scoped credentials are forwarded for
+ * API validation; only the installation credential is replaced and marked as
+ * an internal compatibility request.
  */
 import http from "node:http";
 import {
@@ -48,17 +49,17 @@ const hopByHopHeaders = new Set([
   "upgrade",
 ]);
 
-function upstreamHeaders(headers) {
+function upstreamHeaders(headers, providedToken, installationRequest) {
   const forwarded = {};
   for (const [name, value] of Object.entries(headers)) {
-    if (hopByHopHeaders.has(name.toLowerCase()) || value === undefined) continue;
+    const normalizedName = name.toLowerCase();
+    if (hopByHopHeaders.has(normalizedName) || normalizedName === "x-ingenium-internal-service" || value === undefined) continue;
     forwarded[name] = value;
   }
 
-  // Overwrite any caller-provided credential rather than trusting a host
-  // process to carry the container credential correctly.
   forwarded.host = `127.0.0.1:${upstreamPort}`;
-  forwarded.authorization = `Bearer ${token}`;
+  forwarded.authorization = `Bearer ${installationRequest ? token : providedToken}`;
+  if (installationRequest) forwarded["x-ingenium-internal-service"] = "1";
   return forwarded;
 }
 
@@ -69,15 +70,13 @@ function incomingBearerToken(headers) {
   return isValidApiToken(provided) ? provided : null;
 }
 
-function rejectUnauthorized(response, statusCode) {
-  response.writeHead(statusCode, {
+function rejectUnauthorized(response) {
+  response.writeHead(401, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-    ...(statusCode === 401 ? { "www-authenticate": "Bearer" } : {}),
+    "www-authenticate": "Bearer",
   });
-  response.end(statusCode === 401
-    ? '{"error":{"code":"UNAUTHORIZED","message":"Bearer authentication is required"}}'
-    : '{"error":{"code":"FORBIDDEN","message":"Invalid authorization token"}}');
+  response.end('{"error":{"code":"UNAUTHORIZED","message":"Bearer authentication is required"}}');
 }
 
 const server = http.createServer(
@@ -86,21 +85,17 @@ const server = http.createServer(
     const providedToken = incomingBearerToken(request.headers);
     if (!providedToken) {
       request.resume();
-      rejectUnauthorized(response, 401);
+      rejectUnauthorized(response);
       return;
     }
-    if (!apiTokensEqual(providedToken, token)) {
-      request.resume();
-      rejectUnauthorized(response, 403);
-      return;
-    }
+    const installationRequest = apiTokensEqual(providedToken, token);
 
     const upstream = http.request({
       host: "127.0.0.1",
       port: upstreamPort,
       method: request.method,
       path: request.url,
-      headers: upstreamHeaders(request.headers),
+      headers: upstreamHeaders(request.headers, providedToken, installationRequest),
     }, (upstreamResponse) => {
       response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
       upstreamResponse.pipe(response);

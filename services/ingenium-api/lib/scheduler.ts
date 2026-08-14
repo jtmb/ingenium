@@ -175,7 +175,7 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
       const res = await fetch(`http://localhost:${port}/api/v1/synthesis/cross-project`, {
         method: "POST",
         signal: AbortSignal.any([shutdownController.signal, timeoutSignal]),
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
       });
       if (!res.ok && res.status !== 423) {
         const body = await res.json().catch(() => ({})) as any;

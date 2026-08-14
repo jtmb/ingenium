@@ -9,7 +9,7 @@ const probeUrl = process.env.INGENIUM_API_PROBE_URL ?? "http://127.0.0.1:4097/ap
 try {
   const token = loadApiToken(process.env);
   const response = await fetch(probeUrl, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) {

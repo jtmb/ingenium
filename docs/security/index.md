@@ -33,6 +33,15 @@ contain actor and identifiers only, never content. Docs AI derives organization,
 project, and provider authority from authenticated server state and rejects body
 authority overrides.
 
+## MCP scoped credentials
+
+AUTH-107 separates external MCP/runtime credentials from the internal installation
+bearer. Credentials are hash-only, 256-bit, expiry- and security-epoch-bound, and
+carry mandatory audience, scope, organization, project-grant, workspace, and exact
+launcher-worktree bounds. Repository sync is least-privilege; private child runtime
+handoff requires its own runtime audience. Tool filtering is not the authorization
+boundary: every API route re-evaluates the server-derived principal.
+
 ## LLM Endpoint SSRF Protection
 
 **Source**: `packages/ingenium-core/lib/tools/endpoint-policy.ts`

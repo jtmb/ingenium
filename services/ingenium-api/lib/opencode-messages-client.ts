@@ -54,6 +54,7 @@ export function createOpenCodeMessagesClient(
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
+          "X-Ingenium-Internal-Service": "1",
         },
         signal: timeoutSignal,
       });

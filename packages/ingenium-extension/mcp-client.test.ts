@@ -16,17 +16,23 @@ const originalTimeout = process.env.INGENIUM_API_TIMEOUT;
 const originalProject = process.env.INGENIUM_PROJECT;
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+const originalMcpToken = process.env.INGENIUM_MCP_CREDENTIAL;
+const originalMcpTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
 
 function prepareWorktree(): void {
   worktree = mkdtempSync(join(tmpdir(), "ingenium-mcp-client-"));
   mkdirSync(join(worktree, ".opencode"));
-  const tokenPath = join(worktree, ".opencode", ".ingenium-api-token");
+  const tokenPath = join(worktree, ".opencode", ".ingenium-mcp-credential");
   writeFileSync(tokenPath, `${"a".repeat(32)}\n`, { mode: 0o600 });
   chmodSync(tokenPath, 0o600);
   process.env.INGENIUM_PROJECT = "mcp-client-project";
   process.env.INGENIUM_API_URL = "http://api.test/api/v1";
   delete process.env.INGENIUM_API_TOKEN;
   delete process.env.INGENIUM_API_TOKEN_FILE;
+  delete process.env.INGENIUM_MCP_CREDENTIAL;
+  delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  process.env.INGENIUM_WORKSPACE_ID = "mcp-client-workspace";
 }
 
 afterEach(() => {
@@ -40,6 +46,12 @@ afterEach(() => {
   else process.env.INGENIUM_API_TOKEN = originalToken;
   if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
   else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+  if (originalMcpToken === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL;
+  else process.env.INGENIUM_MCP_CREDENTIAL = originalMcpToken;
+  if (originalMcpTokenFile === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  else process.env.INGENIUM_MCP_CREDENTIAL_FILE = originalMcpTokenFile;
+  if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+  else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
 });
@@ -74,7 +86,8 @@ describe("extension MCP client bridge", () => {
         INGENIUM_API_URL: "http://api.test/api/v1",
         INGENIUM_PROJECT: "mcp-client-project",
         INGENIUM_WORKTREE: worktree,
-        INGENIUM_API_TOKEN_FILE: ".opencode/.ingenium-api-token",
+        INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
+        INGENIUM_WORKSPACE_ID: "mcp-client-workspace",
       }),
     }));
     expect(Object.keys(launch!.env)).not.toContain("OPENCODE_CONFIG");

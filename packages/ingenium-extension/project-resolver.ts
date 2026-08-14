@@ -1,4 +1,4 @@
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   apiRequestHeaders,
   waitForAuthenticatedApiReadiness,
@@ -34,11 +34,6 @@ export function classifyExtensionProjectFailure(error: unknown): ExtensionProjec
   return error instanceof ExtensionProjectStartupError ? error.failure : "unavailable";
 }
 
-function classifyProjectProvisioningFailure(status: number): ExtensionProjectFailureKind {
-  if (status === 401 || status === 403) return "authentication";
-  return status >= 500 ? "unavailable" : "rejected";
-}
-
 export function isValidProjectName(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_PROJECT_NAME_LENGTH &&
     value.trim().length > 0 && value === value.trim() && value !== "." && value !== ".." &&
@@ -67,11 +62,7 @@ export function resolveExtensionProject(worktree: string, requestedProject?: str
     if (!isValidProjectName(explicit)) return rejectProjectResolution("INGENIUM_PROJECT is not a safe project name");
     return explicit;
   }
-  const derived = basename(worktree);
-  // /workspace is the container mount, not an external worktree identity.
-  if (derived === "workspace") return rejectProjectResolution("Cannot derive a project from /workspace; set INGENIUM_PROJECT explicitly");
-  if (!isValidProjectName(derived)) return rejectProjectResolution("Could not derive a safe project name from the worktree");
-  return derived;
+  return rejectProjectResolution("A credential-bound INGENIUM_PROJECT locator is required");
 }
 
 /** Idempotently provision the resolved project before an extension writes resources. */
@@ -100,21 +91,25 @@ export async function ensureExtensionProject(
       throw new ExtensionProjectStartupError(readiness.failure ?? "unavailable");
     }
 
-    let response: Response;
-    try {
-      response = await request(`${normalizedApiBase}/projects`, {
-        method: "POST",
-        headers: apiRequestHeaders(worktree, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ name: project, is_global: project === "global-default" }),
-        signal: AbortSignal.timeout(apiTimeoutMs()),
-      });
-    } catch {
-      throw new ExtensionProjectStartupError("unavailable");
+    const binding = readiness.binding!;
+    if (binding.launcherWorktree !== resolve(worktree)
+      || binding.workspaceId !== process.env.INGENIUM_WORKSPACE_ID
+      || !binding.projectIds.includes(binding.projectId)) {
+      throw new ExtensionProjectStartupError("not_found");
     }
-    if (!response.ok && response.status !== 409) {
-      throw new ExtensionProjectStartupError(classifyProjectProvisioningFailure(response.status));
+
+    const metadata = await request(`${normalizedApiBase}/projects/${encodeURIComponent(project)}/detail`, {
+      headers: apiRequestHeaders(worktree),
+      signal: AbortSignal.timeout(apiTimeoutMs()),
+    }).catch(() => null);
+    if (metadata?.ok) {
+      const payload = await metadata.json().catch(() => null) as { data?: { project?: { id?: unknown } } } | null;
+      if (payload?.data?.project?.id !== binding.projectId) throw new ExtensionProjectStartupError("not_found");
+      return project;
     }
-    return project;
+    if (metadata?.status === 403) throw new ExtensionProjectStartupError("scope");
+    if (metadata?.status === 404) throw new ExtensionProjectStartupError("not_found");
+    throw new ExtensionProjectStartupError(metadata ? "rejected" : "unavailable");
   })();
   ensuredProjects.set(cacheKey, pending);
   try {

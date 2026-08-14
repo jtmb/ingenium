@@ -376,8 +376,11 @@ if [ ! -f "$OC_CONFIG" ]; then
       "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token",
+        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
+        "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+        "INGENIUM_MCP_AUDIENCE": "mcp",
         "INGENIUM_PROJECT": "global-default",
+        "INGENIUM_WORKSPACE_ID": "global-default-workspace",
         "INGENIUM_WORKTREE": "/workspace"
       }
     }
@@ -416,12 +419,11 @@ runuser -u appuser -- env -i \
   XDG_CONFIG_HOME="/home/appuser/.config" \
   node /app/scripts/project-opencode-global-config.mjs "$OC_CONFIG"
 
-# OpenCode is launched with env -i, so its local MCP child cannot inherit the
-# runtime token-file path. Seed the only protected fallback path accepted by
-# the MCP server below its worktree; the non-secret MCP config passes that
-# relative file path to the child, which reads it from its /workspace CWD.
+# OpenCode receives only separately issued scoped credentials. Remove the
+# historical installation-token copy after proving it is the known runtime
+# credential; never overwrite an operator-issued scoped credential.
 WORKSPACE_OPENCODE_DIR="/workspace/.opencode"
-WORKSPACE_MCP_TOKEN_FILE="${WORKSPACE_OPENCODE_DIR}/.ingenium-api-token"
+LEGACY_WORKSPACE_TOKEN_FILE="${WORKSPACE_OPENCODE_DIR}/.ingenium-api-token"
 if [ -L "$WORKSPACE_OPENCODE_DIR" ]; then
   echo "ERROR: OpenCode workspace directory must not be a symbolic link"
   exit 1
@@ -433,31 +435,13 @@ fi
 mkdir -p "$WORKSPACE_OPENCODE_DIR"
 chown appuser:appuser "$WORKSPACE_OPENCODE_DIR"
 chmod 0700 "$WORKSPACE_OPENCODE_DIR"
-if [ -L "$WORKSPACE_MCP_TOKEN_FILE" ]; then
-  echo "ERROR: OpenCode MCP token file must not be a symbolic link"
-  exit 1
-fi
-if [ -e "$WORKSPACE_MCP_TOKEN_FILE" ] && [ ! -f "$WORKSPACE_MCP_TOKEN_FILE" ]; then
-  echo "ERROR: OpenCode MCP token path must be a regular file"
-  exit 1
-fi
-workspace_token_tmp="$(mktemp "${WORKSPACE_OPENCODE_DIR}/.ingenium-api-token.XXXXXX")"
-trap 'rm -f "$workspace_token_tmp"' EXIT HUP INT TERM
-chown appuser:appuser "$workspace_token_tmp"
-chmod 0600 "$workspace_token_tmp"
-cat "$RUNTIME_API_TOKEN_FILE" > "$workspace_token_tmp"
-mv -f "$workspace_token_tmp" "$WORKSPACE_MCP_TOKEN_FILE"
-trap - EXIT HUP INT TERM
-
-# Validate metadata and content equivalence without printing credential bytes.
-workspace_token_metadata="$(stat -c '%a:%U:%G' "$WORKSPACE_MCP_TOKEN_FILE")"
-if [ "$workspace_token_metadata" != "600:appuser:appuser" ]; then
-  echo "ERROR: OpenCode MCP token file must be mode 0600 and owned by appuser"
-  exit 1
-fi
-if ! cmp -s "$RUNTIME_API_TOKEN_FILE" "$WORKSPACE_MCP_TOKEN_FILE"; then
-  echo "ERROR: OpenCode MCP token file does not match the runtime token file"
-  exit 1
+if [ -e "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" ]; then
+  if [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ ! -f "$LEGACY_WORKSPACE_TOKEN_FILE" ] \
+    || ! cmp -s "$RUNTIME_API_TOKEN_FILE" "$LEGACY_WORKSPACE_TOKEN_FILE"; then
+    echo "ERROR: legacy OpenCode API token path is unsafe or unrecognized"
+    exit 1
+  fi
+  rm -f "$LEGACY_WORKSPACE_TOKEN_FILE"
 fi
 
 # Project the two server-owned profiles into OpenCode's persistent global
