@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { authorization, contextConversations, getAuthenticationFoundationMigrationStatus, getDb, identity, observations, organizations, personality, projects, rag, resetDbForTest } from "../lib/index.js";
+import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
+import { authorization, bootstrap, contextConversations, getAuthenticationFoundationMigrationStatus, getDb, identity, observations, organizations, personality, projects, rag, resetDbForTest } from "../lib/index.js";
 
 let directory = "";
 
@@ -25,6 +26,54 @@ describe("AUTH-105 content tenancy", () => {
     resetDbForTest();
     getDb(process.env.INGENIUM_CORE_DB_PATH);
     expect(getDb().prepare("SELECT migration, phase FROM content_tenancy_manifests").get()).toEqual({ migration: 98, phase: "verified" });
+  });
+
+  it("preserves private legacy content until the pending bootstrap owner is claimed", async () => {
+    const legacyPath = join(directory, "legacy-content.db");
+    const legacy = new Database(legacyPath);
+    const migrations = resolve(import.meta.dirname ?? __dirname, "../data/migrations");
+    const files = readdirSync(migrations)
+      .filter((file) => /^\d{3}_.*\.sql$/.test(file) && Number(file.slice(0, 3)) <= 97 && !file.includes("_upgrade"))
+      .sort();
+    expect(files).toHaveLength(97);
+    for (const file of files) legacy.exec(readFileSync(join(migrations, file), "utf8"));
+    const projectId = "00000000-0000-4000-8000-000000000198";
+    const now = new Date().toISOString();
+    legacy.prepare(`INSERT INTO projects
+      (id, name, path, is_global, created_at, updated_at, organization_id)
+      VALUES (?, 'legacy-content', '/legacy-content', 1, ?, ?, ?)`)
+      .run(projectId, now, now, organizations.BOOTSTRAP_ORGANIZATION_ID);
+    const observationId = Number(legacy.prepare(`INSERT INTO observations
+      (project_id, observation_type, content, source, created_at, updated_at)
+      VALUES (?, 'preference', 'private legacy preference', 'manual', ?, ?)`)
+      .run(projectId, now, now).lastInsertRowid);
+    legacy.close();
+
+    resetDbForTest();
+    process.env.INGENIUM_CORE_DB_PATH = legacyPath;
+    const upgraded = getDb(legacyPath);
+    expect(upgraded.prepare("SELECT state, owner_user_id FROM bootstrap_state WHERE singleton = 1").get())
+      .toEqual({ state: "pending", owner_user_id: null });
+    expect(upgraded.prepare("SELECT owner_user_id, visibility FROM observations WHERE id = ?").get(observationId))
+      .toEqual({ owner_user_id: bootstrap.PENDING_BOOTSTRAP_OWNER_ID, visibility: "private" });
+    expect(upgraded.prepare("SELECT status FROM users WHERE id = ?").get(bootstrap.PENDING_BOOTSTRAP_OWNER_ID))
+      .toEqual({ status: "disabled" });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM auth_identities WHERE user_id = ?").get(bootstrap.PENDING_BOOTSTRAP_OWNER_ID))
+      .toEqual({ count: 0 });
+
+    const claimed = await bootstrap.claimBootstrap({
+      email: "owner@example.test",
+      displayName: "Owner",
+      password: "correct horse battery staple",
+    });
+    expect(claimed.userId).toBe(bootstrap.PENDING_BOOTSTRAP_OWNER_ID);
+    expect(upgraded.prepare("SELECT state, owner_user_id FROM bootstrap_state WHERE singleton = 1").get())
+      .toEqual({ state: "claimed", owner_user_id: bootstrap.PENDING_BOOTSTRAP_OWNER_ID });
+    expect(upgraded.prepare("SELECT email_normalized, display_name, status FROM users WHERE id = ?").get(bootstrap.PENDING_BOOTSTRAP_OWNER_ID))
+      .toEqual({ email_normalized: "owner@example.test", display_name: "Owner", status: "active" });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM password_credentials WHERE user_id = ?").get(bootstrap.PENDING_BOOTSTRAP_OWNER_ID))
+      .toEqual({ count: 1 });
+    expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("rejects cross-organization Docs children and RAG checkpoint bindings", () => {

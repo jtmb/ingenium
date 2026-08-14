@@ -2,12 +2,45 @@
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
 
+INSERT INTO users (id, email_normalized, display_name, status, created_at, updated_at)
+SELECT '00000000-0000-4000-8000-000000000098', 'pending-bootstrap-owner@invalid.invalid',
+       'Pending Bootstrap Owner', 'disabled', datetime('now'), datetime('now')
+WHERE (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1) IS NULL
+  AND NOT EXISTS (SELECT 1 FROM users)
+  AND EXISTS (
+    SELECT 1 FROM context_conversations
+    UNION ALL SELECT 1 FROM context_rag_upload_sessions
+    UNION ALL SELECT 1 FROM context_rag_uploads
+    UNION ALL SELECT 1 FROM observations
+    UNION ALL SELECT 1 FROM personality_traits
+  );
+INSERT INTO organization_memberships
+  (organization_id, user_id, role, status, created_at, updated_at)
+SELECT '00000000-0000-4000-8000-000000000093', '00000000-0000-4000-8000-000000000098',
+       'owner', 'active', datetime('now'), datetime('now')
+WHERE EXISTS (SELECT 1 FROM users WHERE id = '00000000-0000-4000-8000-000000000098')
+  AND NOT EXISTS (
+    SELECT 1 FROM organization_memberships
+    WHERE organization_id = '00000000-0000-4000-8000-000000000093'
+      AND user_id = '00000000-0000-4000-8000-000000000098'
+  );
+
 CREATE TEMP TABLE content_tenancy_owner_guard (
   valid INTEGER NOT NULL CHECK(valid = 1)
 );
 INSERT INTO content_tenancy_owner_guard (valid)
 SELECT CASE
   WHEN (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1) IS NOT NULL THEN 1
+  WHEN EXISTS (
+    SELECT 1 FROM users user
+    JOIN organization_memberships membership ON membership.user_id = user.id
+    WHERE user.id = '00000000-0000-4000-8000-000000000098'
+      AND user.email_normalized = 'pending-bootstrap-owner@invalid.invalid'
+      AND user.display_name = 'Pending Bootstrap Owner'
+      AND user.status = 'disabled'
+      AND membership.organization_id = '00000000-0000-4000-8000-000000000093'
+      AND membership.role = 'owner' AND membership.status = 'active'
+  ) THEN 1
   WHEN NOT EXISTS (
     SELECT 1 FROM context_conversations
     UNION ALL SELECT 1 FROM context_rag_upload_sessions
@@ -204,7 +237,10 @@ WHERE (id IN (SELECT rag_source_id FROM docs_repository_pages WHERE rag_source_i
 DROP TRIGGER rag_sources_context_checkpoint_immutable_update;
 UPDATE rag_sources SET organization_id = (SELECT organization_id FROM projects WHERE id = rag_sources.project_id) WHERE organization_id IS NULL;
 UPDATE rag_sources
-SET visibility = 'restricted', owner_user_id = (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1)
+SET visibility = 'restricted', owner_user_id = COALESCE(
+  (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1),
+  '00000000-0000-4000-8000-000000000098'
+)
 WHERE id IN (SELECT rag_source_id FROM context_rag_uploads)
    OR id IN (SELECT rag_source_id FROM context_checkpoint_rag_sources);
 CREATE TRIGGER rag_sources_context_checkpoint_immutable_update BEFORE UPDATE ON rag_sources
@@ -227,7 +263,10 @@ ALTER TABLE context_rag_upload_sessions ADD COLUMN owner_user_id TEXT REFERENCES
 ALTER TABLE context_rag_upload_sessions ADD COLUMN visibility TEXT NOT NULL DEFAULT 'project' CHECK(visibility IN ('organization', 'project', 'restricted'));
 UPDATE context_rag_upload_sessions SET organization_id = (SELECT organization_id FROM projects WHERE id = context_rag_upload_sessions.project_id) WHERE organization_id IS NULL;
 UPDATE context_rag_upload_sessions
-SET visibility = 'restricted', owner_user_id = (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1);
+SET visibility = 'restricted', owner_user_id = COALESCE(
+  (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1),
+  '00000000-0000-4000-8000-000000000098'
+);
 CREATE INDEX idx_context_rag_sessions_scope ON context_rag_upload_sessions(organization_id, project_id, visibility, owner_user_id, status, created_at DESC);
 CREATE TRIGGER context_rag_sessions_scope_insert BEFORE INSERT ON context_rag_upload_sessions
 WHEN NEW.organization_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id)
@@ -244,7 +283,10 @@ ALTER TABLE context_conversations ADD COLUMN owner_user_id TEXT REFERENCES users
 ALTER TABLE context_conversations ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'organization', 'project'));
 DROP TRIGGER context_conversations_immutable_update;
 UPDATE context_conversations SET organization_id = (SELECT organization_id FROM projects WHERE id = context_conversations.project_id) WHERE organization_id IS NULL;
-UPDATE context_conversations SET owner_user_id = (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1) WHERE owner_user_id IS NULL;
+UPDATE context_conversations SET owner_user_id = COALESCE(
+  (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1),
+  '00000000-0000-4000-8000-000000000098'
+) WHERE owner_user_id IS NULL;
 CREATE UNIQUE INDEX idx_context_conversations_scope_id ON context_conversations(organization_id, project_id, id);
 CREATE INDEX idx_context_conversations_visibility ON context_conversations(organization_id, owner_user_id, visibility, created_at DESC, id DESC);
 CREATE TRIGGER context_conversations_immutable_update BEFORE UPDATE ON context_conversations
@@ -289,7 +331,10 @@ ALTER TABLE observations ADD COLUMN organization_id TEXT REFERENCES organization
 ALTER TABLE observations ADD COLUMN owner_user_id TEXT REFERENCES users(id) ON DELETE RESTRICT;
 ALTER TABLE observations ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'organization'));
 UPDATE observations SET organization_id = (SELECT organization_id FROM projects WHERE id = observations.project_id) WHERE organization_id IS NULL;
-UPDATE observations SET owner_user_id = (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1) WHERE owner_user_id IS NULL;
+UPDATE observations SET owner_user_id = COALESCE(
+  (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1),
+  '00000000-0000-4000-8000-000000000098'
+) WHERE owner_user_id IS NULL;
 CREATE INDEX idx_observations_scope ON observations(organization_id, owner_user_id, visibility, project_id, status);
 CREATE TRIGGER observations_scope_insert BEFORE INSERT ON observations
 WHEN NEW.organization_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id)
@@ -304,7 +349,10 @@ ALTER TABLE personality_traits ADD COLUMN organization_id TEXT REFERENCES organi
 ALTER TABLE personality_traits ADD COLUMN owner_user_id TEXT REFERENCES users(id) ON DELETE RESTRICT;
 ALTER TABLE personality_traits ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'organization'));
 UPDATE personality_traits SET organization_id = (SELECT organization_id FROM projects WHERE id = personality_traits.project_id) WHERE organization_id IS NULL;
-UPDATE personality_traits SET owner_user_id = (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1) WHERE owner_user_id IS NULL;
+UPDATE personality_traits SET owner_user_id = COALESCE(
+  (SELECT owner_user_id FROM bootstrap_state WHERE singleton = 1),
+  '00000000-0000-4000-8000-000000000098'
+) WHERE owner_user_id IS NULL;
 CREATE INDEX idx_personality_scope ON personality_traits(organization_id, owner_user_id, visibility, project_id, is_active);
 CREATE TRIGGER personality_scope_insert BEFORE INSERT ON personality_traits
 WHEN NEW.organization_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id)
