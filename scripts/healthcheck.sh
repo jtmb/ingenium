@@ -119,9 +119,9 @@ require_restore_maintenance_safe
 require_vault_job_secret_root
 require_api_ok
 require_http_ok "dashboard" "http://127.0.0.1:3001/"
-require_gateway_status "dashboard gateway" "localhost" "/tasks" "200"
-require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/" "200"
-require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/projects" "200"
+require_gateway_status "dashboard gateway" "localhost" "/login" "200"
+require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/login" "200"
+require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/bootstrap/status" "200"
 if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
   require_http_ok "OpenCode Web" "http://127.0.0.1:4098/"
   require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"

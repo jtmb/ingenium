@@ -39,6 +39,9 @@ runtime_environment=(
   INGENIUM_DEPLOYMENT_MODE=control-plane
   INGENIUM_RUNTIME_MANAGER_URL=http://runtime-manager:4110/
   INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token
+  INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-runtime-gateway/token
+  INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test
+  DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test
   INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS=17001
   INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER=3
   INGENIUM_RUNTIME_CPU_MILLIS=1100
@@ -76,6 +79,9 @@ printf '%s' "$rendered" | node -e '
     OPENCODE_SERVER_PASSWORD: "protected-test-secret",
     INGENIUM_RUNTIME_MANAGER_URL: "http://runtime-manager:4110/",
     INGENIUM_RUNTIME_MANAGER_TOKEN_FILE: "/run/ingenium-runtime-manager/token",
+    INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE: "/run/ingenium-runtime-gateway/token",
+    INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.example.test",
+    DASHBOARD_ALLOWED_ORIGINS: "https://dashboard.example.test",
     INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS: "17001",
     INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER: "3",
     INGENIUM_RUNTIME_CPU_MILLIS: "1100",
@@ -105,5 +111,12 @@ if env -u OPENCODE_SERVER_PASSWORD \
   /usr/bin/env "${runtime_environment[@]}" sh "$REPO_ROOT/scripts/run-api.sh"; then
   fail 'run-api reached startup without OPENCODE_SERVER_PASSWORD'
 fi
+
+grep -F -x -q -- 'require_gateway_status "dashboard gateway" "localhost" "/login" "200"' \
+  "$REPO_ROOT/scripts/healthcheck.sh" || fail 'healthcheck does not probe the public login route'
+grep -F -x -q -- 'require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/login" "200"' \
+  "$REPO_ROOT/scripts/healthcheck.sh" || fail 'healthcheck does not probe the forwarded public login route'
+grep -F -x -q -- 'require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/bootstrap/status" "200"' \
+  "$REPO_ROOT/scripts/healthcheck.sh" || fail 'healthcheck does not probe the bootstrap-safe API route'
 
 printf 'PASS: production control-plane mode, runtime configuration, and OpenCode secret fail-closed startup contract\n'
