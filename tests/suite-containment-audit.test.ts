@@ -587,6 +587,10 @@ describe("suite containment audit", () => {
     expect(secondReport.telemetry.map(({ runId }) => runId)).toEqual([second.runId]);
     expect(firstReport.managedPorts).not.toContain(second.ports.api);
     expect(secondReport.managedPorts).not.toContain(first.ports.api);
+    expect(firstReport.tempEntries).toContain(first.runDir);
+    expect(firstReport.tempEntries).not.toContain(second.runDir);
+    expect(secondReport.tempEntries).toContain(second.runDir);
+    expect(secondReport.tempEntries).not.toContain(first.runDir);
   });
 
   it("classifies retained legacy evidence as informational and never as missing telemetry", async () => {

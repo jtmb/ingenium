@@ -118,7 +118,7 @@ export interface StopRunOptions {
 
 /**
  * Create the manifest-owned project through the same authenticated API that
- * the fixture exercises. A 409 means an interrupted setup already created
+ * the fixture exercises. A 200 means an interrupted setup already created
  * this exact run project, so it is the idempotent success case.
  */
 export async function provisionTestRunProject(
@@ -127,13 +127,12 @@ export async function provisionTestRunProject(
 ): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const url = `http://127.0.0.1:${context.ports.api}/api/v1/projects`;
+  const url = `http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-bootstrap`;
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { ...testRunApiAuthHeaders(context), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: context.project, is_global: false }),
+      headers: testRunApiAuthHeaders(context),
       signal: controller.signal,
     });
   } catch (error) {
@@ -143,7 +142,7 @@ export async function provisionTestRunProject(
     clearTimeout(timer);
   }
 
-  if (response.status !== 201 && response.status !== 409) {
+  if (response.status !== 200 && response.status !== 201) {
     throw new Error(`Unable to provision fixture project ${context.project}: API returned ${response.status}`);
   }
 
@@ -188,26 +187,12 @@ export async function provisionTestRunOwner(context: TestRunContext): Promise<vo
 
 export async function createTestRunBrowserStorageState(context: TestRunContext) {
   const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
-  const dashboardOrigin = `http://127.0.0.1:${context.ports.dashboard}`;
-  const csrf = await fixtureRequest(`${apiBase}/auth/csrf`, { headers: { Origin: dashboardOrigin } });
-  if (!csrf.ok) throw new Error(`Unable to initialize fixture login: API returned ${csrf.status}`);
-  const csrfBody = await csrf.json() as { data?: { csrfToken?: string } };
-  const csrfToken = csrfBody.data?.csrfToken;
-  if (!csrfToken) throw new Error("Fixture login did not return a CSRF token");
-  const preAuthCookie = cookieFromResponse(csrf, "__Host-ingenium_pre_auth");
-
-  const login = await fixtureRequest(`${apiBase}/auth/login`, {
+  const session = await fixtureRequest(`${apiBase}/auth/fixture-session`, {
     method: "POST",
-    headers: {
-      Origin: dashboardOrigin,
-      "Content-Type": "application/json",
-      "X-CSRF-Token": csrfToken,
-      Cookie: `__Host-ingenium_pre_auth=${preAuthCookie}`,
-    },
-    body: JSON.stringify({ email: FIXTURE_OWNER_EMAIL, password: FIXTURE_OWNER_PASSWORD, deviceLabel: "Playwright fixture" }),
+    headers: testRunApiAuthHeaders(context),
   });
-  if (!login.ok) throw new Error(`Unable to log in fixture dashboard: API returned ${login.status}`);
-  const sessionToken = cookieFromResponse(login, "__Host-ingenium_session");
+  if (!session.ok) throw new Error(`Unable to create fixture dashboard session: API returned ${session.status}`);
+  const sessionToken = cookieFromResponse(session, "__Host-ingenium_session");
   return {
     cookies: [{
       name: "__Host-ingenium_session",
@@ -271,7 +256,7 @@ function serverEnvironment(context: TestRunManifest, extra: Record<string, strin
     INGENIUM_PROJECT: context.project,
     INGENIUM_TEST_RUN_NONCE: context.runNonce,
     INGENIUM_API_PORT: String(context.ports.api),
-    DASHBOARD_ALLOWED_ORIGINS: `http://127.0.0.1:${context.ports.dashboard}`,
+    DASHBOARD_ALLOWED_ORIGINS: `http://127.0.0.1:${context.ports.dashboard},http://localhost:${context.ports.dashboard}`,
     NODE_ENV: "production",
     ...extra,
   });

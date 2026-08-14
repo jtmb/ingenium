@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { productionApiHealthRequest } from "./runtime";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const repositoryRoot = process.cwd();
 const playwrightCli = resolve(repositoryRoot, "node_modules/@playwright/test/cli.js");
@@ -19,7 +17,6 @@ describe("dashboard route parity Playwright config", () => {
         env: {
           ...process.env,
           RUN_DASHBOARD_ROUTE_PARITY: "1",
-          INGENIUM_ROUTE_PARITY_URL: "http://localhost:3000",
         },
         encoding: "utf8",
       },
@@ -37,29 +34,18 @@ describe("dashboard route parity Playwright config", () => {
     expect(source).toContain("workers: 1");
     expect(source).toContain("fullyParallel: false");
     expect(source).toContain("retries: 0");
+    expect(source).toContain("getDashboardStorageStatePath(runtime.context)");
   });
 
-  it("uses the configured authenticated API endpoint only for health preflight", () => {
-    const directory = mkdtempSync(join(tmpdir(), "ingenium-route-parity-token-"));
-    const tokenFile = join(directory, "api-token");
-    writeFileSync(tokenFile, `${"A".repeat(48)}\n`, { mode: 0o600 });
-    chmodSync(tokenFile, 0o600);
-    try {
-      expect(productionApiHealthRequest({
-        INGENIUM_E2E_API_URL: "http://127.0.0.1:4097/api/v1",
-        INGENIUM_API_TOKEN_FILE: tokenFile,
-        INGENIUM_API_TOKEN: "literal-placeholder-must-not-be-used",
-      })).toEqual({
-        url: "http://127.0.0.1:4097/api/v1/health",
-        headers: { Authorization: `Bearer ${"A".repeat(48)}` },
-      });
+  it("uses the isolated fixture lifecycle and browser-only session bootstrap", () => {
+    const setup = readFileSync(resolve(repositoryRoot, "tests/dashboard-route-parity/global-setup.ts"), "utf8");
+    const fixture = readFileSync(resolve(repositoryRoot, "tests/dashboard-route-parity/fixture.ts"), "utf8");
+    const wrapper = readFileSync(resolve(repositoryRoot, "tests/run-dashboard-route-parity.ts"), "utf8");
 
-      expect(() => productionApiHealthRequest({
-        INGENIUM_E2E_API_URL: "http://127.0.0.1:4097/api/v1",
-        INGENIUM_API_TOKEN: "A".repeat(48),
-      })).toThrow(/INGENIUM_API_TOKEN_FILE/);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+    expect(setup).toContain("fixtureGlobalSetup");
+    expect(fixture).toContain("/test-fixture/session");
+    expect(fixture).toContain("not.toBe(previousSession)");
+    expect(wrapper).not.toContain("docker");
+    expect(wrapper).not.toContain("INGENIUM_ROUTE_PARITY_TOKEN");
   });
 });

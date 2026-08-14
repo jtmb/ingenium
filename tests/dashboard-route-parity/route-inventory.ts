@@ -259,8 +259,8 @@ export function routeWithQuery(path: string, query: Readonly<Record<string, stri
  */
 export function buildPageSpecificQueryVariants(
   data: PageSpecificQueryVariantData,
+  project = "global-default",
 ): readonly QueryVariant[] {
-  const project = "global-default";
   const mailState = { account: data.mailAccount, folder: "INBOX" };
 
   return [
@@ -332,7 +332,7 @@ export function buildPageSpecificQueryVariants(
   ];
 }
 
-export function discoverRouteInventory(): RouteInventory {
+export function discoverRouteInventory(project = "global-default"): RouteInventory {
   const canonicalNavigationRoutes = discoverCanonicalNavigationRoutes();
   const settingsDeepLinks = discoverSettingsDeepLinks();
   const supportedSettingsTabs = settingsDeepLinks.map(({ id }) => id);
@@ -342,7 +342,7 @@ export function discoverRouteInventory(): RouteInventory {
     queryVariants.push({
       name: `${path} with the active project query`,
       path,
-      query: { project: "global-default" },
+      query: { project },
     });
   }
 
@@ -355,7 +355,7 @@ export function discoverRouteInventory(): RouteInventory {
     queryVariants.push({
       name: `home settings deep link (${tab}) with the active project query`,
       path: "/",
-      query: { project: "global-default", settings: tab },
+      query: { project, settings: tab },
     });
   }
 
@@ -372,7 +372,7 @@ export function discoverRouteInventory(): RouteInventory {
   queryVariants.push({
     name: "settings redirect route with the active project query",
     path: "/settings",
-    query: { project: "global-default" },
+    query: { project },
   });
 
   return {

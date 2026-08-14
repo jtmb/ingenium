@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "./fixture";
+import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const emptySummary = {
   learning: null,
@@ -41,8 +42,58 @@ test("bootstraps a clean QA Vision browser into the isolated fixture session", a
     const fixtureUrl = new URL("/test-fixture/session", baseURL);
     fixtureUrl.hostname = "localhost";
     await page.goto(fixtureUrl.toString());
-    expect(new URL(page.url()).searchParams.get("project")).toMatch(/^playwright-test-/);
+    const project = new URL(page.url()).searchParams.get("project");
+    expect(project).toBe(getDefaultSuiteRuntime().project);
     expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ingenium_session")).toBe(true);
+    expect(browserServerOnlyHeaders).toEqual([]);
+
+    const fixtureState = await page.evaluate(async () => {
+      const [projectsResponse, organizationsResponse] = await Promise.all([
+        fetch("/api/v1/projects"),
+        fetch("/api/v1/organizations"),
+      ]);
+      const projectsBody = await projectsResponse.text();
+      const organizationsBody = await organizationsResponse.text();
+      const projects = projectsResponse.ok ? JSON.parse(projectsBody) : { data: [] };
+      const organizations = organizationsResponse.ok ? JSON.parse(organizationsBody) : { data: [] };
+      const csrfResponse = await fetch("/api/v1/auth/session/csrf", {
+        method: "POST",
+        headers: { "x-ingenium-ui": "dashboard" },
+      });
+      const csrfBody = await csrfResponse.text();
+      const csrfToken = csrfResponse.ok
+        ? (JSON.parse(csrfBody) as { data: { csrfToken: string } }).data.csrfToken
+        : "";
+      const mutation = csrfToken
+        ? await fetch("/api/v1/opencode/sessions?directory=%2Fworkspace", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-ingenium-ui": "dashboard",
+            "x-csrf-token": csrfToken,
+          },
+          body: JSON.stringify({ title: "Visual fixture CSRF smoke" }),
+        })
+        : undefined;
+      return {
+        projects: projects.data,
+        organizations: organizations.data,
+        projectsStatus: projectsResponse.status,
+        projectsBody,
+        organizationsStatus: organizationsResponse.status,
+        organizationsBody,
+        csrfStatus: csrfResponse.status,
+        csrfBody,
+        mutationStatus: mutation?.status,
+        mutationBody: mutation ? await mutation.text() : "CSRF bootstrap failed",
+      };
+    });
+    expect(fixtureState.projectsStatus, fixtureState.projectsBody).toBe(200);
+    expect(fixtureState.organizationsStatus, fixtureState.organizationsBody).toBe(200);
+    expect(fixtureState.projects.map((entry: { name: string }) => entry.name)).toEqual([project]);
+    expect(fixtureState.organizations.map((entry: { slug: string }) => entry.slug)).toEqual([project]);
+    expect(fixtureState.csrfStatus, fixtureState.csrfBody).toBe(200);
+    expect(fixtureState.mutationStatus, fixtureState.mutationBody).toBe(201);
     expect(browserServerOnlyHeaders).toEqual([]);
   } finally {
     await context.close();

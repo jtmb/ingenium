@@ -1,54 +1,17 @@
 import { resolve } from "node:path";
 import { repositoryRoot } from "./route-inventory";
-import { readDashboardApiTokenFile } from "../../services/ingenium-dashboard/src/lib/dashboard-token";
-
-const TARGET_ENVIRONMENT_VARIABLES = [
-  "INGENIUM_ROUTE_PARITY_URL",
-  "INGENIUM_PRODUCTION_DASHBOARD_URL",
-  "INGENIUM_E2E_DASHBOARD_URL",
-] as const;
-const API_TARGET_ENVIRONMENT_VARIABLES = ["INGENIUM_E2E_API_URL"] as const;
+import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
 
 export const ROUTE_PARITY_OPT_IN = "RUN_DASHBOARD_ROUTE_PARITY";
 
 /**
- * Resolve the already-running production dashboard gateway.
- *
- * This suite deliberately does not start a server, build Docker, or fall back
- * to a dev server. The explicit opt-in and target URL make accidental smoke
- * runs against a developer process fail closed.
+ * Resolve the run-owned production-mode dashboard fixture.
+ * The suite never accepts a developer or deployed production origin.
  */
 export function productionDashboardUrl(requireExplicit = false): string {
-  const raw = TARGET_ENVIRONMENT_VARIABLES
-    .map((name) => process.env[name]?.trim())
-    .find((value): value is string => Boolean(value));
-
-  if (!raw) {
-    if (requireExplicit) {
-      throw new Error(
-        `Set ${TARGET_ENVIRONMENT_VARIABLES.join(" or ")} to the root production dashboard/gateway URL`,
-      );
-    }
-    // Config loading and `--list` remain side-effect free. Global setup still
-    // requires an explicit target before any network request is made.
-    return "http://127.0.0.1:3000/";
-  }
-
-  let target: URL;
-  try {
-    target = new URL(raw);
-  } catch {
-    throw new Error(`Production dashboard target is not an absolute URL: ${raw}`);
-  }
-  if (target.protocol !== "http:" && target.protocol !== "https:") {
-    throw new Error(`Production dashboard target must use HTTP(S): ${raw}`);
-  }
-  if (target.username || target.password || target.search || target.hash) {
-    throw new Error("Production dashboard target must not contain credentials, query, or hash data");
-  }
-  if (target.pathname !== "/" && target.pathname !== "") {
-    throw new Error("Production dashboard target must be a root gateway origin, not a shared sub-path");
-  }
+  void requireExplicit;
+  const target = new URL(getDefaultSuiteRuntime().dashboardUrl);
+  target.hostname = "localhost";
   return `${target.origin}/`;
 }
 
@@ -57,41 +20,6 @@ export function productionDashboardRoute(path: string): string {
   const route = new URL(path, target);
   if (route.origin !== target.origin) throw new Error(`Route escaped the dashboard gateway origin: ${path}`);
   return route.toString();
-}
-
-export function productionApiHealthRequest(
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): { url: string; headers: Record<string, string> } {
-  const raw = API_TARGET_ENVIRONMENT_VARIABLES
-    .map((name) => environment[name]?.trim())
-    .find((value): value is string => Boolean(value));
-  if (!raw) {
-    throw new Error(`Set ${API_TARGET_ENVIRONMENT_VARIABLES.join(" or ")} to the authenticated production API root`);
-  }
-
-  const tokenFile = environment.INGENIUM_API_TOKEN_FILE?.trim();
-  if (!tokenFile) throw new Error("INGENIUM_API_TOKEN_FILE must name the protected production API credential");
-  const token = readDashboardApiTokenFile(tokenFile);
-
-  let target: URL;
-  try {
-    target = new URL(raw);
-  } catch {
-    throw new Error(`Production API target is not an absolute URL: ${raw}`);
-  }
-  if ((target.protocol !== "http:" && target.protocol !== "https:")
-    || target.username || target.password || target.search || target.hash) {
-    throw new Error("Production API target must be a credential-free HTTP(S) URL");
-  }
-  const path = target.pathname.replace(/\/+$/, "");
-  if (path === "" || path === "/") target.pathname = "/api/v1/health";
-  else if (path === "/api/v1") target.pathname = "/api/v1/health";
-  else if (path !== "/api/v1/health") throw new Error("Production API target must be the root, /api/v1, or /api/v1/health");
-
-  return {
-    url: target.toString(),
-    headers: { Authorization: `Bearer ${token}` },
-  };
 }
 
 export function artifactDirectory(): string {

@@ -48,8 +48,6 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_API_RATE_LIMIT` | `100` | `lib/middleware/rate-limit.ts` | Max requests per minute per IP |
 | `INGENIUM_API_TOKEN` | _(required; no default)_ | entrypoint, API boundary, API, dashboard server proxy | Internal installation bearer only. It must not appear in user runtimes or external extension config. |
 | `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; runtime default `/run/ingenium-secrets/api-token` in container)_ | entrypoint, API boundary, API, dashboard, health probe, internal services | Protected installation-token file. External MCP uses `INGENIUM_MCP_CREDENTIAL_FILE`. |
-| `INGENIUM_ROUTE_PARITY_TOKEN_CONTAINER` | `ingenium-control-plane` | `tests/run-dashboard-route-parity.ts` | Running control-plane container used only to inject the protected route-parity preflight credential when no host token file is configured. |
-| `INGENIUM_ROUTE_PARITY_SERVER_TOKEN_FILE` | `/run/ingenium-secrets/api-token` | `tests/run-dashboard-route-parity.ts` | Owner-only credential path inside the route-parity source container; its contents are never printed or passed as a command argument. |
 | `DASHBOARD_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | dashboard `proxy.ts`, API `config/index.ts`, supervised launchers | Comma-separated **exact** HTTP(S) dashboard origins accepted by both dashboard-proxy CSRF and API CORS/CSRF. Entries cannot include paths, credentials, query/fragment, whitespace, or wildcards. |
 | `CORS_ORIGIN` | _(legacy single-origin fallback only)_ | `config/index.ts` | Backward-compatible non-container fallback when `DASHBOARD_ALLOWED_ORIGINS` is unset. New deployments must configure the explicit allowlist. |
 | `INGENIUM_AUTH_ENCRYPTION_KEY_FILE` | _(required for TOTP and OIDC login)_ | `packages/ingenium-core/lib/tools/authentication.ts` | Owner-only regular file containing exactly one base64url-encoded 256-bit key. Used only for authentication-factor and transient OIDC PKCE encryption; independent of vault seal state. |
@@ -130,7 +128,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
 | `INGENIUM_E2E_PROJECT` | _(none)_ | `tests/ingenium-dashboard/docker-active-project.ts` | Optional external Docker-suite project. It must be an existing active project returned by the deployment's same-origin project-list preflight. When unset, the Docker suite requires exactly one active global project. The suite never creates or deletes a project. |
-| `INGENIUM_E2E_API_URL` | _(none)_ | dashboard route-parity preflight | Absolute credential-free API root used for the server-side authenticated health request; the bearer remains in the Node runner. |
+| `INGENIUM_E2E_API_URL` | _(none)_ | explicit external Playwright suites | Optional external API root used by suites that do not own an integrated fixture. |
 | `INGENIUM_API_TEST_MODE` | _(unset)_ | isolated API/dashboard fixture | Enables test-only server contracts in manifest-owned fixture processes. Never set in a deployed application. |
 | `INGENIUM_TEST_RUN_NONCE` | _(generated per fixture run)_ | isolated API/dashboard fixture | UUID nonce binding the test-only browser-session exchange to its manifest-owned run. |
 

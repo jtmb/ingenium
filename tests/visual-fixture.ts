@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
 import { cleanupStaleTestRuns, readTestRunManifest } from "./test-run-context";
 import { startTestServers, stopRunFromManifest } from "./test-server-lifecycle";
+import { visualQaRunDirectory } from "./ingenium-dashboard/visual-qa-artifacts";
 
 const DEFAULT_LEASE_SECONDS = 1_800;
 const MAX_LEASE_SECONDS = 3_600;
@@ -61,11 +62,14 @@ async function start(): Promise<void> {
       throw new Error("Visual fixture did not reach its authenticated running state");
     }
     const timeoutSeconds = leaseSeconds();
+    const artifactDirectory = visualQaRunDirectory(context.runId);
     startGuardian(context.manifestPath, timeoutSeconds);
     process.stdout.write(`${JSON.stringify({
       runId: context.runId,
       url: `http://localhost:${context.ports.dashboard}/test-fixture/session`,
       timeoutSeconds,
+      artifactDirectory,
+      manifest: context.manifestPath,
       cleanup: `npx tsx tests/visual-fixture.ts stop --manifest ${context.manifestPath}`,
     })}\n`);
   } catch (error) {

@@ -1,5 +1,4 @@
-import { expect, test } from "../ingenium-dashboard/external-suite-navigation-governor";
-import type { BrowserContext, Page, Request } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page, type Request } from "./fixture";
 import {
   buildPageSpecificQueryVariants,
   discoverRouteInventory,
@@ -11,8 +10,10 @@ import {
   type SettingsDeepLink,
 } from "./route-inventory";
 import { productionDashboardRoute } from "./runtime";
+import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
 
-const inventory: RouteInventory = discoverRouteInventory();
+const project = getDefaultSuiteRuntime().project;
+const inventory: RouteInventory = discoverRouteInventory(project);
 const retiredRouteExpectation = inventory.canonicalNavigationRoutes.filter(isRetiredDashboardRoute);
 const NO_ACCOUNT_SENTINEL = "route-parity-no-account";
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -160,7 +161,7 @@ async function gotoProductionRoute(
 }
 
 async function openSettingsDeepLink(page: Page, tab: string): Promise<void> {
-  const path = routeWithQuery("/", { project: "global-default", settings: tab });
+  const path = routeWithQuery("/", { project, settings: tab });
   const dialog = page.getByRole("dialog");
   await gotoProductionRoute(page, path);
   await expect(dialog, `settings=${tab} did not open the overlay`).toBeVisible();
@@ -230,7 +231,7 @@ async function assertSettingsSelection(
 }
 
 async function openSettingsCompatibilityRoute(page: Page): Promise<void> {
-  const path = routeWithQuery("/settings", { project: "global-default" });
+  const path = routeWithQuery("/settings", { project });
   const dialog = page.getByRole("dialog");
   await gotoProductionRoute(page, path);
   await expect
@@ -290,7 +291,7 @@ test.describe("Production dashboard route parity", () => {
 
   test("the rendered navigation has no missing or stale page targets", async ({ page, context }) => {
     await runReadOnlyBrowserCheck(page, context, "navigation and route inspection", async () => {
-      await gotoProductionRoute(page, routeWithQuery("/", { project: "global-default" }));
+      await gotoProductionRoute(page, routeWithQuery("/", { project }));
       await expect(page.locator("#nav-sidebar")).toBeVisible();
 
       const hrefs = await page.locator("#nav-sidebar a[href]").evaluateAll((links) =>
@@ -310,7 +311,7 @@ test.describe("Production dashboard route parity", () => {
       await installDocumentOnlyRoute(page);
       for (const route of inventory.canonicalNavigationRoutes) {
         expect(artifact.routes.has(route), `${route} is absent from the production artifact`).toBe(true);
-        await assertGatewayRoute(page, route, { project: "global-default" });
+        await assertGatewayRoute(page, route, { project });
       }
     });
   });
@@ -318,7 +319,7 @@ test.describe("Production dashboard route parity", () => {
   for (const route of inventory.canonicalNavigationRoutes) {
     test(`smoke renders canonical route ${route}`, async ({ page, context }) => {
       await runReadOnlyBrowserCheck(page, context, `canonical route ${route}`, async () => {
-        await assertGatewayRoute(page, route, { project: "global-default" });
+        await assertGatewayRoute(page, route, { project });
       }, { documentOnly: true });
     });
   }
@@ -339,7 +340,7 @@ test.describe("Production dashboard route parity", () => {
       docsSpaceId: "0",
       docsPageId: "0",
       mailAccount: NO_ACCOUNT_SENTINEL,
-    });
+    }, project);
     expect(variants, "page-specific query inventory must not be empty").not.toEqual([]);
 
     await runReadOnlyBrowserCheck(page, context, "page-specific and standalone query variants", async () => {
@@ -359,7 +360,7 @@ test.describe("Production dashboard route parity", () => {
           await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
           const url = new URL(page.url());
           expect(url.searchParams.get("settings")).toBe(deepLink.id);
-          expect(url.searchParams.get("project")).toBe("global-default");
+          expect(url.searchParams.get("project")).toBe(project);
           await assertSettingsSelection(page, deepLink, viewport.name);
         });
       });
@@ -398,7 +399,7 @@ test.describe("Production dashboard route parity", () => {
         docsSpaceId: "0",
         docsPageId: "0",
         mailAccount: NO_ACCOUNT_SENTINEL,
-      }).map((variant) => variant.path),
+      }, project).map((variant) => variant.path),
     ];
     expect(suiteRoutes.filter(isRetiredDashboardRoute)).toEqual([]);
   });

@@ -19,6 +19,7 @@ import {
   manualArtifactDirectory,
   resolvePlaywrightRepoRoot,
   visualQaArtifactDirectory,
+  visualQaRunDirectory,
 } from "../../../tests/ingenium-dashboard/visual-qa-artifacts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -92,6 +93,17 @@ describe("visual artifact containment", () => {
     expect(realpathSync(runDirectory)).toBe(runDirectory);
     expect(realpathSync(directory)).toBe(directory);
     expect(visualQaArtifactDirectory("dashboard-desktop")).toBe(directory);
+    expect(visualQaRunDirectory("run-contract")).toBe(runDirectory);
+  });
+
+  it("requires an explicit deterministic visual-QA run id", () => {
+    const repository = temporaryRepository("ingenium-visual-artifact-repo-");
+    process.env.INGENIUM_PLAYWRIGHT_REPO_ROOT = repository;
+    delete process.env.INGENIUM_VISUAL_QA_RUN_ID;
+    delete process.env.INGENIUM_TEST_RUN_NONCE;
+
+    expect(() => visualQaArtifactDirectory("dashboard-desktop")).toThrow(/deterministic run id/);
+    expect(existsSync(join(repository, "tests", "artifacts"))).toBe(false);
   });
 
   it("rejects roots that are not canonical git worktrees", () => {

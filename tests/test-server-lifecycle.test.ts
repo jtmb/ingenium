@@ -102,7 +102,7 @@ describe("test server lifecycle contracts", () => {
     track(context);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { name: context.project } }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "CONFLICT" } }), { status: 409 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { name: context.project } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await provisionTestRunProject(context);
@@ -114,7 +114,7 @@ describe("test server lifecycle contracts", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [url, request] of fetchMock.mock.calls) {
-      expect(url).toBe(`http://127.0.0.1:${context.ports.api}/api/v1/projects`);
+      expect(url).toBe(`http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-bootstrap`);
       expect(request).toMatchObject({
         method: "POST",
         headers: {
@@ -122,10 +122,9 @@ describe("test server lifecycle contracts", () => {
           [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
           [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
           [FIXTURE_PROJECT_HEADER]: context.project,
-          "Content-Type": "application/json",
         },
       });
-      expect(JSON.parse(String(request.body))).toEqual({ name: context.project, is_global: false });
+      expect(request.body).toBeUndefined();
     }
   });
 
@@ -143,14 +142,9 @@ describe("test server lifecycle contracts", () => {
   it("claims an isolated owner and creates a fresh browser session", async () => {
     const context = createTestRunContext({ ports: { api: 45196, dashboard: 45197, fixture: 45198 } });
     track(context);
-    const csrfToken = "c".repeat(43);
     const sessionToken = "s".repeat(43);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response("{}", { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { csrfToken } }), {
-        status: 200,
-        headers: { "Set-Cookie": `__Host-ingenium_pre_auth=${csrfToken}; Path=/; Secure; HttpOnly` },
-      }))
       .mockResolvedValueOnce(new Response("{}", {
         status: 200,
         headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
@@ -180,26 +174,23 @@ describe("test server lifecycle contracts", () => {
       displayName: "Playwright Owner",
       password: FIXTURE_OWNER_PASSWORD,
     });
-    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
-      headers: {
-        Origin: `http://127.0.0.1:${context.ports.dashboard}`,
-        Cookie: `__Host-ingenium_pre_auth=${csrfToken}`,
-        "X-CSRF-Token": csrfToken,
-      },
-    });
+    expect(fetchMock.mock.calls[1]).toEqual([
+      `http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-session`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
+          [FIXTURE_PROJECT_HEADER]: context.project,
+        }),
+      }),
+    ]);
   });
 
   it("persists the fixture browser session inside the run directory", async () => {
     const context = createTestRunContext({ ports: { api: 45199, dashboard: 45200, fixture: 45210 } });
     track(context);
-    const csrfToken = "c".repeat(43);
     const sessionToken = "s".repeat(43);
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { csrfToken } }), {
-        status: 200,
-        headers: { "Set-Cookie": `__Host-ingenium_pre_auth=${csrfToken}; Path=/; Secure; HttpOnly` },
-      }))
-      .mockResolvedValueOnce(new Response("{}", {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("{}", {
         status: 200,
         headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
       })));
@@ -228,6 +219,9 @@ describe("test server lifecycle contracts", () => {
     expect(specs[0]!.env.INGENIUM_API_DISABLE_MAIL_MAINTENANCE).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_MAIL).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_RATE_LIMIT).toBe(String(FIXTURE_API_RATE_LIMIT));
+    expect(specs[0]!.env.DASHBOARD_ALLOWED_ORIGINS).toBe(
+      "http://127.0.0.1:45202,http://localhost:45202",
+    );
     expect(specs[0]!.env.INGENIUM_TEST_RUN_NONCE).toBe(context.runNonce);
     for (const spec of specs) {
       expect(spec.env.INGENIUM_PROJECT).toBe(context.project);

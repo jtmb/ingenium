@@ -6,7 +6,7 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   TEST_RUN_MANIFEST_ENV,
   TEST_RUN_TELEMETRY_ENV,
@@ -794,7 +794,20 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
       .filter((entry) => entry.resolution?.status === "resolved")
       .map((entry) => resolve(entry.manifestPath)),
   );
-  const tempAudit = auditTemp(resolvedManifestPaths);
+  const discoveredTempAudit = auditTemp(resolvedManifestPaths);
+  const selectedTempDirectories = new Set([
+    ...(loadedManifest.manifest ? [loadedManifest.manifest.runDir] : []),
+    ...telemetry.map((entry) => dirname(entry.manifestPath)),
+  ].map((path) => resolve(path)));
+  const scopedTempAudit = scopedTelemetry.size > 0 || loadedManifest.manifest !== undefined;
+  const tempAudit = scopedTempAudit
+    ? {
+      manifestBacked: [...discoveredTempAudit.manifestBacked, ...discoveredTempAudit.manifestless]
+        .filter((path) => selectedTempDirectories.has(resolve(path))),
+      manifestless: [...discoveredTempAudit.manifestBacked, ...discoveredTempAudit.manifestless]
+        .filter((path) => !selectedTempDirectories.has(resolve(path))),
+    }
+    : discoveredTempAudit;
   const rssLimit = Number(process.env.INGENIUM_AUDIT_RSS_LIMIT ?? DEFAULT_RSS_LIMIT);
   const selectedManifestPath = options.manifestPath ?? process.env[TEST_RUN_MANIFEST_ENV];
   const telemetryReport = telemetry.map((entry) => {

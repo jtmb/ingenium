@@ -407,85 +407,39 @@ security review are bounded to the declared acceptance and provenance/offline
 boundary respectively; Docker acceptance verifies all 7 supervisord services
 remain healthy. Evidence contains no workspace content or secrets.
 
-## Production dashboard route parity
+## Production-mode dashboard route parity
 
-The route-parity suite is a separate, read-only production acceptance gate. It
-does not start `next dev`, `next start`, Docker, or a fixture, and it never
-creates API credentials or mutation requests. It requires an already-running
-production dashboard gateway and an explicit opt-in:
+The route-parity suite is a separate, bounded acceptance gate that owns the same
+production-mode API/dashboard/chat fixture lifecycle as the integrated suite. It
+never targets a developer server or deployed installation and never imports a
+production credential:
 
 ```bash
 npx tsx tests/run-dashboard-route-parity.ts
 ```
 
-`INGENIUM_PRODUCTION_DASHBOARD_URL` and `INGENIUM_E2E_DASHBOARD_URL` are
-compatibility aliases for the target URL. The target must be an absolute HTTP(S)
-root origin with no credentials, query, fragment, or shared sub-path. The suite
-uses `INGENIUM_E2E_API_URL` and reads the rotated credential from the owner-only
-`INGENIUM_API_TOKEN_FILE` only for its authenticated health preflight. When no
-host token file is configured, the wrapper copies the running control plane's
-protected `/run/ingenium-secrets/api-token` into a mode-0600 temporary file,
-passes only that path to Playwright, and removes it in `finally`. Override the
-source with `INGENIUM_ROUTE_PARITY_TOKEN_CONTAINER` and
-`INGENIUM_ROUTE_PARITY_SERVER_TOKEN_FILE`. The credential is never a command
-argument, literal environment value, terminal output, browser setting, or
-dashboard-origin header.
-The suite
-loads the production `.next` route manifests, derives the canonical 24 primary
-routes from dashboard navigation, checks settings deep links and supported query
-variants, rejects retired routes, and smoke-renders every route through the
-gateway. Its inventory is deterministic: primary routes come from the navigation
-source, settings tabs from the registered settings panel map, and artifact routes
-from `BUILD_ID`, `routes-manifest.json`, and `app-path-routes-manifest.json`.
+The wrapper allocates a run-owned `playwright-test-*` project and organization,
+starts `next start`, and provisions a project-scoped synthetic browser user. Each
+test re-enters through `/test-fixture/session` and proves that exchange rotated
+the synthetic session before interactive navigation. Browser requests never contain the internal fixture
+bearer or binding headers. The route inventory uses the run project rather than
+`global-default`.
 
-Coverage includes:
+The suite loads the production `.next` route manifests, derives the canonical 24
+primary routes from dashboard navigation, checks all 14 settings deep links and
+supported query variants, rejects retired routes, and smoke-renders every route.
+The serialized navigation governor remains active.
 
-- every derived primary navigation route and the production artifact/gateway
-  route for each;
-- all 14 supported settings tabs (`general`, `projects`, `skills`, `tasks`,
-  `jobs`, `plugins`, `mail`, `agents`, `mcp-servers`, `config`, `observations`,
-  `personality`, `providers`, and `logs`), with and without the active project
-  query, plus the chat providers deep link; and
-- route-linked settings panels must expose their documented workspace target
-  (`/projects`, `/skills`, `/tasks`, `/jobs`, `/plugins`, `/agents`,
-  `/mcp-servers`, `/observations`, `/personality`, and `/logs`); `config` is a
-  compact launcher for `/config`;
-- the `/settings` compatibility redirect;
-- safe page-specific and standalone variants, using discovered documentation IDs
-  when available and harmless sentinels otherwise; and
-- rendered navigation parity, retired-route rejection, and a no-mutation guard
-  for read-only inspection and settings deep links.
+After the fixture-only session bootstrap, route inspection is strictly
+non-mutating. The browser guard observes the whole context, including subframes
+and redirect chains; document-only checks abort scripts, styles, frames, and
+XHR/fetch requests. The known docs-space request is intercepted with isolated
+GET-only data as defense in depth.
 
-The global preflight applies the one-time API-health drain described above; its
-gateway root response still treats every `429` as fatal. The shared document
-governor reserves 12 observed-plus-headroom dynamic requests at 30 requests per
-second, serializes dashboard documents at one per 400ms, drains the 60-request
-Nginx burst for 2 seconds after global setup, and waits 6 seconds before each
-external test transition. During browser checks only, the bounded same-origin
-API-read recovery described above may replay a valid `Retry-After` response
-once; all RSC and non-API `429` responses remain fatal and are classified by
-`Retry-After`, body kind, and server header. OpenCode/code-server documents and
-asset subrequests are not paced. The suite does not fall back to a development
-server.
-A missing artifact route, stale navigation target, failed gateway response, or
-unexpected mutation is therefore a deterministic acceptance failure.
+A missing artifact route, stale navigation target, failed fixture response, or
+unexpected post-bootstrap mutation is a deterministic acceptance failure. Follow
+every focused or complete run with:
 
-Run this suite after the production dashboard has been built and deployed. A
-green unit or fixture run does not prove production route parity; a missing
-route in the artifact or an unreachable gateway is a failure of this acceptance
-gate, not a reason to fall back to a development server.
-
-### Strict non-mutating audit contract
-
-The production route-parity run is strictly non-mutating. It must not create
-credentials, seed projects or documentation, write application state, or send
-`POST`, `PUT`, `PATCH`, or `DELETE` requests. The browser guard observes the
-whole context, including subframes and redirect chains; document-only checks
-abort scripts, styles, frames, and XHR/fetch requests so route acceptance is
-isolated to the production document/gateway path. The known docs-space request
-is intercepted with an isolated GET-only fixture as defense in depth.
-
-If the audit observes a mutation, a stale navigation target, a missing artifact
-route, or a failed production gateway response, report the audit as failed. Do
-not “repair” the target by running a write-capable setup flow or by falling
-back to a development server.
+```bash
+npx tsx tests/suite-containment-audit.ts --strict
+```

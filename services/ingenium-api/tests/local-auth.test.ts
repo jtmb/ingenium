@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authentication, bootstrap, invitations, projects, resetDbForTest, runtimes, securityTokens } from "ingenium-core";
+import { authentication, authorization, bootstrap, invitations, organizations, projects, resetDbForTest, runtimes, securityTokens } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -107,6 +107,16 @@ describe("AUTH-101 local API", () => {
     const rejected = await fetch(`${baseUrl}/api/v1/auth/fixture-session`, { method: "POST", headers });
     expect(rejected.status).toBe(404);
 
+    const bootstrapped = await fetch(`${baseUrl}/api/v1/auth/fixture-bootstrap`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "x-ingenium-fixture-run-nonce": nonce,
+        "x-ingenium-fixture-project": "playwright-test-auth108",
+      },
+    });
+    expect(bootstrapped.status).toBe(201);
+
     const accepted = await fetch(`${baseUrl}/api/v1/auth/fixture-session`, {
       method: "POST",
       headers: {
@@ -118,6 +128,18 @@ describe("AUTH-101 local API", () => {
     expect(accepted.status).toBe(200);
     expect(accepted.headers.get("set-cookie")).toMatch(/__Host-ingenium_session=.*Secure; HttpOnly; SameSite=Strict/);
     expect(await accepted.json()).toEqual({ data: { authenticated: true } });
+    const sessionToken = accepted.headers.get("set-cookie")!.match(/__Host-ingenium_session=([^;]+)/)![1]!;
+    const fixtureUserId = authentication.resolveSession(sessionToken)!.user_id;
+    expect(fixtureUserId).toBe(ownerId);
+    const visibleProjects = authorization.listAuthorizedProjects({
+      type: "browser-user",
+      id: fixtureUserId,
+      scopes: ["user:*"],
+    });
+    expect(visibleProjects.map((project) => project.name)).toEqual(["playwright-test-auth108"]);
+    expect(visibleProjects[0]?.organization_id).not.toBe(organizationId);
+    expect(organizations.listUserOrganizations(fixtureUserId).map((organization) => organization.slug))
+      .toEqual(["playwright-test-auth108"]);
   });
 
   it("requires session-bound CSRF for unsafe cookie-authenticated requests", async () => {

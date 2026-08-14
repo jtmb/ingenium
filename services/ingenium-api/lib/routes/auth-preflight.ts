@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { authentication, authorization, getDb, invitations, mcpCredentials, oidcAuthentication, runtimes, securityAudit, securityTokens } from "ingenium-core";
+import { authentication, authorization, getDb, identity, invitations, mcpCredentials, oidcAuthentication, organizations, projects, runtimes, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
 import { authAttemptRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
@@ -14,6 +14,62 @@ const OIDC_TRANSACTION_COOKIE = "__Host-ingenium_oidc_transaction";
 
 function setSession(res: Response, session: ReturnType<typeof authentication.createSession>): void {
   res.set("Set-Cookie", `${authentication.SESSION_COOKIE_NAME}=${session.token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=43200`);
+}
+
+function fixtureProjectName(req: Request): string | undefined {
+  const expectedNonce = process.env.INGENIUM_TEST_RUN_NONCE;
+  const expectedProject = process.env.INGENIUM_PROJECT;
+  const valid = process.env.INGENIUM_API_TEST_MODE === "1"
+    && typeof expectedNonce === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(expectedNonce)
+    && expectedProject?.startsWith("playwright-test-")
+    && req.get("x-ingenium-fixture-run-nonce") === expectedNonce
+    && req.get("x-ingenium-fixture-project") === expectedProject
+    && req.get("x-ingenium-internal-service") === "1"
+    && req.principal?.type === "compatibility"
+    && req.headers.cookie === undefined
+    && req.get("origin") === undefined;
+  return valid ? expectedProject : undefined;
+}
+
+function ensureFixtureProject(projectName: string) {
+  const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  let organization = database.prepare(
+    "SELECT id, name, slug, status FROM organizations WHERE slug = ?",
+  ).get(projectName) as ReturnType<typeof organizations.getOrganization>;
+  if (!organization) {
+    const organizationId = organizations.createOrganization(`Fixture ${projectName}`, projectName);
+    organization = organizations.getOrganization(organizationId);
+  }
+  if (!organization) throw new AppError("Fixture organization is unavailable", "FIXTURE_NOT_READY", 409);
+
+  const existing = projects.getProject(projectName);
+  if (existing && existing.organization_id !== organization.id) {
+    throw new AppError("Fixture project ownership is inconsistent", "FIXTURE_NOT_READY", 409);
+  }
+  return { organization, project: existing ?? projects.createProject(projectName, false, organization.id) };
+}
+
+function bindFixtureOwner(projectName: string, userId: string): void {
+  const { organization, project } = ensureFixtureProject(projectName);
+  const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  const memberships = database.prepare(
+    "SELECT organization_id AS organizationId FROM organization_memberships WHERE user_id = ?",
+  ).all(userId) as Array<{ organizationId: string }>;
+  for (const membership of memberships) {
+    if (membership.organizationId !== organization.id) {
+      const holderEmail = `holder-${projectName}@playwright.invalid`;
+      const holder = database.prepare(
+        "SELECT id FROM users WHERE email_normalized = ?",
+      ).get(holderEmail) as { id: string } | undefined;
+      const holderId = holder?.id ?? identity.createUser(holderEmail, "Fixture Organization Holder").id;
+      organizations.addOrganizationMember(membership.organizationId, holderId, "owner");
+      organizations.setOrganizationMemberRole(membership.organizationId, userId, "member");
+      organizations.removeOrganizationMember(membership.organizationId, userId);
+    }
+  }
+  organizations.addOrganizationMember(organization.id, userId, "owner");
+  organizations.addProjectMember(project.id, userId, "editor");
 }
 
 function currentUser(req: Request) {
@@ -35,24 +91,25 @@ function requireRecentStepUp(req: Request) {
 }
 
 authPreflightRouter.get("/csrf", issuePreAuthCsrf);
+authPreflightRouter.post("/fixture-bootstrap", (req, res) => {
+  const projectName = fixtureProjectName(req);
+  if (!projectName) throw new AppError("Resource not found", "NOT_FOUND", 404);
+  const existed = Boolean(projects.getProject(projectName));
+  const fixture = ensureFixtureProject(projectName);
+  res.status(existed ? 200 : 201).json({
+    data: { project: fixture.project.name, organizationId: fixture.organization.id },
+  });
+});
 authPreflightRouter.post("/fixture-session", (req, res) => {
-  const expectedNonce = process.env.INGENIUM_TEST_RUN_NONCE;
-  const validFixtureRequest = process.env.INGENIUM_API_TEST_MODE === "1"
-    && typeof expectedNonce === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(expectedNonce)
-    && req.get("x-ingenium-fixture-run-nonce") === expectedNonce
-    && req.get("x-ingenium-fixture-project") === process.env.INGENIUM_PROJECT
-    && req.get("x-ingenium-internal-service") === "1"
-    && req.principal?.type === "compatibility"
-    && req.headers.cookie === undefined
-    && req.get("origin") === undefined;
-  if (!validFixtureRequest) throw new AppError("Resource not found", "NOT_FOUND", 404);
+  const projectName = fixtureProjectName(req);
+  if (!projectName) throw new AppError("Resource not found", "NOT_FOUND", 404);
 
   const owner = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
     "SELECT owner_user_id AS userId FROM bootstrap_state WHERE singleton = 1 AND state = 'claimed'",
   ).get() as { userId: string } | undefined;
   if (!owner) throw new AppError("Fixture owner is not provisioned", "FIXTURE_NOT_READY", 409);
 
+  bindFixtureOwner(projectName, owner.userId);
   const session = authentication.createSession(owner.userId, new Date(), "QA Vision fixture");
   setSession(res, session);
   res.set("Cache-Control", "no-store");

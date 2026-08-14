@@ -26,7 +26,7 @@ describe("external-suite Playwright configuration", () => {
 
   it("uses the same fixture lifecycle for production route parity", () => {
     const source = readFileSync(
-      resolve(repositoryRoot, "tests/dashboard-route-parity/production-route-parity.spec.ts"),
+      resolve(repositoryRoot, "tests/dashboard-route-parity/fixture.ts"),
       "utf8",
     );
 

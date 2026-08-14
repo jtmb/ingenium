@@ -3,7 +3,7 @@ import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const runtime = getDefaultSuiteRuntime();
 const apiUrl = runtime.apiBase;
-const project = "global-default";
+const project = runtime.project;
 const headers = runtime.apiHeaders;
 const builtInTool = "ingenium_skill_list";
 

@@ -9,7 +9,10 @@ const test = base.extend<{}, { authenticatedStatePath?: string }>({
       : undefined);
   }, { scope: "worker" }],
   context: async ({ browser, contextOptions, authenticatedStatePath }, use) => {
-    const context = await browser.newContext({ ...contextOptions, storageState: authenticatedStatePath });
+    const context = await browser.newContext({
+      ...contextOptions,
+      storageState: authenticatedStatePath ?? contextOptions.storageState,
+    });
     await use(context);
     if (authenticatedStatePath) {
       writeDashboardStorageState(getDefaultSuiteRuntime().context, await context.storageState());
