@@ -1399,7 +1399,7 @@ docker compose up --build
 | Host Port | Service | Description |
 |-----------|---------|-------------|
 | `3000` | Dashboard and gateways | Next.js frontend plus local root gateways without HTTP Basic Auth; supports default Windows-to-WSL localhost forwarding |
-| `127.0.0.1:4097` | API boundary | Authenticated bearer boundary for host MCP and in-container dashboard/OpenCode traffic |
+| `127.0.0.1:4097` | API boundary | Authenticated bearer boundary for host MCP and in-container OpenCode traffic; the Dashboard server rewrites to private Express `4096` |
 | internal `4096` | Express API | Private REST gateway and sole DB authority |
 | internal `4098` | opencode-web | OpenCode Web upstream behind local `opencode.localhost:3000` |
 | internal `4099` | ttyd-opencode | OpenCode CLI upstream behind local `cli.localhost:3000` |

@@ -44,6 +44,29 @@ describe("Next.js gateway configuration", () => {
     });
   });
 
+  it("uses the private API listener in production without advertising it to browsers", async () => {
+    process.env.NODE_ENV = "production";
+    const config = await loadNextConfig();
+
+    expect(await config.rewrites()).toEqual({
+      fallback: [
+        {
+          source: "/api/v1/:path*",
+          destination: "http://127.0.0.1:4096/api/v1/:path*",
+        },
+      ],
+    });
+    expect(await contentSecurityPolicy(config)).toContain("connect-src 'self' http://localhost:4097");
+  });
+
+  it("preserves an explicit isolated fixture API port in production", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.INGENIUM_API_PORT = "50664";
+    const config = await loadNextConfig();
+
+    expect((await config.rewrites()).fallback[0]?.destination).toBe("http://127.0.0.1:50664/api/v1/:path*");
+  });
+
   it("allows direct local ports only in an unconfigured development build", async () => {
     process.env.NODE_ENV = "development";
     const csp = await contentSecurityPolicy(await loadNextConfig());

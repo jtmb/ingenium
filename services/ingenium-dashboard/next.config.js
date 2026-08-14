@@ -72,14 +72,14 @@ const nextConfig = {
   },
 
   /**
-   * Proxy /api/v1/* requests to the internal API container at
-   * 127.0.0.1:4097, enabling same-origin API access from the
-   * dashboard regardless of the client hostname. OpenCode Web and CLI are
-   * intentionally not rewritten here: they must use direct local ports, the
+   * Proxy /api/v1/* requests to the private API listener in production and
+   * the configured API port in development/fixtures, enabling same-origin API
+   * access from the dashboard regardless of the client hostname. OpenCode Web
+   * and CLI are intentionally not rewritten here: they must use direct local ports, the
    * authenticated `.localhost` host gateways, or explicit HTTPS origins.
    */
   async rewrites() {
-    const apiPort = process.env.INGENIUM_API_PORT || "4097";
+    const apiPort = process.env.INGENIUM_API_PORT || (process.env.NODE_ENV === "production" ? "4096" : "4097");
     return {
       // A fallback rewrite lets dashboard-owned API route handlers win. In
       // particular, the persistent OpenCode SSE route must not pass through
