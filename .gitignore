@@ -31,6 +31,7 @@ playwright/.cache/
 
 # Build output
 .next/
+.ingenium-dashboard-fixtures/
 dist/
 build/
 *.tsbuildinfo

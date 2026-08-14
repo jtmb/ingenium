@@ -35,6 +35,7 @@ const TEST_RUN_PORT_LOCK_VERSION = 1;
 export const TEST_RUN_CREATION_FAILURE_FILENAME = "creation-failure.json";
 const DEVELOPMENT_PORTS = new Set([3000, 4097, 4098, 4099, 4999]);
 export const TEST_RUN_API_TOKEN_FILENAME = "api-token";
+const TEST_RUN_DASHBOARD_WORKSPACE_ROOT = ".ingenium-dashboard-fixtures";
 
 /**
  * Derive the only project identity that the default Playwright fixture may
@@ -43,6 +44,17 @@ export const TEST_RUN_API_TOKEN_FILENAME = "api-token";
  */
 export function getTestRunProjectName(runId: string): string {
   return `playwright-test-${runId.slice(0, 8)}`;
+}
+
+export function getTestRunDashboardWorkspace(
+  context: Pick<TestRunManifest, "repoRoot" | "runNonce">,
+): string {
+  return join(
+    context.repoRoot,
+    "services",
+    TEST_RUN_DASHBOARD_WORKSPACE_ROOT,
+    context.runNonce,
+  );
 }
 
 /**
@@ -1746,6 +1758,14 @@ export function cleanupTestRun(manifestPath: string): void {
     }
   }
   const apiTokenFile = getTestRunApiTokenPath(manifest);
+  const dashboardWorkspace = getTestRunDashboardWorkspace(manifest);
+  if (existsSync(dashboardWorkspace)) {
+    assertNoSymlinkedAncestors(dashboardWorkspace, manifest.repoRoot, "test-run dashboard workspace");
+    if (!lstatSync(dashboardWorkspace).isDirectory()) {
+      throw new Error("Test-run dashboard workspace is not a directory");
+    }
+    rmSync(dashboardWorkspace, { recursive: true, force: true });
+  }
   releaseTestRunPortReservations(manifest, { allowMissing: true });
   rmSync(manifest.runDir, { recursive: true, force: true });
   const environment = {

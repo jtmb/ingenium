@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, rmSync, symlinkSync, realpathSync } from "node:fs";
 import { createConnection } from "node:net";
 import { basename, join } from "node:path";
 import {
   cleanupTestRun,
   getPortEnvironment,
+  getTestRunDashboardWorkspace,
   getTestRunTelemetryPath,
   markTestRunRecovered,
   markTestRunProcessCleared,
@@ -45,6 +46,22 @@ export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
 export const FIXTURE_API_RATE_LIMIT = 1_000;
 export const FIXTURE_OWNER_EMAIL = "playwright-owner@example.test";
 export const FIXTURE_OWNER_PASSWORD = "Playwright-fixture-password-2026!";
+
+function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildArtifacts: boolean): string {
+  const source = join(context.repoRoot, "services", "ingenium-dashboard");
+  const target = getTestRunDashboardWorkspace(context);
+  rmSync(target, { recursive: true, force: true });
+  cpSync(source, target, {
+    recursive: true,
+    filter: (path) => {
+      const name = basename(path);
+      if (name === "node_modules") return false;
+      return includeBuildArtifacts || name !== ".next";
+    },
+  });
+  symlinkSync(join(source, "node_modules"), join(target, "node_modules"), "dir");
+  return target;
+}
 
 interface CommandResult {
   code: number | null;
@@ -270,7 +287,9 @@ export function getServerSpecs(
   const tsx = nodeModuleBin(context.repoRoot, "tsx");
   const next = nodeModuleBin(context.repoRoot, "next");
   const apiEntry = join(context.repoRoot, "services", "ingenium-api", "dist", "scripts", "api-server.js");
-  const dashboardDir = join(context.repoRoot, "services", "ingenium-dashboard");
+  const dashboardDir = production
+    ? getTestRunDashboardWorkspace(context)
+    : join(context.repoRoot, "services", "ingenium-dashboard");
 
   return [
     {
@@ -1093,7 +1112,6 @@ export async function buildProductionArtifacts(context: TestRunContext, timeoutM
     "packages/ingenium-core",
     "packages/ingenium-email",
     "services/ingenium-api",
-    "services/ingenium-dashboard",
   ];
   try {
     for (const workspace of workspaces) {
@@ -1101,15 +1119,25 @@ export async function buildProductionArtifacts(context: TestRunContext, timeoutM
         context.repoRoot,
         ["run", "build", `--workspace=${workspace}`],
         timeoutMs,
-        workspace === "services/ingenium-dashboard"
-          ? { NODE_ENV: "production", INGENIUM_API_PORT: String(context.ports.api) }
-          : {},
+        {},
         context.runNonce,
         context,
       );
       if (result.code !== 0) {
         throw new Error(`Production build failed for ${workspace}\n${result.output}`);
       }
+    }
+    const dashboardWorkspace = prepareTestRunDashboardWorkspace(context, false);
+    const dashboard = await runBoundedCommand(
+      context.repoRoot,
+      ["--prefix", dashboardWorkspace, "run", "build"],
+      timeoutMs,
+      { NODE_ENV: "production", INGENIUM_API_PORT: String(context.ports.api) },
+      context.runNonce,
+      context,
+    );
+    if (dashboard.code !== 0) {
+      throw new Error(`Production build failed for services/ingenium-dashboard\n${dashboard.output}`);
     }
   } catch (error) {
     try {
@@ -1241,9 +1269,10 @@ export async function startTestServers(
   try {
     capturePreexistingProcessBaseline(context);
     if (production && shouldBuild) await buildProductionArtifacts(context, options.buildTimeoutMs);
+    else if (production) prepareTestRunDashboardWorkspace(context, true);
     if (production) {
       if (!existsSync(specs[0]!.args[0]!)) throw new Error("API production entrypoint is missing after build");
-      if (!existsSync(join(context.repoRoot, "services", "ingenium-dashboard", ".next", "BUILD_ID"))) {
+      if (!existsSync(join(getTestRunDashboardWorkspace(context), ".next", "BUILD_ID"))) {
         throw new Error("Dashboard production build is missing after build");
       }
     }
@@ -1570,5 +1599,5 @@ export function installRunSignalHandlers(
 
 export function productionArtifactsExist(context: TestRunContext): boolean {
   return existsSync(join(context.repoRoot, "services", "ingenium-api", "dist", "scripts", "api-server.js"))
-    && existsSync(join(context.repoRoot, "services", "ingenium-dashboard", ".next", "BUILD_ID"));
+    && existsSync(join(getTestRunDashboardWorkspace(context), ".next", "BUILD_ID"));
 }

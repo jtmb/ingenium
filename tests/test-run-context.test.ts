@@ -12,6 +12,7 @@ import {
   createTestRunContext,
   getApprovedTempRoot,
   getPlaywrightOutputDirectory,
+  getTestRunDashboardWorkspace,
   getTestRunDashboardUrl,
   getTestRunArtifactRoot,
   getTestRunPortLockPath,
@@ -231,10 +232,14 @@ describe("test-run context", () => {
     telemetryRoots.push(dirname(context.telemetryPath!));
     const sibling = join(root, "do-not-delete.txt");
     writeFileSync(sibling, "keep me");
+    const dashboardWorkspace = getTestRunDashboardWorkspace(context);
+    mkdirSync(dashboardWorkspace, { recursive: true });
+    writeFileSync(join(dashboardWorkspace, "BUILD_ID"), context.runId);
 
     cleanupTestRun(context.manifestPath);
 
     expect(() => readTestRunManifest(context.manifestPath)).toThrow();
+    expect(existsSync(dashboardWorkspace)).toBe(false);
     expect(existsSync(getTestRunPortLockPath(context.ports.api))).toBe(false);
     expect(readFileSync(sibling, "utf8")).toBe("keep me");
   });

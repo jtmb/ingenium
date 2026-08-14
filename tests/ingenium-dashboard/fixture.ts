@@ -1,5 +1,6 @@
 import { test as base, expect } from "@playwright/test";
-import { getDashboardStorageStatePath, normalizeDashboardStorageState, writeDashboardStorageState } from "./fixture-credentials";
+import { createTestRunBrowserStorageState } from "../test-server-lifecycle";
+import { getDashboardStorageStatePath } from "./fixture-credentials";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const test = base.extend<{}, { authenticatedStatePath?: string }>({
@@ -9,15 +10,14 @@ const test = base.extend<{}, { authenticatedStatePath?: string }>({
       : undefined);
   }, { scope: "worker" }],
   context: async ({ browser, contextOptions, authenticatedStatePath }, use) => {
+    const storageState = authenticatedStatePath
+      ? await createTestRunBrowserStorageState(getDefaultSuiteRuntime().context)
+      : contextOptions.storageState;
     const context = await browser.newContext({
       ...contextOptions,
-      storageState: authenticatedStatePath ?? contextOptions.storageState,
+      storageState,
     });
     await use(context);
-    if (authenticatedStatePath) {
-      const runtime = getDefaultSuiteRuntime();
-      writeDashboardStorageState(runtime.context, normalizeDashboardStorageState(runtime.context, await context.storageState()));
-    }
     await context.close();
   },
 });

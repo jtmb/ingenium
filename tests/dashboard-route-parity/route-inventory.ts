@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { getTestRunDashboardWorkspace, readTestRunManifest, TEST_RUN_MANIFEST_ENV } from "../test-run-context";
 
 /**
  * Route inventory for the production dashboard smoke suite.
@@ -413,9 +414,13 @@ function appPathManifestRoutes(manifest: unknown): string[] {
 /** Load and validate the production build's route manifests without writing. */
 export function loadProductionArtifactRoutes(): ProductionArtifactRoutes {
   const configuredDirectory = process.env.INGENIUM_DASHBOARD_ARTIFACT_DIR?.trim();
+  const manifestPath = process.env[TEST_RUN_MANIFEST_ENV];
+  const fixtureDirectory = manifestPath
+    ? join(getTestRunDashboardWorkspace(readTestRunManifest(manifestPath)), ".next")
+    : join(REPOSITORY_ROOT, "services", "ingenium-dashboard", ".next");
   const directory = configuredDirectory
     ? resolve(REPOSITORY_ROOT, configuredDirectory)
-    : join(REPOSITORY_ROOT, "services", "ingenium-dashboard", ".next");
+    : fixtureDirectory;
   const buildId = readText(join(directory, "BUILD_ID")).trim();
   if (!buildId) throw new Error(`Production dashboard artifact has no BUILD_ID: ${directory}`);
 

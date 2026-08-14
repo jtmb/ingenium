@@ -22,6 +22,7 @@ import {
   createTestRunContext,
   getTestRunArtifactRoot,
   getTestRunApiTokenPath,
+  getTestRunDashboardWorkspace,
   readTestRunManifest,
   readTestRunTelemetry,
   resetTestRunContextForTests,
@@ -148,11 +149,16 @@ describe("test server lifecycle contracts", () => {
       .mockResolvedValueOnce(new Response("{}", {
         status: 200,
         headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
+      }))
+      .mockResolvedValueOnce(new Response("{}", {
+        status: 200,
+        headers: { "Set-Cookie": `__Host-ingenium_session=${"t".repeat(43)}; Path=/; Secure; HttpOnly` },
       }));
     vi.stubGlobal("fetch", fetchMock);
 
     await provisionTestRunOwner(context);
     const storageState = await createTestRunBrowserStorageState(context);
+    const renewedStorageState = await createTestRunBrowserStorageState(context);
 
     expect(storageState.cookies).toEqual([expect.objectContaining({
       name: "__Host-ingenium_session",
@@ -169,6 +175,9 @@ describe("test server lifecycle contracts", () => {
         origin: `http://localhost:${context.ports.dashboard}`,
         localStorage: [{ name: "ingenium_global_project", value: context.project }],
       },
+    ]);
+    expect(renewedStorageState.cookies).toEqual([
+      expect.objectContaining({ value: "t".repeat(43) }),
     ]);
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
@@ -217,6 +226,7 @@ describe("test server lifecycle contracts", () => {
 
     expect(specs.map((spec) => spec.port)).toEqual([45201, 45202, 45203]);
     expect(specs[1]!.args[0]).toBe("start");
+    expect(specs[1]!.cwd).toBe(getTestRunDashboardWorkspace(context));
     expect(specs[1]!.args).not.toContain("dev");
     expect(specs[2]!.env.CHAT_FIXTURE_PORT).toBe("45203");
     expect(specs[0]!.env.INGENIUM_API_TOKEN).toBe(TEST_API_TOKEN);

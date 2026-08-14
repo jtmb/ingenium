@@ -64,9 +64,11 @@ are reserved for explicitly declared full, release, or cross-cutting gates.
 The fixture Playwright configuration is the deterministic Phase 5 fixture E2E
 run. It starts the production-mode API and dashboard processes plus the chat
 fixture, uses a per-run temporary database/project, allocates a distinct
-high-port block, and cleans up the exact manifest-owned run directory during
-teardown. This is the verified Phase 5E behavior: the run manifest is the
-source of truth for process identity, ports, paths, and cleanup ownership.
+high-port block, and builds the dashboard from a run-isolated source copy so a
+concurrent fixture cannot replace another run's live Next.js artifacts. Teardown
+cleans up the exact manifest-owned run directory. This is the verified Phase 5E
+behavior: the run manifest is the source of truth for process identity, ports,
+paths, and cleanup ownership.
 
 ```bash
 npx playwright test --config=tests/playwright.config.ts
@@ -77,8 +79,9 @@ live-mail, and manual visual suites. Do not interpret an excluded suite as
 passing: it was not run.
 
 `INGENIUM_E2E_SKIP_BUILD=1` is allowed only when the production artifacts have
-already been built. It skips the build step, not production mode: the
-dashboard still runs with `next start`.
+already been built. The fixture copies those artifacts into its run-isolated
+workspace; it skips the build step, not production mode, and the dashboard still
+runs with `next start`.
 
 ### Strict containment ownership
 
