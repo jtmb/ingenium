@@ -55,6 +55,7 @@ const EXPECTED_BINDINGS: Record<string, PortBinding[]> = {
   "4097/tcp": [{ HostIp: "127.0.0.1", HostPort: "4097" }],
   "1455/tcp": [{ HostIp: "127.0.0.1", HostPort: "1455" }],
 };
+const COMPOSE_GATEWAY_SERVICES = ["ingenium", "control-plane"] as const;
 
 function defaultDockerRunner(args: readonly string[]): string {
   return execFileSync("docker", [...args], {
@@ -81,10 +82,10 @@ function normalizedBindings(bindings: PortBinding[]): string[] {
   return bindings.map(bindingKey).sort();
 }
 
-function expectedLabels(repoRoot: string): Record<string, string> {
+function expectedLabels(repoRoot: string, service: typeof COMPOSE_GATEWAY_SERVICES[number]): Record<string, string> {
   return {
     "com.docker.compose.project": basename(repoRoot),
-    "com.docker.compose.service": "ingenium",
+    "com.docker.compose.service": service,
     "com.docker.compose.project.working_dir": repoRoot,
     "com.docker.compose.project.config_files": join(repoRoot, "docker-compose.yml"),
   };
@@ -122,6 +123,7 @@ function verifyContainer(
   container: DockerContainer,
   candidateId: string,
   repoRoot: string,
+  service: typeof COMPOSE_GATEWAY_SERVICES[number],
   expectedRevision: string | undefined,
 ): { container?: VerifiedContainer; reason?: string } {
   const id = container.Id;
@@ -136,7 +138,7 @@ function verifyContainer(
     return { reason: "Compose container labels are not inspectable" };
   }
   const labels = container.Config.Labels as Record<string, string>;
-  for (const [label, expected] of Object.entries(expectedLabels(repoRoot))) {
+  for (const [label, expected] of Object.entries(expectedLabels(repoRoot, service))) {
     if (labels[label] !== expected) {
       return { reason: `Compose container label ${label} does not match this repository` };
     }
@@ -165,7 +167,8 @@ function verifyContainer(
 
 function stableContainer(first: VerifiedContainer, second: VerifiedContainer): boolean {
   if (first.id !== second.id || first.ociRevision !== second.ociRevision) return false;
-  for (const label of Object.keys(expectedLabels(first.labels["com.docker.compose.project.working_dir"]!))) {
+  const service = first.labels["com.docker.compose.service"] as typeof COMPOSE_GATEWAY_SERVICES[number];
+  for (const label of Object.keys(expectedLabels(first.labels["com.docker.compose.project.working_dir"]!, service))) {
     if (first.labels[label] !== second.labels[label]) return false;
   }
   return Object.keys(EXPECTED_BINDINGS).every((containerPort) =>
@@ -186,15 +189,25 @@ function unverified(reason: string): ComposeOwnershipReport {
 export function inspectComposeOwnership(options: InspectComposeOwnershipOptions): ComposeOwnershipReport {
   const repoRoot = getCanonicalRepoRoot(options.repoRoot);
   const docker = options.docker ?? defaultDockerRunner;
-  const labels = expectedLabels(repoRoot);
+  const project = basename(repoRoot);
+  let service: typeof COMPOSE_GATEWAY_SERVICES[number] = "ingenium";
   let candidates: string[];
   try {
     candidates = docker([
       "ps",
-      "--filter", `label=com.docker.compose.project=${labels["com.docker.compose.project"]}`,
-      "--filter", `label=com.docker.compose.service=${labels["com.docker.compose.service"]}`,
+      "--filter", `label=com.docker.compose.project=${project}`,
+      "--filter", `label=com.docker.compose.service=${service}`,
       "--format", "{{.ID}}",
     ]).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (candidates.length === 0) {
+      service = "control-plane";
+      candidates = docker([
+        "ps",
+        "--filter", `label=com.docker.compose.project=${project}`,
+        "--filter", `label=com.docker.compose.service=${service}`,
+        "--format", "{{.ID}}",
+      ]).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    }
   } catch (error) {
     return unverified(`Docker ownership inspection is unavailable: ${errorMessage(error)}`);
   }
@@ -209,6 +222,7 @@ export function inspectComposeOwnership(options: InspectComposeOwnershipOptions)
       parseInspection(docker(["inspect", candidateId])),
       candidateId,
       repoRoot,
+      service,
       options.expectedOciRevision,
     );
     if (!validated.container) return unverified(validated.reason!);
@@ -222,6 +236,7 @@ export function inspectComposeOwnership(options: InspectComposeOwnershipOptions)
       parseInspection(docker(["inspect", first.id])),
       first.id,
       repoRoot,
+      service,
       options.expectedOciRevision,
     );
     if (!validated.container) return unverified(validated.reason!);

@@ -10,10 +10,13 @@ const containerId = "a".repeat(64);
 const replacementContainerId = "b".repeat(64);
 const revision = "e5e76703f6daf45b972e41894cfc9f33ff3961d5";
 
-function healthyContainer(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function healthyContainer(
+  overrides: Record<string, unknown> = {},
+  service: "ingenium" | "control-plane" = "ingenium",
+): Record<string, unknown> {
   const labels = {
     "com.docker.compose.project": "ingenium",
-    "com.docker.compose.service": "ingenium",
+    "com.docker.compose.service": service,
     "com.docker.compose.project.working_dir": repoRoot,
     "com.docker.compose.project.config_files": `${repoRoot}/docker-compose.yml`,
     "org.opencontainers.image.revision": revision,
@@ -73,6 +76,22 @@ describe("Compose ownership inspection", () => {
       repoRoot,
       expectedOciRevision: revision,
       docker: runner([`${containerId.slice(0, 12)}\n`, inspection(healthyContainer()), inspection(healthyContainer())]),
+    });
+
+    expect(report).toMatchObject({
+      classification: "compose-owned",
+      containerId,
+      ociRevision: revision,
+      hostPorts: [3000, 4097, 1455],
+    });
+  });
+
+  it("accepts the isolated production control plane when the compatibility service is absent", () => {
+    const controlPlane = healthyContainer({}, "control-plane");
+    const report = inspectComposeOwnership({
+      repoRoot,
+      expectedOciRevision: revision,
+      docker: runner(["", `${containerId.slice(0, 12)}\n`, inspection(controlPlane), inspection(controlPlane)]),
     });
 
     expect(report).toMatchObject({
