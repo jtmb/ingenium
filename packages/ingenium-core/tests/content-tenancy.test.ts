@@ -47,6 +47,15 @@ describe("AUTH-105 content tenancy", () => {
       (project_id, observation_type, content, source, created_at, updated_at)
       VALUES (?, 'preference', 'private legacy preference', 'manual', ?, ?)`)
       .run(projectId, now, now).lastInsertRowid);
+    const ragSourceId = "00000000-0000-4000-8000-000000000298";
+    legacy.prepare(`INSERT INTO rag_sources
+      (id, project_id, title, source_type, source_hash, byte_size, created_at, updated_at)
+      VALUES (?, ?, 'private legacy source', 'text', ?, 14, ?, ?)`)
+      .run(ragSourceId, projectId, "a".repeat(64), now, now);
+    legacy.prepare(`INSERT INTO context_rag_uploads
+      (id, project_id, rag_source_id, content_hash, provenance, created_at)
+      VALUES (?, ?, ?, ?, 'direct_upload', ?)`)
+      .run("00000000-0000-4000-8000-000000000398", projectId, ragSourceId, "a".repeat(64), now);
     legacy.close();
 
     resetDbForTest();
@@ -56,6 +65,8 @@ describe("AUTH-105 content tenancy", () => {
       .toEqual({ state: "pending", owner_user_id: null });
     expect(upgraded.prepare("SELECT owner_user_id, visibility FROM observations WHERE id = ?").get(observationId))
       .toEqual({ owner_user_id: bootstrap.PENDING_BOOTSTRAP_OWNER_ID, visibility: "private" });
+    expect(upgraded.prepare("SELECT owner_user_id, visibility FROM rag_sources WHERE id = ?").get(ragSourceId))
+      .toEqual({ owner_user_id: bootstrap.PENDING_BOOTSTRAP_OWNER_ID, visibility: "restricted" });
     expect(upgraded.prepare("SELECT status FROM users WHERE id = ?").get(bootstrap.PENDING_BOOTSTRAP_OWNER_ID))
       .toEqual({ status: "disabled" });
     expect(upgraded.prepare("SELECT count(*) AS count FROM auth_identities WHERE user_id = ?").get(bootstrap.PENDING_BOOTSTRAP_OWNER_ID))

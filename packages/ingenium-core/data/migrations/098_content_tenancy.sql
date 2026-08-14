@@ -224,6 +224,7 @@ SELECT organization.id,
 FROM organizations organization
 WHERE NOT EXISTS (SELECT 1 FROM docs_spaces space WHERE space.organization_id = organization.id);
 
+DROP TRIGGER rag_sources_context_upload_immutable_update;
 ALTER TABLE rag_sources ADD COLUMN organization_id TEXT REFERENCES organizations(id) ON DELETE RESTRICT;
 ALTER TABLE rag_sources ADD COLUMN visibility TEXT NOT NULL DEFAULT 'project' CHECK(visibility IN ('organization', 'project', 'restricted'));
 ALTER TABLE rag_sources ADD COLUMN owner_user_id TEXT REFERENCES users(id) ON DELETE RESTRICT;
@@ -246,6 +247,12 @@ WHERE id IN (SELECT rag_source_id FROM context_rag_uploads)
 CREATE TRIGGER rag_sources_context_checkpoint_immutable_update BEFORE UPDATE ON rag_sources
 WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link WHERE link.project_id = OLD.project_id AND link.rag_source_id = OLD.id)
 BEGIN SELECT RAISE(ABORT, 'checkpoint RAG sources are immutable — UPDATE rejected'); END;
+CREATE TRIGGER rag_sources_context_upload_immutable_update BEFORE UPDATE ON rag_sources
+WHEN EXISTS (
+  SELECT 1 FROM context_rag_uploads upload
+  WHERE upload.project_id = OLD.project_id AND upload.rag_source_id = OLD.id
+)
+BEGIN SELECT RAISE(ABORT, 'context upload RAG sources are immutable — UPDATE rejected'); END;
 CREATE UNIQUE INDEX idx_rag_sources_scope_id ON rag_sources(organization_id, project_id, id);
 CREATE INDEX idx_rag_sources_visibility ON rag_sources(organization_id, visibility, project_id, owner_user_id, updated_at DESC);
 CREATE TRIGGER rag_sources_scope_insert BEFORE INSERT ON rag_sources
