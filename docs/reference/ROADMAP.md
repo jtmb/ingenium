@@ -178,6 +178,8 @@ P0 DOC-100
   -> A0 AUTH-100 -> A1 AUTH-101 -> A2 AUTH-102 -> A3 AUTH-103 -> A4 AUTH-104
      -> A5 AUTH-105 -> A6 AUTH-106 -> A7 AUTH-107 -> A8 AUTH-108
       -> A9 AUTH-109 -> A10 AUTH-110 -> A11 AUTH-111
+      -> F0a RESTORE-103 -> F0b OIDC-100 -> F0c RUNTIME-100
+         -> F0d TELEMETRY-100 -> F1 AUTH-112
 ```
 
 The C0-C6 coordination lane is an implementation-gated barrier chain;
@@ -2201,3 +2203,500 @@ Evidence AUTH-110: Enforcement-cutoff acceptance verified complete migrations 09
 <!-- (work-complete) AUTH-111 2026-08-14T16:01:33Z ingenium-docs -->
 Evidence AUTH-111: Release acceptance passed at source and deployed SHA `1e5d4919640e2a02c1c6a580edc9e2998336e39f`; production Compose showed a healthy control plane, healthy runtime manager, and running runtime gateway, while all inspected OCI revision labels matched that full SHA. The completed manual safety-backup record is `94bc63d5-dcb7-42a8-ae13-8b94c836e8b6` with SHA-256 `223ca677aa0c775505e453ac683bb58edfc5c594cab66ba60fadeaf4156543de`. Security recorded 88 API, 10 core, 9 dashboard, and 37 lifecycle checks with no blocker and history scan 0; fixture E2E passed 127 cases; route parity passed 62/62 across 24 routes and 14 Settings links; the 59-case auth migration matrix, DB-isolation check, strict containment clean stop, and desktop/mobile visual PASS completed without sensitive values. Workflow/source progression is `396b1d9`, `8550538`, `f261a1d`, `a89a1b8`, `fcf33b3`, `47d005b`, `2c4a3e0`, `1c0cd87`, `88a6a1d`, `5760d90`, `ebcdff6`, `9eb3e1f`, `259e620`, `1f7b6cc`, `d15e5a8`, `531b60e`, `70ac425`, `96c26d8`, `fd93f5a`, `88e485a`, `b5b66ff`, `fdc3bd2`, `82115b9`, `6263256`, `7950c6a`, `3644f32`, `0d9b3f2`, `1e5d491`. Remaining non-blocking follow-ups are restore post-swap security-epoch invalidation, OIDC configured-provider private-network/response-size hardening, retained unrelated historical temporary telemetry, and the production-profile local OpenCode/CLI/VS Code 502 behavior by design.
 Evidence AUTH-111: Focused verification: `bash tests/test-append-only-files.sh`, `bash tests/test-agent-validation.sh`, `git diff --check`, the targeted relative-link check for four changed canonical docs, and `bash -n scripts/bootstrap-local-secrets.sh` all passed; no Docs Workspace mutation or unrelated documentation regeneration was performed.
+
+## Approved post-AUTH follow-up program
+
+AUTH-100 through AUTH-111 are the completed release baseline. The approved
+follow-up contracts below are additive and begin from the current prerequisite
+HEAD `4f837ad` (`docs(auth): reconcile release roadmap evidence`). They do not
+change the completed AUTH evidence, mutate the Docs Workspace, or record live
+work markers in this planning update.
+
+### Follow-up dependency and allocation contract
+
+The follow-up is serialized into exclusive subwaves so the shared premium/docs
+territories never overlap: `F0a` restore invalidation depends on `AUTH-111` and
+`RESTORE-101`; `F0b` OIDC transport, `F0c` production runtime UX, and `F0d`
+telemetry retention each depend on `AUTH-111` and follow the preceding barrier;
+`F1` is the merged acceptance/reconciliation barrier for all four tasks. Each
+subwave records its own source, deployment, visual, security, and containment
+evidence before the next subwave starts.
+
+#### RESTORE-103 — Restore-time token and capability invalidation
+
+- **IN_SCOPE:** Under the confirmed policy **TOKENS ONLY**, add the restore
+  invalidation stage after the database swap and restore-ledger rehydrate:
+  revoke sessions, scoped API tokens, MCP/repository/service/runtime
+  credentials, runtime tickets/sessions, reset/verification/OIDC/mail/context/
+  restore pending states, invitations, task reservations, and coordination
+  ownership; increment user, service-principal (SP), and runtime generations.
+  Run it after rehydrate and before the external journal records `rehydrated`
+  or any service restarts. Preserve restored password hashes, OIDC identity
+  links, TOTP factors, and recovery codes. A failed invalidation audit must
+  fail the restore and enter the existing rollback path.
+- **OUT_OF_SCOPE:** Password changes or hash regeneration; OIDC relinking;
+  TOTP/recovery-code replacement; resource/content deletion; broad post-restore
+  credential redesign; external provider revocation; live production apply;
+  and Docs Workspace mutation.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `AUTH-111`, completed `RESTORE-101`, and prerequisite HEAD
+  `4f837ad`.
+- **Acceptance:** Every listed token/capability family is revoked or generation-
+  invalidated atomically; stale credentials, tickets, sessions, reservations,
+  and ownership claims fail closed; user/SP/runtime generations increase and
+  are checked by all relevant consumers; password hashes, `(issuer,subject)`
+  links, encrypted TOTP factors, recovery codes, IDs, and ownership data are
+  unchanged; the invalidation audit is immutable, content-free, and secret-free;
+  the external journal cannot reach `rehydrated` or restart services until the
+  audit commits; any audit failure rolls the restore back.
+- **STOP_CONDITION:** `PASS` only after focused restore/core/API tests,
+  deployment/health, security, migration/preservation, fixture E2E, strict
+  containment, residual-risk recording, and marker reconciliation pass.
+- **Escalation:** Only unavailable required external credential/access after the
+  configured fixture path; unauthorized destructive or irreversible action;
+  mutually exclusive product decision; genuine requirement ambiguity; or
+  bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  token-only scope, generation coverage, preserved auth material, audit order,
+  and rollback behavior.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart the current merged source and health-check the
+  restore, API, supervisor, and runtime boundaries.
+- **Rollback/safety:** Keep invalidation inside the restore transaction/barrier;
+  never restore or rewrite the preserved password, OIDC, TOTP, or recovery-code
+  material. Do not emit `rehydrated`, restart services, or release the external
+  journal until audit success. **Residual rollback risk:** once a restored
+  credential has been revoked, a database rollback cannot restore its validity
+  in external caches, clients, or already-observing services; retain that risk
+  in the journal/receipt, require fresh authentication, and leave the restore
+  failed closed if external invalidation state cannot be proven.
+- **Source surfaces:** `services/ingenium-api/scripts/restore-maintenance.ts`,
+  `services/ingenium-api/lib/restore-supervisor.ts`,
+  `packages/ingenium-core/lib/tools/authentication.ts`,
+  `security-tokens.ts`, `mcp-credentials.ts`, `runtimes.ts`, `task-claims.ts`,
+  `coordination.ts`, `invitations.ts`, and restore execution ledger helpers.
+- **Test surfaces:** `services/ingenium-api/tests/restore-maintenance.test.ts`,
+  `runtime-restore-guard.test.ts`, `restore-supervisor.test.ts`,
+  `packages/ingenium-core/tests/backups.test.ts`, `authentication.test.ts`,
+  `mcp-credentials.test.ts`, `runtime-isolation.test.ts`, `coordination.test.ts`,
+  `task-coordination.test.ts`, and injected audit-failure/rollback fixtures.
+- **Doc surfaces:** After verified implementation, update only the affected
+  sections of [Backup and Restore](../operations/backup-restore.md),
+  [API Authentication](../security/api-authentication.md),
+  [Credential Rotation](../security/credential-rotation.md),
+  [Database Migrations](../develop/database.md), and [Security](../security/index.md).
+- **Tests:** Probe ordering around swap, ledger rehydrate, journal transition,
+  and restart; positive/negative coverage for every token family; generation
+  races; preservation digests; immutable audit; failure injection; deployment
+  health; fixture E2E; and strict containment.
+- **Docs:** This roadmap now; no other canonical documentation is changed until
+  source behavior and its operator wording are verified.
+- **Exclusive writer territory:** Restore maintenance ordering, token/capability
+  invalidation and generation helpers, restore-focused tests, and their direct
+  audit/ledger projections; no OIDC, dashboard, runtime-UX, or telemetry
+  retention overlap.
+- **Phase/counts:** `F0a`; 2 writers / 3 nonwriters. Premium owns restore/core
+  invalidation, Docs owns directly affected canonical projections; QA,
+  security, and Explore are nonwriters. Barrier before `F0b`.
+- **Verification plan:** Run disposable swap/rehydrate fixtures, compare
+  pre/post preserved-material digests and IDs, inject each audit/order failure,
+  prove rollback, rebuild/restart and health-check the merged source, run one
+  fixture E2E plus strict containment, and rerun only the smallest regression
+  for a reproducible causal fix.
+- **Causal remediation rule:** Fix the first invalidation ordering, generation
+  lookup, token-family coverage, audit commit, or rollback boundary shown by the
+  restore trace; do not patch individual consumers or restore preserved auth
+  material as a workaround.
+- **Finding classification:** Stale capability acceptance, preserved-auth
+  mutation, journal/restart ordering failure, audit loss, or rollback risk not
+  recorded is `BLOCKING`; unrelated credential cleanup is `FOLLOW_UP`; bounded
+  residual-risk and preservation evidence is `INFORMATIONAL`.
+- **Evidence placeholders:** Source `[pending focused diff/tests]`; deploy/health
+  `[pending rebuilt current source and route evidence]`; visual `N/A — no UI
+  change`; security `[pending bounded current-diff review]`; containment
+  `[pending run-scoped strict audit]`.
+- **Planned marker entries (not live):** append `work-started` for `RESTORE-103`
+  after preflight/ownership, then append one matching `work-complete` entry
+  after all gates and non-empty evidence pass.
+
+#### OIDC-100 — Bounded OIDC provider transport
+
+- **IN_SCOPE:** Harden OIDC discovery, token, and JWKS transport by reusing
+  `packages/ingenium-core/lib/tools/endpoint-policy.ts`: production requests
+  require HTTPS on port 443 and public DNS addresses with DNS pinning; redirects
+  are rejected; request/response body, content-type, compression, and total
+  time budgets are bounded; `jose` uses the bounded `customFetch` and cache;
+  loopback HTTP is permitted only through an explicit test fixture; rate limits,
+  stable errors, and security audit events cover provider failures; and the auth
+  encryption key is provisioned through `env-i` rather than source or a new
+  dependency.
+- **OUT_OF_SCOPE:** New identity protocols or providers; public signup; claim,
+  issuer/subject, algorithm, or account-linking redesign; real provider
+  credentials; runtime UI changes; weakening endpoint policy; and adding an npm
+  dependency.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `AUTH-111` and `RESTORE-103`; `INGENIUM_AUTH_ENCRYPTION_KEY_FILE`
+  remains the documented injected key boundary.
+- **Acceptance:** Production discovery/token/JWKS calls cannot use HTTP, a
+  non-443 port, private/link-local/loopback DNS, rebinding, or a redirect;
+  pinned addresses and TLS host identity are used for the complete request;
+  malformed/missing content type, compressed or oversized bodies, slow headers,
+  slow bodies, and total-time overruns fail closed; JOSE never falls back to its
+  unbounded default fetch; the cache is bounded and keyed by validated issuer/
+  JWKS identity; loopback succeeds only in the explicit fixture; rate limits,
+  fixed error envelopes, and redacted immutable audit rows are deterministic;
+  the injected auth encryption key is required, owner-controlled, and absent
+  from source/logs/responses; no new dependency is introduced.
+- **STOP_CONDITION:** `PASS` only after focused endpoint/OIDC/API tests,
+  deployment/health, security review, configured-provider fixture evidence,
+  strict containment, and marker reconciliation pass.
+- **Escalation:** Only unavailable required external credential/access after the
+  configured fixture path; unauthorized destructive or irreversible action;
+  mutually exclusive product decision; genuine requirement ambiguity; or
+  bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  SSRF/DNS pinning, redirect and body limits, JOSE fetch/cache, rate limits,
+  audit redaction, and key provisioning.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart and health-check actual auth/OIDC routes.
+- **Rollback/safety:** Disable only the affected provider or transport path on
+  failure; preserve existing identity links and encrypted auth material; use
+  loopback fixtures and injected test keys only; never log provider bodies,
+  tokens, keys, or DNS answers; do not solve a transport failure by allowing
+  private networks, redirects, or a broad fetch fallback.
+- **Source surfaces:** `packages/ingenium-core/lib/tools/endpoint-policy.ts`,
+  `oidc-authentication.ts`, `authentication.ts`, and
+  `services/ingenium-api/lib/routes/auth-preflight.ts` plus auth rate-limit/audit
+  adapters.
+- **Test surfaces:** `packages/ingenium-core/tests/endpoint-policy.test.ts`,
+  `oidc-authentication.test.ts`, `services/ingenium-api/tests/auth-preflight.test.ts`,
+  `local-auth.test.ts`, and public-DNS, redirect, compression, size, timeout,
+  cache, rate-limit, and redaction fixtures.
+- **Doc surfaces:** After verified implementation, update only [API
+  Authentication](../security/api-authentication.md), [Security](../security/index.md),
+  [API Reference](../develop/api.md), and [Environment Variables](../develop/variables.md).
+- **Tests:** Exercise public HTTPS 443 success, every denied address/port/scheme,
+  DNS pin/rebind, zero redirects, content-type/compression/body/time budgets,
+  JOSE custom fetch/cache, loopback fixture gating, rate limits, stable errors,
+  audit redaction, injected-key failure, deployment health, and strict
+  containment.
+- **Docs:** This roadmap now; no provider or variable documentation changes until
+  the shipped transport is source-verified.
+- **Exclusive writer territory:** OIDC/endpoint transport and auth-provider
+  tests; no restore ordering, dashboard/runtime UX, or telemetry retention
+  overlap.
+- **Phase/counts:** `F0b`; 2 writers / 3 nonwriters. Premium owns transport/core,
+  Docs owns directly affected canonical projections; QA, security, and Explore
+  are nonwriters. Barrier before `F0c`.
+- **Verification plan:** Run only the declared loopback fixture and static
+  dependency check, inspect request/response/error/audit boundaries, rebuild and
+  health-check, run the focused fixture E2E and strict containment once, and fix
+  only the first reproducible transport root before its minimum recheck.
+- **Causal remediation rule:** Fix the earliest URL validation, DNS pin, socket,
+  response-bound, JOSE fetch/cache, key-injection, rate-limit, or audit boundary
+  proven by the trace; never add a provider-specific bypass.
+- **Finding classification:** SSRF/private-network/redirect bypass, unbounded
+  body or time behavior, JOSE default-fetch use, key/response leakage, missing
+  rate limit, or new dependency is `BLOCKING`; provider UX or protocol expansion
+  is `FOLLOW_UP`; bounded fixture and audit telemetry is `INFORMATIONAL`.
+- **Evidence placeholders:** Source `[pending focused diff/tests]`; deploy/health
+  `[pending rebuilt auth-route evidence]`; visual `N/A — no UI change`; security
+  `[pending bounded transport/key review]`; containment `[pending run-scoped
+  strict audit]`.
+- **Planned marker entries (not live):** append `work-started` for `OIDC-100`
+  after preflight/ownership, then append one matching `work-complete` entry
+  after all gates and non-empty evidence pass.
+
+#### RUNTIME-100 — Production runtime UX and activity leases
+
+- **IN_SCOPE:** Separate production direct local aliases from compatibility
+  proxying: `opencode.localhost`, `cli.localhost`, and `vscode.localhost` use
+  static, identical 404 guidance in production where direct access is not
+  supported, while compatibility aliases continue proxying. Add an explicit,
+  authorization-filtered workspace picker and explicit start/resume actions;
+  never auto-authorize a workspace or silently select a singleton. Account for
+  HTTP, WebSocket, and generation activity against the runtime idle lease and
+  revalidate generation/session state on use. Production must never use a
+  singleton fallback.
+- **OUT_OF_SCOPE:** New runtime isolation primitives; shared-user runtimes;
+  direct private-port publication; automatic authorization or runtime creation;
+  compatibility-profile removal; arbitrary iframe permissions; remote/LAN
+  enablement; and unrelated dashboard redesign.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `AUTH-111`, `AUTH-108`, `AUTH-109`, and `RESTORE-103`.
+- **Acceptance:** Production direct local aliases return the same static 404
+  status/body/headers and actionable guidance for unsupported access; existing
+  compatibility aliases still proxy their intended upstreams; workspace lists
+  contain only server-authorized user/org/project entries and never authorize or
+  start as a read side effect; start/resume requires an explicit authorized
+  action and rejects foreign/archived workspaces; every accepted HTTP request,
+  WebSocket lifecycle, and generation validation touches the correct bounded
+  activity/idle lease; stale generation/session use fails closed; production
+  with zero, one, or many candidates never falls back to a singleton and instead
+  reports explicit unavailable/authorization state; changed routes remain
+  accessible and pass desktop/mobile visual checks.
+- **STOP_CONDITION:** `PASS` only after focused API/gateway/dashboard tests,
+  deployed production and compatibility health, security review, changed-route
+  and passive visual gates, fixture E2E, strict containment, and marker
+  reconciliation pass.
+- **Escalation:** Only unavailable required external credential/access after the
+  configured fixture path; unauthorized destructive or irreversible action;
+  mutually exclusive product decision; genuine requirement ambiguity; or
+  bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed
+  route at 1440x900 and 390x844 plus the requested passive sweep;
+  `@ingenium-security-auditor` reviews authorization, alias, session, generation,
+  and idle-lease boundaries.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart production and compatibility profiles and
+  health-check actual aliases, runtime roots, WebSocket upgrades, and API routes.
+- **Rollback/safety:** Preserve compatibility proxy behavior and existing runtime
+  volumes; disable only the new production UX path on failure; never expose
+  4098/4099/4100 directly, auto-authorize, select a singleton, or delete a
+  runtime to recover a UI state; clean only manifest-owned fixtures.
+- **Source surfaces:** `nginx/gateway.conf`, `proxy-opencode.conf`,
+  `proxy-vscode.conf`, `services/ingenium-api/scripts/runtime-gateway.ts`,
+  `services/ingenium-api/lib/routes/runtimes.ts`, `runtime-reconciler.ts`,
+  `packages/ingenium-core/lib/tools/runtimes.ts`, and dashboard
+  `runtime-urls.ts`/`use-runtime-launch.ts` consumers.
+- **Test surfaces:** `services/ingenium-api/tests/runtime-gateway.test.ts`,
+  `runtimes-route.test.ts`, `runtime-manager-contract.test.ts`,
+  `packages/ingenium-core/tests/runtime-isolation.test.ts`, dashboard
+  `runtime-launch.test.tsx`, runtime-frame/URL tests, gateway/config validation,
+  route parity, and production/compatibility fixture suites.
+- **Doc surfaces:** After verified implementation, update only [Deployment
+  Guide](../operations/deployment.md), [OpenCode usage](../usage/opencode.md),
+  [Dashboard usage](../usage/dashboard.md), [Architecture](../concepts/architecture.md),
+  [Conventions](../concepts/conventions.md), and [Iframe Security](../security/iframe-sandbox.md).
+- **Tests:** Compare alias status/body/header identity, compatibility proxy
+  success, authorization-filtered list/start/resume and negative cases, no-side-
+  effect reads, zero/one/many runtime selection, HTTP/WS/generation activity,
+  idle expiry and generation invalidation, accessibility, console/network,
+  deployment health, visual evidence, fixture E2E, and strict containment.
+- **Docs:** This roadmap now; no runtime UX guide is changed until deployed
+  behavior and 404/compatibility wording are verified.
+- **Exclusive writer territory:** Nginx/runtime gateway, runtime authorization/
+  activity lease, dashboard workspace-picker/launch surfaces, and focused tests;
+  no OIDC, restore ledger, or telemetry-retention overlap.
+- **Phase/counts:** `F0c`; 3 writers / 3 nonwriters. Premium owns API/gateway and
+  deployment, Fast owns dashboard UX, Docs owns canonical projections; QA,
+  security, and QA Vision are nonwriters. Barrier before `F0d`.
+- **Verification plan:** Run production and compatibility fixtures separately,
+  inspect exact response/network/upgrade evidence and authorization traces,
+  capture both viewports after the final UI change, rebuild/restart and
+  health-check, run fixture E2E plus strict containment once, and rerun only the
+  smallest causal route or gateway check after an in-scope fix.
+- **Causal remediation rule:** Fix the first host/alias, authorization lookup,
+  side-effecting workspace read, runtime selection, activity touch, generation,
+  lease, or UI-state producer proven by source and live trace; never restore a
+  singleton fallback or hide a denied state in the client.
+- **Finding classification:** Cross-user/workspace access, auto-authorization,
+  singleton fallback, private-port exposure, stale-lease acceptance, wrong
+  static guidance, broken compatibility proxy, or in-scope visual/accessibility
+  failure is `BLOCKING`; unrelated runtime polish is `FOLLOW_UP`; route and lease
+  telemetry is `INFORMATIONAL`.
+- **Evidence placeholders:** Source `[pending gateway/API/dashboard diff/tests]`;
+  deploy/health `[pending production + compatibility route evidence]`; visual
+  `[pending 1440x900/390x844 and passive sweep artifacts]`; security `[pending
+  bounded runtime-boundary review]`; containment `[pending strict audit and
+  owned-process/port cleanup]`.
+- **Planned marker entries (not live):** append `work-started` for `RUNTIME-100`
+  after preflight/ownership, then append one matching `work-complete` entry
+  after all gates and non-empty evidence pass.
+
+#### TELEMETRY-100 — Run-scoped telemetry retention gate
+
+- **IN_SCOPE:** Define retention around the exact canonical root
+  `tests/artifacts/test-runs/<UUID>`. Default to preview. A run is auto-eligible
+  only when it is at least 30 days old, complete/resolved, has no process, has
+  closed ports, has no manifest, and contains exactly one
+  `runner-telemetry.json`. Implement plan, report, execute, and verify stages
+  with a generated digest, exclusive locks, path-identity checks, quarantine,
+  and a durable receipt. Keep all ambiguous, auxiliary, legacy, temporary,
+  visual, and manual evidence on a manual-review path. Execution remains a
+  destructive decision gate and requires exact confirmation of the generated
+  digest after preview.
+- **OUT_OF_SCOPE:** Automatic deletion of any non-eligible evidence; broad
+  glob-based cleanup; visual/manual/legacy/tmp migration; artifact content
+  rewriting; process termination; changing fixture ownership; Docs Workspace
+  mutation; and silent execution without a preview digest confirmation.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `AUTH-111`, current containment/artifact contracts, and
+  `F0c` runtime activity evidence.
+- **Acceptance:** Only exact UUID run roots are considered; preview performs no
+  mutation and reports every eligibility predicate; report and plan use the same
+  canonical digest; execute requires the exact post-preview digest plus an
+  authorized destructive confirmation; lock acquisition prevents concurrent
+  plans; revalidation closes the race between report and quarantine; quarantine
+  is reversible until receipt/verification; receipt records digest, paths,
+  predicates, actor, timestamps, and outcome without sensitive content; verify
+  proves only eligible run roots changed; ambiguous/auxiliary/legacy/tmp/
+  visual/manual evidence is never auto-selected; failures retain evidence and
+  do not broaden scope.
+- **STOP_CONDITION:** `PASS` only after focused retention/artifact tests,
+  preview/report/execute/verify fixtures, deployment/health where packaged,
+  security review, strict containment, receipt/digest evidence, and marker
+  reconciliation pass.
+- **Escalation:** Only unavailable required external credential/access after the
+  configured fixture path; unauthorized destructive or irreversible action;
+  mutually exclusive product decision; genuine requirement ambiguity; or
+  bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa`; `@ingenium-security-auditor` reviews
+  destructive gating, path traversal/TOCTOU, lock/quarantine/receipt integrity,
+  and evidence classification.
+- **Deployment owner:** `@ingenium-software-engineer-premium`; N/A for a pure
+  test utility, otherwise rebuild/restart the current merged source and
+  health-check the packaged route/runner.
+- **Rollback/safety:** Preview is the default and cannot mutate. Keep quarantined
+  entries until digest verification and receipt commit; on any failure retain
+  the quarantine and recovery receipt for manual action. Never remove a process,
+  open port, manifestless ambiguous tree, or evidence outside the exact plan;
+  never delete with `rm -rf` or a broad glob.
+- **Source surfaces:** `tests/test-run-context.ts`,
+  `tests/suite-containment-audit.ts`, `tests/playwright-global-setup.ts`,
+  `tests/playwright-global-teardown.ts`, `tests/test-artifact-hygiene.sh`, and
+  the run-owned artifact/receipt implementation added within `tests/`.
+- **Test surfaces:** `tests/test-run-context.test.ts`,
+  `tests/suite-containment-audit.test.ts`, `tests/default-suite-containment.test.ts`,
+  `test-artifact-hygiene.sh`, plus isolated plan/report/execute/verify fixtures
+  for age, status, resolution, process, port, manifest, count, digest, lock,
+  symlink, quarantine, receipt, ambiguity, and retry cases.
+- **Doc surfaces:** After verified implementation, update only [Testing
+  Guide](../develop/testing.md), [Deployment Guide](../operations/deployment.md),
+  and directly affected artifact/containment wording in [Architecture](../concepts/architecture.md).
+- **Tests:** Run preview first; compare deterministic digests; exercise exact
+  UUID roots and every predicate; race two plans; inject stale digest, lock,
+  symlink, quarantine, receipt, and verify failures; prove manual classification
+  of all excluded evidence; run artifact hygiene and strict containment without
+  deleting retained evidence.
+- **Docs:** This roadmap now; no retention policy is published elsewhere until
+  the destructive gate and receipt are source-verified.
+- **Exclusive writer territory:** Test-run telemetry retention/planning,
+  artifact classification, quarantine/receipt implementation, and focused
+  retention tests; no restore, OIDC, runtime UX, or unrelated artifact cleanup.
+- **Phase/counts:** `F0d`; 2 writers / 3 nonwriters. Premium owns the retention
+  engine, Docs owns directly affected testing/deployment wording; QA, security,
+  and Explore are nonwriters. Barrier before `F1`.
+- **Verification plan:** Use disposable UUID run roots only; run preview/report,
+  confirm the generated digest exactly, execute one approved destructive fixture,
+  verify the receipt and retained quarantine/recovery evidence, run artifact
+  hygiene and strict containment, and fix only a reproducible in-scope cause
+  before its minimum targeted recheck.
+- **Causal remediation rule:** Fix the first path classification, eligibility
+  predicate, digest, lock, quarantine, receipt, or verification boundary proven
+  by the plan trace; never convert unknown evidence into an auto-eligible state.
+- **Finding classification:** Unauthorized deletion, digest bypass, race/TOCTOU,
+  lost receipt/quarantine, process/port cleanup, or auto-selection of ambiguous
+  evidence is `BLOCKING`; retention policy extensions are `FOLLOW_UP`; preview
+  inventories and retained receipts are `INFORMATIONAL`.
+- **Evidence placeholders:** Source `[pending retention diff/tests]`;
+  deploy/health `[pending packaged-runner evidence or N/A]`; visual `N/A —
+  visual/manual evidence remains manual`; security `[pending destructive-gate
+  review]`; containment `[pending artifact hygiene + strict audit]`.
+- **Planned marker entries (not live):** append `work-started` for
+  `TELEMETRY-100` after preflight/ownership, then append one matching
+  `work-complete` entry after all gates and non-empty evidence pass.
+
+#### AUTH-112 — Merged follow-up deployment, acceptance, and reconciliation
+
+- **IN_SCOPE:** Merge and accept `RESTORE-103`, `OIDC-100`, `RUNTIME-100`, and
+  `TELEMETRY-100` from the current source; rebuild/restart the authorized
+  deployment; run their declared source, deployment/health, visual, security,
+  fixture-E2E, and strict-containment gates; verify the affected canonical
+  documentation links, commands, policy wording, changed-file list, and
+  append-only marker state; then reconcile every follow-up marker, evidence
+  placeholder, and TodoWrite item.
+- **OUT_OF_SCOPE:** New product decisions/features; public signup, passkeys, or
+  SMS; real credentials; unapproved production restore or destructive telemetry
+  execution; unrelated documentation cleanup/index regeneration; Docs Workspace
+  mutation; and changing completed AUTH evidence.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `RESTORE-103`, `OIDC-100`, `RUNTIME-100`, `TELEMETRY-100`,
+  `AUTH-111`, and the prerequisite HEAD `4f837ad`.
+- **Acceptance:** Current merged source and image provenance are deployed and
+  healthy; all four predecessor acceptance contracts pass; the restore audit
+  ordering and residual-risk record are present; OIDC transport is bounded with
+  no new dependency; production/compatibility runtime aliases and explicit
+  workspace authorization are correct; telemetry execution is still preview-
+  first and digest-gated; the applicable 1440x900/390x844 visual and passive
+  sweep passes; security reports no in-scope blocker; fixture E2E and strict
+  containment prove clean owned-process/port/temp teardown; targeted links,
+  commands, policy wording, append-only validation, agent validation, and diff
+  checks pass; every new task has one valid future start/complete pair and
+  non-empty completion evidence before this task can complete.
+- **STOP_CONDITION:** `PASS` only after every predecessor gate and final
+  documentation/marker/TodoWrite reconciliation passes. `STOP` or `CANCELLED`
+  is terminal only when explicitly requested.
+- **Escalation:** Only unavailable required external credential/access after the
+  configured fixture path; unauthorized destructive or irreversible action;
+  mutually exclusive product decision; genuine requirement ambiguity; or
+  bounded diagnosis without a reproducible root cause.
+- **Verification owner:** `@ingenium-qa` owns one declared merged fixture/
+  containment pass; `@ingenium-security-auditor` owns one bounded current-diff
+  and dependency pass; `@ingenium-qa-vision` owns the changed-route and passive
+  desktop/mobile visual gates; `@ingenium-docs` owns final canonical-doc and
+  marker reconciliation.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
+  permission; rebuild/restart the current merged source, verify provenance, and
+  health-check actual API, dashboard, OIDC, compatibility, production runtime,
+  WebSocket, and runner boundaries.
+- **Rollback/safety:** Use disposable identities, providers, runtimes, UUID run
+  roots, and credentials; never run a live destructive restore or telemetry
+  deletion; clean only manifest-owned fixtures; retain failed deployment,
+  quarantine, receipt, journal, and visual evidence; revert only the merged
+  follow-up wave and never mutate Docs Workspace or unrelated dirty files.
+- **Source surfaces:** The four predecessor source surfaces plus their focused
+  tests, `docker-compose.yml`, `Dockerfile`, `nginx/`, runtime/auth/restore
+  scripts, and the canonical roadmap/marker parser surfaces.
+- **Test surfaces:** The four predecessor focused suites; `bash
+  tests/test-append-only-files.sh`; `bash tests/test-agent-validation.sh`;
+  `git diff --check`; targeted repository-relative link/command checks;
+  declared production fixture E2E; `npx tsx tests/suite-containment-audit.ts
+  --strict`; and applicable 1440x900/390x844 visual evidence.
+- **Doc surfaces:** Verify only the directly affected canonical files named by
+  the predecessor contracts, primarily [API Authentication](../security/api-authentication.md),
+  [Security](../security/index.md), [Architecture](../concepts/architecture.md),
+  [API Reference](../develop/api.md), [Database Migrations](../develop/database.md),
+  [Testing Guide](../develop/testing.md), [Deployment Guide](../operations/deployment.md),
+  [OpenCode usage](../usage/opencode.md), [Dashboard usage](../usage/dashboard.md),
+  [Iframe Security](../security/iframe-sandbox.md), [Credential Rotation](../security/credential-rotation.md),
+  and [Environment Variables](../develop/variables.md). No broad regeneration.
+- **Tests:** Execute the declared checks once in dependency order; inspect source
+  and deployment provenance, route/link/command output, visual accessibility/
+  console/network/browser cleanup, security redaction, tenant/runtime isolation,
+  restore preservation, telemetry receipts, and strict containment; remediate a
+  reproducible in-scope root and rerun only its minimum proving regression.
+- **Docs:** Repository Markdown only; Docs Workspace remains untouched.
+- **Exclusive writer territory:** Merged deployment/evidence, final reconciliation,
+  and the directly affected canonical docs; no new implementation territory after
+  the four predecessor barriers.
+- **Phase/counts:** `F1`; 2 writers / 3 nonwriters. Premium owns deployment and
+  release evidence, Docs owns final canonical docs/markers; QA, security, and QA
+  Vision are nonwriters. This is the terminal follow-up barrier.
+- **Verification plan:** Confirm all predecessors are complete and their markers
+  are ordered; rebuild/restart current merged source; run the declared deployment,
+  security, visual, fixture, containment, link, command, append-only, and agent
+  checks once; fix only reproducible in-scope causes with minimum rechecks; then
+  append the valid work markers and evidence in order and reconcile TodoWrite.
+- **Causal remediation rule:** Fix the earliest failing predecessor boundary or
+  evidence producer, not the final report; after a writer fix rerun only its
+  targeted proving check and repeat the affected final reconciliation.
+- **Finding classification:** Any failed predecessor acceptance, deployment/
+  health, visual/accessibility, security, isolation, containment, digest/receipt,
+  link/command, marker, or reconciliation gate is `BLOCKING`; unrelated drift is
+  `FOLLOW_UP`; retained provenance and bounded telemetry are `INFORMATIONAL`.
+- **Evidence placeholders:** Source `[pending merged diff and predecessor evidence]`;
+  deploy/health `[pending current-source rebuild/restart and route probes]`;
+  visual `[pending changed-route + passive 1440x900/390x844 artifacts]`; security
+  `[pending bounded review]`; containment `[pending fixture E2E + strict audit]`;
+  docs/markers `[pending link/command/append-only/agent/diff reconciliation]`.
+- **Planned marker entries (not live):** append `work-started` for `AUTH-112`
+  after all predecessors and ownership are ready, then append one matching
+  `work-complete` entry after merged acceptance and reconciliation pass.
+
+### Work marker log (continued)
+
+No new work-started or work-complete marker is recorded by this planning
+update. Future execution must append exact UTC-second markers here only after
+the declared preflight/ownership gate and after the corresponding acceptance
+evidence is complete; the existing `RESTORE-101` active marker remains open.
