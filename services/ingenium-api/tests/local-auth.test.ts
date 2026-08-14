@@ -131,6 +131,7 @@ describe("AUTH-101 local API", () => {
     const sessionToken = accepted.headers.get("set-cookie")!.match(/__Host-ingenium_session=([^;]+)/)![1]!;
     const fixtureUserId = authentication.resolveSession(sessionToken)!.user_id;
     expect(fixtureUserId).toBe(ownerId);
+    expect(authentication.resolveSession(sessionToken)!.recent_step_up_at).not.toBeNull();
     const visibleProjects = authorization.listAuthorizedProjects({
       type: "browser-user",
       id: fixtureUserId,

@@ -1313,7 +1313,12 @@ export function readTestRunTelemetryForContainmentAudit(
   telemetryPath: string,
   expectedRepoRoot = getCanonicalRepoRoot(),
 ): TestRunTelemetry {
-  return readTestRunTelemetryFromRoots(telemetryPath, expectedRepoRoot, getContainmentAuditTempRoots());
+  const repoRoot = getCanonicalRepoRoot(expectedRepoRoot);
+  return readTestRunTelemetryFromRoots(
+    telemetryPath,
+    repoRoot,
+    [...getContainmentAuditTempRoots(), join(repoRoot, ".tmp")],
+  );
 }
 
 export function markTestRunProcessCleared(

@@ -34,7 +34,7 @@ describe("dashboard route parity Playwright config", () => {
     expect(source).toContain("workers: 1");
     expect(source).toContain("fullyParallel: false");
     expect(source).toContain("retries: 0");
-    expect(source).toContain("getDashboardStorageStatePath(runtime.context)");
+    expect(source).not.toContain("storageState");
   });
 
   it("uses the isolated fixture lifecycle and browser-only session bootstrap", () => {
@@ -43,8 +43,8 @@ describe("dashboard route parity Playwright config", () => {
     const wrapper = readFileSync(resolve(repositoryRoot, "tests/run-dashboard-route-parity.ts"), "utf8");
 
     expect(setup).toContain("fixtureGlobalSetup");
-    expect(fixture).toContain("/test-fixture/session");
-    expect(fixture).toContain("not.toBe(previousSession)");
+    expect(fixture).toContain("external-suite-navigation-governor");
+    expect(fixture).not.toContain("storageState");
     expect(wrapper).not.toContain("docker");
     expect(wrapper).not.toContain("INGENIUM_ROUTE_PARITY_TOKEN");
   });

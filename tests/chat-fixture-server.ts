@@ -21,6 +21,7 @@ import { basename } from "node:path";
  *   GET  /permission         → empty permission list
  *   GET  /question           → empty question list
  *   GET  /agent              → empty agent list
+ *   POST /__fixture/reset    → clear per-test session state (runner mode only)
  *
  * Any unhandled path returns 404.
  */
@@ -569,6 +570,22 @@ function route(req: IncomingMessage, res: ServerResponse): void {
   const path = url.split("?")[0]!;
 
   const query = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?")) : "");
+
+  if (method === "POST" && path === "/__fixture/reset") {
+    const expectedNonce = process.env.INGENIUM_TEST_RUN_NONCE;
+    if (
+      process.env.CHAT_FIXTURE_RUNNER !== "1"
+      || !expectedNonce
+      || req.headers["x-ingenium-fixture-run-nonce"] !== expectedNonce
+    ) {
+      notFound(res);
+      return;
+    }
+    sessions.length = 0;
+    res.writeHead(204, { "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
 
   if (method === "POST" && path === "/session") {
     parseBody(req).then(() => {

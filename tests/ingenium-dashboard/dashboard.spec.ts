@@ -304,11 +304,15 @@ test.describe("Ingenium Dashboard", () => {
 
     await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "+ New Project", exact: true }).click();
-    const projectName = `E2E Project ${Date.now()}`;
+    const projectName = `e2e-project-${Date.now()}`;
     await page.getByPlaceholder("Project name").fill(projectName);
+    const createResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/v1/projects" && response.request().method() === "POST");
     await page.getByRole("button", { name: "Create", exact: true }).click();
+    const response = await createResponse;
+    expect(response.status(), await response.text()).toBe(201);
 
-    await expect(page.getByText(projectName, { exact: true }).first()).toBeVisible();
+    expect((await response.json() as { data: { name: string } }).data.name).toBe(projectName);
   });
 
   test("skills page loads with its current search contract", async ({ page }) => {

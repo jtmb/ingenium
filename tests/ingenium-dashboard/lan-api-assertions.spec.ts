@@ -106,42 +106,21 @@ test.describe("Same-origin dashboard API requests", () => {
   });
 });
 
-test.describe("Direct local iframe URL assertions", () => {
+test.describe("Isolated workspace availability", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("/opencode page renders Web iframe on the trusted root origin", async ({ page }) => {
+  test("/opencode reports that no isolated workspace is ready", async ({ page }) => {
     await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeAttached({ timeout: 10000 });
-    await expect(webIframe).toHaveAttribute(
-      "src",
-      /^(?:https?):\/\/[^/]+\/$/,
-    );
+    await expect(page.getByRole("heading", { name: "Workspace is unavailable" })).toBeVisible();
+    await expect(page.locator('iframe[title="OpenCode Web"]')).toHaveCount(0);
   });
 
-  test("Web iframe is trusted first-party content without a sandbox attribute", async ({ page }) => {
+  test("does not render workspace iframes without a ready runtime", async ({ page }) => {
     await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeAttached({ timeout: 10000 });
-
-    // Root-relative assets require a trusted first-party iframe without sandboxing.
-    await expect(webIframe).not.toHaveAttribute("sandbox");
-
-    const allow = await webIframe.getAttribute("allow");
-    expect(allow).toContain("clipboard-write");
-  });
-
-  test("exactly one Web iframe, at most one CLI iframe", async ({ page }) => {
-    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
-
-    const webIframes = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframes).toHaveCount(1);
-
-    const cliIframes = page.locator('iframe[title="OpenCode Terminal"]');
-    const cliCount = await cliIframes.count();
-    expect(cliCount).toBeLessThanOrEqual(1);
+    await expect(page.locator('iframe[title="OpenCode Web"]')).toHaveCount(0);
+    await expect(page.locator('iframe[title="OpenCode Terminal"]')).toHaveCount(0);
   });
 
   test("does not request the removed OpenCode sub-path proxies", async ({ page }) => {
@@ -149,8 +128,7 @@ test.describe("Direct local iframe URL assertions", () => {
     page.on("request", (request) => requestedUrls.push(request.url()));
     await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeAttached({ timeout: 10000 });
+    await expect(page.getByRole("heading", { name: "Workspace is unavailable" })).toBeVisible();
     expect(requestedUrls.some((url) => /\/opencode-(web|cli)(?:\/|$)/.test(new URL(url).pathname))).toBe(false);
   });
 });

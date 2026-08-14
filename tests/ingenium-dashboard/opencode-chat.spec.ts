@@ -1,5 +1,5 @@
 import { expect, test } from "./external-suite-navigation-governor";
-import type { Page } from "@playwright/test";
+import type { Page } from "./fixture";
 
 const SESSION_ID = "chat-e2e-test-session";
 const SESSION_TITLE = "Test Conversation";

@@ -14,6 +14,7 @@ import {
   getTestRunArtifactRoot,
   readTestRunManifest,
   readTestRunTelemetry,
+  readTestRunTelemetryForContainmentAudit,
   releaseTestRunPortReservations,
   resetTestRunContextForTests,
   updateTestRunManifest,
@@ -689,6 +690,26 @@ describe("suite containment audit", () => {
       else process.env.TMPDIR = originalTmpdir;
       resetTestRunContextForTests();
     }
+  });
+
+  it("reads retained telemetry from the retired repository temp root only during containment audit", async () => {
+    const context = createContextWithReservedPortRetry({ applyEnvironment: false });
+    contexts.push(context);
+    updateTestRunManifest(context.manifestPath, { status: "stopping" });
+    await recoverStoppingTestRun(context.manifestPath, { portTimeoutMs: 50 });
+    cleanupTestRun(context.manifestPath);
+
+    const telemetry = JSON.parse(readFileSync(context.telemetryPath!, "utf8")) as { manifestPath: string };
+    telemetry.manifestPath = join(context.repoRoot, ".tmp", `ingenium-playwright-run-${context.runId}`, "run-manifest.json");
+    writeFileSync(context.telemetryPath!, JSON.stringify(telemetry));
+
+    expect(() => readTestRunTelemetry(context.telemetryPath!)).toThrow("outside the approved temp root");
+    expect(readTestRunTelemetryForContainmentAudit(context.telemetryPath!)).toMatchObject({
+      runId: context.runId,
+      manifestPath: telemetry.manifestPath,
+      status: "complete",
+      resolution: { status: "resolved" },
+    });
   });
 
   it("does not suppress fresh missing-manifest telemetry or malformed retained evidence", async () => {

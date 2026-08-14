@@ -5,13 +5,10 @@ import {
   ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
 } from "../ingenium-dashboard/external-suite-navigation-governor";
 import { productionDashboardUrl } from "./runtime";
-import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
-import { getDashboardStorageStatePath } from "../ingenium-dashboard/fixture-credentials";
 
 /** The exclusive allow-list intentionally selects no legacy dashboard specs. */
 export const ROUTE_PARITY_TEST_MATCH = "production-route-parity.spec.ts";
 const PLAYWRIGHT_REPO_ROOT = resolve(__dirname, "../..");
-const runtime = getDefaultSuiteRuntime();
 
 export default defineConfig({
   testDir: ".",
@@ -33,7 +30,6 @@ export default defineConfig({
   outputDir: getPlaywrightOutputDirectory("dashboard-route-parity", PLAYWRIGHT_REPO_ROOT),
   use: {
     baseURL: productionDashboardUrl(),
-    storageState: getDashboardStorageStatePath(runtime.context),
     headless: true,
     viewport: { width: 1440, height: 900 },
     trace: "off",

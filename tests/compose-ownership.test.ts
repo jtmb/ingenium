@@ -102,6 +102,44 @@ describe("Compose ownership inspection", () => {
     });
   });
 
+  it("accepts an absolute operator override after the canonical repository config", () => {
+    const base = healthyContainer({}, "control-plane");
+    const labels = (base.Config as { Labels: Record<string, string> }).Labels;
+    const container = healthyContainer({
+      Config: {
+        Labels: {
+          ...labels,
+          "com.docker.compose.project.config_files": `${repoRoot}/docker-compose.yml,/operator/compose.override.yml`,
+        },
+      },
+    }, "control-plane");
+    const report = inspectComposeOwnership({
+      repoRoot,
+      docker: runner(["", `${containerId.slice(0, 12)}\n`, inspection(container), inspection(container)]),
+    });
+
+    expect(report).toMatchObject({ classification: "compose-owned", containerId });
+  });
+
+  it("rejects a config list that does not start with this repository's canonical config", () => {
+    const base = healthyContainer();
+    const labels = (base.Config as { Labels: Record<string, string> }).Labels;
+    const container = healthyContainer({
+      Config: {
+        Labels: {
+          ...labels,
+          "com.docker.compose.project.config_files": `/operator/compose.override.yml,${repoRoot}/docker-compose.yml`,
+        },
+      },
+    });
+    const report = inspectComposeOwnership({
+      repoRoot,
+      docker: runner([`${containerId.slice(0, 12)}\n`, inspection(container)]),
+    });
+
+    expect(report).toMatchObject({ classification: "unverified" });
+  });
+
   it("does not treat multiple same-port candidates as Compose ownership", () => {
     const report = inspectComposeOwnership({
       repoRoot,

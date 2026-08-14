@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { get } from "node:http";
 import {
@@ -13,6 +13,8 @@ function listeningPort(server: { address(): string | import("node:net").AddressI
   if (!address || typeof address === "string") throw new Error("fixture did not bind a TCP port");
   return address.port;
 }
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("chat fixture lifecycle", () => {
   it("validates its port and publishes the actual isolated provider origin", async () => {
@@ -54,6 +56,26 @@ describe("chat fixture lifecycle", () => {
       await expect(response.json()).resolves.toEqual({
         error: { message: "Not found", code: "NOT_FOUND" },
       });
+    } finally {
+      await closeChatFixtureServer(server);
+    }
+  });
+
+  it("resets session state only for the manifest-bound fixture runner", async () => {
+    const nonce = "10000000-0000-4000-8000-000000000108";
+    vi.stubEnv("CHAT_FIXTURE_RUNNER", "1");
+    vi.stubEnv("INGENIUM_TEST_RUN_NONCE", nonce);
+    const server = await startChatFixtureServer(0);
+    try {
+      const port = listeningPort(server);
+      await fetch(`http://127.0.0.1:${port}/session`, { method: "POST", body: "{}" });
+      expect(await (await fetch(`http://127.0.0.1:${port}/session`)).json()).toHaveLength(1);
+      expect((await fetch(`http://127.0.0.1:${port}/__fixture/reset`, { method: "POST" })).status).toBe(404);
+      expect((await fetch(`http://127.0.0.1:${port}/__fixture/reset`, {
+        method: "POST",
+        headers: { "x-ingenium-fixture-run-nonce": nonce },
+      })).status).toBe(204);
+      expect(await (await fetch(`http://127.0.0.1:${port}/session`)).json()).toEqual([]);
     } finally {
       await closeChatFixtureServer(server);
     }

@@ -179,6 +179,20 @@ test.describe("TASK-102 task capture", () => {
       await page.goto("/chat", { waitUntil: "domcontentloaded" });
       const chatCreateTask = page.getByRole("button", { name: "Create task from conversation" });
       await expect(chatCreateTask).toBeEnabled({ timeout: 20_000 });
+      const upstreamSession = await request.get(
+        `${runtime.apiBase}/opencode/sessions/fixture-session-1`,
+        { headers: runtime.apiHeaders },
+      );
+      expect(upstreamSession.status(), await upstreamSession.text()).toBe(200);
+      expect((await upstreamSession.json() as { data: { projectID: string } }).data.projectID)
+        .toBe(FIXTURE_OPENCODE_PROJECT_ID);
+      const currentMappings = await request.get(
+        `${runtime.apiBase}/usage/mappings?project=${encodeURIComponent(globalProject.name)}`,
+        { headers: runtime.apiHeaders },
+      );
+      expect(currentMappings.status(), await currentMappings.text()).toBe(200);
+      expect((await currentMappings.json() as { data: Array<{ opencodeProjectId: string; status: string }> }).data)
+        .toContainEqual(expect.objectContaining({ opencodeProjectId: FIXTURE_OPENCODE_PROJECT_ID, status: "mapped" }));
 
       await chatCreateTask.click();
       const chatCapture = await captureFromDialog(page, {

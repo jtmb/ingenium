@@ -164,6 +164,14 @@ function requestedOrganizationId(req: Request, principal: RequestPrincipal): str
 }
 
 function requestedProject(req: Request): { id: string; organizationId: string } | undefined {
+  const captureSource = req.method === "POST" && req.path === "/api/v1/tasks/captures"
+    && req.body && typeof req.body === "object"
+    ? (req.body as Record<string, unknown>).source_type
+    : undefined;
+  if (captureSource === "chat" || captureSource === "email") {
+    const global = projects.getGlobalProject();
+    return global ? { id: global.id, organizationId: global.organization_id } : undefined;
+  }
   const projectPathName = req.path.startsWith("/api/v1/projects/") ? req.path.slice("/api/v1/projects/".length).split("/")[0] : undefined;
   const name = projectPathName ?? req.params.name ?? (typeof req.query.project === "string" ? req.query.project : undefined);
   if (!name || !projects.isValidProjectName(name)) return undefined;

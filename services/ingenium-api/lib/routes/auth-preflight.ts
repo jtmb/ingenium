@@ -110,7 +110,7 @@ authPreflightRouter.post("/fixture-session", (req, res) => {
   if (!owner) throw new AppError("Fixture owner is not provisioned", "FIXTURE_NOT_READY", 409);
 
   bindFixtureOwner(projectName, owner.userId);
-  const session = authentication.createSession(owner.userId, new Date(), "QA Vision fixture");
+  const session = authentication.createSession(owner.userId, new Date(), "QA Vision fixture", true);
   setSession(res, session);
   res.set("Cache-Control", "no-store");
   res.json({ data: { authenticated: true } });

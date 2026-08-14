@@ -37,14 +37,13 @@ import {
   FIXTURE_API_RATE_LIMIT,
   FIXTURE_OWNER_EMAIL,
   FIXTURE_OWNER_PASSWORD,
+  createTestRunBrowserStorageState,
   buildProductionArtifacts,
   captureSpawnedChildPgid,
   getServerSpecs,
   installRunSignalHandlers,
   inspectProcessIdentity,
   provisionTestRunProject,
-  createTestRunBrowserStorageState,
-  provisionTestRunBrowserSession,
   provisionTestRunOwner,
   recoverStoppingTestRun,
   startTestServers,
@@ -59,7 +58,7 @@ import {
   FIXTURE_RUN_NONCE_HEADER,
   directApiAuthHeaders,
 } from "./fixture-api-auth";
-import { getDashboardFixtureEnvironment, getDashboardStorageStatePath } from "./ingenium-dashboard/fixture-credentials";
+import { getDashboardFixtureEnvironment } from "./ingenium-dashboard/fixture-credentials";
 
 const manifests: string[] = [];
 const telemetryRoots: string[] = [];
@@ -163,6 +162,7 @@ describe("test server lifecycle contracts", () => {
     expect(storageState.cookies).toEqual([expect.objectContaining({
       name: "__Host-ingenium_session",
       value: sessionToken,
+      domain: "127.0.0.1",
       secure: true,
       httpOnly: true,
     })]);
@@ -193,29 +193,6 @@ describe("test server lifecycle contracts", () => {
       displayName: "Playwright Owner",
       password: FIXTURE_OWNER_PASSWORD,
     });
-    expect(fetchMock.mock.calls[1]).toEqual([
-      `http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-session`,
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
-          [FIXTURE_PROJECT_HEADER]: context.project,
-        }),
-      }),
-    ]);
-  });
-
-  it("persists the fixture browser session inside the run directory", async () => {
-    const context = createTestRunContext({ ports: { api: 45199, dashboard: 45200, fixture: 45210 } });
-    track(context);
-    const sessionToken = "s".repeat(43);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("{}", {
-        status: 200,
-        headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
-      })));
-
-    expect(await provisionTestRunBrowserSession(context)).toBe(getDashboardStorageStatePath(context));
-    expect(readFileSync(getDashboardStorageStatePath(context), "utf8")).toContain(sessionToken);
   });
 
   it("uses production dashboard startup and explicitly isolates all services", () => {

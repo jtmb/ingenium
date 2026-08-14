@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { getCanonicalRepoRoot } from "./test-run-context";
 
 export const COMPOSE_OWNED_HOST_PORTS = [3000, 4097, 1455] as const;
@@ -87,8 +87,16 @@ function expectedLabels(repoRoot: string, service: typeof COMPOSE_GATEWAY_SERVIC
     "com.docker.compose.project": basename(repoRoot),
     "com.docker.compose.service": service,
     "com.docker.compose.project.working_dir": repoRoot,
-    "com.docker.compose.project.config_files": join(repoRoot, "docker-compose.yml"),
   };
+}
+
+function hasCanonicalComposeConfig(labels: Record<string, string>, repoRoot: string): boolean {
+  const configFiles = labels["com.docker.compose.project.config_files"]?.split(",");
+  return Boolean(
+    configFiles?.length
+    && configFiles[0] === join(repoRoot, "docker-compose.yml")
+    && configFiles.every((path) => path.length > 0 && isAbsolute(path)),
+  );
 }
 
 function parseInspection(output: string): DockerContainer {
@@ -143,6 +151,9 @@ function verifyContainer(
       return { reason: `Compose container label ${label} does not match this repository` };
     }
   }
+  if (!hasCanonicalComposeConfig(labels, repoRoot)) {
+    return { reason: "Compose container label com.docker.compose.project.config_files does not match this repository" };
+  }
   const ociRevision = labels["org.opencontainers.image.revision"];
   if (expectedRevision !== undefined && ociRevision !== expectedRevision) {
     return { reason: "Compose container OCI revision does not match the required revision" };
@@ -171,6 +182,8 @@ function stableContainer(first: VerifiedContainer, second: VerifiedContainer): b
   for (const label of Object.keys(expectedLabels(first.labels["com.docker.compose.project.working_dir"]!, service))) {
     if (first.labels[label] !== second.labels[label]) return false;
   }
+  if (first.labels["com.docker.compose.project.config_files"]
+    !== second.labels["com.docker.compose.project.config_files"]) return false;
   return Object.keys(EXPECTED_BINDINGS).every((containerPort) =>
     JSON.stringify(normalizedBindings(first.bindings[containerPort]!))
       === JSON.stringify(normalizedBindings(second.bindings[containerPort]!)));

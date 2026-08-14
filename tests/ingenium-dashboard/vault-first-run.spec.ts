@@ -55,7 +55,11 @@ test.describe("Vault — First-Run Flow", () => {
 
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
 
+    const initializeResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/v1/vault/initialize");
     await submitBtn.click();
+    const response = await initializeResponse;
+    expect(response.status(), await response.text()).toBe(201);
 
     await expect(dialog).not.toBeVisible({ timeout: 5000 });
 

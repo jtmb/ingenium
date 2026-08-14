@@ -13,6 +13,7 @@ async function mockRouteData(page: Page): Promise<void> {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    if (path.startsWith("/api/v1/auth/")) return route.fallback();
     const response = (data: unknown) => route.fulfill({
       status: 200,
       contentType: "application/json",

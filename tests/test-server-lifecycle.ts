@@ -25,7 +25,7 @@ import {
   readProcStat,
   type ProcessIdentity,
 } from "./test-run-process-discovery";
-import { normalizeDashboardStorageState, writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
+import { normalizeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
 import {
   FIXTURE_INTERNAL_SERVICE_HEADER,
   TEST_API_TOKEN,
@@ -225,8 +225,14 @@ export async function createTestRunBrowserStorageState(context: TestRunContext) 
   });
 }
 
-export async function provisionTestRunBrowserSession(context: TestRunContext): Promise<string> {
-  return writeDashboardStorageState(context, await createTestRunBrowserStorageState(context), true);
+export async function resetTestRunChatFixture(context: TestRunContext): Promise<void> {
+  const response = await fixtureRequest(`http://127.0.0.1:${context.ports.fixture}/__fixture/reset`, {
+    method: "POST",
+    headers: { "x-ingenium-fixture-run-nonce": context.runNonce },
+  });
+  if (response.status !== 204) {
+    throw new Error(`Unable to reset chat fixture state: fixture returned ${response.status}`);
+  }
 }
 
 function npmCommand(): string {
@@ -1355,7 +1361,6 @@ export async function startTestServers(
       if (spec.name === "api") {
         await provisionTestRunProject(context);
         await provisionTestRunOwner(context);
-        await provisionTestRunBrowserSession(context);
       }
       // The filesystem reservation protects the pre-listener race. The exact
       // readiness response is the ownership-transfer boundary; after it, the
