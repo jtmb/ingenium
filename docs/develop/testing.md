@@ -420,15 +420,22 @@ never targets a developer server or deployed installation and never imports a
 production credential:
 
 ```bash
+RUN_DASHBOARD_ROUTE_PARITY=1 \
+  npx playwright test --config=tests/dashboard-route-parity/playwright.config.ts
+
+# Equivalent convenience wrapper:
 npx tsx tests/run-dashboard-route-parity.ts
 ```
 
-The wrapper allocates a run-owned `playwright-test-*` global/home project and organization,
-starts `next start`, and provisions an organization-scoped synthetic browser user. Each
-test re-enters through `/test-fixture/session` and proves that exchange rotated
-the synthetic session before interactive navigation. Browser requests never contain the internal fixture
-bearer or binding headers. The route inventory uses the run project rather than
-`global-default`.
+The config and global setup allocate a run-owned `playwright-test-*` global/home
+project and organization, start `next start`, provision an organization-scoped
+synthetic browser user, and write one mode-`0600` run-owned Playwright storage
+state before workers start. The session cookie and selected-project storage are
+bound to that run's loopback dashboard origin and project. The wrapper is only a
+convenience opt-in; it is not an authentication side effect. Browser requests
+never contain the internal fixture bearer or binding headers, and no production
+credential is installed in browser state. The route inventory uses the run
+project rather than `global-default`.
 
 The suite loads the production `.next` route manifests, derives the canonical 24
 primary routes from dashboard navigation, checks all 14 settings deep links and

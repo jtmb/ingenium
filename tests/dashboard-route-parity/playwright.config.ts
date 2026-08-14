@@ -1,14 +1,33 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
-import { getPlaywrightOutputDirectory } from "../test-run-context";
+import {
+  cleanupTestRun,
+  getPlaywrightOutputDirectory,
+  readTestRunManifest,
+  TEST_RUN_MANIFEST_ENV,
+} from "../test-run-context";
 import {
   ROUTE_PARITY_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
 } from "../ingenium-dashboard/external-suite-navigation-governor";
 import { productionDashboardUrl } from "./runtime";
+import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
+import { getDashboardStorageStatePath } from "../ingenium-dashboard/fixture-credentials";
 
 /** The exclusive allow-list intentionally selects no legacy dashboard specs. */
 export const ROUTE_PARITY_TEST_MATCH = "production-route-parity.spec.ts";
 const PLAYWRIGHT_REPO_ROOT = resolve(__dirname, "../..");
+const runtime = getDefaultSuiteRuntime();
+
+process.once("exit", () => {
+  try {
+    const manifestPath = process.env[TEST_RUN_MANIFEST_ENV];
+    if (manifestPath && readTestRunManifest(manifestPath).status === "created") {
+      cleanupTestRun(manifestPath);
+    }
+  } catch {
+    // Preserve the runner's original exit status when cleanup evidence is incomplete.
+  }
+});
 
 export default defineConfig({
   testDir: ".",
@@ -30,6 +49,7 @@ export default defineConfig({
   outputDir: getPlaywrightOutputDirectory("dashboard-route-parity", PLAYWRIGHT_REPO_ROOT),
   use: {
     baseURL: productionDashboardUrl(),
+    storageState: getDashboardStorageStatePath(runtime.context),
     headless: true,
     viewport: { width: 1440, height: 900 },
     trace: "off",

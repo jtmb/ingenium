@@ -3,9 +3,9 @@ import { createTestRunBrowserStorageState, resetTestRunChatFixture } from "../te
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const test = base.extend({
-  context: async ({ browser, contextOptions }, use) => {
-    let storageState = contextOptions.storageState;
-    if (process.env.INGENIUM_TEST_RUN_MANIFEST) {
+  context: async ({ browser, contextOptions, storageState: configuredStorageState }, use) => {
+    let storageState = configuredStorageState;
+    if (process.env.INGENIUM_TEST_RUN_MANIFEST && storageState === undefined) {
       const runtime = getDefaultSuiteRuntime();
       await resetTestRunChatFixture(runtime.context);
       storageState = await createTestRunBrowserStorageState(runtime.context);

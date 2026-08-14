@@ -25,7 +25,7 @@ import {
   readProcStat,
   type ProcessIdentity,
 } from "./test-run-process-discovery";
-import { normalizeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
+import { normalizeDashboardStorageState, writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
 import {
   FIXTURE_INTERNAL_SERVICE_HEADER,
   TEST_API_TOKEN,
@@ -202,7 +202,10 @@ export async function provisionTestRunOwner(context: TestRunContext): Promise<vo
   }
 }
 
-export async function createTestRunBrowserStorageState(context: TestRunContext) {
+export async function createTestRunBrowserStorageState(
+  context: TestRunContext,
+  dashboardHost: "127.0.0.1" | "localhost" = "127.0.0.1",
+) {
   const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
   const session = await fixtureRequest(`${apiBase}/auth/fixture-session`, {
     method: "POST",
@@ -214,7 +217,7 @@ export async function createTestRunBrowserStorageState(context: TestRunContext) 
     cookies: [{
       name: "__Host-ingenium_session",
       value: sessionToken,
-      domain: "127.0.0.1",
+      domain: dashboardHost,
       path: "/",
       expires: Math.floor(Date.now() / 1000) + 12 * 60 * 60,
       httpOnly: true,
@@ -223,6 +226,16 @@ export async function createTestRunBrowserStorageState(context: TestRunContext) 
     }],
     origins: [],
   });
+}
+
+export async function provisionTestRunBrowserSession(
+  context: TestRunContext,
+  dashboardHost: "127.0.0.1" | "localhost" = "127.0.0.1",
+): Promise<string> {
+  return writeDashboardStorageState(
+    context,
+    await createTestRunBrowserStorageState(context, dashboardHost),
+  );
 }
 
 export async function resetTestRunChatFixture(context: TestRunContext): Promise<void> {

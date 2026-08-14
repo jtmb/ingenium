@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -44,6 +45,7 @@ import {
   installRunSignalHandlers,
   inspectProcessIdentity,
   provisionTestRunProject,
+  provisionTestRunBrowserSession,
   provisionTestRunOwner,
   recoverStoppingTestRun,
   startTestServers,
@@ -58,7 +60,7 @@ import {
   FIXTURE_RUN_NONCE_HEADER,
   directApiAuthHeaders,
 } from "./fixture-api-auth";
-import { getDashboardFixtureEnvironment } from "./ingenium-dashboard/fixture-credentials";
+import { getDashboardFixtureEnvironment, getDashboardStorageStatePath } from "./ingenium-dashboard/fixture-credentials";
 
 const manifests: string[] = [];
 const telemetryRoots: string[] = [];
@@ -193,6 +195,33 @@ describe("test server lifecycle contracts", () => {
       displayName: "Playwright Owner",
       password: FIXTURE_OWNER_PASSWORD,
     });
+  });
+
+  it("persists a localhost-bound synthetic session inside the run directory", async () => {
+    const context = createTestRunContext({ ports: { api: 45199, dashboard: 45200, fixture: 45210 } });
+    track(context);
+    const sessionToken = "s".repeat(43);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("{}", {
+      status: 200,
+      headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
+    })));
+
+    expect(await provisionTestRunBrowserSession(context, "localhost"))
+      .toBe(getDashboardStorageStatePath(context));
+    expect(statSync(getDashboardStorageStatePath(context)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(getDashboardStorageStatePath(context), "utf8"))).toMatchObject({
+      cookies: [{
+        name: "__Host-ingenium_session",
+        value: sessionToken,
+        domain: "localhost",
+      }],
+      origins: expect.arrayContaining([expect.objectContaining({
+        origin: `http://localhost:${context.ports.dashboard}`,
+        localStorage: [{ name: "ingenium_global_project", value: context.project }],
+      })]),
+    });
+    expect(() => getDashboardStorageStatePath({ runDir: context.runDir, homeDir: tmpdir() }))
+      .toThrow(/outside the test-run directory/);
   });
 
   it("uses production dashboard startup and explicitly isolates all services", () => {

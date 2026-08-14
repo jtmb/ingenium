@@ -9,7 +9,7 @@ import {
   type RouteInventory,
   type SettingsDeepLink,
 } from "./route-inventory";
-import { productionDashboardRoute } from "./runtime";
+import { productionDashboardRoute, productionDashboardUrl } from "./runtime";
 import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
 
 const project = getDefaultSuiteRuntime().project;
@@ -247,7 +247,7 @@ async function openSettingsCompatibilityRoute(page: Page): Promise<void> {
 }
 
 test.describe("Production dashboard route parity", () => {
-  test("derives the complete primary navigation and rejects retired page routes", () => {
+  test("derives the complete navigation and settings inventories without retired routes", () => {
     expect(inventory.canonicalNavigationRoutes).toContain("/");
     expect(inventory.canonicalNavigationRoutes).toContain("/secrets");
     expect(inventory.canonicalNavigationRoutes).toContain("/mcp-servers");
@@ -255,9 +255,6 @@ test.describe("Production dashboard route parity", () => {
     expect(inventory.canonicalNavigationRoutes).toContain("/vscode");
     expect(retiredRouteExpectation).toEqual([]);
     expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(24);
-  });
-
-  test("uses the explicit 14-ID settings deep-link inventory", () => {
     expect(inventory.settingsDeepLinks.map(({ id }) => id)).toEqual([
       "general",
       "projects",
@@ -287,6 +284,33 @@ test.describe("Production dashboard route parity", () => {
     const missing = inventory.canonicalNavigationRoutes.filter((route) => !artifact.routes.has(route));
     expect(missing, `Routes missing from ${artifact.directory}`).toEqual([]);
     expect([...artifact.routes].filter(isRetiredDashboardRoute), "Production artifact contains retired page routes").toEqual([]);
+  });
+
+  test("direct config authenticates navigation and settings for its isolated run project", async ({ page, context }) => {
+    await runReadOnlyBrowserCheck(page, context, "direct route-parity authentication", async () => {
+      await gotoProductionRoute(page, routeWithQuery("/", { project }));
+      await expect(page.locator("#nav-sidebar")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+
+      const sessionCookie = (await context.cookies(productionDashboardUrl()))
+        .find((cookie) => cookie.name === "__Host-ingenium_session");
+      expect(sessionCookie).toMatchObject({
+        domain: "localhost",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+      });
+      expect(sessionCookie?.value).toBeTruthy();
+      expect(await page.evaluate(() => localStorage.getItem("ingenium_global_project"))).toBe(project);
+
+      const authorizedProjects = await page.evaluate(async () => {
+        const response = await fetch("/api/v1/projects", { credentials: "same-origin" });
+        return { status: response.status, body: await response.json() as { data?: Array<{ name?: string }> } };
+      });
+      expect(authorizedProjects.status).toBe(200);
+      expect(authorizedProjects.body.data?.map(({ name }) => name)).toContain(project);
+      expect(authorizedProjects.body.data?.map(({ name }) => name)).not.toContain("global-default");
+    });
   });
 
   test("the rendered navigation has no missing or stale page targets", async ({ page, context }) => {
