@@ -32,6 +32,7 @@ import {
 import globalTeardown from "./playwright-global-teardown";
 import {
   TEST_API_TOKEN,
+  FIXTURE_INTERNAL_SERVICE_HEADER,
   FIXTURE_API_RATE_LIMIT,
   FIXTURE_OWNER_EMAIL,
   FIXTURE_OWNER_PASSWORD,
@@ -113,6 +114,7 @@ describe("test server lifecycle contracts", () => {
         method: "POST",
         headers: {
           Authorization: `Bearer ${TEST_API_TOKEN}`,
+          [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
           "Content-Type": "application/json",
         },
       });
@@ -159,7 +161,10 @@ describe("test server lifecycle contracts", () => {
     })]);
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_API_TOKEN}` },
+      headers: {
+        Authorization: `Bearer ${TEST_API_TOKEN}`,
+        [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+      },
     });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       email: FIXTURE_OWNER_EMAIL,
@@ -206,6 +211,7 @@ describe("test server lifecycle contracts", () => {
     expect(specs[2]!.env.CHAT_FIXTURE_PORT).toBe("45203");
     expect(specs[0]!.env.INGENIUM_API_TOKEN).toBe(TEST_API_TOKEN);
     expect(specs[1]!.env.INGENIUM_API_TOKEN).toBeUndefined();
+    expect(specs[1]!.env.INGENIUM_API_TEST_MODE).toBe("1");
     expect(specs[1]!.env.INGENIUM_API_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
     expect(specs[0]!.env.INGENIUM_API_TEST_MODE).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_BACKGROUND_SCHEDULERS).toBe("1");
@@ -221,6 +227,7 @@ describe("test server lifecycle contracts", () => {
     expect(specs[1]!.readinessHeaders).toBeUndefined();
     expect(specs[2]!.readinessHeaders).toBeUndefined();
     expect(specs[0]!.readinessHeaders?.Authorization).toBe(`Bearer ${TEST_API_TOKEN}`);
+    expect(specs[0]!.readinessHeaders?.[FIXTURE_INTERNAL_SERVICE_HEADER]).toBe("1");
     expect(specs[1]!.env.SOME_SECRET).toBeUndefined();
     expect(specs[2]!.env.INGENIUM_API_TOKEN).toBeUndefined();
   });
@@ -305,6 +312,19 @@ describe("test server lifecycle contracts", () => {
       if (previousManifest === undefined) delete process.env[TEST_RUN_MANIFEST_ENV];
       else process.env[TEST_RUN_MANIFEST_ENV] = previousManifest;
     }
+  });
+
+  it("retains the original manifest between setup cleanup and global teardown", async () => {
+    const context = createTestRunContext({ ports: { api: 45217, dashboard: 45218, fixture: 45219 } });
+    track(context);
+    updateTestRunManifest(context.manifestPath, { status: "running", processes: [] });
+
+    await stopRunFromManifest(context.manifestPath, { cleanup: false, stopTimeoutMs: 25 });
+
+    expect(existsSync(context.manifestPath)).toBe(true);
+    expect(readTestRunManifest(context.manifestPath).status).toBe("complete");
+    await globalTeardown();
+    expect(existsSync(context.manifestPath)).toBe(false);
   });
 
   it("fails global teardown and retains telemetry when the original manifest is missing", async () => {

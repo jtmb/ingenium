@@ -110,18 +110,28 @@ identity, run nonce, ports, database, project, and temporary directory in a
 manifest. Child environments are built from an explicit allowlist of safe
 runtime variables plus service-specific values; parent credentials and
 unrelated secrets are not inherited. The API child alone receives the test
-bearer and `INGENIUM_API_TEST_MODE=1` (with background schedulers and mail
-maintenance disabled). Dashboard and fixture readiness/preflight requests
-receive no API bearer header; the dashboard's server-side credential is kept
-separate in its protected token-file path.
+bearer. The API and dashboard receive `INGENIUM_API_TEST_MODE=1`; background
+schedulers and mail maintenance remain disabled. Dashboard and fixture
+readiness/preflight requests receive no API bearer header; the dashboard's
+server-side credential is kept separate in its protected token-file path.
 
 Readiness follows the same boundary: only the API readiness request sends a
-bearer header. Dashboard and fixture readiness requests are unauthenticated.
+bearer plus the internal-service marker. Dashboard and fixture readiness
+requests are unauthenticated.
 The dashboard proxy's API credential is server-only: when
 `INGENIUM_API_TOKEN_FILE` is configured it takes precedence over inline input,
 must be an owner-readable (`0600`) regular non-symlink file, and is never
 returned to browser responses. Invalid or unsafe token-file configuration fails
 closed.
+
+After fixture setup reports its manifest and ports, passive QA Vision can open
+`http://localhost:<dashboard-port>/test-fixture/session`. The `localhost`
+origin allows Chromium to accept the Secure fixture cookie over loopback HTTP.
+The dashboard performs
+the manifest-nonce-bound exchange server-side, installs only the isolated
+browser session cookie, and redirects to the run-owned project. The route is
+`404` outside test mode; neither the API bearer nor fixture credentials enter
+the browser.
 
 ### Mutation-origin contract
 
@@ -392,12 +402,18 @@ production dashboard gateway and an explicit opt-in:
 ```bash
 RUN_DASHBOARD_ROUTE_PARITY=1 \
 INGENIUM_ROUTE_PARITY_URL=http://localhost:3000 \
+INGENIUM_E2E_API_URL=http://127.0.0.1:4097/api/v1 \
+INGENIUM_API_TOKEN=<operator-provided-token> \
 npx playwright test --config=tests/dashboard-route-parity/playwright.config.ts
 ```
 
 `INGENIUM_PRODUCTION_DASHBOARD_URL` and `INGENIUM_E2E_DASHBOARD_URL` are
 compatibility aliases for the target URL. The target must be an absolute HTTP(S)
 root origin with no credentials, query, fragment, or shared sub-path. The suite
+uses `INGENIUM_E2E_API_URL` and the
+server-side `INGENIUM_API_TOKEN` only for its authenticated health preflight;
+that bearer is never installed in the browser or sent to the dashboard origin.
+The suite
 loads the production `.next` route manifests, derives the canonical 23 primary
 routes from dashboard navigation, checks settings deep links and supported query
 variants, rejects retired routes, and smoke-renders every route through the

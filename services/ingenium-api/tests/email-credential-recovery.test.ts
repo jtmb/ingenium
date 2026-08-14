@@ -13,6 +13,9 @@ const {
   getAccount,
   getCredentials,
   getEmailRuntime,
+  getEngineStatus,
+  getOAuthUrl,
+  listAccounts,
   normalizeEmailAccountEndpoints,
   removeAccount,
   startEngine,
@@ -30,6 +33,9 @@ const {
   getAccount: vi.fn(),
   getCredentials: vi.fn(),
   getEmailRuntime: vi.fn(),
+  getEngineStatus: vi.fn(() => ({ running: true, heartbeatAt: "2026-08-14T00:00:00.000Z", accounts: [] })),
+  getOAuthUrl: vi.fn(),
+  listAccounts: vi.fn(() => []),
   normalizeEmailAccountEndpoints: vi.fn((provider: string, endpoints: Record<string, unknown>) => {
     if (provider !== "custom" && Object.values(endpoints).some((value) => value !== undefined)) {
       throw new Error("fixed provider endpoint override");
@@ -50,10 +56,20 @@ getEmailRuntime.mockReturnValue({
 
 vi.mock("ingenium-core", () => ({
   logger: { warn: vi.fn(), error: vi.fn() },
-  emailCache: { clearCache: clearEmailCache },
+  emailCache: { clearCache: clearEmailCache, getCachedEmails: vi.fn(() => ({ data: [], total: 0 })) },
   synthesisLlm: {},
   settings: {},
   projects: { getCanonicalGlobalProject: vi.fn(() => ({ organization_id: "test-organization" })) },
+  authorization: {
+    requireOwnedResourcePermission: vi.fn((principal, resource) => ({
+      allowed: principal.type === "compatibility"
+        || (resource.ownerKind === "user" && resource.ownerUserId === principal.id)
+        || (resource.ownerKind === "organization" && principal.id === "organization-admin"),
+    })),
+    requireOrganizationPermission: vi.fn((principal) => ({
+      allowed: principal.type === "compatibility" || principal.id === "organization-admin",
+    })),
+  },
 }));
 
 vi.mock("ingenium-email", () => ({
@@ -65,6 +81,9 @@ vi.mock("ingenium-email", () => ({
   getAccount,
   getCredentials,
   getEmailRuntime,
+  getEngineStatus,
+  getOAuthUrl,
+  listAccounts,
   normalizeEmailAccountEndpoints,
   removeAccount,
   storeAccount,
@@ -88,7 +107,16 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
+    const userId = req.get("x-test-user");
+    req.principal = userId
+      ? {
+        type: "user",
+        id: userId,
+        scopes: ["user:*"],
+        organizationId: "test-organization",
+        session: { id: `session-${userId}` } as never,
+      }
+      : { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
     next();
   });
   app.use("/api/v1/emails", emailsRouter);
@@ -107,6 +135,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getEngineStatus.mockReturnValue({ running: true, heartbeatAt: "2026-08-14T00:00:00.000Z", accounts: [] });
+  listAccounts.mockReturnValue([]);
 });
 
 describe("PATCH /emails/accounts/:id/credentials", () => {
@@ -428,5 +458,112 @@ describe("PATCH /emails/accounts/:id", () => {
     expect(connectAccount).not.toHaveBeenCalled();
     expect(createTransport).not.toHaveBeenCalled();
     expect(startEngine).not.toHaveBeenCalled();
+  });
+});
+
+describe("mail tenancy API", () => {
+  it("returns only the authorized private account's engine status", async () => {
+    const ownerAccount = {
+      id: "owner-account",
+      email: "owner@example.test",
+      organizationId: "test-organization",
+      ownerKind: "user",
+      ownerUserId: "mail-owner",
+    };
+    const foreignAccount = {
+      id: "foreign-account",
+      email: "foreign@example.test",
+      organizationId: "test-organization",
+      ownerKind: "user",
+      ownerUserId: "mail-foreign",
+    };
+    getAccount.mockImplementation((id: string) => id === ownerAccount.id ? ownerAccount : id === foreignAccount.id ? foreignAccount : undefined);
+    getEngineStatus.mockReturnValue({
+      running: true,
+      heartbeatAt: "2026-08-14T00:00:00.000Z",
+      accounts: [
+        { accountId: ownerAccount.id, email: ownerAccount.email, folders: [] },
+        { accountId: foreignAccount.id, email: foreignAccount.email, folders: [] },
+      ],
+    });
+
+    const own = await fetch(`${baseUrl}/api/v1/emails/sync-status?account=${ownerAccount.id}`, {
+      headers: { "x-test-user": "mail-owner" },
+    });
+    expect(own.status).toBe(200);
+    expect((await own.json()).data.engine).toEqual({
+      accounts: [{ accountId: ownerAccount.id, email: ownerAccount.email, folders: [] }],
+    });
+
+    const foreign = await fetch(`${baseUrl}/api/v1/emails/sync-status?account=${foreignAccount.id}`, {
+      headers: { "x-test-user": "mail-owner" },
+    });
+    expect(foreign.status).toBe(404);
+  });
+
+  it("defaults ordinary account creation to private ownership and requires organization write access for shared ownership", async () => {
+    addAccount.mockImplementation((account, owner) => ({ id: `account-${owner.ownerKind}`, connected: false, ...account, ...owner }));
+
+    const privateResponse = await fetch(`${baseUrl}/api/v1/emails/accounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-user": "mail-owner" },
+      body: JSON.stringify({ email: "private@example.test", provider: "custom", authType: "app_password" }),
+    });
+    expect(privateResponse.status).toBe(201);
+    expect(addAccount).toHaveBeenLastCalledWith(expect.any(Object), {
+      organizationId: "test-organization",
+      ownerKind: "user",
+      ownerUserId: "mail-owner",
+    });
+
+    const denied = await fetch(`${baseUrl}/api/v1/emails/accounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-user": "mail-owner" },
+      body: JSON.stringify({ email: "shared@example.test", provider: "custom", authType: "app_password", owner_kind: "organization" }),
+    });
+    expect(denied.status).toBe(403);
+
+    const allowed = await fetch(`${baseUrl}/api/v1/emails/accounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-user": "organization-admin" },
+      body: JSON.stringify({ email: "shared@example.test", provider: "custom", authType: "app_password", owner_kind: "organization" }),
+    });
+    expect(allowed.status).toBe(201);
+    expect(addAccount).toHaveBeenLastCalledWith(expect.any(Object), {
+      organizationId: "test-organization",
+      ownerKind: "organization",
+      ownerUserId: undefined,
+    });
+  });
+
+  it("binds OAuth attempts to the same private-default and organization-write ownership rules", async () => {
+    getOAuthUrl.mockResolvedValue({ url: "https://oauth.example.test/authorize" });
+
+    const privateResponse = await fetch(`${baseUrl}/api/v1/emails/accounts/oauth/url?provider=gmail`, {
+      headers: { "x-test-user": "mail-owner" },
+    });
+    expect(privateResponse.status).toBe(200);
+    expect(getOAuthUrl).toHaveBeenLastCalledWith("gmail", expect.objectContaining({
+      organizationId: "test-organization",
+      ownerKind: "user",
+      ownerUserId: "mail-owner",
+      actorId: "mail-owner",
+    }));
+
+    const denied = await fetch(`${baseUrl}/api/v1/emails/accounts/oauth/url?provider=gmail&owner_kind=organization`, {
+      headers: { "x-test-user": "mail-owner" },
+    });
+    expect(denied.status).toBe(403);
+
+    const allowed = await fetch(`${baseUrl}/api/v1/emails/accounts/oauth/url?provider=gmail&owner_kind=organization`, {
+      headers: { "x-test-user": "organization-admin" },
+    });
+    expect(allowed.status).toBe(200);
+    expect(getOAuthUrl).toHaveBeenLastCalledWith("gmail", expect.objectContaining({
+      organizationId: "test-organization",
+      ownerKind: "organization",
+      ownerUserId: undefined,
+      actorId: "organization-admin",
+    }));
   });
 });

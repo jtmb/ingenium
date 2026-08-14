@@ -26,7 +26,7 @@ export function requireProject(req: Request, res: Response): string | null {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${name}' not found. Create it first via POST /api/v1/projects or the dashboard.` } });
     return null;
   }
-  if (!req.authorizationPolicy) return project.id;
+  if (!req.authorizationPolicy || req.authorizationPolicy.target === "installation") return project.id;
   const principal = req.principal;
   if (!principal) {
     res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });

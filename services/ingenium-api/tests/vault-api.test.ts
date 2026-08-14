@@ -10,6 +10,8 @@ import * as core from "ingenium-core";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import { vaultRouter } from "../lib/routes/vault.js";
 import { vaultBruteForceLimiter } from "../lib/middleware/rate-limit.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
+import { errorHandler } from "../lib/middleware/errors.js";
 
 const passphrase = "correct horse battery staple";
 const plaintext = "my-secret-value";
@@ -385,5 +387,99 @@ describe("POST /initialize", () => {
     expect(body).not.toContain(secret);
     expect(body).not.toContain(passphrase);
     expect(JSON.parse(body).data[0]).not.toHaveProperty("details");
+  });
+});
+
+describe("vault lifecycle authorization", () => {
+  let lifecycleDirectory: string;
+  let lifecycleServer: Server;
+  let lifecycleBaseUrl: string;
+  let lifecycleProject: string;
+  let principals: Record<string, Express.Request["principal"]>;
+
+  beforeEach(async () => {
+    vaultBruteForceLimiter.clear();
+    core.resetDbForTest();
+    lifecycleDirectory = mkdtempSync(join(tmpdir(), "ingenium-vault-lifecycle-api-"));
+    vi.stubEnv("INGENIUM_CORE_DB_PATH", join(lifecycleDirectory, "vault.db"));
+    lifecycleProject = `vault-lifecycle-${Date.now()}`;
+    const project = core.projects.createProject(lifecycleProject);
+    const installationAdmin = core.identity.createUser("vault-admin@example.test", "Vault Admin");
+    const projectEditor = core.identity.createUser("vault-editor@example.test", "Vault Editor");
+    core.organizations.addOrganizationMember(project.organization_id, projectEditor.id, "member");
+    core.organizations.addProjectMember(project.id, projectEditor.id, "editor");
+    core.getDb().prepare("INSERT INTO installation_admins (user_id, created_at) VALUES (?, ?)")
+      .run(installationAdmin.id, new Date().toISOString());
+
+    principals = {
+      "admin-recent": {
+        type: "user",
+        id: installationAdmin.id,
+        scopes: ["user:*"],
+        session: core.authentication.createSession(installationAdmin.id, new Date(), "vault matrix", true).session,
+      },
+      "admin-stale": {
+        type: "user",
+        id: installationAdmin.id,
+        scopes: ["user:*"],
+        session: core.authentication.createSession(installationAdmin.id).session,
+      },
+      "editor-recent": {
+        type: "user",
+        id: projectEditor.id,
+        scopes: ["user:*"],
+        session: core.authentication.createSession(projectEditor.id, new Date(), "vault matrix", true).session,
+      },
+      compatibility: { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] },
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.principal = principals[String(req.headers["x-test-principal"] ?? "")];
+      next();
+    });
+    app.use(authorizationMiddleware);
+    app.use("/api/v1/vault", vaultRouter);
+    app.use(errorHandler);
+    lifecycleServer = createServer(app);
+    await new Promise<void>((resolve) => lifecycleServer.listen(0, "127.0.0.1", resolve));
+    lifecycleBaseUrl = `http://127.0.0.1:${(lifecycleServer.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    vaultBruteForceLimiter.clear();
+    await new Promise<void>((resolve) => lifecycleServer.close(() => resolve()));
+    core.vault.sealVault();
+    core.resetDbForTest();
+    vi.unstubAllEnvs();
+    rmSync(lifecycleDirectory, { recursive: true, force: true });
+  });
+
+  async function lifecycleRequest(operation: "initialize" | "seal" | "unseal", principal: string): Promise<Response> {
+    return fetch(`${lifecycleBaseUrl}/api/v1/vault/${operation}?project=${lifecycleProject}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-principal": principal },
+      body: operation === "seal" ? undefined : JSON.stringify(operation === "initialize"
+        ? { password: passphrase, confirmation: passphrase }
+        : { password: passphrase }),
+    });
+  }
+
+  it("allows only a recently elevated installation administrator", async () => {
+    expect((await lifecycleRequest("initialize", "editor-recent")).status).toBe(403);
+    const staleInitialize = await lifecycleRequest("initialize", "admin-stale");
+    expect(staleInitialize.status).toBe(403);
+    expect((await staleInitialize.json()).error.code).toBe("STEP_UP_REQUIRED");
+    expect((await lifecycleRequest("initialize", "compatibility")).status).toBe(403);
+    expect((await lifecycleRequest("initialize", "admin-recent")).status).toBe(201);
+
+    expect((await lifecycleRequest("seal", "editor-recent")).status).toBe(403);
+    expect((await lifecycleRequest("seal", "admin-stale")).status).toBe(403);
+    expect((await lifecycleRequest("seal", "admin-recent")).status).toBe(200);
+
+    expect((await lifecycleRequest("unseal", "editor-recent")).status).toBe(403);
+    expect((await lifecycleRequest("unseal", "admin-stale")).status).toBe(403);
+    expect((await lifecycleRequest("unseal", "admin-recent")).status).toBe(200);
   });
 });

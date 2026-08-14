@@ -13,6 +13,7 @@ export interface AuthorizationPolicy {
   target: PolicyTarget;
   sensitive?: boolean;
   stepUp?: boolean;
+  browserSessionOnly?: boolean;
 }
 
 export interface AuthorizedProjectTarget {
@@ -105,6 +106,17 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   if (req.path.startsWith("/api/v1/docs")) {
     const permission = permissionFor(req as Request);
     return { action: `docs.${permission}`, resource: "docs", permission, target: "organization", sensitive: permission !== "read" };
+  }
+  if (req.method === "POST" && /^\/api\/v1\/vault\/(initialize|unseal|seal)$/.test(req.path)) {
+    return {
+      action: "vault.lifecycle.admin",
+      resource: "vault",
+      permission: "admin",
+      target: "installation",
+      sensitive: true,
+      stepUp: true,
+      browserSessionOnly: true,
+    };
   }
   if (PRIVATE_PREFIXES.some((prefix) => req.path.startsWith(prefix))) {
     const permission = permissionFor(req as Request);
@@ -199,6 +211,10 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
   req.authorizationPolicy = policy;
   if (policy.target === "public") return next();
   if (!req.principal) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
+  if (policy.browserSessionOnly && (req.principal.type !== "user" || !req.principal.session)) {
+    audit(req.principal, policy, "denied");
+    throw new AppError("A browser installation administrator is required", "FORBIDDEN", 403);
+  }
   if (policy.target === "gateway-private") {
     if (req.principal.type !== "runtime-service" || req.principal.id !== "runtime-gateway"
       || req.principal.audience !== "runtime-gateway" || req.principal.network !== "runtime-gateway"
@@ -260,7 +276,10 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
       : { allowed: req.path === "/api/v1/projects" && req.method === "GET", visible: req.path === "/api/v1/projects" && req.method === "GET" };
   }
   if (decision.allowed && policy.stepUp && req.principal.type === "user" && req.principal.session
-    && !authentication.hasRecentStepUp(req.principal.session)) decision = { ...decision, allowed: false };
+    && !authentication.hasRecentStepUp(req.principal.session)) {
+    audit(req.principal, policy, "denied", decision);
+    throw new AppError("Recent step-up authentication is required", "STEP_UP_REQUIRED", 403);
+  }
   if (!decision.allowed) {
     audit(req.principal, policy, "denied", decision);
     throw new AppError(decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found", decision.visible ? "FORBIDDEN" : "NOT_FOUND", decision.visible ? 403 : 404);

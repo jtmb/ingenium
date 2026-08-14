@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { authentication, authorization, invitations, mcpCredentials, oidcAuthentication, runtimes, securityAudit, securityTokens } from "ingenium-core";
+import { authentication, authorization, getDb, invitations, mcpCredentials, oidcAuthentication, runtimes, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
 import { authAttemptRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
@@ -35,6 +35,28 @@ function requireRecentStepUp(req: Request) {
 }
 
 authPreflightRouter.get("/csrf", issuePreAuthCsrf);
+authPreflightRouter.post("/fixture-session", (req, res) => {
+  const expectedNonce = process.env.INGENIUM_TEST_RUN_NONCE;
+  const validFixtureRequest = process.env.INGENIUM_API_TEST_MODE === "1"
+    && typeof expectedNonce === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(expectedNonce)
+    && req.get("x-ingenium-fixture-run-nonce") === expectedNonce
+    && req.get("x-ingenium-internal-service") === "1"
+    && req.principal?.type === "compatibility"
+    && req.headers.cookie === undefined
+    && req.get("origin") === undefined;
+  if (!validFixtureRequest) throw new AppError("Resource not found", "NOT_FOUND", 404);
+
+  const owner = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT owner_user_id AS userId FROM bootstrap_state WHERE singleton = 1 AND state = 'claimed'",
+  ).get() as { userId: string } | undefined;
+  if (!owner) throw new AppError("Fixture owner is not provisioned", "FIXTURE_NOT_READY", 409);
+
+  const session = authentication.createSession(owner.userId, new Date(), "QA Vision fixture");
+  setSession(res, session);
+  res.set("Cache-Control", "no-store");
+  res.json({ data: { authenticated: true } });
+});
 authPreflightRouter.get("/oidc/providers", (_req, res) => {
   res.json({
     data: oidcAuthentication.listOidcProviders()

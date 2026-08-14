@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { productionApiHealthRequest } from "./runtime";
 
 const repositoryRoot = process.cwd();
 const playwrightCli = resolve(repositoryRoot, "node_modules/@playwright/test/cli.js");
@@ -35,5 +36,26 @@ describe("dashboard route parity Playwright config", () => {
     expect(source).toContain("workers: 1");
     expect(source).toContain("fullyParallel: false");
     expect(source).toContain("retries: 0");
+  });
+
+  it("uses the configured authenticated API endpoint only for health preflight", () => {
+    const originalUrl = process.env.INGENIUM_E2E_API_URL;
+    const originalToken = process.env.INGENIUM_API_TOKEN;
+    try {
+      process.env.INGENIUM_E2E_API_URL = "http://127.0.0.1:4097/api/v1";
+      process.env.INGENIUM_API_TOKEN = "A".repeat(48);
+      expect(productionApiHealthRequest()).toEqual({
+        url: "http://127.0.0.1:4097/api/v1/health",
+        headers: { Authorization: `Bearer ${"A".repeat(48)}` },
+      });
+
+      delete process.env.INGENIUM_API_TOKEN;
+      expect(() => productionApiHealthRequest()).toThrow(/INGENIUM_API_TOKEN/);
+    } finally {
+      if (originalUrl === undefined) delete process.env.INGENIUM_E2E_API_URL;
+      else process.env.INGENIUM_E2E_API_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
+      else process.env.INGENIUM_API_TOKEN = originalToken;
+    }
   });
 });

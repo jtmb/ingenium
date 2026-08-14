@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -17,6 +17,15 @@ import { createUser } from "../lib/tools/identity.js";
 let tempDir = "";
 const originalPath = process.env.INGENIUM_CORE_DB_PATH;
 
+function createLegacyDatabaseThrough(migration: number): Database.Database {
+  const database = new Database(process.env.INGENIUM_CORE_DB_PATH!);
+  const migrations = join(import.meta.dirname, "../data/migrations");
+  for (const file of readdirSync(migrations).filter((name) => Number.parseInt(name.slice(0, 3), 10) <= migration).sort()) {
+    database.exec(readFileSync(join(migrations, file), "utf8"));
+  }
+  return database;
+}
+
 beforeEach(() => {
   resetDbForTest();
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-auth-foundation-"));
@@ -32,9 +41,16 @@ afterEach(() => {
 
 describe("AUTH-100 migration and bootstrap foundation", () => {
   it("creates a fresh complete schema and preserves existing project IDs on a 092-shaped upgrade", () => {
+    const legacy = createLegacyDatabaseThrough(92);
+    const projectId = randomUUID();
+    const timestamp = new Date().toISOString();
+    legacy.prepare("INSERT INTO projects (id, name, path, is_global, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)")
+      .run(projectId, "preserved", "/preserved", timestamp, timestamp);
+    legacy.close();
+
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const project = createProject("preserved", true);
     const projectIds = db.prepare("SELECT id FROM projects ORDER BY id").all();
+    const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string };
     expect(project.organization_id).toBe(BOOTSTRAP_ORGANIZATION_ID);
     expect(db.prepare("SELECT state FROM bootstrap_state WHERE singleton = 1").get()).toEqual({ state: "pending" });
     expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
@@ -45,11 +61,8 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
       "095": { complete: true, missing: [] },
     });
 
-    db.exec("DROP TRIGGER organization_invitations_consume_once; DROP TRIGGER scoped_api_tokens_project_organization_insert; DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER scoped_api_tokens_identity_immutable; DROP INDEX idx_security_audit_scope; DROP INDEX idx_organization_invitations_scope; DROP INDEX idx_scoped_api_tokens_service; DROP INDEX idx_scoped_api_tokens_user; DROP TABLE security_audit_events; DROP TABLE organization_invitations; DROP TABLE scoped_api_tokens; DROP TABLE service_principals; DROP TABLE installation_admins; DROP TRIGGER oidc_authorization_states_consume_once; DROP TRIGGER auth_one_time_states_consume_once; DROP INDEX idx_oidc_authorization_states_expiry; DROP INDEX idx_auth_one_time_states_expiry; DROP INDEX idx_auth_sessions_user_active; DROP INDEX idx_auth_identities_user; DROP TABLE oidc_authorization_states; DROP TABLE oidc_providers; DROP TABLE auth_recovery_codes; DROP TABLE auth_totp_factors; DROP TABLE auth_one_time_states; DROP TABLE auth_sessions; DROP TABLE password_credentials; DROP TABLE auth_identities; DROP TRIGGER projects_require_organization_insert; DROP TRIGGER projects_require_organization_update; DROP TRIGGER project_memberships_same_organization_insert; DROP TRIGGER project_memberships_same_organization_update; DROP TRIGGER organization_memberships_keep_owner_delete; DROP TRIGGER organization_memberships_keep_owner_update; DROP TRIGGER project_memberships_reject_org_departure; DROP TRIGGER project_memberships_reject_org_delete; DROP TRIGGER projects_reject_membership_reparent; DROP TRIGGER bootstrap_manifests_immutable_update; DROP TRIGGER bootstrap_manifests_immutable_delete; DROP INDEX idx_projects_organization; DROP TABLE project_memberships; DROP TABLE organization_memberships; DROP TABLE bootstrap_state; DROP TABLE bootstrap_manifests; DROP TABLE users; ALTER TABLE projects DROP COLUMN organization_id; DROP TABLE organizations;");
-    resetDbForTest();
-    const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    expect(upgraded.prepare("SELECT id FROM projects ORDER BY id").all()).toEqual(projectIds);
-    expect(upgraded.prepare("SELECT count(*) AS count FROM auth_sessions").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT id FROM projects ORDER BY id").all()).toEqual(projectIds);
+    expect(db.prepare("SELECT count(*) AS count FROM auth_sessions").get()).toEqual({ count: 0 });
   });
 
   it("fails closed without repairing a partial migration", () => {
@@ -63,17 +76,20 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
   });
 
   it("upgrades an exact AUTH-100 authentication schema and preserves valid one-time states", () => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    db.exec("DROP TRIGGER organization_invitations_consume_once; DROP TRIGGER scoped_api_tokens_project_organization_update; DROP TRIGGER scoped_api_tokens_project_organization_insert; DROP TRIGGER security_audit_events_project_organization_insert; DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER scoped_api_tokens_identity_immutable; DROP INDEX idx_security_audit_scope; DROP INDEX idx_organization_invitations_scope; DROP INDEX idx_scoped_api_tokens_service; DROP INDEX idx_scoped_api_tokens_user; DROP TABLE security_audit_events; DROP TABLE organization_invitations; DROP TABLE scoped_api_tokens; DROP TABLE service_principals; DROP TABLE installation_admins; DROP TRIGGER oidc_authorization_states_consume_once; DROP INDEX idx_oidc_authorization_states_expiry; DROP TABLE oidc_authorization_states; DROP TABLE oidc_providers; DROP TRIGGER auth_one_time_states_consume_once; DROP INDEX idx_auth_one_time_states_expiry; DROP INDEX idx_auth_sessions_user_active; DROP INDEX idx_auth_identities_user; DROP TABLE auth_recovery_codes; DROP TABLE auth_totp_factors; DROP TABLE auth_one_time_states; DROP TABLE auth_sessions; DROP TABLE password_credentials; DROP TABLE auth_identities; ALTER TABLE users DROP COLUMN security_epoch; ALTER TABLE users DROP COLUMN email_verified_at;");
-    db.exec(readFileSync(join(import.meta.dirname, "auth100-authentication.sql"), "utf8"));
-    const user = createUser("upgrade@example.test", "Upgrade");
-    db.prepare("INSERT INTO auth_one_time_states (id, purpose, user_id, state_hash, expires_at, created_at) VALUES (?, 'password_reset', ?, ?, ?, ?)")
-      .run(randomUUID(), user.id, "a".repeat(64), new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
-    resetDbForTest();
+    const legacy = createLegacyDatabaseThrough(93);
+    legacy.exec(readFileSync(join(import.meta.dirname, "auth100-authentication.sql"), "utf8"));
+    const userId = randomUUID();
+    const timestamp = new Date().toISOString();
+    legacy.prepare("INSERT INTO users (id, email_normalized, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run(userId, "upgrade@example.test", "Upgrade", timestamp, timestamp);
+    legacy.prepare("INSERT INTO auth_one_time_states (id, purpose, user_id, state_hash, expires_at, created_at) VALUES (?, 'password_reset', ?, ?, ?, ?)")
+      .run(randomUUID(), userId, "a".repeat(64), new Date(Date.now() + 60_000).toISOString(), timestamp);
+    legacy.close();
+
     const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
     expect(upgraded.prepare("SELECT purpose FROM auth_one_time_states").all()).toEqual([{ purpose: "password_reset" }]);
     expect(() => upgraded.prepare("INSERT INTO auth_one_time_states (id, purpose, user_id, state_hash, expires_at, created_at) VALUES (?, 'mfa_challenge', ?, ?, ?, ?)")
-      .run(randomUUID(), user.id, "b".repeat(64), new Date(Date.now() + 60_000).toISOString(), new Date().toISOString())).not.toThrow();
+      .run(randomUUID(), userId, "b".repeat(64), new Date(Date.now() + 60_000).toISOString(), new Date().toISOString())).not.toThrow();
     expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(getAuthenticationFoundationMigrationStatus()["094"]).toEqual({ any: true, complete: true, missing: [] });
   });

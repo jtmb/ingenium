@@ -1,5 +1,5 @@
 import { loadProductionArtifactRoutes } from "./route-inventory";
-import { productionDashboardUrl, requireRouteParityOptIn } from "./runtime";
+import { productionApiHealthRequest, productionDashboardUrl, requireRouteParityOptIn } from "./runtime";
 import {
   drainGatewayRequestBucket,
   retryExternalSuiteStartupApiPreflight,
@@ -7,9 +7,8 @@ import {
 
 /**
  * Read-only preflight for the production artifact/gateway route suite.
- * No API bearer, provider credential, mail account, or mutation request is
- * created here; network access is limited to read-only API health and gateway
- * root GETs.
+ * The API bearer is used only by this Node preflight request. It is never
+ * installed in a browser context or forwarded to the dashboard gateway.
  */
 export default async function routeParityGlobalSetup(): Promise<void> {
   requireRouteParityOptIn();
@@ -17,15 +16,15 @@ export default async function routeParityGlobalSetup(): Promise<void> {
   const target = productionDashboardUrl(true);
 
   try {
-    const apiHealth = new URL("/api/v1/health", target).toString();
+    const apiHealth = productionApiHealthRequest();
     const apiResponse = await retryExternalSuiteStartupApiPreflight(
-      () => fetch(apiHealth, { method: "GET", redirect: "follow" }),
+      () => fetch(apiHealth.url, { method: "GET", headers: apiHealth.headers, redirect: "follow" }),
     );
     if (apiResponse.status === 429) {
       throw new Error(`Production dashboard API startup preflight returned HTTP 429 (Retry-After: ${apiResponse.headers.get("retry-after")?.trim() || "missing"})`);
     }
     if (!apiResponse.ok) {
-      throw new Error(`Production dashboard API startup preflight returned HTTP ${apiResponse.status}: ${apiHealth}`);
+      throw new Error(`Production dashboard API startup preflight returned HTTP ${apiResponse.status}: ${apiHealth.url}`);
     }
 
     const response = await fetch(target, { method: "GET", redirect: "follow" });

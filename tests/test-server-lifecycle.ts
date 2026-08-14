@@ -33,6 +33,7 @@ export const SERVER_STOP_TIMEOUT_MS = 8_000;
 export const PRODUCTION_BUILD_TIMEOUT_MS = 180_000;
 export const READINESS_REQUEST_TIMEOUT_MS = 1_000;
 export const TEST_API_TOKEN = "A".repeat(48);
+export const FIXTURE_INTERNAL_SERVICE_HEADER = "x-ingenium-internal-service";
 export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
 // The serialized fixture suite creates deliberate browser/API traffic. Keep
 // this bounded override local to its isolated API process; production retains
@@ -127,6 +128,7 @@ export async function provisionTestRunProject(
       method: "POST",
       headers: {
         Authorization: `Bearer ${TEST_API_TOKEN}`,
+        [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ name: context.project, is_global: false }),
@@ -171,7 +173,11 @@ async function fixtureRequest(url: string, init: RequestInit): Promise<Response>
 
 export async function provisionTestRunOwner(context: TestRunContext): Promise<void> {
   const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
-  const operatorHeaders = { Authorization: `Bearer ${TEST_API_TOKEN}`, "Content-Type": "application/json" };
+  const operatorHeaders = {
+    Authorization: `Bearer ${TEST_API_TOKEN}`,
+    [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+    "Content-Type": "application/json",
+  };
   const claim = await fixtureRequest(`${apiBase}/bootstrap/claim`, {
     method: "POST",
     headers: operatorHeaders,
@@ -302,7 +308,10 @@ export function getServerSpecs(
         INGENIUM_API_RATE_LIMIT: String(FIXTURE_API_RATE_LIMIT),
       }),
       readinessUrl: `http://127.0.0.1:${context.ports.api}/api/v1/health`,
-      readinessHeaders: { Authorization: `Bearer ${TEST_API_TOKEN}` },
+      readinessHeaders: {
+        Authorization: `Bearer ${TEST_API_TOKEN}`,
+        [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+      },
     },
     {
       name: "dashboard",
@@ -313,6 +322,7 @@ export function getServerSpecs(
         : ["dev", "--hostname", "127.0.0.1", "--port", String(context.ports.dashboard)],
       cwd: dashboardDir,
       env: serverEnvironment(context, {
+        INGENIUM_API_TEST_MODE: "1",
         PORT: String(context.ports.dashboard),
         ...Object.fromEntries(
           Object.entries(dashboardEnvironment).filter(([key]) => key !== "INGENIUM_API_TOKEN"),

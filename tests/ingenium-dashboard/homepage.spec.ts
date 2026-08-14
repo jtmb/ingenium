@@ -26,6 +26,27 @@ async function mockSummary(page: Page): Promise<void> {
   }));
 }
 
+test("bootstraps a clean QA Vision browser into the isolated fixture session", async ({ browser, baseURL }) => {
+  if (!baseURL) throw new Error("Fixture dashboard URL is unavailable");
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const browserAuthorizationHeaders: string[] = [];
+  page.on("request", (request) => {
+    const authorization = request.headers().authorization;
+    if (authorization) browserAuthorizationHeaders.push(authorization);
+  });
+  try {
+    const fixtureUrl = new URL("/test-fixture/session", baseURL);
+    fixtureUrl.hostname = "localhost";
+    await page.goto(fixtureUrl.toString());
+    expect(new URL(page.url()).searchParams.get("project")).toMatch(/^playwright-test-/);
+    expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ingenium_session")).toBe(true);
+    expect(browserAuthorizationHeaders).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 /** E2E contracts for the current operational cockpit homepage. */
 test.describe("Homepage — Operational Cockpit", () => {
   test.beforeEach(async ({ page }) => {

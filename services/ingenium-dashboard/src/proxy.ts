@@ -151,11 +151,23 @@ export function isPublicAuthPath(pathname: string): boolean {
   return PUBLIC_AUTH_PATHS.has(pathname);
 }
 
+export function isFixtureSessionBootstrapPath(
+  pathname: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const nonce = environment["INGENIUM_TEST_RUN_NONCE"];
+  return pathname === "/test-fixture/session"
+    && environment["INGENIUM_API_TEST_MODE"] === "1"
+    && typeof nonce === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(nonce)
+    && environment["INGENIUM_PROJECT"]?.startsWith("playwright-test-") === true;
+}
+
 function protectDashboardPage(request: NextRequest): NextResponse | null {
   const pathname = request.nextUrl.pathname;
   if (pathname.startsWith("/api/v1")) return null;
   const authenticated = Boolean(request.cookies.get(AUTH_SESSION_COOKIE)?.value);
-  if (!authenticated && !isPublicAuthPath(pathname)) {
+  if (!authenticated && !isPublicAuthPath(pathname) && !isFixtureSessionBootstrapPath(pathname)) {
     const login = new URL("/login", request.url);
     login.searchParams.set("returnTo", safeReturnTo(`${pathname}${request.nextUrl.search}`));
     return NextResponse.redirect(login);

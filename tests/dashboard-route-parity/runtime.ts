@@ -6,6 +6,7 @@ const TARGET_ENVIRONMENT_VARIABLES = [
   "INGENIUM_PRODUCTION_DASHBOARD_URL",
   "INGENIUM_E2E_DASHBOARD_URL",
 ] as const;
+const API_TARGET_ENVIRONMENT_VARIABLES = ["INGENIUM_E2E_API_URL"] as const;
 
 export const ROUTE_PARITY_OPT_IN = "RUN_DASHBOARD_ROUTE_PARITY";
 
@@ -55,6 +56,40 @@ export function productionDashboardRoute(path: string): string {
   const route = new URL(path, target);
   if (route.origin !== target.origin) throw new Error(`Route escaped the dashboard gateway origin: ${path}`);
   return route.toString();
+}
+
+export function productionApiHealthRequest(): { url: string; headers: Record<string, string> } {
+  const raw = API_TARGET_ENVIRONMENT_VARIABLES
+    .map((name) => process.env[name]?.trim())
+    .find((value): value is string => Boolean(value));
+  if (!raw) {
+    throw new Error(`Set ${API_TARGET_ENVIRONMENT_VARIABLES.join(" or ")} to the authenticated production API root`);
+  }
+
+  const token = process.env.INGENIUM_API_TOKEN?.trim();
+  if (!token || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
+    throw new Error("INGENIUM_API_TOKEN must contain the production API preflight credential");
+  }
+
+  let target: URL;
+  try {
+    target = new URL(raw);
+  } catch {
+    throw new Error(`Production API target is not an absolute URL: ${raw}`);
+  }
+  if ((target.protocol !== "http:" && target.protocol !== "https:")
+    || target.username || target.password || target.search || target.hash) {
+    throw new Error("Production API target must be a credential-free HTTP(S) URL");
+  }
+  const path = target.pathname.replace(/\/+$/, "");
+  if (path === "" || path === "/") target.pathname = "/api/v1/health";
+  else if (path === "/api/v1") target.pathname = "/api/v1/health";
+  else if (path !== "/api/v1/health") throw new Error("Production API target must be the root, /api/v1, or /api/v1/health");
+
+  return {
+    url: target.toString(),
+    headers: { Authorization: `Bearer ${token}` },
+  };
 }
 
 export function artifactDirectory(): string {

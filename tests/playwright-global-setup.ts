@@ -34,7 +34,7 @@ export default async function globalSetup(): Promise<void> {
     }
   } catch (error) {
     try {
-      await stopRunFromManifest(context.manifestPath);
+      await stopRunFromManifest(context.manifestPath, { cleanup: false });
     } catch (cleanupError) {
       // Keep the startup failure as the thrown error, but do not discard
       // process/port diagnostics from the mandatory cleanup attempt.

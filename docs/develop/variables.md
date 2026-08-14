@@ -128,6 +128,9 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
 | `INGENIUM_E2E_PROJECT` | _(none)_ | `tests/ingenium-dashboard/docker-active-project.ts` | Optional external Docker-suite project. It must be an existing active project returned by the deployment's same-origin project-list preflight. When unset, the Docker suite requires exactly one active global project. The suite never creates or deletes a project. |
+| `INGENIUM_E2E_API_URL` | _(none)_ | dashboard route-parity preflight | Absolute credential-free API root used for the server-side authenticated health request; the bearer remains in the Node runner. |
+| `INGENIUM_API_TEST_MODE` | _(unset)_ | isolated API/dashboard fixture | Enables test-only server contracts in manifest-owned fixture processes. Never set in a deployed application. |
+| `INGENIUM_TEST_RUN_NONCE` | _(generated per fixture run)_ | isolated API/dashboard fixture | UUID nonce binding the test-only browser-session exchange to its manifest-owned run. |
 
 ## Backups
 

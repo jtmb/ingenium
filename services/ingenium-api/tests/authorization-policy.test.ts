@@ -14,6 +14,7 @@ describe("AUTH-102 canonical API policy", () => {
     ["GET", "/api/v1/context/conversations", "private", "read"],
     ["GET", "/api/v1/emails/accounts", "private", "read"],
     ["POST", "/api/v1/vault/items/item/reveal", "project", "write"],
+    ["POST", "/api/v1/vault/initialize", "installation", "admin"],
     ["PUT", "/api/v1/settings/provider-configs", "installation", "write"],
     ["POST", "/api/v1/opencode/integrations/openai/connect/key", "installation", "execute"],
     ["GET", "/api/v1/backups", "installation", "read"],

@@ -257,6 +257,11 @@ owner-authorized. Organization-owned accounts use organization/project roles;
 private accounts require the owner or an explicit grant. Unauthorized account
 IDs return `404`.
 
+Browser users create private-owned accounts and OAuth attempts by default.
+`owner_kind=organization` requires organization write/admin permission for both
+manual account creation and OAuth initiation. Sync-status engine details are
+projected only for the authorized account and never include other engine workers.
+
 > 🔴 `GET /accounts` by default returns only non-hidden accounts. Pass `?include_hidden=true` to include hidden accounts.
 
 | Method | Endpoint | Purpose |

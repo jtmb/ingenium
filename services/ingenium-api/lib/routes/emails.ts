@@ -137,14 +137,28 @@ function currentOrganizationId(req: Request): string | undefined {
   return projects.getCanonicalGlobalProject()?.organization_id;
 }
 
-function emailOwner(req: Request) {
+function emailOwner(req: Request, res: Response) {
   const organizationId = currentOrganizationId(req);
   if (!organizationId) return undefined;
   const requestedOwner = req.body?.owner_kind ?? req.query.owner_kind;
-  const ownerKind = requestedOwner === "user" ? "user" : "organization";
-  const ownerUserId = ownerKind === "user" && req.principal?.type === "user" ? req.principal.id : undefined;
-  if (ownerKind === "user" && !ownerUserId) return undefined;
-  return { organizationId, ownerKind, ownerUserId } as const;
+  if (req.principal?.type === "user") {
+    if (requestedOwner === "organization") {
+      const decision = authorization.requireOrganizationPermission(
+        toAuthorizationPrincipal(req.principal),
+        organizationId,
+        "mail",
+        "write",
+      );
+      if (!decision.allowed) {
+        res.status(403).json({ error: { code: "FORBIDDEN", message: "Organization mail ownership requires organization write permission" } });
+        return undefined;
+      }
+      return { organizationId, ownerKind: "organization" as const, ownerUserId: undefined };
+    }
+    return { organizationId, ownerKind: "user" as const, ownerUserId: req.principal.id };
+  }
+  if (requestedOwner === "user") return undefined;
+  return { organizationId, ownerKind: "organization" as const, ownerUserId: undefined };
 }
 
 function canAccessEmailAccount(req: Request, account: EmailAccount, permission: authorization.AuthorizationPermission): boolean {
@@ -240,9 +254,9 @@ emailsRouter.get("/accounts/oauth/url", (_req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth is supported only for gmail and outlook" } });
     return;
   }
-  const owner = emailOwner(_req);
+  const owner = emailOwner(_req, res);
   if (!owner) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail owner is required" } });
+    if (!res.headersSent) res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail owner is required" } });
     return;
   }
   const accountId = typeof _req.query.account_id === "string" && _req.query.account_id
@@ -376,9 +390,9 @@ emailsRouter.post("/accounts", (req, res) => {
     name: name ?? email,
     ...endpoints,
   } as Omit<EmailAccount, "id" | "connected">;
-  const owner = emailOwner(req);
+  const owner = emailOwner(req, res);
   if (!owner) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail owner is required" } });
+    if (!res.headersSent) res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail owner is required" } });
     return;
   }
   const account = appPassword
@@ -1087,7 +1101,7 @@ emailsRouter.post("/sync", async (req, res) => {
 
 /**
  * GET /sync-status?project=&account= — Return per-folder sync status from the engine.
- * Backward-compatible response shape with new `engine` key for raw EngineStatus.
+ * The engine projection contains only the already-authorized account.
  */
 emailsRouter.get("/sync-status", (req, res) => {
   const accountId = req.query.account as string | undefined;
@@ -1106,6 +1120,7 @@ emailsRouter.get("/sync-status", (req, res) => {
   try {
     const engineStatus = getEngineStatus();
     const acct = engineStatus.accounts.find(a => a.accountId === accountId);
+    const scopedEngineStatus = { accounts: acct ? [acct] : [] };
 
     if (!acct) {
       // Account not in engine — return idle state
@@ -1118,7 +1133,7 @@ emailsRouter.get("/sync-status", (req, res) => {
           totalCached: 0,
           totalBodies: 0,
           folders: [],
-          engine: engineStatus,
+          engine: scopedEngineStatus,
         },
       });
       return;
@@ -1163,7 +1178,7 @@ emailsRouter.get("/sync-status", (req, res) => {
         totalCached,
         totalBodies,
         folders,
-        engine: engineStatus,
+        engine: scopedEngineStatus,
       },
     });
   } catch (error: unknown) {
