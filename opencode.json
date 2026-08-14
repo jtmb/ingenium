@@ -41,7 +41,7 @@
         "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
         "INGENIUM_MCP_AUDIENCE": "mcp",
         "INGENIUM_PROJECT": "ingenium",
-        "INGENIUM_WORKSPACE_ID": "ingenium-local-workspace",
+        "INGENIUM_WORKSPACE_ID": "acceptance-ingenium",
         "INGENIUM_API_TIMEOUT": "10000",
         "LOG_LEVEL": "info"
       }
