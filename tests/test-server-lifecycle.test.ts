@@ -160,6 +160,16 @@ describe("test server lifecycle contracts", () => {
       secure: true,
       httpOnly: true,
     })]);
+    expect(storageState.origins).toEqual([
+      {
+        origin: `http://127.0.0.1:${context.ports.dashboard}`,
+        localStorage: [{ name: "ingenium_global_project", value: context.project }],
+      },
+      {
+        origin: `http://localhost:${context.ports.dashboard}`,
+        localStorage: [{ name: "ingenium_global_project", value: context.project }],
+      },
+    ]);
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
       headers: {

@@ -14,6 +14,7 @@ import { getTestRunApiTokenPath, type TestRunContext, type TestRunManifest } fro
 
 export const DASHBOARD_API_TOKEN_FILE_ENV = "INGENIUM_API_TOKEN_FILE";
 export const DASHBOARD_STORAGE_STATE_FILENAME = "browser-storage-state.json";
+export const DASHBOARD_GLOBAL_PROJECT_STORAGE_KEY = "ingenium_global_project";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const TOKEN_MODE = 0o600;
 
@@ -144,6 +145,25 @@ export function getDashboardStorageStatePath(context: Pick<TestRunManifest, "run
     throw new Error("Refusing to use a dashboard storage state outside the test-run directory");
   }
   return storageStatePath;
+}
+
+interface DashboardStorageState {
+  cookies: unknown[];
+  origins?: unknown[];
+}
+
+export function normalizeDashboardStorageState(
+  context: Pick<TestRunContext, "ports" | "project">,
+  storageState: DashboardStorageState,
+): DashboardStorageState {
+  const localStorage = [{ name: DASHBOARD_GLOBAL_PROJECT_STORAGE_KEY, value: context.project }];
+  return {
+    cookies: storageState.cookies,
+    origins: ["127.0.0.1", "localhost"].map((host) => ({
+      origin: `http://${host}:${context.ports.dashboard}`,
+      localStorage,
+    })),
+  };
 }
 
 export function writeDashboardStorageState(

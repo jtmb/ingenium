@@ -24,7 +24,7 @@ import {
   readProcStat,
   type ProcessIdentity,
 } from "./test-run-process-discovery";
-import { writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
+import { normalizeDashboardStorageState, writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
 import {
   FIXTURE_INTERNAL_SERVICE_HEADER,
   TEST_API_TOKEN,
@@ -193,7 +193,7 @@ export async function createTestRunBrowserStorageState(context: TestRunContext) 
   });
   if (!session.ok) throw new Error(`Unable to create fixture dashboard session: API returned ${session.status}`);
   const sessionToken = cookieFromResponse(session, "__Host-ingenium_session");
-  return {
+  return normalizeDashboardStorageState(context, {
     cookies: [{
       name: "__Host-ingenium_session",
       value: sessionToken,
@@ -205,7 +205,7 @@ export async function createTestRunBrowserStorageState(context: TestRunContext) 
       sameSite: "Strict",
     }],
     origins: [],
-  };
+  });
 }
 
 export async function provisionTestRunBrowserSession(context: TestRunContext): Promise<string> {

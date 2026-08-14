@@ -116,6 +116,10 @@ describe("AUTH-105 content tenancy", () => {
   it("allows organization-local Docs names and slugs", () => {
     const foreignOrganization = organizations.createOrganization("Foreign docs", "foreign-docs");
     const db = getDb();
+    expect(db.prepare("SELECT name, slug FROM docs_spaces WHERE organization_id = ?").get(foreignOrganization)).toEqual({
+      name: `Organization ${foreignOrganization.slice(0, 8)}`,
+      slug: `organization-${foreignOrganization.slice(0, 8)}`,
+    });
     for (const organizationId of [organizations.BOOTSTRAP_ORGANIZATION_ID, foreignOrganization]) {
       db.prepare(
         "INSERT INTO docs_spaces (organization_id, name, slug, description, icon) VALUES (?, 'Shared', 'shared', '', 'folder')",

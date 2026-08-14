@@ -59,6 +59,7 @@ export default defineConfig({
     "**/mcp-tools.spec.ts",
     "**/ingenium-dashboard/mcp-tool-controls.spec.ts",
     "**/ingenium-dashboard/homepage.spec.ts",
+    "**/ingenium-dashboard/fixture-project-context.spec.ts",
     "**/ingenium-dashboard/dashboard.spec.ts",
     "**/ingenium-dashboard/docs-ai.spec.ts",
     "**/ingenium-dashboard/chat-states.spec.ts",

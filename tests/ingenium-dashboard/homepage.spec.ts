@@ -42,8 +42,8 @@ test("bootstraps a clean QA Vision browser into the isolated fixture session", a
     const fixtureUrl = new URL("/test-fixture/session", baseURL);
     fixtureUrl.hostname = "localhost";
     await page.goto(fixtureUrl.toString());
-    const project = new URL(page.url()).searchParams.get("project");
-    expect(project).toBe(getDefaultSuiteRuntime().project);
+    expect(new URL(page.url()).searchParams.has("project")).toBe(false);
+    const project = getDefaultSuiteRuntime().project;
     expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ingenium_session")).toBe(true);
     expect(browserServerOnlyHeaders).toEqual([]);
 
@@ -90,7 +90,9 @@ test("bootstraps a clean QA Vision browser into the isolated fixture session", a
     });
     expect(fixtureState.projectsStatus, fixtureState.projectsBody).toBe(200);
     expect(fixtureState.organizationsStatus, fixtureState.organizationsBody).toBe(200);
-    expect(fixtureState.projects.map((entry: { name: string }) => entry.name)).toEqual([project]);
+    expect(fixtureState.projects).toEqual([
+      expect.objectContaining({ name: project, is_global: 1 }),
+    ]);
     expect(fixtureState.organizations.map((entry: { slug: string }) => entry.slug)).toEqual([project]);
     expect(fixtureState.csrfStatus, fixtureState.csrfBody).toBe(200);
     expect(fixtureState.mutationStatus, fixtureState.mutationBody).toBe(201);

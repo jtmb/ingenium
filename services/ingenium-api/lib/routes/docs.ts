@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authorization, docs, organizations, repositoryDocs, MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE, getDb, execTransaction, checkpointAfterWrite } from "ingenium-core";
+import { authorization, docs, organizations, projects, repositoryDocs, MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE, getDb, execTransaction, checkpointAfterWrite } from "ingenium-core";
 import formidable from "formidable";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync, createReadStream, statSync } from "node:fs";
@@ -209,7 +209,9 @@ function organizationId(req: any, res: any): string | null {
   const requestPrincipal = req.principal ?? { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
   const supplied = typeof req.query.organization_id === "string" ? req.query.organization_id : undefined;
   const principal = authorizationPrincipal(requestPrincipal);
-  const target = supplied ?? principal.organizationId ?? organizations.BOOTSTRAP_ORGANIZATION_ID;
+  const target = supplied ?? principal.organizationId
+    ?? projects.getGlobalProject()?.organization_id
+    ?? organizations.BOOTSTRAP_ORGANIZATION_ID;
   if (!req.authorizationPolicy) return target;
   if (!target) {
     res.status(400).json({ error: { code: "BAD_REQUEST", message: "organization_id is required" } });

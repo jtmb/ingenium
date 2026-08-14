@@ -117,11 +117,23 @@ export function createOrganization(name: string, slug: string): string {
     throw new Error("Invalid organization");
   }
   const id = execTransaction(() => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
     const organizationId = randomUUID();
     const now = new Date().toISOString();
-    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    database.prepare(
       "INSERT INTO organizations (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     ).run(organizationId, normalizedName, normalizedSlug, now, now);
+    database.prepare(
+      `INSERT INTO docs_spaces
+       (organization_id, name, slug, description, icon, is_global, created_at, updated_at)
+       VALUES (?, ?, ?, 'Organization documentation', 'folder', 0, ?, ?)`,
+    ).run(
+      organizationId,
+      `Organization ${organizationId.slice(0, 8)}`,
+      `organization-${organizationId.slice(0, 8)}`,
+      now,
+      now,
+    );
     return organizationId;
   });
   checkpointAfterWrite();

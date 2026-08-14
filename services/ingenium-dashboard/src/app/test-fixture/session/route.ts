@@ -74,7 +74,6 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const location = new URL("/", fixture.dashboardOrigin);
-  location.searchParams.set("project", fixture.project);
   return new Response(null, {
     status: 302,
     headers: {

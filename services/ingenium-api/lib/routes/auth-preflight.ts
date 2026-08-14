@@ -47,7 +47,7 @@ function ensureFixtureProject(projectName: string) {
   if (existing && existing.organization_id !== organization.id) {
     throw new AppError("Fixture project ownership is inconsistent", "FIXTURE_NOT_READY", 409);
   }
-  return { organization, project: existing ?? projects.createProject(projectName, false, organization.id) };
+  return { organization, project: projects.createProject(projectName, true, organization.id) };
 }
 
 function bindFixtureOwner(projectName: string, userId: string): void {

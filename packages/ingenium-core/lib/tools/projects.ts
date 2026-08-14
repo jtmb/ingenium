@@ -358,7 +358,10 @@ export function getFormerGlobalProjectIds(canonicalGlobalProjectId: string): str
 export function getCanonicalGlobalProject(): Project | undefined {
   const global = getGlobalProject();
   if (!global) return undefined;
-  if (global.name !== "global-default") throw new CanonicalGlobalProjectResolutionError();
+  const isolatedFixtureGlobal = process.env.INGENIUM_API_TEST_MODE === "1"
+    && global.name === process.env.INGENIUM_PROJECT
+    && global.name.startsWith("playwright-test-");
+  if (global.name !== "global-default" && !isolatedFixtureGlobal) throw new CanonicalGlobalProjectResolutionError();
   return global;
 }
 

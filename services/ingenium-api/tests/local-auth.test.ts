@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authentication, authorization, bootstrap, invitations, organizations, projects, resetDbForTest, runtimes, securityTokens } from "ingenium-core";
+import { authentication, authorization, bootstrap, docs, invitations, organizations, projects, resetDbForTest, runtimes, securityTokens } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -137,9 +137,14 @@ describe("AUTH-101 local API", () => {
       scopes: ["user:*"],
     });
     expect(visibleProjects.map((project) => project.name)).toEqual(["playwright-test-auth108"]);
+    expect(visibleProjects[0]?.is_global).toBe(1);
     expect(visibleProjects[0]?.organization_id).not.toBe(organizationId);
     expect(organizations.listUserOrganizations(fixtureUserId).map((organization) => organization.slug))
       .toEqual(["playwright-test-auth108"]);
+    expect(projects.getCanonicalGlobalProject()?.name).toBe("playwright-test-auth108");
+    expect(docs.listSpaces(visibleProjects[0]!.organization_id)).toEqual([
+      expect.objectContaining({ slug: expect.stringMatching(/^organization-[0-9a-f]{8}$/) }),
+    ]);
   });
 
   it("requires session-bound CSRF for unsafe cookie-authenticated requests", async () => {

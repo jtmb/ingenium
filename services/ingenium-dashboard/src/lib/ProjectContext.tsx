@@ -230,8 +230,12 @@ export function useProjectResolution(): ProjectResolutionState {
         }
 
         try {
-          localStorage.setItem(STORAGE_KEY, resolution.project);
-          if (!preference.hasExplicitPreference) localStorage.setItem(GLOBAL_CACHE_KEY, resolution.project);
+          if (preference.hasExplicitPreference) {
+            localStorage.setItem(STORAGE_KEY, resolution.project);
+          } else {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.setItem(GLOBAL_CACHE_KEY, resolution.project);
+          }
         } catch {
           // Storage is an optimization only.
         }

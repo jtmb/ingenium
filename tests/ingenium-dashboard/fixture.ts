@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { getDashboardStorageStatePath, writeDashboardStorageState } from "./fixture-credentials";
+import { getDashboardStorageStatePath, normalizeDashboardStorageState, writeDashboardStorageState } from "./fixture-credentials";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const test = base.extend<{}, { authenticatedStatePath?: string }>({
@@ -15,7 +15,8 @@ const test = base.extend<{}, { authenticatedStatePath?: string }>({
     });
     await use(context);
     if (authenticatedStatePath) {
-      writeDashboardStorageState(getDefaultSuiteRuntime().context, await context.storageState());
+      const runtime = getDefaultSuiteRuntime();
+      writeDashboardStorageState(runtime.context, normalizeDashboardStorageState(runtime.context, await context.storageState()));
     }
     await context.close();
   },

@@ -129,7 +129,9 @@ After fixture setup reports its manifest and ports, passive QA Vision can open
 origin allows Chromium to accept the Secure fixture cookie over loopback HTTP.
 The dashboard performs
 the manifest-nonce-bound exchange server-side, installs only the isolated
-browser session cookie, and redirects to the run-owned project. The route is
+browser session cookie, and redirects without a `project` query. The dashboard
+resolves the fixture's sole run-owned global/home project; explicit project
+tests may still select that same isolated project. The route is
 `404` outside test mode; neither the API bearer nor fixture credentials enter
 the browser.
 
@@ -418,8 +420,8 @@ production credential:
 npx tsx tests/run-dashboard-route-parity.ts
 ```
 
-The wrapper allocates a run-owned `playwright-test-*` project and organization,
-starts `next start`, and provisions a project-scoped synthetic browser user. Each
+The wrapper allocates a run-owned `playwright-test-*` global/home project and organization,
+starts `next start`, and provisions an organization-scoped synthetic browser user. Each
 test re-enters through `/test-fixture/session` and proves that exchange rotated
 the synthetic session before interactive navigation. Browser requests never contain the internal fixture
 bearer or binding headers. The route inventory uses the run project rather than
