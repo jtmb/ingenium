@@ -10,6 +10,7 @@ describe("AUTH-102 canonical API policy", () => {
   it.each([
     ["GET", "/api/v1/tasks", "project", "read"],
     ["POST", "/api/v1/jobs/job/run", "project", "execute"],
+    ["GET", "/api/v1/jobs/runs/run-id/logs", "installation", "read"],
     ["GET", "/api/v1/context/conversations", "project", "read"],
     ["GET", "/api/v1/emails/accounts", "project", "read"],
     ["POST", "/api/v1/vault/items/item/reveal", "project", "write"],

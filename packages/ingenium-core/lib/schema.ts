@@ -225,6 +225,10 @@ export interface SkillProposalCounts {
 export interface Task {
   id: string;
   project_id: string;
+  organization_id: string;
+  owner_kind: "user" | "organization";
+  owner_user_id?: string | null;
+  visibility: "private" | "organization";
   title: string;
   description?: string;
   column_id: string;
@@ -258,6 +262,7 @@ export type TaskSourceType = typeof TASK_SOURCE_TYPES[number];
 export interface TaskSourceReference {
   id: string;
   project_id: string;
+  organization_id: string;
   task_id: string;
   source_type: TaskSourceType;
   source_id: string;
@@ -385,6 +390,11 @@ export interface JobVaultReference {
 export interface Job {
   id: string;
   project_id: string;
+  organization_id: string;
+  owner_kind: "user" | "organization";
+  owner_user_id?: string | null;
+  visibility: "private" | "organization";
+  service_principal_id: string;
   name: string;
   description?: string | null;
   agent: string;
@@ -394,10 +404,15 @@ export interface Job {
   enabled: boolean;
   timeout_minutes: number;
   revision: number;
+  schedule_revision: number;
   vault_references: JobVaultReference[];
   created_at: string;
   updated_at: string;
 }
+
+export const MAX_CONCURRENT_AUTOMATION_RUNS = 2;
+export const MAX_CONCURRENT_RUNS_PER_ORGANIZATION = 1;
+export const MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL = 1;
 
 /** JOB-100's intentionally small, trusted-only trigger catalog. */
 export const TRUSTED_JOB_EVENT_TYPES = [
@@ -450,6 +465,17 @@ export type TrustedJobEventRecord = z.infer<typeof TrustedJobEventRecordSchema>;
 export interface JobRun {
   id: string;
   job_id: string;
+  project_id: string;
+  organization_id: string;
+  effective_service_principal_id: string;
+  delegator_actor_type?: "compatibility" | "user" | "service" | "system" | null;
+  delegator_actor_id?: string | null;
+  source_actor_type?: "compatibility" | "user" | "service" | "system" | null;
+  source_actor_id?: string | null;
+  job_revision: number;
+  schedule_revision?: number | null;
+  scheduled_for?: string | null;
+  authorization_revision: number;
   status: "queued" | "running" | "success" | "failed" | "timeout" | "cancelled";
   trigger: "manual" | "cron" | "event";
   started_at?: string | null;
@@ -865,6 +891,7 @@ export type ContextCheckpoint = z.infer<typeof ContextCheckpointSchema>;
 export const ContextCheckpointAuditEventSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string().uuid(),
+  organization_id: z.string().uuid(),
   event_type: z.enum([
     "conversation_archived",
     "conversation_unarchived",
@@ -876,6 +903,12 @@ export const ContextCheckpointAuditEventSchema = z.object({
   expected_revision: z.coerce.number().int().nonnegative(),
   checkpoint_state_hash: ContextHashSchema.nullable(),
   archive_sequence: z.coerce.number().int().nonnegative().nullable(),
+  source_actor_type: z.enum(["compatibility", "user", "service", "system"]),
+  source_actor_id: z.string().max(128).nullable(),
+  delegator_actor_type: z.enum(["compatibility", "user", "service", "system"]).nullable(),
+  delegator_actor_id: z.string().max(128).nullable(),
+  request_id: z.string().max(128).nullable(),
+  correlation_id: z.string().max(128).nullable(),
   created_at: z.string().datetime(),
 });
 export type ContextCheckpointAuditEvent = z.infer<typeof ContextCheckpointAuditEventSchema>;

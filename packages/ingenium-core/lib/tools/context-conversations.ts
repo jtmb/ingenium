@@ -218,6 +218,15 @@ function parseConversationArchiveInput(input: unknown) {
   return parsed.data;
 }
 
+export interface ContextMaintenanceProvenance {
+  actorType: "compatibility" | "user" | "service" | "system";
+  actorId?: string | null;
+  delegatorActorType?: "compatibility" | "user" | "service" | "system" | null;
+  delegatorActorId?: string | null;
+  requestId?: string | null;
+  correlationId?: string | null;
+}
+
 function readConversation(row: unknown): ContextConversation {
   const parsed = ContextConversationSchema.safeParse(row);
   if (!parsed.success) throw new Error("Invalid persisted context conversation");
@@ -388,17 +397,23 @@ function insertCheckpointAuditEvent(
   const id = randomUUID();
   db.prepare(
     `INSERT INTO context_checkpoint_audit_events
-     (id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
-      expected_revision, checkpoint_state_hash, authorization_id, archive_sequence, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, project_id, organization_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+      expected_revision, checkpoint_state_hash, authorization_id, archive_sequence,
+      source_actor_type, source_actor_id, delegator_actor_type, delegator_actor_id, request_id, correlation_id, created_at)
+     SELECT ?, ?, authorization.organization_id, ?, ?, ?, ?, ?, ?, authorization.id, ?,
+            authorization.actor_type, authorization.actor_id, authorization.delegator_actor_type,
+            authorization.delegator_actor_id, authorization.request_id, authorization.correlation_id, ?
+     FROM context_checkpoint_maintenance_authorizations authorization
+     WHERE authorization.project_id = ? AND authorization.id = ?`,
   ).run(
     id, input.projectId, input.eventType, input.conversationId, input.checkpointId,
     input.targetConversationId, input.expectedRevision, input.checkpointStateHash,
-    input.authorizationId, input.archiveSequence, input.createdAt,
+    input.archiveSequence, input.createdAt, input.projectId, input.authorizationId,
   );
   const event = readCheckpointAuditEvent(db.prepare(
-    `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
-            expected_revision, checkpoint_state_hash, archive_sequence, created_at
+    `SELECT id, project_id, organization_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+            expected_revision, checkpoint_state_hash, archive_sequence, source_actor_type, source_actor_id,
+            delegator_actor_type, delegator_actor_id, request_id, correlation_id, created_at
      FROM context_checkpoint_audit_events WHERE project_id = ? AND id = ?`,
   ).get(input.projectId, id));
   appendTrustedJobEventInTransaction(db, input.projectId, trustedJobEventFromContextAuditEvent(event));
@@ -924,6 +939,7 @@ export function authorizeContextMaintenanceAction(
   projectId: string,
   conversationId: string,
   input: unknown,
+  provenance: ContextMaintenanceProvenance = { actorType: "compatibility" },
 ): ContextMaintenanceAuthorization {
   const value = parseMaintenanceAuthorizationInput(input);
   const confirmationToken = randomBytes(32).toString("base64url");
@@ -947,12 +963,16 @@ export function authorizeContextMaintenanceAction(
     const id = randomUUID();
     db.prepare(
       `INSERT INTO context_checkpoint_maintenance_authorizations
-       (id, project_id, operation, conversation_id, checkpoint_id, expected_revision,
-        confirmation_hash, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, project_id, organization_id, operation, conversation_id, checkpoint_id, expected_revision,
+        confirmation_hash, actor_type, actor_id, delegator_actor_type, delegator_actor_id,
+        request_id, correlation_id, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      id, projectId, value.operation, conversationId, value.checkpointId ?? null,
-      value.expectedRevision, sha256(confirmationToken), expiresAt, createdAt,
+      id, projectId, projectOrganizationId(db, projectId), value.operation, conversationId,
+      value.checkpointId ?? null, value.expectedRevision, sha256(confirmationToken),
+      provenance.actorType, provenance.actorId ?? null, provenance.delegatorActorType ?? null,
+      provenance.delegatorActorId ?? null, provenance.requestId ?? null, provenance.correlationId ?? null,
+      expiresAt, createdAt,
     );
     return {
       operation: value.operation,
@@ -1038,15 +1058,17 @@ export function listContextCheckpointAuditEvents(
   }
   const rows = options.conversationId === undefined
     ? db.prepare(
-      `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
-              expected_revision, checkpoint_state_hash, archive_sequence, created_at
+      `SELECT id, project_id, organization_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+              expected_revision, checkpoint_state_hash, archive_sequence, source_actor_type, source_actor_id,
+              delegator_actor_type, delegator_actor_id, request_id, correlation_id, created_at
        FROM context_checkpoint_audit_events
        WHERE project_id = ?
        ORDER BY created_at DESC, id DESC LIMIT ?`,
     ).all(projectId, limit)
     : db.prepare(
-      `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
-              expected_revision, checkpoint_state_hash, archive_sequence, created_at
+      `SELECT id, project_id, organization_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+              expected_revision, checkpoint_state_hash, archive_sequence, source_actor_type, source_actor_id,
+              delegator_actor_type, delegator_actor_id, request_id, correlation_id, created_at
        FROM context_checkpoint_audit_events
        WHERE project_id = ? AND conversation_id = ?
        ORDER BY created_at DESC, id DESC LIMIT ?`,

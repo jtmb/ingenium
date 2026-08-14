@@ -17,6 +17,13 @@ const core = vi.hoisted(() => ({
   jobs: {
     listJobs: vi.fn(() => []),
     startJobRun: vi.fn(),
+    orderJobsForFairDispatch: vi.fn((candidates: unknown[]) => candidates),
+  },
+  jobEventDeliveries: {
+    snapshotTrustedJobEvents: vi.fn(),
+    listExpiredJobEventLeases: vi.fn(() => []),
+    claimNextJobEventDelivery: vi.fn(),
+    sanitizeJobEventText: vi.fn((value: string) => value),
   },
   maintenanceLocks: {
     generateOwnerToken: vi.fn(() => "lock-token"),
@@ -41,7 +48,8 @@ const email = vi.hoisted(() => ({
 
 vi.mock("ingenium-core", () => core);
 vi.mock("ingenium-email", () => email);
-vi.mock("../lib/job-runner.js", () => ({ executeJobRun: vi.fn(), recoverVaultSecretRunDirectories: vi.fn(() => Promise.resolve()) }));
+const runner = vi.hoisted(() => ({ executeJobRun: vi.fn(), recoverVaultSecretRunDirectories: vi.fn(() => Promise.resolve()) }));
+vi.mock("../lib/job-runner.js", () => runner);
 
 import { isSchedulerRunning, startScheduler, stopScheduler } from "../lib/scheduler.js";
 import {
@@ -141,5 +149,38 @@ describe("scheduler lifecycle ownership", () => {
       undefined,
       expect.objectContaining({ ownerToken: "lock-token" }),
     );
+  });
+
+  it("dispatches a due job from each organization before revisiting the noisy tenant", async () => {
+    const firstOrganizationJobs = [
+      { id: "first-a", project_id: "first-project", organization_id: "first-org", name: "first-a", enabled: true, schedule_cron: "* * * * *", schedule_revision: 0, agent: "agent", prompt_template: "prompt", timeout_minutes: 1 },
+      { id: "first-b", project_id: "first-project", organization_id: "first-org", name: "first-b", enabled: true, schedule_cron: "* * * * *", schedule_revision: 0, agent: "agent", prompt_template: "prompt", timeout_minutes: 1 },
+    ];
+    const secondOrganizationJob = { id: "second", project_id: "second-project", organization_id: "second-org", name: "second", enabled: true, schedule_cron: "* * * * *", schedule_revision: 0, agent: "agent", prompt_template: "prompt", timeout_minutes: 1 };
+    core.projects.listProjects.mockReturnValue([
+      { id: "first-project", archived_at: null },
+      { id: "second-project", archived_at: null },
+    ]);
+    core.jobs.listJobs.mockImplementation((projectId: string) => (
+      projectId === "first-project" ? firstOrganizationJobs : [secondOrganizationJob]
+    ));
+    core.jobs.orderJobsForFairDispatch.mockImplementation((candidates: typeof firstOrganizationJobs) => [
+      candidates[0]!, secondOrganizationJob, candidates[1]!,
+    ]);
+    core.jobs.startJobRun.mockImplementation((_projectId: string, jobId: string) => (
+      jobId === "first-b"
+        ? { status: "queued", reason: "Automation concurrency quota is full" }
+        : { id: `${jobId}-run` }
+    ));
+    runner.executeJobRun.mockResolvedValue(undefined);
+
+    startScheduler(4097);
+    await vi.advanceTimersByTimeAsync(70_001);
+
+    expect(core.jobs.orderJobsForFairDispatch).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "first-a" }), expect.objectContaining({ id: "second" })]),
+      "cron",
+    );
+    expect(runner.executeJobRun.mock.calls.map((call) => call[1].organization_id)).toEqual(["first-org", "second-org"]);
   });
 });

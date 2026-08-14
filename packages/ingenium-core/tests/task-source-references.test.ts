@@ -40,6 +40,16 @@ function setup() {
   return { db, global, local, other };
 }
 
+function createMailAccount(db: ReturnType<typeof getDb>, organizationId: string, accountId: string): void {
+  const createdAt = "2026-08-01T00:00:00.000Z";
+  db.prepare(
+    `INSERT INTO mail_accounts
+     (id, organization_id, owner_kind, email, name, provider, auth_type, config_json,
+      created_by_actor_type, created_at, updated_at)
+     VALUES (?, ?, 'organization', ?, ?, 'custom', 'app_password', '{}', 'system', ?, ?)`,
+  ).run(accountId, organizationId, `${accountId}@example.test`, accountId, createdAt, createdAt);
+}
+
 afterEach(() => {
   resetDbForTest();
   if (directory) rmSync(directory, { recursive: true, force: true });
@@ -54,11 +64,13 @@ describe("task source references", () => {
   it("atomically captures one source into one todo task and returns the first reference on retry", () => {
     const { db, global } = setup();
     const sourceId = createEmailTaskSourceId("capture-account", "Archive/2026", "capture-42");
+    createMailAccount(db, global.organization_id, "capture-account");
     db.prepare(
       `INSERT INTO email_cache
-       (account_id, folder, uid, subject, snippet, envelope_json, cached_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (organization_id, account_id, folder, uid, subject, snippet, envelope_json, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
+      global.organization_id,
       "capture-account",
       "Archive/2026",
       "capture-42",
@@ -97,9 +109,10 @@ describe("task source references", () => {
       content: "Foreign context body must not create a local task.",
     });
     const localEmailId = createEmailTaskSourceId("local-account", "INBOX", "43");
+    createMailAccount(db, global.organization_id, "local-account");
     db.prepare(
-      "INSERT INTO email_cache (account_id, folder, uid, cached_at) VALUES (?, ?, ?, ?)",
-    ).run("local-account", "INBOX", "43", "2026-08-01T00:00:00.000Z");
+      "INSERT INTO email_cache (organization_id, account_id, folder, uid, cached_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(global.organization_id, "local-account", "INBOX", "43", "2026-08-01T00:00:00.000Z");
     const beforeTasks = (db.prepare("SELECT count(*) AS count FROM tasks").get() as { count: number }).count;
     const beforeActivity = (db.prepare("SELECT count(*) AS count FROM task_activity").get() as { count: number }).count;
 
@@ -193,11 +206,13 @@ describe("task source references", () => {
     const globalTask = createTask(global.id, "Global source task");
     const localTask = createTask(local.id, "Local source task");
     const emailId = createEmailTaskSourceId("account-a", "INBOX", "42");
+    createMailAccount(db, global.organization_id, "account-a");
     db.prepare(
       `INSERT INTO email_cache
-       (account_id, folder, uid, subject, snippet, envelope_json, cached_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run("account-a", "INBOX", "42", "Secret subject", "Secret snippet", '{"authorization":"secret"}', "2026-08-01T00:00:00.000Z");
+       (organization_id, account_id, folder, uid, subject, snippet, envelope_json, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(global.organization_id, "account-a", "INBOX", "42", "Secret subject", "Secret snippet",
+      '{"authorization":"secret"}', "2026-08-01T00:00:00.000Z");
 
     const context = ingestContextRagDocument(local.id, {
       title: "Context handoff",
@@ -245,10 +260,12 @@ describe("task source references", () => {
     const { db, global, local, other } = setup();
     const globalTask = createTask(global.id, "Global task");
     const localTask = createTask(local.id, "Local task");
+    expect(getTaskSourceReferenceTaskScope(local.id, localTask.id)?.organization_id).toBe(local.organization_id);
     const emailId = createEmailTaskSourceId("account-b", "Archive", "43");
+    createMailAccount(db, global.organization_id, "account-b");
     db.prepare(
-      "INSERT INTO email_cache (account_id, folder, uid, cached_at) VALUES (?, ?, ?, ?)",
-    ).run("account-b", "Archive", "43", "2026-08-01T00:00:00.000Z");
+      "INSERT INTO email_cache (organization_id, account_id, folder, uid, cached_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(global.organization_id, "account-b", "Archive", "43", "2026-08-01T00:00:00.000Z");
     const foreignJob = createJob(other.id, "Foreign job", undefined, "agent", "prompt");
     const localJob = createJob(local.id, "Local job", undefined, "agent", "prompt");
 

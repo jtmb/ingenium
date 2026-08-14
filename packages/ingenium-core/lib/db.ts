@@ -178,6 +178,12 @@ interface JobVaultRevisionAuditMigrationState {
   missing: string[];
 }
 
+interface AutomationTenancyMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 interface RestorePlansMigrationState {
   any: boolean;
   complete: boolean;
@@ -677,7 +683,7 @@ function inspectTaskSourceReferencesMigration(db: Database.Database): TaskSource
       missing.push(`${table} → tasks composite foreign key`);
     }
     const foreignKeys = db.prepare(`PRAGMA foreign_key_list('${table}')`).all() as Array<{ table: string }>;
-    if (foreignKeys.some((foreignKey) => foreignKey.table !== "tasks")) {
+    if (foreignKeys.some((foreignKey) => foreignKey.table !== "tasks" && foreignKey.table !== "organizations")) {
       missing.push(`${table} has unsupported source foreign key`);
     }
   }
@@ -2094,6 +2100,91 @@ function inspectContentTenancyMigration(db: Database.Database): ContentTenancyMi
   return state;
 }
 
+function inspectAutomationTenancyMigration(db: Database.Database): AutomationTenancyMigrationState {
+  const state = inspectMigrationComponents(db, {
+    automation_principal_grants: ["id", "organization_id", "project_id", "service_principal_id", "permission", "status", "revision"],
+    automation_dispatch_cursors: ["dispatch_kind", "last_organization_id", "last_claimed_at", "revision"],
+    automation_tenancy_manifests: ["migration", "organization_id", "counts_json", "identities_json", "phase", "created_at"],
+  }, [
+    "idx_jobs_automation_scope", "idx_jobs_automation_owner", "idx_job_runs_cron_claim",
+    "idx_job_runs_automation_scope", "idx_automation_principal_grants_scope", "idx_tasks_automation_owner",
+  ], [
+    "automation_principal_grants_scope_insert", "automation_principal_grants_revision_update", "automation_dispatch_cursors_revision_update",
+    "context_checkpoint_maintenance_authorizations_automation_scope_insert", "context_checkpoint_audit_events_automation_scope_insert",
+    "jobs_automation_scope_insert", "jobs_automation_scope_immutable", "job_runs_automation_scope_insert", "job_runs_automation_scope_update",
+    "job_run_logs_automation_scope_insert", "job_run_logs_automation_scope_update", "trusted_job_events_automation_scope_insert",
+    "job_event_dispatches_automation_scope_insert", "job_event_deliveries_automation_scope_insert", "job_event_deliveries_automation_scope_update",
+    "job_event_attempts_automation_scope_insert", "job_event_attempts_automation_scope_update",
+    "job_vault_references_automation_scope_insert", "job_vault_references_automation_scope_update",
+    "job_vault_reference_audit_automation_scope_insert", "job_vault_runs_automation_scope_insert",
+    "job_vault_runs_automation_scope_update", "job_vault_run_items_automation_scope_insert", "job_vault_runtime_audit_automation_scope_insert",
+    "tasks_automation_scope_insert", "tasks_automation_scope_immutable", "task_comments_automation_scope_insert", "task_comments_automation_scope_update",
+    "task_activity_automation_scope_insert", "task_activity_automation_scope_update", "task_links_automation_scope_insert", "task_links_automation_scope_update",
+    "task_notifications_automation_scope_insert", "task_notifications_automation_scope_update",
+    "board_config_automation_scope_insert", "board_config_automation_scope_update",
+    "task_source_references_automation_scope_insert", "task_mutation_receipts_automation_scope_insert",
+    "pipeline_events_automation_scope_insert", "pipeline_events_automation_scope_update",
+    "automation_tenancy_manifests_immutable_update", "automation_tenancy_manifests_immutable_delete",
+  ]);
+  const columnsByTable: Record<string, string[]> = {
+    context_checkpoint_maintenance_authorizations: ["organization_id", "actor_type", "actor_id", "delegator_actor_type", "delegator_actor_id", "request_id", "correlation_id"],
+    context_checkpoint_audit_events: ["organization_id", "source_actor_type", "source_actor_id", "delegator_actor_type", "delegator_actor_id", "request_id", "correlation_id"],
+    jobs: ["organization_id", "owner_kind", "owner_user_id", "visibility", "service_principal_id", "schedule_revision", "created_by_actor_type", "created_by_actor_id"],
+    job_runs: ["organization_id", "effective_service_principal_id", "delegator_actor_type", "delegator_actor_id", "source_actor_type", "source_actor_id", "job_revision", "schedule_revision", "scheduled_for", "authorization_revision"],
+    job_run_logs: ["organization_id"],
+    trusted_job_events: ["organization_id", "source_actor_type", "source_actor_id"],
+    job_event_dispatches: ["organization_id"],
+    job_event_deliveries: ["organization_id", "effective_service_principal_id", "source_actor_type", "source_actor_id", "job_revision", "authorization_revision"],
+    job_event_attempts: ["organization_id", "effective_service_principal_id", "source_actor_type", "source_actor_id"],
+    job_vault_references: ["organization_id", "grant_revision"],
+    job_vault_reference_audit: ["organization_id", "actor_type", "actor_id"],
+    job_vault_runs: ["organization_id", "effective_service_principal_id", "job_revision", "authorization_revision"],
+    job_vault_run_items: ["organization_id", "grant_revision"],
+    job_vault_runtime_audit: ["organization_id", "effective_service_principal_id"],
+    tasks: ["organization_id", "owner_kind", "owner_user_id", "visibility", "created_by_actor_type", "created_by_actor_id"],
+    task_comments: ["organization_id"], task_activity: ["organization_id"], task_links: ["organization_id"],
+    task_notifications: ["organization_id"], board_config: ["organization_id"], task_source_references: ["organization_id"],
+    task_mutation_receipts: ["organization_id"], pipeline_events: ["effective_service_principal_id", "source_run_id"],
+  };
+  for (const [table, columns] of Object.entries(columnsByTable)) {
+    const present = new Set((db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map(({ name }) => name));
+    const found = columns.filter((column) => present.has(column));
+    state.any ||= found.length > 0;
+    for (const column of columns) if (!present.has(column)) state.missing.push(`${table}.${column} column`);
+  }
+  if (state.missing.length === 0) {
+    const unmapped = db.prepare(
+      `SELECT (SELECT count(*) FROM jobs WHERE organization_id IS NULL OR service_principal_id IS NULL)
+        + (SELECT count(*) FROM job_runs WHERE organization_id IS NULL OR effective_service_principal_id IS NULL)
+        + (SELECT count(*) FROM job_run_logs WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM tasks WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM task_comments WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM task_activity WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM task_links WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM task_notifications WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM board_config WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM task_source_references WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM task_mutation_receipts WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM trusted_job_events WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM job_event_dispatches WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM job_event_deliveries WHERE organization_id IS NULL OR effective_service_principal_id IS NULL)
+        + (SELECT count(*) FROM job_event_attempts WHERE organization_id IS NULL OR effective_service_principal_id IS NULL)
+        + (SELECT count(*) FROM job_vault_references WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM job_vault_reference_audit WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM job_vault_runs WHERE organization_id IS NULL OR effective_service_principal_id IS NULL)
+        + (SELECT count(*) FROM job_vault_run_items WHERE organization_id IS NULL)
+        + (SELECT count(*) FROM job_vault_runtime_audit WHERE organization_id IS NULL OR effective_service_principal_id IS NULL)
+        + (SELECT count(*) FROM pipeline_events
+           WHERE (source_run_id IS NULL) <> (effective_service_principal_id IS NULL)) AS count`,
+    ).get() as { count: number };
+    const manifest = db.prepare("SELECT phase FROM automation_tenancy_manifests WHERE migration = 99").get() as { phase: string } | undefined;
+    if (unmapped.count > 0) state.missing.push("automation ownership backfill");
+    if (manifest?.phase !== "verified") state.missing.push("migration 099 verified manifest");
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
 function inspectSynthesisBatchMigration(db: Database.Database): SynthesisBatchMigrationState {
   const tables: Record<string, string[]> = {
     synthesis_batches: [
@@ -3105,7 +3196,7 @@ export function getDb(dbPath?: string): Database.Database {
   return db;
 }
 
-export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098", AuthenticationFoundationMigrationState> {
+export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099", AuthenticationFoundationMigrationState> {
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   return {
     "093": inspectIdentityTenancyMigration(database),
@@ -3114,6 +3205,7 @@ export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "09
     "096": inspectResourceOwnershipMigration(database),
     "097": inspectMailTenancyMigration(database),
     "098": inspectContentTenancyMigration(database),
+    "099": inspectAutomationTenancyMigration(database),
   };
 }
 
@@ -3178,6 +3270,7 @@ function runMigrations(db: Database.Database): void {
             "096_resource_ownership.sql",
              "097_mail_tenancy.sql",
              "098_content_tenancy.sql",
+             "099_automation_tenancy.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -4420,6 +4513,21 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("098", ["foreign key integrity"]);
     }
     logger.info("db", "Applied migration 098_content_tenancy.sql");
+  }
+
+  const automationTenancy = inspectAutomationTenancyMigration(db);
+  if (automationTenancy.any && !automationTenancy.complete) throw restoreMigrationPartialStateError("099", automationTenancy.missing);
+  if (!automationTenancy.complete) {
+    if (!inspectContentTenancyMigration(db).complete) {
+      throw restoreMigrationPartialStateError("099", ["migration 098 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "099_automation_tenancy.sql"), "utf-8"));
+    const applied = inspectAutomationTenancyMigration(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError("099", applied.missing);
+    if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("099", ["foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 099_automation_tenancy.sql");
   }
 
   enforceReservedBrokerInvariant(db);

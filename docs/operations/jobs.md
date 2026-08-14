@@ -8,6 +8,27 @@ description: Job queue and background task monitoring — scheduled and running 
 ## What It Does
 Job queue and background task monitoring page. Displays a list of scheduled and running jobs with their status, progress, and execution history.
 
+## Automation identity and scheduling
+
+Each job belongs to one organization/project and names an effective service
+principal. The principal must be active and hold the project's revisioned
+automation `execute` grant when a run is created and whenever recovery resumes.
+Manual runs record their delegator; trusted events preserve source actor plus
+delivery and attempt provenance.
+
+Cron dispatch uniquely claims the job ID, schedule revision, and UTC minute.
+Repeated scheduler ticks cannot start the same occurrence, and schedule edits
+increment the schedule revision so stale claims are rejected. Cron and event
+dispatch advance durable organization round-robin cursors. The global limit is
+two active runs, with one active run per organization and service principal, so
+one tenant cannot occupy both slots.
+
+Vault item IDs remain metadata-only references. Execution also requires an
+active resource grant for the effective service principal, with the exact grant
+revision captured in run provenance. Raw process details and run logs are
+installation surfaces; organization administrators do not gain access to
+user-private prompts, task content, raw output, or vault plaintext by role alone.
+
 ## How to Use
 1. Navigate to `/jobs` from the dashboard nav bar
 2. Use the **Jobs**, **Event queue**, and **Trusted events** views. The Jobs view displays a **grid of cards**, each showing the job name, agent badge, description, cron schedule, enable/disable toggle, timeout, and a status dot.
@@ -135,14 +156,23 @@ and retain its delivery history instead.
 
 ## Vault-backed runner attempts (VAULT-101)
 
-When a job uses vault references, the runner makes one explicit authorization
+Every runner attempt resolves exactly one provider connection explicitly granted
+to the job's service principal. Organization-owned connections must belong to the
+run organization; installation-owned connections must use an active global-project
+vault credential. Missing, duplicate, expired, or revoked grants fail closed.
+The selected config and auth are written only to the run-owned tmpfs runtime;
+shared OpenCode config/auth files are never copied or inherited.
+Because the selected agent can read its run-local auth file, durable child output
+is reduced to one generic redaction marker for every run.
+
+When a job uses vault references, the runner also makes one explicit authorization
 decision per attempt immediately before spawn. Sealed, missing, deleted,
 foreign-project, revoked, expired, or version-stale references fail closed and
 do not start a child. Retries do not reuse authorization: each attempt resolves
 fresh metadata and authorization, and no automatic unseal is performed.
 
-The runner creates a run-owned `0700` tmpfs directory and `0600` UUID-named
-secret files. It passes only the non-secret
+The runner creates a run-owned `0700` tmpfs directory for every attempt and
+`0600` UUID-named files for referenced secrets. It passes only the non-secret
 `INGENIUM_VAULT_SECRET_FILES` ID-to-path map; values never appear in the
 environment, argv, prompt, logs, API/MCP output, or durable database. Output is
 fully redacted for vault-enabled runs. Process-group recovery and shutdown

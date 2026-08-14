@@ -1,5 +1,6 @@
 import { Router, Response, type Request } from "express";
 import {
+  authorization,
   projects,
   tasks,
   logger,
@@ -7,7 +8,7 @@ import {
   TaskSourceReferenceCreateInputSchema,
   usage,
 } from "ingenium-core";
-import { requireGlobalProject, requireProject } from "../helpers.js";
+import { requestAuthorizationPrincipal, requestContentActor, requireGlobalProject, requireProject } from "../helpers.js";
 import { isOpenCodeError, opencodeClient } from "../opencode-client.js";
 import { getOpenCodeUsageSourceInstance } from "../usage-sync.js";
 
@@ -94,8 +95,35 @@ function taskMutationOptions(req: Request): tasks.TaskMutationOptions {
   };
 }
 
-function requireTaskMember(projectId: string, taskId: string, res: Response): boolean {
-  if (tasks.getTask(projectId, taskId)) return true;
+function taskCreationOptions(req: Request, projectId: string): tasks.TaskMutationOptions {
+  const options = taskMutationOptions(req);
+  const actor = requestContentActor(req, projectId);
+  if (!actor) return options;
+  return {
+    ...options,
+    ownership: {
+      organizationId: actor.organizationId,
+      ownerUserId: actor.ownerUserId,
+      visibility: actor.ownerUserId ? "private" : "organization",
+      actorType: req.principal?.type === "runtime-service" ? "system" : req.principal?.type ?? "compatibility",
+      actorId: req.principal?.id,
+    },
+  };
+}
+
+function visibleTask(req: Request, task: NonNullable<ReturnType<typeof tasks.getTask>>): boolean {
+  if (!req.authorizationPolicy) return true;
+  const principal = requestAuthorizationPrincipal(req);
+  if (principal.type === "compatibility") return true;
+  if (task.visibility === "private") {
+    return (principal.type === "browser-user" || principal.type === "user-token") && principal.id === task.owner_user_id;
+  }
+  return authorization.requireProjectPermission(principal, task.project_id, "tasks", req.authorizationPolicy.permission).allowed;
+}
+
+function requireVisibleTask(req: Request, res: Response, projectId: string, taskId: string): boolean {
+  const task = tasks.getTask(projectId, taskId);
+  if (task && visibleTask(req, task)) return true;
   res.status(404).json({ error: { code: "TASK_NOT_FOUND", message: "Task not found" } });
   return false;
 }
@@ -240,6 +268,7 @@ async function deleteTaskReference(req: Request, res: Response): Promise<void> {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const taskId = req.params.taskId!;
+  if (!requireVisibleTask(req, res, projectId, taskId)) return;
   const referenceId = req.params.referenceId ?? req.query.reference_id;
   if (!tasks.isTaskSourceReferenceId(taskId) || typeof referenceId !== "string" || !tasks.isTaskSourceReferenceId(referenceId)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "reference_id is required" } });
@@ -275,7 +304,7 @@ tasksRouter.get("/search", (req, res) => {
     return;
   }
   const limit = parseInt(req.query.limit as string) || 50;
-  const results = tasks.searchTasks(projectId, query, limit);
+  const results = tasks.searchTasks(projectId, query, limit).filter((task) => visibleTask(req, task));
   res.json({ data: results, total: results.length });
 });
 
@@ -313,7 +342,11 @@ tasksRouter.get("/notifications", (req, res) => {
     return;
   }
   const unreadOnly = req.query.unread === "1" || req.query.unread === "true";
-  const list = tasks.getNotifications(projectId, recipient, unreadOnly);
+  const list = tasks.getNotifications(projectId, recipient, unreadOnly)
+    .filter((notification) => {
+      const task = tasks.getTask(projectId, notification.task_id);
+      return !!task && visibleTask(req, task);
+    });
   res.json({ data: list, total: list.length });
 });
 
@@ -328,6 +361,7 @@ tasksRouter.post("/notifications/:id/read", (req, res) => {
       res.status(404).json({ error: { code: "TASK_NOT_FOUND", message: "Task not found" } });
       return;
     }
+    if (!requireVisibleTask(req, res, projectId, notification.task_id)) return;
     const ok = tasks.markNotificationRead(projectId, id, taskMutationOptions(req));
     if (!ok) {
       res.status(404).json({ error: { code: "TASK_NOT_FOUND", message: "Task not found" } });
@@ -358,6 +392,7 @@ tasksRouter.post("/bulk", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "task_ids array is required" } });
     return;
   }
+  if (!task_ids.every((taskId): taskId is string => typeof taskId === "string" && requireVisibleTask(req, res, projectId, taskId))) return;
   // Filter out undefined values; explicit empty strings mean "clear"
   const cleanFields: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {
@@ -402,7 +437,7 @@ tasksRouter.post("/bulk", (req, res) => {
 tasksRouter.get("/next", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const task = tasks.getNextTask(projectId);
+  const task = tasks.listTasks(projectId, "todo").find((candidate) => visibleTask(req, candidate));
   if (!task) {
     res.json({ data: null });
     return;
@@ -438,7 +473,7 @@ tasksRouter.post("/captures", async (req, res) => {
         input.data.title,
         chat.sourceId,
         chat.snapshot,
-        taskMutationOptions(req),
+        taskCreationOptions(req, projectId),
       );
       if (result.status === "not_found") {
         sendTaskCaptureNotFound(res);
@@ -477,7 +512,7 @@ tasksRouter.post("/captures", async (req, res) => {
       input.data.title,
       input.data.source_type,
       sourceId,
-      taskMutationOptions(req),
+      taskCreationOptions(req, projectId),
     );
     if (result.status === "not_found") {
       sendTaskCaptureNotFound(res);
@@ -504,7 +539,7 @@ tasksRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const columnId = req.query.column_id as string | undefined;
-  const list = tasks.listTasks(projectId, columnId);
+  const list = tasks.listTasks(projectId, columnId).filter((task) => visibleTask(req, task));
   res.json({ data: list, total: list.length });
 });
 
@@ -526,7 +561,7 @@ tasksRouter.post("/", (req, res) => {
       start_date,
       estimate_minutes,
       custom_fields: custom_fields !== undefined ? (typeof custom_fields === "string" ? custom_fields : JSON.stringify(custom_fields)) : undefined,
-    }, taskMutationOptions(req));
+    }, taskCreationOptions(req, projectId));
     res.status(201).json({ data: task });
   } catch (err: unknown) {
     if (sendTaskCoordinationError(res, err)) return;
@@ -548,6 +583,7 @@ tasksRouter.post("/", (req, res) => {
 tasksRouter.post("/:taskId/references", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.taskId!)) return;
   if (!tasks.isTaskSourceReferenceId(req.params.taskId!)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid task source reference" } });
     return;
@@ -617,6 +653,7 @@ tasksRouter.post("/:taskId/references", async (req, res) => {
 tasksRouter.get("/:taskId/references", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.taskId!)) return;
   if (!tasks.isTaskSourceReferenceId(req.params.taskId!)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid task source reference" } });
     return;
@@ -647,6 +684,7 @@ function managedReservationRoute(operation: "reserve" | "release") {
   return (req: Request, res: Response) => {
     const projectId = requireProject(req, res);
     if (!projectId) return;
+    if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
     try {
       const options = taskMutationOptions(req);
       const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
@@ -684,7 +722,7 @@ tasksRouter.get("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const task = tasks.getTask(projectId, req.params.id!);
-  if (!task) {
+  if (!task || !visibleTask(req, task)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
     return;
   }
@@ -695,6 +733,7 @@ tasksRouter.get("/:id", (req, res) => {
 tasksRouter.patch("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const { column_id, actor, expected_revision, expectedRevision, idempotency_key, idempotencyKey, ...fields } = req.body;
 
   // If only column_id is provided, use moveTask for backward compatibility
@@ -756,6 +795,7 @@ tasksRouter.patch("/:id", (req, res) => {
 tasksRouter.delete("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const actor = req.query.actor as string | undefined;
   try {
     const deleted = tasks.deleteTask(projectId, req.params.id!, actor, taskMutationOptions(req));
@@ -774,7 +814,7 @@ tasksRouter.delete("/:id", (req, res) => {
 tasksRouter.get("/:id/comments", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!requireTaskMember(projectId, req.params.id!, res)) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const list = tasks.getComments(projectId, req.params.id!);
   res.json({ data: list, total: list.length });
 });
@@ -783,6 +823,7 @@ tasksRouter.get("/:id/comments", (req, res) => {
 tasksRouter.post("/:id/comments", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const { author, body, parent_comment_id, actor } = req.body;
   if (!author || !body) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "author and body are required" } });
@@ -801,6 +842,7 @@ tasksRouter.post("/:id/comments", (req, res) => {
 tasksRouter.patch("/:id/comments/:commentId", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const { body, actor } = req.body;
   if (!body) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "body is required" } });
@@ -823,6 +865,7 @@ tasksRouter.patch("/:id/comments/:commentId", (req, res) => {
 tasksRouter.post("/:id/comments/:commentId/react", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const { reaction, actor } = req.body;
   if (!reaction) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "reaction is required" } });
@@ -845,7 +888,7 @@ tasksRouter.post("/:id/comments/:commentId/react", (req, res) => {
 tasksRouter.get("/:id/activity", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!requireTaskMember(projectId, req.params.id!, res)) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const limit = parseInt(req.query.limit as string) || 50;
   const list = tasks.getTaskActivity(projectId, req.params.id!, limit);
   res.json({ data: list, total: list.length });
@@ -855,8 +898,12 @@ tasksRouter.get("/:id/activity", (req, res) => {
 tasksRouter.get("/:id/links", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!requireTaskMember(projectId, req.params.id!, res)) return;
-  const list = tasks.getTaskLinks(projectId, req.params.id!);
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
+  const list = tasks.getTaskLinks(projectId, req.params.id!).filter((link) => {
+    const source = tasks.getTask(projectId, link.task_id);
+    const target = tasks.getTask(projectId, link.linked_task_id);
+    return !!source && !!target && visibleTask(req, source) && visibleTask(req, target);
+  });
   res.json({ data: list, total: list.length });
 });
 
@@ -874,6 +921,7 @@ tasksRouter.post("/:id/links", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "link_type must be blocks, blocked_by, or relates_to" } });
     return;
   }
+  if (!requireVisibleTask(req, res, projectId, req.params.id!) || !requireVisibleTask(req, res, projectId, linked_task_id)) return;
   try {
     const link = tasks.linkTasks(projectId, req.params.id!, linked_task_id, link_type, actor, taskMutationOptions(req));
     res.status(201).json({ data: link, revision: taskRevision(projectId, req.params.id!) });
@@ -888,6 +936,7 @@ tasksRouter.post("/:id/links", (req, res) => {
 tasksRouter.delete("/:id/links/:linkId", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
   const actor = req.query.actor as string | undefined;
   try {
     const deleted = tasks.unlinkTasks(projectId, req.params.id!, req.params.linkId!, actor, taskMutationOptions(req));
@@ -906,7 +955,14 @@ tasksRouter.delete("/:id/links/:linkId", (req, res) => {
 tasksRouter.get("/:id/tree", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!requireTaskMember(projectId, req.params.id!, res)) return;
-  const tree = tasks.getTaskTree(projectId, req.params.id!);
+  if (!requireVisibleTask(req, res, projectId, req.params.id!)) return;
+  const filterTree = (nodes: Record<string, unknown>[]): Record<string, unknown>[] => nodes.flatMap((node) => {
+    const id = typeof node.id === "string" ? node.id : "";
+    const task = id ? tasks.getTask(projectId, id) : undefined;
+    if (!task || !visibleTask(req, task)) return [];
+    const children = Array.isArray(node.children) ? filterTree(node.children as Record<string, unknown>[]) : [];
+    return [{ ...node, children }];
+  });
+  const tree = filterTree(tasks.getTaskTree(projectId, req.params.id!));
   res.json({ data: tree });
 });

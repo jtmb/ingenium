@@ -82,6 +82,16 @@ function contextOwnerScope(req: Request): string | null | undefined {
   return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
 }
 
+function maintenanceProvenance(req: Request): contextConversations.ContextMaintenanceProvenance {
+  const principal = req.principal;
+  return {
+    actorType: principal?.type === "runtime-service" ? "system" : principal?.type ?? "compatibility",
+    actorId: principal?.id ?? null,
+    requestId: req.get("x-request-id") ?? null,
+    correlationId: req.get("x-correlation-id") ?? null,
+  };
+}
+
 function sendContextRagError(res: Response, error: unknown): void {
   if (!(error instanceof contextRag.ContextRagError)) {
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to process context RAG data" } });
@@ -507,6 +517,7 @@ contextRouter.post("/conversations/:conversationId/maintenance/authorize", (req,
       projectId,
       req.params.conversationId!,
       req.body ?? {},
+      maintenanceProvenance(req),
     );
     res.status(201).json({ data: authorization });
   } catch (error) {

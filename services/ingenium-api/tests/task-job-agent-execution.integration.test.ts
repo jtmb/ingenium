@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { resetDbForTest } from "ingenium-core";
+import { getDb, resetDbForTest, vault } from "ingenium-core";
 import { configureJobRunnerRuntimeForTesting, runningProcesses } from "../lib/job-runner.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { projectsRouter } from "../lib/routes/projects.js";
@@ -96,6 +96,7 @@ describe("caller-orchestrated task job execution", () => {
     let runId = "";
     let restoreRuntime: (() => void) | undefined;
     const fixturePath = `${fakeBin}${delimiter}${originalEnvironment.PATH ?? ""}`;
+    const vaultRoot = join(directory, "job-secrets");
 
     process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
     process.env.INGENIUM_HOME = join(directory, "home");
@@ -106,7 +107,7 @@ describe("caller-orchestrated task job execution", () => {
       mkdirSync(fakeBin, { recursive: true });
       writeFileSync(fakeOpenCode, `#!/bin/sh
 set -eu
-if [ "$#" -ne 5 ] || [ "$1" != "run" ] || [ "$2" != "${prompt}" ] || [ "$3" != "--agent" ] || [ "$4" != "fixture-agent" ] || [ "$5" != "--auto" ]; then
+if [ "$#" -ne 8 ] || [ "$1" != "run" ] || [ "$2" != "${prompt}" ] || [ "$3" != "--agent" ] || [ "$4" != "fixture-agent" ] || [ "$5" != "--auto" ] || [ "$6" != "--pure" ] || [ "$7" != "--dir" ] || [ "$8" != "/workspace" ]; then
   printf '%s\\n' 'fixture-argv-mismatch' >&2
   exit 64
 fi
@@ -120,12 +121,15 @@ case "$*" in
     exit 66
     ;;
 esac
+sleep 1
 printf '%s\\n' '${marker}'
 `);
       chmodSync(fakeOpenCode, 0o700);
       expect(fixturePath.split(delimiter)[0]).toBe(fakeBin);
       resetDbForTest();
-      restoreRuntime = configureJobRunnerRuntimeForTesting({ workingDirectory: directory });
+      mkdirSync(vaultRoot, { mode: 0o700 });
+      chmodSync(vaultRoot, 0o700);
+      restoreRuntime = configureJobRunnerRuntimeForTesting({ workingDirectory: directory, vaultSecretRoot: vaultRoot });
 
       const app = express();
       app.use(express.json());
@@ -142,6 +146,7 @@ printf '%s\\n' '${marker}'
 
       const projectResponse = await fetch(`${baseUrl}/api/v1/projects`, json({ name: projectName }));
       expect(projectResponse.status).toBe(201);
+      const project = (await projectResponse.json()).data as { id: string; organization_id: string };
       projectCreated = true;
 
       const taskResponse = await fetch(projectUrl(baseUrl, "/api/v1/tasks"), json({
@@ -166,6 +171,25 @@ printf '%s\\n' '${marker}'
         trigger_event: null,
         vault_references: [],
       });
+      vault.initVault(project.id, "fixture provider vault passphrase");
+      expect(vault.unsealVault(project.id, "fixture provider vault passphrase").ok).toBe(true);
+      const credentialItemId = vault.createItem(project.id, "Fixture provider credential", "api_key", "fixture-provider-key");
+      const now = new Date().toISOString();
+      const connectionId = "fixture-provider-connection";
+      getDb().prepare(
+        `INSERT INTO provider_connections
+         (id, provider_key, owner_kind, organization_id, credential_item_id, display_name,
+          provider_type, config_json, created_by_actor_type, created_at, updated_at)
+         VALUES (?, 'fixture-provider', 'organization', ?, ?, 'Fixture Provider', 'managed', ?, 'system', ?, ?)`,
+      ).run(connectionId, project.organization_id, credentialItemId,
+        JSON.stringify({ name: "Fixture Provider", npm: "@ai-sdk/openai-compatible", models: ["fixture-model"] }), now, now);
+      getDb().prepare(
+        `INSERT INTO resource_grants
+         (id, organization_id, resource_type, resource_id, grantee_kind, grantee_id,
+          permissions_json, granted_by_actor_type, created_at, updated_at)
+         VALUES (?, ?, 'provider_connection', ?, 'service', ?, '["execute"]', 'system', ?, ?)`,
+      ).run("10000000-0000-4000-8000-000000000106", project.organization_id, connectionId,
+        job.data.service_principal_id, now, now);
 
       const referenceResponse = await fetch(projectUrl(baseUrl, `/api/v1/tasks/${taskId}/references`), json({
         source_type: "job",
@@ -221,7 +245,7 @@ printf '%s\\n' '${marker}'
       expect(logsResponse.status).toBe(200);
       const logsText = await logsResponse.text();
       const logs = JSON.parse(logsText).data as Array<{ stream: string; line: string }>;
-      expect(logs).toContainEqual(expect.objectContaining({ stream: "stdout", line: marker }));
+      expect(logs).toEqual([expect.objectContaining({ stream: "stderr", line: "Vault job output redacted." })]);
 
       for (const text of [triggerText, logsText]) {
         expect(text).not.toContain(taskBodyCanary);
@@ -246,6 +270,7 @@ printf '%s\\n' '${marker}'
         if (runId) await waitForRunProcessCleanup(runId);
       });
       await cleanup(() => restoreRuntime?.());
+      await cleanup(() => vault.sealVault());
       await cleanup(async () => {
         if (!referenceId || !taskId) return;
         const referenceDelete = await fetch(
@@ -284,5 +309,5 @@ printf '%s\\n' '${marker}'
       restoreEnvironment(originalEnvironment);
       if (cleanupError) throw cleanupError;
     }
-  });
+  }, 15_000);
 });

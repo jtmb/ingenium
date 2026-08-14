@@ -42,8 +42,8 @@ function logTaskActivity(
   const now = new Date().toISOString();
   const db = getDb(dbPath());
   db.prepare(
-    `INSERT INTO task_activity (id, task_id, actor, event_type, payload, created_at)
-     SELECT ?, t.id, ?, ?, ?, ? FROM tasks t WHERE t.id = ? AND t.project_id = ?`
+    `INSERT INTO task_activity (id, task_id, organization_id, actor, event_type, payload, created_at)
+     SELECT ?, t.id, t.organization_id, ?, ?, ?, ? FROM tasks t WHERE t.id = ? AND t.project_id = ?`
   ).run(id, actor, eventType, payload ? JSON.stringify(payload) : null, now, taskId, projectId);
 }
 
@@ -52,6 +52,13 @@ export type TaskReservationState = "available" | "reserved" | "quarantined";
 export interface TaskMutationOptions {
   expectedRevision?: number;
   idempotencyKey?: string;
+  ownership?: {
+    organizationId: string;
+    ownerUserId?: string | null;
+    visibility?: "private" | "organization";
+    actorType?: "compatibility" | "user" | "service" | "system";
+    actorId?: string | null;
+  };
 }
 
 export interface ManagedTaskReservationInput {
@@ -176,9 +183,9 @@ function writeReceipt<T>(
   }
   db.prepare(
     `INSERT INTO task_mutation_receipts
-     (id, project_id, task_id, operation, idempotency_key, request_hash, result_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(randomUUID(), projectId, taskId, operation, key, hash, resultJson, new Date().toISOString());
+     (id, project_id, organization_id, task_id, operation, idempotency_key, request_hash, result_json, created_at)
+     SELECT ?, project.id, project.organization_id, ?, ?, ?, ?, ?, ? FROM projects project WHERE project.id = ?`,
+  ).run(randomUUID(), taskId, operation, key, hash, resultJson, new Date().toISOString(), projectId);
   return result;
 }
 
@@ -263,17 +270,26 @@ export function createTask(
     requireScopedParent(db, projectId, "", fields?.parent_id);
     const now = new Date().toISOString();
     const id = randomUUID();
+    const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+    if (!project) throw new TaskCoordinationError("TASK_NOT_FOUND");
+    const organizationId = options.ownership?.organizationId ?? project.organization_id;
+    if (organizationId !== project.organization_id) throw new TaskCoordinationError("TASK_NOT_FOUND");
     db.prepare(
-      `INSERT INTO tasks (id, project_id, title, description, column_id, assigned_to,
+      `INSERT INTO tasks (id, project_id, organization_id, owner_kind, owner_user_id, visibility,
+        created_by_actor_type, created_by_actor_id, title, description, column_id, assigned_to,
         parent_id, issue_type, priority, due_date, start_date,
         estimate_minutes, spent_minutes, remaining_minutes, custom_fields,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'todo', ?,
-         ?, ?, ?, ?, ?,
-         ?, 0, ?, ?,
-         ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', ?,
+          ?, ?, ?, ?, ?,
+          ?, 0, ?, ?,
+          ?, ?)`
     ).run(
-      id, projectId, title, description ?? null, assignedTo ?? null,
+      id, projectId, organizationId, options.ownership?.ownerUserId ? "user" : "organization",
+      options.ownership?.ownerUserId ?? null,
+      options.ownership?.visibility ?? (options.ownership?.ownerUserId ? "private" : "organization"),
+      options.ownership?.actorType ?? "compatibility", options.ownership?.actorId ?? null,
+      title, description ?? null, assignedTo ?? null,
       fields?.parent_id ?? null, fields?.issue_type ?? "task", fields?.priority ?? 0,
       fields?.due_date ?? null, fields?.start_date ?? null,
       fields?.estimate_minutes ?? null, fields?.estimate_minutes ?? null, fields?.custom_fields ?? null,
@@ -383,6 +399,7 @@ const TASK_SOURCE_REFERENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[8
 export interface TaskSourceReferenceTaskScope {
   id: string;
   project_id: string;
+  organization_id: string;
   is_global: boolean;
   archived_at: string | null;
 }
@@ -510,7 +527,7 @@ function taskSourceReferenceScope(
   taskId: string,
 ): TaskSourceReferenceTaskScope | undefined {
   return db.prepare(
-    `SELECT t.id, t.project_id, p.is_global, p.archived_at
+    `SELECT t.id, t.project_id, t.organization_id, p.is_global, p.archived_at
      FROM tasks t
      INNER JOIN projects p ON p.id = t.project_id
      WHERE t.id = ? AND t.project_id = ?`,
@@ -573,8 +590,8 @@ function resolveStoredTaskSourceReference(
       const parts = parseEmailTaskSourceId(sourceId);
       if (!parts) return undefined;
       const row = db.prepare(
-        "SELECT cached_at FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?",
-      ).get(...parts) as { cached_at: string } | undefined;
+        "SELECT cached_at FROM email_cache WHERE organization_id = ? AND account_id = ? AND folder = ? AND uid = ?",
+      ).get(scope.organization_id, ...parts) as { cached_at: string } | undefined;
       return row ? {
         display_title: "Email",
         display_detail: "Email message",
@@ -641,11 +658,12 @@ function insertTaskSourceReference(
   const createdAt = new Date().toISOString();
   db.prepare(
     `INSERT INTO task_source_references
-     (id, project_id, task_id, source_type, source_id, display_title, display_detail, source_timestamp, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, project_id, organization_id, task_id, source_type, source_id, display_title, display_detail, source_timestamp, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     scope.project_id,
+    scope.organization_id,
     scope.id,
     sourceType,
     sourceId,
@@ -714,6 +732,7 @@ function findTaskBySourceReference(
     reference: {
       id: reference_id,
       project_id: reference_project_id,
+      organization_id: row.organization_id,
       task_id: reference_task_id,
       source_type: reference_source_type,
       source_id: reference_source_id,
@@ -746,7 +765,7 @@ function createTaskWithVerifiedSourceSnapshot(
     const replay = receipt<CreateTaskWithSourceReferenceResult>(db, projectId, options.idempotencyKey, hash);
     if (replay !== undefined) return { result: replay, written: false, created: false };
     const project = db.prepare(
-      "SELECT id AS project_id, is_global, archived_at FROM projects WHERE id = ?",
+      "SELECT id AS project_id, organization_id, is_global, archived_at FROM projects WHERE id = ?",
     ).get(projectId) as Omit<TaskSourceReferenceTaskScope, "id"> | undefined;
     if (!project) return { result: { status: "not_found" } as CreateTaskWithSourceReferenceResult, written: false, created: false };
 
@@ -772,9 +791,11 @@ function createTaskWithVerifiedSourceSnapshot(
     const now = new Date().toISOString();
     const taskId = randomUUID();
     db.prepare(
-      `INSERT INTO tasks (id, project_id, title, column_id, issue_type, priority, spent_minutes, created_at, updated_at)
-       VALUES (?, ?, ?, 'todo', 'task', 0, 0, ?, ?)`,
-    ).run(taskId, projectId, normalizedTitle, now, now);
+      `INSERT INTO tasks
+       (id, project_id, organization_id, owner_kind, visibility, created_by_actor_type,
+        title, column_id, issue_type, priority, spent_minutes, created_at, updated_at)
+       VALUES (?, ?, ?, 'organization', 'organization', 'compatibility', ?, 'todo', 'task', 0, 0, ?, ?)`,
+    ).run(taskId, projectId, project.organization_id, normalizedTitle, now, now);
     const task = requireScopedTask(db, projectId, taskId);
     const reference = insertTaskSourceReference(
       db,
@@ -1279,9 +1300,10 @@ export function addComment(
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO task_comments (id, task_id, parent_comment_id, author, body, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(id, taskId, parentCommentId ?? null, author, body, now);
+      `INSERT INTO task_comments (id, task_id, organization_id, parent_comment_id, author, body, created_at)
+       SELECT ?, task.id, task.organization_id, ?, ?, ?, ?
+       FROM tasks task WHERE task.id = ? AND task.project_id = ?`
+    ).run(id, parentCommentId ?? null, author, body, now, taskId, projectId);
     const comment = db.prepare("SELECT * FROM task_comments WHERE id = ? AND task_id = ?").get(id, taskId) as TaskComment;
     incrementTaskRevision(db, projectId, taskId, preflight.task!.revision);
     return {
@@ -1485,8 +1507,11 @@ export function linkTasks(
 
     const id = randomUUID();
     db.prepare(
-      "INSERT INTO task_links (id, task_id, linked_task_id, link_type) VALUES (?, ?, ?, ?)"
-    ).run(id, taskId, linkedTaskId, linkType);
+      `INSERT INTO task_links (id, task_id, linked_task_id, organization_id, link_type)
+       SELECT ?, source.id, target.id, source.organization_id, ?
+       FROM tasks source JOIN tasks target ON target.id = ? AND target.project_id = source.project_id
+       WHERE source.id = ? AND source.project_id = ?`
+    ).run(id, linkType, linkedTaskId, taskId, projectId);
 
     incrementTaskRevision(db, projectId, taskId, source.revision);
     incrementTaskRevision(db, projectId, linkedTaskId, linked.revision);
@@ -1632,8 +1657,10 @@ export function notifyTask(
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(
-      "INSERT INTO task_notifications (id, project_id, recipient, task_id, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(id, projectId, recipient, taskId, kind, now);
+      `INSERT INTO task_notifications (id, project_id, organization_id, recipient, task_id, kind, created_at)
+       SELECT ?, task.project_id, task.organization_id, ?, task.id, ?, ?
+       FROM tasks task WHERE task.project_id = ? AND task.id = ?`
+    ).run(id, recipient, kind, now, projectId, taskId);
 
     const notification = db.prepare("SELECT * FROM task_notifications WHERE id = ? AND project_id = ? AND task_id = ?")
       .get(id, projectId, taskId) as TaskNotification;
@@ -1745,9 +1772,9 @@ export function getBoardConfig(projectId: string): BoardConfig {
     // Try to insert default if none exists
     const now = new Date().toISOString();
     db.prepare(
-      `INSERT OR IGNORE INTO board_config (id, project_id, columns, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(randomUUID(), projectId, DEFAULT_COLUMNS, now, now);
+      `INSERT OR IGNORE INTO board_config (id, project_id, organization_id, columns, created_at, updated_at)
+       SELECT ?, project.id, project.organization_id, ?, ?, ? FROM projects project WHERE project.id = ?`
+    ).run(randomUUID(), DEFAULT_COLUMNS, now, now, projectId);
 
     return db.prepare("SELECT * FROM board_config WHERE project_id = ?").get(projectId) as BoardConfig;
   });
@@ -1775,9 +1802,9 @@ export function updateBoardConfig(
     if (!existing) {
       // Create default first, then update
       db.prepare(
-        `INSERT INTO board_config (id, project_id, columns, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`
-      ).run(randomUUID(), projectId, DEFAULT_COLUMNS, now, now);
+        `INSERT INTO board_config (id, project_id, organization_id, columns, created_at, updated_at)
+         SELECT ?, project.id, project.organization_id, ?, ?, ? FROM projects project WHERE project.id = ?`
+      ).run(randomUUID(), DEFAULT_COLUMNS, now, now, projectId);
     }
 
     const setClauses: string[] = ["updated_at = ?"];

@@ -410,17 +410,25 @@ function runJobScheduler(generation: number): void {
     const activeProjects = allProjects.filter(p => !p.archived_at);
     const now = new Date();
 
+    const dueJobs: ReturnType<typeof jobs.listJobs> = [];
     for (const p of activeProjects) {
       if (!isSchedulerActive(generation)) break;
       const projectJobs = jobs.listJobs(p.id);
 
       for (const job of projectJobs) {
-        if (!isSchedulerActive(generation)) break;
         if (!job.enabled) continue;
         if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
         if (!matchesCron(job.schedule_cron, now)) continue;
-
-        const result = jobs.startJobRun(p.id, job.id, "cron");
+        dueJobs.push(job);
+      }
+    }
+    for (const job of jobs.orderJobsForFairDispatch(dueJobs, "cron")) {
+        if (!isSchedulerActive(generation)) break;
+        const scheduledFor = new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
+        const result = jobs.startJobRun(job.project_id, job.id, "cron", {
+          scheduledFor,
+          expectedScheduleRevision: job.schedule_revision,
+        });
 
         if ("reason" in result) {
           logger.debug("job-scheduler", `Job "${jobEventDeliveries.sanitizeJobEventText(job.name, 128)}" skipped: ${result.reason}`);
@@ -430,7 +438,7 @@ function runJobScheduler(generation: number): void {
         logger.info("job-scheduler", `Triggered cron run ${result.id} for job "${jobEventDeliveries.sanitizeJobEventText(job.name, 128)}"`);
 
         if (!isSchedulerActive(generation)) {
-          jobs.cancelJobRun(p.id, result.id);
+          jobs.cancelJobRun(job.project_id, result.id);
           break;
         }
 
@@ -438,7 +446,6 @@ function runJobScheduler(generation: number): void {
           const message = jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.message : "unknown", 256);
           logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${message}`, { error: message, name: jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.name : "unknown", 64) });
         });
-      }
     }
   } catch (err: any) {
     const message = jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.message : "unknown", 256);
@@ -460,18 +467,18 @@ async function runEventJobScheduler(generation: number): Promise<void> {
         if (!isSchedulerActive(generation)) return;
         await recoverExpiredEventAttempt(lease);
       }
-      for (let claimCount = 0; claimCount < EVENT_JOB_CLAIMS_PER_CYCLE && isSchedulerActive(generation); claimCount += 1) {
-        const claim = jobEventDeliveries.claimJobEventDelivery(project.id);
-        if (!claim) break;
-        executeJobRun(claim.run.id, claim.job, claim.job.prompt_template, {
-          deliveryId: claim.delivery.id,
-          attemptNumber: claim.attemptNumber,
-          leaseToken: claim.leaseToken,
-          leaseRevision: claim.leaseRevision,
-        }).catch((error: Error) => {
-          logger.error("job-event-scheduler", "Event job runner failed", { name: error.name });
-        });
-      }
+    }
+    for (let claimCount = 0; claimCount < EVENT_JOB_CLAIMS_PER_CYCLE && isSchedulerActive(generation); claimCount += 1) {
+      const claim = jobEventDeliveries.claimNextJobEventDelivery();
+      if (!claim) break;
+      executeJobRun(claim.run.id, claim.job, claim.job.prompt_template, {
+        deliveryId: claim.delivery.id,
+        attemptNumber: claim.attemptNumber,
+        leaseToken: claim.leaseToken,
+        leaseRevision: claim.leaseRevision,
+      }).catch((error: Error) => {
+        logger.error("job-event-scheduler", "Event job runner failed", { name: error.name });
+      });
     }
   } catch (error) {
     logger.warn("job-event-scheduler", "Trusted event dispatch cycle failed", {

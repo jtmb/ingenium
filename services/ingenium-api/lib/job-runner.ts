@@ -64,8 +64,6 @@ const supportsOwnedProcessGroups = process.platform !== "win32";
 const RUN_NONCE_ENV = "INGENIUM_JOB_RUN_NONCE";
 const JOB_CHILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 export const VAULT_JOB_SECRET_ROOT = "/dev/shm/ingenium-job-secrets";
-const VAULT_OPENCODE_CONFIG_SOURCE = "/home/appuser/.config/opencode/opencode.jsonc";
-const VAULT_OPENCODE_AUTH_SOURCE = "/home/appuser/.local/share/opencode/auth.json";
 const VAULT_RUNTIME_DIRECTORIES = ["home", "config", "data", "cache", "state", "tmp"] as const;
 const VAULT_RUNTIME_DIRECTORY_SET = new Set<string>(VAULT_RUNTIME_DIRECTORIES);
 const VAULT_CONFIG_MAX_BYTES = 1024 * 1024;
@@ -145,8 +143,6 @@ interface JobRunnerRuntime {
   signalProcessGroup: (processGroupId: number, signal: NodeJS.Signals) => void;
   workingDirectory: string;
   vaultSecretRoot: string;
-  openCodeConfigPath: string;
-  openCodeAuthPath: string;
 }
 
 interface EventExecutionContext {
@@ -458,8 +454,6 @@ const defaultJobRunnerRuntime: JobRunnerRuntime = {
   },
   workingDirectory: "/workspace",
   vaultSecretRoot: VAULT_JOB_SECRET_ROOT,
-  openCodeConfigPath: VAULT_OPENCODE_CONFIG_SOURCE,
-  openCodeAuthPath: VAULT_OPENCODE_AUTH_SOURCE,
 };
 
 let jobRunnerRuntime = defaultJobRunnerRuntime;
@@ -536,118 +530,6 @@ function createPrivateDirectory(path: string, owner: number): void {
   assertPrivateDirectory(path, owner);
 }
 
-function readPrivateRuntimeSource(path: string, maxBytes: number): Buffer {
-  const owner = processOwnerId();
-  let descriptor: number | undefined;
-  try {
-    const metadata = lstatSync(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== owner
-      || !hasExactMode(metadata, 0o600) || metadata.nlink !== 1 || metadata.size < 1 || metadata.size > maxBytes) {
-      throw new VaultSecretStorageError();
-    }
-    descriptor = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    const opened = fstatSync(descriptor);
-    if (!opened.isFile() || opened.uid !== owner || !hasExactMode(opened, 0o600)
-      || opened.nlink !== 1 || opened.size < 1 || opened.size > maxBytes) throw new VaultSecretStorageError();
-    const content = readFileSync(descriptor);
-    if (content.length < 1 || content.length > maxBytes) {
-      content.fill(0);
-      throw new VaultSecretStorageError();
-    }
-    return content;
-  } catch (error) {
-    if (error instanceof VaultSecretStorageError) throw error;
-    throw new VaultSecretStorageError();
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
-}
-
-function stripJsoncComments(input: string): string {
-  let output = "";
-  let quote = "";
-  let escaped = false;
-  for (let index = 0; index < input.length; index += 1) {
-    const current = input[index]!;
-    const next = input[index + 1];
-    if (quote) {
-      output += current;
-      if (escaped) escaped = false;
-      else if (current === "\\") escaped = true;
-      else if (current === quote) quote = "";
-      continue;
-    }
-    if (current === '"') {
-      quote = current;
-      output += current;
-      continue;
-    }
-    if (current === "/" && next === "/") {
-      index += 1;
-      while (index + 1 < input.length && input[index + 1] !== "\n" && input[index + 1] !== "\r") index += 1;
-      continue;
-    }
-    if (current === "/" && next === "*") {
-      index += 1;
-      while (index + 1 < input.length && !(input[index] === "*" && input[index + 1] === "/")) index += 1;
-      if (index + 1 >= input.length) throw new VaultSecretStorageError();
-      index += 1;
-      continue;
-    }
-    output += current;
-  }
-  if (quote) throw new VaultSecretStorageError();
-  return output;
-}
-
-function removeJsoncTrailingCommas(input: string): string {
-  let output = "";
-  let quote = "";
-  let escaped = false;
-  for (let index = 0; index < input.length; index += 1) {
-    const current = input[index]!;
-    if (quote) {
-      output += current;
-      if (escaped) escaped = false;
-      else if (current === "\\") escaped = true;
-      else if (current === quote) quote = "";
-      continue;
-    }
-    if (current === '"') {
-      quote = current;
-      output += current;
-      continue;
-    }
-    if (current === ",") {
-      let next = index + 1;
-      while (next < input.length && /\s/.test(input[next]!)) next += 1;
-      if (input[next] === "}" || input[next] === "]") continue;
-    }
-    output += current;
-  }
-  if (quote) throw new VaultSecretStorageError();
-  return output;
-}
-
-/** Keep provider/model/agent settings while dropping plugins and MCP persistence paths. */
-function isolateOpenCodeConfig(source: Buffer): Buffer {
-  try {
-    const parsed = JSON.parse(removeJsoncTrailingCommas(stripJsoncComments(source.toString("utf8"))));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new VaultSecretStorageError();
-    const config = parsed as Record<string, unknown>;
-    const isolated: Record<string, unknown> = {};
-    for (const key of ["$schema", "provider", "model", "agent", "permission"]) {
-      if (Object.hasOwn(config, key)) isolated[key] = config[key];
-    }
-    return Buffer.from(`${JSON.stringify(isolated)}\n`, "utf8");
-  } catch (error) {
-    if (error instanceof VaultSecretStorageError) throw error;
-    throw new VaultSecretStorageError();
-  } finally {
-    source.fill(0);
-  }
-}
-
 function writePrivateRuntimeFile(path: string, value: Buffer): void {
   let descriptor: number | undefined;
   try {
@@ -673,7 +555,11 @@ function writePrivateRuntimeFile(path: string, value: Buffer): void {
   }
 }
 
-function createVaultOpenCodeRuntime(runDir: string, owner: number): VaultOpenCodeRuntime {
+function createVaultOpenCodeRuntime(
+  runDir: string,
+  owner: number,
+  provider: vault.JobProviderRuntimeResolution,
+): VaultOpenCodeRuntime {
   const runtime: VaultOpenCodeRuntime = {
     home: join(runDir, "home"),
     config: join(runDir, "config"),
@@ -682,12 +568,25 @@ function createVaultOpenCodeRuntime(runDir: string, owner: number): VaultOpenCod
     state: join(runDir, "state"),
     tmp: join(runDir, "tmp"),
   };
-  const configSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeConfigPath, VAULT_CONFIG_MAX_BYTES);
   let isolatedConfig: Buffer | undefined;
   let authSource: Buffer | undefined;
   try {
-    isolatedConfig = isolateOpenCodeConfig(configSource);
-    authSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeAuthPath, VAULT_AUTH_MAX_BYTES);
+    const models = Array.isArray(provider.config.models)
+      ? Object.fromEntries(provider.config.models.filter((model): model is string => typeof model === "string")
+        .map((model) => [model, { id: model, name: model }]))
+      : {};
+    const providerConfig = {
+      name: typeof provider.config.name === "string" ? provider.config.name : provider.providerKey,
+      npm: typeof provider.config.npm === "string" ? provider.config.npm : "@ai-sdk/openai-compatible",
+      ...(typeof provider.config.baseURL === "string" && provider.config.baseURL
+        ? { options: { baseURL: provider.config.baseURL } }
+        : {}),
+      models,
+    };
+    isolatedConfig = Buffer.from(`${JSON.stringify({ provider: { [provider.providerKey]: providerConfig } })}\n`, "utf8");
+    authSource = Buffer.from(JSON.stringify({
+      [provider.providerKey]: { type: "api", key: provider.credential.toString("utf8") },
+    }), "utf8");
     for (const directory of VAULT_RUNTIME_DIRECTORIES) createPrivateDirectory(join(runDir, directory), owner);
     const configDirectory = join(runtime.config, "opencode");
     const dataDirectory = join(runtime.data, "opencode");
@@ -699,23 +598,9 @@ function createVaultOpenCodeRuntime(runDir: string, owner: number): VaultOpenCod
     authSource = undefined;
     return runtime;
   } finally {
-    configSource.fill(0);
     isolatedConfig?.fill(0);
     authSource?.fill(0);
-  }
-}
-
-function validateVaultOpenCodeSources(): void {
-  const configSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeConfigPath, VAULT_CONFIG_MAX_BYTES);
-  let isolated: Buffer | undefined;
-  let authSource: Buffer | undefined;
-  try {
-    isolated = isolateOpenCodeConfig(configSource);
-    authSource = readPrivateRuntimeSource(jobRunnerRuntime.openCodeAuthPath, VAULT_AUTH_MAX_BYTES);
-  } finally {
-    configSource.fill(0);
-    isolated?.fill(0);
-    authSource?.fill(0);
+    provider.release();
   }
 }
 
@@ -916,6 +801,7 @@ function createVaultSecretRunFiles(
   projectId: string,
   runId: string,
   resolution: vault.VaultJobSecretsResolution,
+  provider: vault.JobProviderRuntimeResolution,
 ): VaultSecretRunFiles {
   let root: string | undefined;
   let runDir: string | undefined;
@@ -923,9 +809,6 @@ function createVaultSecretRunFiles(
   const itemIds: string[] = [];
   let createdDirectory = false;
   try {
-    // Fail before creating tmpfs state when a persistent source is unavailable,
-    // malformed, linked, oversized, or too broadly readable.
-    validateVaultOpenCodeSources();
     root = assertVaultSecretRoot();
     runDir = strictRunDirectory(root, runId);
     owner = processOwnerId();
@@ -937,7 +820,7 @@ function createVaultSecretRunFiles(
       throw new VaultSecretStorageError();
     }
 
-    const runtime = createVaultOpenCodeRuntime(runDir, owner);
+    const runtime = createVaultOpenCodeRuntime(runDir, owner, provider);
 
     for (const secret of resolution.secrets) {
       if (!RUN_UUID_PATTERN.test(secret.itemId) || itemIds.includes(secret.itemId)
@@ -978,6 +861,7 @@ function createVaultSecretRunFiles(
     vaultSecretRuns.set(runId, run);
     return run;
   } catch {
+    provider.release();
     resolution.release();
     if (createdDirectory && root && removeSafeVaultSecretDirectory(root, runId, itemIds)) {
       jobs.markVaultJobRunCleaned(projectId, runId);
@@ -1464,6 +1348,11 @@ async function recoverVaultSecretRunDirectoriesImpl(): Promise<void> {
   }
 
   for (const recovery of recoveries) {
+    if (!jobs.isJobRunAuthorizationCurrent(recovery.projectId, recovery.runId)) {
+      markRunFailedIfActive(recovery);
+      retainVaultRunRecovery(recovery);
+      continue;
+    }
     const directoryState = runDirectoryState(root, recovery);
     if (directoryState === "unsafe") {
       retainVaultRunRecovery(recovery);
@@ -1645,15 +1534,14 @@ function completeJobSpawnFailure(
   projectId: string,
   eventContext: EventExecutionContext,
   runId: string,
-  vaultEnabled: boolean,
 ): void {
   jobEventDeliveries.completeJobEventDelivery(projectId, {
     ...eventContext,
     runId,
     outcome: "failed",
     exitCode: -1,
-    errorCode: vaultEnabled ? VAULT_UNAVAILABLE_CODE : "process_failure",
-    errorMessage: vaultEnabled ? VAULT_UNAVAILABLE_MESSAGE : "Unable to start the OpenCode process.",
+    errorCode: VAULT_UNAVAILABLE_CODE,
+    errorMessage: VAULT_UNAVAILABLE_MESSAGE,
   });
 }
 
@@ -1709,42 +1597,47 @@ export async function executeJobRun(
   const timeoutMinutes = job.timeout_minutes > 0 ? job.timeout_minutes : 30;
   let vaultRunFiles: VaultSecretRunFiles | undefined;
   let vaultResolution: vault.VaultJobSecretsResolution | null = null;
+  let providerResolution: vault.JobProviderRuntimeResolution | undefined;
   const runNonce = jobRunnerRuntime.createRunNonce();
   const runNonceHash = hashNonce(runNonce);
   try {
     // Authorization, freshness, version matching, decryption, and expiry are
     // resolved in core immediately before this process can be spawned.
     vaultResolution = vault.resolveJobVaultSecrets(job.project_id, job.id, runId);
-    if (vaultResolution) {
-      if (!supportsOwnedProcessGroups || !runNonceHash) throw new VaultSecretStorageError();
-      const prepared = jobs.prepareVaultJobRun(job.project_id, {
-        runId,
-        jobId: job.id,
-        deadlineAt: vaultResolution.deadlineAt,
-        processNonceHash: runNonceHash,
-        itemSnapshots: vaultResolution.secrets.map((secret) => ({
-          itemId: secret.itemId,
-          authorizedItemVersion: secret.authorizedItemVersion,
-        })),
-      });
-      if (!prepared) throw new VaultSecretStorageError();
-      // Resolution and persistence can race expiry. No filesystem state or child
-      // is created once the effective deadline has elapsed.
-      if (vaultResolution.deadlineAt <= Date.now()) {
-        vaultResolution.release();
-        jobs.markVaultJobRunFailed(job.project_id, runId);
-        jobs.markVaultJobRunCleaned(job.project_id, runId);
-        throw new VaultSecretStorageError();
-      }
-      vaultRunFiles = createVaultSecretRunFiles(job.project_id, runId, vaultResolution);
-      // Recheck after sensitive files/configuration are materialized and before
-      // spawn, then remove the exact run directory if expiry won the race.
-      if (vaultResolution.deadlineAt <= Date.now()) {
-        cleanupVaultSecretRun(runId);
-        throw new VaultSecretStorageError();
-      }
+    providerResolution = vault.resolveJobProviderRuntime(job.project_id, job.id, runId);
+    const runtimeResolution = vaultResolution ?? {
+      secrets: [],
+      deadlineAt: Date.now() + timeoutMinutes * 60_000,
+      release: () => undefined,
+    };
+    if (!supportsOwnedProcessGroups || !runNonceHash) throw new VaultSecretStorageError();
+    const prepared = jobs.prepareVaultJobRun(job.project_id, {
+      runId,
+      jobId: job.id,
+      deadlineAt: runtimeResolution.deadlineAt,
+      processNonceHash: runNonceHash,
+      itemSnapshots: runtimeResolution.secrets.map((secret) => ({
+        itemId: secret.itemId,
+        authorizedItemVersion: secret.authorizedItemVersion,
+      })),
+    });
+    if (!prepared) throw new VaultSecretStorageError();
+    if (runtimeResolution.deadlineAt <= Date.now()) {
+      runtimeResolution.release();
+      jobs.markVaultJobRunFailed(job.project_id, runId);
+      jobs.markVaultJobRunCleaned(job.project_id, runId);
+      throw new VaultSecretStorageError();
+    }
+    vaultRunFiles = createVaultSecretRunFiles(
+      job.project_id, runId, runtimeResolution, providerResolution,
+    );
+    providerResolution = undefined;
+    if (runtimeResolution.deadlineAt <= Date.now()) {
+      cleanupVaultSecretRun(runId);
+      throw new VaultSecretStorageError();
     }
   } catch {
+    providerResolution?.release();
     vaultResolution?.release();
     jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
     if (eventContext) {
@@ -1768,15 +1661,13 @@ export async function executeJobRun(
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-  const args = vaultRunFiles
-    ? ["run", prompt, "--agent", job.agent, "--auto", "--pure", "--dir", "/workspace"]
-    : ["run", prompt, "--agent", job.agent, "--auto"];
+  const args = ["run", prompt, "--agent", job.agent, "--auto", "--pure", "--dir", "/workspace"];
 
   // Prompts are user-authored and can contain credentials. Do not log the CLI
   // arguments or rendered template, even at debug level.
   logger.info("job-runner", `Starting OpenCode process for run ${runId} (agent: ${safeJobLogText(job.agent, 128)})`);
 
-  // Vault runs start from their tmpfs home and use the supported --dir option for
+  // Job runs start from their tmpfs home and use the supported --dir option for
   // workspace access. --pure prevents project/global plugins from sending a
   // vault session to persistent OpenCode, API, or MCP state.
   let proc: ChildProcess;
@@ -1794,8 +1685,8 @@ export async function executeJobRun(
     });
   } catch {
     if (vaultRunFiles) cleanupVaultSecretRun(runId);
-    if (vaultResolution) jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
-    if (eventContext) completeJobSpawnFailure(job.project_id, eventContext, runId, !!vaultResolution);
+    jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
+    if (eventContext) completeJobSpawnFailure(job.project_id, eventContext, runId);
     else jobs.finishJobRun(job.project_id, runId, "failed", -1);
     activeRunCount = Math.max(0, activeRunCount - 1);
     return;
@@ -1818,7 +1709,7 @@ export async function executeJobRun(
     ? jobRunnerRuntime.processInspector.inspectProcess(proc.pid)
     : null;
   const tracking = getOwnedDetachedRunDiagnosticForTesting(runId);
-  const vaultIdentityPersisted = !vaultRunFiles || !!(
+  const vaultIdentityPersisted = !!(
     spawnedIdentity
     && spawnedIdentity.processId === proc.pid
     && spawnedIdentity.processGroupId === proc.pid
@@ -1853,25 +1744,10 @@ export async function executeJobRun(
 
   let vaultRedactionWritten = false;
   const recordVaultRedaction = () => {
-    if (!vaultResolution || vaultRedactionWritten || vaultRedactionRuns.has(runId)) return;
+    if (vaultRedactionWritten || vaultRedactionRuns.has(runId)) return;
     vaultRedactionWritten = true;
     vaultRedactionRuns.add(runId);
     jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
-  };
-
-  // Trusted event payloads are intentionally never interpolated into prompts.
-  // Do not turn a downstream agent echo into a durable payload/prompt leak.
-  const appendOutputLog = (stream: "stdout" | "stderr", line: string) => {
-    if (vaultResolution) {
-      recordVaultRedaction();
-      return;
-    }
-    jobs.appendRunLog(
-      job.project_id,
-      runId,
-      stream,
-      eventContext ? "Event job output redacted from durable logs." : line,
-    );
   };
 
   if (eventContext) {
@@ -1947,8 +1823,7 @@ export async function executeJobRun(
     timedOut = true;
     logger.warn("job-runner", `Run ${runId} timed out after ${timeoutMs}ms — killing process.`);
     const termination = terminateProcess(runId, proc);
-    if (vaultResolution) recordVaultRedaction();
-    else jobs.appendRunLog(job.project_id, runId, "stderr", `Job timed out after ${timeoutMinutes} minutes.`);
+    recordVaultRedaction();
     cleanupVaultSecretRunAfterTeardown(runId);
     if (eventContext) {
       void termination.then(() => {
@@ -1956,10 +1831,8 @@ export async function executeJobRun(
         completeEvent(
           "timeout",
           -1,
-          vaultResolution ? VAULT_UNAVAILABLE_CODE : ambiguous ? "ambiguous_process_ownership" : "timeout",
-          vaultResolution ? VAULT_UNAVAILABLE_MESSAGE : ambiguous
-            ? "Timed-out process ownership could not be revalidated."
-            : "Job timed out.",
+          ambiguous ? "ambiguous_process_ownership" : "timeout",
+          ambiguous ? "Timed-out process ownership could not be revalidated." : "Job timed out.",
         );
       });
     } else {
@@ -1967,50 +1840,17 @@ export async function executeJobRun(
     }
   }, timeoutMs);
 
-  let stdoutBuffer = "";
-  proc.stdout?.on("data", (chunk: Buffer) => {
-    if (vaultResolution) {
-      recordVaultRedaction();
-      return;
-    }
-    stdoutBuffer += chunk.toString("utf-8");
-    const lines = stdoutBuffer.split("\n");
-    // Keep the last incomplete line in the buffer (stream may end mid-line)
-    stdoutBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.length > 0) {
-        appendOutputLog("stdout", line);
-      }
-    }
+  proc.stdout?.on("data", () => {
+    recordVaultRedaction();
   });
 
-  let stderrBuffer = "";
-  proc.stderr?.on("data", (chunk: Buffer) => {
-    if (vaultResolution) {
-      recordVaultRedaction();
-      return;
-    }
-    stderrBuffer += chunk.toString("utf-8");
-    const lines = stderrBuffer.split("\n");
-    stderrBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.length > 0) {
-        appendOutputLog("stderr", line);
-      }
-    }
+  proc.stderr?.on("data", () => {
+    recordVaultRedaction();
   });
 
   proc.on("close", (code) => {
-    // Flush any remaining buffer content (last partial line from stream data)
-    if (stdoutBuffer.length > 0) {
-      appendOutputLog("stdout", stdoutBuffer);
-    }
-    if (stderrBuffer.length > 0) {
-      appendOutputLog("stderr", stderrBuffer);
-    }
-
     if (timeoutHandle) clearTimeout(timeoutHandle);
-    if (vaultResolution) recordVaultRedaction();
+    recordVaultRedaction();
 
     const wasTerminated = terminationCompletions.has(runId);
     if (!timedOut && !wasTerminated && finalize()) {
@@ -2029,7 +1869,7 @@ export async function executeJobRun(
     noteLeaderClosed(runId);
     // A successful leader exit does not prove a detached descendant is gone.
     // Vault files remain until a verified teardown attempt has run.
-    if (vaultResolution && ownedDetachedRuns.has(runId) && !terminationCompletions.has(runId)) {
+    if (ownedDetachedRuns.has(runId) && !terminationCompletions.has(runId)) {
       void terminateProcess(runId, proc);
     }
     finalize();
@@ -2051,13 +1891,11 @@ export async function executeJobRun(
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
     logger.error("job-runner", `Run ${runId} failed to start`, { name: safeJobLogText(err.name, 64) });
-    if (vaultResolution) recordVaultRedaction();
+    recordVaultRedaction();
     if (eventContext) {
-      if (vaultResolution) completeEvent("failed", -1, VAULT_UNAVAILABLE_CODE, VAULT_UNAVAILABLE_MESSAGE);
-      else completeEvent("failed", -1, "process_failure", "Unable to start the OpenCode process.");
+      completeEvent("failed", -1, VAULT_UNAVAILABLE_CODE, VAULT_UNAVAILABLE_MESSAGE);
     }
     else jobs.finishJobRun(job.project_id, runId, "failed", -1);
-    if (!vaultResolution) jobs.appendRunLog(job.project_id, runId, "stderr", "Unable to start the OpenCode process.");
 
     finalize();
     cleanupVaultSecretRun(runId);
@@ -2067,7 +1905,7 @@ export async function executeJobRun(
   });
 
   if (provenanceFailure) {
-    if (vaultResolution) recordVaultRedaction();
+    recordVaultRedaction();
     void terminateProcess(runId, proc);
     cleanupVaultSecretRunAfterTeardown(runId);
   }
@@ -2169,6 +2007,10 @@ export async function recoverExpiredEventAttempt(lease: jobEventDeliveries.Expir
       // event-delivery state or the current job reference set.
     }
   };
+  if (!jobs.isJobRunAuthorizationCurrent(lease.projectId, lease.runId)) {
+    resolve("dead_letter", "authorization_stale", "Automation authorization changed before recovery.");
+    return;
+  }
   const vaultRun = jobs.getVaultSecretRunRecovery(lease.runId);
   if (vaultRun) {
     await recoverVaultSecretRunDirectories();

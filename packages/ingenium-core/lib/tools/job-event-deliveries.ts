@@ -1,10 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
-import type {
+import {
   Job,
   JobEventDelivery,
   JobEventDeliveryState,
   JobRun,
+  MAX_CONCURRENT_AUTOMATION_RUNS,
+  MAX_CONCURRENT_RUNS_PER_ORGANIZATION,
+  MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL,
   TrustedJobEventType,
 } from "../schema.js";
 
@@ -45,7 +48,7 @@ export interface JobEventDispatchResult {
 
 export interface JobEventClaim {
   delivery: JobEventDelivery;
-  job: Pick<Job, "id" | "project_id" | "agent" | "prompt_template" | "timeout_minutes">;
+  job: Pick<Job, "id" | "project_id" | "organization_id" | "service_principal_id" | "agent" | "prompt_template" | "timeout_minutes">;
   run: JobRun;
   attemptNumber: number;
   leaseRevision: number;
@@ -225,22 +228,31 @@ export function snapshotTrustedJobEvents(projectId: string, limit = DELIVERY_PAG
     let createdDeliveries = 0;
     for (const event of events) {
       const marked = db.prepare(
-        `INSERT INTO job_event_dispatches (project_id, trusted_event_id, snapshotted_at)
-         VALUES (?, ?, ?) ON CONFLICT(project_id, trusted_event_id) DO NOTHING`,
-      ).run(projectId, event.id, timestamp);
+        `INSERT INTO job_event_dispatches (project_id, organization_id, trusted_event_id, snapshotted_at)
+         SELECT project.id, project.organization_id, ?, ? FROM projects project WHERE project.id = ?
+         ON CONFLICT(project_id, trusted_event_id) DO NOTHING`,
+      ).run(event.id, timestamp, projectId);
       if (marked.changes !== 1) continue;
       createdDeliveries += db.prepare(
-        `INSERT INTO job_event_deliveries
-         (id, project_id, trusted_event_id, job_id, state, attempt_count, next_attempt_at,
+         `INSERT INTO job_event_deliveries
+          (id, project_id, organization_id, trusted_event_id, job_id, effective_service_principal_id,
+           source_actor_type, source_actor_id, job_revision, authorization_revision, state, attempt_count, next_attempt_at,
           lease_revision, lease_expires_at, lease_owner_hash, last_error_code, last_error_message, created_at, updated_at)
          SELECT lower(hex(randomblob(4))) || '-' || substr(lower(hex(randomblob(2))), 1, 4) || '-' ||
                   substr(lower(hex(randomblob(2))), 1, 4) || '-' || substr(lower(hex(randomblob(2))), 1, 4) || '-' ||
                   lower(hex(randomblob(6))),
-                ?, e.id, j.id, 'queued', 0, ?, 0, NULL, NULL, NULL, NULL, ?, ?
+                 ?, j.organization_id, e.id, j.id, j.service_principal_id, e.source_actor_type, e.source_actor_id,
+                 j.revision, grant_row.revision,
+                'queued', 0, ?, 0, NULL, NULL, NULL, NULL, ?, ?
          FROM trusted_job_events e
          JOIN jobs j ON j.project_id = e.project_id
            AND j.enabled = 1
            AND j.trigger_event = e.event_type
+         JOIN service_principals principal ON principal.id = j.service_principal_id
+           AND principal.organization_id = j.organization_id AND principal.status = 'active'
+         JOIN automation_principal_grants grant_row ON grant_row.project_id = j.project_id
+           AND grant_row.organization_id = j.organization_id AND grant_row.service_principal_id = j.service_principal_id
+           AND grant_row.permission = 'execute' AND grant_row.status = 'active'
          WHERE e.project_id = ? AND e.id = ?`,
       ).run(projectId, timestamp, timestamp, timestamp, projectId, event.id).changes;
     }
@@ -298,14 +310,38 @@ export function claimJobEventDelivery(
     const db = getDb(dbPath());
     const timestamp = now();
     const changed = reconcileUndeliverableInTransaction(db, projectId, timestamp);
+    const project = db.prepare("SELECT organization_id FROM projects WHERE id = ? AND archived_at IS NULL")
+      .get(projectId) as { organization_id: string } | undefined;
+    if (!project) return { claim: undefined, changed };
+    const capacity = db.prepare(
+      `SELECT count(*) AS global_count,
+              count(*) FILTER (WHERE organization_id = ?) AS organization_count
+       FROM job_runs WHERE status IN ('queued', 'running')`,
+    ).get(project.organization_id) as { global_count: number; organization_count: number };
+    if (capacity.global_count >= MAX_CONCURRENT_AUTOMATION_RUNS
+      || capacity.organization_count >= MAX_CONCURRENT_RUNS_PER_ORGANIZATION) {
+      return { claim: undefined, changed };
+    }
     const candidate = db.prepare(
       `SELECT d.id, d.trusted_event_id, d.job_id, d.attempt_count, d.lease_revision,
-              e.event_type, j.id AS matched_job_id, j.project_id, j.agent, j.prompt_template, j.timeout_minutes
+              e.event_type, e.source_actor_type, e.source_actor_id,
+              j.id AS matched_job_id, j.project_id, j.organization_id, j.service_principal_id,
+              j.revision AS job_revision, j.agent, j.prompt_template, j.timeout_minutes,
+              grant_row.revision AS authorization_revision
        FROM job_event_deliveries d
        JOIN trusted_job_events e ON e.project_id = d.project_id AND e.id = d.trusted_event_id
        JOIN jobs j ON j.project_id = d.project_id AND j.id = d.job_id
+       JOIN service_principals principal ON principal.id = j.service_principal_id
+         AND principal.organization_id = j.organization_id AND principal.status = 'active'
+       JOIN automation_principal_grants grant_row ON grant_row.project_id = j.project_id
+         AND grant_row.organization_id = j.organization_id AND grant_row.service_principal_id = j.service_principal_id
+         AND grant_row.permission = 'execute' AND grant_row.status = 'active'
        WHERE d.project_id = ? AND d.state IN ('queued', 'retry_wait')
-         AND d.next_attempt_at <= ? AND j.enabled = 1 AND j.trigger_event = e.event_type
+          AND d.next_attempt_at <= ? AND j.enabled = 1 AND j.trigger_event = e.event_type
+          AND d.organization_id = j.organization_id AND d.effective_service_principal_id = j.service_principal_id
+          AND d.job_revision = j.revision AND d.authorization_revision = grant_row.revision
+         AND (SELECT count(*) FROM job_runs active WHERE active.status IN ('queued', 'running')
+              AND active.effective_service_principal_id = d.effective_service_principal_id) < ?
          AND NOT EXISTS (
            SELECT 1 FROM job_runs active
            WHERE active.job_id = d.job_id AND active.status IN ('queued', 'running')
@@ -316,9 +352,11 @@ export function claimJobEventDelivery(
              AND active_delivery.state = 'leased'
          )
        ORDER BY d.next_attempt_at ASC, d.id ASC LIMIT 1`,
-    ).get(projectId, timestamp) as {
+    ).get(projectId, timestamp, MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL) as {
       id: string; trusted_event_id: string; job_id: string; attempt_count: number; lease_revision: number;
-      event_type: TrustedJobEventType; matched_job_id: string; project_id: string; agent: string;
+      event_type: TrustedJobEventType; source_actor_type: "compatibility" | "user" | "service" | "system";
+      source_actor_id: string | null; matched_job_id: string; project_id: string; organization_id: string;
+      service_principal_id: string; job_revision: number; authorization_revision: number; agent: string;
       prompt_template: string; timeout_minutes: number;
     } | undefined;
     if (!candidate) return { claim: undefined, changed };
@@ -336,14 +374,21 @@ export function claimJobEventDelivery(
     if (claimed.changes !== 1) return { claim: undefined, changed };
     const runId = randomUUID();
     db.prepare(
-      `INSERT INTO job_runs (id, job_id, project_id, status, trigger, started_at, created_at)
-       VALUES (?, ?, ?, 'running', 'event', ?, ?)`,
-    ).run(runId, candidate.job_id, projectId, timestamp, timestamp);
+      `INSERT INTO job_runs
+       (id, job_id, project_id, organization_id, effective_service_principal_id,
+        source_actor_type, source_actor_id, job_revision, authorization_revision,
+        status, trigger, started_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 'event', ?, ?)`,
+    ).run(runId, candidate.job_id, projectId, candidate.organization_id, candidate.service_principal_id,
+      candidate.source_actor_type, candidate.source_actor_id, candidate.job_revision,
+      candidate.authorization_revision, timestamp, timestamp);
     db.prepare(
       `INSERT INTO job_event_attempts
-       (id, project_id, delivery_id, attempt_number, run_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), projectId, candidate.id, attemptNumber, runId, timestamp, timestamp);
+        (id, project_id, organization_id, effective_service_principal_id, source_actor_type, source_actor_id,
+         delivery_id, attempt_number, run_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(randomUUID(), projectId, candidate.organization_id, candidate.service_principal_id,
+      candidate.source_actor_type, candidate.source_actor_id, candidate.id, attemptNumber, runId, timestamp, timestamp);
     const row = db.prepare(deliveryQuery("d.project_id = ? AND d.id = ?"))
       .get(projectId, candidate.id) as DeliveryRow;
     return {
@@ -353,6 +398,8 @@ export function claimJobEventDelivery(
         job: {
           id: candidate.job_id,
           project_id: projectId,
+          organization_id: candidate.organization_id,
+          service_principal_id: candidate.service_principal_id,
           agent: candidate.agent,
           prompt_template: candidate.prompt_template,
           timeout_minutes: candidate.timeout_minutes,
@@ -366,6 +413,101 @@ export function claimJobEventDelivery(
   });
   if (result.changed > 0) checkpointAfterWrite();
   return result.claim;
+}
+
+/** Claim the oldest eligible delivery using a durable organization round-robin cursor. */
+export function claimNextJobEventDelivery(
+  leaseToken = generateJobEventLeaseToken(),
+  leaseMs = JOB_EVENT_DELIVERY_LEASE_MS,
+): JobEventClaim | undefined {
+  if (!isOpaqueToken(leaseToken) || !Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 300_000) {
+    throw new Error("INVALID_JOB_EVENT_LEASE");
+  }
+  const result = execTransaction(() => {
+    const db = getDb(dbPath());
+    const timestamp = now();
+    const candidate = db.prepare(
+      `SELECT d.id, d.project_id, d.organization_id, d.trusted_event_id, d.job_id,
+              d.attempt_count, d.lease_revision, e.source_actor_type, e.source_actor_id,
+              j.service_principal_id, j.revision AS job_revision, j.agent, j.prompt_template,
+              j.timeout_minutes, grant_row.revision AS authorization_revision
+       FROM job_event_deliveries d
+       JOIN trusted_job_events e ON e.project_id = d.project_id AND e.id = d.trusted_event_id
+       JOIN jobs j ON j.project_id = d.project_id AND j.id = d.job_id
+       JOIN service_principals principal ON principal.id = j.service_principal_id
+         AND principal.organization_id = j.organization_id AND principal.status = 'active'
+       JOIN automation_principal_grants grant_row ON grant_row.project_id = j.project_id
+         AND grant_row.organization_id = j.organization_id AND grant_row.service_principal_id = j.service_principal_id
+         AND grant_row.permission = 'execute' AND grant_row.status = 'active'
+       LEFT JOIN automation_dispatch_cursors cursor ON cursor.dispatch_kind = 'event'
+       WHERE d.state IN ('queued', 'retry_wait') AND d.next_attempt_at <= ?
+         AND j.enabled = 1 AND j.trigger_event = e.event_type
+         AND d.organization_id = j.organization_id AND d.effective_service_principal_id = j.service_principal_id
+         AND d.job_revision = j.revision AND d.authorization_revision = grant_row.revision
+         AND (SELECT count(*) FROM job_runs active WHERE active.status IN ('queued', 'running')) < ?
+         AND (SELECT count(*) FROM job_runs active WHERE active.status IN ('queued', 'running')
+              AND active.organization_id = d.organization_id) < ?
+         AND (SELECT count(*) FROM job_runs active WHERE active.status IN ('queued', 'running')
+              AND active.effective_service_principal_id = d.effective_service_principal_id) < ?
+         AND NOT EXISTS (SELECT 1 FROM job_runs active WHERE active.job_id = d.job_id AND active.status IN ('queued', 'running'))
+         AND NOT EXISTS (SELECT 1 FROM job_event_deliveries active_delivery
+                         WHERE active_delivery.job_id = d.job_id AND active_delivery.state = 'leased')
+       ORDER BY CASE WHEN cursor.last_organization_id IS NULL OR d.organization_id > cursor.last_organization_id THEN 0 ELSE 1 END,
+                d.organization_id, d.next_attempt_at, d.id LIMIT 1`,
+    ).get(timestamp, MAX_CONCURRENT_AUTOMATION_RUNS, MAX_CONCURRENT_RUNS_PER_ORGANIZATION,
+      MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL) as {
+      id: string; project_id: string; organization_id: string; trusted_event_id: string; job_id: string;
+      attempt_count: number; lease_revision: number; source_actor_type: "compatibility" | "user" | "service" | "system";
+      source_actor_id: string | null; service_principal_id: string; job_revision: number; authorization_revision: number;
+      agent: string; prompt_template: string; timeout_minutes: number;
+    } | undefined;
+    if (!candidate) return undefined;
+    const attemptNumber = candidate.attempt_count + 1;
+    const leaseRevision = candidate.lease_revision + 1;
+    const claimed = db.prepare(
+      `UPDATE job_event_deliveries SET state = 'leased', attempt_count = ?, next_attempt_at = NULL,
+         lease_revision = ?, lease_expires_at = ?, lease_owner_hash = ?, updated_at = ?
+       WHERE id = ? AND project_id = ? AND lease_revision = ? AND state IN ('queued', 'retry_wait') AND next_attempt_at <= ?`,
+    ).run(attemptNumber, leaseRevision, new Date(Date.now() + leaseMs).toISOString(), sha256(leaseToken), timestamp,
+      candidate.id, candidate.project_id, candidate.lease_revision, timestamp);
+    if (claimed.changes !== 1) return undefined;
+    const runId = randomUUID();
+    db.prepare(
+      `INSERT INTO job_runs
+       (id, job_id, project_id, organization_id, effective_service_principal_id, source_actor_type,
+        source_actor_id, job_revision, authorization_revision, status, trigger, started_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 'event', ?, ?)`,
+    ).run(runId, candidate.job_id, candidate.project_id, candidate.organization_id, candidate.service_principal_id,
+      candidate.source_actor_type, candidate.source_actor_id, candidate.job_revision, candidate.authorization_revision,
+      timestamp, timestamp);
+    db.prepare(
+      `INSERT INTO job_event_attempts
+        (id, project_id, organization_id, effective_service_principal_id, source_actor_type, source_actor_id,
+         delivery_id, attempt_number, run_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(randomUUID(), candidate.project_id, candidate.organization_id, candidate.service_principal_id,
+      candidate.source_actor_type, candidate.source_actor_id, candidate.id, attemptNumber, runId, timestamp, timestamp);
+    db.prepare(
+      `INSERT INTO automation_dispatch_cursors (dispatch_kind, last_organization_id, last_claimed_at)
+       VALUES ('event', ?, ?)
+       ON CONFLICT(dispatch_kind) DO UPDATE SET last_organization_id = excluded.last_organization_id,
+         last_claimed_at = excluded.last_claimed_at, revision = automation_dispatch_cursors.revision + 1`,
+    ).run(candidate.organization_id, timestamp);
+    const row = db.prepare(deliveryQuery("d.project_id = ? AND d.id = ?"))
+      .get(candidate.project_id, candidate.id) as DeliveryRow;
+    return {
+      delivery: publicDelivery(row),
+      job: {
+        id: candidate.job_id, project_id: candidate.project_id, organization_id: candidate.organization_id,
+        service_principal_id: candidate.service_principal_id, agent: candidate.agent,
+        prompt_template: candidate.prompt_template, timeout_minutes: candidate.timeout_minutes,
+      },
+      run: db.prepare("SELECT * FROM job_runs WHERE project_id = ? AND id = ?").get(candidate.project_id, runId) as JobRun,
+      attemptNumber, leaseRevision, leaseToken,
+    } satisfies JobEventClaim;
+  });
+  if (result) checkpointAfterWrite();
+  return result;
 }
 
 /** Only an unexpired current owner can extend its lease; expired leases cannot resurrect. */

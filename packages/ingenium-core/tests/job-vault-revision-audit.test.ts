@@ -80,6 +80,6 @@ describe("VAULT-102 revisioned job vault authorization", () => {
       `INSERT INTO job_vault_runtime_audit
        (id, project_id, job_id, item_id, action, run_id, authorized_item_version, created_at)
        VALUES (?, ?, ?, ?, 'secret_read', ?, 1, ?)`,
-    ).run("00000000-0000-4000-8000-000000000001", project.id, job.id, itemId, "00000000-0000-4000-8000-000000000002", new Date().toISOString())).toThrow(/run must match/);
+    ).run("00000000-0000-4000-8000-000000000001", project.id, job.id, itemId, "00000000-0000-4000-8000-000000000002", new Date().toISOString())).toThrow(/scope mismatch/);
   });
 });

@@ -77,6 +77,9 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     return { action: `projects.${permission}`, resource: "projects", permission, target: collection || (req.method === "POST" && req.path === "/api/v1/projects") ? "organization" : "project", sensitive: permission === "admin", stepUp: permission === "admin" };
   }
   if (req.path.startsWith("/api/v1/synthesis/cross-project")) return { action: "synthesis.execute", resource: "synthesis", permission: "execute", target: "installation", sensitive: true };
+  if (/^\/api\/v1\/jobs\/runs\/[^/]+\/logs$/.test(req.path)) {
+    return { action: "jobs.raw-logs.read", resource: "jobs", permission: "read", target: "installation", sensitive: true };
+  }
   if (req.path.startsWith("/api/v1/settings/provider-configs") || req.path.startsWith("/api/v1/settings/llm-config")) {
     const permission = permissionFor(req as Request);
     return { action: `providers.${permission}`, resource: "providers", permission, target: "installation", sensitive: true };

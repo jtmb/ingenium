@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
+import { createOrganization } from "../lib/tools/organizations.js";
 import {
   DEFAULT_JOB_TIMEOUT_MINUTES,
   JobTimeoutError,
@@ -22,6 +23,10 @@ import {
   getRunLogs,
   MAX_JOB_TIMEOUT_MINUTES,
   recoverInterruptedJobRuns,
+  orderJobsForFairDispatch,
+  MAX_CONCURRENT_AUTOMATION_RUNS,
+  MAX_CONCURRENT_RUNS_PER_ORGANIZATION,
+  MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL,
 } from "../lib/tools/jobs.js";
 
 let tempDir: string;
@@ -39,6 +44,42 @@ afterAll(() => {
 });
 
 describe("jobs — CRUD", () => {
+  it("orders cron candidates after the durable organization cursor", () => {
+    const firstProject = createProject("fair-cron-first");
+    const secondOrganization = createOrganization("Fair cron second", "fair-cron-second");
+    const secondProject = createProject("fair-cron-second", false, secondOrganization);
+    const first = createJob(firstProject.id, "first", undefined, "agent", "prompt");
+    const second = createJob(secondProject.id, "second", undefined, "agent", "prompt");
+    getDb().prepare(
+      "INSERT INTO automation_dispatch_cursors (dispatch_kind, last_organization_id, last_claimed_at) VALUES ('cron', ?, ?)",
+    ).run(first.organization_id, new Date().toISOString());
+
+    expect(orderJobsForFairDispatch([first, second], "cron").map((job) => job.organization_id))
+      .toEqual([second.organization_id, first.organization_id]);
+  });
+
+  it("reserves global capacity for another organization and service principal", () => {
+    expect(MAX_CONCURRENT_AUTOMATION_RUNS).toBe(2);
+    expect(MAX_CONCURRENT_RUNS_PER_ORGANIZATION).toBe(1);
+    expect(MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL).toBe(1);
+
+    const firstProject = createProject("quota-first");
+    const secondOrganization = createOrganization("Quota second", "quota-second");
+    const secondProject = createProject("quota-second", false, secondOrganization);
+    const first = createJob(firstProject.id, "first", undefined, "agent", "prompt");
+    const noisySibling = createJob(firstProject.id, "noisy sibling", undefined, "agent", "prompt");
+    const otherTenant = createJob(secondProject.id, "other tenant", undefined, "agent", "prompt");
+
+    const firstRun = startJobRun(firstProject.id, first.id, "manual", { delegator: { type: "user", id: "first-user" } });
+    expect("reason" in firstRun).toBe(false);
+    expect(startJobRun(firstProject.id, noisySibling.id, "manual", { delegator: { type: "user", id: "first-user" } }))
+      .toEqual({ status: "queued", reason: "Automation concurrency quota is full" });
+    const otherRun = startJobRun(secondProject.id, otherTenant.id, "manual", { delegator: { type: "service", id: "other-service" } });
+    expect("reason" in otherRun).toBe(false);
+
+    if (!("reason" in firstRun)) finishJobRun(firstProject.id, firstRun.id, "success", 0);
+    if (!("reason" in otherRun)) finishJobRun(secondProject.id, otherRun.id, "success", 0);
+  });
   it("creates a job with all fields", () => {
     const job = createJob(
       projectId,
@@ -190,7 +231,7 @@ describe("jobs — run lifecycle (queued → running → success)", () => {
   });
 
   it("starts a job run as running immediately", () => {
-    const run = startJobRun(projectId, jobId, "manual");
+    const run = startJobRun(projectId, jobId, "manual", { delegator: { type: "compatibility", id: "test" } });
 
     // Should not be a "reason" object (which means queued/rejected)
     expect("reason" in run).toBe(false);
@@ -202,18 +243,57 @@ describe("jobs — run lifecycle (queued → running → success)", () => {
     expect(runObj.started_at).not.toBeNull();
     expect(runObj.finished_at).toBeNull();
     expect(runObj.exit_code).toBeNull();
+    finishJobRun(projectId, runObj.id, "success", 0);
   });
 
   it("prevents starting a second run while one is running", () => {
-    const result = startJobRun(projectId, jobId, "manual");
+    const first = startJobRun(projectId, jobId, "manual", { delegator: { type: "compatibility", id: "test" } });
+    if ("reason" in first) throw new Error(first.reason);
+    const result = startJobRun(projectId, jobId, "manual", { delegator: { type: "compatibility", id: "test" } });
     expect("reason" in result).toBe(true);
     if ("reason" in result) {
       expect(result.reason).toContain("already has a running");
     }
+    finishJobRun(projectId, first.id, "success", 0);
+  });
+
+  it("claims each cron occurrence once and invalidates stale schedule revisions", () => {
+    const scheduled = createJob(projectId, "Scheduled claim", undefined, "ingenium-qa", "test", "* * * * *");
+    const scheduledFor = "2026-08-13T12:00:00.000Z";
+    const first = startJobRun(projectId, scheduled.id, "cron", {
+      scheduledFor,
+      expectedScheduleRevision: scheduled.schedule_revision,
+    });
+    expect("reason" in first).toBe(false);
+    if (!("reason" in first)) finishJobRun(projectId, first.id, "success", 0);
+    expect(startJobRun(projectId, scheduled.id, "cron", {
+      scheduledFor,
+      expectedScheduleRevision: scheduled.schedule_revision,
+    })).toMatchObject({ reason: "Scheduled occurrence was already claimed" });
+
+    const updated = updateJob(projectId, scheduled.id, { schedule_cron: "*/5 * * * *" }, scheduled.revision);
+    if (updated.status !== "updated") throw new Error("expected schedule update");
+    expect(updated.job.schedule_revision).toBe(scheduled.schedule_revision + 1);
+    expect(startJobRun(projectId, scheduled.id, "cron", {
+      scheduledFor: "2026-08-13T12:05:00.000Z",
+      expectedScheduleRevision: scheduled.schedule_revision,
+    })).toMatchObject({ reason: "Job schedule changed before it could be claimed" });
+  });
+
+  it("fails closed when the effective service principal is revoked", () => {
+    const guarded = createJob(projectId, "Revoked principal", undefined, "ingenium-qa", "test");
+    getDb().prepare("UPDATE service_principals SET status = 'revoked', updated_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), guarded.service_principal_id);
+    expect(startJobRun(projectId, guarded.id, "manual", {
+      delegator: { type: "compatibility", id: "test" },
+    })).toMatchObject({ reason: "Job automation authorization is unavailable" });
+    getDb().prepare("UPDATE service_principals SET status = 'active', updated_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), guarded.service_principal_id);
   });
 
   it("finishes a job run as success", () => {
-    // Get the current running run
+    const started = startJobRun(projectId, jobId, "manual", { delegator: { type: "compatibility", id: "test" } });
+    if ("reason" in started) throw new Error(started.reason);
     const runs = listJobRuns(projectId, jobId);
     expect(runs.length).toBeGreaterThanOrEqual(1);
     const runningRun = runs.find(r => r.status === "running");
@@ -232,7 +312,8 @@ describe("jobs — run lifecycle (queued → running → success)", () => {
   });
 
   it("can start a new run after previous one finished", () => {
-    const run = startJobRun(projectId, jobId, "cron");
+    const job = getJob(projectId, jobId)!;
+    const run = startJobRun(projectId, jobId, "cron", { scheduledFor: new Date().toISOString(), expectedScheduleRevision: job.schedule_revision });
     expect("reason" in run).toBe(false);
 
     const runObj = run as JobRun;
@@ -264,7 +345,7 @@ describe("jobs — cancel and timeout", () => {
   });
 
   it("cancels a running job", () => {
-    const run = startJobRun(projectId, jobId, "manual");
+    const run = startJobRun(projectId, jobId, "manual", { delegator: { type: "compatibility", id: "test" } });
     expect("reason" in run).toBe(false);
     const runObj = run as JobRun;
 
@@ -285,17 +366,20 @@ describe("jobs — startup recovery", () => {
     const manualJob = createJob(projectId, "Recover manual", undefined, "ingenium-qa", "test");
     const cronJob = createJob(projectId, "Recover cron", undefined, "ingenium-qa", "test");
     const eventJob = createJob(projectId, "Preserve event", undefined, "ingenium-qa", "test");
-    const manualRun = startJobRun(projectId, manualJob.id, "manual") as JobRun;
-    const cronRun = startJobRun(projectId, cronJob.id, "cron") as JobRun;
-    const eventRun = startJobRun(projectId, eventJob.id, "event") as JobRun;
+    const manualRun = startJobRun(projectId, manualJob.id, "manual", { delegator: { type: "compatibility", id: "test" } }) as JobRun;
+    expect(recoverInterruptedJobRuns()).toBe(1);
+    const cronRun = startJobRun(projectId, cronJob.id, "cron", { scheduledFor: new Date().toISOString(), expectedScheduleRevision: cronJob.schedule_revision }) as JobRun;
+    expect(recoverInterruptedJobRuns()).toBe(1);
+    const eventRun = startJobRun(projectId, eventJob.id, "event", { sourceActor: { type: "compatibility", id: "test" } });
 
-    expect(recoverInterruptedJobRuns()).toBe(2);
+    expect(recoverInterruptedJobRuns()).toBe(0);
     expect(getJobRun(projectId, manualRun.id)).toMatchObject({ status: "failed", exit_code: -1, finished_at: expect.any(String) });
     expect(getJobRun(projectId, cronRun.id)).toMatchObject({ status: "failed", exit_code: -1, finished_at: expect.any(String) });
-    expect(getJobRun(projectId, eventRun.id)).toMatchObject({ status: "running", finished_at: null });
-    expect("reason" in startJobRun(projectId, manualJob.id, "manual")).toBe(false);
-
-    finishJobRun(projectId, eventRun.id, "failed", -1);
+    expect("reason" in eventRun).toBe(false);
+    if (!("reason" in eventRun)) finishJobRun(projectId, eventRun.id, "success", 0);
+    const rerun = startJobRun(projectId, manualJob.id, "manual", { delegator: { type: "compatibility", id: "test" } });
+    expect("reason" in rerun).toBe(false);
+    if (!("reason" in rerun)) finishJobRun(projectId, rerun.id, "success", 0);
   });
 });
 
@@ -313,7 +397,7 @@ describe("jobs — run logs (append + tail polling)", () => {
     );
     jobId = job.id;
 
-    const run = startJobRun(projectId, job.id, "manual");
+    const run = startJobRun(projectId, job.id, "manual", { delegator: { type: "compatibility", id: "test" } });
     expect("reason" in run).toBe(false);
     const runObj = run as JobRun;
     runId = runObj.id;

@@ -23,6 +23,7 @@ const core = vi.hoisted(() => ({
     cancelJobRun: vi.fn(),
     finishJobRun: vi.fn(),
     getJobRun: vi.fn(() => ({ status: "running" })),
+    isJobRunAuthorizationCurrent: vi.fn(() => true),
     getVaultSecretRunRecovery: vi.fn(),
     listVaultSecretRunsForRecovery: vi.fn(() => []),
     prepareVaultJobRun: vi.fn((_projectId: string, input: {
@@ -54,6 +55,13 @@ const core = vi.hoisted(() => ({
   },
   vault: {
     resolveJobVaultSecrets: vi.fn(() => null),
+    resolveJobProviderRuntime: vi.fn(() => ({
+      connectionId: "provider-connection",
+      providerKey: "test-provider",
+      config: { name: "Test Provider", npm: "@ai-sdk/openai-compatible", models: ["test-model"] },
+      credential: Buffer.from("provider-credential"),
+      release: vi.fn(),
+    })),
   },
   jobEventDeliveries: {
     JOB_EVENT_DELIVERY_LEASE_MS: 30_000,
@@ -207,8 +215,8 @@ async function startRun(runId: string, child: MutableChild): Promise<void> {
 }
 
 let restoreRuntime: (() => void) | undefined;
-let restoreRuntimeSources: (() => void) | undefined;
 let runtimeSourcesDirectory = "";
+let runtimeRoot = "";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -216,6 +224,13 @@ beforeEach(() => {
   childHarness.next = null;
   core.jobs.getJobRun.mockReturnValue({ status: "running" });
   core.vault.resolveJobVaultSecrets.mockReturnValue(null);
+  core.vault.resolveJobProviderRuntime.mockImplementation(() => ({
+    connectionId: "provider-connection",
+    providerKey: "test-provider",
+    config: { name: "Test Provider", npm: "@ai-sdk/openai-compatible", models: ["test-model"] },
+    credential: Buffer.from("provider-credential"),
+    release: vi.fn(),
+  }));
   runtimeSourcesDirectory = mkdtempSync("/dev/shm/ingenium-opencode-runtime-");
   chmodSync(runtimeSourcesDirectory, 0o700);
   const config = join(runtimeSourcesDirectory, "opencode.jsonc");
@@ -224,7 +239,8 @@ beforeEach(() => {
   writeFileSync(auth, "{}\n", { mode: 0o600 });
   chmodSync(config, 0o600);
   chmodSync(auth, 0o600);
-  restoreRuntimeSources = configureJobRunnerRuntimeForTesting({ openCodeConfigPath: config, openCodeAuthPath: auth });
+  runtimeRoot = vaultRoot();
+  restoreRuntime = configureJobRunnerRuntimeForTesting({ vaultSecretRoot: runtimeRoot });
 });
 
 afterEach(async () => {
@@ -235,10 +251,10 @@ afterEach(async () => {
   }
   restoreRuntime?.();
   restoreRuntime = undefined;
-  restoreRuntimeSources?.();
-  restoreRuntimeSources = undefined;
   if (runtimeSourcesDirectory) rmSync(runtimeSourcesDirectory, { recursive: true, force: true });
   runtimeSourcesDirectory = "";
+  if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
+  runtimeRoot = "";
   resetJobRunnerForTesting();
   vi.useRealTimers();
   vi.unstubAllEnvs();
@@ -370,7 +386,7 @@ describe("job-runner process lifecycle", () => {
   });
 
   it("records verified event-process identity without retaining the plaintext nonce and treats nonzero exits as transient delivery failures", async () => {
-    const runId = "event-run";
+    const runId = "10000000-0000-4000-8000-000000000001";
     const child = fakeChild();
     const proc = processHarness([
       identity(101, "leader-start"),
@@ -392,7 +408,7 @@ describe("job-runner process lifecycle", () => {
     (child.stdout as EventEmitter).emit("data", Buffer.from("prompt=payload-should-not-persist\n"));
     closeChild(child, 7, null);
     expect(core.jobs.appendRunLog).toHaveBeenCalledWith(
-      "project-id", runId, "stdout", "Event job output redacted from durable logs.",
+      "project-id", runId, "stderr", "Vault job output redacted.",
     );
     expect(core.jobEventDeliveries.completeJobEventDelivery).toHaveBeenCalledWith("project-id", expect.objectContaining({
       outcome: "failed",
@@ -472,19 +488,28 @@ describe("job-runner process lifecycle", () => {
     restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, createRunNonce: () => "run-nonce" });
 
     childHarness.next = child;
-    await executeJobRun("allowlisted-env", { ...job, agent: "Bearer agent-secret" }, job.prompt_template);
+    const runId = "10000000-0000-4000-8000-000000000002";
+    await executeJobRun(runId, { ...job, agent: "Bearer agent-secret" }, job.prompt_template);
     const spawnOptions = vi.mocked(spawn).mock.calls.at(-1)?.[2];
     expect(spawnOptions?.env).toMatchObject({
-      PATH: expect.any(String), HOME: "/home/appuser", USER: expect.any(String), SHELL: expect.any(String),
+      PATH: expect.any(String), HOME: join(runtimeRoot, runId, "home"), USER: expect.any(String), SHELL: expect.any(String),
       TERM: expect.any(String), LANG: expect.any(String), XDG_CONFIG_HOME: expect.any(String),
       XDG_DATA_HOME: expect.any(String), XDG_CACHE_HOME: expect.any(String), INGENIUM_JOB_PROJECT_ID: "project-id",
     });
+    expect(vi.mocked(spawn).mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(["--pure", "--dir", "/workspace"]));
+    expect(JSON.parse(readFileSync(join(runtimeRoot, runId, "data", "opencode", "auth.json"), "utf8")))
+      .toEqual({ "test-provider": { type: "api", key: "provider-credential" } });
     for (const name of ["INGENIUM_API_TOKEN", "OPENCODE_SERVER_PASSWORD", "OPENAI_API_KEY", "COOKIE"]) {
       expect(spawnOptions?.env).not.toHaveProperty(name);
     }
     expect(buildJobProcessEnvironment("project-id", "run-nonce")).not.toHaveProperty("INGENIUM_API_TOKEN");
     expect(core.logger.info.mock.calls.flat().join(" ")).not.toContain("agent-secret");
     closeChild(child, 0, null);
+    expect(core.jobs.prepareVaultJobRun).toHaveBeenCalledWith("project-id", expect.objectContaining({
+      runId,
+      itemSnapshots: [],
+    }));
+    expect(core.jobs.recordVaultJobRunProcessIdentity).toHaveBeenCalledWith("project-id", runId, expect.any(Object));
   });
 
   it("does not spawn a child while a referenced vault is sealed", async () => {
@@ -537,7 +562,9 @@ describe("job-runner process lifecycle", () => {
       const ephemeralAuth = readFileSync(join(root, runId, "data", "opencode", "auth.json"), "utf8");
       expect(ephemeralConfig).not.toContain("must-not-run");
       expect(ephemeralConfig).not.toContain("mcp");
-      expect(ephemeralAuth).toBe("{}\n");
+      expect(JSON.parse(ephemeralAuth)).toEqual({
+        "test-provider": { type: "api", key: "provider-credential" },
+      });
       expect(readFileSync(join(runtimeSourcesDirectory, "opencode.jsonc"), "utf8")).not.toContain(canary);
       expect(readFileSync(join(runtimeSourcesDirectory, "auth.json"), "utf8")).not.toContain(canary);
       expect(resolved.secrets[0].value.every((byte: number) => byte === 0)).toBe(true);
@@ -575,14 +602,14 @@ describe("job-runner process lifecycle", () => {
     }
   });
 
-  it("fails closed before spawn when the isolated provider config or auth source is unavailable", async () => {
+  it("fails closed before spawn when no provider connection is authorized", async () => {
     const root = vaultRoot();
-    const resolved = vaultResolution("missing-auth-canary");
-    restoreRuntime = configureJobRunnerRuntimeForTesting({
-      vaultSecretRoot: root,
-      openCodeAuthPath: join(runtimeSourcesDirectory, "missing-auth.json"),
-    });
+    const resolved = vaultResolution("missing-provider-canary");
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ vaultSecretRoot: root });
     core.vault.resolveJobVaultSecrets.mockReturnValue(resolved);
+    core.vault.resolveJobProviderRuntime.mockImplementationOnce(() => {
+      throw new Error("PROVIDER_RUNTIME_UNAVAILABLE");
+    });
     try {
       await executeJobRun("45444444-4444-4444-8444-444444444444", job, job.prompt_template);
       expect(vi.mocked(spawn)).not.toHaveBeenCalled();
@@ -1025,7 +1052,7 @@ describe("job-runner process lifecycle", () => {
   });
 
   it("revalidates a nonce-marked descendant after leader exit and retains evidence until SIGKILL teardown is verified", async () => {
-    const runId = "descendant-run";
+    const runId = "10000000-0000-4000-8000-000000000003";
     const child = fakeChild();
     const proc = processHarness([identity(101, "leader-start")]);
     const groupSignals: NodeJS.Signals[] = [];
@@ -1068,7 +1095,7 @@ describe("job-runner process lifecycle", () => {
   });
 
   it("suppresses SIGTERM and SIGKILL when a reused PID/PGID no longer matches the owned leader", async () => {
-    const runId = "reused-group-run";
+    const runId = "10000000-0000-4000-8000-000000000004";
     const child = fakeChild();
     const proc = processHarness([identity(101, "owned-start")]);
     const signalProcessGroup = vi.fn();
@@ -1097,7 +1124,7 @@ describe("job-runner process lifecycle", () => {
   });
 
   it("suppresses escalation when a known descendant PID has a different start time or executable", async () => {
-    const runId = "reused-descendant-run";
+    const runId = "10000000-0000-4000-8000-000000000005";
     const child = fakeChild();
     const proc = processHarness([identity(101, "leader-start")]);
     const signalProcessGroup = vi.fn();
@@ -1127,7 +1154,7 @@ describe("job-runner process lifecycle", () => {
   });
 
   it("awaits shutdown cancellation through the bounded escalation attempt", async () => {
-    const runId = "shutdown-run";
+    const runId = "10000000-0000-4000-8000-000000000006";
     const child = fakeChild();
     const proc = processHarness([identity(101, "leader-start")]);
     restoreRuntime = configureJobRunnerRuntimeForTesting({

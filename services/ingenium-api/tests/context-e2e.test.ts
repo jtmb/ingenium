@@ -314,7 +314,14 @@ describe("CTX-005 end-to-end context use", () => {
       body: JSON.stringify({ expectedRevision: 2, confirmationToken: archiveAuthorization.confirmationToken }),
     });
     expect(archiveResponse.status).toBe(200);
-    expect((await archiveResponse.json()).data).toMatchObject({ archived: true, event: { event_type: "conversation_archived" } });
+    expect((await archiveResponse.json()).data).toMatchObject({
+      archived: true,
+      event: {
+        event_type: "conversation_archived",
+        source_actor_type: "compatibility",
+        source_actor_id: null,
+      },
+    });
 
     const blockedAppendResponse = await fetch(url(`/api/v1/context/conversations/${conversation.id}/messages`), {
       method: "POST",

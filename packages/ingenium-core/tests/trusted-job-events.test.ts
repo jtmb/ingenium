@@ -109,15 +109,33 @@ function insertFabricatedAudit(
 ): { id: string; createdAt: string } {
   const id = randomUUID();
   const createdAt = input.createdAt ?? new Date().toISOString();
+  const authorization = db.prepare(
+    `SELECT organization_id, actor_type, actor_id, delegator_actor_type, delegator_actor_id, request_id, correlation_id
+     FROM context_checkpoint_maintenance_authorizations WHERE project_id = ? AND id = ?`,
+  ).get(input.projectId, input.authorizationId) as {
+    organization_id: string;
+    actor_type: string;
+    actor_id: string | null;
+    delegator_actor_type: string | null;
+    delegator_actor_id: string | null;
+    request_id: string | null;
+    correlation_id: string | null;
+  } | undefined;
+  const organizationId = authorization?.organization_id
+    ?? (db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(input.projectId) as { organization_id: string }).organization_id;
   db.prepare(
     `INSERT INTO context_checkpoint_audit_events
-     (id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
-      expected_revision, checkpoint_state_hash, authorization_id, archive_sequence, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, project_id, organization_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+      expected_revision, checkpoint_state_hash, authorization_id, archive_sequence, source_actor_type,
+      source_actor_id, delegator_actor_type, delegator_actor_id, request_id, correlation_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    id, input.projectId, input.eventType, input.conversationId, input.checkpointId,
+    id, input.projectId, organizationId, input.eventType, input.conversationId, input.checkpointId,
     input.targetConversationId, input.expectedRevision, input.checkpointStateHash,
-    input.authorizationId, input.archiveSequence, createdAt,
+    input.authorizationId, input.archiveSequence, authorization?.actor_type ?? "compatibility",
+    authorization?.actor_id ?? null, authorization?.delegator_actor_type ?? null,
+    authorization?.delegator_actor_id ?? null, authorization?.request_id ?? null,
+    authorization?.correlation_id ?? null, createdAt,
   );
   return { id, createdAt };
 }
@@ -130,12 +148,14 @@ function insertFabricatedTrustedEvent(
   payload: Record<string, string | number>,
   createdAt: string,
 ): void {
+  const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string };
   db.prepare(
     `INSERT INTO trusted_job_events
-     (id, project_id, event_type, schema_version, producer, source_audit_event_id,
-      dedupe_key, payload, created_at)
-     VALUES (?, ?, ?, 1, 'context.maintenance', ?, ?, ?, ?)`,
-  ).run(randomUUID(), projectId, eventType, sourceAuditEventId, sourceAuditEventId, JSON.stringify(payload), createdAt);
+     (id, project_id, organization_id, source_actor_type, event_type, schema_version,
+      producer, source_audit_event_id, dedupe_key, payload, created_at)
+     VALUES (?, ?, ?, 'compatibility', ?, 1, 'context.maintenance', ?, ?, ?, ?)`,
+  ).run(randomUUID(), projectId, project.organization_id, eventType, sourceAuditEventId,
+    sourceAuditEventId, JSON.stringify(payload), createdAt);
 }
 
 afterEach(() => {
@@ -155,6 +175,7 @@ describe("migration 076 trusted job events", () => {
     expect(db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trusted_job_events_%' ORDER BY name",
     ).all()).toEqual([
+      { name: "trusted_job_events_automation_scope_insert" },
       { name: "trusted_job_events_context_provenance" },
       { name: "trusted_job_events_immutable_delete" },
       { name: "trusted_job_events_immutable_update" },
@@ -183,16 +204,20 @@ describe("migration 076 trusted job events", () => {
     expect(() => db.prepare("DELETE FROM trusted_job_events WHERE id = ?").run(event.id)).toThrow(/immutable/);
     expect(() => db.prepare(
       `INSERT INTO trusted_job_events
-       (id, project_id, event_type, schema_version, producer, source_audit_event_id, dedupe_key, payload, created_at)
-       VALUES (?, ?, ?, 1, 'context.maintenance', ?, ?, '{not-json', ?)`,
-    ).run(randomUUID(), first.id, "context.conversation.archived", archived.event.id, archived.event.id, archived.event.created_at)).toThrow();
+       (id, project_id, organization_id, source_actor_type, event_type, schema_version,
+        producer, source_audit_event_id, dedupe_key, payload, created_at)
+       VALUES (?, ?, ?, 'compatibility', ?, 1, 'context.maintenance', ?, ?, '{not-json', ?)`,
+    ).run(randomUUID(), first.id, first.organization_id, "context.conversation.archived",
+      archived.event.id, archived.event.id, archived.event.created_at)).toThrow();
     expect(() => db.prepare(
       `INSERT INTO trusted_job_events
-       (id, project_id, event_type, schema_version, producer, source_audit_event_id, dedupe_key, payload, created_at)
-       VALUES (?, ?, ?, 1, 'context.maintenance', ?, ?, ?, ?)`,
+       (id, project_id, organization_id, source_actor_type, event_type, schema_version,
+        producer, source_audit_event_id, dedupe_key, payload, created_at)
+       VALUES (?, ?, ?, 'compatibility', ?, 1, 'context.maintenance', ?, ?, ?, ?)`,
     ).run(
       randomUUID(),
       first.id,
+      first.organization_id,
       "context.conversation.archived",
       randomUUID(),
       randomUUID(),
@@ -230,7 +255,9 @@ describe("migration 076 trusted job events", () => {
     process.env.INGENIUM_CORE_DB_PATH = path;
     resetDbForTest();
     const upgraded = getDb(path);
-    const legacyJob = upgraded.prepare("SELECT id, trigger_event FROM jobs WHERE project_id = ?").get(projectId) as { id: string; trigger_event: string };
+    const legacyJob = upgraded.prepare(
+      "SELECT id, trigger_event, organization_id, service_principal_id FROM jobs WHERE project_id = ?",
+    ).get(projectId) as { id: string; trigger_event: string; organization_id: string; service_principal_id: string };
     expect(legacyJob.trigger_event).toBe("legacy.webhook");
     expect(upgraded.prepare(
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'job_event_deliveries'",
@@ -240,9 +267,11 @@ describe("migration 076 trusted job events", () => {
     ).get()).toEqual({ count: 1 });
     expect(() => upgraded.prepare(
       `INSERT INTO jobs
-       (id, project_id, name, agent, prompt_template, trigger_event, enabled, timeout_minutes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'unknown.event', 1, 30, ?, ?)`,
-    ).run(randomUUID(), projectId, "Unknown", "agent", "prompt", createdAt, createdAt)).toThrow(/trigger_event/);
+       (id, project_id, organization_id, service_principal_id, name, agent, prompt_template,
+        trigger_event, enabled, timeout_minutes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'unknown.event', 1, 30, ?, ?)`,
+    ).run(randomUUID(), projectId, legacyJob.organization_id, legacyJob.service_principal_id,
+      "Unknown", "agent", "prompt", createdAt, createdAt)).toThrow(/trigger_event/);
     expect(() => upgraded.prepare("UPDATE jobs SET trigger_event = 'unknown.event', revision = revision + 1 WHERE id = ?").run(legacyJob.id)).toThrow(/trigger_event/);
     expect(upgraded.prepare("UPDATE jobs SET name = ?, revision = revision + 1 WHERE id = ?").run("Legacy job renamed", legacyJob.id).changes).toBe(1);
     expect(upgraded.prepare("UPDATE jobs SET trigger_event = NULL, revision = revision + 1 WHERE id = ?").run(legacyJob.id).changes).toBe(1);
@@ -265,7 +294,7 @@ describe("trusted job event core contract", () => {
       checkpointStateHash: null,
       authorizationId: randomUUID(),
       archiveSequence: 0,
-    })).toThrow(/FOREIGN KEY/);
+    })).toThrow(/provenance mismatch|FOREIGN KEY/);
 
     authorizeContextMaintenanceAction(first.id, conversation.id, {
       operation: "archive_conversation",
@@ -309,7 +338,7 @@ describe("trusted job event core contract", () => {
       checkpointStateHash: null,
       authorizationId: otherProjectAuthorizationId,
       archiveSequence: 1,
-    })).toThrow(/FOREIGN KEY/);
+    })).toThrow(/provenance mismatch|FOREIGN KEY/);
     expect(listTrustedJobEvents(first.id).data).toEqual([]);
   });
 
@@ -612,5 +641,36 @@ describe("trusted job event core contract", () => {
     resetDbForTest();
     expect(listTrustedJobEvents(first.id, { limit: 100 }).data).toHaveLength(3);
     expect(getDb(path).prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("carries the authenticated maintenance actor into trusted events and runs", () => {
+    const { db, first } = setup();
+    const { conversation } = contextFixture(first.id);
+    const actorId = randomUUID();
+    const authorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "archive_conversation",
+      expectedRevision: 1,
+    }, {
+      actorType: "user",
+      actorId,
+      requestId: "req-auth-106",
+      correlationId: "corr-auth-106",
+    });
+
+    const archived = archiveContextConversation(first.id, conversation.id, {
+      expectedRevision: 1,
+      confirmationToken: authorization.confirmationToken,
+    });
+    const event = db.prepare(
+      "SELECT source_actor_type, source_actor_id FROM trusted_job_events WHERE source_audit_event_id = ?",
+    ).get(archived.event.id);
+
+    expect(archived.event).toMatchObject({
+      source_actor_type: "user",
+      source_actor_id: actorId,
+      request_id: "req-auth-106",
+      correlation_id: "corr-auth-106",
+    });
+    expect(event).toEqual({ source_actor_type: "user", source_actor_id: actorId });
   });
 });

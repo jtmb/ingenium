@@ -180,6 +180,27 @@ return the same not-found response as absent resources. Native and managed
 provider credentials may enter shared OpenCode only when installation-owned;
 private provider ownership fails closed until an isolated provider runtime exists.
 
+### Automation tenancy (AUTH-106)
+
+Migration 099 gives every job and task an immutable organization/project owner.
+Jobs execute as explicit organization service principals backed by revisioned
+project execution grants. Manual runs retain the delegator; trusted-event runs
+retain source actor and delivery/attempt provenance; cron runs atomically claim
+a unique `(job, schedule revision, scheduled minute)`.
+
+Cron and trusted-event dispatch use durable organization round-robin cursors.
+At most two automation runs are active globally, while each organization and
+service principal may occupy one slot. Every attempt uses a run-local pure
+OpenCode runtime containing exactly one explicitly service-granted organization
+or installation provider; no shared OpenCode config/auth state is inherited.
+
+Run, event-delivery, vault-reference, and recovery records snapshot the job,
+service-principal, and grant revisions used for execution. Recovery revalidates
+those snapshots before secret resolution or process handling. Revoked principals
+and stale job, execution-grant, or vault-grant revisions fail closed. User-private
+jobs and tasks remain owner-only, while raw run logs/process surfaces remain
+installation-admin operations.
+
 ### Content tenancy (AUTH-105)
 
 Migration 098 makes Docs spaces, templates, and tags organization roots. Pages,

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
+import { createOrganization } from "../lib/tools/organizations.js";
 import { createJob, deleteJob, getRunLogs } from "../lib/tools/jobs.js";
 import {
   appendContextMessage,
@@ -17,6 +18,7 @@ import {
 } from "../lib/tools/context-conversations.js";
 import {
   claimJobEventDelivery,
+  claimNextJobEventDelivery,
   completeJobEventDelivery,
   generateJobEventLeaseToken,
   getJobEventDelivery,
@@ -54,19 +56,22 @@ function contextFixture(projectId: string) {
   return { conversation, checkpoint: createContextCheckpoint(projectId, conversation.id, { expectedRevision: 1 }) };
 }
 
-function emitAllTrustedEvents(projectId: string) {
+function emitAllTrustedEvents(
+  projectId: string,
+  provenance: Parameters<typeof authorizeContextMaintenanceAction>[3] = { actorType: "compatibility" },
+) {
   const { conversation, checkpoint } = contextFixture(projectId);
   const archive = authorizeContextMaintenanceAction(projectId, conversation.id, {
     operation: "archive_conversation", expectedRevision: 1,
-  });
+  }, provenance);
   archiveContextConversation(projectId, conversation.id, { expectedRevision: 1, confirmationToken: archive.confirmationToken });
   const unarchive = authorizeContextMaintenanceAction(projectId, conversation.id, {
     operation: "unarchive_conversation", expectedRevision: 1,
-  });
+  }, provenance);
   unarchiveContextConversation(projectId, conversation.id, { expectedRevision: 1, confirmationToken: unarchive.confirmationToken });
   const restore = authorizeContextMaintenanceAction(projectId, conversation.id, {
     operation: "restore_checkpoint", checkpointId: checkpoint.checkpoint.id, expectedRevision: 1,
-  });
+  }, provenance);
   restoreContextCheckpoint(projectId, conversation.id, checkpoint.checkpoint.id, {
     expectedRevision: 1, confirmationToken: restore.confirmationToken, idempotencyKey: "event-delivery-restore",
   });
@@ -198,7 +203,8 @@ describe("JOB-101 trusted event delivery queue", () => {
   it("claims atomically, persists only hashes, requires the current owner, and records one event attempt/run", () => {
     const { db, first, second } = setup();
     createJob(first.id, "archive", undefined, "agent", "prompt", undefined, "context.conversation.archived");
-    emitAllTrustedEvents(first.id);
+    const actorId = randomUUID();
+    emitAllTrustedEvents(first.id, { actorType: "user", actorId });
     snapshotTrustedJobEvents(first.id);
     const claim = claimJobEventDelivery(first.id, generateJobEventLeaseToken())!;
     expect(claim.delivery.state).toBe("leased");
@@ -223,6 +229,24 @@ describe("JOB-101 trusted event delivery queue", () => {
     expect(db.prepare(
       "SELECT process_nonce_hash FROM job_event_attempts WHERE project_id = ? AND run_id = ?",
     ).get(first.id, claim.run.id)).not.toMatchObject({ process_nonce_hash: "process-nonce-not-persisted" });
+    expect(db.prepare(
+      `SELECT delivery.source_actor_type AS delivery_actor_type, delivery.source_actor_id AS delivery_actor_id,
+              attempt.organization_id, attempt.effective_service_principal_id,
+              attempt.source_actor_type, attempt.source_actor_id,
+              run.source_actor_type AS run_actor_type, run.source_actor_id AS run_actor_id
+       FROM job_event_attempts attempt JOIN job_runs run ON run.id = attempt.run_id
+       JOIN job_event_deliveries delivery ON delivery.id = attempt.delivery_id
+       WHERE attempt.project_id = ? AND attempt.run_id = ?`,
+    ).get(first.id, claim.run.id)).toEqual({
+      organization_id: first.organization_id,
+      effective_service_principal_id: claim.job.service_principal_id,
+      delivery_actor_type: "user",
+      delivery_actor_id: actorId,
+      source_actor_type: "user",
+      source_actor_id: actorId,
+      run_actor_type: "user",
+      run_actor_id: actorId,
+    });
     expect(completeJobEventDelivery(second.id, {
       ...claim,
       deliveryId: claim.delivery.id,
@@ -240,6 +264,37 @@ describe("JOB-101 trusted event delivery queue", () => {
       exitCode: 0,
     })?.state).toBe("succeeded");
     expect(getJobEventDelivery(first.id, claim.delivery.id)?.lease_expires_at).toBeNull();
+  });
+
+  it("round-robins durable claims across organizations instead of draining one project", () => {
+    const { db, first } = setup();
+    const secondOrganization = createOrganization("Event delivery second org", "event-delivery-second-org");
+    const second = createProject("event-delivery-second-org-project", false, secondOrganization);
+    createJob(first.id, "first one", undefined, "agent", "prompt", undefined, "context.conversation.archived");
+    createJob(first.id, "first two", undefined, "agent", "prompt", undefined, "context.conversation.archived");
+    createJob(second.id, "second", undefined, "agent", "prompt", undefined, "context.conversation.archived");
+    emitAllTrustedEvents(first.id);
+    emitAllTrustedEvents(second.id);
+    snapshotTrustedJobEvents(first.id);
+    snapshotTrustedJobEvents(second.id);
+
+    const firstClaim = claimNextJobEventDelivery()!;
+    const secondClaim = claimNextJobEventDelivery()!;
+
+    expect(firstClaim.job.organization_id).not.toBe(secondClaim.job.organization_id);
+    expect(db.prepare("SELECT last_organization_id FROM automation_dispatch_cursors WHERE dispatch_kind = 'event'").get())
+      .toEqual({ last_organization_id: secondClaim.job.organization_id });
+  });
+
+  it("applies the same organization quota to project-scoped claims", () => {
+    const { first } = setup();
+    createJob(first.id, "first", undefined, "agent", "prompt", undefined, "context.conversation.archived");
+    createJob(first.id, "second", undefined, "agent", "prompt", undefined, "context.conversation.archived");
+    emitAllTrustedEvents(first.id);
+    snapshotTrustedJobEvents(first.id);
+
+    expect(claimJobEventDelivery(first.id)).toBeDefined();
+    expect(claimJobEventDelivery(first.id)).toBeUndefined();
   });
 
   it("retries with bounded durable backoff and dead-letters the fifth failure", () => {

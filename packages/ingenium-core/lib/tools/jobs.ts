@@ -5,6 +5,9 @@ import {
   JobRunLog,
   JobRunWithEventMetadata,
   JobVaultReference,
+  MAX_CONCURRENT_AUTOMATION_RUNS,
+  MAX_CONCURRENT_RUNS_PER_ORGANIZATION,
+  MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL,
   TrustedJobEventTypeSchema,
   type TrustedJobEventType,
 } from "../schema.js";
@@ -41,11 +44,30 @@ export const JOB_VAULT_REFERENCE_MAX = 16;
 export const DEFAULT_JOB_TIMEOUT_MINUTES = 30;
 export const MIN_JOB_TIMEOUT_MINUTES = 1;
 export const MAX_JOB_TIMEOUT_MINUTES = 1_440;
+export { MAX_CONCURRENT_AUTOMATION_RUNS, MAX_CONCURRENT_RUNS_PER_ORGANIZATION, MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 type JobRow = Omit<Job, "vault_references">;
 type JobDb = ReturnType<typeof getDb>;
+
+export type AutomationActorType = "compatibility" | "user" | "service" | "system";
+
+export interface JobOwnershipInput {
+  organizationId: string;
+  servicePrincipalId?: string;
+  ownerUserId?: string | null;
+  visibility?: "private" | "organization";
+  actorType?: AutomationActorType;
+  actorId?: string | null;
+}
+
+export interface JobRunProvenance {
+  delegator?: { type: AutomationActorType; id?: string | null };
+  sourceActor?: { type: AutomationActorType; id?: string | null };
+  scheduledFor?: string;
+  expectedScheduleRevision?: number;
+}
 
 export class JobVaultReferenceError extends Error {
   readonly code: "INVALID_VAULT_ITEM_IDS" | "VAULT_ITEM_NOT_FOUND";
@@ -114,6 +136,68 @@ function loadJob(db: JobDb, projectId: string, jobId: string): Job | undefined {
   return job ? withVaultReferences(db, job) : undefined;
 }
 
+export function orderJobsForFairDispatch<T extends Pick<Job, "organization_id" | "id">>(
+  candidates: readonly T[],
+  dispatchKind: "cron" | "event",
+): T[] {
+  const cursor = getDb(dbPath()).prepare(
+    "SELECT last_organization_id FROM automation_dispatch_cursors WHERE dispatch_kind = ?",
+  ).get(dispatchKind) as { last_organization_id: string | null } | undefined;
+  const lastOrganizationId = cursor?.last_organization_id;
+  return [...candidates].sort((left, right) => {
+    const leftWrapped = lastOrganizationId && left.organization_id <= lastOrganizationId ? 1 : 0;
+    const rightWrapped = lastOrganizationId && right.organization_id <= lastOrganizationId ? 1 : 0;
+    return leftWrapped - rightWrapped
+      || left.organization_id.localeCompare(right.organization_id)
+      || left.id.localeCompare(right.id);
+  });
+}
+
+function hasAutomationCapacity(db: JobDb, organizationId: string, servicePrincipalId: string): boolean {
+  const counts = db.prepare(
+    `SELECT count(*) AS global_count,
+            count(*) FILTER (WHERE organization_id = ?) AS organization_count,
+            count(*) FILTER (WHERE effective_service_principal_id = ?) AS principal_count
+     FROM job_runs WHERE status IN ('queued', 'running')`,
+  ).get(organizationId, servicePrincipalId) as {
+    global_count: number;
+    organization_count: number;
+    principal_count: number;
+  };
+  return counts.global_count < MAX_CONCURRENT_AUTOMATION_RUNS
+    && counts.organization_count < MAX_CONCURRENT_RUNS_PER_ORGANIZATION
+    && counts.principal_count < MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL;
+}
+
+function advanceDispatchCursor(db: JobDb, dispatchKind: "cron" | "event", organizationId: string, timestamp: string): void {
+  db.prepare(
+    `INSERT INTO automation_dispatch_cursors (dispatch_kind, last_organization_id, last_claimed_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(dispatch_kind) DO UPDATE SET last_organization_id = excluded.last_organization_id,
+       last_claimed_at = excluded.last_claimed_at, revision = automation_dispatch_cursors.revision + 1`,
+  ).run(dispatchKind, organizationId, timestamp);
+}
+
+function ensureAutomationPrincipal(db: JobDb, organizationId: string, projectId: string): string {
+  let principal = db.prepare(
+    "SELECT id FROM service_principals WHERE organization_id = ? AND name = 'Automation Dispatcher'",
+  ).get(organizationId) as { id: string } | undefined;
+  const timestamp = new Date().toISOString();
+  if (!principal) {
+    principal = { id: randomUUID() };
+    db.prepare(
+      "INSERT INTO service_principals (id, organization_id, name, status, created_at, updated_at) VALUES (?, ?, 'Automation Dispatcher', 'active', ?, ?)",
+    ).run(principal.id, organizationId, timestamp, timestamp);
+  }
+  db.prepare(
+    `INSERT INTO automation_principal_grants
+     (id, organization_id, project_id, service_principal_id, permission, granted_by_actor_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'execute', 'system', ?, ?)
+     ON CONFLICT(project_id, service_principal_id, permission) DO NOTHING`,
+  ).run(randomUUID(), organizationId, projectId, principal.id, timestamp, timestamp);
+  return principal.id;
+}
+
 function loadActiveVaultItems(db: JobDb, projectId: string, itemIds: string[]): Map<string, number> {
   if (itemIds.length === 0) return new Map();
   const placeholders = itemIds.map(() => "?").join(", ");
@@ -123,6 +207,36 @@ function loadActiveVaultItems(db: JobDb, projectId: string, itemIds: string[]): 
   ).all(projectId, '{"mode":"deleted"}', ...itemIds) as Array<{ id: string; version: number }>;
   if (rows.length !== itemIds.length) throw new JobVaultReferenceError("VAULT_ITEM_NOT_FOUND");
   return new Map(rows.map((item) => [item.id, item.version]));
+}
+
+function requireAutomationVaultGrant(db: JobDb, projectId: string, jobId: string, itemId: string): number {
+  const grant = db.prepare(
+    `SELECT grant_row.revision
+     FROM jobs job
+     JOIN resource_grants grant_row ON grant_row.organization_id = job.organization_id
+       AND grant_row.resource_type = 'vault_item' AND grant_row.resource_id = ?
+       AND grant_row.grantee_kind = 'service' AND grant_row.grantee_id = job.service_principal_id
+       AND grant_row.revoked_at IS NULL AND (grant_row.expires_at IS NULL OR grant_row.expires_at > ?)
+       AND EXISTS (SELECT 1 FROM json_each(grant_row.permissions_json) permission WHERE permission.value IN ('*', 'read', 'write', 'admin'))
+     WHERE job.project_id = ? AND job.id = ?`,
+  ).get(itemId, new Date().toISOString(), projectId, jobId) as { revision: number } | undefined;
+  if (!grant) throw new JobVaultReferenceError("VAULT_ITEM_NOT_FOUND");
+  return grant.revision;
+}
+
+function ensureAutomationVaultGrants(db: JobDb, projectId: string, jobId: string, itemIds: readonly string[]): void {
+  if (itemIds.length === 0) return;
+  const timestamp = new Date().toISOString();
+  const insert = db.prepare(
+    `INSERT INTO resource_grants
+     (id, organization_id, resource_type, resource_id, grantee_kind, grantee_id, permissions_json,
+      granted_by_actor_type, created_at, updated_at)
+     SELECT ?, job.organization_id, 'vault_item', ?, 'service', job.service_principal_id, '["read"]',
+            'compatibility', ?, ?
+     FROM jobs job WHERE job.project_id = ? AND job.id = ?
+     ON CONFLICT DO NOTHING`,
+  );
+  for (const itemId of itemIds) insert.run(randomUUID(), itemId, timestamp, timestamp, projectId, jobId);
 }
 
 function insertVaultReferenceAudit(
@@ -136,9 +250,10 @@ function insertVaultReferenceAudit(
 ): void {
   db.prepare(
     `INSERT INTO job_vault_reference_audit
-     (id, project_id, job_id, item_id, authorized_item_version, action, actor, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'authenticated_api', ?)`,
-  ).run(randomUUID(), projectId, jobId, itemId, itemVersion, action, timestamp);
+     (id, project_id, organization_id, job_id, item_id, authorized_item_version, action, actor, actor_type, created_at)
+     SELECT ?, job.project_id, job.organization_id, job.id, ?, ?, ?, 'authenticated_api', 'compatibility', ?
+     FROM jobs job WHERE job.project_id = ? AND job.id = ?`,
+  ).run(randomUUID(), itemId, itemVersion, action, timestamp, projectId, jobId);
 }
 
 function replaceVaultReferences(db: JobDb, projectId: string, jobId: string, value: unknown): void {
@@ -149,6 +264,7 @@ function replaceVaultReferences(db: JobDb, projectId: string, jobId: string, val
   if (!parent) throw new Error("Job vault reference parent is missing");
 
   const requestedVersions = loadActiveVaultItems(db, projectId, itemIds);
+  ensureAutomationVaultGrants(db, projectId, jobId, itemIds);
   const existing = db.prepare(
     `SELECT item_id, authorized_item_version, status
      FROM job_vault_references WHERE project_id = ? AND job_id = ?`,
@@ -175,30 +291,32 @@ function replaceVaultReferences(db: JobDb, projectId: string, jobId: string, val
   for (const itemId of itemIds) {
     const existingReference = existingByItemId.get(itemId);
     const itemVersion = requestedVersions.get(itemId)!;
+    const grantRevision = requireAutomationVaultGrant(db, projectId, jobId, itemId);
     if (existingReference?.status === "authorized") {
       // An explicit same-ID PATCH is an intentional reauthorization event even
       // without rotation. Omission preserves the previous authorization and
       // continues to fail closed if a later item version diverges.
       db.prepare(
         `UPDATE job_vault_references
-         SET authorized_at = ?, authorized_item_version = ?
+         SET authorized_at = ?, authorized_item_version = ?, grant_revision = ?
          WHERE project_id = ? AND job_id = ? AND item_id = ? AND status = 'authorized'`,
-      ).run(timestamp, itemVersion, projectId, jobId, itemId);
+      ).run(timestamp, itemVersion, grantRevision, projectId, jobId, itemId);
       insertVaultReferenceAudit(db, projectId, jobId, itemId, itemVersion, "authorized", timestamp);
       continue;
     }
     if (existingReference) {
       db.prepare(
         `UPDATE job_vault_references
-         SET authorized_at = ?, authorized_item_version = ?, status = 'authorized'
+         SET authorized_at = ?, authorized_item_version = ?, grant_revision = ?, status = 'authorized'
          WHERE project_id = ? AND job_id = ? AND item_id = ? AND status = 'revoked'`,
-      ).run(timestamp, itemVersion, projectId, jobId, itemId);
+      ).run(timestamp, itemVersion, grantRevision, projectId, jobId, itemId);
     } else {
       db.prepare(
         `INSERT INTO job_vault_references
-         (project_id, job_id, item_id, authorized_at, authorized_item_version, status)
-         VALUES (?, ?, ?, ?, ?, 'authorized')`,
-      ).run(projectId, jobId, itemId, timestamp, itemVersion);
+         (project_id, organization_id, job_id, item_id, authorized_at, authorized_item_version, grant_revision, status)
+         SELECT job.project_id, job.organization_id, job.id, ?, ?, ?, ?, 'authorized'
+         FROM jobs job WHERE job.project_id = ? AND job.id = ?`,
+      ).run(itemId, timestamp, itemVersion, grantRevision, projectId, jobId);
     }
     insertVaultReferenceAudit(db, projectId, jobId, itemId, itemVersion, "authorized", timestamp);
   }
@@ -232,6 +350,7 @@ export function createJob(
   triggerEvent?: string | null,
   timeoutMinutes?: number,
   vaultItemIds?: string[],
+  ownership?: JobOwnershipInput,
 ): Job {
   const effectiveTimeoutMinutes = timeoutMinutes ?? DEFAULT_JOB_TIMEOUT_MINUTES;
   if (!isValidJobTimeoutMinutes(effectiveTimeoutMinutes)) throw new JobTimeoutError();
@@ -240,12 +359,20 @@ export function createJob(
     const db = getDb(dbPath());
     const now = new Date().toISOString();
     const id = randomUUID();
+    const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+    if (!project) throw new Error("Job project is unavailable");
+    const organizationId = ownership?.organizationId ?? project.organization_id;
+    const servicePrincipalId = ownership?.servicePrincipalId ?? ensureAutomationPrincipal(db, organizationId, projectId);
+    if (!servicePrincipalId || organizationId !== project.organization_id) throw new Error("Job automation principal is unavailable");
     db.prepare(
-      `INSERT INTO jobs (id, project_id, name, description, agent, prompt_template,
+      `INSERT INTO jobs (id, project_id, organization_id, owner_kind, owner_user_id, visibility,
+        service_principal_id, created_by_actor_type, created_by_actor_id, name, description, agent, prompt_template,
         schedule_cron, trigger_event, enabled, timeout_minutes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).run(
-      id, projectId, name, description ?? null, agent, promptTemplate,
+      id, projectId, organizationId, ownership?.ownerUserId ? "user" : "organization", ownership?.ownerUserId ?? null,
+      ownership?.visibility ?? (ownership?.ownerUserId ? "private" : "organization"), servicePrincipalId,
+      ownership?.actorType ?? "compatibility", ownership?.actorId ?? null, name, description ?? null, agent, promptTemplate,
        scheduleCron ?? null, trustedTriggerEvent,
        effectiveTimeoutMinutes, now, now,
     );
@@ -320,6 +447,9 @@ export function updateJob(
           ? nextTriggerEvent
           : (fields as Record<string, unknown>)[field] ?? null);
       }
+    }
+    if (hasOwn(fields, "schedule_cron")) {
+      setClauses.push("schedule_revision = schedule_revision + 1");
     }
 
     if (hasOwn(fields, "enabled")) {
@@ -472,18 +602,22 @@ export function insertJobVaultRuntimeAudit(
     return false;
   }
   const run = db.prepare(
-    `SELECT 1
+    `SELECT run.organization_id, run.effective_service_principal_id
      FROM job_runs run
      JOIN jobs job ON job.project_id = run.project_id AND job.id = run.job_id
      WHERE run.project_id = ? AND run.id = ? AND job.id = ?`,
-  ).get(input.projectId, input.runId, input.jobId);
+  ).get(input.projectId, input.runId, input.jobId) as {
+    organization_id: string;
+    effective_service_principal_id: string;
+  } | undefined;
   if (!run) return false;
   db.prepare(
     `INSERT INTO job_vault_runtime_audit
-     (id, project_id, job_id, item_id, action, run_id, authorized_item_version, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, project_id, organization_id, effective_service_principal_id, job_id, item_id, action, run_id, authorized_item_version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    randomUUID(), input.projectId, input.jobId, isRead ? itemId! : null, input.action,
+    randomUUID(), input.projectId, run.organization_id, run.effective_service_principal_id,
+    input.jobId, isRead ? itemId! : null, input.action,
     input.runId, isRead ? version! : null, new Date().toISOString(),
   );
   return true;
@@ -545,19 +679,35 @@ export function listJobVaultAudit(
  *
  * Reasons for rejection: job not found, job disabled, or an existing run in progress.
  */
-export function startJobRun(projectId: string, jobId: string, trigger: "manual" | "cron" | "event"): JobRun | { status: "queued"; reason: string } {
+export function startJobRun(
+  projectId: string,
+  jobId: string,
+  trigger: "manual" | "cron" | "event",
+  provenance: JobRunProvenance = {},
+): JobRun | { status: "queued"; reason: string } {
   const result = execTransaction(() => {
     const db = getDb(dbPath());
 
-    const job = db.prepare("SELECT id, enabled FROM jobs WHERE id = ? AND project_id = ? AND deleted_at IS NULL")
-      .get(jobId, projectId) as { id: string; enabled: number } | undefined;
+    const job = db.prepare(
+      `SELECT job.id, job.enabled, job.organization_id, job.service_principal_id, job.revision, job.schedule_revision,
+              grant_row.revision AS authorization_revision
+       FROM jobs job
+       JOIN service_principals principal ON principal.id = job.service_principal_id
+         AND principal.organization_id = job.organization_id AND principal.status = 'active'
+       JOIN automation_principal_grants grant_row ON grant_row.project_id = job.project_id
+         AND grant_row.organization_id = job.organization_id AND grant_row.service_principal_id = job.service_principal_id
+         AND grant_row.permission = 'execute' AND grant_row.status = 'active'
+       WHERE job.id = ? AND job.project_id = ? AND job.deleted_at IS NULL`,
+    ).get(jobId, projectId) as {
+      id: string; enabled: number; organization_id: string; service_principal_id: string;
+      revision: number; schedule_revision: number; authorization_revision: number;
+    } | undefined;
     if (!job) {
-      return { status: "queued" as const, reason: "Job not found" };
+      return { status: "queued" as const, reason: "Job automation authorization is unavailable" };
     }
     if (!job.enabled) {
       return { status: "queued" as const, reason: "Job is disabled" };
     }
-
     // Concurrency guard: prevent overlapping runs. A new run cannot start if
     // another run is still 'running' or 'queued' for the same job.
     const running = db.prepare(
@@ -566,14 +716,40 @@ export function startJobRun(projectId: string, jobId: string, trigger: "manual" 
     if (running) {
       return { status: "queued" as const, reason: "Job already has a running or queued run" };
     }
+    if (!hasAutomationCapacity(db, job.organization_id, job.service_principal_id)) {
+      return { status: "queued" as const, reason: "Automation concurrency quota is full" };
+    }
 
     const now = new Date().toISOString();
+    const scheduledFor = trigger === "cron" ? provenance.scheduledFor : undefined;
+    if (trigger === "cron" && (!scheduledFor || provenance.expectedScheduleRevision !== job.schedule_revision)) {
+      return { status: "queued" as const, reason: "Job schedule changed before it could be claimed" };
+    }
+    const delegator = trigger === "manual" ? provenance.delegator ?? { type: "compatibility" as const, id: "internal" } : undefined;
     const runId = randomUUID();
 
-    db.prepare(
-      `INSERT INTO job_runs (id, job_id, project_id, status, trigger, started_at, created_at)
-       VALUES (?, ?, ?, 'running', ?, ?, ?)`,
-    ).run(runId, jobId, projectId, trigger, now, now);
+    try {
+      db.prepare(
+        `INSERT INTO job_runs
+         (id, job_id, project_id, organization_id, effective_service_principal_id,
+          delegator_actor_type, delegator_actor_id, source_actor_type, source_actor_id,
+          job_revision, schedule_revision, scheduled_for, authorization_revision,
+          status, trigger, started_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
+      ).run(
+        runId, jobId, projectId, job.organization_id, job.service_principal_id,
+        delegator?.type ?? null, delegator?.id ?? null,
+        provenance.sourceActor?.type ?? null, provenance.sourceActor?.id ?? null,
+        job.revision, trigger === "cron" ? job.schedule_revision : null, scheduledFor ?? null,
+        job.authorization_revision, trigger, now, now,
+      );
+      if (trigger === "cron") advanceDispatchCursor(db, "cron", job.organization_id, now);
+    } catch (error) {
+      if (trigger === "cron" && error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+        return { status: "queued" as const, reason: "Scheduled occurrence was already claimed" };
+      }
+      throw error;
+    }
 
     return db.prepare("SELECT * FROM job_runs WHERE id = ?").get(runId) as JobRun;
   });
@@ -651,6 +827,26 @@ export function recoverInterruptedJobRuns(): number {
   });
   if (recovered > 0) checkpointAfterWrite();
   return recovered;
+}
+
+/** Revalidate immutable execution authority before recovery touches secrets or processes. */
+export function isJobRunAuthorizationCurrent(projectId: string, runId: string): boolean {
+  return Boolean(getDb(dbPath()).prepare(
+    `SELECT 1
+     FROM job_runs run
+     JOIN jobs job ON job.project_id = run.project_id AND job.id = run.job_id
+     JOIN projects project ON project.id = job.project_id AND project.organization_id = job.organization_id
+       AND project.archived_at IS NULL
+     JOIN service_principals principal ON principal.id = run.effective_service_principal_id
+       AND principal.organization_id = run.organization_id AND principal.status = 'active'
+     JOIN automation_principal_grants grant_row ON grant_row.project_id = job.project_id
+       AND grant_row.organization_id = job.organization_id
+       AND grant_row.service_principal_id = run.effective_service_principal_id
+       AND grant_row.permission = 'execute' AND grant_row.status = 'active'
+     WHERE run.project_id = ? AND run.id = ? AND run.organization_id = job.organization_id
+       AND run.effective_service_principal_id = job.service_principal_id
+       AND run.job_revision = job.revision AND run.authorization_revision = grant_row.revision`,
+  ).get(projectId, runId));
 }
 
 /** List job runs for a given job, most recent first. Default limit 50. */
@@ -742,7 +938,7 @@ function vaultRunRecoveryFromRow(db: JobDb, row: VaultJobRunRow): VaultSecretRun
 }
 
 function normalizeVaultRunSnapshots(value: readonly VaultJobRunItemSnapshot[]): VaultJobRunItemSnapshot[] | undefined {
-  if (value.length < 1 || value.length > JOB_VAULT_REFERENCE_MAX) return undefined;
+  if (value.length > JOB_VAULT_REFERENCE_MAX) return undefined;
   const snapshots = value.map((item) => ({ ...item }));
   if (!snapshots.every((item) => UUID_PATTERN.test(item.itemId)
     && Number.isSafeInteger(item.authorizedItemVersion) && item.authorizedItemVersion >= 1)) return undefined;
@@ -795,19 +991,25 @@ export function prepareVaultJobRun(
     try {
       db.prepare(
         `INSERT INTO job_vault_runs
-         (run_id, project_id, job_id, state, deadline_at, process_nonce_hash, prepared_at, updated_at)
-         VALUES (?, ?, ?, 'prepared', ?, ?, ?, ?)`,
-      ).run(input.runId, projectId, input.jobId, input.deadlineAt, input.processNonceHash, timestamp, timestamp);
+         (run_id, project_id, organization_id, job_id, effective_service_principal_id,
+          job_revision, authorization_revision, state, deadline_at, process_nonce_hash, prepared_at, updated_at)
+         SELECT run.id, run.project_id, run.organization_id, run.job_id, run.effective_service_principal_id,
+                run.job_revision, run.authorization_revision, 'prepared', ?, ?, ?, ?
+         FROM job_runs run WHERE run.id = ? AND run.project_id = ? AND run.job_id = ?`,
+      ).run(input.deadlineAt, input.processNonceHash, timestamp, timestamp, input.runId, projectId, input.jobId);
     } catch {
       return undefined;
     }
     const insert = db.prepare(
       `INSERT INTO job_vault_run_items
-       (project_id, run_id, job_id, item_id, authorized_item_version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       (project_id, organization_id, run_id, job_id, item_id, authorized_item_version, grant_revision, created_at)
+       SELECT reference.project_id, reference.organization_id, ?, reference.job_id, reference.item_id,
+              ?, reference.grant_revision, ?
+       FROM job_vault_references reference
+       WHERE reference.project_id = ? AND reference.job_id = ? AND reference.item_id = ?`,
     );
     for (const snapshot of snapshots) {
-      insert.run(projectId, input.runId, input.jobId, snapshot.itemId, snapshot.authorizedItemVersion, timestamp);
+      insert.run(input.runId, snapshot.authorizedItemVersion, timestamp, projectId, input.jobId, snapshot.itemId);
     }
     const row = db.prepare(
       "SELECT * FROM job_vault_runs WHERE project_id = ? AND run_id = ?",
@@ -945,8 +1147,9 @@ export function appendRunLog(projectId: string, runId: string, stream: "stdout" 
     const seq = maxSeq.max_seq + 1;
 
     db.prepare(
-      "INSERT INTO job_run_logs (run_id, seq, stream, line, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(runId, seq, stream, sanitizeJobEventText(line, 4_096), now);
+      `INSERT INTO job_run_logs (run_id, organization_id, seq, stream, line, created_at)
+       SELECT id, organization_id, ?, ?, ?, ? FROM job_runs WHERE id = ? AND project_id = ?`,
+    ).run(seq, stream, sanitizeJobEventText(line, 4_096), now, runId, projectId);
 
     return db.prepare(
       "SELECT * FROM job_run_logs WHERE run_id = ? AND seq = ?",

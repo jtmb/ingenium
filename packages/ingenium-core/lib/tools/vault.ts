@@ -32,6 +32,10 @@ export class VaultJobSecretsUnavailableError extends Error {
   }
 }
 
+function unavailableProviderRuntime(): never {
+  throw new VaultJobSecretsUnavailableError();
+}
+
 /** A run-owned plaintext buffer. Call release after the bounded runner tears down. */
 export interface VaultJobSecretHandle {
   readonly itemId: string;
@@ -44,6 +48,14 @@ export interface VaultJobSecretHandle {
 export interface VaultJobSecretsResolution {
   readonly secrets: readonly VaultJobSecretHandle[];
   readonly deadlineAt: number;
+  release(): void;
+}
+
+export interface JobProviderRuntimeResolution {
+  readonly connectionId: string;
+  readonly providerKey: string;
+  readonly config: Readonly<Record<string, unknown>>;
+  readonly credential: Buffer;
   release(): void;
 }
 
@@ -355,11 +367,19 @@ export function resolveJobVaultSecrets(
           FROM projects project
           JOIN jobs job ON job.project_id = project.id
           JOIN job_runs run ON run.project_id = job.project_id AND run.job_id = job.id AND run.id = ?
+          JOIN service_principals principal ON principal.id = run.effective_service_principal_id
+            AND principal.organization_id = run.organization_id AND principal.status = 'active'
+          JOIN automation_principal_grants automation_grant ON automation_grant.project_id = job.project_id
+            AND automation_grant.organization_id = job.organization_id
+            AND automation_grant.service_principal_id = run.effective_service_principal_id
+            AND automation_grant.permission = 'execute' AND automation_grant.status = 'active'
           JOIN vault_config config ON config.id = 1
          LEFT JOIN job_vault_references all_reference
            ON all_reference.project_id = job.project_id AND all_reference.job_id = job.id
          WHERE project.id = ? AND project.archived_at IS NULL
            AND job.id = ? AND job.enabled = 1 AND job.deleted_at IS NULL
+           AND run.organization_id = job.organization_id AND run.effective_service_principal_id = job.service_principal_id
+           AND run.job_revision = job.revision AND run.authorization_revision = automation_grant.revision
          GROUP BY job.id, config.sealed`,
        ).get(runId, projectId, jobId) as {
         timeout_minutes: number;
@@ -370,14 +390,20 @@ export function resolveJobVaultSecrets(
 
       const references = transactionDb.prepare(
         `SELECT reference.item_id, reference.authorized_item_version,
-                item.id AS active_item_id, item.version, item.access_policy,
-                item.expires_at, item.lease_duration_seconds, item.encrypted, item.wrapped_kek
+                 item.id AS active_item_id, item.version, item.access_policy,
+                 item.expires_at, item.lease_duration_seconds, item.encrypted, item.wrapped_kek
          FROM job_vault_references reference
+         JOIN job_runs run ON run.project_id = reference.project_id AND run.job_id = reference.job_id AND run.id = ?
+         JOIN resource_grants grant_row ON grant_row.organization_id = run.organization_id
+           AND grant_row.resource_type = 'vault_item' AND grant_row.resource_id = reference.item_id
+           AND grant_row.grantee_kind = 'service' AND grant_row.grantee_id = run.effective_service_principal_id
+           AND grant_row.revision = reference.grant_revision AND grant_row.revoked_at IS NULL
+           AND (grant_row.expires_at IS NULL OR grant_row.expires_at > ?)
          LEFT JOIN vault_items item
            ON item.project_id = reference.project_id AND item.id = reference.item_id
          WHERE reference.project_id = ? AND reference.job_id = ? AND reference.status = 'authorized'
          ORDER BY reference.item_id ASC`,
-      ).all(projectId, jobId) as Array<{
+      ).all(runId, new Date().toISOString(), projectId, jobId) as Array<{
         item_id: string;
         authorized_item_version: number;
         active_item_id: string | null;
@@ -465,6 +491,78 @@ export function resolveJobVaultSecrets(
     recordJobSecretDenied(projectId, jobId, runId);
     unavailableJobSecrets();
   }
+}
+
+/** Resolve the single provider connection explicitly granted to this run's service principal. */
+export function resolveJobProviderRuntime(
+  projectId: string,
+  jobId: string,
+  runId: string,
+): JobProviderRuntimeResolution {
+  const key = masterKey;
+  if (!key) unavailableProviderRuntime();
+  const now = new Date().toISOString();
+  const rows = getDb(dbPath()).prepare(
+    `SELECT connection.id, connection.provider_key, connection.config_json,
+            item.encrypted, item.wrapped_kek
+     FROM job_runs run
+     JOIN jobs job ON job.project_id = run.project_id AND job.id = run.job_id
+     JOIN resource_grants grant_row ON grant_row.organization_id = run.organization_id
+       AND grant_row.resource_type = 'provider_connection'
+       AND grant_row.grantee_kind = 'service' AND grant_row.grantee_id = run.effective_service_principal_id
+       AND grant_row.revoked_at IS NULL AND (grant_row.expires_at IS NULL OR grant_row.expires_at > ?)
+       AND EXISTS (SELECT 1 FROM json_each(grant_row.permissions_json) permission
+                   WHERE permission.value IN ('*', 'read', 'execute', 'admin'))
+      JOIN provider_connections connection ON connection.id = grant_row.resource_id AND connection.enabled = 1
+        AND connection.owner_kind IN ('organization', 'installation')
+      JOIN vault_items item ON item.id = connection.credential_item_id
+        AND item.access_policy <> ?
+      JOIN projects credential_project ON credential_project.id = item.project_id AND credential_project.archived_at IS NULL
+      WHERE run.id = ? AND run.project_id = ? AND run.job_id = ?
+        AND run.organization_id = job.organization_id
+        AND run.effective_service_principal_id = job.service_principal_id
+        AND ((connection.owner_kind = 'organization' AND connection.organization_id = run.organization_id
+              AND item.organization_id = run.organization_id AND item.owner_kind = 'organization')
+          OR (connection.owner_kind = 'installation' AND connection.organization_id IS NULL
+              AND credential_project.is_global = 1 AND item.owner_kind = 'organization'))
+      ORDER BY connection.id LIMIT 2`,
+  ).all(now, DELETED_POLICY, runId, projectId, jobId) as Array<{
+    id: string;
+    provider_key: string;
+    config_json: string;
+    encrypted: Buffer;
+    wrapped_kek: Buffer;
+  }>;
+  if (rows.length !== 1) unavailableProviderRuntime();
+  const row = rows[0]!;
+  let config: unknown;
+  try {
+    config = JSON.parse(row.config_json);
+  } catch {
+    unavailableProviderRuntime();
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) unavailableProviderRuntime();
+  let dek: Buffer | undefined;
+  let credential: Buffer | undefined;
+  try {
+    dek = unwrapKey(row.wrapped_kek, key);
+    credential = decryptSecretBuffer(row.encrypted, dek);
+  } finally {
+    if (dek) zeroJobSecretBuffer("dek", dek);
+  }
+  const value = credential!;
+  let released = false;
+  return {
+    connectionId: row.id,
+    providerKey: row.provider_key,
+    config: config as Record<string, unknown>,
+    credential: value,
+    release: () => {
+      if (released) return;
+      released = true;
+      zeroJobSecretBuffer("plaintext", value);
+    },
+  };
 }
 
 /** Encrypt and store a vault item with a unique data encryption key. */

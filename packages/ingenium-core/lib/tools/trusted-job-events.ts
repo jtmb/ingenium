@@ -66,6 +66,9 @@ interface SourceAuditEvent {
   expected_revision: number;
   archive_sequence: number | null;
   created_at: string;
+  organization_id: string;
+  source_actor_type: "compatibility" | "user" | "service" | "system";
+  source_actor_id: string | null;
 }
 
 const DANGEROUS_PAYLOAD_KEY = /(?:authorization|cookie|content|message|password|secret|token|title|body|hash|reasoning)/i;
@@ -158,7 +161,18 @@ function parseInput(input: AppendTrustedJobEventInput): {
 }
 
 function readEvent(row: unknown): TrustedJobEvent {
-  const record = TrustedJobEventRecordSchema.safeParse(row);
+  const persisted = row as Record<string, unknown>;
+  const record = TrustedJobEventRecordSchema.safeParse({
+    id: persisted.id,
+    project_id: persisted.project_id,
+    event_type: persisted.event_type,
+    schema_version: persisted.schema_version,
+    producer: persisted.producer,
+    source_audit_event_id: persisted.source_audit_event_id,
+    dedupe_key: persisted.dedupe_key,
+    payload: persisted.payload,
+    created_at: persisted.created_at,
+  });
   if (!record.success) throw new Error("Invalid persisted trusted job event");
   let rawPayload: unknown;
   try {
@@ -171,9 +185,12 @@ function readEvent(row: unknown): TrustedJobEvent {
 
 function sourceAuditEvent(db: Db, sourceAuditEventId: string): SourceAuditEvent {
   const source = db.prepare(
-    `SELECT id, project_id, event_type, conversation_id, checkpoint_id,
-            target_conversation_id, expected_revision, archive_sequence, created_at
-     FROM context_checkpoint_audit_events WHERE id = ?`,
+    `SELECT audit.id, audit.project_id, audit.event_type, audit.conversation_id, audit.checkpoint_id,
+            audit.target_conversation_id, audit.expected_revision, audit.archive_sequence, audit.created_at,
+            audit.organization_id, audit.source_actor_type, audit.source_actor_id
+     FROM context_checkpoint_audit_events audit
+     JOIN context_conversations conversation ON conversation.project_id = audit.project_id AND conversation.id = audit.conversation_id
+     WHERE audit.id = ?`,
   ).get(sourceAuditEventId) as SourceAuditEvent | undefined;
   if (!source) throw new TrustedJobEventError("SOURCE_AUDIT_NOT_FOUND");
   return source;
@@ -235,6 +252,9 @@ export function trustedJobEventFromContextAuditEvent(audit: ContextCheckpointAud
     expected_revision: audit.expected_revision,
     archive_sequence: audit.archive_sequence,
     created_at: audit.created_at,
+    organization_id: audit.organization_id,
+    source_actor_type: audit.source_actor_type,
+    source_actor_id: audit.source_actor_id,
   };
   const expected = expectedFromSource(source);
   return { eventType: expected.eventType, sourceAuditEventId: audit.id, payload: expected.payload };
@@ -273,13 +293,16 @@ export function appendTrustedJobEventInTransaction(
   const payload = serializePayload(value.payload);
   const inserted = db.prepare(
     `INSERT INTO trusted_job_events
-     (id, project_id, event_type, schema_version, producer, source_audit_event_id,
-      dedupe_key, payload, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     (id, project_id, organization_id, source_actor_type, source_actor_id,
+      event_type, schema_version, producer, source_audit_event_id, dedupe_key, payload, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_id, source_audit_event_id) DO NOTHING`,
   ).run(
     id,
     projectId,
+    source.organization_id,
+    source.source_actor_type,
+    source.source_actor_id,
     value.eventType,
     TRUSTED_JOB_EVENT_SCHEMA_VERSION,
     TRUSTED_JOB_EVENT_PRODUCER,

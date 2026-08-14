@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authorization, getDb, jobs, jobEventDeliveries, jobSuggestLlm, synthesisLlm, trustedJobEvents } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requireProject, requestAuthorizationPrincipal, requestContentActor } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 import { executeSynthesisBroker } from "../opencode-client.js";
 import { resolveSynthesisProviderSelections } from "../synthesis-provider-resolution.js";
@@ -118,6 +118,29 @@ function sendRevisionConflict(res: import("express").Response, currentRevision: 
   });
 }
 
+function visibleJob(req: import("express").Request, job: NonNullable<ReturnType<typeof jobs.getJob>>): boolean {
+  if (!req.authorizationPolicy) return true;
+  const principal = requestAuthorizationPrincipal(req);
+  if (principal.type === "compatibility") return true;
+  if (job.visibility === "private") {
+    return (principal.type === "browser-user" || principal.type === "user-token") && principal.id === job.owner_user_id;
+  }
+  return authorization.requireProjectPermission(principal, job.project_id, "jobs", req.authorizationPolicy.permission).allowed;
+}
+
+function visibleRun(req: import("express").Request, run: NonNullable<ReturnType<typeof jobs.getJobRun>>): boolean {
+  const job = jobs.getJob(run.project_id, run.job_id);
+  return !!job && visibleJob(req, job);
+}
+
+function requestActor(req: import("express").Request): { type: jobs.AutomationActorType; id?: string | null } {
+  if (!req.principal) return { type: "compatibility", id: "direct-router" };
+  return {
+    type: req.principal.type === "runtime-service" ? "system" : req.principal.type,
+    id: req.principal.id,
+  };
+}
+
 function parseBoundedPage(req: import("express").Request, res: import("express").Response): { limit: number; cursor?: string } | null {
   const rawLimit = req.query.limit;
   const limit = rawLimit === undefined ? 20 : Number(rawLimit);
@@ -140,7 +163,7 @@ function parseBoundedPage(req: import("express").Request, res: import("express")
 jobsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const list = jobs.listJobs(projectId);
+  const list = jobs.listJobs(projectId).filter((job) => visibleJob(req, job));
   res.json({ data: list, total: list.length });
 });
 
@@ -174,6 +197,8 @@ jobsRouter.post("/", (req, res) => {
   }
 
   try {
+    const actor = requestContentActor(req, projectId);
+    const principal = requestAuthorizationPrincipal(req);
     const job = jobs.createJob(
       projectId,
       name,
@@ -184,6 +209,14 @@ jobsRouter.post("/", (req, res) => {
       trigger_event,
       timeout_minutes,
       vaultItemIds,
+      {
+        organizationId: actor?.organizationId ?? principal.organizationId ?? "",
+        ...(principal.type === "service-principal" ? { servicePrincipalId: principal.id } : {}),
+        ownerUserId: actor?.ownerUserId ?? null,
+        visibility: actor?.ownerUserId ? "private" : "organization",
+        actorType: requestActor(req).type,
+        actorId: requestActor(req).id,
+      },
     );
     res.status(201).json({ data: job });
   } catch (error) {
@@ -236,7 +269,11 @@ jobsRouter.get("/event-deliveries", (req, res) => {
   if (!options) return;
   try {
     const page = jobEventDeliveries.listJobEventDeliveries(projectId, options);
-    res.json({ data: page.data, nextCursor: page.nextCursor });
+    const data = page.data.filter((delivery) => {
+      const job = jobs.getJob(projectId, delivery.job_id);
+      return !!job && visibleJob(req, job);
+    });
+    res.json({ data, nextCursor: page.nextCursor });
   } catch {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor is invalid" } });
   }
@@ -246,7 +283,8 @@ jobsRouter.get("/event-deliveries/:deliveryId", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const delivery = jobEventDeliveries.getJobEventDelivery(projectId, req.params.deliveryId!);
-  if (!delivery) {
+  const job = delivery ? jobs.getJob(projectId, delivery.job_id) : undefined;
+  if (!delivery || !job || !visibleJob(req, job)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Event delivery not found" } });
     return;
   }
@@ -266,7 +304,7 @@ jobsRouter.post("/runs/:runId/cancel", (req, res) => {
   const runId = req.params.runId!;
 
   const existing = jobs.getJobRun(projectId, runId);
-  if (!existing) {
+  if (!existing || !visibleRun(req, existing)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Run not found" } });
     return;
   }
@@ -358,7 +396,7 @@ jobsRouter.get("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const job = jobs.getJob(projectId, req.params.id!);
-  if (!job) {
+  if (!job || !visibleJob(req, job)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
     return;
   }
@@ -369,6 +407,11 @@ jobsRouter.get("/:id", (req, res) => {
 jobsRouter.get("/:id/vault-audit", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const job = jobs.getJob(projectId, req.params.id!);
+  if (!job || !visibleJob(req, job)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+    return;
+  }
   const options = parseBoundedPage(req, res);
   if (!options) return;
   try {
@@ -389,6 +432,11 @@ jobsRouter.get("/:id/vault-audit", (req, res) => {
 jobsRouter.patch("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const job = jobs.getJob(projectId, req.params.id!);
+  if (!job || !visibleJob(req, job)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+    return;
+  }
 
   const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
   const expectedRevision = parseExpectedRevision(body);
@@ -458,6 +506,11 @@ jobsRouter.patch("/:id", (req, res) => {
 jobsRouter.delete("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const job = jobs.getJob(projectId, req.params.id!);
+  if (!job || !visibleJob(req, job)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
+    return;
+  }
 
   const expectedRevision = parseExpectedRevision(req.body);
   if (expectedRevision === null) {
@@ -488,12 +541,12 @@ jobsRouter.post("/:id/run", (req, res) => {
   if (!projectId) return;
 
   const job = jobs.getJob(projectId, req.params.id!);
-  if (!job) {
+  if (!job || !visibleJob(req, job)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
     return;
   }
 
-  const result = jobs.startJobRun(projectId, req.params.id!, "manual");
+  const result = jobs.startJobRun(projectId, req.params.id!, "manual", { delegator: requestActor(req) });
 
   if ("reason" in result) {
     res.status(409).json({ error: { code: "CONFLICT", message: result.reason } });
@@ -524,7 +577,7 @@ jobsRouter.get("/:id/runs", (req, res) => {
   if (!projectId) return;
 
   const job = jobs.getJob(projectId, req.params.id!);
-  if (!job) {
+  if (!job || !visibleJob(req, job)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } });
     return;
   }

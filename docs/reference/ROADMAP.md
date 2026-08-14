@@ -685,10 +685,22 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   vault leakage, raw-log bypass, data loss, or cross-tenant history access is
   `BLOCKING`; richer automation features are `FOLLOW_UP`; bounded run evidence is
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-106: <acceptance evidence placeholder>` with non-empty
-  automation preservation, security, deployment, E2E, and containment evidence.
+- **Markers/evidence:** [x] `work-started` preflight completed; [ ] append
+  matching `work-complete` after all gates.
+  Evidence AUTH-106: migration 099 complete/partial probes and identity/history
+  preservation passed focused core tests; job/run/event/vault authorization,
+  cron dedupe, stale-revision rejection, raw-log installation policy, and runner
+  recovery revalidation passed the focused core and API matrices.
+  Organization-qualified task source lookups and post-migration trusted-event
+  fixtures pass their focused regressions. Context maintenance now preserves
+  user/service actor, request, and correlation provenance through trusted events
+  deliveries, attempts, and event runs. Cron and event dispatch use durable
+  organization round-robin cursors under a global limit of two and per-org/per-
+  principal limits of one. Every run projects exactly one explicitly service-
+  granted organization or installation provider connection into run-local tmpfs;
+  global OpenCode config/auth files are no longer copied. Affected workspace typechecks,
+  DB-isolation enforcement, and diff checks pass. Deployment, fixture E2E,
+  strict containment, QA, and security gates remain open.
 
 #### AUTH-107 — MCP tenancy: authenticated principal and scoped tools
 
