@@ -14,8 +14,9 @@ description: Redacted response record and future remediation steps for the histo
 - **Remote refs:** `origin` branches `main` and `the-next-level` were force-updated to the reported sanitized refs.
 - **Current scans:** Local and current scans are clean.
 - **Historical credential comparison:** No historical JWT matched the current local credentials.
+- **Deployed bearer rotation:** Complete; the prior bearer was rejected with HTTP `401`.
 - **Local email key:** Unchanged.
-- **Outstanding verification:** External provider revocation, cache invalidation, and collaborator/CI clone-reset actions remain to be verified.
+- **Separate follow-up:** External provider revocation, cache invalidation, and collaborator/CI clone-reset actions remain tracked here and were not inferred from the local bearer check.
 
 No secret values are recorded in this document, issues, commits, logs, or support transcripts.
 
@@ -23,7 +24,7 @@ No secret values are recorded in this document, issues, commits, logs, or suppor
 
 ### 1. Credential verification
 
-External provider revocation and related cache invalidation are still pending verification. No credential values are recorded here.
+The deployed Ingenium API bearer was rotated and the prior bearer was rejected with HTTP `401`. External provider revocation and related cache invalidation remain separate follow-up checks. No credential values are recorded here.
 
 ### 2. History rewrite
 
@@ -48,6 +49,7 @@ Local and current scans are clean. No historical JWT matched the current local c
 - [x] `origin/main` and `origin/the-next-level` force-updated to the reported sanitized refs.
 - [x] Local and current scans clean.
 - [x] No historical JWT matched current local credentials.
+- [x] Deployed bearer rotated and prior bearer rejected with HTTP `401`.
 - [x] Local email key unchanged.
 - [ ] External provider revocation verified.
 - [ ] External provider caches invalidated or confirmed clear.

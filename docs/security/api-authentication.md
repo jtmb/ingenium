@@ -283,12 +283,12 @@ status codes and redacted paths/metadata such as `0600:appuser:appuser`; never
 print file contents or an `Authorization` header. If a secret is exposed,
 rotate it and restart every consumer before continuing.
 
-## Public-JWT incident release hold
+## Historical public-JWT incident status
 
-The historical public-JWT exposure remains a release blocker. Phase 2G is not
-release-cleared until the exposed credential and related signing/session
-credentials are revoked, replacements are installed, repository history is
-purged and rescanned, and all affected deployments are restarted and verified.
-Do not mark a release ready based only on a clean current-file scan; reachable
-history and unfiltered clones must also be remediated. See
-[Credential Incident Runbook](credential-rotation.md).
+The historical public-JWT exposure was remediated for the current release
+boundary: repository history was rewritten and rescanned, the deployed bearer
+credential was rotated, and the prior bearer was rejected with HTTP `401`.
+There is no remaining release hold for this API-bearer acceptance. Do not infer
+that separately tracked external-provider, cache, or collaborator/CI clone
+actions are complete; see the [Credential Incident Runbook](credential-rotation.md)
+for those follow-ups.

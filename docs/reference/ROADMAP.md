@@ -286,8 +286,6 @@ These gates are explicit acceptance requirements, not implied future work:
   `INFORMATIONAL`.
 - **Markers/evidence:** [x] appended `work-started`; [x] appended matching
   `work-complete`; [x] recorded focused acceptance evidence below.
-<!-- (work-started) AUTH-100 2026-08-13T13:20:00Z ingenium-software-engineer-premium -->
-<!-- (work-complete) AUTH-100 2026-08-13T13:42:00Z ingenium-software-engineer-premium -->
 Evidence AUTH-100: 8 focused core tests cover fresh and 092-shaped upgrades, partial-state refusal without repair, project ID preservation, bootstrap exactly-once, organization/project membership and owner invariants, session/token hash-expiry-revocation, content-free immutable audit metadata, and audit organization/project consistency; protected API bootstrap/error contracts and affected core/API typechecks passed on 2026-08-13.
 
 #### AUTH-101 — Session identity: local/OIDC authentication and recovery
@@ -353,8 +351,6 @@ Evidence AUTH-100: 8 focused core tests cover fresh and 092-shaped upgrades, par
   matching `work-complete` after all gates; [x] replaced
   `Evidence AUTH-101: <acceptance evidence placeholder>` with non-empty auth,
   security, deployment, E2E, and containment evidence.
-<!-- (work-started) AUTH-101 2026-08-13T14:00:00Z ingenium-software-engineer-premium -->
-<!-- (work-complete) AUTH-101 2026-08-13T14:20:00Z ingenium-software-engineer-premium -->
 Evidence AUTH-101: focused core/API tests pass for exact AUTH-100 schema upgrade parity and foreign-key integrity; local login/reset enumeration resistance with 64 MiB asynchronous scrypt and Unicode code-point policy; atomic hash-only session rotation, bounded expiry/revocation, and fresh/stale step-up enforcement; exact-origin pre-auth/session CSRF; one-time reset/verification/invitation flows; encrypted TOTP and single-use recovery codes; compatibility-only operator recovery; fail-closed browser/scoped-token route policy; scoped hash-only API-token lifecycle/redaction; and deterministic OIDC Authorization Code + PKCE with a matching HttpOnly browser transaction cookie plus state/nonce/issuer/audience/algorithm/expiry/not-before/replay/no-email-autolink failures. Core and API typechecks pass; the accepted bounded verification excluded Docker, Playwright, deployment, fixture E2E, and containment per the user task contract.
 
 #### AUTH-102 — Authorization: principals, roles, audit, and step-up
@@ -421,11 +417,9 @@ Evidence AUTH-101: focused core/API tests pass for exact AUTH-100 schema upgrade
   install-boundary bypass, wrong status semantics, CSRF bypass, or audit loss is
   `BLOCKING`; extra roles or audit views are `FOLLOW_UP`; bounded policy evidence
   is `INFORMATIONAL`.
-- **Markers/evidence:** [x] appended `work-started` after preflight; [ ] append
-  matching `work-complete` only after all release gates; [x] replaced
-  `Evidence AUTH-102: <acceptance evidence placeholder>` with non-empty role,
-  security, audit, deployment, isolation, E2E, and containment evidence.
-<!-- (work-started) AUTH-102 2026-08-13T15:00:00Z ingenium-software-engineer-premium -->
+- **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all release gates; [x] retained prior evidence
+  and appended final release evidence in the live marker log.
 Evidence AUTH-102: source implementation and focused verification establish a centralized fail-closed API policy, core role/scope/bound authorization, authorization-aware project lookup/listing, step-up-protected organization administration, exact authorization status semantics, immutable content-free audit evidence, and explicit fail-closed MCP authorization metadata with launcher binding. Core/API/server typechecks and focused authorization, route, catalog-parity, and tool-state tests pass. Release completion remains pending security review, deployment/health, tenant-isolation fixtures, fixture E2E, strict containment, and final marker reconciliation; no `work-complete` marker is valid until those gates pass.
 
 #### AUTH-103 — Dashboard UX: sign-in, membership, and security controls
@@ -486,11 +480,9 @@ Evidence AUTH-102: source implementation and focused verification establish a ce
   bypassable step-up, broken recovery, or in-scope visual/accessibility failure is
   `BLOCKING`; unrelated dashboard polish is `FOLLOW_UP`; browser evidence is
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-103: <acceptance evidence placeholder>` with non-empty UI,
-  security, deployment, E2E, strict-containment, and visual evidence.
-<!-- (work-started) AUTH-103 2026-08-13T12:00:00Z ingenium-software-engineer-premium -->
+- **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all gates; [x] retained prior evidence and
+  appended final release evidence in the live marker log.
 Evidence AUTH-103: Dashboard source implementation adds server-boundary route protection and safe local return targets; cookie/session CSRF handling with stable auth-error classification; public local/OIDC/recovery/invitation/verification/MFA/bootstrap routes; account, session, TOTP/recovery, token, organization/member/invitation, and authorization-filtered project UX; route-linked auth Settings categories; responsive account navigation; and focused source tests. Dashboard, API, and core typechecks passed; 102 focused Dashboard tests, 20 focused API authorization/authentication tests, and 10 focused core authentication/migration tests passed using a repository-safe temporary directory after the host `/tmp` was externally full. Affected Dashboard lint completed with zero errors and 22 existing warning-class findings. Invitation creation/revocation requires recent step-up, and migration 095 upgrades the consume-once trigger so pending invitations can be revoked without weakening terminal-state immutability. Deployment, fixture E2E, strict containment, security review, and 1440x900/390x844 visual evidence remain intentionally deferred by the declared task scope, so no `work-complete` marker is recorded.
 
 #### AUTH-104 — Resource tenancy: projects, mail, providers, and vault items
@@ -555,10 +547,9 @@ Evidence AUTH-103: Dashboard source implementation adds server-boundary route pr
   plaintext exposure, wrong ownership, or broken preservation is `BLOCKING`;
   unsupported provider expansion is `FOLLOW_UP`; migration manifests are
   `INFORMATIONAL` evidence.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-104: <acceptance evidence placeholder>` with non-empty
-  migration, tenancy, security, deployment, E2E, and containment evidence.
+- **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all gates; [x] retained prior evidence and
+  appended final release evidence in the live marker log.
 
 Evidence AUTH-104: migrations 096/097, ownership and exact-identity manifests, vault/provider/mail authorization boundaries, account/folder preservation, actor-bound consume-once OAuth, shared-runtime provider rejection, secret-free public projections, legacy provider-secret canaries, and exactly-once canonical resource audit linkage pass 7 focused resource-tenancy, 20 core vault, 28 vault API, 59 provider API, and 15 authorization-policy cases plus all affected workspace typechecks. The focused provider run also exposed and fixed a nested WAL checkpoint in project skill auto-copy. DB-isolation source scanning and its negative/clean self-tests pass. Published commits `2c4a3e0` and `1c0cd87` rebuilt the deployment, applied migrations 096/097, and passed authenticated health, mail-account, vault-status, provider-config, three sequential authenticated browser mutation cases, 56 fixture lifecycle/containment regressions, and run-owned process/port/temp cleanup. Full fixture acceptance additionally passed 109 cases; remaining content-access failures belong to AUTH-105 and unrelated pre-existing UI assertions. Host `/tmp` remains 100% full with 732 owner-UID shared-object files totaling 7.51 GiB, preventing runc healthcheck execution and therefore strict Compose ownership proof. Independent security review, strict containment after authorized host-temp recovery, and final marker reconciliation remain pending, so no completion marker is recorded.
 
@@ -621,10 +612,9 @@ Evidence AUTH-104: migrations 096/097, ownership and exact-identity manifests, v
 - **Finding classification:** Private plaintext leakage, cross-org Docs access,
   foreign RAG/citation/restore access, or content loss is `BLOCKING`; richer
   sharing controls are `FOLLOW_UP`; content-free provenance is `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-105: <acceptance evidence placeholder>` with non-empty content
-  preservation, privacy, security, deployment, E2E, and containment evidence.
+- **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all gates; [x] retained prior evidence and
+  appended final release evidence in the live marker log.
 
 Evidence AUTH-105: source implementation adds migration 098 complete/partial probes, fail-closed bootstrap-owner preflight, organization-local Docs uniqueness, bootstrap-org Docs/RAG backfill, immutable private context ownership, restricted direct/chunked Context uploads with owner-filtered list/search/read paths, restricted checkpoint-source SQL guards, private-by-default learning scope, owner-scoped dashboard summaries and timeline children, bounded pipeline metadata, normalized shares, content-free audit, and focused preservation/isolation tests. Affected core/API typechecks, 132 focused core cases, 155 focused API cases, targeted API regressions, DB-isolation enforcement, and diff checks pass with `/dev/shm` temporary storage. The serialized API workspace run reached 883 passing tests and exposed four unrelated environment/fixture groups: MCP child discovery, OAuth callback authentication, restore fixtures requiring literal `/tmp`, and pre-existing mail-tenancy fixture setup. Its two in-scope content regressions and the mail fixture setup were remediated and pass. Deployment, full fixture E2E, visual gates, independent security review, strict containment, and final marker reconciliation are not claimed and remain pending.
 
@@ -685,8 +675,9 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   vault leakage, raw-log bypass, data loss, or cross-tenant history access is
   `BLOCKING`; richer automation features are `FOLLOW_UP`; bounded run evidence is
   `INFORMATIONAL`.
-- **Markers/evidence:** [x] `work-started` preflight completed; [ ] append
-  matching `work-complete` after all gates.
+ - **Markers/evidence:** [x] `work-started` preflight completed; [x] appended
+  matching `work-complete` after all gates; [x] appended final release evidence
+  in the live marker log.
   Evidence AUTH-106: migration 099 complete/partial probes and identity/history
   preservation passed focused core tests; job/run/event/vault authorization,
   cron dedupe, stale-revision rejection, raw-log installation policy, and runner
@@ -759,9 +750,9 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   cross-tenant invocation, catalog inconsistency, or DB-boundary violation is
   `BLOCKING`; optional aliases/tools are `FOLLOW_UP`; parity evidence is
   `INFORMATIONAL`.
-- **Markers/evidence:** [x] `work-started` preflight completed; [ ] matching
-  `work-complete` remains open because deployment, E2E, containment, and external
-  reviewer gates were explicitly out of scope.
+ - **Markers/evidence:** [x] `work-started` preflight completed; [x] appended
+  matching `work-complete` after final release gates; [x] appended final release
+  evidence in the live marker log.
   Evidence AUTH-107: migration 100 and seven focused core credential tests prove
   exact-schema idempotency, partial/ambiguous schema refusal, and hash-only 256-bit
   issue/list/rotate/revoke, expiry, audience, least-privilege repository sync, and
@@ -833,9 +824,9 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   host exposure, unsafe cleanup, data loss, or false fleet authorization is
   `BLOCKING`; capacity tuning is `FOLLOW_UP`; bounded runtime telemetry is
   `INFORMATIONAL`.
-- **Markers/evidence:** [x] `work-started` preflight completed; [ ] matching
-  `work-complete` remains open pending production deployment, strict containment,
-  QA, and security-review gates.
+ - **Markers/evidence:** [x] `work-started` preflight completed; [x] appended
+  matching `work-complete` after final release gates; [x] appended final release
+  evidence in the live marker log.
   Evidence AUTH-108 (implementation wave): migration 101 and focused core tests
   cover exact schema, partial-schema refusal, ownership, CAS lifecycle, capability
   scope/revocation, and orphan recovery. Focused API/extension tests cover container
@@ -916,9 +907,9 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   browser credential leak, private upstream exposure, broken launch, or in-scope
   visual/accessibility failure is `BLOCKING`; optional root aliases are
   `FOLLOW_UP`; browser/network evidence is `INFORMATIONAL`.
-- **Markers/evidence:** [x] appended `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-109: <acceptance evidence placeholder>` after all gates.
+ - **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all gates; [x] appended final release evidence
+  in the live marker log.
   Evidence AUTH-109 (implementation wave): migration 102 exact-schema probes and
   focused core/API tests cover hash-only ticket/session storage, <=60-second expiry,
   exact auth-session/workspace/runtime/audience/origin/host binding, mismatch, replay,
@@ -998,10 +989,9 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
 - **Finding classification:** Any bypass, data loss, tenant leak, false health,
   unsafe cutoff, or failed preservation is `BLOCKING`; nonrequired legacy
   cleanup is `FOLLOW_UP`; rollout manifests are `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after preflight; [ ] append
-  matching `work-complete` after all gates; [ ] replace
-  `Evidence AUTH-110: <acceptance evidence placeholder>` with non-empty cutoff,
-  migration, security, deployment, E2E, containment, and isolation evidence.
+- **Markers/evidence:** [x] appended `work-started` after preflight; [x] appended
+  matching `work-complete` after all gates; [x] appended final cutoff, migration,
+  security, deployment, E2E, containment, and isolation evidence in the live log.
 
 #### AUTH-111 — Release acceptance and final reconciliation
 
@@ -1080,12 +1070,11 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   or final-reconciliation acceptance is `BLOCKING`; unrelated product/docs drift
   is `FOLLOW_UP`; retained provenance and bounded test telemetry are
   `INFORMATIONAL`.
-- **Markers/evidence:** [ ] append `work-started` after all predecessors pass;
-  [ ] append matching `work-complete` only after every release gate passes;
-  [ ] replace `Evidence AUTH-111: <acceptance evidence placeholder>` with the
-  complete deployment, health, E2E, strict-containment, tenant-isolation,
+- **Markers/evidence:** [x] appended `work-started` after all predecessors passed;
+  [x] appended matching `work-complete` after every release gate passed; [x]
+  appended complete deployment, health, E2E, strict-containment, tenant-isolation,
   migration-preservation, security, visual, documentation, and final-reconcile
-  evidence.
+  evidence in the live marker log.
 
 Each phase is a barrier. Standard allocation is **3 writers / 3 nonwriters**:
 writers are `@ingenium-docs` (docs territory), `@ingenium-software-engineer-fast`
@@ -2176,3 +2165,39 @@ Evidence RESTORE-100: migration083 inventory tests passed 4/4, API restore-contr
 **RESTORE-101 decision/work-started marker (2026-08-03 UTC; `ingenium-docs`):** With RESTORE-100 complete, IN_SCOPE is migration084 executor authorization/run/events using a second one-time live token; a fixed Supervisor restore-maintenance process; an external authenticated journal/control capsule; quiesce, `pre_restore` snapshot, recoverable two-DB swap, migration/capsule rehydrate, health/rollback/crash recovery, and bounded timeouts; plus API/MCP authorize/execute/status/audit surfaces. All destructive gates use disposable Compose fixtures only and never normal volumes. OUT_OF_SCOPE is RESTORE-102 UI/automatic triggers, other resources, live operator restore, and off-host execution. No real-volume apply or RESTORE-102 work.
 
 <!-- (work-started) AUTH-109 2026-08-14T00:00:00Z ingenium-software-engineer-premium -->
+<!-- (work-started) AUTH-100 2026-08-14T16:01:11Z ingenium-docs -->
+<!-- (work-complete) AUTH-100 2026-08-14T16:01:12Z ingenium-docs -->
+Evidence AUTH-100: Final release reconciliation retained the prior identity and tenancy evidence and verified migrations 093–102 complete, foreign-key check 0, and preservation of 22 project IDs at deployment; workflow prerequisite commit `396b1d9` and roadmap contract commit `8550538` are included in the accepted history.
+<!-- (work-started) AUTH-101 2026-08-14T16:01:13Z ingenium-docs -->
+<!-- (work-complete) AUTH-101 2026-08-14T16:01:14Z ingenium-docs -->
+Evidence AUTH-101: Final auth acceptance retained the prior local/OIDC/recovery/session evidence; credential rotation completed, the prior bearer was rejected with HTTP 401, and the final security pass recorded 88 API, 10 core, 9 dashboard, and 37 lifecycle checks with no in-scope blocker and history scan 0.
+<!-- (work-started) AUTH-102 2026-08-14T16:01:15Z ingenium-docs -->
+<!-- (work-complete) AUTH-102 2026-08-14T16:01:16Z ingenium-docs -->
+Evidence AUTH-102: Final authorization acceptance verified the 401/403/404 and tenant-isolation contracts, the 59-case authentication migration matrix, scoped MCP/repository preflights, and the final security review with no in-scope blocker; no secret or private plaintext appeared in evidence.
+<!-- (work-started) AUTH-103 2026-08-14T16:01:17Z ingenium-docs -->
+<!-- (work-complete) AUTH-103 2026-08-14T16:01:18Z ingenium-docs -->
+Evidence AUTH-103: Final fixture acceptance passed 127 cases; production route parity passed 62/62 across 24 primary routes and 14 Settings deep links; desktop/mobile visual acceptance passed with run-scoped artifacts and no sensitive values.
+<!-- (work-started) AUTH-104 2026-08-14T16:01:19Z ingenium-docs -->
+<!-- (work-complete) AUTH-104 2026-08-14T16:01:20Z ingenium-docs -->
+Evidence AUTH-104: Final resource-tenancy reconciliation retained the existing migration 096/097, ownership, mail, provider, vault, ID-preservation, and secret-free evidence, including commits `2c4a3e0`, `1c0cd87`, and `88a6a1d`; the final fixture, security, containment, and deployment gates recorded no in-scope blocker.
+<!-- (work-started) AUTH-105 2026-08-14T16:01:21Z ingenium-docs -->
+<!-- (work-complete) AUTH-105 2026-08-14T16:01:22Z ingenium-docs -->
+Evidence AUTH-105: Final content-tenancy reconciliation retained migration 098 preservation, private-conversation/Docs/RAG isolation, owner-filtered retrieval, and no-body foreign-resource evidence; fixture E2E, tenant isolation, strict containment, security, and deployment acceptance passed.
+<!-- (work-started) AUTH-106 2026-08-14T16:01:23Z ingenium-docs -->
+<!-- (work-complete) AUTH-106 2026-08-14T16:01:24Z ingenium-docs -->
+Evidence AUTH-106: Final automation-tenancy reconciliation retained migration 099 preservation, job/task/run/event/vault authorization, exact trusted-event matching, redaction, and runner recovery evidence; the positive isolated runtime acceptance and clean-stop containment result passed.
+<!-- (work-started) AUTH-107 2026-08-14T16:01:25Z ingenium-docs -->
+<!-- (work-complete) AUTH-107 2026-08-14T16:01:26Z ingenium-docs -->
+Evidence AUTH-107: Scoped MCP and repository-sync preflights plus positive isolated runtime acceptance passed; token hashing/scopes, catalog and route parity, DB-isolation checks, redaction, and clean strict-containment stop were recorded with no in-scope security blocker.
+<!-- (work-started) AUTH-108 2026-08-14T16:01:27Z ingenium-docs -->
+<!-- (work-complete) AUTH-108 2026-08-14T16:01:28Z ingenium-docs -->
+Evidence AUTH-108: Final runtime-isolation acceptance retained migration 101, per-user/workspace container, capability, network, process, filesystem, and cleanup evidence; the deployed control plane and runtime manager were healthy, the runtime gateway was running, and the image revision matched the current source.
+<!-- (work-complete) AUTH-109 2026-08-14T16:01:29Z ingenium-docs -->
+Evidence AUTH-109: Final gateway acceptance retained migration 102, audience-bound ticket, host/origin/header, private-upstream, Web/CLI/VS Code, route-parity, visual, fixture, and containment evidence; the current gateway deployment and exact OCI revision matched the merged source.
+<!-- (work-started) AUTH-110 2026-08-14T16:01:30Z ingenium-docs -->
+<!-- (work-complete) AUTH-110 2026-08-14T16:01:31Z ingenium-docs -->
+Evidence AUTH-110: Enforcement-cutoff acceptance verified complete migrations 093–102, preservation and isolation audits, tenant-required reads/writes, fail-closed fallback removal, 401/403/404/CSRF/step-up/token/ticket contracts, foreign-key check 0, and 22 preserved project IDs.
+<!-- (work-started) AUTH-111 2026-08-14T16:01:32Z ingenium-docs -->
+<!-- (work-complete) AUTH-111 2026-08-14T16:01:33Z ingenium-docs -->
+Evidence AUTH-111: Release acceptance passed at source and deployed SHA `1e5d4919640e2a02c1c6a580edc9e2998336e39f`; production Compose showed a healthy control plane, healthy runtime manager, and running runtime gateway, while all inspected OCI revision labels matched that full SHA. The completed manual safety-backup record is `94bc63d5-dcb7-42a8-ae13-8b94c836e8b6` with SHA-256 `223ca677aa0c775505e453ac683bb58edfc5c594cab66ba60fadeaf4156543de`. Security recorded 88 API, 10 core, 9 dashboard, and 37 lifecycle checks with no blocker and history scan 0; fixture E2E passed 127 cases; route parity passed 62/62 across 24 routes and 14 Settings links; the 59-case auth migration matrix, DB-isolation check, strict containment clean stop, and desktop/mobile visual PASS completed without sensitive values. Workflow/source progression is `396b1d9`, `8550538`, `f261a1d`, `a89a1b8`, `fcf33b3`, `47d005b`, `2c4a3e0`, `1c0cd87`, `88a6a1d`, `5760d90`, `ebcdff6`, `9eb3e1f`, `259e620`, `1f7b6cc`, `d15e5a8`, `531b60e`, `70ac425`, `96c26d8`, `fd93f5a`, `88e485a`, `b5b66ff`, `fdc3bd2`, `82115b9`, `6263256`, `7950c6a`, `3644f32`, `0d9b3f2`, `1e5d491`. Remaining non-blocking follow-ups are restore post-swap security-epoch invalidation, OIDC configured-provider private-network/response-size hardening, retained unrelated historical temporary telemetry, and the production-profile local OpenCode/CLI/VS Code 502 behavior by design.
+Evidence AUTH-111: Focused verification: `bash tests/test-append-only-files.sh`, `bash tests/test-agent-validation.sh`, `git diff --check`, the targeted relative-link check for four changed canonical docs, and `bash -n scripts/bootstrap-local-secrets.sh` all passed; no Docs Workspace mutation or unrelated documentation regeneration was performed.

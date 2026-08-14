@@ -177,8 +177,8 @@ exchange/validate route. The Dashboard proxy denies those routes before rewritin
 The loopback-only `127.0.0.1:4097` listener is an authenticated bearer boundary.
 It validates the dashboard/OpenCode server credential and host MCP credentials,
 then forwards to the private Express listener on container port `4096`; the
-latter is the sole DB authority. Missing or malformed bearer headers return
-`401`, wrong tokens return `403`, and network locality never bypasses validation.
+latter is the sole DB authority. Missing, malformed, and invalid bearer headers
+return `401`, and network locality never bypasses validation.
 
 ### 2. Dashboard (Next.js on :3000)
 
@@ -434,7 +434,7 @@ generated `dist/` directories from the build context, compiles the current API
 source into the builder output, and starts that output. A partial or stale
 tracked `services/ingenium-api/dist` tree is not an input to the runtime.
 
-The host-loopback API boundary is `127.0.0.1:4097`; it validates and replaces the bearer token before forwarding to Express on private port `4096`. Host port `1455` reaches the Nginx listener, which forwards only the exact `GET /auth/callback` path to private Express `4096`; the auth middleware allowlists that method/path without a bearer token. Every other path is rejected (`404` for other paths, `405` for non-GET). See [API Authentication](../security/api-authentication.md) for token lifecycle, CSRF, rotation, and the public-JWT incident release hold.
+The host-loopback API boundary is `127.0.0.1:4097`; it validates and replaces the bearer token before forwarding to Express on private port `4096`. Host port `1455` reaches the Nginx listener, which forwards only the exact `GET /auth/callback` path to private Express `4096`; the auth middleware allowlists that method/path without a bearer token. Every other path is rejected (`404` for other paths, `405` for non-GET). See [API Authentication](../security/api-authentication.md) for token lifecycle, CSRF, rotation, and the historical public-JWT incident status.
 
 ### Troubleshooting deployment and restart failures
 
@@ -442,7 +442,7 @@ The host-loopback API boundary is `127.0.0.1:4097`; it validates and replaces th
 |---|---|---|
 | Container exits before supervisord starts | Missing/invalid API token, unsafe token file, or invalid email secret | Provide a valid secret/file with required permissions. Do not disable API auth or print the value. |
 | `401` at `127.0.0.1:4097` | Missing or malformed `Authorization: Bearer` header | Use the secret store or protected MCP file; do not put the token in a URL or command-line argument. |
-| `403` at `4097` | Token does not match the deployed runtime token | Reseed the host file with `scripts/bootstrap-local-secrets.sh`, then recreate the container. |
+| `401` at `4097` | Token does not match the deployed runtime token | Reseed the host file with `scripts/bootstrap-local-secrets.sh`, then recreate the container. |
 | Dashboard API returns `503` | Dashboard server cannot load the runtime token | Restart/recreate the container; a source or proxy change requires `--build`. |
 | Dashboard mutation returns `403` | Missing/wrong `Origin` or `X-Ingenium-UI: dashboard` marker | Use the same-origin dashboard path. MCP/server callers should not add browser headers. |
 | Health is unhealthy | Authenticated API probe or a supervised gateway process failed | Check `docker compose ps` and logs, then verify token-file metadata and restart. Health does not bypass bearer auth. |
