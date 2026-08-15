@@ -24,10 +24,35 @@ function docker(args, environment) {
   return result.stdout.trim();
 }
 
-const expectedRevision = process.argv[2];
+const serviceByProfile = {
+  compatibility: "ingenium",
+  production: "control-plane",
+};
+
+let expectedRevision;
+let profile = "compatibility";
+const arguments_ = process.argv.slice(2);
+for (let index = 0; index < arguments_.length; index += 1) {
+  const argument = arguments_[index];
+  if (argument === "--profile") {
+    profile = arguments_[index + 1];
+    index += 1;
+  } else if (argument?.startsWith("--profile=")) {
+    profile = argument.slice("--profile=".length);
+  } else if (expectedRevision === undefined) {
+    expectedRevision = argument;
+  } else {
+    fail("usage: validate-image-provenance.mjs EXPECTED_REVISION [--profile compatibility|production]");
+  }
+}
+
 if (typeof expectedRevision !== "string" || !revisionPattern.test(expectedRevision)) {
   fail("expected revision must be a lowercase 40-character Git SHA");
 }
+if (!Object.hasOwn(serviceByProfile, profile)) {
+  fail(`unsupported Compose profile: ${String(profile)}`);
+}
+const service = serviceByProfile[profile];
 
 // Compose resolves build arguments for every subcommand. Supply only the
 // expected public revision so this verifier never needs deployment secrets.
@@ -35,9 +60,36 @@ const composeEnvironment = {
   ...process.env,
   IMAGE_REVISION: expectedRevision,
 };
-const containerId = docker(["compose", "ps", "-q", "ingenium"], composeEnvironment);
-if (!containerId) {
-  fail("Ingenium Compose service is not running");
+const containerIds = docker(
+  ["compose", "--profile", profile, "ps", "-q", service],
+  composeEnvironment,
+).split(/\r?\n/).filter(Boolean);
+if (containerIds.length === 0) {
+  fail(`${service} Compose service is not running for profile ${profile}`);
+}
+if (containerIds.length !== 1) {
+  fail(`${service} Compose service must have exactly one running container`);
+}
+const [containerId] = containerIds;
+
+let containerLabels;
+try {
+  containerLabels = JSON.parse(
+    docker(["inspect", "--format", "{{json .Config.Labels}}", containerId], composeEnvironment),
+  );
+} catch {
+  fail("running Compose container labels are not valid JSON");
+}
+
+const expectedProject = process.env.COMPOSE_PROJECT_NAME || "ingenium";
+if (
+  !containerLabels
+  || typeof containerLabels !== "object"
+  || Array.isArray(containerLabels)
+  || containerLabels["com.docker.compose.project"] !== expectedProject
+  || containerLabels["com.docker.compose.service"] !== service
+) {
+  fail("running container is not owned by the expected Compose project and service");
 }
 
 const imageId = docker(["inspect", "--format", "{{.Image}}", containerId], composeEnvironment);

@@ -62,8 +62,9 @@ docker compose --profile compatibility exec ingenium npm run test
 docker compose --profile compatibility exec ingenium npm run check
 ```
 
-After a detached deployment, verify the running image metadata without dumping
-its labels or reading deployment secrets:
+After a detached compatibility deployment, verify the running image metadata
+without dumping its labels or reading deployment secrets. Compatibility is the
+validator's default and targets the `ingenium` service:
 
 ```bash
 ./scripts/validate-image-provenance.mjs "$IMAGE_REVISION"
@@ -150,6 +151,7 @@ export DASHBOARD_ALLOWED_ORIGINS='https://dashboard.example.com'
 
 docker compose --profile runtime-build build runtime-image
 docker compose --profile production -f docker-compose.yml -f docker-compose.runtime.override.yml up --build -d control-plane runtime-gateway runtime-manager
+./scripts/validate-image-provenance.mjs "$IMAGE_REVISION" --profile production
 ```
 
 Only `runtime-manager` mounts `/var/run/docker.sock`; never add that mount to the
@@ -448,6 +450,8 @@ Compose, or prefix an individual command:
 export IMAGE_REVISION="$(git rev-parse HEAD)"
 docker compose up --build -d
 ./scripts/validate-image-provenance.mjs "$IMAGE_REVISION"
+# Production must select the control-plane service explicitly.
+./scripts/validate-image-provenance.mjs "$IMAGE_REVISION" --profile production
 ```
 
 The runtime image carries `org.opencontainers.image.revision` and
