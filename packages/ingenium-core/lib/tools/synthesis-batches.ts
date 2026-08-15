@@ -530,17 +530,20 @@ function applyPlanTrait(
     const db = synthesisDb();
     const existing = db.prepare(
       `SELECT * FROM personality_traits
-       WHERE project_id = ? AND trait_type = ? AND trait_value = ?`,
+       WHERE project_id = ? AND owner_user_id IS NULL AND visibility = 'organization'
+         AND trait_type = ? AND trait_value = ?`,
     ).get(projectId, trait.trait_type, trait.trait_value) as PersonalityTrait | undefined;
     const confidence = Math.min(0.95, Math.max(0.05, trait.confidence));
     if (!existing) {
       const now = timestamp();
       db.prepare(
         `INSERT INTO personality_traits (
-          project_id, trait_type, trait_value, display_label, confidence,
+          project_id, organization_id, owner_user_id, visibility,
+          trait_type, trait_value, display_label, confidence,
           exemplar_observation_id, exemplar_text, source, is_active, metadata, created_at, updated_at
-        ) VALUES (?, ?, ?, NULL, ?, NULL, NULL, 'synthesis', 1, NULL, ?, ?)`,
-      ).run(projectId, trait.trait_type, trait.trait_value, confidence, now, now);
+        ) SELECT id, organization_id, NULL, 'organization', ?, ?, NULL, ?,
+          NULL, NULL, 'synthesis', 1, NULL, ?, ? FROM projects WHERE id = ?`,
+      ).run(trait.trait_type, trait.trait_value, confidence, now, now, projectId);
       return { status: "created" as const, wrote: true };
     }
     const nextConfidence = Math.max(existing.confidence, confidence);

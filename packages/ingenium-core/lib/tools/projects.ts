@@ -424,6 +424,9 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
     global = { ...source, id: "dry-run-global-default", name: "global-default", is_global: true, organization_id: BOOTSTRAP_ORGANIZATION_ID };
   }
   if (!global) global = createProject("global-default", true);
+  if (source.organization_id !== global.organization_id) {
+    throw new Error("Refusing /workspace migration across organization boundaries");
+  }
 
   const childTables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>)
     .map(({ name }) => name)
@@ -452,6 +455,16 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
   checkpointAfterWrite();
 
   execTransaction(() => {
+    const transferTriggers = db.prepare(
+      `SELECT name, sql FROM sqlite_master
+       WHERE type = 'trigger' AND sql IS NOT NULL
+         AND lower(sql) LIKE '%project_id%' AND lower(sql) LIKE '%immutable%'`,
+    ).all() as Array<{ name: string; sql: string }>;
+    // Ownership guards must remain exact outside this audited, same-organization transfer.
+    // SQLite rolls every dropped trigger back if any migration verification below fails.
+    for (const trigger of transferTriggers) {
+      db.exec(`DROP TRIGGER ${quoteIdentifier(trigger.name)}`);
+    }
     for (const collision of collisions) {
       db.prepare("UPDATE skills SET name = ? WHERE project_id = ? AND name = ?").run(collision.destinationName, source.id, collision.name);
     }
@@ -473,6 +486,7 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
     if (remaining !== 0) throw new Error("Refusing /workspace project deletion: child rows remain");
     const fkViolations = db.prepare("PRAGMA foreign_key_check").all();
     if (fkViolations.length !== 0) throw new Error("Refusing /workspace project deletion: foreign-key check failed");
+    for (const trigger of transferTriggers) db.exec(trigger.sql);
     db.prepare("DELETE FROM projects WHERE id = ?").run(source.id);
     db.prepare("UPDATE project_migration_manifests SET status = 'completed', updated_at = ? WHERE id = ?").run(new Date().toISOString(), manifestId);
   });

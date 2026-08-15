@@ -2,7 +2,7 @@ import { Observation, PersonalityTrait, Skill } from "../schema.js";
 import { getSetting } from "./settings.js";
 import { getGlobalProject } from "./projects.js";
 import { logger } from "../logger.js";
-import { safeLlmFetch } from "./endpoint-policy.js";
+import { EndpointPolicyError, safeLlmFetch } from "./endpoint-policy.js";
 import { tryParseJSON } from "./llm-json.js";
 import { isSafeSkillName } from "./skills.js";
 
@@ -325,7 +325,7 @@ export async function callSynthesisLLM(
     const parsed = tryParseJSON(content);
     return validateResponse(parsed);
   } catch (err: any) {
-    if (err.name === "AbortError") {
+    if (err?.name === "AbortError" || (err instanceof EndpointPolicyError && err.code === "aborted")) {
       return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis was cancelled." };
     }
     logger.error("synthesis-llm", `LLM synthesis call failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });

@@ -2,10 +2,10 @@ import { checkpointAfterWrite, execTransaction, getDb, resolveCoreDbPath } from 
 
 export const EMAIL_WATCHER_MARKER_CAP = 4096;
 
-export interface WatcherMarkerRememberResult {
-  alreadyProcessed: boolean;
-  newlyRecorded: boolean;
-}
+export type WatcherMarkerRememberResult =
+  | { status: "already_processed"; alreadyProcessed: true; newlyRecorded: false }
+  | { status: "newly_recorded"; alreadyProcessed: false; newlyRecorded: true }
+  | { status: "account_absent"; alreadyProcessed: false; newlyRecorded: false };
 
 function dbPath(): string {
   return resolveCoreDbPath();
@@ -39,15 +39,27 @@ export function remember(
 ): WatcherMarkerRememberResult {
   assertMarkerScope(projectId, accountId, folder, uid);
 
-  const result = execTransaction(() => {
+  const outcome = execTransaction(() => {
     const db = getDb(dbPath());
+    const account = db.prepare(
+      `SELECT account.organization_id
+       FROM mail_accounts account
+       JOIN projects project
+         ON project.id = ? AND project.organization_id = account.organization_id
+       WHERE account.id = ?`,
+    ).get(projectId, accountId) as { organization_id: string } | undefined;
+    if (!account) {
+      return {
+        result: { status: "account_absent", alreadyProcessed: false, newlyRecorded: false } as const,
+        wrote: false,
+      };
+    }
     const inserted = db.prepare(
       `INSERT INTO email_watcher_markers
          (project_id, organization_id, account_id, folder, uid, created_at, updated_at)
-       SELECT ?, organization_id, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       FROM mail_accounts WHERE id = ?
+       VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(project_id, account_id, folder, uid) DO NOTHING`,
-    ).run(projectId, accountId, folder, uid, accountId);
+    ).run(projectId, account.organization_id, accountId, folder, uid);
 
     if (inserted.changes === 0) {
       const refreshed = db.prepare(
@@ -56,9 +68,12 @@ export function remember(
          WHERE project_id = ? AND account_id = ? AND folder = ? AND uid = ?`,
       ).run(projectId, accountId, folder, uid);
       if (refreshed.changes !== 1) {
-        throw new Error("Watcher marker disappeared during duplicate suppression");
+        throw new Error("Watcher marker conflict did not resolve to one scoped row");
       }
-      return { alreadyProcessed: true, newlyRecorded: false };
+      return {
+        result: { status: "already_processed", alreadyProcessed: true, newlyRecorded: false } as const,
+        wrote: true,
+      };
     }
 
     db.prepare(
@@ -70,11 +85,14 @@ export function remember(
          LIMIT -1 OFFSET ?
        )`,
     ).run(projectId, accountId, folder, EMAIL_WATCHER_MARKER_CAP);
-    return { alreadyProcessed: false, newlyRecorded: true };
+    return {
+      result: { status: "newly_recorded", alreadyProcessed: false, newlyRecorded: true } as const,
+      wrote: true,
+    };
   });
 
-  checkpointAfterWrite();
-  return result;
+  if (outcome.wrote) checkpointAfterWrite();
+  return outcome.result;
 }
 
 /** Remove durable watcher markers when the API deletes an account. */

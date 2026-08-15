@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, resetDbForTest } from "../lib/db.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
 import {
   archiveProject,
   createProject,
@@ -42,6 +43,17 @@ function seedWorkspaceProject(skillCount = 10): { db: ReturnType<typeof getDb>; 
       .run(randomUUID(), sourceId, `skill-${index}`, "test", `content-${index}`, now, now);
   }
   return { db, sourceId };
+}
+
+function insertOrganizationTask(db: ReturnType<typeof getDb>, projectId: string, title: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO tasks
+       (id, project_id, organization_id, owner_kind, owner_user_id, visibility,
+        created_by_actor_type, created_by_actor_id, title, created_at, updated_at)
+     SELECT ?, id, organization_id, 'organization', NULL, 'organization',
+       'compatibility', NULL, ?, ?, ? FROM projects WHERE id = ?`,
+  ).run(randomUUID(), title, now, now, projectId);
 }
 
 describe("project identity", () => {
@@ -87,8 +99,7 @@ describe("project identity", () => {
   it("returns a typed child-reference result without deleting a project", () => {
     const db = database();
     const project = createProject("referenced-project");
-    const now = new Date().toISOString();
-    db.prepare("INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), project.id, "child", now, now);
+    insertOrganizationTask(db, project.id, "child");
 
     expect(deleteProject(project.name)).toEqual({ status: "has_children", childTables: ["tasks"] });
     expect(db.prepare("SELECT name FROM projects WHERE id = ?").get(project.id)).toEqual({ name: "referenced-project" });
@@ -105,8 +116,7 @@ describe("project identity", () => {
 
   it("dry-runs then migrates exactly ten DB-only workspace skills with a durable manifest", () => {
     const { db, sourceId } = seedWorkspaceProject();
-    const now = new Date().toISOString();
-    db.prepare("INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), sourceId, "kept child", now, now);
+    insertOrganizationTask(db, sourceId, "kept child");
 
     const dryRun = migrateWorkspaceProject(true);
     expect(dryRun.dryRun).toBe(true);
@@ -120,6 +130,7 @@ describe("project identity", () => {
     expect(db.prepare("SELECT 1 FROM projects WHERE name = '/workspace'").get()).toBeUndefined();
     expect(db.prepare("SELECT COUNT(*) AS count FROM skills WHERE project_id = (SELECT id FROM projects WHERE name = 'global-default')").get()).toEqual({ count: 10 });
     expect(db.prepare("SELECT status, source_skill_count FROM project_migration_manifests WHERE id = ?").get(migrated.manifestId)).toEqual({ status: "completed", source_skill_count: 10 });
+    expect(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'tasks_automation_scope_immutable'").get()).toEqual({ 1: 1 });
   });
 
   it("refuses a workspace migration unless the source has exactly ten skills", () => {
@@ -156,8 +167,13 @@ describe("project identity", () => {
   it("rolls back when foreign-key verification fails", () => {
     const { db } = seedWorkspaceProject();
     db.pragma("foreign_keys = OFF");
-    db.prepare("INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
-      .run(randomUUID(), randomUUID(), "orphaned task", new Date().toISOString(), new Date().toISOString());
+    db.exec("DROP TRIGGER tasks_automation_scope_insert");
+    db.prepare(
+      `INSERT INTO tasks
+         (id, project_id, organization_id, owner_kind, owner_user_id, visibility,
+          created_by_actor_type, created_by_actor_id, title, created_at, updated_at)
+       VALUES (?, ?, ?, 'organization', NULL, 'organization', 'compatibility', NULL, ?, ?, ?)`,
+    ).run(randomUUID(), randomUUID(), BOOTSTRAP_ORGANIZATION_ID, "orphaned task", new Date().toISOString(), new Date().toISOString());
     db.pragma("foreign_keys = ON");
 
     expect(() => migrateWorkspaceProject()).toThrow(/foreign-key check failed/);

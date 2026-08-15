@@ -62,6 +62,7 @@ describe("VAULT-100 migration", () => {
       .map((column) => column.name);
     expect(auditColumns).toEqual([
       "id", "project_id", "job_id", "item_id", "authorized_item_version", "action", "actor", "created_at",
+      "organization_id", "actor_type", "actor_id",
     ]);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 
@@ -86,16 +87,16 @@ describe("VAULT-100 migration", () => {
     const foreign = item(second.id, "foreign");
     const insert = db.prepare(
       `INSERT INTO job_vault_references
-       (project_id, job_id, item_id, authorized_at, authorized_item_version, status)
-       VALUES (?, ?, ?, ?, 1, 'authorized')`,
+       (project_id, organization_id, job_id, item_id, authorized_at, authorized_item_version, status)
+       VALUES (?, ?, ?, ?, ?, 1, 'authorized')`,
     );
-    expect(() => insert.run(first.id, job.id, foreign, new Date().toISOString())).toThrow(/active in the same project/);
+    expect(() => insert.run(first.id, first.organization_id, job.id, foreign, new Date().toISOString())).toThrow(/scope mismatch/);
 
     const itemIds = Array.from({ length: JOB_VAULT_REFERENCE_MAX + 1 }, (_, index) => item(first.id, `direct-${index}`));
     for (const itemId of itemIds.slice(0, JOB_VAULT_REFERENCE_MAX)) {
-      expect(() => insert.run(first.id, job.id, itemId, new Date().toISOString())).not.toThrow();
+      expect(() => insert.run(first.id, first.organization_id, job.id, itemId, new Date().toISOString())).not.toThrow();
     }
-    expect(() => insert.run(first.id, job.id, itemIds[JOB_VAULT_REFERENCE_MAX]!, new Date().toISOString()))
+    expect(() => insert.run(first.id, first.organization_id, job.id, itemIds[JOB_VAULT_REFERENCE_MAX]!, new Date().toISOString()))
       .toThrow(/limit exceeded/);
   });
 });
