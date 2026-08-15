@@ -20,6 +20,7 @@ const browserLaunchInput = z.object({
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   workspaceId: z.string().min(1).max(256),
 }).strict();
+const browserHealthInput = z.object({ audience: z.enum(["web", "cli", "vscode"]) }).strict();
 const gatewayExchangeInput = z.object({
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   audience: z.enum(["web", "cli", "vscode"]),
@@ -114,6 +115,29 @@ function runtimeRootDomain(): string {
   return value;
 }
 
+export function compatibilityRuntimeTarget(audience: "web" | "cli" | "vscode"): string {
+  if (audience === "web") return "http://127.0.0.1:4098/";
+  if (audience === "cli") return "http://127.0.0.1:4099/";
+  return "http://127.0.0.1:4100/?folder=/workspace";
+}
+
+export async function compatibilityRuntimeReady(
+  audience: "web" | "cli" | "vscode",
+  probe: typeof fetch = fetch,
+): Promise<boolean> {
+  try {
+    const response = await probe(compatibilityRuntimeTarget(audience), {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(2_000),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    return response.status >= 200 && response.status < 400;
+  } catch {
+    return false;
+  }
+}
+
 runtimesRouter.get("/browser/status", (req, res) => {
   try {
     const principal = browserPrincipal(req);
@@ -144,6 +168,26 @@ runtimesRouter.get("/browser/workspaces", (req, res) => {
     const principal = browserPrincipal(req);
     res.set("Cache-Control", "no-store");
     res.json({ data: deploymentMode() === "control-plane" ? browserWorkspaceRows(principal.id).map(browserWorkspaceDto) : [] });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.get("/browser/health", async (req, res) => {
+  const parsed = browserHealthInput.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime audience is invalid" } });
+    return;
+  }
+  try {
+    browserPrincipal(req);
+    if (deploymentMode() !== "compatibility") {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+      return;
+    }
+    const ready = await compatibilityRuntimeReady(parsed.data.audience);
+    res.set("Cache-Control", "no-store");
+    res.json({ data: { status: ready ? "ready" : "unavailable" } });
   } catch (error) {
     runtimeError(res, error);
   }

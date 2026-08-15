@@ -4,6 +4,7 @@ import {
   isRuntimeGenerationRequest,
   isRuntimeHealthRequest,
   proxyResponseHeaders,
+  runtimeBackendHealthPath,
   runtimeCookie,
   runtimeScope,
   sanitizedHeaders,
@@ -22,12 +23,12 @@ afterEach(() => {
 });
 
 describe("AUTH-109 runtime gateway", () => {
-  it("accepts only an exact audience runtime host", () => {
-    expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test` } })).toEqual({
-      audience: "web",
+  it.each(["web", "cli", "vscode"] as const)("accepts only an exact %s runtime host", (audience) => {
+    expect(runtimeScope({ headers: { host: `${audience}--${runtimeId}.runtime.example.test` } })).toEqual({
+      audience,
       runtimeId,
-      host: `web--${runtimeId}.runtime.example.test`,
-      origin: `https://web--${runtimeId}.runtime.example.test`,
+      host: `${audience}--${runtimeId}.runtime.example.test`,
+      origin: `https://${audience}--${runtimeId}.runtime.example.test`,
     });
     expect(runtimeScope({ headers: { host: `cli--${runtimeId}.runtime.example.test.evil.test` } })).toBeUndefined();
     expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test:443` } })).toBeUndefined();
@@ -59,23 +60,33 @@ describe("AUTH-109 runtime gateway", () => {
       .not.toHaveProperty("x-ingenium-authenticated-user");
   });
 
-  it("uses a host-only secure audience cookie and a restrictive frame policy", () => {
+  it.each(["web", "cli", "vscode"] as const)("uses a host-only secure %s cookie and replaces upstream frame denial", (audience) => {
     const token = `rbs_${"a".repeat(43)}`;
-    expect(runtimeCookie("vscode", token, 60)).toBe(
-      `__Host-ingenium_runtime_vscode=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=60`,
+    expect(runtimeCookie(audience, token, 60)).toBe(
+      `__Host-ingenium_runtime_${audience}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=60`,
     );
-    expect(runtimeCookie("vscode", token, 60)).not.toContain("Domain=");
-    const scope = runtimeScope({ headers: { host: `vscode--${runtimeId}.runtime.example.test` } })!;
+    expect(runtimeCookie(audience, token, 60)).not.toContain("Domain=");
+    const scope = runtimeScope({ headers: { host: `${audience}--${runtimeId}.runtime.example.test` } })!;
     const headers = proxyResponseHeaders({
-      "content-security-policy": "default-src 'self'",
+      "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
       "x-frame-options": "DENY",
       "set-cookie": "upstream=secret",
       location: `http://ingenium-runtime-${runtimeId.replaceAll("-", "")}:4100/path`,
-    }, scope);
+    }, scope, "https://dashboard.example.test");
     expect(headers["content-security-policy"]).toEqual(["default-src 'self'", "frame-ancestors https://dashboard.example.test"]);
+    expect(String(headers["content-security-policy"])).not.toContain("frame-ancestors 'none'");
+    expect(String(headers["content-security-policy"])).not.toContain("frame-ancestors *");
     expect(headers).not.toHaveProperty("x-frame-options");
     expect(headers).not.toHaveProperty("set-cookie");
     expect(headers.location).toBe(`${scope.origin}/path`);
+  });
+
+  it.each([
+    ["web", "/"],
+    ["cli", "/"],
+    ["vscode", "/?folder=/workspace"],
+  ] as const)("probes the exact %s audience root before reporting ready", (audience, path) => {
+    expect(runtimeBackendHealthPath(audience)).toBe(path);
   });
 
   it("sends only the dedicated audience for the API boundary to attest", () => {

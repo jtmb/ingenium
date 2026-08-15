@@ -74,6 +74,7 @@ export interface RuntimeBrowserSession {
   audience: RuntimeLaunchAudience;
   origin: string;
   host: string;
+  launcherOrigin: string;
   generation: number;
   expiresAt: string;
   lastSeenAt: string;
@@ -552,6 +553,7 @@ function browserSessionDto(row: RuntimeBrowserSessionRow): RuntimeBrowserSession
     audience: row.audience,
     origin: row.origin,
     host: row.host,
+    launcherOrigin: row.launcher_origin,
     generation: row.generation,
     expiresAt: row.expires_at,
     lastSeenAt: row.last_seen_at,
@@ -644,10 +646,10 @@ export function consumeRuntimeBrowserLaunchTicket(input: {
     const id = randomUUID();
     db.prepare(`INSERT INTO runtime_browser_sessions
       (id, runtime_id, workspace_id, organization_id, project_id, owner_user_id, auth_session_id, audience,
-       origin, host, token_hash, generation, expires_at, last_seen_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+       origin, host, launcher_origin, token_hash, generation, expires_at, last_seen_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, row.runtime_id, row.workspace_id, row.organization_id, row.project_id, row.owner_user_id,
-      row.auth_session_id, row.audience, row.origin, row.host, sha256(browserToken), row.generation,
+      row.auth_session_id, row.audience, row.origin, row.host, row.launcher_origin, sha256(browserToken), row.generation,
       expiresAt, now.toISOString(), now.toISOString(),
     );
     return browserSessionDto(db.prepare("SELECT * FROM runtime_browser_sessions WHERE id = ?").get(id) as RuntimeBrowserSessionRow);

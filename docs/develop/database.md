@@ -127,6 +127,7 @@ another Compose project volume.
 | 100 | `100_mcp_credentials.sql` | Adds AUTH-107 hash-only MCP/service/runtime/repository-sync credentials with mandatory audience, scope, organization/project grants, workspace/worktree, expiry, service-principal security epoch, rotation/revocation, last-used metadata, and immutable SQL guards. |
 | 101 | `101_runtime_isolation.sql` | Adds AUTH-108 authorized-workspace mappings, one runtime per workspace, revisioned runtime lifecycle/leases/limits, runtime capability bindings, hash-only one-time audience launch tickets, append-only activity, exact-schema probes, and verified backfill evidence. |
 | 102 | `102_runtime_browser_sessions.sql` | Adds AUTH-109 runtime browser generations, exact auth-session/workspace/runtime/audience/origin/host hash-only launch tickets, and hash-only revocable browser sessions with one-time consumption and generation invalidation. |
+| 103 | `103_runtime_browser_launcher_origin.sql` | Persists the authenticated dashboard launcher origin on new runtime browser sessions, backfills matching live sessions from consumed launch tickets, and revokes unmatched legacy sessions so gateway CSP and health responses can allow only the originating dashboard. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

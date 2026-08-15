@@ -693,6 +693,16 @@ function isTerminallyResolved(entry: TestRunTelemetry): boolean {
     && entry.resolution?.status === "resolved";
 }
 
+export function historicalOnlyListenerPorts(
+  historicalPorts: readonly number[],
+  currentPorts: readonly number[],
+  repositoryCandidatePorts: readonly number[],
+): Set<number> {
+  const current = new Set(currentPorts);
+  const repository = new Set(repositoryCandidatePorts);
+  return new Set(historicalPorts.filter((port) => !current.has(port) && !repository.has(port)));
+}
+
 function baselineMatchesCandidate(
   baseline: TestRunPreexistingProcessBaseline,
   candidate: RepositoryProcessCandidate,
@@ -849,7 +859,22 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   const holds = discoveredProcesses.map((candidate) =>
     `manifestless candidate ${candidate.pid} listening on ${candidate.listeningPorts.join(",") || "no recorded port"}`);
   const discoveredPorts = unmanagedCandidates.flatMap((candidate) => candidate.listeningPorts);
-  const preexistingUnownedPorts = new Set(preexistingUnownedCandidates.flatMap((candidate) => candidate.listeningPorts));
+  const historicalPorts: number[] = [];
+  const currentPorts: number[] = [];
+  for (const entry of telemetry) {
+    const check = telemetryManifestChecks.get(entry)!;
+    const telemetryPath = getTestRunTelemetryPath(entry);
+    const historical = check.state === "missing"
+      && !scopedTelemetry.has(telemetryPath)
+      && Date.now() - Date.parse(entry.updatedAt) >= HISTORICAL_INERT_EVIDENCE_AFTER_MS
+      && isTerminallyResolved(entry);
+    (historical ? historicalPorts : currentPorts).push(...Object.values(entry.ports));
+  }
+  const historicalCollisions = historicalOnlyListenerPorts(historicalPorts, currentPorts, discoveredPorts);
+  const preexistingUnownedPorts = new Set([
+    ...preexistingUnownedCandidates.flatMap((candidate) => candidate.listeningPorts),
+    ...historicalCollisions,
+  ]);
   const expectedOciRevision = process.env.INGENIUM_AUDIT_OCI_REVISION?.trim() || undefined;
   const composeOwnership = options.composeOwnership ?? inspectComposeOwnership({
     repoRoot,

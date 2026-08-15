@@ -239,7 +239,9 @@ one-time, at-most-60-second issue/consume primitives. Browser exchange, origin b
 runtime-specific roots, and launch UI are completed by AUTH-109 migration 102. The
 unprivileged HTTPS gateway has a narrow credential and no Docker socket. Host-only
 audience cookies and generation-checked sessions bind the runtime root to the
-originating dashboard auth session; logout/revoke closes streams and reconnects.
+originating dashboard auth session. Migration 103 persists that exact launcher
+origin so gateway health and proxied CSP responses permit only that dashboard
+origin; logout/revoke closes streams and reconnects.
 
 ### Content tenancy (AUTH-105)
 

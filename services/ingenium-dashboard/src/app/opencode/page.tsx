@@ -21,8 +21,7 @@ type OpenCodeMode = "web" | "cli";
 export default function OpenCodePage() {
   const [mode, setMode] = useState<OpenCodeMode>("web");
   const [cliMounted, setCliMounted] = useState(false);
-  const [webLoaded, setWebLoaded] = useState(false);
-  const [cliLoaded, setCliLoaded] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<"pending" | "connected" | "error">("pending");
 
   // Load persisted mode from localStorage on mount
   useEffect(() => {
@@ -56,21 +55,18 @@ export default function OpenCodePage() {
     [cliMounted],
   );
 
-  const isLoaded = mode === "web" ? webLoaded : cliLoaded;
-
   return (
     <div className="flex flex-col h-full min-h-0">
       <OpenCodeToolbar
         mode={mode}
         onModeChange={handleModeChange}
-        isLoaded={isLoaded}
+        status={connectionStatus}
       />
       <div className="flex-1 relative bg-black">
         <OpenCodeFrame
           mode={mode}
           cliMounted={cliMounted}
-          onWebLoaded={() => setWebLoaded(true)}
-          onCliLoaded={() => setCliLoaded(true)}
+          onConnectionStatusChange={setConnectionStatus}
         />
       </div>
     </div>

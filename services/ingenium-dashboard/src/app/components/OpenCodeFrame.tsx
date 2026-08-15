@@ -7,8 +7,7 @@ import RuntimeWorkspacePicker from "./RuntimeWorkspacePicker";
 interface OpenCodeFrameProps {
   mode: "web" | "cli";
   cliMounted: boolean;
-  onWebLoaded?: () => void;
-  onCliLoaded?: () => void;
+  onConnectionStatusChange?: (status: "pending" | "connected" | "error") => void;
 }
 
 /**
@@ -28,8 +27,7 @@ interface OpenCodeFrameProps {
 export default function OpenCodeFrame({
   mode,
   cliMounted,
-  onWebLoaded,
-  onCliLoaded,
+  onConnectionStatusChange,
 }: OpenCodeFrameProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,6 +45,12 @@ export default function OpenCodeFrame({
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  useEffect(() => {
+    const failed = workspace.status === "error" || workspace.status === "unavailable" || workspace.status === "empty"
+      || activeLaunch.status === "unavailable" || activeLaunch.status === "expired" || activeFrameError !== null;
+    onConnectionStatusChange?.(failed ? "error" : canRenderFrame ? "connected" : "pending");
+  }, [activeFrameError, activeLaunch.status, canRenderFrame, onConnectionStatusChange, workspace.status]);
 
   // Observe container size changes to provide stable dimensions to ttyd / OpenCode
   useEffect(() => {
@@ -96,16 +100,14 @@ export default function OpenCodeFrame({
     }
   };
 
-  const handleFrameLoad = (frameMode: "web" | "cli", onLoaded?: () => void) => {
+  const handleFrameLoad = (frameMode: "web" | "cli") => {
     // An inactive frame can finish loading after the active frame has failed.
     // It must never clear the active frame's error surface or its timeout.
     if (frameMode !== modeRef.current) {
-      onLoaded?.();
       return;
     }
     clearLoadTimeout();
     setFrameError((current) => current?.mode === frameMode ? null : current);
-    onLoaded?.();
   };
 
   const handleFrameError = (frameMode: "web" | "cli") => {
@@ -196,7 +198,7 @@ export default function OpenCodeFrame({
           tabIndex={mode === "web" ? 0 : -1}
           title="OpenCode Web"
           allow="clipboard-write"
-          onLoad={() => handleFrameLoad("web", onWebLoaded)}
+          onLoad={() => handleFrameLoad("web")}
           onError={() => handleFrameError("web")}
         />
       )}
@@ -216,7 +218,7 @@ export default function OpenCodeFrame({
           tabIndex={mode === "cli" ? 0 : -1}
           title="OpenCode Terminal"
           allow="clipboard-write"
-          onLoad={() => handleFrameLoad("cli", onCliLoaded)}
+          onLoad={() => handleFrameLoad("cli")}
           onError={() => handleFrameError("cli")}
         />
       )}

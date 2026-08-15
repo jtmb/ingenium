@@ -6,7 +6,11 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { authentication, getDb, identity, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
-import { runtimesRouter } from "../lib/routes/runtimes.js";
+import {
+  compatibilityRuntimeReady,
+  compatibilityRuntimeTarget,
+  runtimesRouter,
+} from "../lib/routes/runtimes.js";
 import { reconcileRuntimes } from "../lib/runtime-reconciler.js";
 
 let api: Server;
@@ -292,6 +296,20 @@ describe("AUTH-108 runtime routes", () => {
       body: JSON.stringify({ exchangeProof: "p".repeat(43), audience: "web", origin: launchOrigin, host: new URL(launchOrigin).host, launcherOrigin: "https://dashboard.example.test" }),
     });
     expect(replay.status).toBe(401);
+
+    for (const [audience, proof] of [["cli", "q".repeat(43)], ["vscode", "r".repeat(43)]] as const) {
+      const audienceLaunch = await fetch(`${apiBase}/api/v1/runtimes/browser/launch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: "https://dashboard.example.test" },
+        body: JSON.stringify({ audience, exchangeProof: proof, workspaceId: "runtime-route-browser" }),
+      });
+      const audienceBody = await audienceLaunch.json() as { data: { launchUrl: string } };
+      expect(audienceLaunch.status).toBe(201);
+      expect(audienceBody.data.launchUrl).toBe(
+        `https://${audience}--${runtime.id}.runtime.example.test/__ingenium/exchange`,
+      );
+      expect(JSON.stringify(audienceBody)).not.toMatch(/backend|container|storagePath|sessionToken/i);
+    }
   });
 
   it("uses the compatibility descriptor without calling the runtime manager", async () => {
@@ -304,6 +322,33 @@ describe("AUTH-108 runtime routes", () => {
     expect(status.status).toBe(200);
     await expect(status.json()).resolves.toEqual({ data: { mode: "compatibility", status: "ready", reason: null } });
     expect(managerRequests).toEqual([]);
+  });
+
+  it.each([
+    ["web", "http://127.0.0.1:4098/"],
+    ["cli", "http://127.0.0.1:4099/"],
+    ["vscode", "http://127.0.0.1:4100/?folder=/workspace"],
+  ] as const)("health-checks the exact compatibility %s backend without returning its target", async (audience, target) => {
+    const requests: string[] = [];
+    const probe = (async (input: string | URL | Request) => {
+      requests.push(String(input));
+      return new Response(null, { status: 302 });
+    }) as typeof fetch;
+
+    expect(compatibilityRuntimeTarget(audience)).toBe(target);
+    expect(await compatibilityRuntimeReady(audience, probe)).toBe(true);
+    expect(requests).toEqual([target]);
+  });
+
+  it("rejects compatibility health access in isolated mode without exposing a backend", async () => {
+    const scope = createWorkspace("runtime-route-health");
+    browserSession = authentication.createSession(scope.user.id);
+
+    const response = await fetch(`${apiBase}/api/v1/runtimes/browser/health?audience=web`);
+    const body = await response.text();
+
+    expect(response.status).toBe(404);
+    expect(body).not.toMatch(/4098|backend|container|127\.0\.0\.1/i);
   });
 
   it("lists only currently authorized owned workspaces without paths or authority IDs", async () => {

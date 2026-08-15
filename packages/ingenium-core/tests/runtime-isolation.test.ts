@@ -291,7 +291,13 @@ describe("AUTH-108 runtime isolation", () => {
     expect(consumeRuntimeBrowserLaunchTicket({ ...expiring, exchangeProof: expiringProof, now: new Date("2026-08-13T00:01:00.001Z") })).toBeUndefined();
 
     const exchanged = consumeRuntimeBrowserLaunchTicket({ exchangeProof, audience: issued.audience, origin: issued.origin, host: issued.host, launcherOrigin: issued.launcherOrigin, now });
-    expect(exchanged?.session).toMatchObject({ runtimeId: runtime.id, workspaceId: "workspace-browser", audience: "web", host: issued.host });
+    expect(exchanged?.session).toMatchObject({
+      runtimeId: runtime.id,
+      workspaceId: "workspace-browser",
+      audience: "web",
+      host: issued.host,
+      launcherOrigin: "https://dashboard.example.test",
+    });
     expect(consumeRuntimeBrowserLaunchTicket({ exchangeProof, audience: issued.audience, origin: issued.origin, host: issued.host, launcherOrigin: issued.launcherOrigin, now })).toBeUndefined();
     expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "cli", host: issued.host, origin: issued.origin, now })).toBeUndefined();
     expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "web", host: issued.host, origin: issued.origin, now })?.backendName).toBe(runtime.backendName);

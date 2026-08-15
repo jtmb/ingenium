@@ -302,7 +302,9 @@ pending reset/verification/OIDC/mail/context/restore authorizations,
 invitations, task reservations, and coordination ownership. User,
 service-principal, workspace/runtime, and browser generations advance. Password
 hashes, OIDC identity links, TOTP factors, recovery codes, and resource content
-remain unchanged. A partial credential generation or failed content-free audit
+remain unchanged. Normal API startup subsequently applies migration 103; restored
+runtime browser sessions are already revoked by restore rehydration. A partial
+credential generation or failed content-free audit
 fails closed and enters signed-journal rollback/recovery; services do not restart
 first. The installation bearer file is not restored from the database bundle.
 

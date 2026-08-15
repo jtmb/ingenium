@@ -66,6 +66,7 @@ export default defineConfig({
     "**/ingenium-dashboard/chat-e2e-smoke.spec.ts",
     "**/ingenium-dashboard/opencode-chat.spec.ts",
     "**/ingenium-dashboard/vscode.spec.ts",
+    "**/ingenium-dashboard/runtime-audiences.spec.ts",
     "**/ingenium-dashboard/jobs.spec.ts",
     "**/ingenium-dashboard/pipeline.spec.ts",
     "**/ingenium-dashboard/settings-providers.spec.ts",

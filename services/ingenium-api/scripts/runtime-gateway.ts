@@ -10,7 +10,7 @@ type ActivityKind = "connection_opened" | "connection_closed" | "generation_star
 type RuntimeScope = { audience: Audience; runtimeId: string; host: string; origin: string };
 type ValidatedSession = {
   backendName: string;
-  session: { expiresAt: string };
+  session: { expiresAt: string; launcherOrigin: string };
 };
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -123,15 +123,17 @@ export function isRuntimeGenerationRequest(request: Pick<IncomingMessage, "metho
   return /^\/session\/[^/]+\/(?:message|prompt|prompt_async|command)$/.test(pathname);
 }
 
-function framePolicy(): string {
-  return `frame-ancestors ${[...dashboardOrigins()].join(" ")}`;
+function framePolicy(origin?: string): string {
+  if (origin === undefined) return "frame-ancestors 'none'";
+  if (!dashboardOrigins().has(origin)) throw new Error("Dashboard origin is not allowed");
+  return `frame-ancestors ${origin}`;
 }
 
-function reject(response: ServerResponse, status = 401, message = "Authentication is required"): void {
+function reject(response: ServerResponse, status = 401, message = "Authentication is required", origin?: string): void {
   response.writeHead(status, {
     "Content-Type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
-    "Content-Security-Policy": `${framePolicy()}; default-src 'none'`,
+    "Content-Security-Policy": `${framePolicy(origin)}; default-src 'none'`,
     "X-Content-Type-Options": "nosniff",
   }).end(message);
 }
@@ -205,7 +207,11 @@ function exchange(request: IncomingMessage, response: ServerResponse, scope: Run
   });
 }
 
-export function proxyResponseHeaders(headers: IncomingHttpHeaders, scope: RuntimeScope): IncomingHttpHeaders {
+export function proxyResponseHeaders(
+  headers: IncomingHttpHeaders,
+  scope: RuntimeScope,
+  launcherOrigin: string,
+): IncomingHttpHeaders {
   const result: IncomingHttpHeaders = {};
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
@@ -215,7 +221,11 @@ export function proxyResponseHeaders(headers: IncomingHttpHeaders, scope: Runtim
     } else result[lower] = value;
   }
   const upstreamPolicy = headers["content-security-policy"];
-  result["content-security-policy"] = upstreamPolicy ? [String(upstreamPolicy), framePolicy()] : framePolicy();
+  const policies = (Array.isArray(upstreamPolicy) ? upstreamPolicy : upstreamPolicy ? [upstreamPolicy] : [])
+    .map((policy) => policy.split(";").map((directive) => directive.trim())
+      .filter((directive) => directive && !directive.toLowerCase().startsWith("frame-ancestors ")).join("; "))
+    .filter(Boolean);
+  result["content-security-policy"] = [...policies, framePolicy(launcherOrigin)];
   result["x-content-type-options"] = "nosniff";
   return result;
 }
@@ -223,6 +233,51 @@ export function proxyResponseHeaders(headers: IncomingHttpHeaders, scope: Runtim
 export function runtimeCookie(audience: Audience, token: string, maxAge: number): string {
   if (!/^rbs_[A-Za-z0-9_-]{43}$/.test(token) || !Number.isSafeInteger(maxAge) || maxAge < 1) throw new Error("Invalid runtime cookie");
   return `${COOKIE_NAMES[audience]}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
+}
+
+export function runtimeBackendHealthPath(audience: Audience): string {
+  return audience === "vscode" ? "/?folder=/workspace" : "/";
+}
+
+async function backendReady(scope: RuntimeScope, backendName: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const upstream = httpRequest({
+      hostname: backendName,
+      port: BACKEND_PORTS[scope.audience],
+      method: "GET",
+      path: runtimeBackendHealthPath(scope.audience),
+      headers: sanitizedHeaders({}, scope),
+      timeout: 5_000,
+    }, (response) => {
+      response.resume();
+      resolve((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 400);
+    });
+    upstream.once("timeout", () => upstream.destroy());
+    upstream.once("error", () => resolve(false));
+    upstream.end();
+  });
+}
+
+async function health(request: IncomingMessage, response: ServerResponse, scope: RuntimeScope): Promise<void> {
+  const origin = request.headers.origin;
+  if (request.method !== "GET" || !origin || !dashboardOrigins().has(origin)) {
+    reject(response, 403, "Runtime health origin is not allowed");
+    return;
+  }
+  const token = cookie(request, COOKIE_NAMES[scope.audience]);
+  const resolved = token ? await validate(scope, token).catch(() => undefined) : undefined;
+  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName)) {
+    reject(response, 503, "Runtime audience is unavailable", origin);
+    return;
+  }
+  response.writeHead(204, {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": framePolicy(origin),
+    Vary: "Origin",
+    "X-Content-Type-Options": "nosniff",
+  }).end();
 }
 
 async function proxyHttp(request: IncomingMessage, response: ServerResponse, scope: RuntimeScope): Promise<void> {
@@ -256,7 +311,10 @@ async function proxyHttp(request: IncomingMessage, response: ServerResponse, sco
     headers: sanitizedHeaders(request.headers, scope),
     timeout: 30_000,
   }, (upstreamResponse) => {
-    response.writeHead(upstreamResponse.statusCode ?? 502, proxyResponseHeaders(upstreamResponse.headers, scope));
+    response.writeHead(
+      upstreamResponse.statusCode ?? 502,
+      proxyResponseHeaders(upstreamResponse.headers, scope, resolved.session.launcherOrigin),
+    );
     upstreamResponse.pipe(response);
   });
   const recheck = setInterval(() => {
@@ -346,6 +404,10 @@ export function startRuntimeGateway() {
     }
     if (request.url === "/__ingenium/exchange") {
       exchange(request, response, scope);
+      return;
+    }
+    if (request.url === "/__ingenium/health") {
+      void health(request, response, scope);
       return;
     }
     void proxyHttp(request, response, scope);

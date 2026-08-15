@@ -1,5 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, readdirSync, rmSync, symlinkSync, realpathSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createConnection } from "node:net";
 import { basename, join } from "node:path";
 import {
@@ -46,6 +55,13 @@ export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
 export const FIXTURE_API_RATE_LIMIT = 1_000;
 export const FIXTURE_OWNER_EMAIL = "playwright-owner@example.test";
 export const FIXTURE_OWNER_PASSWORD = "Playwright-fixture-password-2026!";
+
+function ensureTestRunAuthEncryptionKey(context: TestRunContext): void {
+  const path = join(context.homeDir, "auth-encryption-key");
+  if (!existsSync(path)) {
+    writeFileSync(path, randomBytes(32).toString("base64url"), { flag: "wx", mode: 0o600 });
+  }
+}
 
 function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildArtifacts: boolean): string {
   const source = join(context.repoRoot, "services", "ingenium-dashboard");
@@ -321,6 +337,7 @@ export function getServerSpecs(
         OPENCODE_SERVER_URL: `http://127.0.0.1:${context.ports.fixture}`,
         OPENCODE_SERVER_PASSWORD: "test-fixture",
         INGENIUM_API_TOKEN: TEST_API_TOKEN,
+        INGENIUM_AUTH_ENCRYPTION_KEY_FILE: join(context.homeDir, "auth-encryption-key"),
         INGENIUM_API_TEST_MODE: "1",
         INGENIUM_API_DISABLE_BACKGROUND_SCHEDULERS: "1",
         INGENIUM_API_DISABLE_SCHEDULERS: "1",
@@ -1287,6 +1304,7 @@ export async function startTestServers(
   const running: RunningServer[] = [];
   try {
     capturePreexistingProcessBaseline(context);
+    ensureTestRunAuthEncryptionKey(context);
     if (production && shouldBuild) await buildProductionArtifacts(context, options.buildTimeoutMs);
     else if (production) prepareTestRunDashboardWorkspace(context, true);
     if (production) {

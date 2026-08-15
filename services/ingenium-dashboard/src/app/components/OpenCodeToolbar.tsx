@@ -7,7 +7,7 @@ export type OpenCodeToolbarMode = "web" | "cli";
 interface OpenCodeToolbarProps {
   mode: OpenCodeToolbarMode;
   onModeChange: (newMode: OpenCodeToolbarMode) => void;
-  isLoaded: boolean;
+  status: "pending" | "connected" | "error";
 }
 
 /**
@@ -21,7 +21,7 @@ interface OpenCodeToolbarProps {
 export default function OpenCodeToolbar({
   mode,
   onModeChange,
-  isLoaded,
+  status,
 }: OpenCodeToolbarProps) {
   // Global keyboard shortcut: Ctrl+Shift+` — toggles Web ↔ CLI
   useEffect(() => {
@@ -148,16 +148,12 @@ export default function OpenCodeToolbar({
 
         {/* Health status indicator */}
         <span
-          title={
-            isLoaded ? "Connected to isolated runtime" : "Launching isolated runtime…"
-          }
+          title={status === "connected" ? "Connected to runtime" : status === "error" ? "Runtime unavailable" : "Runtime not connected"}
           className={[
             "w-2 h-2 rounded-full shrink-0 transition-colors duration-300",
-            isLoaded ? "bg-green-500" : "bg-yellow-500 animate-pulse",
+            status === "connected" ? "bg-green-500" : status === "error" ? "bg-red-500" : "bg-yellow-500 animate-pulse",
           ].join(" ")}
-          aria-label={
-            isLoaded ? "OpenCode isolated runtime connected" : "OpenCode isolated runtime loading"
-          }
+          aria-label={status === "connected" ? "OpenCode runtime connected" : status === "error" ? "OpenCode runtime unavailable" : "OpenCode runtime not connected"}
         />
       </div>
     </div>

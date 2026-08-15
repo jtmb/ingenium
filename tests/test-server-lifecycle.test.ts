@@ -236,6 +236,8 @@ describe("test server lifecycle contracts", () => {
     expect(specs[1]!.args).not.toContain("dev");
     expect(specs[2]!.env.CHAT_FIXTURE_PORT).toBe("45203");
     expect(specs[0]!.env.INGENIUM_API_TOKEN).toBe(TEST_API_TOKEN);
+    expect(specs[0]!.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE)
+      .toBe(join(context.homeDir, "auth-encryption-key"));
     expect(specs[1]!.env.INGENIUM_API_TOKEN).toBeUndefined();
     expect(specs[1]!.env.INGENIUM_API_TEST_MODE).toBe("1");
     expect(specs[1]!.env.INGENIUM_API_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
@@ -261,6 +263,30 @@ describe("test server lifecycle contracts", () => {
     expect(specs[0]!.readinessHeaders?.[FIXTURE_PROJECT_HEADER]).toBe(context.project);
     expect(specs[1]!.env.SOME_SECRET).toBeUndefined();
     expect(specs[2]!.env.INGENIUM_API_TOKEN).toBeUndefined();
+    expect(specs[1]!.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE).toBeUndefined();
+    expect(specs[2]!.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE).toBeUndefined();
+  });
+
+  it("provisions an owner-only auth encryption key before the API starts", async () => {
+    const context = createTestRunContext({ ports: { api: 45214, dashboard: 45215, fixture: 45216 } });
+    track(context);
+
+    try {
+      await expect(startTestServers(context, {
+        production: false,
+        build: false,
+        spawnServer: (spec) => {
+          const keyPath = spec.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
+          expect(keyPath).toBe(join(context.homeDir, "auth-encryption-key"));
+          expect(statSync(keyPath!).mode & 0o777).toBe(0o600);
+          expect(readFileSync(keyPath!, "utf8")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+          throw new Error("auth encryption key probe");
+        },
+      })).rejects.toThrow("auth encryption key probe");
+    } finally {
+      updateTestRunManifest(context.manifestPath, { status: "created", processes: [] });
+      cleanupTestRun(context.manifestPath);
+    }
   });
 
   it("adds the internal marker only to explicitly bound fixture API calls", () => {

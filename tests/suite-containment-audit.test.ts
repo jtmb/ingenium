@@ -30,6 +30,7 @@ import {
   auditSuiteContainment,
   inspectOwnedMisplacedTestResults,
   removeOwnedMisplacedTestResults,
+  historicalOnlyListenerPorts,
   strictFailures,
 } from "./suite-containment-audit";
 
@@ -170,6 +171,14 @@ function temporaryRepository(): string {
 }
 
 describe("suite containment audit", () => {
+  it("separates unrelated historical port reuse from current or repository-owned listeners", () => {
+    expect([...historicalOnlyListenerPorts(
+      [41345, 45000, 46000],
+      [45000],
+      [46000],
+    )]).toEqual([41345]);
+  });
+
   it("detects a leaked manifest-owned dynamic port from persisted telemetry", { timeout: 15_000 }, async () => {
     const context = createTestRunContext({ ports: { api: 45301, dashboard: 45302, fixture: 45303 } });
     contexts.push(context);

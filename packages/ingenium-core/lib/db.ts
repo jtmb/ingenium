@@ -2345,7 +2345,7 @@ const RUNTIME_BROWSER_TRIGGERS = [
 function inspectRuntimeBrowserMigration(db: Database.Database): AuthenticationFoundationMigrationState {
   const state = inspectMigrationComponents(db, RUNTIME_BROWSER_TABLES, RUNTIME_BROWSER_INDEXES, RUNTIME_BROWSER_TRIGGERS);
   if (!state.any || state.missing.length > 0) return state;
-  state.missing.push(...compareMigrationDefinitions(db, "102_runtime_browser_sessions.sql", `
+  const definitionMissing = compareMigrationDefinitions(db, "102_runtime_browser_sessions.sql", `
     CREATE TABLE users (id TEXT PRIMARY KEY);
     CREATE TABLE organizations (id TEXT PRIMARY KEY);
     CREATE TABLE projects (id TEXT PRIMARY KEY);
@@ -2361,7 +2361,12 @@ function inspectRuntimeBrowserMigration(db: Database.Database): AuthenticationFo
       state TEXT, security_epoch INTEGER,
       UNIQUE(id, workspace_id, organization_id, project_id, owner_user_id)
     );
-  `, [...Object.keys(RUNTIME_BROWSER_TABLES), ...RUNTIME_BROWSER_INDEXES, ...RUNTIME_BROWSER_TRIGGERS]));
+  `, [...Object.keys(RUNTIME_BROWSER_TABLES), ...RUNTIME_BROWSER_INDEXES, ...RUNTIME_BROWSER_TRIGGERS]);
+  const launcherOriginAdded = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('runtime_browser_sessions') WHERE name = 'launcher_origin'",
+  ).get() as { count: number }).count === 1;
+  state.missing.push(...definitionMissing.filter((component) =>
+    !(launcherOriginAdded && component === "runtime_browser_sessions definition")));
   if (state.missing.length === 0) {
     const missingGenerations = db.prepare(`SELECT count(*) AS count FROM runtime_instances r
       WHERE NOT EXISTS (SELECT 1 FROM runtime_browser_generations g WHERE g.runtime_id = r.id)`).get() as { count: number };
@@ -4886,6 +4891,29 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("102", ["foreign key integrity"]);
     }
     logger.info("db", "Applied migration 102_runtime_browser_sessions.sql");
+  }
+
+  const runtimeBrowserLauncherOrigin = db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('runtime_browser_sessions') WHERE name = 'launcher_origin'",
+  ).get() as { count: number };
+  const runtimeBrowserLauncherOriginTriggers = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN ('runtime_browser_session_launcher_origin_insert', 'runtime_browser_session_launcher_origin_update')",
+  ).get() as { count: number };
+  if (runtimeBrowserLauncherOrigin.count > 0 && runtimeBrowserLauncherOriginTriggers.count !== 2) {
+    throw restoreMigrationPartialStateError("103", ["runtime browser launcher origin triggers"]);
+  }
+  if (runtimeBrowserLauncherOrigin.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "103_runtime_browser_launcher_origin.sql"), "utf-8"));
+    const applied = db.prepare(
+      "SELECT count(*) AS count FROM pragma_table_info('runtime_browser_sessions') WHERE name = 'launcher_origin'",
+    ).get() as { count: number };
+    const appliedTriggers = db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN ('runtime_browser_session_launcher_origin_insert', 'runtime_browser_session_launcher_origin_update')",
+    ).get() as { count: number };
+    if (applied.count !== 1 || appliedTriggers.count !== 2 || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("103", ["runtime browser launcher origin or foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 103_runtime_browser_launcher_origin.sql");
   }
 
   enforceReservedBrokerInvariant(db);

@@ -27,6 +27,7 @@ type RuntimeDescriptor = {
 
 type RuntimeLaunch = { launchUrl: string; status: "ready" };
 type RuntimeStart = { status: "ready" | "starting" };
+type RuntimeHealth = { status: "ready" | "unavailable" };
 
 export const RUNTIME_START_POLL_MS = 1_000;
 export const RUNTIME_START_MAX_ATTEMPTS = 10;
@@ -177,6 +178,20 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
     let active = true;
     const launch = async () => {
       if (workspace.mode === "compatibility") {
+        try {
+          const health = await request<{ data: RuntimeHealth }>(`/runtimes/browser/health?audience=${audience}`);
+          if (!active) return;
+          if (health.data.status !== "ready") {
+            setStatus("unavailable");
+            setError("The local runtime audience is unavailable. Check the service status and retry.");
+            return;
+          }
+        } catch {
+          if (!active) return;
+          setStatus("unavailable");
+          setError("The local runtime audience is unavailable. Check the service status and retry.");
+          return;
+        }
         setUrl(compatibilityUrl(audience));
         setStatus("ready");
         return;
@@ -200,7 +215,19 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
           setError(exchange.status === 401 ? "The launch ticket expired before it could be redeemed." : "The runtime gateway is unavailable.");
           return;
         }
-        setUrl(`${new URL(launched.data.launchUrl).origin}/`);
+        const origin = new URL(launched.data.launchUrl).origin;
+        const health = await fetch(`${origin}/__ingenium/health`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!active) return;
+        if (!health.ok) {
+          setStatus("unavailable");
+          setError("The runtime audience did not become ready. Check the runtime service and retry.");
+          return;
+        }
+        setUrl(`${origin}/`);
         setStatus("ready");
       } catch (failure) {
         if (!active) return;
