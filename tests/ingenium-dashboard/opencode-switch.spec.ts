@@ -1,5 +1,8 @@
-import { expect, test } from "./external-suite-navigation-governor";
+import { expect, test as externalTest } from "./external-suite-navigation-governor";
+import { test as fixtureTest } from "./fixture";
 import type { Page } from "@playwright/test";
+
+const test = process.env.INGENIUM_TEST_RUN_MANIFEST ? fixtureTest : externalTest;
 
 const WEB_IFRAME = 'iframe[title="OpenCode Web"]';
 const CLI_IFRAME = 'iframe[title="OpenCode Terminal"]';
@@ -12,6 +15,27 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   // The health gateway is mocked so mode behavior can be exercised against a
   // local dashboard without requiring Docker or an OpenCode/provider process.
   test.beforeEach(async ({ page }) => {
+    await page.route("**/api/v1/**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: [] }),
+    }));
+    await page.route(/\/api\/v1\/auth\/session(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          user: { id: "fixture-user", email_normalized: "fixture@example.test", display_name: "Fixture User", status: "active", email_verified_at: null },
+          session: { id: "fixture-session", recentStepUp: true, mfaEnabled: false },
+          installationAdmin: true,
+        },
+      }),
+    }));
+    await page.route("**/api/v1/projects**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: [{ id: "fixture-project", name: "playwright-project", is_global: true }] }),
+    }));
     await mockOpenCodeHealth(page);
     await mockOpenCodeFrames(page);
   });
@@ -240,7 +264,7 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     { name: "desktop", width: 1440, height: 900 },
     { name: "mobile", width: 390, height: 844 },
   ]) {
-    test(`${viewport.name} query mode selects CLI, requests its audience, and safely falls back from invalid mode`, async ({ page }) => {
+    test(`${viewport.name} query mode selects CLI, requests its audience, and safely falls back from invalid mode`, async ({ page, baseURL }) => {
       await page.setViewportSize(viewport);
       await page.addInitScript(() => localStorage.setItem("opencode-mode", "web"));
       const consoleErrors: string[] = [];
@@ -253,7 +277,17 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
         if (url.pathname === "/api/v1/runtimes/browser/health") audiences.push(url.searchParams.get("audience") ?? "");
       });
 
-      await page.goto("/opencode?mode=cli", { waitUntil: "domcontentloaded" });
+      let route = (path: string) => path;
+      if (process.env.INGENIUM_TEST_RUN_MANIFEST) {
+        if (!baseURL) throw new Error("Fixture dashboard URL is unavailable");
+        const fixtureUrl = new URL("/test-fixture/session", baseURL);
+        fixtureUrl.hostname = "localhost";
+        await page.goto(fixtureUrl.toString(), { waitUntil: "domcontentloaded" });
+        const fixtureOrigin = new URL(page.url()).origin;
+        route = (path) => new URL(path, fixtureOrigin).toString();
+      }
+
+      await page.goto(route("/opencode?mode=cli"), { waitUntil: "domcontentloaded" });
       const cliButton = page.locator(SWITCH_TO_CLI);
       await expect(cliButton).toHaveAttribute("aria-pressed", "true");
       await expect(page.locator(SWITCH_TO_WEB)).toHaveAttribute("aria-pressed", "false");
@@ -271,10 +305,10 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
       expect(await page.evaluate(() => (window as typeof window & { __openedUrl?: string }).__openedUrl))
         .toBe("/standalone?page=opencode&mode=cli");
 
-      await page.goto("/standalone?page=opencode&mode=cli", { waitUntil: "domcontentloaded" });
+      await page.goto(route("/standalone?page=opencode&mode=cli"), { waitUntil: "domcontentloaded" });
       await expect(page.getByRole("button", { name: "CLI mode" })).toHaveAttribute("aria-pressed", "true");
 
-      await page.goto("/opencode?mode=%25", { waitUntil: "domcontentloaded" });
+      await page.goto(route("/opencode?mode=%25"), { waitUntil: "domcontentloaded" });
       await expect(page.locator(SWITCH_TO_WEB)).toHaveAttribute("aria-pressed", "true");
       await expect.poll(() => new URL(page.url()).searchParams.get("mode")).toBe("web");
       expect(consoleErrors).toEqual([]);

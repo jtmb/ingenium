@@ -27,8 +27,9 @@ vi.mock("../src/lib/use-runtime-launch", () => ({
 }));
 vi.mock("../src/app/components/WorkspaceControl", () => ({ default: () => <span data-testid="workspace-control" /> }));
 
-import OpenCodePage from "../src/app/opencode/page";
+import OpenCodePageClient from "../src/app/opencode/OpenCodePageClient";
 import VSCodePage from "../src/app/vscode/page";
+import { parseOpenCodeMode } from "../src/lib/open-code-mode";
 
 beforeEach(() => {
   localStorage.clear();
@@ -44,7 +45,7 @@ afterEach(() => {
 describe("AUTH-109 protected runtime frames", () => {
   it("uses audience roots without sandbox expansion and launches the protected pop-out", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
-    render(<OpenCodePage />);
+    render(<OpenCodePageClient initialMode="web" restoreStoredMode />);
     const web = screen.getByTitle("OpenCode Web");
     expect(web.getAttribute("src")).toBe(`https://web--${runtimeId}.runtime.example.test/`);
     expect(web.getAttribute("allow")).toBe("clipboard-write");
@@ -62,7 +63,7 @@ describe("AUTH-109 protected runtime frames", () => {
     window.history.replaceState(null, "", "/opencode?mode=cli");
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
 
-    render(<OpenCodePage />);
+    render(<OpenCodePageClient initialMode="cli" restoreStoredMode={false} />);
 
     expect(screen.getByRole("button", { name: "Switch to CLI mode" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Switch to Web mode" }).getAttribute("aria-pressed")).toBe("false");
@@ -77,7 +78,7 @@ describe("AUTH-109 protected runtime frames", () => {
     localStorage.setItem("opencode-mode", "cli");
     window.history.replaceState(null, "", "/opencode?mode=%25");
 
-    render(<OpenCodePage />);
+    render(<OpenCodePageClient initialMode={parseOpenCodeMode("%")} restoreStoredMode={false} />);
 
     expect(screen.getByRole("button", { name: "Switch to Web mode" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Switch to CLI mode" }).getAttribute("aria-pressed")).toBe("false");

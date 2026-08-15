@@ -8,7 +8,8 @@ import OpenCodeFrame from "../components/OpenCodeFrame";
 import VSCodeFrame from "../components/VSCodeFrame";
 import { api, type DocSpace } from "@/lib/api";
 import { buildStandaloneDocsHandoffUrl } from "../docs/docs-navigation";
-import { parseOpenCodeMode, useOpenCodeMode } from "@/lib/open-code-mode";
+import { parseOpenCodeMode } from "@/lib/open-code-mode";
+import { useOpenCodeMode } from "@/lib/use-open-code-mode";
 
 /**
  * StandalonePage — Renders page content WITHOUT the full layout chrome
@@ -121,7 +122,7 @@ function StandaloneVSCode() {
  * Replicates the OpenCodeFrame logic without the pathname guard.
  */
 function StandaloneOpenCode({ modeParam }: { modeParam: string | null }) {
-  const { mode, cliMounted, changeMode } = useOpenCodeMode(modeParam);
+  const { mode, cliMounted, changeMode } = useOpenCodeMode(parseOpenCodeMode(modeParam), modeParam === null);
 
   return (
     <div className="relative w-full h-full">

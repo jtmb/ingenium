@@ -1,10 +1,5 @@
-"use client";
-
-import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import OpenCodeFrame from "../components/OpenCodeFrame";
-import OpenCodeToolbar from "../components/OpenCodeToolbar";
-import { useOpenCodeMode } from "@/lib/open-code-mode";
+import { parseOpenCodeMode } from "@/lib/open-code-mode";
+import OpenCodePageClient from "./OpenCodePageClient";
 
 /**
  * OpenCode page — dual-mode interface: Web, CLI.
@@ -18,33 +13,14 @@ import { useOpenCodeMode } from "@/lib/open-code-mode";
  * The legacy "chat" value is gracefully redirected to "web" since Chat
  * is now a standalone page at /chat.
  */
-export default function OpenCodePage() {
-  return (
-    <Suspense fallback={<div className="h-full bg-black" />}>
-      <OpenCodeContent />
-    </Suspense>
-  );
-}
-
-function OpenCodeContent() {
-  const searchParams = useSearchParams();
-  const { mode, cliMounted, changeMode } = useOpenCodeMode(searchParams.get("mode"));
-  const [connectionStatus, setConnectionStatus] = useState<"pending" | "connected" | "error">("pending");
-
-  return (
-    <div className="flex flex-col h-full min-h-0">
-      <OpenCodeToolbar
-        mode={mode}
-        onModeChange={changeMode}
-        status={connectionStatus}
-      />
-      <div className="flex-1 relative bg-black">
-        <OpenCodeFrame
-          mode={mode}
-          cliMounted={cliMounted}
-          onConnectionStatusChange={setConnectionStatus}
-        />
-      </div>
-    </div>
-  );
+export default async function OpenCodePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const modeParam = (await searchParams).mode;
+  return <OpenCodePageClient
+    initialMode={parseOpenCodeMode(typeof modeParam === "string" ? modeParam : null)}
+    restoreStoredMode={modeParam === undefined}
+  />;
 }
