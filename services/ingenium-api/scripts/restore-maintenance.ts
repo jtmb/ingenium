@@ -25,6 +25,7 @@ import type { Dirent, Stats } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import {
   backups,
+  authorizeRestoreMaintenanceFixture,
   closeDbForMaintenance,
   getDb,
   projects,
@@ -84,6 +85,7 @@ type LockedTargets = LockedTarget[];
 
 let loadedJournalKey: Buffer | null = null;
 let trustedCorePathsConfigured = false;
+let validatedFixtureRoot: string | null | undefined;
 
 function wipeJournalKey(): void {
   loadedJournalKey?.fill(0);
@@ -134,13 +136,35 @@ function sha256File(path: string): string {
 }
 
 function fixtureRoot(): string | null {
+  if (validatedFixtureRoot !== undefined) return validatedFixtureRoot;
   const value = process.env.INGENIUM_RESTORE_TEST_ROOT;
-  if (!value) return null;
-  const root = resolve(value);
-  if (process.env.NODE_ENV !== "test" || dirname(root) !== "/tmp" || !/^ingenium-restore-fixture-[A-Za-z0-9_-]+$/.test(basename(root))) {
+  const command = process.argv[2];
+  const nonce = process.argv[3];
+  if (!value && !command && !nonce) {
+    validatedFixtureRoot = null;
+    return null;
+  }
+  if (!value || (command !== "--fixture" && command !== "--validate-fixture") || !nonce || process.argv.length !== 4) {
     throw new MaintenanceError("JOURNAL_INVALID");
   }
-  return root;
+  try {
+    validatedFixtureRoot = authorizeRestoreMaintenanceFixture(value, nonce);
+  } catch {
+    throw new MaintenanceError("JOURNAL_INVALID");
+  }
+  return validatedFixtureRoot;
+}
+
+function prepareFixtureProcRoot(root: string): void {
+  const configuredRoot = process.env.INGENIUM_RESTORE_TEST_PROC_ROOT;
+  const procRoot = configuredRoot ?? resolve(root, "proc");
+  if (procRoot !== resolve(procRoot) || !procRoot.startsWith(`${root}/`)) throw new MaintenanceError("JOURNAL_INVALID");
+  mkdirSync(procRoot, { recursive: true, mode: 0o700 });
+  const fault = process.env.INGENIUM_RESTORE_TEST_PROC_FAULT;
+  if (!fault) return;
+  if (fault !== "fd-dir" && fault !== "fd") throw new MaintenanceError("JOURNAL_INVALID");
+  mkdirSync(resolve(procRoot, "1", "fd"), { recursive: true, mode: 0o700 });
+  if (fault === "fd") writeFileSync(resolve(procRoot, "1", "fd", "0"), "", { mode: 0o600 });
 }
 
 function targetPaths(): TargetPaths {
@@ -1157,7 +1181,12 @@ function recover(): void {
 }
 
 async function main(): Promise<void> {
-  if (process.argv.length !== 2) throw new MaintenanceError("JOURNAL_INVALID");
+  const fixture = fixtureRoot();
+  if (process.argv[2] === "--validate-fixture") return;
+  if ((!fixture && process.argv.length !== 2) || (fixture && process.argv[2] !== "--fixture")) {
+    throw new MaintenanceError("JOURNAL_INVALID");
+  }
+  if (fixture) prepareFixtureProcRoot(fixture);
   const mode = process.env.INGENIUM_RESTORE_MAINTENANCE_MODE;
   if (mode === "recover") {
     recover();

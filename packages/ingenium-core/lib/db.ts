@@ -1,8 +1,9 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { readFileSync, mkdirSync, existsSync, realpathSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { logger } from "./logger.js";
+import { isAuthorizedRestoreMaintenanceFixturePath } from "./restore-fixture-path.js";
 import {
   SKILL_PROPOSAL_RETENTION_DELETE_ERROR,
   SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER,
@@ -3423,18 +3424,7 @@ const RESTORE_MAINTENANCE_SECURITY_MIGRATIONS: readonly RestoreMaintenanceMigrat
 ];
 
 function requireRestoreMaintenanceProcess(databasePath: string): void {
-  const testRoot = process.env.INGENIUM_RESTORE_TEST_ROOT
-    ? resolve(process.env.INGENIUM_RESTORE_TEST_ROOT)
-    : "";
-  let disposableTestPath = false;
-  try {
-    disposableTestPath = realpathSync(databasePath).startsWith(`${testRoot}/`);
-  } catch {
-    // The maintenance database opener reports missing or inaccessible files.
-  }
-  const disposableTestExecutor = process.env.NODE_ENV === "test"
-    && /^\/tmp\/ingenium-restore-fixture-[A-Za-z0-9_-]+$/.test(testRoot)
-    && disposableTestPath;
+  const disposableTestExecutor = isAuthorizedRestoreMaintenanceFixturePath(databasePath);
   const privilegedExecutor = typeof process.getuid === "function" && process.getuid() === 0;
   if (process.env.INGENIUM_RESTORE_MAINTENANCE_MODE !== "execute"
     || (!privilegedExecutor && !disposableTestExecutor)) {

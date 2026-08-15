@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, linkSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
   closeDbForMaintenance,
@@ -13,6 +13,11 @@ import {
   resetDbForTest,
   validateRestoreSecuritySchemaForMaintenance,
 } from "../../../packages/ingenium-core/lib/db.js";
+import {
+  authorizeRestoreMaintenanceFixture,
+  clearRestoreMaintenanceFixtureAuthorization,
+  validateRestoreMaintenanceFixtureRoot,
+} from "../../../packages/ingenium-core/lib/restore-fixture-path.js";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import * as authentication from "../../../packages/ingenium-core/lib/tools/authentication.js";
 import * as contextConversations from "../../../packages/ingenium-core/lib/tools/context-conversations.js";
@@ -37,6 +42,7 @@ import {
 type ChildResult = { code: number | null; stdout: string; stderr: string };
 
 let fixtureRoot: string;
+let fixtureNonce: string;
 let coreDbPath: string;
 let openCodeDbPath: string;
 let globalProjectId: string;
@@ -77,7 +83,37 @@ const securityFixture: {
 
 function runFixture(environment: NodeJS.ProcessEnv): Promise<ChildResult> {
   return new Promise((resolveResult, reject) => {
-    const child = spawn("/bin/sh", [fixtureScript], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("/bin/sh", [fixtureScript], {
+      env: {
+        RESTORE_MAINTENANCE_NODE: process.execPath,
+        RESTORE_MAINTENANCE_SCRIPT: maintenanceScript,
+        INGENIUM_RESTORE_FIXTURE_NONCE: fixtureNonce,
+        ...environment,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.once("error", reject);
+    child.once("exit", (code) => resolveResult({ code, stdout, stderr }));
+  });
+}
+
+function createFixturePath(parent: string, prefix = "ingenium-restore-fixture-"): { root: string; nonce: string } {
+  const root = mkdtempSync(join(parent, prefix));
+  const nonce = randomBytes(32).toString("hex");
+  writeFileSync(join(root, ".ingenium-restore-fixture.json"), JSON.stringify({ version: 1, nonce }), { mode: 0o600 });
+  return { root, nonce };
+}
+
+function runMaintenance(args: string[], environment: NodeJS.ProcessEnv): Promise<ChildResult> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(process.execPath, [maintenanceScript, ...args], {
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
@@ -228,7 +264,8 @@ function supervisorResponse(state: "RUNNING" | "STOPPED"): string {
 }
 
 beforeAll(async () => {
-  fixtureRoot = mkdtempSync(join(tmpdir(), "ingenium-restore-fixture-"));
+  ({ root: fixtureRoot, nonce: fixtureNonce } = createFixturePath(tmpdir()));
+  authorizeRestoreMaintenanceFixture(fixtureRoot, fixtureNonce);
   coreDbPath = join(fixtureRoot, "data");
   openCodeDbPath = join(fixtureRoot, "opencode.db");
   const backupsDir = join(fixtureRoot, "backups");
@@ -455,6 +492,7 @@ afterAll(async () => {
   delete process.env.OPENCODE_DB_PATH;
   delete process.env.INGENIUM_TRUSTED_ARTIFACT_UID;
   delete process.env.INGENIUM_TRUSTED_ARTIFACT_GID;
+  clearRestoreMaintenanceFixtureAuthorization();
   const stagingRoot = join(fixtureRoot, "restore-staging");
   if (existsSync(stagingRoot)) {
     for (const entry of readdirSync(stagingRoot)) chmodSync(join(stagingRoot, entry), 0o700);
@@ -463,6 +501,71 @@ afterAll(async () => {
 });
 
 describe("RESTORE-101 disposable maintenance fixture", () => {
+  it("accepts a nonce-bound fixture below an owner-controlled nested TMPDIR", () => {
+    const safeTmpdir = mkdtempSync(join(tmpdir(), "restore-safe-tmpdir-"));
+    const nestedTmpdir = join(safeTmpdir, "opencode", "run");
+    mkdirSync(nestedTmpdir, { recursive: true, mode: 0o700 });
+    const fixture = createFixturePath(nestedTmpdir);
+    try {
+      expect(validateRestoreMaintenanceFixtureRoot(fixture.root, fixture.nonce)).toBe(fixture.root);
+      expect(() => validateRestoreMaintenanceFixtureRoot(fixture.root, "0".repeat(64))).toThrow("Unsafe restore maintenance fixture root");
+    } finally {
+      rmSync(safeTmpdir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects symlink escapes and traversal spellings", () => {
+    const safeParent = mkdtempSync(join(tmpdir(), "restore-safe-parent-"));
+    const symlinkRoot = join(safeParent, `ingenium-restore-fixture-${randomUUID()}`);
+    symlinkSync(resolve(__dirname, "../../.."), symlinkRoot);
+    const fixture = createFixturePath(safeParent);
+    try {
+      expect(() => validateRestoreMaintenanceFixtureRoot(symlinkRoot, fixture.nonce)).toThrow("Unsafe restore maintenance fixture root");
+      expect(() => validateRestoreMaintenanceFixtureRoot(`${fixture.root}/../${basename(fixture.root)}`, fixture.nonce))
+        .toThrow("Unsafe restore maintenance fixture root");
+    } finally {
+      rmSync(safeParent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects wrong basenames, owners, and unsafe parent permissions", () => {
+    const safeParent = mkdtempSync(join(tmpdir(), "restore-policy-parent-"));
+    const wrongPrefix = createFixturePath(safeParent, "restore-fixture-");
+    const valid = createFixturePath(safeParent);
+    try {
+      expect(() => validateRestoreMaintenanceFixtureRoot(wrongPrefix.root, wrongPrefix.nonce)).toThrow("Unsafe restore maintenance fixture root");
+      expect(() => validateRestoreMaintenanceFixtureRoot(valid.root, valid.nonce, (process.getuid?.() ?? 0) + 1))
+        .toThrow("Unsafe restore maintenance fixture root");
+      chmodSync(safeParent, 0o777);
+      expect(() => validateRestoreMaintenanceFixtureRoot(valid.root, valid.nonce)).toThrow("Unsafe restore maintenance fixture root");
+    } finally {
+      chmodSync(safeParent, 0o700);
+      rmSync(safeParent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects outside-root and cross-device fixture storage", () => {
+    expect(existsSync("/dev/shm")).toBe(true);
+    const outside = createFixturePath("/dev/shm");
+    try {
+      expect(() => validateRestoreMaintenanceFixtureRoot(outside.root, outside.nonce)).toThrow("Unsafe restore maintenance fixture root");
+    } finally {
+      rmSync(outside.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects production paths and cannot enable fixture mode from production environment", async () => {
+    expect(() => validateRestoreMaintenanceFixtureRoot("/app/.ingenium/ingenium-restore-fixture-production", fixtureNonce))
+      .toThrow("Unsafe restore maintenance fixture root");
+    const result = await runMaintenance(["--fixture", fixtureNonce], {
+      PATH: process.env.PATH,
+      NODE_ENV: "production",
+      INGENIUM_RESTORE_TEST_ROOT: fixtureRoot,
+      INGENIUM_RESTORE_MAINTENANCE_MODE: "execute",
+    });
+    expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining("JOURNAL_INVALID") });
+  });
+
   it("refuses persistent container volume paths", async () => {
     const result = await runFixture({ INGENIUM_RESTORE_FIXTURE_ROOT: "/app/.ingenium" });
     expect(result).toMatchObject({ code: 64, stderr: expect.stringContaining("disposable") });
