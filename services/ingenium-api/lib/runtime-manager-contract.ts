@@ -218,6 +218,7 @@ export function buildRuntimeContainerSpec(
       "XDG_CONFIG_HOME=/home/appuser/.config",
       "XDG_DATA_HOME=/home/appuser/.local/share",
       "XDG_STATE_HOME=/home/appuser/.local/state",
+      "TMPDIR=/home/appuser/.tmp",
       `INGENIUM_API_URL=${config.apiUrl}`,
       `INGENIUM_PROJECT=${input.projectName}`,
       `INGENIUM_PROJECT_ID=${input.projectId}`,
@@ -247,6 +248,7 @@ export function buildRuntimeContainerSpec(
       SecurityOpt: ["no-new-privileges:true"],
       Tmpfs: {
         "/home/appuser": `rw,nosuid,nodev,size=${input.limits.diskBytes},uid=1000,gid=1000,mode=0700`,
+        "/home/appuser/.tmp": "rw,exec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",
         "/run/ingenium-runtime": "rw,noexec,nosuid,nodev,size=1048576,uid=1000,gid=1000,mode=0700",
         "/tmp": "rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",
       },

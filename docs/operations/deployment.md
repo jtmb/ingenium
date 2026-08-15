@@ -157,6 +157,9 @@ control plane, runtime gateway, or a user runtime. The manager port and runtime 
 4098/4099/4100 remain un-published. The gateway alone publishes HTTPS 443 from its
 unprivileged 8443 listener. Each runtime receives a dedicated Docker network, exact worktree
 mount, read-only root filesystem, private HOME/XDG tmpfs, and bounded resources.
+The runtime keeps `/tmp` and HOME `noexec`; only the owner-only 64 MiB
+`/home/appuser/.tmp` nested tmpfs is executable so the pinned OpenCode CLI can
+load its extracted OpenTUI native library.
 The manager transfers the scoped runtime capability through attached container stdin;
 the entrypoint atomically installs it as an owner-only file on the private runtime
 tmpfs before any supervised service starts. It is never an environment value, image

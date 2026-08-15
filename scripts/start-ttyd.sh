@@ -14,6 +14,7 @@ exec env -i \
   HOME="/home/appuser" \
   XDG_CONFIG_HOME="/home/appuser/.config" \
   XDG_DATA_HOME="/home/appuser/.local/share" \
+  TMPDIR="/home/appuser/.tmp" \
   OPENCODE_SERVER_PASSWORD="" \
   ttyd \
     --interface "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}" \

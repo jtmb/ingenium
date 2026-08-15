@@ -75,6 +75,8 @@ describe("AUTH-108 runtime manager contract", () => {
     expect(first.Labels["com.ingenium.runtime.revision"]).toBe("1");
     expect(first.HostConfig.NetworkMode).not.toBe(second.HostConfig.NetworkMode);
     expect(first.HostConfig.Tmpfs["/home/appuser"]).toContain("mode=0700");
+    expect(first.HostConfig.Tmpfs["/home/appuser/.tmp"]).toContain("rw,exec,nosuid,nodev");
+    expect(first.HostConfig.Tmpfs["/tmp"]).toContain("noexec");
     expect(first.HostConfig.Tmpfs["/run/ingenium-runtime"]).toContain("noexec");
     expect(first.HostConfig).toMatchObject({
       ReadonlyRootfs: true,
@@ -91,6 +93,7 @@ describe("AUTH-108 runtime manager contract", () => {
       "HOME=/home/appuser",
       "XDG_CONFIG_HOME=/home/appuser/.config",
       "XDG_DATA_HOME=/home/appuser/.local/share",
+      "TMPDIR=/home/appuser/.tmp",
       "INGENIUM_WORKTREE=/workspace",
       "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability",
     ]));
