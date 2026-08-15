@@ -19,4 +19,20 @@ describe("AUTH-103 browser API client", () => {
       expect(headers["X-CSRF-Token"]).toBe("csrf-fixture");
     }
   });
+
+  it("uses pre-auth CSRF directly without probing an authenticated session", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await dashboardFetch("/api/v1/auth/login", {
+      method: "POST",
+      headers: { "X-CSRF-Token": "pre-auth-csrf" },
+      body: "{}",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "X-CSRF-Token": "pre-auth-csrf",
+    });
+  });
 });

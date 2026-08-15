@@ -74,9 +74,23 @@ export function classifyAuthFailure(status: number, code: string | null): AuthFa
 let sessionCsrfToken: string | null = null;
 let csrfBootstrap: Promise<string | null> | null = null;
 let expiryRedirectStarted = false;
+const PRE_AUTH_CSRF_PATHS = new Set([
+  "/api/v1/auth/login",
+  "/api/v1/auth/mfa/challenge",
+  "/api/v1/auth/password/forgot",
+  "/api/v1/auth/password/reset",
+  "/api/v1/auth/email/verify",
+  "/api/v1/auth/oidc/start",
+]);
 
 function isUnsafeMethod(method = "GET"): boolean {
   return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
+}
+
+function requestPath(input: RequestInfo | URL): string {
+  if (typeof input === "string") return new URL(input, "http://dashboard.invalid").pathname;
+  if (input instanceof URL) return input.pathname;
+  return new URL(input.url).pathname;
 }
 
 async function bootstrapSessionCsrf(): Promise<string | null> {
@@ -196,7 +210,12 @@ export function dashboardFetch(
   return (async () => fetch(input, {
     ...options,
     credentials: "same-origin",
-    headers: buildRequestHeaders(options, isUnsafeMethod(options?.method) ? await bootstrapSessionCsrf() : null),
+    headers: buildRequestHeaders(
+      options,
+      isUnsafeMethod(options?.method) && !PRE_AUTH_CSRF_PATHS.has(requestPath(input))
+        ? await bootstrapSessionCsrf()
+        : null,
+    ),
   }))();
 }
 
