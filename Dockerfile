@@ -166,6 +166,7 @@ COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mj
 COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf
 COPY --chown=root:root --chmod=0555 scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh ./scripts/validate-vault-job-secret-root.sh
+COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
 # startup, so copy its primary configuration and declared include set together.
 COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf ./nginx/

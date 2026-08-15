@@ -210,3 +210,26 @@ describe("vaultRateLimiter", () => {
     vaultRateLimiter.clear();
   });
 });
+
+describe("OIDC route rate limits", () => {
+  it("isolates start and callback limits by IP and provider", async () => {
+    const { clearAuthAttemptRateLimit, enforceOidcRateLimit } = await import("../lib/middleware/auth-rate-limit.js");
+    clearAuthAttemptRateLimit();
+    const response = {
+      set: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as unknown as Response;
+    const request = { ip: "203.0.113.8" } as Request;
+
+    for (let index = 0; index < 5; index += 1) {
+      expect(enforceOidcRateLimit(request, response, "start", "provider-a")).toBe(true);
+    }
+    expect(enforceOidcRateLimit(request, response, "start", "provider-a")).toBe(false);
+    expect(enforceOidcRateLimit(request, response, "start", "provider-b")).toBe(true);
+    expect(enforceOidcRateLimit(request, response, "callback", "provider-a")).toBe(true);
+    expect(enforceOidcRateLimit({ ip: "203.0.113.9" } as Request, response, "start", "provider-a")).toBe(true);
+    expect(response.status).toHaveBeenCalledWith(429);
+    clearAuthAttemptRateLimit();
+  });
+});

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { authentication, authorization, getDb, identity, invitations, mcpCredentials, oidcAuthentication, organizations, projects, runtimes, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
-import { authAttemptRateLimit } from "../middleware/auth-rate-limit.js";
+import { authAttemptRateLimit, enforceOidcRateLimit, oidcStartRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
 
 export const authPreflightRouter = Router();
@@ -88,6 +88,16 @@ function requireRecentStepUp(req: Request) {
     throw new AppError("Recent authentication is required", "STEP_UP_REQUIRED", 403);
   }
   return principal;
+}
+
+export function publicOidcError(error: unknown): unknown {
+  if (error instanceof z.ZodError || error instanceof AppError) return error;
+  if (error instanceof oidcAuthentication.OidcError) {
+    if (error.kind === "timeout") return new AppError("OIDC provider timed out", "OIDC_PROVIDER_TIMEOUT", 504);
+    if (error.kind === "upstream") return new AppError("OIDC provider is unavailable", "OIDC_PROVIDER_UNAVAILABLE", 502);
+    return new AppError("OIDC authorization failed", "OIDC_AUTHENTICATION_FAILED", 401);
+  }
+  return new AppError("OIDC provider is unavailable", "OIDC_PROVIDER_UNAVAILABLE", 502);
 }
 
 authPreflightRouter.get("/csrf", issuePreAuthCsrf);
@@ -344,23 +354,28 @@ authPreflightRouter.delete("/mcp-credentials/:id", (req, res) => {
   res.status(204).end();
 });
 
-authPreflightRouter.post("/oidc/start", preAuthCsrf, async (req, res, next) => {
+authPreflightRouter.post("/oidc/start", preAuthCsrf, oidcStartRateLimit, async (req, res, next) => {
   try {
     const { transactionToken, ...result } = await oidcAuthentication.beginOidcAuthorization(z.object({ providerId: z.string().uuid() }).strict().parse(req.body).providerId);
     res.set("Set-Cookie", `${OIDC_TRANSACTION_COOKIE}=${transactionToken}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300`);
     res.json({ data: result });
-  } catch (error) { next(error); }
+  } catch (error) { next(publicOidcError(error)); }
 });
 authPreflightRouter.get("/oidc/callback", async (req, res, next) => {
   try {
-    const input = z.object({ state: z.string().min(32).max(512), code: z.string().min(1).max(2048) }).parse(req.query);
     const transactionToken = cookie(req, OIDC_TRANSACTION_COOKIE);
-    if (!transactionToken) throw new AppError("OIDC authorization failed", "OIDC_AUTHENTICATION_FAILED", 401);
+    const rawState = typeof req.query.state === "string" ? req.query.state : "";
+    const providerId = transactionToken && rawState
+      ? oidcAuthentication.resolveOidcTransactionProviderId(rawState, transactionToken)
+      : undefined;
+    if (!enforceOidcRateLimit(req, res, "callback", providerId)) return;
+    const input = z.object({ state: z.string().min(32).max(512), code: z.string().min(1).max(2048) }).parse(req.query);
+    if (!transactionToken) throw new oidcAuthentication.OidcError("authentication");
     res.set("Set-Cookie", `${OIDC_TRANSACTION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`);
     const session = authentication.createSession(await oidcAuthentication.completeOidcAuthorization(input.state, input.code, transactionToken), new Date(), undefined, true);
     setSession(res, session);
     res.json({ data: { user: authentication.getUserForSession(session.session), csrfToken: session.csrfToken } });
-  } catch (error) { next(error); }
+  } catch (error) { next(publicOidcError(error)); }
 });
 
 authPreflightRouter.get("/preflight", (req, res) => {

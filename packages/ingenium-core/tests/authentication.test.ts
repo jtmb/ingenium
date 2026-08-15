@@ -30,6 +30,18 @@ afterEach(() => {
 });
 
 describe("AUTH-101 local authentication", () => {
+  it("validates the injected owner-only 256-bit auth encryption key", () => {
+    expect(() => authentication.validateAuthEncryptionKeyFile()).not.toThrow();
+    const keyFile = process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE!;
+    chmodSync(keyFile, 0o644);
+    expect(() => authentication.validateAuthEncryptionKeyFile()).toThrow("unsafe");
+    chmodSync(keyFile, 0o600);
+    writeFileSync(keyFile, "invalid\n", { mode: 0o600 });
+    expect(() => authentication.validateAuthEncryptionKeyFile()).toThrow("invalid");
+    writeFileSync(keyFile, `${Buffer.alloc(32, 7).toString("base64url")}\n\n`, { mode: 0o600 });
+    expect(() => authentication.validateAuthEncryptionKeyFile()).toThrow("invalid");
+  });
+
   it("uses generic login failures, Unicode code-point passwords, and rotates/revokes bounded sessions", async () => {
     const user = await authentication.authenticateLocal("OWNER@example.test", "correct horse battery staple");
     await expect(authentication.authenticateLocal("missing@example.test", "correct horse battery staple")).rejects.toThrow("Authentication failed");

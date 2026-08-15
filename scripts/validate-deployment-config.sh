@@ -397,6 +397,9 @@ require_literal "${repo_root}/scripts/run-api.sh" "INGENIUM_TRUSTED_ARTIFACT_GID
 require_literal "${repo_root}/scripts/run-restore-maintenance.sh" "INGENIUM_TRUSTED_ARTIFACT_GID"
 require_literal "$entrypoint" "RESTORE_JOURNAL_KEY_FILE=\"/app/.ingenium/restore-journal-key\""
 require_literal "$entrypoint" "restore journal key must be root-owned mode 0600"
+require_literal "$entrypoint" 'provision-auth-encryption-key.sh "$AUTH_ENCRYPTION_KEY_FILE" appuser appuser'
+require_literal "${repo_root}/scripts/run-api.sh" 'INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$auth_encryption_key_file"'
+require_literal "$dockerfile" 'scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh'
 require_literal "$entrypoint" "chown root:root \"\$RESTORE_MAINTENANCE_DIR\""
 require_literal "${repo_root}/scripts/healthcheck.sh" "http://127.0.0.1:4100/healthz"
 require_literal "${repo_root}/scripts/healthcheck.sh" '"VS Code gateway root" "vscode.localhost" "/" "302"'

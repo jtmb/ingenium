@@ -2399,10 +2399,17 @@ evidence before the next subwave starts.
   body or time behavior, JOSE default-fetch use, key/response leakage, missing
   rate limit, or new dependency is `BLOCKING`; provider UX or protocol expansion
   is `FOLLOW_UP`; bounded fixture and audit telemetry is `INFORMATIONAL`.
-- **Evidence placeholders:** Source `[pending focused diff/tests]`; deploy/health
-  `[pending rebuilt auth-route evidence]`; visual `N/A — no UI change`; security
-  `[pending bounded transport/key review]`; containment `[pending run-scoped
-  strict audit]`.
+- **Evidence:** Source implementation on prerequisite HEAD `9a3404f` passes core
+  typecheck plus 48 endpoint-policy, 19 OIDC, and 8 authentication tests; API
+  typecheck plus 49 focused auth/rate-limit tests and 12 startup tests; the
+  persistent-key, control-plane environment, API-boundary, deployment-static,
+  DB-isolation, dependency, shell-syntax, and diff checks. The loopback fixture
+  covers malformed and timed-out discovery/token/JWKS, exact policy gating,
+  claims/replay/no-link behavior, content-free audit, and JWKS URI rotation.
+  Visual is `N/A — no UI change`. Docker rebuild/route health and focused
+  Playwright/strict containment remain unclaimed because this implementation
+  contract explicitly excluded broad E2E and Docker; therefore no
+  `work-complete` marker is recorded in this wave.
 - **Planned marker entries (not live):** append `work-started` for `OIDC-100`
   after preflight/ownership, then append one matching `work-complete` entry
   after all gates and non-empty evidence pass.
@@ -2696,7 +2703,7 @@ evidence before the next subwave starts.
 
 ### Work marker log (continued)
 
-No new work-started or work-complete marker is recorded by this planning
-update. Future execution must append exact UTC-second markers here only after
-the declared preflight/ownership gate and after the corresponding acceptance
-evidence is complete; the existing `RESTORE-101` active marker remains open.
+<!-- (work-started) OIDC-100 2026-08-15T01:15:31Z ingenium-software-engineer-premium -->
+Focused implementation evidence is recorded above. A matching `work-complete`
+marker requires the separately declared deployed route-health, bounded security,
+and containment gates; the existing `RESTORE-101` active marker remains open.

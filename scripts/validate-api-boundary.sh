@@ -26,6 +26,7 @@ bootstrap="${repo_root}/scripts/bootstrap-local-secrets.sh"
 boundary_proxy="${repo_root}/scripts/api-boundary-proxy.mjs"
 boundary_proxy_runner="${repo_root}/scripts/run-api-boundary-proxy.sh"
 supervisor_config="${repo_root}/supervisord.conf"
+auth_key_provisioner="${repo_root}/scripts/provision-auth-encryption-key.sh"
 
 require_file() {
   path="$1"
@@ -59,7 +60,7 @@ reject_pattern() {
   fi
 }
 
-for path in "$compose_file" "$dockerfile" "$gitignore" "$dockerignore" "$entrypoint" "$run_api" "$healthcheck" "$api_probe" "$dashboard_runner" "$dashboard_proxy" "$dashboard_token" "$auth_middleware" "$api_token_middleware" "$csrf_middleware" "$api_server" "$scheduler" "$gateway" "$dashboard_nginx_proxy" "$callback_proxy" "$bootstrap" "$boundary_proxy" "$boundary_proxy_runner" "$supervisor_config"; do
+for path in "$compose_file" "$dockerfile" "$gitignore" "$dockerignore" "$entrypoint" "$run_api" "$healthcheck" "$api_probe" "$dashboard_runner" "$dashboard_proxy" "$dashboard_token" "$auth_middleware" "$api_token_middleware" "$csrf_middleware" "$api_server" "$scheduler" "$gateway" "$dashboard_nginx_proxy" "$callback_proxy" "$bootstrap" "$boundary_proxy" "$boundary_proxy_runner" "$supervisor_config" "$auth_key_provisioner"; do
   require_file "$path"
 done
 
@@ -67,6 +68,7 @@ require_literal "$compose_file" '127.0.0.1:4097:4097'
 require_literal "$compose_file" '127.0.0.1:1455:1455'
 require_literal "$compose_file" 'INGENIUM_API_TOKEN=${INGENIUM_API_TOKEN:-}'
 require_literal "$compose_file" 'INGENIUM_API_TOKEN_FILE=${INGENIUM_API_TOKEN_FILE:-}'
+require_literal "$compose_file" 'INGENIUM_AUTH_ENCRYPTION_KEY_FILE=${INGENIUM_AUTH_ENCRYPTION_KEY_FILE:-/app/.ingenium/auth-encryption-key}'
 require_literal "$compose_file" 'DASHBOARD_ALLOWED_ORIGINS=${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}'
 require_literal "$compose_file" 'INGENIUM_API_PORT=4096'
 reject_literal "$compose_file" '1455:4097'
@@ -83,9 +85,15 @@ require_literal "$entrypoint" 'INGENIUM_API_TOKEN or INGENIUM_API_TOKEN_FILE is 
 require_literal "$entrypoint" 'API token must contain 32 to 128 base64url characters'
 require_literal "$entrypoint" 'RUNTIME_API_TOKEN_FILE="${RUNTIME_SECRET_DIR}/api-token"'
 require_literal "$entrypoint" 'unset INGENIUM_API_TOKEN'
+require_literal "$entrypoint" 'INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$AUTH_ENCRYPTION_KEY_FILE"'
+require_literal "$entrypoint" 'provision-auth-encryption-key.sh "$AUTH_ENCRYPTION_KEY_FILE" appuser appuser'
 require_literal "$entrypoint" 'validate-vault-job-secret-root.sh provision'
 require_literal "$entrypoint" 'OC_AUTH="/home/appuser/.local/share/opencode/auth.json"'
 require_literal "$run_api" 'INGENIUM_API_TOKEN_FILE="$token_file"'
+require_literal "$run_api" 'INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$auth_encryption_key_file"'
+require_literal "$auth_key_provisioner" 'randomBytes(32).toString("base64url")'
+require_literal "$auth_key_provisioner" 'O_NOFOLLOW'
+require_literal "$auth_key_provisioner" 'chmod 0600 "$temporary"'
 require_literal "${repo_root}/scripts/run-dashboard.sh" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 require_literal "$run_api" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "${repo_root}/scripts/run-dashboard.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
@@ -126,6 +134,7 @@ require_literal "$api_token_middleware" 'API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,
 require_literal "$api_token_middleware" 'constants.O_NOFOLLOW'
 require_literal "$api_token_middleware" 'API token file must not be group- or world-readable'
 require_literal "$api_server" 'app.use(authMiddleware);'
+require_literal "$api_server" 'authentication.validateAuthEncryptionKeyFile();'
 require_literal "$api_server" 'app.use(csrfMiddleware);'
 require_literal "$api_server" 'app.listen(config.port, isControlPlaneMode() ? "0.0.0.0" : "127.0.0.1")'
 require_literal "$csrf_middleware" 'Unsafe browser API requests require the trusted dashboard origin and request marker'

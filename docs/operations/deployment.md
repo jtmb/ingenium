@@ -97,6 +97,17 @@ need the credential in their inherited environment. Symlinks, non-regular files,
 and unsafe permissions are rejected. Credential contents are never part of
 logs, observations, or diagnostics.
 
+### Persistent authentication encryption key
+
+Before Supervisor starts, the entrypoint atomically provisions
+`/app/.ingenium/auth-encryption-key` in the persistent Ingenium data volume. The
+file contains one base64url-encoded 256-bit value, is owned by
+`appuser:appuser`, and has mode `0600`. Existing valid content is retained on
+restart; symlinks, non-regular files, wrong ownership/mode, and malformed values
+stop startup. The clean API launcher receives only the file path through
+`INGENIUM_AUTH_ENCRYPTION_KEY_FILE`, and the API validates it before binding.
+Do not add the key value to Compose, `.env`, logs, or tracked files.
+
 ### Isolated production runtime profile
 
 Build the immutable runtime image before starting the control plane. The manager and

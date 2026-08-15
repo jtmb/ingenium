@@ -6,7 +6,7 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { jobs, projects, resetDbForTest } from "ingenium-core";
-import { recoverInterruptedJobRunsAtStartup } from "../scripts/api-server.js";
+import { recoverInterruptedJobRunsAtStartup, startApiServer as startConfiguredApiServer } from "../scripts/api-server.js";
 
 /**
  * Startup regression tests — verify that the API server does not exit or crash
@@ -88,6 +88,25 @@ afterEach(async () => {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("API startup — no global project", () => {
+  it("refuses to bind without the injected authentication encryption key file", () => {
+    const originalToken = process.env.INGENIUM_API_TOKEN;
+    const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+    const originalKeyFile = process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
+    const originalExitCode = process.exitCode;
+    process.env.INGENIUM_API_TOKEN = "a".repeat(32);
+    delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
+    try {
+      expect(startConfiguredApiServer()).toBeNull();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN; else process.env.INGENIUM_API_TOKEN = originalToken;
+      if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE; else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+      if (originalKeyFile === undefined) delete process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE; else process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE = originalKeyFile;
+      process.exitCode = originalExitCode;
+    }
+  });
+
   it("health endpoint returns 200 even with no projects in DB", async () => {
     const app = buildApp();
     const baseUrl = await startServer(app);

@@ -362,13 +362,20 @@ function loadAuthEncryptionKey(): Buffer {
       || (process.platform !== "win32" && typeof process.getuid === "function" && stat.uid !== process.getuid())) {
       throw new Error("Auth encryption key file is unsafe");
     }
-    const encoded = readFileSync(descriptor, "utf8").replace(/\n$/, "");
+    const contents = readFileSync(descriptor, "utf8");
+    if (!/^[A-Za-z0-9_-]{43}\n?$/.test(contents)) throw new Error("Auth encryption key is invalid");
+    const encoded = contents.endsWith("\n") ? contents.slice(0, -1) : contents;
     const key = Buffer.from(encoded, "base64url");
-    if (key.length !== 32) throw new Error("Auth encryption key is invalid");
+    if (key.length !== 32 || key.toString("base64url") !== encoded) throw new Error("Auth encryption key is invalid");
     return key;
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
   }
+}
+
+export function validateAuthEncryptionKeyFile(): void {
+  const key = loadAuthEncryptionKey();
+  key.fill(0);
 }
 
 export function encryptAuthSecret(secret: string): string {

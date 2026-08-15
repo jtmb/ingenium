@@ -186,6 +186,19 @@ if [ "$backup_key_metadata" != "600:appuser:appuser" ] || [ "$backup_key_bytes" 
 fi
 export INGENIUM_BACKUP_SIGNING_KEY_FILE="$BACKUP_SIGNING_KEY_FILE"
 
+AUTH_ENCRYPTION_KEY_FILE="${INGENIUM_AUTH_ENCRYPTION_KEY_FILE:-/app/.ingenium/auth-encryption-key}"
+AUTH_ENCRYPTION_KEY_PARENT="$(dirname "$AUTH_ENCRYPTION_KEY_FILE")"
+case "$AUTH_ENCRYPTION_KEY_FILE" in
+  /app/.ingenium/*) ;;
+  *) echo "ERROR: auth encryption key path must be directly below /app/.ingenium"; exit 1 ;;
+esac
+if [ "$AUTH_ENCRYPTION_KEY_PARENT" != "/app/.ingenium" ] || [ "$AUTH_ENCRYPTION_KEY_FILE" = "$BACKUP_SIGNING_KEY_FILE" ]; then
+  echo "ERROR: auth encryption key path is invalid"
+  exit 1
+fi
+/app/scripts/provision-auth-encryption-key.sh "$AUTH_ENCRYPTION_KEY_FILE" appuser appuser
+export INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$AUTH_ENCRYPTION_KEY_FILE"
+
 # RESTORE-100 stages verified copies outside the mutable backup-source tree.
 RESTORE_STAGING_DIR="${INGENIUM_RESTORE_STAGING_DIR:-/app/.ingenium/restore-staging}"
 RESTORE_STAGING_PARENT="$(dirname "$RESTORE_STAGING_DIR")"

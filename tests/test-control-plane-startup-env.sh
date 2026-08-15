@@ -42,6 +42,7 @@ runtime_environment=(
   INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-runtime-gateway/token
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test
   DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test
+  INGENIUM_AUTH_ENCRYPTION_KEY_FILE=/app/.ingenium/auth-encryption-key
   INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS=17001
   INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER=3
   INGENIUM_RUNTIME_CPU_MILLIS=1100
@@ -82,6 +83,7 @@ printf '%s' "$rendered" | node -e '
     INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE: "/run/ingenium-runtime-gateway/token",
     INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.example.test",
     DASHBOARD_ALLOWED_ORIGINS: "https://dashboard.example.test",
+    INGENIUM_AUTH_ENCRYPTION_KEY_FILE: "/app/.ingenium/auth-encryption-key",
     INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS: "17001",
     INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER: "3",
     INGENIUM_RUNTIME_CPU_MILLIS: "1100",

@@ -12,6 +12,7 @@ vi.mock("node:https", () => ({ request: httpsRequestMock }));
 import {
   isPrivateAddress,
   LLM_RESPONSE_BODY_MAX_BYTES,
+  safeEndpointFetch,
   safeLlmFetch,
   validateEndpointUrl,
 } from "../lib/tools/endpoint-policy.js";
@@ -76,6 +77,24 @@ beforeAll(async () => {
     if (request.url === "/pin") {
       response.writeHead(200, { "Content-Type": "text/plain" });
       response.end("pinned");
+      return;
+    }
+
+    if (request.url === "/json") {
+      response.writeHead(200, { "Content-Type": "application/problem+json; charset=utf-8" });
+      response.end(JSON.stringify({ encoding: request.headers["accept-encoding"] }));
+      return;
+    }
+
+    if (request.url === "/compressed") {
+      response.writeHead(200, { "Content-Type": "application/json", "Content-Encoding": "gzip" });
+      response.end("not-really-compressed");
+      return;
+    }
+
+    if (request.url === "/no-content-type") {
+      response.writeHead(200);
+      response.end("{}");
       return;
     }
 
@@ -174,6 +193,16 @@ beforeAll(async () => {
       return;
     }
 
+    if (request.url === "/slow-headers") {
+      setTimeout(() => {
+        if (!response.destroyed) {
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end("{}");
+        }
+      }, 100);
+      return;
+    }
+
     response.writeHead(404);
     response.end();
   });
@@ -209,7 +238,7 @@ describe("endpoint policy address validation", () => {
     ] as never);
 
     await expect(validateEndpointUrl("https://mixed.test/v1", false))
-      .rejects.toThrow("internal/private");
+      .rejects.toThrow("non-global");
     expect(lookup).toHaveBeenCalledWith("mixed.test", { all: true, verbatim: true });
   });
 
@@ -225,7 +254,61 @@ describe("endpoint policy address validation", () => {
       { address: "::ffff:127.0.0.1", family: 6 },
     ] as never);
     await expect(validateEndpointUrl("http://[::ffff:127.0.0.1]/", false))
-      .rejects.toThrow("internal/private");
+      .rejects.toThrow("non-global");
+  });
+
+  it.each([
+    ["translation", "64:ff9b::", "64:ff9b::ffff:ffff"],
+    ["local translation", "64:ff9b:1::", "64:ff9b:1:ffff:ffff:ffff:ffff:ffff"],
+    ["discard-only", "100::", "100::ffff:ffff:ffff:ffff"],
+    ["dummy", "100:0:0:1::", "100:0:0:1:ffff:ffff:ffff:ffff"],
+    ["IETF assignments", "2001::", "2001:1ff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["documentation", "2001:db8::", "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["6to4", "2002::", "2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["AS112", "2620:4f:8000::", "2620:4f:8000:ffff:ffff:ffff:ffff:ffff"],
+    ["new documentation", "3fff::", "3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["future-use", "4000::", "5fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["segment routing", "5f00::", "5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["unique-local", "fc00::", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["link-local", "fe80::", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["site-local", "fec0::", "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+    ["multicast", "ff00::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"],
+  ])("rejects both boundaries of the %s IPv6 block", (_name, first, last) => {
+    expect(isPrivateAddress(first)).toBe(true);
+    expect(isPrivateAddress(last)).toBe(true);
+  });
+
+  it.each([
+    "2001:4860:4860::8888",
+    "2606:4700:4700::1111",
+    "2a00:1450:4009:80b::200e",
+  ])("allows ordinary public global-unicast address %s", (address) => {
+    expect(isPrivateAddress(address)).toBe(false);
+  });
+
+  it.each([
+    "2001:200::1",
+    "2001:db7:ffff::1",
+    "2001:db9::1",
+    "2003::1",
+    "2620:4f:7fff:ffff::1",
+    "2620:4f:8001::1",
+    "3ffe:ffff::1",
+    "3fff:1000::1",
+    "3fff:ffff::1",
+  ])("does not overmatch adjacent global-unicast address %s", (address) => {
+    expect(isPrivateAddress(address)).toBe(false);
+  });
+
+  it("fails closed when public and reserved IPv6 answers are mixed", async () => {
+    const lookup = vi.spyOn(dns, "lookup").mockResolvedValue([
+      { address: "2606:4700:4700::1111", family: 6 },
+      { address: "100:0:0:1::1", family: 6 },
+    ] as never);
+
+    await expect(validateEndpointUrl("https://mixed-v6.test/v1", false))
+      .rejects.toThrow("non-global");
+    expect(lookup).toHaveBeenCalledWith("mixed-v6.test", { all: true, verbatim: true });
   });
 
   it("pins a single DNS resolution rather than rebinding during transport", async () => {
@@ -363,7 +446,7 @@ describe("endpoint policy redirects", () => {
     lookupToLoopback();
     await expect(safeLlmFetch(`http://origin.test:${originPort}/loop`, {}, {
       allowPrivateNetwork: true,
-    })).rejects.toThrow("too many times");
+    })).rejects.toThrow("redirect");
     expect(loopRequests).toBeGreaterThan(10);
   });
 
@@ -372,6 +455,120 @@ describe("endpoint policy redirects", () => {
       method: "POST",
       body: Readable.from(["not replayable"]) as unknown as BodyInit,
     }, { allowPrivateNetwork: true })).rejects.toThrow("replayable");
+  });
+});
+
+describe("generalized endpoint policy bounds", () => {
+  it.each([
+    "0.0.0.0", "10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.1.1", "172.16.0.1",
+    "192.0.0.1", "192.0.2.1", "192.88.99.1", "192.168.1.1", "198.18.0.1",
+    "198.51.100.1", "203.0.113.1", "224.0.0.1", "240.0.0.1", "255.255.255.255",
+    "::", "::1", "::ffff:10.0.0.1", "64:ff9b:1::1", "100::1", "2001:db8::1",
+    "2002::1", "fc00::1", "fe80::1", "fec0::1", "ff00::1",
+  ])("classifies %s as non-global", (address) => {
+    expect(isPrivateAddress(address)).toBe(true);
+  });
+
+  it("enforces protocol, port, DNS-name, fragment, and trailing-dot policy before transport", async () => {
+    const policy = {
+      allowPrivateNetwork: false,
+      allowedPorts: [443],
+      allowedProtocols: ["https:" as const],
+      rejectFragments: true,
+      rejectIpLiterals: true,
+      rejectTrailingDot: true,
+      requireDnsHostname: true,
+    };
+    await expect(safeEndpointFetch("http://public.example/v1", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+    await expect(safeEndpointFetch("https://public.example:8443/v1", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+    await expect(safeEndpointFetch("https://127.0.0.1/v1", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+    await expect(safeEndpointFetch("https://localhost/v1", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+    await expect(safeEndpointFetch("https://public.example./v1", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+    await expect(safeEndpointFetch("https://public.example/v1#fragment", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+    await expect(safeEndpointFetch("https://user:pass@public.example/v1", {}, policy)).rejects.toMatchObject({ code: "invalid_url" });
+  });
+
+  it("enforces request bytes, JSON-compatible content, identity encoding, and zero redirects", async () => {
+    lookupToLoopback();
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/pin`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "12345",
+    }, { allowPrivateNetwork: true, maxRequestBodyBytes: 4 })).rejects.toMatchObject({ code: "request_too_large" });
+    const oversizedBlob = new Blob(["12345"]);
+    const bodyRead = vi.spyOn(oversizedBlob, "arrayBuffer");
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/pin`, {
+      method: "POST",
+      body: oversizedBlob,
+    }, { allowPrivateNetwork: true, maxRequestBodyBytes: 4 })).rejects.toMatchObject({ code: "request_too_large" });
+    expect(bodyRead).not.toHaveBeenCalled();
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/pin`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "ok",
+    }, {
+      allowPrivateNetwork: true,
+      allowedRequestContentTypes: ["application/x-www-form-urlencoded"],
+    })).rejects.toMatchObject({ code: "content_type" });
+
+    const response = await safeEndpointFetch(`http://origin.test:${originPort}/json`, {
+      headers: { "accept-encoding": "identity" },
+    }, {
+      allowPrivateNetwork: true,
+      allowedResponseContentTypes: ["application/json", "application/*+json"],
+      rejectEncodedResponses: true,
+    });
+    expect(await response.json()).toEqual({ encoding: "identity" });
+
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/pin`, {}, {
+      allowPrivateNetwork: true,
+      allowedResponseContentTypes: ["application/json"],
+    })).rejects.toMatchObject({ code: "content_type" });
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/no-content-type`, {}, {
+      allowPrivateNetwork: true,
+      allowedResponseContentTypes: ["application/json"],
+    })).rejects.toMatchObject({ code: "content_type" });
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/compressed`, {}, {
+      allowPrivateNetwork: true,
+      allowedResponseContentTypes: ["application/json"],
+      rejectEncodedResponses: true,
+    })).rejects.toMatchObject({ code: "content_encoding" });
+    await expect(safeEndpointFetch(`http://origin.test:${originPort}/redirect-302`, {}, {
+      allowPrivateNetwork: true,
+      maxRedirects: 0,
+    })).rejects.toMatchObject({ code: "redirect" });
+  });
+
+  it("honors caller abort and ignores proxy environment variables", async () => {
+    lookupToLoopback();
+    const originalProxy = process.env.HTTP_PROXY;
+    process.env.HTTP_PROXY = "http://127.0.0.1:1";
+    try {
+      const direct = await safeEndpointFetch(`http://origin.test:${originPort}/pin`, {}, { allowPrivateNetwork: true });
+      expect(await direct.text()).toBe("pinned");
+      const controller = new AbortController();
+      const pending = safeEndpointFetch(`http://body.test:${bodyPort}/slow`, { signal: controller.signal }, {
+        allowPrivateNetwork: true,
+        timeoutMs: 5_000,
+      });
+      setTimeout(() => controller.abort(), 20);
+      await expect(pending).rejects.toMatchObject({ code: "aborted" });
+    } finally {
+      if (originalProxy === undefined) delete process.env.HTTP_PROXY;
+      else process.env.HTTP_PROXY = originalProxy;
+    }
+  });
+
+  it("applies one timeout to slow headers and slow response bodies", async () => {
+    lookupToLoopback();
+    await expect(safeEndpointFetch(`http://body.test:${bodyPort}/slow-headers`, {}, {
+      allowPrivateNetwork: true,
+      timeoutMs: 20,
+    })).rejects.toMatchObject({ code: "timeout" });
+    await expect(safeEndpointFetch(`http://body.test:${bodyPort}/slow`, {}, {
+      allowPrivateNetwork: true,
+      timeoutMs: 20,
+    })).rejects.toMatchObject({ code: "timeout" });
   });
 });
 

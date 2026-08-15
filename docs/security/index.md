@@ -61,6 +61,14 @@ scope, and one-time consumption; browser origin exchange remains AUTH-109.
 
 All LLM provider endpoints are validated by `validateEndpointUrl()` before any HTTP request is made. The system uses a two-layer defense:
 
+The same transport now has caller-selectable protocol, port, redirect,
+request/response byte, content-type, compression, timeout, private-network, and
+abort policies. OIDC applies the strict production profile: HTTPS DNS names,
+provider-allowed ports, all-answer global-address validation, one DNS resolution
+with address pinning and logical TLS identity, no redirects or proxy environment,
+identity encoding, bounded JSON objects, and five-second requests within a
+15-second callback. Its JOSE remote-key loader cannot fall back to default fetch.
+
 ### Layer 1 — URL Parse
 - Rejects non-HTTP(S) protocols
 - Rejects URLs with embedded credentials (`username:password@host`)

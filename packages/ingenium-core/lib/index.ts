@@ -65,5 +65,5 @@ export * as protectedSettings from "./tools/protected-settings.js";
 export * as backups from "./tools/backups.js";
 export * as ragChunker from "./tools/rag-chunker.js";
 export * as rag from "./tools/rag.js";
-export { isIP, isPrivateAddress, safeLlmFetch, validateEndpointUrl } from "./tools/endpoint-policy.js";
-export type { EndpointPolicyOptions } from "./tools/endpoint-policy.js";
+export { EndpointPolicyError, isIP, isPrivateAddress, safeEndpointFetch, safeLlmFetch, validateEndpointUrl } from "./tools/endpoint-policy.js";
+export type { EndpointPolicyErrorCode, EndpointPolicyOptions } from "./tools/endpoint-policy.js";

@@ -3,7 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
 import { pathToFileURL } from "node:url";
-import { agents, backups, jobs, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { agents, authentication, backups, jobs, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
@@ -344,6 +344,7 @@ export function startApiServer(): ApiServerHandle | null {
   // timer remains, and the non-zero exitCode is observed by supervisord.
   try {
     assertApiTokenConfigured();
+    authentication.validateAuthEncryptionKeyFile();
   } catch {
     console.error("[api] FATAL API authentication configuration is invalid");
     process.exitCode = 1;

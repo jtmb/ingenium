@@ -6,6 +6,7 @@ set -eu
 token_file="${INGENIUM_API_TOKEN_FILE:-/run/ingenium-secrets/api-token}"
 backup_dir="${INGENIUM_BACKUPS_DIR:-}"
 backup_signing_key_file="${INGENIUM_BACKUP_SIGNING_KEY_FILE:-/app/.ingenium/backup-signing-key}"
+auth_encryption_key_file="${INGENIUM_AUTH_ENCRYPTION_KEY_FILE:?INGENIUM_AUTH_ENCRYPTION_KEY_FILE is required}"
 restore_staging_dir="${INGENIUM_RESTORE_STAGING_DIR:-}"
 trusted_artifact_uid="$(cat /usr/local/share/ingenium/appuser-uid)"
 trusted_artifact_gid="$(cat /usr/local/share/ingenium/appuser-gid)"
@@ -57,6 +58,7 @@ exec env -i \
   INGENIUM_DOCS_ROOT="${INGENIUM_DOCS_ROOT:-}" \
   INGENIUM_BACKUPS_DIR="$backup_dir" \
   INGENIUM_BACKUP_SIGNING_KEY_FILE="$backup_signing_key_file" \
+  INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$auth_encryption_key_file" \
   INGENIUM_RESTORE_STAGING_DIR="$restore_staging_dir" \
   INGENIUM_TRUSTED_ARTIFACT_UID="$trusted_artifact_uid" \
   INGENIUM_TRUSTED_ARTIFACT_GID="$trusted_artifact_gid" \

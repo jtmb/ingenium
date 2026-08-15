@@ -127,6 +127,41 @@ operator settings, and never logs credential contents.
 Do not add the token to a tracked `opencode.json` or `opencode.jsonc`. Those
 files should contain the MCP command, API URL, and non-secret settings only.
 
+## OIDC outbound provider boundary
+
+OIDC discovery, token exchange, and JWKS retrieval use the pinned endpoint
+transport in `endpoint-policy.ts`; they never use the platform's unbounded
+`fetch` path. Production URLs require HTTPS, DNS hostnames, and port 443.
+Credentials, fragments,
+trailing-dot hosts, localhost, IP literals, and any DNS answer in a non-global
+range are rejected. Each request resolves all A/AAAA answers once, rejects a
+mixed public/private answer set, pins one accepted address, and preserves the
+logical Host header and TLS SNI. Proxy environment variables are not consulted,
+and redirects and encoded responses are rejected.
+
+Discovery and token JSON responses are limited to 64 KiB, JWKS to 256 KiB, and
+the form-encoded token request to 16 KiB. Requests have a five-second total
+timeout; the complete callback has a 15-second budget. Responses must have a
+JSON-compatible media type and contain a JSON object. JOSE uses only this custom
+transport, with a 100-entry provider/issuer/JWKS/algorithm cache, ten-minute
+freshness, 30-second cooldown, and five-second timeout. A changed exact issuer,
+JWKS URI, or algorithm evicts that provider's prior module.
+
+Tests may pass an internal exact `http://127.0.0.1:<ephemeral-port>` policy
+argument directly to the OIDC core functions. It is not selected by `NODE_ENV`,
+persisted provider data, an environment variable, or API input. Public OIDC
+failures are fixed `401`, `502`, or `504` envelopes without URLs, addresses,
+claims, or upstream bodies. Start and callback attempts are independently
+limited by IP/provider, and valid callback transactions append a content-free
+immutable success or failure audit event.
+
+The authentication encryption key is separate from API, email, vault, and
+restore keys. Container startup atomically provisions
+`/app/.ingenium/auth-encryption-key` as a persistent appuser-owned mode-`0600`
+base64url 256-bit key. `run-api.sh` clears the inherited environment and passes
+only `INGENIUM_AUTH_ENCRYPTION_KEY_FILE`; API startup validates the file before
+binding.
+
 ### Extension project initialization preflight
 
 This authenticated boundary protects the Git-authoritative repository path:

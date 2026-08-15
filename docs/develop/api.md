@@ -46,12 +46,26 @@ arrive without a local bearer credential:
 | POST | `/api/v1/auth/mcp-credentials/:id/rotate` | Issue a replacement and immediately revoke the prior credential. Requires recent step-up; plaintext is returned once. |
 | DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Requires recent step-up. |
 
+### OIDC authentication
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/auth/oidc/providers` | Return enabled provider IDs and labels only. |
+| POST | `/api/v1/auth/oidc/start` | Begin Authorization Code + PKCE after pre-auth CSRF and the per-IP/provider start limit. Sets the HttpOnly transaction cookie. |
+| GET | `/api/v1/auth/oidc/callback` | Complete the cookie-bound transaction under the independent callback limit. Invalid authorization returns `401 OIDC_AUTHENTICATION_FAILED`; bounded provider failures return `502 OIDC_PROVIDER_UNAVAILABLE`; budget expiry returns `504 OIDC_PROVIDER_TIMEOUT`. Error bodies never include endpoint, address, claim, token, or upstream details. |
+
+OIDC discovery, token, and JWKS requests use a DNS-pinned, proxy-independent,
+zero-redirect HTTPS transport. Discovery/token responses are capped at 64 KiB,
+JWKS at 256 KiB, token requests at 16 KiB, each request at five seconds, and a
+callback at 15 seconds. JSON-compatible object responses and identity encoding
+are mandatory.
+
 ## Startup Behavior
 
 The API performs the following at startup (in order):
 
-1. **Validate API token** — Startup fails closed if the mandatory token or protected token file is missing or invalid
-2. **Listen on private port** — The Express server starts on container port `4096`; the public boundary is `4097`
+1. **Validate API token and auth key** — Startup fails closed if the mandatory token/protected token file or owner-only 256-bit authentication encryption key file is missing or invalid.
+2. **Listen on private port** — The Express server starts on container port `4096`; the public boundary is `4097`.
 3. **Ensure global project** — `ensureGlobalProject()` idempotently creates the `global-default` project if it does not exist. This is required by the scheduler (synthesis interval resolution) and the email engine (account storage). Local development benefits from the same auto-bootstrap as Docker deployments.
 4. **Start scheduler** — The synthesis, mail sync, job cron, and lock cleanup schedulers begin their cycles after a staggered delay.
 5. **WAL checkpoint + integrity check** — Runs `wal_checkpoint(TRUNCATE)` and `integrity_check` to ensure the DB is healthy before the scheduler writes data.
@@ -79,7 +93,8 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
   |---------|---------|------------|----------|
   | General API | 100 req/min per IP | All authenticated routes (before auth middleware to throttle brute-force) | `lib/middleware/rate-limit.ts` |
   | Vault | 5 req/min per IP | All `/api/v1/vault/*` routes | `scripts/api-server.ts:134` |
-  | OAuth callback | 20 req/min per IP | `GET /auth/callback` (public, before auth) | `lib/routes/opencode.ts:97-98` |
+  | OAuth callback | 20 req/min per IP | `GET /auth/callback` (public, before auth) | `lib/routes/opencode.ts` |
+  | OIDC start/callback | 5 req/min per IP/provider and phase | `/api/v1/auth/oidc/start` and `/api/v1/auth/oidc/callback` | `lib/middleware/auth-rate-limit.ts` |
 
   > Rate limit state is in-memory only — resets on process restart. Suitable for single-instance deployments with supervisord restarts. For multi-replica deployments, replace with Redis or an external store.
 
