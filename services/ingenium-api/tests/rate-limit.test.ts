@@ -41,6 +41,19 @@ describe("rateLimit — sliding window", () => {
     } as unknown as Partial<Response>;
   }
 
+  function makeGatewayReq(remoteAddress = "127.0.0.1"): Partial<Request> {
+    return {
+      ip: remoteAddress,
+      method: "POST",
+      path: "/api/v1/runtimes/gateway/validate",
+      headers: {
+        "x-ingenium-audience": "runtime-gateway",
+        "x-ingenium-private-network": "runtime-gateway",
+      },
+      socket: { remoteAddress } as Request["socket"],
+    };
+  }
+
   it("allows first request from an IP", () => {
     const req = makeReq();
     const res = makeRes();
@@ -112,6 +125,27 @@ describe("rateLimit — sliding window", () => {
     const next = vi.fn();
     rateLimit(req as Request, res as Response, next);
     expect(res.set).toHaveBeenCalledWith("Retry-After", expect.any(String));
+  });
+
+  it("keeps boundary-attested gateway traffic out of the human-facing bucket", () => {
+    const limit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    for (let i = 0; i <= limit; i++) {
+      const next = vi.fn();
+      rateLimit(makeGatewayReq() as Request, makeRes() as Response, next);
+      expect(next).toHaveBeenCalled();
+    }
+  });
+
+  it("does not trust a gateway marker from a runtime-network address", () => {
+    const limit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    for (let i = 0; i < limit; i++) {
+      rateLimit(makeGatewayReq("172.18.0.9") as Request, makeRes() as Response, vi.fn());
+    }
+    const response = makeRes();
+    const next = vi.fn();
+    rateLimit(makeGatewayReq("172.18.0.9") as Request, response as Response, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(429);
   });
 });
 

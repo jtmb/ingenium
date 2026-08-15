@@ -99,6 +99,9 @@ Only the API boundary accepts its `runtime-gateway` audience and overwrites the
 private-network marker after credential validation. Browser sessions, API user tokens,
 installation compatibility principals, and the Dashboard proxy receive `404` on the
 gateway-private exchange and validation routes.
+Boundary-attested gateway exchange, validation, and activity calls use a separate
+fixed 10,000-request/minute loopback bucket so runtime assets do not consume the
+human-facing API limit. Non-loopback requests cannot select that bucket.
 
 ### Host and container seeding
 

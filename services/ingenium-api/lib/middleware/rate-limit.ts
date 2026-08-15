@@ -24,6 +24,18 @@ import { config } from "../../config/index.js";
  * `clearRateLimitEntries()` drops the entire map.
  */
 const MAX_ENTRIES = 10_000;
+const RUNTIME_GATEWAY_MAX_REQUESTS = 10_000;
+
+export function isBoundaryAttestedRuntimeGatewayRequest(req: Request): boolean {
+  const remoteAddress = req.socket?.remoteAddress;
+  return (remoteAddress === "127.0.0.1" || remoteAddress === "::1" || remoteAddress === "::ffff:127.0.0.1")
+    && req.method === "POST"
+    && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(req.path)
+    && req.headers["x-ingenium-audience"] === "runtime-gateway"
+    && req.headers["x-ingenium-private-network"] === "runtime-gateway"
+    && req.headers.cookie === undefined
+    && req.headers.origin === undefined;
+}
 
 export function createRateLimiter(maxRequests: number, windowMs = 60_000) {
   const requestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -68,13 +80,21 @@ export function createRateLimiter(maxRequests: number, windowMs = 60_000) {
 }
 
 const defaultRateLimiter = createRateLimiter(config.rateLimit);
+// ponytail: one bounded shared bucket; split by runtime only if measured concurrency requires it.
+const runtimeGatewayRateLimiter = createRateLimiter(RUNTIME_GATEWAY_MAX_REQUESTS);
 
 /** Reset the default rate-limit store entirely — exposed for test cleanup only. */
 export function clearRateLimitEntries(): void {
   defaultRateLimiter.clear();
+  runtimeGatewayRateLimiter.clear();
 }
 
-export const rateLimit = defaultRateLimiter;
+export const rateLimit = Object.assign(
+  (req: Request, res: Response, next: NextFunction) => (isBoundaryAttestedRuntimeGatewayRequest(req)
+    ? runtimeGatewayRateLimiter(req, res, next)
+    : defaultRateLimiter(req, res, next)),
+  { clear: clearRateLimitEntries },
+);
 
 /**
  * Brute-force protection for vault passphrase attempts only. It is mounted on
