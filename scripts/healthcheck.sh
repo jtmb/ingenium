@@ -109,9 +109,10 @@ require_cli_root_ok() {
 
 require_production_aliases_unavailable() {
   expected_body="Direct local runtime aliases are unavailable in production. Open the Ingenium Dashboard and choose an authorized workspace."
+  expected="$(printf '%s\n|404' "$expected_body")"
   for host in opencode.localhost cli.localhost vscode.localhost; do
     actual="$(curl --silent --show-error --max-time 5 --header "Host: $host" --write-out '|%{http_code}' http://127.0.0.1:3000/)"
-    if [ "$actual" != "${expected_body}|404" ]; then
+    if [ "$actual" != "$expected" ]; then
       echo "ERROR: production runtime alias did not return the common 404 guidance: $host"
       exit 1
     fi

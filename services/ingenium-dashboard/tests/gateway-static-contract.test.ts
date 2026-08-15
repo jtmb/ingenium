@@ -8,6 +8,7 @@ const read = (relativePath: string) => readFileSync(resolve(repoRoot, relativePa
 const dockerfile = read("Dockerfile");
 const compose = read("docker-compose.yml");
 const dashboardRunner = read("scripts/run-dashboard.sh");
+const healthcheck = read("scripts/healthcheck.sh");
 const gateway = read("nginx/gateway.conf");
 const dashboardProxy = read("nginx/proxy-dashboard.conf");
 const vscodeProxy = read("nginx/proxy-vscode.conf");
@@ -138,6 +139,7 @@ describe("dashboard deployment static contract", () => {
     expect(productionAliases.match(/include \/app\/nginx\/runtime-alias-unavailable-location\.conf;/g)).toHaveLength(3);
     expect(productionAliases).not.toContain("proxy_pass");
     expect(unavailableAlias).toContain('return 404 "Direct local runtime aliases are unavailable in production. Open the Ingenium Dashboard and choose an authorized workspace.\\n";');
+    expect(healthcheck).toContain('expected="$(printf \'%s\\n|404\' "$expected_body")"');
     expect(unavailableAlias).toContain('add_header Cache-Control "no-store" always;');
     expect(unavailableAlias).toContain('add_header X-Content-Type-Options "nosniff" always;');
     expect(unavailableAlias).toContain("default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
