@@ -119,7 +119,7 @@ const server = http.createServer(
     const pathname = new URL(request.url ?? "/", "http://api-boundary").pathname;
     const gatewayPrefix = pathname.startsWith("/api/v1/runtimes/gateway/");
     const gatewayRequest = request.method === "POST"
-      && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate)$/.test(pathname)
+      && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(pathname)
       && request.headers["x-ingenium-audience"] === "runtime-gateway"
       && runtimeGatewayToken !== null
       && runtimeGatewayTokensEqual(providedToken, runtimeGatewayToken);

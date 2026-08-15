@@ -116,6 +116,7 @@ require_literal "$boundary_proxy" 'normalizedName === "x-ingenium-internal-servi
 require_literal "$boundary_proxy" 'normalizedName === "x-ingenium-private-network"'
 require_literal "$boundary_proxy" 'runtimeGatewayIngressHeaders(forwarded)'
 require_literal "$boundary_proxy" 'gatewayPrefix && !gatewayRequest'
+require_literal "$boundary_proxy" '/^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/'
 require_literal "$boundary_proxy" 'server.listen(proxyPort, "0.0.0.0"'
 require_literal "$dashboard_proxy" 'isRuntimeGatewayPrivatePath(request.nextUrl.pathname)'
 require_literal "$dashboard_nginx_proxy" 'proxy_set_header X-Ingenium-Audience "";'
