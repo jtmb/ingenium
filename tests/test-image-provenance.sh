@@ -68,18 +68,26 @@ require_text config/vscode-extensions/ingenium.system-theme-defaults/package.jso
 
 require_text docker-compose.yml 'IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"'
 require_text docker-compose.yml 'IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"'
-require_text scripts/validate-image-provenance.mjs '"compose", "--profile", profile, "ps", "-q", service'
 require_text scripts/validate-image-provenance.mjs 'compatibility: "ingenium"'
 require_text scripts/validate-image-provenance.mjs 'production: "control-plane"'
-require_text scripts/validate-image-provenance.mjs 'running container is not owned by the expected Compose project and service'
+require_text scripts/owned-compose-container.mjs '"com.docker.compose.project"'
+require_text scripts/owned-compose-container.mjs '"com.docker.compose.service"'
+require_text scripts/owned-compose-container.mjs '"com.docker.compose.project.working_dir"'
+require_text scripts/owned-compose-container.mjs '"com.docker.compose.project.config_files"'
+require_text scripts/owned-compose-container.mjs 'running container is not owned by the expected repository, Compose project, and service'
 require_text scripts/validate-image-provenance.mjs 'org.opencontainers.image.revision'
 require_text scripts/validate-image-provenance.mjs 'org.opencontainers.image.source'
 require_text scripts/validate-image-provenance.mjs 'secret-bearing OCI label key'
-reject_text scripts/validate-image-provenance.mjs '"compose", "ps", "-q", "ingenium"'
-require_text docs/operations/deployment.md "validator's default and targets the"
+reject_text scripts/validate-image-provenance.mjs '"compose"'
+reject_text scripts/owned-compose-container.mjs '"compose"'
+require_text scripts/validate-database-integrity.mjs 'resolveOwnedComposeContainer("control-plane", import.meta.url)'
+require_text scripts/validate-database-integrity.mjs '/app/services/ingenium-api/dist/scripts/check-database-integrity.js'
+require_text docs/operations/deployment.md "Compatibility is the validator's default and targets only"
 require_text docs/operations/deployment.md './scripts/validate-image-provenance.mjs "$IMAGE_REVISION" --profile production'
 
 node --check "$REPO_ROOT/scripts/validate-image-provenance.mjs"
+node --check "$REPO_ROOT/scripts/owned-compose-container.mjs"
+node --check "$REPO_ROOT/scripts/validate-database-integrity.mjs"
 node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[1],"utf8"); const quote=String.fromCharCode(39); const marker="node -e "+quote; const start=source.indexOf(marker, source.indexOf("BUILTIN_MANIFEST=")); const end=source.indexOf(quote+";", start); if (start < 0 || end < 0) throw new Error("built-in manifest validator was not found"); new Function(source.slice(start + marker.length, end));' "$REPO_ROOT/Dockerfile"
 node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[1],"utf8"); const quote=String.fromCharCode(39); const marker="node -e "+quote; const start=source.indexOf(marker, source.indexOf("EXTENSION_MANIFEST=")); const end=source.indexOf(quote+"; "+String.fromCharCode(92), start); if (start < 0 || end < 0) throw new Error("VSIX manifest validator was not found"); new Function(source.slice(start + marker.length, end));' "$REPO_ROOT/Dockerfile"
 
@@ -100,6 +108,7 @@ const { spawnSync } = require("node:child_process");
 
 const repoRoot = process.argv[2];
 const validator = path.join(repoRoot, "scripts/validate-image-provenance.mjs");
+const databaseValidator = path.join(repoRoot, "scripts/validate-database-integrity.mjs");
 const revision = "a".repeat(40);
 const imageId = "sha256:test-image";
 const containerId = "b".repeat(64);
@@ -110,70 +119,97 @@ process.on("exit", () => fs.rmSync(fakeDockerDirectory, { recursive: true, force
 fs.writeFileSync(fakeDocker, `#!/usr/bin/env node
 const scenario = JSON.parse(process.env.PROVENANCE_SCENARIO);
 const args = process.argv.slice(2);
-if (args[0] === "compose") {
-  const profileIndex = args.indexOf("--profile");
-  if (profileIndex < 0 || args[profileIndex + 1] !== scenario.profile || args.at(-1) !== scenario.service) {
+if (args[0] === "ps") {
+  if (!args.includes("--filter") || !args.includes("label=com.docker.compose.service=" + scenario.service)) {
     process.exitCode = 91;
   } else {
     process.stdout.write(scenario.containerIds.join("\\n"));
   }
-} else if (args[0] === "inspect" && args.includes("{{json .Config.Labels}}")) {
-  process.stdout.write(JSON.stringify(scenario.containerLabels));
-} else if (args[0] === "inspect" && args.includes("{{.Image}}")) {
-  process.stdout.write(scenario.imageId);
+} else if (args[0] === "inspect") {
+  process.stdout.write(JSON.stringify([scenario.container]));
 } else if (args[0] === "image" && args.includes("{{json .Config.Labels}}")) {
   process.stdout.write(JSON.stringify(scenario.imageLabels));
+} else if (args[0] === "exec") {
+  if (args[1] !== scenario.container.Id || args[2] !== "node" || args[3] !== "/app/services/ingenium-api/dist/scripts/check-database-integrity.js") {
+    process.exitCode = 93;
+  } else {
+    process.stdout.write(JSON.stringify(scenario.databaseResult));
+    process.exitCode = scenario.databaseResult.ok ? 0 : 1;
+  }
 } else {
   process.exitCode = 92;
 }
 `, { mode: 0o755 });
 
-function scenario(profile, service, overrides = {}) {
+function scenario(service, overrides = {}) {
   return {
-    profile,
     service,
     containerIds: [containerId],
-    containerLabels: {
-      "com.docker.compose.project": "ingenium",
-      "com.docker.compose.service": service,
+    container: {
+      Id: containerId,
+      Image: imageId,
+      State: { Running: true },
+      Config: {
+        Labels: {
+          "com.docker.compose.project": "ingenium",
+          "com.docker.compose.service": service,
+          "com.docker.compose.project.working_dir": repoRoot,
+          "com.docker.compose.project.config_files": path.join(repoRoot, "docker-compose.yml"),
+        },
+      },
     },
-    imageId,
     imageLabels: {
       "org.opencontainers.image.revision": revision,
       "org.opencontainers.image.source": "https://github.com/jtmb/ingenium",
+    },
+    databaseResult: {
+      ok: true,
+      integrityViolationCount: 0,
+      foreignKeyViolationCount: 0,
     },
     ...overrides,
   };
 }
 
-function run(name, expectedStatus, arguments_, value) {
-  const result = spawnSync(process.execPath, [validator, revision, ...arguments_], {
+function run(name, executable, expectedStatus, arguments_, value) {
+  const environment = {
+    ...process.env,
+    PATH: `${fakeDockerDirectory}:${process.env.PATH}`,
+    PROVENANCE_SCENARIO: JSON.stringify(value),
+  };
+  delete environment.OPENCODE_SERVER_PASSWORD;
+  delete environment.INGENIUM_RUNTIME_ROOT_DOMAIN;
+  const result = spawnSync(process.execPath, [executable, ...arguments_], {
     encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${fakeDockerDirectory}:${process.env.PATH}`,
-      PROVENANCE_SCENARIO: JSON.stringify(value),
-    },
+    env: environment,
   });
   if (result.status !== expectedStatus) {
     throw new Error(`${name}: expected exit ${expectedStatus}, got ${result.status}; stderr: ${result.stderr}`);
   }
 }
 
-run("compatibility defaults to ingenium", 0, [], scenario("compatibility", "ingenium"));
-run("production selects control-plane", 0, ["--profile", "production"], scenario("production", "control-plane"));
-run("missing service fails closed", 1, [], scenario("compatibility", "ingenium", { containerIds: [] }));
-run("ambiguous service fails closed", 1, [], scenario("compatibility", "ingenium", { containerIds: [containerId, "c".repeat(64)] }));
-run("mismatched SHA fails closed", 1, [], scenario("compatibility", "ingenium", {
+run("compatibility defaults to ingenium", validator, 0, [revision], scenario("ingenium"));
+run("production selects control-plane", validator, 0, [revision, "--profile", "production"], scenario("control-plane"));
+run("missing service fails closed", validator, 1, [revision], scenario("ingenium", { containerIds: [] }));
+run("ambiguous service fails closed", validator, 1, [revision], scenario("ingenium", { containerIds: [containerId, "c".repeat(64)] }));
+run("mismatched SHA fails closed", validator, 1, [revision], scenario("ingenium", {
   imageLabels: {
     "org.opencontainers.image.revision": "c".repeat(40),
     "org.opencontainers.image.source": "https://github.com/jtmb/ingenium",
   },
 }));
-run("unowned container fails closed", 1, [], scenario("compatibility", "ingenium", {
-  containerLabels: {
-    "com.docker.compose.project": "unrelated-project",
-    "com.docker.compose.service": "ingenium",
+const foreign = scenario("ingenium");
+foreign.container.Config.Labels["com.docker.compose.project"] = "unrelated-project";
+run("foreign project fails closed", validator, 1, [revision], foreign);
+const mismatchedRepository = scenario("ingenium");
+mismatchedRepository.container.Config.Labels["com.docker.compose.project.working_dir"] = "/foreign/repository";
+run("mismatched repository fails closed", validator, 1, [revision], mismatchedRepository);
+run("owned control plane runs content-free database check", databaseValidator, 0, [], scenario("control-plane"));
+run("database violations fail closed", databaseValidator, 1, [], scenario("control-plane", {
+  databaseResult: {
+    ok: false,
+    integrityViolationCount: 1,
+    foreignKeyViolationCount: 2,
   },
 }));
 NODE

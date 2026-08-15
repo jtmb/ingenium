@@ -63,8 +63,9 @@ docker compose --profile compatibility exec ingenium npm run check
 ```
 
 After a detached compatibility deployment, verify the running image metadata
-without dumping its labels or reading deployment secrets. Compatibility is the
-validator's default and targets the `ingenium` service:
+without dumping its labels or reading deployment secrets. The validator uses
+Docker service/project/repository labels directly and never renders Compose.
+Compatibility is the validator's default and targets only the `ingenium` service:
 
 ```bash
 ./scripts/validate-image-provenance.mjs "$IMAGE_REVISION"
@@ -152,6 +153,7 @@ export DASHBOARD_ALLOWED_ORIGINS='https://dashboard.example.com'
 docker compose --profile runtime-build build runtime-image
 docker compose --profile production -f docker-compose.yml -f docker-compose.runtime.override.yml up --build -d control-plane runtime-gateway runtime-manager
 ./scripts/validate-image-provenance.mjs "$IMAGE_REVISION" --profile production
+./scripts/validate-database-integrity.mjs
 ```
 
 Only `runtime-manager` mounts `/var/run/docker.sock`; never add that mount to the
@@ -405,6 +407,13 @@ The runtime token is an `appuser`-owned mode-`0600` file, so its owner and mode
 validation require the probe to run under that identity. Do not run the probe as
 another user or relax the token-file permissions.
 
+For a production data-integrity proof, run
+`./scripts/validate-database-integrity.mjs`. It resolves the exact repository-owned
+`control-plane` from Docker labels and executes the built API integrity CLI inside
+that container. The CLI opens the canonical database read-only, runs SQLite
+integrity and foreign-key checks, and returns only status and violation counts;
+the host never reads the database or receives a credential.
+
 ```yaml
 healthcheck:
   test: ["CMD", "/app/scripts/healthcheck.sh"]
@@ -459,7 +468,9 @@ The runtime image carries `org.opencontainers.image.revision` and
 build argument; the source defaults to the public repository URL. Neither is a
 runtime environment variable or a credential. The verifier inspects only the
 running Compose image, checks the expected SHA and a credential-free HTTPS
-source URL, rejects secret-bearing label keys, and never prints raw labels.
+source URL, rejects secret-bearing label keys, and never prints raw labels. It
+selects the exact service through Docker labels and does not invoke Compose, so
+unrelated interpolation secrets are not required for verification.
 
 The API uses a clean source build on startup/image creation. Docker excludes
 generated `dist/` directories from the build context, compiles the current API

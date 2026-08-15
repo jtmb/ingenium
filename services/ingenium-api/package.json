@@ -7,6 +7,7 @@
     "build": "npm run build --workspace=ingenium-email && tsc",
     "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
+    "check:database-integrity": "node dist/scripts/check-database-integrity.js",
     "test": "vitest run --config vitest.config.ts",
     "test:live-opencode": "RUN_OPENCODE_LIVE=1 vitest run --config vitest.live.config.ts",
     "typecheck": "node scripts/typecheck-with-clean-core.mjs"

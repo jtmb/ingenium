@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { resolveOwnedComposeContainer } from "./owned-compose-container.mjs";
 
 // OCI provenance is compared to the canonical full lowercase Git SHA.
 const revisionPattern = /^[0-9a-f]{40}$/;
@@ -11,10 +12,9 @@ function fail(message) {
   process.exit(1);
 }
 
-function docker(args, environment) {
+function docker(args) {
   const result = spawnSync("docker", args, {
     encoding: "utf8",
-    env: environment,
   });
 
   if (result.error || result.status !== 0) {
@@ -53,89 +53,53 @@ if (!Object.hasOwn(serviceByProfile, profile)) {
   fail(`unsupported Compose profile: ${String(profile)}`);
 }
 const service = serviceByProfile[profile];
-
-// Compose resolves build arguments for every subcommand. Supply only the
-// expected public revision so this verifier never needs deployment secrets.
-const composeEnvironment = {
-  ...process.env,
-  IMAGE_REVISION: expectedRevision,
-};
-const containerIds = docker(
-  ["compose", "--profile", profile, "ps", "-q", service],
-  composeEnvironment,
-).split(/\r?\n/).filter(Boolean);
-if (containerIds.length === 0) {
-  fail(`${service} Compose service is not running for profile ${profile}`);
-}
-if (containerIds.length !== 1) {
-  fail(`${service} Compose service must have exactly one running container`);
-}
-const [containerId] = containerIds;
-
-let containerLabels;
 try {
-  containerLabels = JSON.parse(
-    docker(["inspect", "--format", "{{json .Config.Labels}}", containerId], composeEnvironment),
+  const { imageId } = resolveOwnedComposeContainer(service, import.meta.url);
+  const serializedLabels = docker(
+    ["image", "inspect", "--format", "{{json .Config.Labels}}", imageId],
   );
-} catch {
-  fail("running Compose container labels are not valid JSON");
-}
 
-const expectedProject = process.env.COMPOSE_PROJECT_NAME || "ingenium";
-if (
-  !containerLabels
-  || typeof containerLabels !== "object"
-  || Array.isArray(containerLabels)
-  || containerLabels["com.docker.compose.project"] !== expectedProject
-  || containerLabels["com.docker.compose.service"] !== service
-) {
-  fail("running container is not owned by the expected Compose project and service");
-}
+  let labels;
+  try {
+    labels = JSON.parse(serializedLabels);
+  } catch {
+    fail("running image OCI labels are not valid JSON");
+  }
 
-const imageId = docker(["inspect", "--format", "{{.Image}}", containerId], composeEnvironment);
-const serializedLabels = docker(
-  ["image", "inspect", "--format", "{{json .Config.Labels}}", imageId],
-  composeEnvironment,
-);
+  if (!labels || typeof labels !== "object" || Array.isArray(labels)) {
+    fail("running image does not expose OCI labels");
+  }
 
-let labels;
-try {
-  labels = JSON.parse(serializedLabels);
-} catch {
-  fail("running image OCI labels are not valid JSON");
-}
+  if (labels["org.opencontainers.image.revision"] !== expectedRevision) {
+    fail("running image revision label does not match the expected Git SHA");
+  }
 
-if (!labels || typeof labels !== "object" || Array.isArray(labels)) {
-  fail("running image does not expose OCI labels");
-}
+  const source = labels["org.opencontainers.image.source"];
+  if (typeof source !== "string") {
+    fail("running image does not expose an OCI source label");
+  }
 
-if (labels["org.opencontainers.image.revision"] !== expectedRevision) {
-  fail("running image revision label does not match the expected Git SHA");
-}
-
-const source = labels["org.opencontainers.image.source"];
-if (typeof source !== "string") {
-  fail("running image does not expose an OCI source label");
-}
-
-try {
-  const sourceUrl = new URL(source);
-  if (
-    sourceUrl.protocol !== "https:"
-    || !sourceUrl.hostname
-    || sourceUrl.username
-    || sourceUrl.password
-    || sourceUrl.search
-    || sourceUrl.hash
-  ) {
+  try {
+    const sourceUrl = new URL(source);
+    if (
+      sourceUrl.protocol !== "https:"
+      || !sourceUrl.hostname
+      || sourceUrl.username
+      || sourceUrl.password
+      || sourceUrl.search
+      || sourceUrl.hash
+    ) {
+      fail("running image source label is not a credential-free HTTPS repository URL");
+    }
+  } catch {
     fail("running image source label is not a credential-free HTTPS repository URL");
   }
-} catch {
-  fail("running image source label is not a credential-free HTTPS repository URL");
-}
 
-if (Object.keys(labels).some((key) => secretBearingLabelPattern.test(key))) {
-  fail("running image includes a secret-bearing OCI label key");
+  if (Object.keys(labels).some((key) => secretBearingLabelPattern.test(key))) {
+    fail("running image includes a secret-bearing OCI label key");
+  }
+} catch (error) {
+  fail(error instanceof Error ? error.message : "running image provenance could not be validated");
 }
 
 // Do not print raw labels: deployment metadata checks must not become a path

@@ -1,4 +1,5 @@
 export * from "./db.js";
+export * from "./database-integrity.js";
 export * as skills from "./tools/skills.js";
 export * as skillGovernance from "./tools/skill-governance.js";
 export { getSkillsBase, getPluginsBase, getCommandsBase } from "./tools/paths.js";
