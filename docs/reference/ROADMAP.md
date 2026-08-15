@@ -2207,10 +2207,10 @@ Evidence AUTH-111: Focused verification: `bash tests/test-append-only-files.sh`,
 ## Approved post-AUTH follow-up program
 
 AUTH-100 through AUTH-111 are the completed release baseline. The approved
-follow-up contracts below are additive and begin from the current prerequisite
-HEAD `4f837ad` (`docs(auth): reconcile release roadmap evidence`). They do not
-change the completed AUTH evidence, mutate the Docs Workspace, or record live
-work markers in this planning update.
+follow-up contracts below were added at `f104a1c` and are reconciled against the
+exact deployed HEAD `4fab36292c98310ecee0777029ef981b38644498`. They are
+additive, do not change the completed AUTH evidence, and do not mutate the Docs
+Workspace; the live markers and final evidence are appended below.
 
 ### Follow-up dependency and allocation contract
 
@@ -2239,8 +2239,8 @@ evidence before the next subwave starts.
   credential redesign; external provider revocation; live production apply;
   and Docs Workspace mutation.
 - **Owner:** `@ingenium-software-engineer-premium`.
-- **Dependencies:** `AUTH-111`, completed `RESTORE-101`, and prerequisite HEAD
-  `4f837ad`.
+- **Dependencies:** `AUTH-111`, completed `RESTORE-101`, and the approved
+  follow-up contract at `f104a1c`.
 - **Acceptance:** Every listed token/capability family is revoked or generation-
   invalidated atomically; stale credentials, tickets, sessions, reservations,
   and ownership claims fail closed; user/SP/runtime generations increase and
@@ -2311,13 +2311,11 @@ evidence before the next subwave starts.
   mutation, journal/restart ordering failure, audit loss, or rollback risk not
   recorded is `BLOCKING`; unrelated credential cleanup is `FOLLOW_UP`; bounded
   residual-risk and preservation evidence is `INFORMATIONAL`.
-- **Evidence placeholders:** Source `[pending focused diff/tests]`; deploy/health
-  `[pending rebuilt current source and route evidence]`; visual `N/A — no UI
-  change`; security `[pending bounded current-diff review]`; containment
-  `[pending run-scoped strict audit]`.
-- **Planned marker entries (not live):** append `work-started` for `RESTORE-103`
-  after preflight/ownership, then append one matching `work-complete` entry
-  after all gates and non-empty evidence pass.
+- **Evidence:** Commit `9a3404f` implements the token-only invalidation stage and
+  the pre-auth maintenance upgrade. The focused restore evidence records 31 core
+  and 11 maintenance tests, preserved passwords/OIDC identities/TOTP/recovery
+  material, and the accepted rollback risk; final deployment, health, security,
+  fixture, containment, and backup evidence is consolidated under `AUTH-112`.
 
 #### OIDC-100 — Bounded OIDC provider transport
 
@@ -2399,20 +2397,14 @@ evidence before the next subwave starts.
   body or time behavior, JOSE default-fetch use, key/response leakage, missing
   rate limit, or new dependency is `BLOCKING`; provider UX or protocol expansion
   is `FOLLOW_UP`; bounded fixture and audit telemetry is `INFORMATIONAL`.
-- **Evidence:** Source implementation on prerequisite HEAD `9a3404f` passes core
-  typecheck plus 48 endpoint-policy, 19 OIDC, and 8 authentication tests; API
-  typecheck plus 49 focused auth/rate-limit tests and 12 startup tests; the
-  persistent-key, control-plane environment, API-boundary, deployment-static,
-  DB-isolation, dependency, shell-syntax, and diff checks. The loopback fixture
-  covers malformed and timed-out discovery/token/JWKS, exact policy gating,
-  claims/replay/no-link behavior, content-free audit, and JWKS URI rotation.
-  Visual is `N/A — no UI change`. Docker rebuild/route health and focused
-  Playwright/strict containment remain unclaimed because this implementation
-  contract explicitly excluded broad E2E and Docker; therefore no
-  `work-complete` marker is recorded in this wave.
-- **Planned marker entries (not live):** append `work-started` for `OIDC-100`
-  after preflight/ownership, then append one matching `work-complete` entry
-  after all gates and non-empty evidence pass.
+- **Evidence:** Commit `7927a1f` passes 76 endpoint-policy tests and 19 OIDC
+  tests, with the broader core/API/authentication, startup, injected-key,
+  dependency, static, shell, DB-isolation, and diff checks green. The loopback
+  fixture covers malformed and timed-out discovery/token/JWKS, exact policy
+  gating, claims/replay/no-link behavior, content-free audit, and JWKS URI
+  rotation. Final bounded security review is `PASS` with no in-scope blocker;
+  visual is `N/A — no UI change`, and final deployment/health evidence is
+  consolidated under `AUTH-112`.
 
 #### RUNTIME-100 — Production runtime UX and activity leases
 
@@ -2502,17 +2494,13 @@ evidence before the next subwave starts.
   static guidance, broken compatibility proxy, or in-scope visual/accessibility
   failure is `BLOCKING`; unrelated runtime polish is `FOLLOW_UP`; route and lease
   telemetry is `INFORMATIONAL`.
-- **Evidence:** The working-tree implementation based on `7927a1f` passes the
-  7-test core runtime-isolation file, the 12-test API runtime-route file, the
-  31-test dashboard runtime picker/frame/config set, core/API/dashboard
-  typechecks, dashboard lint with zero errors, static gateway validation,
-  Compose interpolation, shell syntax, DB-isolation enforcement, and
-  `git diff --check`. Deployment/health, 1440x900/390x844 visual and passive
-  sweep, bounded security review, fixture E2E, and strict containment remain
-  pending, so no `work-complete` marker is recorded.
-- **Planned marker entries (not live):** append `work-started` for `RUNTIME-100`
-  after preflight/ownership, then append one matching `work-complete` entry
-  after all gates and non-empty evidence pass.
+- **Evidence:** Source commit `3c71f3e` and the deployed remediation sequence
+  through `bc3daec`, ending at final deployed `4fab362`, establish the explicit
+  authorization-filtered picker, activity accounting, and profile-aware static
+  aliases. Positive Web/CLI/VS Code launch, CSP, and activity evidence passed;
+  runtime-reconciler, audience-cookie, and OpenCode query-mode defects were
+  fixed and rechecked. Final deployment, fixture, containment, and visual
+  evidence is consolidated under `AUTH-112`.
 
 #### TELEMETRY-100 — Run-scoped telemetry retention gate
 
@@ -2542,7 +2530,9 @@ evidence before the next subwave starts.
   predicates, actor, timestamps, and outcome without sensitive content; verify
   proves only eligible run roots changed; ambiguous/auxiliary/legacy/tmp/
   visual/manual evidence is never auto-selected; failures retain evidence and
-  do not broaden scope.
+  do not broaden scope. If preview finds zero eligible roots, confirmation,
+  execution, receipt verification, and deletion are not applicable and the
+  no-op result is a valid completion.
 - **STOP_CONDITION:** `PASS` only after focused retention/artifact tests,
   preview/report/execute/verify fixtures, deployment/health where packaged,
   security review, strict containment, receipt/digest evidence, and marker
@@ -2588,8 +2578,10 @@ evidence before the next subwave starts.
   engine, Docs owns directly affected testing/deployment wording; QA, security,
   and Explore are nonwriters. Barrier before `F1`.
 - **Verification plan:** Use disposable UUID run roots only; run preview/report,
-  confirm the generated digest exactly, execute one approved destructive fixture,
-  verify the receipt and retained quarantine/recovery evidence, run artifact
+  confirm the generated digest exactly and execute one approved destructive
+  fixture only when an eligible root exists; when eligibility is zero, record
+  the no-op without inventing a confirmation or deletion. Verify any receipt
+  and retained quarantine/recovery evidence when execution occurs, run artifact
   hygiene and strict containment, and fix only a reproducible in-scope cause
   before its minimum targeted recheck.
 - **Causal remediation rule:** Fix the first path classification, eligibility
@@ -2599,18 +2591,12 @@ evidence before the next subwave starts.
   lost receipt/quarantine, process/port cleanup, or auto-selection of ambiguous
   evidence is `BLOCKING`; retention policy extensions are `FOLLOW_UP`; preview
   inventories and retained receipts are `INFORMATIONAL`.
-- **Source evidence (implementation present; acceptance still open):**
-  `tests/test-artifact-retention.ts`, `tests/test-run-retention-lock.ts`,
-  `tests/test-artifact-retention.test.ts`, and the guarded writer/audit changes
-  implement the preview/report/execute/verify contract with isolated fixtures.
-  Focused verification, QA/security, and final containment evidence remain
-  required; this is not a `work-complete` marker. Deploy/health
-  `[pending packaged-runner evidence or N/A]`; visual `N/A — visual/manual
-  evidence remains manual`; security `[pending destructive-gate
-  review]`; containment `[pending artifact hygiene + strict audit]`.
-- **Planned marker entries (not live):** append `work-started` for
-  `TELEMETRY-100` after preflight/ownership, then append one matching
-  `work-complete` entry after all gates and non-empty evidence pass.
+- **Evidence:** Commit `7c9bfd4` and its guarded writer/audit changes pass 74
+  focused retention tests and strict containment. The real preview reported 0
+  eligible roots and 475 excluded roots at implementation; no execution or
+  deletion occurred, and exact confirmation was unnecessary because eligibility
+  was zero. Ambiguous, historical, visual, manual, and auxiliary evidence
+  remained on the manual-review path.
 
 #### AUTH-112 — Merged follow-up deployment, acceptance, and reconciliation
 
@@ -2627,7 +2613,7 @@ evidence before the next subwave starts.
   mutation; and changing completed AUTH evidence.
 - **Owner:** `@ingenium-software-engineer-premium`.
 - **Dependencies:** `RESTORE-103`, `OIDC-100`, `RUNTIME-100`, `TELEMETRY-100`,
-  `AUTH-111`, and the prerequisite HEAD `4f837ad`.
+  `AUTH-111`, and the approved follow-up contract at `f104a1c`.
 - **Acceptance:** Current merged source and image provenance are deployed and
   healthy; all four predecessor acceptance contracts pass; the restore audit
   ordering and residual-risk record are present; OIDC transport is bounded with
@@ -2637,7 +2623,7 @@ evidence before the next subwave starts.
   sweep passes; security reports no in-scope blocker; fixture E2E and strict
   containment prove clean owned-process/port/temp teardown; targeted links,
   commands, policy wording, append-only validation, agent validation, and diff
-  checks pass; every new task has one valid future start/complete pair and
+  checks pass; every follow-up task has one valid start/complete pair and
   non-empty completion evidence before this task can complete.
 - **STOP_CONDITION:** `PASS` only after every predecessor gate and final
   documentation/marker/TodoWrite reconciliation passes. `STOP` or `CANCELLED`
@@ -2700,18 +2686,98 @@ evidence before the next subwave starts.
   health, visual/accessibility, security, isolation, containment, digest/receipt,
   link/command, marker, or reconciliation gate is `BLOCKING`; unrelated drift is
   `FOLLOW_UP`; retained provenance and bounded telemetry are `INFORMATIONAL`.
-- **Evidence placeholders:** Source `[pending merged diff and predecessor evidence]`;
-  deploy/health `[pending current-source rebuild/restart and route probes]`;
-  visual `[pending changed-route + passive 1440x900/390x844 artifacts]`; security
-  `[pending bounded review]`; containment `[pending fixture E2E + strict audit]`;
-  docs/markers `[pending link/command/append-only/agent/diff reconciliation]`.
-- **Planned marker entries (not live):** append `work-started` for `AUTH-112`
-  after all predecessors and ownership are ready, then append one matching
-  `work-complete` entry after merged acceptance and reconciliation pass.
+- **Evidence:** Final merged and deployed SHA is
+  `4fab36292c98310ecee0777029ef981b38644498`; final safety backup is
+  `69dae402-e0c5-4944-b2e8-5cd360f8e977`. Secret-free image-provenance
+  verification passed; database integrity and foreign-key checks were zero;
+  health and exact OCI revision checks passed; fixture ownership and strict
+  containment stopped cleanly. Whole-product evidence records Core 1059, email
+  103, extension 133, API 1726, server 458, and Dashboard 695/691
+  latest-complete counts. The root release `npm test` record at the `bc3daec`
+  boundary is `3450/306`, with no skips/only; subsequent focused regressions
+  were green. Bug-sweep fixes are `01ef5ac`, `229d623`, and `69d2da5`; the
+  Ponytail audit/refactor `3b70bc4` is net -5 lines and contains only
+  evidence-backed reuse changes, with no speculative refactors.
+
+  MCP acceptance is exact at 282 catalog tools: 280 stdio entries, 2 extension
+  tools, and 30 categories; live scoped smoke, policy, tampering,
+  `TOOL_DISABLED`, and child-inheritance checks passed. Full fixture E2E passed
+  130/130, route parity passed 62/62 across 24 routes and 14 Settings links,
+  and production/compatibility smokes, DB isolation, artifact hygiene, and
+  strict containment passed. Final security is `PASS`; the malformed-cookie
+  defect was fixed and rechecked.
+
+  Dedicated QA Vision found the CLI query-mode defect. After that fix, its
+  browser tools were unavailable twice; no unavailable-tool run is claimed.
+  The configured browser-agent fallback plus focused Playwright and deployment
+  evidence covered desktop/mobile CLI selection, positive runtime iframe flow,
+  and found no console, network, overflow, or CSP issue.
+
+  Non-blocking follow-ups only: the preserved password/OIDC/MFA rollback risk
+  accepted by user choice; unrelated dependency advisories; existing dashboard
+  lint warnings; unrun mail-specific real coverage, real external provider/mail
+  suites, and manual/destructive operations; retained historical/manual
+  evidence classes; and the dedicated QA Vision tool-availability issue. These
+  are `FOLLOW_UP` or `INFORMATIONAL`, not blockers, and no follow-up work is
+  dispatched.
 
 ### Work marker log (continued)
 
 <!-- (work-started) OIDC-100 2026-08-15T01:15:31Z ingenium-software-engineer-premium -->
-Focused implementation evidence is recorded above. A matching `work-complete`
-marker requires the separately declared deployed route-health, bounded security,
-and containment gates; the existing `RESTORE-101` active marker remains open.
+<!-- (work-complete) RESTORE-101 2026-08-15T21:05:00Z ingenium-docs -->
+Evidence RESTORE-101: The fixed Supervisor executor, paired swap/rollback,
+pre-restore safety snapshot, schema/integrity checks, and bounded journal
+recovery are source-verified and covered by the final deployed health, fixture,
+and strict-containment acceptance. No live-volume restore was executed.
+<!-- (work-started) RESTORE-103 2026-08-15T21:05:01Z ingenium-docs -->
+<!-- (work-complete) RESTORE-103 2026-08-15T21:05:02Z ingenium-docs -->
+Evidence RESTORE-103: Commit `9a3404f` implements token-only invalidation after
+the pre-auth maintenance upgrade and before `rehydrated`/restart. The focused
+record is 31 core plus 11 maintenance tests; passwords, OIDC identities, TOTP,
+and recovery material were preserved. The rollback risk from external clients
+or caches retaining an observed revocation was recorded and accepted by user
+choice. Final backup, deployment, health, security, fixture, and containment
+evidence is included in AUTH-112.
+<!-- (work-complete) OIDC-100 2026-08-15T21:05:03Z ingenium-docs -->
+Evidence OIDC-100: Commit `7927a1f` passed 76 endpoint-policy tests and 19 OIDC
+tests plus the broader core/API/startup/injected-key checks; final bounded
+security review was `PASS` with no blocker. The deployed boundary rejects
+private/redirect/unbounded transport behavior and preserves redacted errors and
+audit evidence.
+<!-- (work-started) RUNTIME-100 2026-08-15T21:05:04Z ingenium-docs -->
+<!-- (work-complete) RUNTIME-100 2026-08-15T21:05:05Z ingenium-docs -->
+Evidence RUNTIME-100: Source `3c71f3e`, remediation through `bc3daec`, and final
+deployment `4fab362` pass explicit picker, activity, profile-alias, Web/CLI/VS
+Code launch, CSP, and runtime-activity acceptance. Reconciler, cookie, and
+query-mode defects were fixed and rechecked. Dedicated QA Vision first found
+the CLI query defect; after the fix its browser tools were unavailable twice,
+so configured browser-agent fallback plus focused Playwright/deployment
+evidence is the claimed post-fix visual coverage.
+<!-- (work-started) TELEMETRY-100 2026-08-15T21:05:06Z ingenium-docs -->
+<!-- (work-complete) TELEMETRY-100 2026-08-15T21:05:07Z ingenium-docs -->
+Evidence TELEMETRY-100: Commit `7c9bfd4` passed 74 focused retention tests and
+strict containment. The real preview found 0 eligible and 475 excluded roots;
+there was no execution or deletion, and exact confirmation was unnecessary
+because eligible was zero. Excluded and historical/manual evidence remained
+retained for manual review.
+<!-- (work-started) AUTH-112 2026-08-15T21:05:08Z ingenium-docs -->
+<!-- (work-complete) AUTH-112 2026-08-15T21:05:09Z ingenium-docs -->
+Evidence AUTH-112: Final deployed SHA `4fab36292c98310ecee0777029ef981b38644498`
+and final backup `69dae402-e0c5-4944-b2e8-5cd360f8e977` are recorded with
+secret-free provenance PASS, DB integrity/FK zero, exact health/OCI provenance,
+and clean owned-process/port/temp containment. Core/email/extension/API/server/
+Dashboard evidence is 1059/103/133/1726/458/695/691; root release `npm test`
+was `3450/306` at `bc3daec` with no skips/only, and focused regressions stayed
+green. MCP 282/280/2 across 30 categories passed live scoped smoke, policy,
+tampering, `TOOL_DISABLED`, and child-inheritance checks. Ponytail audit/refactor
+`3b70bc4` was net -5 lines with evidence-backed reuse only. Fixture E2E was
+130/130; route parity was 62/62 across 24 routes and 14 Settings links; DB
+isolation, artifact hygiene, production/compatibility smokes, and strict
+containment passed. Final security was `PASS`, including malformed-cookie
+recheck. QA Vision tool unavailability after its CLI-query finding is disclosed
+above; browser-agent fallback and focused Playwright/deployment evidence cover
+desktop/mobile selection and positive iframe flow without console/network/
+overflow/CSP issues. Remaining items are non-blocking FOLLOW_UP/INFORMATIONAL:
+user-accepted preserved-auth rollback risk, unrelated dependency advisories,
+existing dashboard lint warnings, unrun mail/provider/manual/destructive suites,
+retained historical/manual evidence classes, and QA Vision tool availability.

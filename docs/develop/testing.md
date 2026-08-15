@@ -381,6 +381,10 @@ does not create a plan, lock, quarantine, or receipt:
 npx tsx tests/test-artifact-retention.ts preview
 ```
 
+If preview reports zero eligible run roots, that is a complete read-only no-op:
+do not invent a digest confirmation, execute a deletion, or create a receipt.
+Excluded evidence remains retained for manual review.
+
 The initial policy auto-selects only telemetry at least 30 days old whose
 schema, repository/run/nonce/path identity, owner-only modes, device/inode,
 single-link file, and exact one-file inventory are valid. The telemetry must be

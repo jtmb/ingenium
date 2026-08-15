@@ -10,9 +10,9 @@ description: Iframe sandbox configuration, risk assessment, and deferred securit
 > from all OpenCode iframes in Phase 2: OpenCode is trusted first-party content embedded
 > via local compatibility roots or authenticated runtime-specific HTTPS origins. The same-origin proxy rewrites
 > (`/opencode-web/`, `/opencode-cli/`) were also removed. The Email HTML iframe retains
-> its separate sandbox policy (no `allow-scripts`). CSP/frame-ancestor policy remains
+> its separate sandbox policy (no `allow-scripts`). CSP and frame-ancestor policies
 > are enforced by the AUTH-109 runtime gateway.
-> **Last updated**: 2026-08-14
+> **Last updated**: 2026-08-15
 
 ---
 
@@ -360,14 +360,24 @@ page still works:
 4. **Chromium sandbox-escape warning resolved** — removing the `allow-scripts
    allow-same-origin` combination eliminates the browser warning.
 
-### ⏳ Deferred (Requires Runtime Testing)
+### ⏳ Remaining manual review
 
-1. **CSP for iframe-loaded resources** — service-specific CSP headers for
-   opencode-web and ttyd responses, restricting what those services can load.
-2. **Email HTML iframe sandbox audit** — the email reader's iframe currently
+1. **Email HTML iframe sandbox audit** — the email reader's iframe currently
    uses a different, more restrictive sandbox (`allow-same-origin allow-popups
    allow-popups-to-escape-sandbox`, no `allow-scripts`). This should be
    reviewed for completeness.
+
+### ✅ Final runtime verification
+
+The deployed follow-up release verified the explicit workspace picker, positive
+Web/CLI/VS Code launch and activity flow, profile-aware compatibility/production
+aliases, and gateway CSP/frame-ancestor behavior. Runtime reconciler, audience
+cookie, and OpenCode query-mode defects were fixed and rechecked. Dedicated QA
+Vision found the CLI query-mode defect; after that fix its browser tools were
+unavailable twice, so no post-fix QA Vision run is claimed. The configured
+browser-agent fallback plus focused Playwright and deployment evidence covered
+desktop/mobile CLI selection and the positive iframe flow with no console,
+network, overflow, or CSP issues.
 
 ### Testing Notes
 

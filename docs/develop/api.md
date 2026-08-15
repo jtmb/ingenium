@@ -98,7 +98,12 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 
   > Rate limit state is in-memory only — resets on process restart. Suitable for single-instance deployments with supervisord restarts. For multi-replica deployments, replace with Redis or an external store.
 
-- **CSP**: Helmet's default Content-Security-Policy is applied. No custom CSP directives are configured. Iframe sandboxing is handled via the `sandbox` attribute on embedded iframes (see [Iframe Sandbox](../security/iframe-sandbox.md)), not via CSP `frame-ancestors`. CSP expansion remains deferred (see [Deferred Items in iframe-sandbox.md](../security/iframe-sandbox.md#-deferred-requires-runtime-testing)).
+- **CSP**: Helmet's default Content-Security-Policy is applied to the dashboard.
+  OpenCode and VS Code are trusted separate-origin iframes without a `sandbox`
+  attribute. The gateway owns the `frame-ancestors` policy and applies the
+  validated dashboard/runtime frame and connection allowlists; private
+  4098/4099/4100 listeners remain unpublished. See [Iframe Sandbox](../security/iframe-sandbox.md)
+  for the security boundary and current verification status.
 
 ## API Endpoints by Category
 
