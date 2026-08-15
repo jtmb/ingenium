@@ -30,8 +30,9 @@ export async function reconcileRuntimes(now = new Date()): Promise<void> {
       }
       let runtime = runtimes.getRuntimeInstance(original.id);
       if (!runtime || runtime.revision !== original.revision) continue;
+      if (runtime.state === "STOPPING") continue;
       if (backend.state !== "running" || (runtime.backendContainerId && backend.backendId !== runtime.backendContainerId)) {
-        if (runtime.state !== "STOPPING") runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "FAILED", actorType: "system", actorId: "runtime-reconciler" });
+        runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "FAILED", actorType: "system", actorId: "runtime-reconciler" });
         continue;
       }
       if (backend.backendId && runtime.backendContainerId === backend.backendId) {

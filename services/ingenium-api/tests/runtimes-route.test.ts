@@ -21,6 +21,8 @@ let directory = "";
 let managerFailure = false;
 let managerRuntimeState = "running";
 let managerRequests: string[] = [];
+let holdManagerStop = false;
+let releaseManagerStop: (() => void) | null = null;
 let browserSession: ReturnType<typeof authentication.createSession> | null = null;
 const token = "a".repeat(43);
 
@@ -74,12 +76,14 @@ beforeAll(async () => {
     }
     const match = /^\/v1\/runtimes\/([0-9a-f-]+)(?:\/stop)?$/.exec(request.url ?? "");
     const runtimeId = match?.[1] ?? "11111111-1111-4111-8111-111111111111";
-    response.writeHead(request.url === "/v1/runtimes" ? 202 : 200).end(JSON.stringify({ data: {
+    const finish = () => response.writeHead(request.url === "/v1/runtimes" ? 202 : 200).end(JSON.stringify({ data: {
       backendId: "a".repeat(64),
       backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
       state: request.url?.endsWith("/stop") ? "exited" : managerRuntimeState,
       health: "starting",
     } }));
+    if (holdManagerStop && request.url?.endsWith("/stop")) releaseManagerStop = finish;
+    else finish();
   });
   managerBase = await listen(manager);
   process.env.INGENIUM_RUNTIME_MANAGER_URL = `${managerBase}/`;
@@ -99,6 +103,8 @@ beforeEach(() => {
   managerFailure = false;
   managerRuntimeState = "running";
   managerRequests = [];
+  holdManagerStop = false;
+  releaseManagerStop = null;
   browserSession = null;
   process.env.INGENIUM_DEPLOYMENT_MODE = "control-plane";
   process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
@@ -107,6 +113,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseManagerStop?.();
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   delete process.env.INGENIUM_RUNTIME_ROOT_DOMAIN;
@@ -210,6 +217,35 @@ describe("AUTH-108 runtime routes", () => {
     await reconcileRuntimes();
 
     expect(runtimes.getRuntimeInstance(runtime.id)?.state).toBe("FAILED");
+  });
+
+  it("does not race a clean stop with reconciler health bookkeeping", async () => {
+    createWorkspace("runtime-route-stop");
+    const provisioned = await fetch(`${apiBase}/api/v1/runtimes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: "runtime-route-stop" }),
+    });
+    expect(provisioned.status).toBe(202);
+    let runtime = runtimes.getRuntimeForWorkspace("runtime-route-stop")!;
+    runtime = runtimes.transitionRuntime({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      toState: "READY",
+      actorType: "system",
+      actorId: "test",
+    });
+    holdManagerStop = true;
+
+    const stopping = fetch(`${apiBase}/api/v1/runtimes/${runtime.id}/stop`, { method: "POST" });
+    await expect.poll(() => runtimes.getRuntimeInstance(runtime.id)?.state).toBe("STOPPING");
+    await reconcileRuntimes();
+    releaseManagerStop?.();
+    releaseManagerStop = null;
+
+    const stopped = await stopping;
+    expect(stopped.status).toBe(200);
+    await expect(stopped.json()).resolves.toMatchObject({ data: { state: "STOPPED" } });
   });
 
   it("returns opaque browser status and atomically exchanges a browser launch ticket", async () => {
