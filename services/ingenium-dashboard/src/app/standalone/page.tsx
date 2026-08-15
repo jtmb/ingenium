@@ -8,6 +8,7 @@ import OpenCodeFrame from "../components/OpenCodeFrame";
 import VSCodeFrame from "../components/VSCodeFrame";
 import { api, type DocSpace } from "@/lib/api";
 import { buildStandaloneDocsHandoffUrl } from "../docs/docs-navigation";
+import { parseOpenCodeMode, useOpenCodeMode } from "@/lib/open-code-mode";
 
 /**
  * StandalonePage — Renders page content WITHOUT the full layout chrome
@@ -53,7 +54,7 @@ function StandaloneContent() {
   const stateParams: Record<string, string> = {};
   searchParams.forEach((value, key) => {
     if (key !== "page" && key !== "standalone") {
-      stateParams[key] = value;
+      stateParams[key] = page === "opencode" && key === "mode" ? parseOpenCodeMode(value) : value;
     }
   });
 
@@ -96,7 +97,7 @@ function StandaloneContent() {
       </header>
 
       <div className="flex-1 min-h-0">
-        {page === "opencode" && <StandaloneOpenCode />}
+        {page === "opencode" && <StandaloneOpenCode modeParam={searchParams.get("mode")} />}
         {page === "vscode" && <StandaloneVSCode />}
         {page === "chat" && <StandaloneChat />}
         {page === "mail" && <StandaloneMail />}
@@ -119,25 +120,8 @@ function StandaloneVSCode() {
  * Standalone OpenCode view — two iframes (Web/CLI) with mode toggle.
  * Replicates the OpenCodeFrame logic without the pathname guard.
  */
-function StandaloneOpenCode() {
-  const [mode, setMode] = useState<"web" | "cli">("web");
-  const [cliMounted, setCliMounted] = useState(false);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("opencode-mode");
-      if (saved === "cli" || saved === "web") {
-        setMode(saved);
-        if (saved === "cli") setCliMounted(true);
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  const handleModeChange = (newMode: "web" | "cli") => {
-    setMode(newMode);
-    try { localStorage.setItem("opencode-mode", newMode); } catch { /* ignore */ }
-    if (newMode === "cli" && !cliMounted) setCliMounted(true);
-  };
+function StandaloneOpenCode({ modeParam }: { modeParam: string | null }) {
+  const { mode, cliMounted, changeMode } = useOpenCodeMode(modeParam);
 
   return (
     <div className="relative w-full h-full">
@@ -148,7 +132,7 @@ function StandaloneOpenCode() {
         style={{ transition: "transform 0.15s ease" }}
       >
         <button
-          onClick={() => handleModeChange("web")}
+          onClick={() => changeMode("web")}
           className={`p-1.5 rounded text-xs transition-colors ${
             mode === "web"
               ? "bg-[var(--color-accent)] text-white"
@@ -164,7 +148,7 @@ function StandaloneOpenCode() {
           </svg>
         </button>
         <button
-          onClick={() => handleModeChange("cli")}
+          onClick={() => changeMode("cli")}
           className={`p-1.5 rounded text-xs transition-colors ${
             mode === "cli"
               ? "bg-[var(--color-accent)] text-white"

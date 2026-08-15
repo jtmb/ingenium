@@ -17,11 +17,18 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   });
 
   async function mockOpenCodeHealth(page: Page) {
-    await page.route("**/api/v1/opencode/health**", (route) =>
+    await page.route("**/api/v1/runtimes/browser/status", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ data: { healthy: true, status: "ready" } }),
+        body: JSON.stringify({ data: { mode: "compatibility", status: "ready", reason: null } }),
+      }),
+    );
+    await page.route("**/api/v1/runtimes/browser/health?audience=*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ data: { status: "ready" } }),
       }),
     );
   }
@@ -228,4 +235,49 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     const display = await cliFrame.evaluate((el) => window.getComputedStyle(el).display);
     expect(display).not.toBe("none");
   });
+
+  for (const viewport of [
+    { name: "desktop", width: 1440, height: 900 },
+    { name: "mobile", width: 390, height: 844 },
+  ]) {
+    test(`${viewport.name} query mode selects CLI, requests its audience, and safely falls back from invalid mode`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript(() => localStorage.setItem("opencode-mode", "web"));
+      const consoleErrors: string[] = [];
+      const audiences: string[] = [];
+      page.on("console", (message) => {
+        if (message.type() === "error") consoleErrors.push(message.text());
+      });
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (url.pathname === "/api/v1/runtimes/browser/health") audiences.push(url.searchParams.get("audience") ?? "");
+      });
+
+      await page.goto("/opencode?mode=cli", { waitUntil: "domcontentloaded" });
+      const cliButton = page.locator(SWITCH_TO_CLI);
+      await expect(cliButton).toHaveAttribute("aria-pressed", "true");
+      await expect(page.locator(SWITCH_TO_WEB)).toHaveAttribute("aria-pressed", "false");
+      await expect(page.locator(CLI_IFRAME)).toBeVisible({ timeout: 10000 });
+      await expect.poll(() => audiences).toContain("cli");
+
+      await page.evaluate(() => {
+        (window as typeof window & { __openedUrl?: string }).__openedUrl = undefined;
+        window.open = ((url?: string | URL) => {
+          (window as typeof window & { __openedUrl?: string }).__openedUrl = String(url);
+          return null;
+        }) as typeof window.open;
+      });
+      await page.getByRole("button", { name: "Pop out to new window" }).click();
+      expect(await page.evaluate(() => (window as typeof window & { __openedUrl?: string }).__openedUrl))
+        .toBe("/standalone?page=opencode&mode=cli");
+
+      await page.goto("/standalone?page=opencode&mode=cli", { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "CLI mode" })).toHaveAttribute("aria-pressed", "true");
+
+      await page.goto("/opencode?mode=%25", { waitUntil: "domcontentloaded" });
+      await expect(page.locator(SWITCH_TO_WEB)).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => new URL(page.url()).searchParams.get("mode")).toBe("web");
+      expect(consoleErrors).toEqual([]);
+    });
+  }
 });

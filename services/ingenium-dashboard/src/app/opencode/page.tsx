@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import OpenCodeFrame from "../components/OpenCodeFrame";
 import OpenCodeToolbar from "../components/OpenCodeToolbar";
-
-type OpenCodeMode = "web" | "cli";
+import { useOpenCodeMode } from "@/lib/open-code-mode";
 
 /**
  * OpenCode page — dual-mode interface: Web, CLI.
@@ -19,47 +19,23 @@ type OpenCodeMode = "web" | "cli";
  * is now a standalone page at /chat.
  */
 export default function OpenCodePage() {
-  const [mode, setMode] = useState<OpenCodeMode>("web");
-  const [cliMounted, setCliMounted] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<"pending" | "connected" | "error">("pending");
-
-  // Load persisted mode from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("opencode-mode");
-      if (saved === "cli") {
-        setMode("cli");
-        // A persisted CLI choice is still a first activation for this page
-        // instance, so mount the terminal alongside the restored mode.
-        setCliMounted(true);
-      }
-      // "chat" and any other value fall back to "web" (default)
-    } catch {
-      // localStorage may be unavailable (SSR, incognito, etc.)
-    }
-  }, []);
-
-  // Persist mode choice; lazy-mount CLI iframe on first CLI activation
-  const handleModeChange = useCallback(
-    (newMode: OpenCodeMode) => {
-      setMode(newMode);
-      try {
-        localStorage.setItem("opencode-mode", newMode);
-      } catch {
-        // Silently ignore localStorage failures
-      }
-      if (newMode === "cli" && !cliMounted) {
-        setCliMounted(true);
-      }
-    },
-    [cliMounted],
+  return (
+    <Suspense fallback={<div className="h-full bg-black" />}>
+      <OpenCodeContent />
+    </Suspense>
   );
+}
+
+function OpenCodeContent() {
+  const searchParams = useSearchParams();
+  const { mode, cliMounted, changeMode } = useOpenCodeMode(searchParams.get("mode"));
+  const [connectionStatus, setConnectionStatus] = useState<"pending" | "connected" | "error">("pending");
 
   return (
     <div className="flex flex-col h-full min-h-0">
       <OpenCodeToolbar
         mode={mode}
-        onModeChange={handleModeChange}
+        onModeChange={changeMode}
         status={connectionStatus}
       />
       <div className="flex-1 relative bg-black">

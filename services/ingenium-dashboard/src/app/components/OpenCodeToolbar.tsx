@@ -49,7 +49,7 @@ export default function OpenCodeToolbar({
 
   const handlePopOut = () => {
     window.open(
-      "/standalone?page=opencode",
+      `/standalone?page=opencode&mode=${mode}`,
       "_blank",
       "width=1280,height=900,noopener"
     );

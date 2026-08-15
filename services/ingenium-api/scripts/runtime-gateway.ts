@@ -21,6 +21,10 @@ const COOKIE_NAMES: Record<Audience, string> = {
   vscode: "__Host-ingenium_runtime_vscode",
 };
 const BACKEND_PORTS: Record<Audience, number> = { web: 4098, cli: 4099, vscode: 4100 };
+const MAX_COOKIE_HEADER_LENGTH = 4_096;
+const MAX_COOKIE_COUNT = 64;
+const MAX_ENCODED_RUNTIME_TOKEN_LENGTH = 128;
+const RUNTIME_SESSION_TOKEN = /^rbs_[A-Za-z0-9_-]{43}$/;
 const HOP_HEADERS = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
 const PRIVATE_HEADERS = new Set([
   "authorization", "cookie", "forwarded", "proxy-authorization", "x-authenticated-user", "x-auth-request-user",
@@ -61,12 +65,30 @@ export function runtimeScope(request: Pick<IncomingMessage, "headers">): Runtime
   return { audience: match[1] as Audience, runtimeId: match[2]!, host, origin: `https://${host}` };
 }
 
-function cookie(request: IncomingMessage, name: string): string | undefined {
-  for (const part of request.headers.cookie?.split(";") ?? []) {
-    const [key, ...value] = part.trim().split("=");
-    if (key === name) return decodeURIComponent(value.join("="));
+export function runtimeSessionCookie(request: Pick<IncomingMessage, "headers">, name: string): string | undefined {
+  const header = request.headers.cookie;
+  if (!header || header.length > MAX_COOKIE_HEADER_LENGTH) return undefined;
+  const parts = header.split(";");
+  if (parts.length > MAX_COOKIE_COUNT) return undefined;
+
+  let matched = false;
+  let token: string | undefined;
+  for (const part of parts) {
+    const separator = part.indexOf("=");
+    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+    if (matched) return undefined;
+    matched = true;
+    const encoded = part.slice(separator + 1).trim();
+    if (encoded.length > MAX_ENCODED_RUNTIME_TOKEN_LENGTH) return undefined;
+    try {
+      const decoded = decodeURIComponent(encoded);
+      if (!RUNTIME_SESSION_TOKEN.test(decoded)) return undefined;
+      token = decoded;
+    } catch {
+      return undefined;
+    }
   }
-  return undefined;
+  return token;
 }
 
 export function gatewayRequestHeaders(token: string): Record<string, string> {
@@ -264,7 +286,7 @@ async function health(request: IncomingMessage, response: ServerResponse, scope:
     reject(response, 403, "Runtime health origin is not allowed");
     return;
   }
-  const token = cookie(request, COOKIE_NAMES[scope.audience]);
+  const token = runtimeSessionCookie(request, COOKIE_NAMES[scope.audience]);
   const resolved = token ? await validate(scope, token).catch(() => undefined) : undefined;
   if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName)) {
     reject(response, 503, "Runtime audience is unavailable", origin);
@@ -281,7 +303,7 @@ async function health(request: IncomingMessage, response: ServerResponse, scope:
 }
 
 async function proxyHttp(request: IncomingMessage, response: ServerResponse, scope: RuntimeScope): Promise<void> {
-  const token = cookie(request, COOKIE_NAMES[scope.audience]);
+  const token = runtimeSessionCookie(request, COOKIE_NAMES[scope.audience]);
   if (!token) return reject(response);
   const suppliedOrigin = request.headers.origin;
   if (suppliedOrigin && suppliedOrigin !== scope.origin) return reject(response, 403, "Runtime request origin is not allowed");
@@ -330,7 +352,7 @@ async function proxyHttp(request: IncomingMessage, response: ServerResponse, sco
 }
 
 async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Buffer, scope: RuntimeScope): Promise<void> {
-  const token = cookie(request, COOKIE_NAMES[scope.audience]);
+  const token = runtimeSessionCookie(request, COOKIE_NAMES[scope.audience]);
   if (!token || (request.headers.origin !== undefined && request.headers.origin !== scope.origin)) {
     socket.destroy();
     return;
@@ -386,6 +408,23 @@ async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Bu
   upstream.end();
 }
 
+export function handleRuntimeGatewayRequest(request: IncomingMessage, response: ServerResponse): void {
+  const scope = runtimeScope(request);
+  if (!scope) {
+    reject(response, 421, "Runtime host is not recognized");
+    return;
+  }
+  if (request.url === "/__ingenium/exchange") {
+    exchange(request, response, scope);
+    return;
+  }
+  if (request.url === "/__ingenium/health") {
+    void health(request, response, scope);
+    return;
+  }
+  void proxyHttp(request, response, scope);
+}
+
 export function startRuntimeGateway() {
   rootDomain();
   dashboardOrigins();
@@ -396,22 +435,7 @@ export function startRuntimeGateway() {
     cert: readFileSync(required("INGENIUM_RUNTIME_TLS_CERT_FILE")),
     key: readFileSync(required("INGENIUM_RUNTIME_TLS_KEY_FILE")),
     minVersion: "TLSv1.2",
-  }, (request, response) => {
-    const scope = runtimeScope(request);
-    if (!scope) {
-      reject(response, 421, "Runtime host is not recognized");
-      return;
-    }
-    if (request.url === "/__ingenium/exchange") {
-      exchange(request, response, scope);
-      return;
-    }
-    if (request.url === "/__ingenium/health") {
-      void health(request, response, scope);
-      return;
-    }
-    void proxyHttp(request, response, scope);
-  });
+  }, handleRuntimeGatewayRequest);
   server.on("upgrade", (request, socket, head) => {
     const scope = runtimeScope(request);
     if (!scope || request.url === "/__ingenium/exchange") {

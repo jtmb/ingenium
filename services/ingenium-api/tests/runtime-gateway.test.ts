@@ -1,16 +1,42 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
   gatewayRequestHeaders,
+  handleRuntimeGatewayRequest,
   isRuntimeGenerationRequest,
   isRuntimeHealthRequest,
   proxyResponseHeaders,
   runtimeBackendHealthPath,
   runtimeCookie,
+  runtimeSessionCookie,
   runtimeScope,
   sanitizedHeaders,
 } from "../scripts/runtime-gateway.js";
 
 const runtimeId = "11111111-1111-4111-8111-111111111111";
+const webCookieName = "__Host-ingenium_runtime_web";
+const sessionToken = `rbs_${"a".repeat(43)}`;
+
+function gatewayRequest(port: number, cookie?: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: "127.0.0.1",
+      port,
+      path: "/",
+      headers: {
+        Host: `web--${runtimeId}.runtime.example.test`,
+        ...(cookie === undefined ? {} : { Cookie: cookie }),
+      },
+    }, (response) => {
+      response.resume();
+      response.once("end", () => resolve(response.statusCode ?? 0));
+    });
+    request.once("error", reject);
+    request.end();
+  });
+}
 
 beforeEach(() => {
   process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
@@ -61,11 +87,10 @@ describe("AUTH-109 runtime gateway", () => {
   });
 
   it.each(["web", "cli", "vscode"] as const)("uses a cross-site embeddable host-only secure %s cookie and replaces upstream frame denial", (audience) => {
-    const token = `rbs_${"a".repeat(43)}`;
-    expect(runtimeCookie(audience, token, 60)).toBe(
-      `__Host-ingenium_runtime_${audience}=${token}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=60`,
+    expect(runtimeCookie(audience, sessionToken, 60)).toBe(
+      `__Host-ingenium_runtime_${audience}=${sessionToken}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=60`,
     );
-    expect(runtimeCookie(audience, token, 60)).not.toContain("Domain=");
+    expect(runtimeCookie(audience, sessionToken, 60)).not.toContain("Domain=");
     const scope = runtimeScope({ headers: { host: `${audience}--${runtimeId}.runtime.example.test` } })!;
     const headers = proxyResponseHeaders({
       "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
@@ -79,6 +104,31 @@ describe("AUTH-109 runtime gateway", () => {
     expect(headers).not.toHaveProperty("x-frame-options");
     expect(headers).not.toHaveProperty("set-cookie");
     expect(headers.location).toBe(`${scope.origin}/path`);
+  });
+
+  it("parses only one bounded valid audience cookie and rejects malformed, oversized, or duplicate values", () => {
+    const cookie = runtimeCookie("web", sessionToken, 60).split(";", 1)[0]!;
+    expect(runtimeSessionCookie({ headers: { cookie: `theme=dark; ${cookie}; compact=1` } }, webCookieName)).toBe(sessionToken);
+    expect(runtimeSessionCookie({ headers: { cookie: `${webCookieName}=%` } }, webCookieName)).toBeUndefined();
+    expect(runtimeSessionCookie({ headers: { cookie: `${webCookieName}=${"a".repeat(4_097)}` } }, webCookieName)).toBeUndefined();
+    expect(runtimeSessionCookie({ headers: { cookie: `${cookie}; ${cookie}` } }, webCookieName)).toBeUndefined();
+    expect(runtimeSessionCookie({ headers: { cookie: `${Array.from({ length: 64 }, (_, index) => `c${index}=x`).join(";")};${cookie}` } }, webCookieName)).toBeUndefined();
+  });
+
+  it("denies malformed percent encoding without terminating the gateway process", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const server = createServer(handleRuntimeGatewayRequest);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      expect(await gatewayRequest(port, `${webCookieName}=%`)).toBe(401);
+      expect(server.listening).toBe(true);
+      expect(await gatewayRequest(port)).toBe(401);
+      expect(server.listening).toBe(true);
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it("rejects a launcher origin that only extends an allowed origin", () => {
