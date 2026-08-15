@@ -30,7 +30,7 @@ type RuntimeStart = { status: "ready" | "starting" };
 type RuntimeHealth = { status: "ready" | "unavailable" };
 
 export const RUNTIME_START_POLL_MS = 1_000;
-export const RUNTIME_START_MAX_ATTEMPTS = 10;
+export const RUNTIME_START_MAX_ATTEMPTS = 60;
 const LAST_WORKSPACE_KEY = "ingenium-runtime-workspace-preference";
 
 function compatibilityUrl(audience: RuntimeAudience): string {
