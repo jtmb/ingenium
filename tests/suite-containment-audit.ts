@@ -32,6 +32,15 @@ import {
   inspectComposeOwnership,
   type ComposeOwnershipReport,
 } from "./compose-ownership";
+import {
+  inspectTestRunArtifactLock,
+  listTestRunRetentionLockEntries,
+  retentionRunIdFromLockEntry,
+} from "./test-run-retention-lock";
+import {
+  inspectValidatedArtifactRetentionTransition,
+  type ArtifactRetentionTransitionInspection,
+} from "./test-artifact-retention";
 
 const DEFAULT_PORTS = [3000, 4097, 1455, 4098, 4099, 4999];
 const DEFAULT_TEMP_PREFIX = "ingenium-playwright-";
@@ -123,6 +132,9 @@ export interface ContainmentAuditReport {
   preexistingUnownedProcesses: PreexistingUnownedProcessState[];
   holds: string[];
   telemetryErrors: string[];
+  /** Active valid transitions are retried once; malformed/expired markers fail. */
+  retentionTransitions: string[];
+  retentionErrors: string[];
   /** Retained evidence from pre-runner/legacy suites; never a runnable run. */
   legacyEvidence: string[];
   /** Human-readable audit information that is intentionally not a failure. */
@@ -709,6 +721,30 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   const scopedTelemetry = scopedTelemetryPaths(loadedManifest.manifest, options);
   const telemetry: TestRunTelemetry[] = [];
   const telemetryErrors: string[] = [];
+  const retentionTransitions: string[] = [];
+  const retentionErrors: string[] = [];
+  const activeRetentionRuns = new Map<string, Extract<ArtifactRetentionTransitionInspection, { state: "valid" }>>();
+  const artifactRoot = getTestRunArtifactRoot(repoRoot);
+  for (const entry of listTestRunRetentionLockEntries(artifactRoot)) {
+    const runId = retentionRunIdFromLockEntry(entry);
+    if (!runId) {
+      retentionErrors.push(`retention marker malformed: ${entry}`);
+      continue;
+    }
+    const rawLock = inspectTestRunArtifactLock(artifactRoot, runId);
+    if (rawLock.state === "active" && rawLock.owner.mode === "writer") continue;
+    const inspection = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+    if (inspection.state === "valid" && inspection.phase === "prepared") {
+      continue;
+    }
+    if (inspection.state === "valid") {
+      activeRetentionRuns.set(runId, inspection);
+      retentionTransitions.push(`active retention transition: ${runId}`);
+      if (!telemetryPaths.includes(inspection.telemetryPath)) telemetryPaths.push(inspection.telemetryPath);
+    } else if (inspection.state === "invalid") {
+      retentionErrors.push(`retention marker invalid: ${runId} (${inspection.code})`);
+    }
+  }
   const legacyEvidence = legacyEvidenceDirectories(repoRoot);
   const artifactClassifications = artifactEvidenceClassifications(repoRoot);
   const artifactResiduals = artifactClassifications
@@ -719,7 +755,45 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     try {
       telemetry.push(readTestRunTelemetryForContainmentAudit(path, repoRoot));
     } catch (error) {
-      telemetryErrors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+      const runId = basename(dirname(path));
+      const telemetryError = error instanceof Error ? error.message : String(error);
+      let initialTransition = activeRetentionRuns.get(runId);
+      if (!initialTransition) {
+        const observed = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+        if (observed.state === "valid" && observed.phase === "quarantined") {
+          initialTransition = observed;
+          activeRetentionRuns.set(runId, observed);
+          retentionTransitions.push(`active retention transition: ${runId}`);
+        }
+      }
+      if (initialTransition) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+        try {
+          const retried = readTestRunTelemetryForContainmentAudit(path, repoRoot);
+          const afterSuccess = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+          if (afterSuccess.state === "valid") {
+            telemetryErrors.push(`${path}: telemetry was recreated during an active retention transition`);
+          } else {
+            telemetryErrors.push(`${path}: retention marker changed during telemetry retry`);
+          }
+          telemetry.push(retried);
+          continue;
+        } catch (retryError) {
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+          const finalTransition = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+          const sameTransition = finalTransition.state === "valid"
+            && finalTransition.markerToken === initialTransition.markerToken
+            && finalTransition.markerHash === initialTransition.markerHash
+            && finalTransition.quarantinePath === initialTransition.quarantinePath;
+          if (sameTransition && /does not exist|ENOENT/i.test(retryMessage)) continue;
+          telemetryErrors.push(`${path}: retry failed: ${retryMessage}`);
+          if (finalTransition.state !== "valid") {
+            retentionErrors.push(`retention marker invalid after retry: ${runId}`);
+          }
+          continue;
+        }
+      }
+      telemetryErrors.push(`${path}: ${telemetryError}`);
     }
   }
   const managedPorts = new Set<number>();
@@ -854,6 +928,8 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     preexistingUnownedProcesses,
     holds,
     telemetryErrors,
+    retentionTransitions,
+    retentionErrors,
     legacyEvidence,
     informational: [
       ...legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
@@ -861,6 +937,7 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
       ...preexistingUnownedProcesses.map((candidate) =>
         `pre-existing unowned candidate retained: ${candidate.pid} listening on ${candidate.listeningPorts.join(",")}`),
       ...tempAudit.manifestless.map((path) => `manifestless temp evidence retained (unowned, not deleted): ${path}`),
+      ...retentionTransitions,
     ],
     artifactClassifications,
     artifactResiduals,
@@ -886,6 +963,7 @@ export function strictFailures(report: ContainmentAuditReport, manifestError?: s
       && entry.resolution?.status === "resolved");
   if (manifestError && !missingManifestWithResolvedTelemetry) failures.push(`manifest: ${manifestError}`);
   if (report.telemetryErrors.length > 0) failures.push(`telemetry: ${report.telemetryErrors.join("; ")}`);
+  if (report.retentionErrors.length > 0) failures.push(`retention: ${report.retentionErrors.join("; ")}`);
   const openPorts = report.ports
     // A raw expected-port setting is not ownership proof. A listener is
     // accepted only after fixture/Compose ownership or a stable baseline

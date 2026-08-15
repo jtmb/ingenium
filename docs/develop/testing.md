@@ -370,6 +370,67 @@ environment or secret manager; never add them to docs, source, or config.
   `tests/artifacts/test-runs/<run-id>/runner-telemetry.json`; it is recovery
   evidence, not disposable scratch data. Do not relocate it to `/tmp` or
   delete it during broad cleanup.
+
+### Ownership-verified telemetry retention
+
+Retention considers only exact UUID directories directly below
+`tests/artifacts/test-runs/`. The default command is a read-only preview and
+does not create a plan, lock, quarantine, or receipt:
+
+```bash
+npx tsx tests/test-artifact-retention.ts preview
+```
+
+The initial policy auto-selects only telemetry at least 30 days old whose
+schema, repository/run/nonce/path identity, owner-only modes, device/inode,
+single-link file, and exact one-file inventory are valid. The telemetry must be
+complete and explicitly resolved, failure-free, have an absent manifest, no
+active or recorded live identity, and three closed ports. The current/selected
+run and named, legacy, manual, visual, Playwright, temporary, misplaced,
+auxiliary, malformed, symlinked, hardlinked, special, wrong-owner,
+cross-device, or otherwise unknown evidence remain manual regardless of age.
+
+Persist a content-free 15-minute plan and matching report only after reviewing
+the preview:
+
+```bash
+npx tsx tests/test-artifact-retention.ts report
+```
+
+The report prints the exact owner-only plan path and SHA-256 digest. Execution
+has no force/all/delete-unowned mode and requires both values verbatim:
+
+```bash
+npx tsx tests/test-artifact-retention.ts execute \
+  --plan '<exact-plan-path>' \
+  --confirm-sha256 '<exact-plan-digest>'
+npx tsx tests/test-artifact-retention.ts verify \
+  --receipt '<exact-receipt-path>'
+```
+
+Execution takes an atomic per-run lock shared with telemetry and manifest
+writers. A retention marker can be created only by the execute path after plan
+and candidate validation; it binds the plan ID/digest, run nonce, candidate
+path/hash/inodes, owner token, and prepared/quarantined path identity. Execution
+repeats every path/schema/hash/inode/inventory/process/port/manifest check, then
+atomically renames only the exact candidate into the plan's quarantine. The
+final unlink synchronously revalidates the marker, parent/directory identity,
+descriptor/path inode, mode, link count, size, and content hash before removing
+the sole canonical telemetry file and now-empty directory. Any changed
+predicate is retained with a recovery receipt. A crash after quarantine leaves
+the validated marker and exact quarantine path for explicit recovery; there is
+no quarantine sweep. The containment audit retries missing canonical telemetry
+once and omits it only while the same unchanged, validated quarantined marker
+remains active. Recreated telemetry and malformed, forged, expired, dead, or
+changed markers remain strict failures.
+
+Plans, reports, locks, quarantines, and receipts live only under the ignored
+owner-only `tests/artifacts/test-runs/.retention-control/` root. Preview and
+receipts contain policy metadata, UUIDs, reason codes/counts, filesystem
+identity/inventory metadata, byte counts, and hashes—not telemetry failures,
+commands, environments, or payload names. Failure-bearing and auxiliary
+evidence is never automatically eligible in this release.
+
 - Screenshots belong under `tests/artifacts/visual-qa/<run-id>/` or
   `tests/artifacts/manual/<date>/`; never save them at the repository root.
   Visual artifacts must be run-scoped; use a descriptive scope beneath the

@@ -15,6 +15,10 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  acquireTestRunArtifactWriterLock,
+  releaseTestRunArtifactLock,
+} from "./test-run-retention-lock";
 
 export const TEST_RUN_MANIFEST_VERSION = 2;
 export const TEST_RUN_TELEMETRY_VERSION = 1;
@@ -781,7 +785,7 @@ function assertSafeRunDirectory(manifest: TestRunManifest, approvedRoot = getApp
   }
 }
 
-function writeManifest(manifest: TestRunManifest): void {
+function writeManifestUnlocked(manifest: TestRunManifest): void {
   const runDir = assertCanonicalExistingPath(manifest.runDir, getApprovedTempRoot(), "test-run directory");
   const manifestPath = join(runDir, "run-manifest.json");
   if (manifest.manifestPath !== manifestPath) throw new Error("Test-run manifest path is not run-owned");
@@ -1085,6 +1089,10 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
   };
 }
 
+export function parseTestRunTelemetryPayload(value: unknown): TestRunTelemetry {
+  return validateTelemetryShape(value);
+}
+
 function readTelemetryIfPresent(path: string): TestRunTelemetry | undefined {
   if (!existsSync(path)) return undefined;
   let parsed: unknown;
@@ -1123,7 +1131,7 @@ function writeOwnedJson(path: string, value: unknown, containmentRoot: string, n
   }
 }
 
-function writeRunnerTelemetry(manifest: TestRunManifest, now = new Date().toISOString()): void {
+function writeRunnerTelemetryUnlocked(manifest: TestRunManifest, now = new Date().toISOString()): void {
   const telemetryPath = getTestRunTelemetryPath(manifest);
   const artifactDirectory = dirname(telemetryPath);
   const artifactRoot = getTestRunArtifactRoot(manifest.repoRoot);
@@ -1321,25 +1329,49 @@ export function readTestRunTelemetryForContainmentAudit(
   );
 }
 
+function withTestRunArtifactWriterLock<T>(
+  manifestPath: string,
+  action: (manifest: TestRunContext) => T,
+): T {
+  const initial = readTestRunManifest(manifestPath);
+  const lock = acquireTestRunArtifactWriterLock({
+    artifactRoot: getTestRunArtifactRoot(initial.repoRoot),
+    repoRoot: initial.repoRoot,
+    runId: initial.runId,
+    runNonce: initial.runNonce,
+  });
+  try {
+    const manifest = readTestRunManifest(manifestPath);
+    if (manifest.repoRoot !== initial.repoRoot || manifest.runId !== initial.runId
+      || manifest.runNonce !== initial.runNonce) {
+      throw new Error("RUN_ARTIFACT_IDENTITY_CHANGED");
+    }
+    return action(manifest);
+  } finally {
+    releaseTestRunArtifactLock(lock);
+  }
+}
+
 export function markTestRunProcessCleared(
   manifestPath: string,
   record: TestRunProcess,
   now = new Date().toISOString(),
 ): void {
-  const manifest = readTestRunManifest(manifestPath);
-  const telemetryPath = getTestRunTelemetryPath(manifest);
-  const telemetry = readTelemetryIfPresent(telemetryPath);
-  if (!telemetry) throw new Error("Cannot clear a process without runner telemetry");
-  const entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
-  if (entry) {
-    entry.state = "cleared";
-    entry.updatedAt = now;
-  }
-  telemetry.updatedAt = now;
-  telemetry.activeProcesses = telemetry.processes
-    .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
-    .map((candidate) => candidate.record);
-  writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const telemetryPath = getTestRunTelemetryPath(manifest);
+    const telemetry = readTelemetryIfPresent(telemetryPath);
+    if (!telemetry) throw new Error("Cannot clear a process without runner telemetry");
+    const entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
+    if (entry) {
+      entry.state = "cleared";
+      entry.updatedAt = now;
+    }
+    telemetry.updatedAt = now;
+    telemetry.activeProcesses = telemetry.processes
+      .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
+      .map((candidate) => candidate.record);
+    writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  });
 }
 
 export function recordTestRunTelemetryFailure(
@@ -1348,30 +1380,31 @@ export function recordTestRunTelemetryFailure(
   record?: TestRunProcess,
   now = new Date().toISOString(),
 ): void {
-  const manifest = readTestRunManifest(manifestPath);
-  const telemetryPath = getTestRunTelemetryPath(manifest);
-  const telemetry = readTelemetryIfPresent(telemetryPath);
-  if (!telemetry) return;
-  telemetry.status = "stopping";
-  delete telemetry.resolution;
-  telemetry.updatedAt = now;
-  const safeReason = telemetryReason(reason);
-  telemetry.failures.push(safeReason);
-  if (record) {
-    let entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
-    if (!entry) {
-      entry = { record, state: "retained", updatedAt: now, reason: safeReason };
-      telemetry.processes.push(entry);
-    } else {
-      entry.state = "retained";
-      entry.reason = safeReason;
-      entry.updatedAt = now;
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const telemetryPath = getTestRunTelemetryPath(manifest);
+    const telemetry = readTelemetryIfPresent(telemetryPath);
+    if (!telemetry) return;
+    telemetry.status = "stopping";
+    delete telemetry.resolution;
+    telemetry.updatedAt = now;
+    const safeReason = telemetryReason(reason);
+    telemetry.failures.push(safeReason);
+    if (record) {
+      let entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
+      if (!entry) {
+        entry = { record, state: "retained", updatedAt: now, reason: safeReason };
+        telemetry.processes.push(entry);
+      } else {
+        entry.state = "retained";
+        entry.reason = safeReason;
+        entry.updatedAt = now;
+      }
     }
-  }
-  telemetry.activeProcesses = telemetry.processes
-    .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
-    .map((candidate) => candidate.record);
-  writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+    telemetry.activeProcesses = telemetry.processes
+      .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
+      .map((candidate) => candidate.record);
+    writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  });
 }
 
 /**
@@ -1384,25 +1417,26 @@ export function markTestRunRecovered(
   manifestPath: string,
   now = new Date().toISOString(),
 ): void {
-  const manifest = readTestRunManifest(manifestPath);
-  const telemetryPath = getTestRunTelemetryPath(manifest);
-  const telemetry = readTelemetryIfPresent(telemetryPath);
-  if (!telemetry) throw new Error("Cannot resolve a run without runner telemetry");
-  for (const entry of telemetry.processes) {
-    if (entry.state === "active" || entry.state === "retained") {
-      entry.state = "cleared";
-      entry.updatedAt = now;
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const telemetryPath = getTestRunTelemetryPath(manifest);
+    const telemetry = readTelemetryIfPresent(telemetryPath);
+    if (!telemetry) throw new Error("Cannot resolve a run without runner telemetry");
+    for (const entry of telemetry.processes) {
+      if (entry.state === "active" || entry.state === "retained") {
+        entry.state = "cleared";
+        entry.updatedAt = now;
+      }
     }
-  }
-  telemetry.status = "complete";
-  telemetry.updatedAt = now;
-  telemetry.activeProcesses = [];
-  telemetry.resolution = {
-    status: "resolved",
-    resolvedAt: now,
-    method: "explicit-recovery",
-  };
-  writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+    telemetry.status = "complete";
+    telemetry.updatedAt = now;
+    telemetry.activeProcesses = [];
+    telemetry.resolution = {
+      status: "resolved",
+      resolvedAt: now,
+      method: "explicit-recovery",
+    };
+    writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  });
 }
 
 export function createTestRunContext(options: CreateTestRunContextOptions = {}): TestRunContext {
@@ -1472,8 +1506,16 @@ export function createTestRunContext(options: CreateTestRunContextOptions = {}):
       processes: [],
     };
 
-    writeManifest(manifest);
-    writeRunnerTelemetry(manifest, manifest.createdAt);
+    mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
+    const lock = acquireTestRunArtifactWriterLock({
+      artifactRoot, repoRoot, runId, runNonce,
+    });
+    try {
+      writeManifestUnlocked(manifest);
+      writeRunnerTelemetryUnlocked(manifest, manifest.createdAt);
+    } finally {
+      releaseTestRunArtifactLock(lock);
+    }
     if (options.applyEnvironment ?? true) applyTestRunEnvironment(manifest);
     return manifest;
   } catch (error) {
@@ -1699,15 +1741,16 @@ export function updateTestRunManifest(
     "status" | "projectProvisionedAt" | "portReservations" | "preexistingProcessBaseline" | "processes"
   >>,
 ): TestRunContext {
-  const manifest = readTestRunManifest(manifestPath);
-  const updated: TestRunContext = { ...manifest, ...update };
-  // Telemetry is the recovery side of the hand-off. Persist it first so a
-  // failure between the two files cannot leave a `complete` manifest with
-  // unresolved telemetry. A later recovery pass can safely reconcile a
-  // stopping manifest whose telemetry is already ahead.
-  writeRunnerTelemetry(updated);
-  writeManifest(updated);
-  return updated;
+  return withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const updated: TestRunContext = { ...manifest, ...update };
+    // Telemetry is the recovery side of the hand-off. Persist it first so a
+    // failure between the two files cannot leave a `complete` manifest with
+    // unresolved telemetry. A later recovery pass can safely reconcile a
+    // stopping manifest whose telemetry is already ahead.
+    writeRunnerTelemetryUnlocked(updated);
+    writeManifestUnlocked(updated);
+    return updated;
+  });
 }
 
 /**
@@ -1718,77 +1761,78 @@ export function updateTestRunManifest(
  */
 export function cleanupTestRun(manifestPath: string): void {
   if (!existsSync(manifestPath)) return;
-  const manifest = readTestRunManifest(manifestPath);
-  if (manifest.status === "stopping") {
-    throw new Error("Refusing to remove recovery evidence for a stopping test run");
-  }
-  if (manifest.processes.length > 0) {
-    throw new Error("Refusing to remove a test run with retained process records");
-  }
-  if (manifest.status === "created") {
-    const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
-    if (!telemetry
-      || telemetry.runId !== manifest.runId
-      || telemetry.runNonce !== manifest.runNonce
-      || telemetry.repoRoot !== manifest.repoRoot
-      || resolve(telemetry.manifestPath) !== resolve(manifest.manifestPath)
-      || telemetry.activeProcesses.length > 0
-      || telemetry.processes.some((entry) => entry.state === "active" || entry.state === "retained")) {
-      throw new Error("Refusing to remove a created run with unresolved telemetry");
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    if (manifest.status === "stopping") {
+      throw new Error("Refusing to remove recovery evidence for a stopping test run");
     }
-    // A config/bootstrap failure can delete a created manifest before the
-    // normal stopping → complete transition. Resolve its already-empty
-    // telemetry first so the retained artifact is never an orphan record.
-    telemetry.status = "complete";
-    telemetry.updatedAt = new Date().toISOString();
-    telemetry.resolution = {
-      status: "resolved",
-      resolvedAt: telemetry.updatedAt,
-      method: "explicit-recovery",
+    if (manifest.processes.length > 0) {
+      throw new Error("Refusing to remove a test run with retained process records");
+    }
+    if (manifest.status === "created") {
+      const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
+      if (!telemetry
+        || telemetry.runId !== manifest.runId
+        || telemetry.runNonce !== manifest.runNonce
+        || telemetry.repoRoot !== manifest.repoRoot
+        || resolve(telemetry.manifestPath) !== resolve(manifest.manifestPath)
+        || telemetry.activeProcesses.length > 0
+        || telemetry.processes.some((entry) => entry.state === "active" || entry.state === "retained")) {
+        throw new Error("Refusing to remove a created run with unresolved telemetry");
+      }
+      // A config/bootstrap failure can delete a created manifest before the
+      // normal stopping → complete transition. Resolve its already-empty
+      // telemetry first so the retained artifact is never an orphan record.
+      telemetry.status = "complete";
+      telemetry.updatedAt = new Date().toISOString();
+      telemetry.resolution = {
+        status: "resolved",
+        resolvedAt: telemetry.updatedAt,
+        method: "explicit-recovery",
+      };
+      writeOwnedJson(
+        getTestRunTelemetryPath(manifest),
+        telemetry,
+        getTestRunArtifactRoot(manifest.repoRoot),
+        "runner telemetry",
+      );
+    } else if (manifest.status !== "complete") {
+      throw new Error(`Refusing to remove a test run in ${manifest.status} state`);
+    } else {
+      const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
+      if (!telemetry || telemetry.status !== "complete"
+        || telemetry.activeProcesses.length > 0
+        || telemetry.resolution?.status !== "resolved") {
+        throw new Error("Refusing to remove a complete run without resolved telemetry");
+      }
+    }
+    const apiTokenFile = getTestRunApiTokenPath(manifest);
+    const dashboardWorkspace = getTestRunDashboardWorkspace(manifest);
+    if (existsSync(dashboardWorkspace)) {
+      assertNoSymlinkedAncestors(dashboardWorkspace, manifest.repoRoot, "test-run dashboard workspace");
+      if (!lstatSync(dashboardWorkspace).isDirectory()) {
+        throw new Error("Test-run dashboard workspace is not a directory");
+      }
+      rmSync(dashboardWorkspace, { recursive: true, force: true });
+    }
+    releaseTestRunPortReservations(manifest, { allowMissing: true });
+    rmSync(manifest.runDir, { recursive: true, force: true });
+    const environment = {
+      [TEST_RUN_MANIFEST_ENV]: manifest.manifestPath,
+      [TEST_RUN_NONCE_ENV]: manifest.runNonce,
+      [TEST_RUN_TELEMETRY_ENV]: getTestRunTelemetryPath(manifest),
+      INGENIUM_CORE_DB_PATH: manifest.dbPath,
+      INGENIUM_HOME: manifest.homeDir,
+      INGENIUM_PROJECT: manifest.project,
+      INGENIUM_API_TOKEN_FILE: apiTokenFile,
+      INGENIUM_E2E_API_PORT: String(manifest.ports.api),
+      INGENIUM_E2E_DASH_PORT: String(manifest.ports.dashboard),
+      INGENIUM_E2E_FIXTURE_PORT: String(manifest.ports.fixture),
     };
-    writeOwnedJson(
-      getTestRunTelemetryPath(manifest),
-      telemetry,
-      getTestRunArtifactRoot(manifest.repoRoot),
-      "runner telemetry",
-    );
-  } else if (manifest.status !== "complete") {
-    throw new Error(`Refusing to remove a test run in ${manifest.status} state`);
-  } else {
-    const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
-    if (!telemetry || telemetry.status !== "complete"
-      || telemetry.activeProcesses.length > 0
-      || telemetry.resolution?.status !== "resolved") {
-      throw new Error("Refusing to remove a complete run without resolved telemetry");
+    for (const [name, value] of Object.entries(environment)) {
+      if (process.env[name] === value) delete process.env[name];
     }
-  }
-  const apiTokenFile = getTestRunApiTokenPath(manifest);
-  const dashboardWorkspace = getTestRunDashboardWorkspace(manifest);
-  if (existsSync(dashboardWorkspace)) {
-    assertNoSymlinkedAncestors(dashboardWorkspace, manifest.repoRoot, "test-run dashboard workspace");
-    if (!lstatSync(dashboardWorkspace).isDirectory()) {
-      throw new Error("Test-run dashboard workspace is not a directory");
-    }
-    rmSync(dashboardWorkspace, { recursive: true, force: true });
-  }
-  releaseTestRunPortReservations(manifest, { allowMissing: true });
-  rmSync(manifest.runDir, { recursive: true, force: true });
-  const environment = {
-    [TEST_RUN_MANIFEST_ENV]: manifest.manifestPath,
-    [TEST_RUN_NONCE_ENV]: manifest.runNonce,
-    [TEST_RUN_TELEMETRY_ENV]: getTestRunTelemetryPath(manifest),
-    INGENIUM_CORE_DB_PATH: manifest.dbPath,
-    INGENIUM_HOME: manifest.homeDir,
-    INGENIUM_PROJECT: manifest.project,
-    INGENIUM_API_TOKEN_FILE: apiTokenFile,
-    INGENIUM_E2E_API_PORT: String(manifest.ports.api),
-    INGENIUM_E2E_DASH_PORT: String(manifest.ports.dashboard),
-    INGENIUM_E2E_FIXTURE_PORT: String(manifest.ports.fixture),
-  };
-  for (const [name, value] of Object.entries(environment)) {
-    if (process.env[name] === value) delete process.env[name];
-  }
-  cachedContext = undefined;
+    cachedContext = undefined;
+  });
 }
 
 export interface StaleRunCleanupResult {

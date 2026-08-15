@@ -2599,9 +2599,14 @@ evidence before the next subwave starts.
   lost receipt/quarantine, process/port cleanup, or auto-selection of ambiguous
   evidence is `BLOCKING`; retention policy extensions are `FOLLOW_UP`; preview
   inventories and retained receipts are `INFORMATIONAL`.
-- **Evidence placeholders:** Source `[pending retention diff/tests]`;
-  deploy/health `[pending packaged-runner evidence or N/A]`; visual `N/A —
-  visual/manual evidence remains manual`; security `[pending destructive-gate
+- **Source evidence (implementation present; acceptance still open):**
+  `tests/test-artifact-retention.ts`, `tests/test-run-retention-lock.ts`,
+  `tests/test-artifact-retention.test.ts`, and the guarded writer/audit changes
+  implement the preview/report/execute/verify contract with isolated fixtures.
+  Focused verification, QA/security, and final containment evidence remain
+  required; this is not a `work-complete` marker. Deploy/health
+  `[pending packaged-runner evidence or N/A]`; visual `N/A — visual/manual
+  evidence remains manual`; security `[pending destructive-gate
   review]`; containment `[pending artifact hygiene + strict audit]`.
 - **Planned marker entries (not live):** append `work-started` for
   `TELEMETRY-100` after preflight/ownership, then append one matching

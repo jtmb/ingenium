@@ -26,6 +26,7 @@ import {
   transferTestRunPortOwnership,
   updateTestRunManifest,
 } from "./test-run-context";
+import { acquireTestRunArtifactWriterLock, releaseTestRunArtifactLock } from "./test-run-retention-lock";
 
 const ownedRoots: string[] = [];
 const telemetryRoots: string[] = [];
@@ -224,6 +225,28 @@ describe("test-run context", () => {
     expect(manifest.portReservations?.find(({ port }) => port === context.ports.api)?.state).toBe("transferred");
     expect(existsSync(getTestRunPortLockPath(context.ports.api))).toBe(false);
     expect(existsSync(getTestRunPortLockPath(context.ports.dashboard))).toBe(true);
+  });
+
+  it("serializes canonical manifest and telemetry writers with retention", () => {
+    const context = createTestRunContext({
+      tempRoot: testTempRoot(),
+      ports: { api: 45177, dashboard: 45178, fixture: 45179 },
+    });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+    const lock = acquireTestRunArtifactWriterLock({
+      artifactRoot: getTestRunArtifactRoot(context.repoRoot),
+      repoRoot: context.repoRoot,
+      runId: context.runId,
+      runNonce: context.runNonce,
+    });
+    try {
+      expect(() => updateTestRunManifest(context.manifestPath, { status: "starting" }))
+        .toThrow(/RUN_ARTIFACT_LOCKED/);
+      expect(readTestRunManifest(context.manifestPath).status).toBe("created");
+    } finally {
+      releaseTestRunArtifactLock(lock);
+    }
+    expect(updateTestRunManifest(context.manifestPath, { status: "created" }).status).toBe("created");
   });
 
   it("removes only the exact manifest-owned run directory", () => {

@@ -90,5 +90,10 @@ servers-page.yml
 # Generated test artifacts
 /test-results/
 tests/artifacts/
+/tests/artifacts/test-runs/.retention-control/
+/tests/artifacts/test-runs/.retention-control/plans/
+/tests/artifacts/test-runs/.retention-control/reports/
+/tests/artifacts/test-runs/.retention-control/receipts/
+/tests/artifacts/test-runs/.retention-control/quarantine/
 tests/qa-screenshots/
 tests/test-results/

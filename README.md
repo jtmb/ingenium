@@ -311,6 +311,7 @@ npm run test --workspace=packages/ingenium-core          # Core unit tests (vite
 npm run test --workspace=packages/ingenium-extension     # Extension tests (vitest)
 npm run typecheck --workspace=packages/ingenium-extension # Extension type check (tsc --noEmit)
 npx playwright test --config=tests/playwright.config.ts                 # Default isolated fixture E2E (production mode)
+npx tsx tests/test-artifact-retention.ts preview                        # Read-only telemetry-retention preview
 ```
 
 The default E2E run owns an isolated temporary database/project, production
@@ -328,6 +329,13 @@ dynamic-port checks, token-file isolation, and run-scoped artifact rules. Store
 runner telemetry under `tests/artifacts/test-runs/<run-id>/` and screenshots
 only under `tests/artifacts/visual-qa/<run-id>/` or
 `tests/artifacts/manual/<date>/`.
+
+Telemetry retention is preview-only by default. Persist an owner-only plan with
+`report`; `execute` accepts only that plan plus its exact `--confirm-sha256`
+digest, and `verify` checks the resulting content-free receipt. Automatic
+eligibility is limited to resolved, failure-free UUID run telemetry older than
+30 days with no manifest, process, open port, auxiliary file, or unsafe path.
+Never run `execute` against evidence that has not been reviewed in the preview.
 
 Validation scripts:
 
