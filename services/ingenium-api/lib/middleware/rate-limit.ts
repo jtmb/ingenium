@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { config } from "../../config/index.js";
+import { isRuntimeGatewayPrivateRequest } from "./auth.js";
 
 /**
  * Sliding-window in-memory rate limiter keyed by client IP.
@@ -29,8 +30,7 @@ const RUNTIME_GATEWAY_MAX_REQUESTS = 10_000;
 export function isBoundaryAttestedRuntimeGatewayRequest(req: Request): boolean {
   const remoteAddress = req.socket?.remoteAddress;
   return (remoteAddress === "127.0.0.1" || remoteAddress === "::1" || remoteAddress === "::ffff:127.0.0.1")
-    && req.method === "POST"
-    && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(req.path)
+    && isRuntimeGatewayPrivateRequest(req)
     && req.headers["x-ingenium-audience"] === "runtime-gateway"
     && req.headers["x-ingenium-private-network"] === "runtime-gateway"
     && req.headers.cookie === undefined

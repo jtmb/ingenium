@@ -35,8 +35,7 @@ export function authAttemptRateLimit(req: Request, res: Response, next: NextFunc
     next();
     return;
   }
-  res.set("Retry-After", String(Math.ceil((resetAt - now) / 1000)));
-  res.status(429).json({ error: { code: "RATE_LIMITED", message: "Too many authentication attempts", details: null, requestId: "req_auth" } });
+  rateLimitedResponse(res, resetAt, now);
 }
 
 function rateLimitedResponse(res: Response, resetAt: number, now: number): void {

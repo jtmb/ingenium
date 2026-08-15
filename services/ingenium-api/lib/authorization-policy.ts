@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { authentication, authorization, projects, securityAudit } from "ingenium-core";
 import { AppError } from "./middleware/errors.js";
-import type { RequestPrincipal } from "./middleware/auth.js";
+import { isRuntimeGatewayPrivateRequest, type RequestPrincipal } from "./middleware/auth.js";
 
 export type PolicyTarget = "installation" | "organization" | "project" | "private" | "gateway-private" | "public";
 export type PolicyPermission = authorization.AuthorizationPermission;
@@ -65,7 +65,7 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   if (req.path === "/api/v1/health") return { action: "health.read", resource: "health", permission: "read", target: "installation" };
   if (req.path.startsWith("/_ingenium/")) return { action: "child-mcp.execute", resource: "child-mcp", permission: "execute", target: "project", sensitive: true };
   if (req.path.startsWith("/api/v1/auth/")) return { action: `auth.${permissionFor(req as Request)}`, resource: "auth", permission: permissionFor(req as Request), target: "private", sensitive: !READ_METHODS.has(req.method) };
-  if (/^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(req.path)) {
+  if (isRuntimeGatewayPrivateRequest(req)) {
     return { action: "runtimes.gateway.execute", resource: "runtime-gateway", permission: "execute", target: "gateway-private", sensitive: true };
   }
   if (req.path.startsWith("/api/v1/runtimes/browser/")) {

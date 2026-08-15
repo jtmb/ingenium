@@ -3,6 +3,7 @@ import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage,
 import { createServer } from "node:https";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
+import { getDashboardAllowedOrigins } from "../config/index.js";
 import { loadRuntimeGatewayToken } from "../lib/runtime-gateway-auth.js";
 
 type Audience = "web" | "cli" | "vscode";
@@ -45,14 +46,11 @@ function rootDomain(): string {
 }
 
 function dashboardOrigins(): Set<string> {
-  const values = required("DASHBOARD_ALLOWED_ORIGINS").split(",").map((value) => value.trim());
-  const result = new Set<string>();
-  for (const value of values) {
-    const url = new URL(value);
-    if (url.origin !== value || url.username || url.password) throw new Error("DASHBOARD_ALLOWED_ORIGINS is invalid");
-    result.add(value);
-  }
-  return result;
+  const origins = getDashboardAllowedOrigins({
+    DASHBOARD_ALLOWED_ORIGINS: required("DASHBOARD_ALLOWED_ORIGINS"),
+  });
+  if (origins.length === 0) throw new Error("DASHBOARD_ALLOWED_ORIGINS is invalid");
+  return new Set(origins);
 }
 
 export function runtimeScope(request: Pick<IncomingMessage, "headers">): RuntimeScope | undefined {

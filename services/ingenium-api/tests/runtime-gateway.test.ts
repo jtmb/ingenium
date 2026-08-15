@@ -81,6 +81,12 @@ describe("AUTH-109 runtime gateway", () => {
     expect(headers.location).toBe(`${scope.origin}/path`);
   });
 
+  it("rejects a launcher origin that only extends an allowed origin", () => {
+    const scope = runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test` } })!;
+    expect(() => proxyResponseHeaders({}, scope, "https://dashboard.example.test.evil.test"))
+      .toThrow("Dashboard origin is not allowed");
+  });
+
   it.each([
     ["web", "/"],
     ["cli", "/"],

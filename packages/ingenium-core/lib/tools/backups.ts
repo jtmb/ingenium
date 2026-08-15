@@ -28,8 +28,10 @@ import {
   execTransaction,
   getDb,
   resolveCoreDbPath,
-  upgradeRestoreSecuritySchemaForMaintenance,
-  validateRestoreSecuritySchemaForMaintenance,
+} from "../db.js";
+export {
+  upgradeRestoreSecuritySchemaForMaintenance as upgradeRestoredSecuritySchemaForMaintenance,
+  validateRestoreSecuritySchemaForMaintenance as validateRestoredSecuritySchemaForMaintenance,
 } from "../db.js";
 import { BackupRecord } from "../schema.js";
 import { getGlobalProject } from "./projects.js";
@@ -2519,14 +2521,6 @@ export function classifyRestoredSecuritySchema(databasePath: string): RestoreSec
   } finally {
     restored.close();
   }
-}
-
-export function validateRestoredSecuritySchemaForMaintenance(databasePath: string): void {
-  validateRestoreSecuritySchemaForMaintenance(databasePath);
-}
-
-export function upgradeRestoredSecuritySchemaForMaintenance(databasePath: string): void {
-  upgradeRestoreSecuritySchemaForMaintenance(databasePath);
 }
 
 /**
