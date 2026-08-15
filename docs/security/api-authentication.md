@@ -90,7 +90,8 @@ only the audience launch URL and opaque status; the proof travels only in reques
 bodies and no session token or private backend identity reaches dashboard code.
 
 The gateway exchanges it for a host-only `__Host-ingenium_runtime_<audience>` cookie
-with `Secure`, `HttpOnly`, and `SameSite=Strict`. Every request and WebSocket handshake
+with `Secure`, `HttpOnly`, and `SameSite=None`, which is required because the dashboard
+and isolated runtime roots are intentionally cross-site. Every request and WebSocket handshake
 revalidates the generation and originating auth session. Logout, session/runtime/
 workspace revoke, expiry, and generation changes fail closed. The gateway's narrow
 owner-only bearer is distinct from installation, manager, and runtime credentials.

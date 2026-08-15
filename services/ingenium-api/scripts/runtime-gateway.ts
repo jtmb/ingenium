@@ -232,7 +232,9 @@ export function proxyResponseHeaders(
 
 export function runtimeCookie(audience: Audience, token: string, maxAge: number): string {
   if (!/^rbs_[A-Za-z0-9_-]{43}$/.test(token) || !Number.isSafeInteger(maxAge) || maxAge < 1) throw new Error("Invalid runtime cookie");
-  return `${COOKIE_NAMES[audience]}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
+  // The dashboard and runtime roots are intentionally cross-site; Strict would drop the
+  // audience cookie on the health request and iframe while __Host- keeps it host-only.
+  return `${COOKIE_NAMES[audience]}=${token}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=${maxAge}`;
 }
 
 export function runtimeBackendHealthPath(audience: Audience): string {

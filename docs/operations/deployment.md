@@ -166,7 +166,8 @@ The manager attaches only the identity-labeled control plane and runtime gateway
 runtime network. The gateway accepts exact `<audience>--<runtime-id>.<domain>` Hosts,
 redeems a browser-generated one-time proof over its narrow `runtime-gateway` audience
 credential through the API boundary, and sets one
-host-only `Secure`, `HttpOnly`, `SameSite=Strict` audience cookie. Requests and
+host-only `Secure`, `HttpOnly`, `SameSite=None` audience cookie so the cross-site
+dashboard iframe can authenticate. Requests and
 WebSocket handshakes require a live session; logout and runtime revoke advance the
 generation and close streams or reconnects.
 

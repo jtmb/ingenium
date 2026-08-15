@@ -60,10 +60,10 @@ describe("AUTH-109 runtime gateway", () => {
       .not.toHaveProperty("x-ingenium-authenticated-user");
   });
 
-  it.each(["web", "cli", "vscode"] as const)("uses a host-only secure %s cookie and replaces upstream frame denial", (audience) => {
+  it.each(["web", "cli", "vscode"] as const)("uses a cross-site embeddable host-only secure %s cookie and replaces upstream frame denial", (audience) => {
     const token = `rbs_${"a".repeat(43)}`;
     expect(runtimeCookie(audience, token, 60)).toBe(
-      `__Host-ingenium_runtime_${audience}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=60`,
+      `__Host-ingenium_runtime_${audience}=${token}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=60`,
     );
     expect(runtimeCookie(audience, token, 60)).not.toContain("Domain=");
     const scope = runtimeScope({ headers: { host: `${audience}--${runtimeId}.runtime.example.test` } })!;
