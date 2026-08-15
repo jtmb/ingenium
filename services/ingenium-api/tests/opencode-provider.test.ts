@@ -19,10 +19,16 @@ import type { AddressInfo } from "node:net";
 import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } from "../lib/routes/opencode.js";
 import { opencodeClient, request, buildAuthHeader } from "../lib/opencode-client.js";
 import { logger } from "ingenium-core";
+import { authMiddleware } from "../lib/middleware/auth.js";
+import { errorHandler } from "../lib/middleware/errors.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 /* ── Configuration ───────────────────────────────────────────────────────── */
 
 const SAVED_PASSWORD = process.env.OPENCODE_SERVER_PASSWORD;
+const SAVED_API_TOKEN = process.env.INGENIUM_API_TOKEN;
+const SAVED_API_TOKEN_FILE = process.env.INGENIUM_API_TOKEN_FILE;
+const API_TOKEN = "a".repeat(32);
 
 /* ── Express proxy server (shared for all proxy-based tests) ──────────────── */
 
@@ -35,11 +41,15 @@ function buildApp(): express.Express {
   app.set("trust proxy", false);
   app.use(express.json());
   app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback);
+  app.post("/api/v1/opencode/integrations/:integrationID/connect/oauth", authMiddleware);
   app.use("/api/v1/opencode", opencodeRouter);
+  app.use(errorHandler);
   return app;
 }
 
 beforeAll(async () => {
+  process.env.INGENIUM_API_TOKEN = API_TOKEN;
+  delete process.env.INGENIUM_API_TOKEN_FILE;
   const app = buildApp();
   server = createServer(app);
 
@@ -57,6 +67,10 @@ afterAll(async () => {
   if (server) {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
   }
+  if (SAVED_API_TOKEN === undefined) delete process.env.INGENIUM_API_TOKEN;
+  else process.env.INGENIUM_API_TOKEN = SAVED_API_TOKEN;
+  if (SAVED_API_TOKEN_FILE === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
+  else process.env.INGENIUM_API_TOKEN_FILE = SAVED_API_TOKEN_FILE;
 });
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
@@ -78,6 +92,14 @@ function mockResponse(
       ),
     body: null,
   } as unknown as Response;
+}
+
+function beginOAuth(body: Record<string, unknown>): Promise<Response> {
+  return fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+    method: "POST",
+    headers: compatibilityAuthHeaders(API_TOKEN, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
 }
 
 /** Build a raw upstream provider object, including fields the browser must never receive. */
@@ -444,11 +466,7 @@ describe("Native provider integrations", () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
     const begin = vi.spyOn(opencodeClient, "beginIntegrationOAuth");
 
-    const res = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: { tenant: "bad\nvalue" } }),
-    });
+    const res = await beginOAuth({ methodID: "chatgpt-browser", inputs: { tenant: "bad\nvalue" } });
 
     expect(res.status).toBe(422);
     expect(begin).not.toHaveBeenCalled();
@@ -462,11 +480,7 @@ describe("Native provider integrations", () => {
     });
     vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("");
 
-    const res = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    const res = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
 
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: { code: "UNSAFE_OAUTH_URL", message: "Provider returned an unsafe authorization URL" } });
@@ -479,11 +493,7 @@ describe("Native provider integrations", () => {
       data: { attemptID: "attempt-ipv6", url: "http://[::1]:1455/auth/callback?state=ipv6-state", instructions: "", mode: "code", time: { created: Date.now(), expires: Date.now() + 60_000 } },
     });
 
-    const res = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    const res = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
 
     expect(res.status).toBe(200);
   });
@@ -502,11 +512,7 @@ describe("Native provider integrations", () => {
     });
     const complete = vi.spyOn(opencodeClient, "completeIntegrationAttempt").mockResolvedValue("connected");
 
-    const begin = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    const begin = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     expect(begin.status).toBe(200);
 
     const callback = await fetch(`${baseUrl}/auth/callback?state=state-1&code=oauth-code`);
@@ -528,11 +534,7 @@ describe("Native provider integrations", () => {
       },
     });
 
-    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     const originalFetch = globalThis.fetch;
     const forward = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
     const callback = await originalFetch(`${baseUrl}/auth/callback?state=state-auto&code=oauth-code`);
@@ -549,11 +551,7 @@ describe("Native provider integrations", () => {
       location: {},
       data: { attemptID: "attempt-configured-forward", url: "https://auth.openai.com/authorize?state=configured-forward-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
     });
-    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     const originalFetch = globalThis.fetch;
     const forward = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
     await originalFetch(`${baseUrl}/auth/callback?state=configured-forward-state&code=oauth-code`);
@@ -575,11 +573,7 @@ describe("Native provider integrations", () => {
     });
     const complete = vi.spyOn(opencodeClient, "completeIntegrationAttempt").mockResolvedValue("connected");
 
-    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     await fetch(`${baseUrl}/auth/callback?state=state-2&code=oauth-code`);
     const replay = await fetch(`${baseUrl}/auth/callback?state=state-2&code=oauth-code`);
 
@@ -595,11 +589,7 @@ describe("Native provider integrations", () => {
     });
     const cancel = vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("cancelled");
 
-    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     const callback = await fetch(`${baseUrl}/auth/callback?state=state-3&error=access_denied`);
 
     expect(callback.status).toBe(400);
@@ -615,11 +605,7 @@ describe("Native provider integrations", () => {
     });
     vi.spyOn(opencodeClient, "completeIntegrationAttempt").mockRejectedValue(new Error("network unavailable"));
 
-    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
-    });
+    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     const callback = await fetch(`${baseUrl}/auth/callback?state=state-4&code=oauth-code`);
 
     expect(callback.status).toBe(502);

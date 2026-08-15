@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { dashboardFetch, getApiBase } from "@/lib/api";
+import Select from "../../components/Select";
 
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
@@ -328,12 +329,12 @@ export default function AccountSetup({
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{reconnectAccount ? "Update Email Credentials" : "Manual Setup"}</h2>
 
       {!reconnectAccount && (
-        <label className="block text-sm font-medium text-[var(--color-text-primary)]">
+        <label htmlFor="mail-account-owner" className="block text-sm font-medium text-[var(--color-text-primary)]">
           Owner
-          <select value={ownerKind} onChange={(event) => setOwnerKind(event.target.value as "user" | "organization")} className="mt-1 w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
+          <Select id="mail-account-owner" value={ownerKind} onChange={(event) => setOwnerKind(event.target.value as "user" | "organization")} wrapperClassName="mt-1 w-full" className="w-full text-sm">
             <option value="organization">Organization</option>
             <option value="user">Private to me</option>
-          </select>
+          </Select>
         </label>
       )}
 

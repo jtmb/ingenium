@@ -9,6 +9,7 @@ import { projects, resetDbForTest, usage } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { usageRouter } from "../lib/routes/usage.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 const API_TOKEN = "a".repeat(32);
 const PRIMARY = "usage-attention-api-primary";
@@ -49,7 +50,11 @@ async function request(
       method,
       headers: {
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(authorization === null ? {} : { Authorization: authorization }),
+        ...(authorization === null
+          ? {}
+          : options.authorization === undefined
+            ? compatibilityAuthHeaders(API_TOKEN)
+            : { Authorization: authorization }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },

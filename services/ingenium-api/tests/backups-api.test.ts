@@ -214,7 +214,7 @@ describe("RESTORE-100 backup API", () => {
       expect(response.headers.get("content-disposition")).toBe('attachment; filename="ingenium.db"');
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
       expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
-      expect(fill).toHaveBeenCalledWith(0);
+      await vi.waitFor(() => expect(fill).toHaveBeenCalledWith(0));
     } finally {
       fill.mockRestore();
     }

@@ -14,6 +14,7 @@ import {
   mcpServersRouter,
 } from "../lib/routes/mcp-servers.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
+import { runtimeServicePrincipal } from "./http-fixtures.js";
 
 let directory = "";
 let server: Server | undefined;
@@ -46,7 +47,11 @@ async function startRouter(): Promise<string> {
     req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
     next();
   });
-  app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
+  app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, (req, _res, next) => {
+    const project = typeof req.query.project === "string" ? projects.getProject(req.query.project) : undefined;
+    if (project) req.principal = runtimeServicePrincipal(project.id);
+    next();
+  }, childMcpRuntimeRouter);
   app.use("/mcp-servers", mcpServersRouter);
   app.use("/mcp-tools", mcpToolsRouter);
   server = createServer(app);

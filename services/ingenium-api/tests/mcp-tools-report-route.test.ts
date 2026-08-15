@@ -13,6 +13,7 @@ import {
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { createMcpToolsRouter } from "../lib/routes/mcp-tools.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 const TOKEN = "a".repeat(32);
 const projectAName = "mcp-report-route-a";
@@ -58,7 +59,7 @@ async function start(launch: () => McpUsefulnessConnection = fixtureConnection):
 
 function report(path: string, authorization = true): Promise<Response> {
   return fetch(`${baseUrl}/report?project=${projectAName}${path}`, {
-    headers: authorization ? { Authorization: `Bearer ${TOKEN}` } : undefined,
+    headers: authorization ? compatibilityAuthHeaders(TOKEN) : undefined,
   });
 }
 
@@ -115,7 +116,7 @@ describe("MCP usefulness report route", () => {
     mcpToolStates.setToolState(projectAId, "ingenium_health_check", false);
     const responseA = await report("");
     const responseB = await fetch(`${baseUrl}/report?project=${projectBName}`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
+      headers: compatibilityAuthHeaders(TOKEN),
     });
     const bodyA = await responseA.json();
     const bodyB = await responseB.json();

@@ -33,6 +33,10 @@ describe("dashboard provider response normalization", () => {
         enabled: true,
         allowPrivateNetwork: false,
         apiKeySet: false,
+        ownerKind: "installation",
+        ownerUserId: null,
+        organizationId: undefined,
+        effectiveCapabilities: [],
       }],
       synthesis: {
         primary: { providerId: "", modelId: "" },

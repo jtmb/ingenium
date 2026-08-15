@@ -9,6 +9,7 @@ import { getDb, projects, resetDbForTest, usage } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { usageRouter } from "../lib/routes/usage.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 const API_TOKEN = "a".repeat(32);
 const PRIMARY = "usage-advisory-api-primary";
@@ -49,7 +50,11 @@ async function request(
       method,
       headers: {
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(authorization === null ? {} : { Authorization: authorization }),
+        ...(authorization === null
+          ? {}
+          : options.authorization === undefined
+            ? compatibilityAuthHeaders(API_TOKEN)
+            : { Authorization: authorization }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
@@ -229,7 +234,7 @@ describe("usage advisory threshold API", () => {
 
   it("keeps malformed, absent, archived, and inverted project/range requests safely typed", async () => {
     const missingProject = await fetch(`${origin}/api/v1/usage/thresholds`, {
-      headers: { Authorization: `Bearer ${API_TOKEN}` },
+      headers: compatibilityAuthHeaders(API_TOKEN),
     });
     expect(missingProject.status).toBe(400);
     await expect(missingProject.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });

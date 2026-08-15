@@ -135,7 +135,7 @@ describe("dashboard fixture credential boundary", () => {
     }));
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(`http://127.0.0.1:${context.ports.dashboard}/?project=${context.project}`);
+    expect(response.headers.get("location")).toBe(`http://127.0.0.1:${context.ports.dashboard}/`);
     expect(response.headers.get("set-cookie")).toContain("fixture-session");
     expect(fetchMock).toHaveBeenCalledWith(
       `http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-session`,

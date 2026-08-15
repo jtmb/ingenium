@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import AIActions from "../src/app/docs/components/AIActions";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 describe("Docs AI actions", () => {
   beforeEach(() => {
@@ -16,7 +17,7 @@ describe("Docs AI actions", () => {
   it("does not send browser provider/model state or a project query parameter", async () => {
     localStorage.setItem("ingenium_chat_selection_v1", JSON.stringify({ providerId: "browser-provider", modelId: "browser-model" }));
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { result: "AI output" } }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(<AIActions fullContent="Docs content" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
@@ -37,7 +38,7 @@ describe("Docs AI actions", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       error: { code: "LLM_UNAVAILABLE", message: "No Chat provider or model is currently available. Open Chat or Settings → Providers, then try again." },
     }), { status: 503 }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(<AIActions selectedText="Selected words" fullContent="Full document" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
@@ -55,7 +56,7 @@ describe("Docs AI actions", () => {
       modelId: "model\u0000injection",
     }));
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { result: "AI output" } }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(<AIActions fullContent="Docs content" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
@@ -73,7 +74,7 @@ describe("Docs AI actions", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       data: { result: "Large document summary" },
     }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(<AIActions fullContent={content} pageTitle="Architecture" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
@@ -90,7 +91,7 @@ describe("Docs AI actions", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       error: { code: "UPSTREAM_PROVIDER_FAILURE", message: privateUpstreamDetail },
     }), { status: 500, statusText: "Internal Server Error" }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(<AIActions fullContent="Docs content" pageTitle="Docs" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
@@ -103,7 +104,7 @@ describe("Docs AI actions", () => {
 
   it("allows Outline for blank content when the page title is available", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { result: "## Release notes" } }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(<AIActions fullContent={" \n"} pageTitle="Release notes" onApply={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
@@ -141,7 +142,7 @@ describe("Docs AI actions", () => {
   it("keeps action and selection context with the preview result", async () => {
     const onApply = vi.fn();
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { result: "Rewritten words" } }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     render(
       <AIActions
         selectedText="Selected words"
@@ -172,7 +173,7 @@ describe("Docs AI actions", () => {
       resolveAI = resolve;
     });
     const fetchMock = vi.fn().mockReturnValue(aiResponse);
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
     const onApply = vi.fn();
     const view = render(<AIActions fullContent="Original content" pageTitle="Docs" onApply={onApply} />);
 

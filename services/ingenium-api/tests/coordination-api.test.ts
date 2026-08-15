@@ -9,6 +9,7 @@ import { getDb, projects, resetDbForTest, tasks } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { coordinationRouter } from "../lib/routes/coordination.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 const API_TOKEN = "a".repeat(32);
 const TOKEN_A = "A".repeat(32);
@@ -67,7 +68,7 @@ async function request(
   for (const [key, value] of Object.entries(options.query ?? {})) query.set(key, String(value));
   const headers: Record<string, string> = {
     ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-    ...(options.authorization === undefined ? { Authorization: `Bearer ${API_TOKEN}` } : { Authorization: options.authorization }),
+    ...(options.authorization === undefined ? compatibilityAuthHeaders(API_TOKEN) : { Authorization: options.authorization }),
     ...options.headers,
   };
   const response = await fetch(`${origin}/api/v1/coordination${path}?${query}`, {

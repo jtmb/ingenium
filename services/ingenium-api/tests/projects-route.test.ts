@@ -5,8 +5,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
-import { getDb, projects, resetDbForTest, settings, vault } from "ingenium-core";
+import { projects, resetDbForTest, settings, tasks, vault } from "ingenium-core";
 import { resetEmailRuntimeForTest } from "ingenium-email";
 import { getEmailEncryptionKeyFingerprint } from "../../../packages/ingenium-email/lib/credential-crypto.js";
 import { configureEmailRuntimeForApi } from "../lib/email-runtime.js";
@@ -17,6 +16,7 @@ import { projectsRouter } from "../lib/routes/projects.js";
 import { migrateEmailAccountsToGlobal } from "../lib/routes/emails.js";
 import { settingsRouter } from "../lib/routes/settings.js";
 import { recoverServerGlobalProviderMetadata } from "../lib/server-global-provider-persistence.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 let tempDir = "";
 let server: Server | undefined;
@@ -74,10 +74,7 @@ async function startPolicyRouter(principal: import("../lib/middleware/auth.js").
 }
 
 function authenticatedJsonHeaders(): HeadersInit {
-  return {
-    Authorization: `Bearer ${API_TOKEN}`,
-    "Content-Type": "application/json",
-  };
+  return compatibilityAuthHeaders(API_TOKEN, { "Content-Type": "application/json" });
 }
 
 describe("project purge route", () => {
@@ -86,10 +83,7 @@ describe("project purge route", () => {
     process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
     process.env.INGENIUM_HOME = join(tempDir, "home");
     const project = projects.createProject("referenced-project");
-    const now = new Date().toISOString();
-    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
-      "INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(randomUUID(), project.id, "child", now, now);
+    tasks.createTask(project.id, "child");
 
     const app = express();
     app.use(express.json());

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 /**
  * LAN API base URL tests against the real implementation in src/lib/api.ts.
@@ -40,7 +41,7 @@ beforeEach(() => {
     status: 200,
     json: () => Promise.resolve(DEFAULT_OK_BODY()),
   });
-  vi.stubGlobal("fetch", fetchMock);
+  installDashboardFetchMock(fetchMock);
 });
 
 afterEach(() => {
@@ -356,7 +357,7 @@ describe("request() — method passthrough", () => {
 describe("request() — response handling", () => {
   it("returns parsed JSON for a 200 response", async () => {
     fetchMock = mockFetchOnce(200, { data: { id: "abc" } });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request } = await getApi();
     const result = await (request as any)("/projects/abc");
@@ -365,7 +366,7 @@ describe("request() — response handling", () => {
 
   it("returns undefined for 204 No Content", async () => {
     fetchMock = mockFetchOnce(204, undefined);
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request } = await getApi();
     const result = await (request as any)("/projects/abc", {
@@ -380,7 +381,7 @@ describe("request() — response handling", () => {
       { error: { message: "Invalid project name" } },
       "Bad Request",
     );
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request } = await getApi();
     await expect(
@@ -390,7 +391,7 @@ describe("request() — response handling", () => {
 
   it("throws with statusText when JSON body has no error message", async () => {
     fetchMock = mockFetchOnce(500, {}, "Internal Server Error");
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request } = await getApi();
     await expect((request as any)("/projects")).rejects.toThrow(
@@ -405,7 +406,7 @@ describe("request() — response handling", () => {
       statusText: "Server Error",
       json: () => Promise.reject(new SyntaxError("Unexpected token")),
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request } = await getApi();
     await expect((request as any)("/projects")).rejects.toThrow(
@@ -421,7 +422,7 @@ describe("request() — response handling", () => {
       headers: new Headers(),
       json: () => Promise.resolve({ error: { message: "Dashboard authentication required" } }),
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request, ApiError } = await getApi();
     const error = await (request as any)("/opencode/health").catch((reason: unknown) => reason);
@@ -443,7 +444,7 @@ describe("request() — response handling", () => {
       headers: new Headers({ "Retry-After": "120" }),
       json: () => Promise.resolve({ error: { message: "Rate limited by gateway" } }),
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     const { request } = await getApi();
     await expect((request as any)("/opencode/chat-config")).rejects.toMatchObject({

@@ -23,6 +23,7 @@ import {
   CONTEXT_SNAPSHOT_INGEST_PATH,
   contextSnapshotIngestRouter,
 } from "../lib/routes/context-snapshot-ingest.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 const API_TOKEN = "a".repeat(32);
 const primaryProjectName = "snapshot-ingest-primary";
@@ -88,7 +89,11 @@ async function postSnapshot(
 ): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": options.contentType ?? CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE,
-    ...(options.authorization === undefined ? {} : { Authorization: options.authorization }),
+    ...(options.authorization === undefined
+      ? {}
+      : options.dashboardMarker === undefined
+        ? compatibilityAuthHeaders(API_TOKEN)
+        : { Authorization: options.authorization }),
     ...(options.contentEncoding === undefined ? {} : { "Content-Encoding": options.contentEncoding }),
     ...(options.dashboardMarker === undefined ? {} : { "x-ingenium-ui": options.dashboardMarker }),
   };
@@ -104,7 +109,7 @@ async function postWithoutContentLength(): Promise<{ status: number; body: strin
     const request = httpRequest(ingestUrl(), {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
+        ...compatibilityAuthHeaders(API_TOKEN),
         "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE,
       },
     }, (response) => {
@@ -380,8 +385,8 @@ describe("protected context snapshot ingest API", () => {
       authorization: `Bearer ${API_TOKEN}`,
       dashboardMarker: "dashboard",
     });
-    expect(dashboardTransportResponse.status).toBe(404);
-    expect((await dashboardTransportResponse.json()).error.code).toBe("NOT_FOUND");
+    expect(dashboardTransportResponse.status).toBe(401);
+    expect((await dashboardTransportResponse.json()).error.code).toBe("INVALID_TOKEN");
 
     const noLength = await postWithoutContentLength();
     expect(noLength.status).toBe(411);

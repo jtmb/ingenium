@@ -9,6 +9,7 @@ import { resetDbForTest } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { bootstrapRouter } from "../lib/routes/bootstrap.js";
+import { compatibilityAuthHeaders } from "./http-fixtures.js";
 
 const token = "b".repeat(32);
 let server: Server;
@@ -51,14 +52,14 @@ describe("bootstrap operator API", () => {
     const unauthenticated = await fetch(`${baseUrl}/api/v1/bootstrap/status`);
     expect(unauthenticated.status).toBe(401);
 
-    const status = await fetch(`${baseUrl}/api/v1/bootstrap/status`, { headers: { Authorization: `Bearer ${token}` } });
+    const status = await fetch(`${baseUrl}/api/v1/bootstrap/status`, { headers: compatibilityAuthHeaders(token) });
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({ data: { state: "pending", revision: 0 } });
 
     const body = JSON.stringify({ email: "owner@example.test", displayName: "Owner", password: "correct horse battery staple" });
     const [first, second] = await Promise.all([
-      fetch(`${baseUrl}/api/v1/bootstrap/claim`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body }),
-      fetch(`${baseUrl}/api/v1/bootstrap/claim`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body }),
+      fetch(`${baseUrl}/api/v1/bootstrap/claim`, { method: "POST", headers: compatibilityAuthHeaders(token, { "Content-Type": "application/json" }), body }),
+      fetch(`${baseUrl}/api/v1/bootstrap/claim`, { method: "POST", headers: compatibilityAuthHeaders(token, { "Content-Type": "application/json" }), body }),
     ]);
     expect([first.status, second.status].sort()).toEqual([201, 409]);
     const conflict = first.status === 409 ? first : second;
@@ -68,7 +69,7 @@ describe("bootstrap operator API", () => {
   it("returns validation errors without reflecting passwords", async () => {
     const response = await fetch(`${baseUrl}/api/v1/bootstrap/claim`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: compatibilityAuthHeaders(token, { "Content-Type": "application/json" }),
       body: JSON.stringify({ email: "bad", displayName: "", password: "raw-secret" }),
     });
     const text = await response.text();

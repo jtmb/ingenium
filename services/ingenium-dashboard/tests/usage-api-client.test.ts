@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, normalizeUsageAttentionItem, usageQueryParams } from "../src/lib/api";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 const timestamp = "2026-04-02T10:00:00.000Z";
 const thresholds = {
@@ -78,7 +79,7 @@ describe("usage API client query serialization", () => {
               : { data: { ...thresholds, currency: "must-not-survive", enforcement: true } };
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.usage.thresholds.get("fixture project");
     await api.usage.thresholds.replace({ ...thresholds, expectedRevision: 4 }, "fixture project");

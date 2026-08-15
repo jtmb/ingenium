@@ -1019,7 +1019,7 @@ describe("POST /settings/llm-config — input validation", () => {
     expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
-    expect(body.error.message).toContain("internal");
+    expect(body.error.message).toContain("non-global network address");
   });
 
   it("returns 422 when backup endpoint points to private IP", async () => {
@@ -1040,7 +1040,7 @@ describe("POST /settings/llm-config — input validation", () => {
     expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
-    expect(body.error.message).toContain("internal");
+    expect(body.error.message).toContain("non-global network address");
   });
 
   it("preserves malformed or empty global config and reports projection failure", async () => {
@@ -1521,7 +1521,7 @@ describe("POST /settings/test-llm — requires project context", () => {
     });
     expect(res.status).toBe(422);
     const body = await res.json();
-    expect(body.error.message).toContain("internal/private");
+    expect(body.error.message).toContain("non-global network address");
   });
 
   it("returns a sanitized transport failure without reflecting the endpoint", async () => {

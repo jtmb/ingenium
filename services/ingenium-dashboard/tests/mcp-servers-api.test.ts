@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/lib/api";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 function response(body: unknown, status = 200): Response {
   return {
@@ -16,7 +17,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("canonical child MCP API client", () => {
   it("uses /mcp-servers and preserves the backend command/args/vault-ref contract", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ data: { id: "server-id" } }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.mcpServers.create({
       name: "calendar",
@@ -47,7 +48,7 @@ describe("canonical child MCP API client", () => {
       total: 0,
       project: "authoritative-project",
     }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await expect(api.mcpTools.list("requested-project", true)).resolves.toMatchObject({
       project: "authoritative-project",
@@ -63,7 +64,7 @@ describe("canonical child MCP API client", () => {
       total: 0,
       data: { tools: [] },
     }));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.mcpTools.report("dashboard project", {
       enabled: true,
@@ -83,7 +84,7 @@ describe("canonical child MCP API client", () => {
       .mockResolvedValueOnce(response({ data: [], total: 0 }))
       .mockResolvedValueOnce(response({ data: [], total: 0 }))
       .mockResolvedValueOnce(response(undefined, 204));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.mcpServers.listTools("mcp project");
     await api.mcpServers.listServerTools("calendar", "mcp project");

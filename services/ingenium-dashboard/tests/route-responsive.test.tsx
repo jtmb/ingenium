@@ -196,11 +196,12 @@ describe("responsive dashboard routes", () => {
   it("stacks observation filters and keeps the mobile-only card action visible", async () => {
     render(<ObservationsPage />);
 
-    const longObservation = await screen.findByText(LONG_TOKEN, { selector: "p" });
+    const observation = await screen.findByRole("button", { name: "View observation 1" });
+    const longObservation = within(observation).getByText(LONG_TOKEN, { selector: "span.block" });
     expect(longObservation.className).toContain("break-words");
     expect(screen.getByLabelText("Filter observations by status").className).toContain("w-full");
     expect(screen.getByLabelText("Filter observations by type").className).toContain("sm:w-auto");
-    expect(screen.getByRole("button", { name: "Open" }).parentElement?.className).toContain("opacity-100");
+    expect(screen.getByRole("button", { name: "Open" }).className).toContain("shrink-0");
   });
 
   it("contains the logs table in a focusable horizontal region", async () => {
@@ -229,7 +230,8 @@ describe("responsive dashboard routes", () => {
   it("wraps agent actions and breaks arbitrary agent text", async () => {
     render(<AgentsPage />);
 
-    const agentName = await screen.findByText(LONG_TOKEN, { selector: "span" });
+    const agent = await screen.findByRole("button", { name: `View agent ${LONG_TOKEN}` });
+    const agentName = within(agent).getByText(LONG_TOKEN, { selector: "span.text-lg" });
     expect(agentName.className).toContain("break-all");
     expect(screen.getByRole("button", { name: "Disable" }).className).toContain("flex-1");
   });

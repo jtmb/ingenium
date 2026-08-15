@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, listContextSources } from "../src/lib/api";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 const successResponse = () => new Response(JSON.stringify({ data: {} }), {
   status: 200,
@@ -11,7 +12,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("task capture API client", () => {
   it("posts the email identity unchanged without a client project", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(successResponse()));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.tasks.capture({
       source_type: "email",
@@ -35,7 +36,7 @@ describe("task capture API client", () => {
 
   it("uses the selected project only for context/docs capture and sends chat identities unchanged", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(successResponse()));
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.tasks.capture({
       source_type: "context",

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/lib/api";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 const fetchMock = vi.fn();
 
 beforeEach(() => {
   fetchMock.mockReset();
-  vi.stubGlobal("fetch", fetchMock);
+  installDashboardFetchMock(fetchMock);
 });
 
 afterEach(() => vi.unstubAllGlobals());

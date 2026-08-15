@@ -129,12 +129,12 @@ describe("email runtime boundary", () => {
     });
 
     expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
-      .toEqual({ alreadyProcessed: false, newlyRecorded: true });
+      .toEqual({ status: "newly_recorded", alreadyProcessed: false, newlyRecorded: true });
     expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
-      .toEqual({ alreadyProcessed: true, newlyRecorded: false });
+      .toEqual({ status: "already_processed", alreadyProcessed: true, newlyRecorded: false });
     expect(getEmailRuntime().watcherMarkers.clearAccount(global.id, "adapter-account")).toBe(1);
     expect(getEmailRuntime().watcherMarkers.remember(global.id, "adapter-account", "INBOX", "adapter-uid"))
-      .toEqual({ alreadyProcessed: false, newlyRecorded: true });
+      .toEqual({ status: "newly_recorded", alreadyProcessed: false, newlyRecorded: true });
   });
 
   it("uses a migrated protected OAuth client secret without restoring its plaintext setting", async () => {

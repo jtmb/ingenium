@@ -14,7 +14,7 @@ import {
   type ChildMcpToolHost,
 } from "../../ingenium-server/lib/child-mcp-gateway.js";
 import { ChildMcpRuntimeManager } from "../../ingenium-server/lib/proxy.js";
-import { getProjectStateAttestation } from "../../ingenium-server/lib/tool-state-gate.js";
+import { getProjectStateAttestation, getToolAuthorizationPolicy } from "../../ingenium-server/lib/tool-state-gate.js";
 import {
   CHILD_MCP_RUNTIME_HANDOFF_HEADER,
   CHILD_MCP_RUNTIME_HANDOFF_PATH,
@@ -22,6 +22,7 @@ import {
   mcpServersRouter,
 } from "../lib/routes/mcp-servers.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
+import { runtimeServicePrincipal } from "./http-fixtures.js";
 
 const repositoryRoot = new URL("../../../", import.meta.url);
 const opencodeConfigPath = new URL("opencode.json", repositoryRoot);
@@ -193,9 +194,10 @@ function createGatewayApi(baseUrl: string): ChildMcpGatewayApi {
       const enabled = (body.data as { enabled?: unknown } | undefined)?.enabled;
       const attestation = getProjectStateAttestation(body, project);
       if (!response.ok || !attestation || typeof enabled !== "boolean") {
-        return { state: "unavailable", attestation: null };
+        return { state: "unavailable", attestation: null, policy: null };
       }
-      return { state: enabled ? "enabled" : "disabled", attestation };
+      const policy = getToolAuthorizationPolicy((body.data as { authorization?: unknown }).authorization);
+      return { state: enabled ? "enabled" : "disabled", attestation, policy };
     },
   };
 }
@@ -267,6 +269,7 @@ describe("MCP-005 gateway API fixture", () => {
       .resolves.toEqual({
         state: "enabled",
         attestation: { project: projectName, project_id: "mcp-playwright-gateway-project-id" },
+        policy: null,
       });
   });
 
@@ -278,7 +281,7 @@ describe("MCP-005 gateway API fixture", () => {
     const baseUrl = await startHttpServer(app);
 
     await expect(createGatewayApi(baseUrl).toolEnabled(projectName, "ingenium_playwright_browser_navigate"))
-      .resolves.toEqual({ state: "unavailable", attestation: null });
+      .resolves.toEqual({ state: "unavailable", attestation: null, policy: null });
   });
 });
 
@@ -289,11 +292,14 @@ describe("MCP-005 real Playwright child gateway", () => {
 
     temporaryDirectory = mkdtempSync(join(tmpdir(), "ingenium-mcp-playwright-gateway-"));
     process.env.INGENIUM_CORE_DB_PATH = join(temporaryDirectory, "data.db");
-    projects.createProject(projectName);
+    const project = projects.createProject(projectName);
 
     const app = express();
     app.use(express.json());
-    app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
+    app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, (req, _res, next) => {
+      req.principal = runtimeServicePrincipal(project.id);
+      next();
+    }, childMcpRuntimeRouter);
     app.use("/api/v1/mcp-servers", mcpServersRouter);
     app.use("/api/v1/mcp-tools", mcpToolsRouter);
     const baseUrl = await startHttpServer(app);

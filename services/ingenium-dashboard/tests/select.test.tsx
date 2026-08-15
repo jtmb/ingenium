@@ -16,13 +16,16 @@ const sharedSelectConsumers = {
   "app/components/settings/SettingsOverlay.tsx": 1,
   "app/components/settings/panels/GeneralPanel.tsx": 1,
   "app/components/settings/panels/MailPanel.tsx": 2,
-  "app/components/settings/panels/PipelinePanel.tsx": 8,
+  "app/components/settings/panels/PipelinePanel.tsx": 9,
   "app/docs/components/DocsShell.tsx": 1,
   "app/jobs/page.tsx": 6,
   "app/mail/components/EmailComposer.tsx": 2,
+  "app/mail/components/AccountSetup.tsx": 1,
   "app/mail/components/RichTextEditor.tsx": 2,
   "app/mcp-servers/components/McpServerManager.tsx": 2,
   "app/observations/page.tsx": 2,
+  "app/organizations/ProjectAccessPanel.tsx": 3,
+  "app/organizations/page.tsx": 3,
   "app/personality/page.tsx": 1,
   "app/secrets/components/CreateItemModal.tsx": 2,
   "app/skills/page.tsx": 1,
@@ -183,7 +186,7 @@ describe("Select", () => {
 });
 
 describe("shared Select inventory", () => {
-  it("contains one implementation select and exactly 57 shared Select consumers", () => {
+  it("contains one implementation select and exactly 65 shared Select consumers", () => {
     const implementation = readFileSync(join(appRoot, "components/Select.tsx"), "utf8");
     const rawConsumers = staticInventory(/<select(?=\s|>)/g);
     const sharedConsumers = staticInventory(/<Select(?=\s|>)/g);
@@ -191,7 +194,7 @@ describe("shared Select inventory", () => {
     expect(implementation.match(/<select(?=\s|>)/g)).toHaveLength(1);
     expect(rawConsumers).toEqual({});
     expect(sharedConsumers).toEqual(sharedSelectConsumers);
-    expect(Object.values(sharedConsumers).reduce((total, count) => total + count, 0)).toBe(57);
+    expect(Object.values(sharedConsumers).reduce((total, count) => total + count, 0)).toBe(65);
     expect(selectImportOwners()).toEqual(
       Object.fromEntries(Object.keys(sharedSelectConsumers).map((path) => [path, 1])),
     );

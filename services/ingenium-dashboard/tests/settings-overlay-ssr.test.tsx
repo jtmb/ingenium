@@ -172,7 +172,7 @@ describe("SettingsOverlay — active panel mounting", () => {
     await waitFor(() => {
       const panels = screen.getAllByTestId("test-panel", { hidden: true });
       expect(panels).toHaveLength(1);
-      expect(screen.getAllByTestId(/^settings-panel-/)).toHaveLength(1);
+      expect(document.body.querySelectorAll('section[data-testid^="settings-panel-"]')).toHaveLength(1);
       expect(screen.getByTestId("settings-panel-providers").getAttribute("hidden")).toBeNull();
     });
   });

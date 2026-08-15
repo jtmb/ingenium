@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/lib/api";
+import { installDashboardFetchMock } from "./dashboard-fetch-fixture";
 
 const fetchMock = vi.fn();
 
@@ -15,7 +16,7 @@ describe("context API client", () => {
       status: 200,
       json: async () => ({ data: [], total: 0, limit: 1, offset: 2 }),
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.context.sources.list("project/one", { limit: 1, offset: 2 });
 
@@ -30,7 +31,7 @@ describe("context API client", () => {
       status: 200,
       json: async () => ({ data: [] }),
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.context.messages.search("conversation/id", "preferred format", "project/one", 25);
 
@@ -45,7 +46,7 @@ describe("context API client", () => {
       status: 201,
       json: async () => ({ data: {} }),
     });
-    vi.stubGlobal("fetch", fetchMock);
+    installDashboardFetchMock(fetchMock);
 
     await api.context.checkpoints.restore("conversation/id", "checkpoint/id", {
       expectedRevision: 4,
