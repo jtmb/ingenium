@@ -1,6 +1,6 @@
 # WSL2 and Windows Transport
 
-The default deployment supports Windows access to the Docker gateway through
+The compatibility deployment supports Windows access to the Docker gateway through
 WSL's normal localhost forwarding. **Port `3000` is the only gateway-reachable
 host port** for the dashboard and the local OpenCode roots:
 
@@ -13,7 +13,7 @@ host port** for the dashboard and the local OpenCode roots:
 - OpenCode and ttyd listeners on `4098` and `4099`: private container upstreams;
   never publish, forward, or open them in Windows Firewall.
 
-All three browser-facing roots are intentionally credential-free for the normal
+All three compatibility browser-facing roots are intentionally credential-free for the normal
 local Windows↔WSL path. The dashboard same-origin proxy injects the API token
 server-side; it never exposes or sends a browser bearer token. This plain-HTTP
 gateway is not a LAN or remote security profile.
@@ -36,6 +36,11 @@ The gateway is the only browser path to OpenCode. Its upstream listeners are
 container-private, and the proxy strips browser authorization, identity, and
 forwarding headers before forwarding. The CLI identity is injected only by the
 gateway. Never add a Windows port-proxy or firewall rule for 4098/4099.
+
+In production, only the dashboard remains useful on these local names.
+`opencode.localhost`, `cli.localhost`, and `vscode.localhost` return the same static
+no-store `404` guidance and reject upgrades without proxying. After sign-in, use the
+dashboard workspace picker and the runtime gateway's exact TLS audience roots.
 
 ## Windows loopback verification
 
@@ -63,17 +68,9 @@ must leave the local machine, provide a separate operator-managed TLS-authentica
 dashboard and both OpenCode root origins. Do not replace this with a raw `netsh
 interface portproxy` rule or a firewall exception for 4098/4099.
 
-Before building that profile, set **both** public origin variables:
-
-```powershell
-$env:NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com/"
-$env:NEXT_PUBLIC_OPENCODE_CLI_URL = "https://cli.example.com/"
-docker compose up --build -d
-```
-
-The origins must be dedicated root HTTPS origins: no path, query, fragment,
-embedded credentials, or dashboard subpath. The TLS profile must authenticate
-the request before forwarding to the private services. Plain LAN HTTP and direct
+The production runtime gateway requires an operator-managed wildcard TLS domain and
+certificate. Runtime audience roots are issued only after authenticated workspace
+selection; they are not fixed browser build settings. Plain LAN HTTP and direct
 4098/4099 exposure are unsupported.
 
 ## Build, restart, and rollback

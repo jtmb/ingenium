@@ -15,7 +15,7 @@ export const RUNTIME_GATEWAY_NETWORK_HEADER = "x-ingenium-private-network";
 export const RUNTIME_GATEWAY_NETWORK_VALUE = "runtime-gateway";
 
 export function isRuntimeGatewayPrivateRequest(req: Pick<Request, "method" | "path">): boolean {
-  return req.method === "POST" && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate)$/.test(req.path);
+  return req.method === "POST" && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(req.path);
 }
 
 declare global {

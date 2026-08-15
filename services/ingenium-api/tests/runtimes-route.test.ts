@@ -41,7 +41,17 @@ function createWorkspace(id: string) {
     ownerUserId: user.id,
     storagePath: `/srv/approved/${id}`,
   });
-  return { user, project };
+  return { user, project, organizationId };
+}
+
+function authorizeAdditionalWorkspace(scope: ReturnType<typeof createWorkspace>, id: string) {
+  return runtimes.authorizeWorkspace({
+    id,
+    organizationId: scope.organizationId,
+    projectId: scope.project.id,
+    ownerUserId: scope.user.id,
+    storagePath: `/srv/approved/${id}`,
+  });
 }
 
 beforeAll(async () => {
@@ -86,6 +96,7 @@ beforeEach(() => {
   managerRuntimeState = "running";
   managerRequests = [];
   browserSession = null;
+  process.env.INGENIUM_DEPLOYMENT_MODE = "control-plane";
   process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
   process.env.INGENIUM_CORE_DB_PATH = join(directory, `data-${crypto.randomUUID()}`);
   resetDbForTest();
@@ -95,6 +106,8 @@ afterEach(() => {
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   delete process.env.INGENIUM_RUNTIME_ROOT_DOMAIN;
+  delete process.env.INGENIUM_DEPLOYMENT_MODE;
+  delete process.env.INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER;
 });
 
 afterAll(async () => {
@@ -117,7 +130,7 @@ describe("AUTH-108 runtime routes", () => {
     expect(response.status).toBe(422);
   });
 
-  it("provisions one runtime per authorized workspace", async () => {
+  it("idempotently provisions one runtime per authorized workspace", async () => {
     createWorkspace("runtime-route-ok");
     const first = await fetch(`${apiBase}/api/v1/runtimes`, {
       method: "POST",
@@ -132,7 +145,8 @@ describe("AUTH-108 runtime routes", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceId: "runtime-route-ok" }),
     });
-    expect(duplicate.status).toBe(409);
+    expect(duplicate.status).toBe(202);
+    expect(managerRequests.filter((request) => request === "POST /v1/runtimes")).toHaveLength(1);
   });
 
   it("fails closed and revokes the capability when the manager is unavailable", async () => {
@@ -196,24 +210,26 @@ describe("AUTH-108 runtime routes", () => {
 
   it("returns opaque browser status and atomically exchanges a browser launch ticket", async () => {
     const scope = createWorkspace("runtime-route-browser");
-    browserSession = authentication.createSession(scope.user.id);
     const provisioned = await fetch(`${apiBase}/api/v1/runtimes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceId: "runtime-route-browser" }),
     });
     expect(provisioned.status).toBe(202);
+    browserSession = authentication.createSession(scope.user.id);
     let runtime = runtimes.getRuntimeForWorkspace("runtime-route-browser")!;
     runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "test" });
 
     const status = await fetch(`${apiBase}/api/v1/runtimes/browser/status`);
     expect(status.status).toBe(200);
-    await expect(status.json()).resolves.toEqual({ data: { status: "ready" } });
+    const statusBody = await status.json();
+    expect(statusBody).toEqual({ data: { mode: "isolated", status: "ready", reason: null } });
+    expect(JSON.stringify(statusBody)).not.toMatch(/runtimeId|backend|storagePath|ownerUserId|projectId/);
 
     const launched = await fetch(`${apiBase}/api/v1/runtimes/browser/launch`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "https://dashboard.example.test" },
-      body: JSON.stringify({ audience: "web", exchangeProof: "p".repeat(43) }),
+      body: JSON.stringify({ audience: "web", exchangeProof: "p".repeat(43), workspaceId: "runtime-route-browser" }),
     });
     expect(launched.status).toBe(201);
     const descriptor = (await launched.json() as { data: { launchUrl: string; status: string } }).data;
@@ -233,11 +249,174 @@ describe("AUTH-108 runtime routes", () => {
       body: JSON.stringify({ exchangeProof: "p".repeat(43), audience: "web", origin: launchOrigin, host: new URL(launchOrigin).host, launcherOrigin: "https://dashboard.example.test" }),
     });
     expect(exchanged.status).toBe(200);
+    const exchangedBody = await exchanged.json() as { data: { sessionToken: string } };
+    const activityScope = {
+      sessionToken: exchangedBody.data.sessionToken,
+      audience: "web",
+      origin: launchOrigin,
+      host: new URL(launchOrigin).host,
+    };
+    for (const kind of ["connection_opened", "generation_started"] as const) {
+      const activity = await fetch(`${apiBase}/api/v1/runtimes/gateway/activity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...activityScope, kind }),
+      });
+      expect(activity.status).toBe(200);
+    }
+    const active = runtimes.getRuntimeInstance(runtime.id)!;
+    expect(active).toMatchObject({ activeConnections: 1, activeGenerations: 1 });
+    const validated = await fetch(`${apiBase}/api/v1/runtimes/gateway/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(activityScope),
+    });
+    expect(validated.status).toBe(200);
+    expect(runtimes.getRuntimeInstance(runtime.id)).toMatchObject({
+      revision: active.revision,
+      activeConnections: 1,
+      activeGenerations: 1,
+    });
+    for (const kind of ["generation_finished", "connection_closed"] as const) {
+      const activity = await fetch(`${apiBase}/api/v1/runtimes/gateway/activity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...activityScope, kind }),
+      });
+      expect(activity.status).toBe(200);
+    }
+    expect(runtimes.getRuntimeInstance(runtime.id)).toMatchObject({ activeConnections: 0, activeGenerations: 0 });
     const replay = await fetch(`${apiBase}/api/v1/runtimes/gateway/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ exchangeProof: "p".repeat(43), audience: "web", origin: launchOrigin, host: new URL(launchOrigin).host, launcherOrigin: "https://dashboard.example.test" }),
     });
     expect(replay.status).toBe(401);
+  });
+
+  it("uses the compatibility descriptor without calling the runtime manager", async () => {
+    const scope = createWorkspace("runtime-route-compatibility");
+    browserSession = authentication.createSession(scope.user.id);
+    process.env.INGENIUM_DEPLOYMENT_MODE = "compatibility";
+
+    const status = await fetch(`${apiBase}/api/v1/runtimes/browser/status`);
+
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toEqual({ data: { mode: "compatibility", status: "ready", reason: null } });
+    expect(managerRequests).toEqual([]);
+  });
+
+  it("lists only currently authorized owned workspaces without paths or authority IDs", async () => {
+    const own = createWorkspace("runtime-route-own");
+    createWorkspace("runtime-route-foreign");
+    browserSession = authentication.createSession(own.user.id);
+
+    const response = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ data: [{
+      id: "runtime-route-own",
+      organizationName: "runtime-route-own",
+      projectName: "runtime-route-own",
+      status: "stopped",
+    }] });
+    expect(JSON.stringify(body)).not.toMatch(/storage|ownerUserId|organizationId|projectId|backend|\/srv\//i);
+
+    const installationList = await fetch(`${apiBase}/api/v1/runtimes/workspaces`);
+    expect(installationList.status).toBe(404);
+    const createAuthorization = await fetch(`${apiBase}/api/v1/runtimes/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "browser-created", storagePath: "/tmp/browser-controlled" }),
+    });
+    expect(createAuthorization.status).toBe(404);
+  });
+
+  it("removes workspaces when organization or project membership is no longer active", async () => {
+    const scope = createWorkspace("runtime-route-membership");
+    browserSession = authentication.createSession(scope.user.id);
+    const remainingOwner = identity.createUser("remaining-owner@example.test", "Remaining owner");
+    const timestamp = new Date().toISOString();
+    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "INSERT INTO organization_memberships (organization_id, user_id, role, status, created_at, updated_at) VALUES (?, ?, 'owner', 'active', ?, ?)",
+    ).run(scope.organizationId, remainingOwner.id, timestamp, timestamp);
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    db.prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?").run(scope.organizationId);
+
+    const suspendedOrganization = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces`);
+
+    await expect(suspendedOrganization.json()).resolves.toEqual({ data: [] });
+    db.prepare("UPDATE organizations SET status = 'active' WHERE id = ?").run(scope.organizationId);
+    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "UPDATE organization_memberships SET status = 'suspended' WHERE organization_id = ? AND user_id = ?",
+    ).run(scope.organizationId, scope.user.id);
+
+    const suspendedMembership = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces`);
+
+    await expect(suspendedMembership.json()).resolves.toEqual({ data: [] });
+    db.prepare("UPDATE organization_memberships SET status = 'active' WHERE organization_id = ? AND user_id = ?")
+      .run(scope.organizationId, scope.user.id);
+    db.prepare("UPDATE projects SET archived_at = ? WHERE id = ?").run(timestamp, scope.project.id);
+    const archivedProject = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces`);
+
+    await expect(archivedProject.json()).resolves.toEqual({ data: [] });
+  });
+
+  it("coalesces concurrent explicit Web, CLI, and VS Code starts into one managed runtime", async () => {
+    const scope = createWorkspace("runtime-route-concurrent");
+    browserSession = authentication.createSession(scope.user.id);
+
+    const responses = await Promise.all(["web", "cli", "vscode"].map(() => fetch(
+      `${apiBase}/api/v1/runtimes/browser/workspaces/runtime-route-concurrent/start`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    )));
+
+    expect(responses.map((response) => response.status)).toEqual([202, 202, 202]);
+    expect(managerRequests.filter((request) => request === "POST /v1/runtimes")).toHaveLength(1);
+    expect(runtimes.listRuntimeInstances(scope.user.id)).toHaveLength(1);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM security_audit_events WHERE actor_id = ? AND action = 'runtime.workspace.start' AND outcome = 'success'",
+    ).get(scope.user.id)).toEqual({ count: 3 });
+  });
+
+  it("denies another user's workspace without invoking the manager", async () => {
+    const owner = createWorkspace("runtime-route-owner");
+    const other = createWorkspace("runtime-route-other");
+    browserSession = authentication.createSession(other.user.id);
+
+    const response = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces/runtime-route-owner/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(404);
+    expect(managerRequests).toEqual([]);
+    expect(runtimes.getRuntimeForWorkspace(owner.project.name)).toBeUndefined();
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM security_audit_events WHERE actor_id = ? AND action = 'runtime.workspace.start' AND outcome = 'denied'",
+    ).get(other.user.id)).toEqual({ count: 1 });
+  });
+
+  it("enforces the active runtime quota on explicit starts", async () => {
+    const scope = createWorkspace("runtime-route-quota-one");
+    authorizeAdditionalWorkspace(scope, "runtime-route-quota-two");
+    browserSession = authentication.createSession(scope.user.id);
+    process.env.INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER = "1";
+
+    const first = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces/runtime-route-quota-one/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const second = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces/runtime-route-quota-two/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(429);
+    await expect(second.json()).resolves.toMatchObject({ error: { code: "QUOTA_EXCEEDED" } });
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM security_audit_events WHERE actor_id = ? AND action = 'runtime.workspace.start' AND outcome = 'failure'",
+    ).get(scope.user.id)).toEqual({ count: 1 });
   });
 });

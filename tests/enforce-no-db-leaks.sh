@@ -24,6 +24,7 @@ runtime_source_files() {
   git -C "$ROOT_DIR" ls-files -z -- \
     '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs' |
     while IFS= read -r -d '' file; do
+      [[ -f "$ROOT_DIR/$file" ]] || continue
       case "$file" in
         packages/ingenium-core/*|services/ingenium-api/*)
           continue

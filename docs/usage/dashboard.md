@@ -10,11 +10,16 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 ## Getting Started
 
 ```bash
-# Production — single container via supervisord
-docker compose up --build
+# Local compatibility profile
+docker compose --profile compatibility up --build
 ```
 
-Docker starts a single container with seven supervisord processes: API, the private API boundary, Dashboard, gateway, opencode-web (internal :4098), ttyd-opencode (internal :4099), and code-server (private :4100). Browser access uses the local `localhost:3000` dashboard root, `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots, and `vscode.localhost:3000` VS Code root without browser credentials. Direct 4098/4099/4100 access is not supported. The built-in MCP catalog contains **282 tools** across **30 baseline categories** (280 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
+Compatibility starts one container with seven supervised processes and fixed local
+runtime aliases. Production separates the control plane, manager, gateway, and
+per-workspace runtimes; its fixed aliases return static `404` picker guidance. Direct
+4098/4099/4100 access is not supported. The built-in MCP catalog contains **282 tools**
+across **30 baseline categories** (280 `ingenium_` catalog entries plus 2 extension
+tools); project-scoped child discovery can add tools and categories at runtime.
 
 ### Connecting an MCP Client
 
@@ -131,11 +136,15 @@ expired-ticket, unavailable, retry, iframe, pop-out, and standalone states use t
 per-user runtime status/launch API rather than global Supervisor health. The browser
 receives only the launch URL/status, never the private code-server address or a runtime/API bearer or session token.
 
-Open `/vscode` from the Workspace navigation group or directly by URL. The page
-embeds code-server through the established port-`3000` virtual-host gateway at
-`http://vscode.localhost:3000/`; code-server itself stays private at
-`127.0.0.1:4100`. The workspace uses `/workspace`, a persistent `vscode-data`
-volume, a full terminal, and the stock Open VSX/user-managed extension flow.
+The same picker is used by `/opencode`, `/vscode`, standalone views, and pop-outs.
+It lists only owned workspaces whose organization/project membership remains active,
+requires an explicit choice and start/resume even when exactly one option exists, and
+polls starting state for a bounded interval before offering retry. It never creates
+workspace authorization or accepts a host path from the browser.
+
+Open `/vscode` from the Workspace navigation group or directly by URL. Compatibility
+embeds `http://vscode.localhost:3000/`; production uses the selected runtime's exact
+`vscode` HTTPS audience. code-server stays private at `4100` in either profile.
 
 The iframe is intentionally unsandboxed because it is trusted first-party content
 on a separate origin and requests only `allow="clipboard-write"`. If the local

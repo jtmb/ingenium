@@ -3,7 +3,18 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const runtimeId = "11111111-1111-4111-8111-111111111111";
 vi.mock("../src/lib/use-runtime-launch", () => ({
-  useRuntimeLaunch: (audience: "web" | "cli" | "vscode", enabled = true) => ({
+  useRuntimeWorkspace: () => ({
+    mode: "isolated",
+    status: "ready",
+    workspaces: [],
+    selectedWorkspaceId: "workspace-one",
+    confirmedWorkspaceId: "workspace-one",
+    error: null,
+    selectWorkspace: vi.fn(),
+    start: vi.fn(),
+    retry: vi.fn(),
+  }),
+  useRuntimeLaunch: (audience: "web" | "cli" | "vscode", _workspace: unknown, enabled = true) => ({
     status: enabled ? "ready" : "loading",
     url: enabled ? `https://${audience}--${runtimeId}.runtime.example.test/` : null,
     error: null,

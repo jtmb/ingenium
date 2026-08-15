@@ -41,11 +41,6 @@ export OPENCODE_SERVER_PASSWORD='...'
 export INGENIUM_API_TOKEN='...'
 export INGENIUM_EMAIL_ENCRYPTION_KEY='...'
 
-# Optional remote/LAN mode: set both before the image build, and use only
-# operator-managed authenticated root HTTPS origins.
-# export NEXT_PUBLIC_OPENCODE_WEB_URL='https://opencode.example.com/'
-# export NEXT_PUBLIC_OPENCODE_CLI_URL='https://cli.example.com/'
-
 # Record the exact checkout used for this image. Compose cannot evaluate Git
 # commands, so IMAGE_REVISION is required for every Compose invocation.
 export IMAGE_REVISION="$(git rev-parse HEAD)"
@@ -175,9 +170,18 @@ host-only `Secure`, `HttpOnly`, `SameSite=Strict` audience cookie. Requests and
 WebSocket handshakes require a live session; logout and runtime revoke advance the
 generation and close streams or reconnects.
 
+The dashboard first loads a browser-safe profile descriptor. Compatibility uses the
+three fixed local aliases and never calls the runtime manager. Production lists only
+the signed-in user's still-authorized organization/project workspaces and requires an
+explicit selection plus start/resume; zero, one, and many candidates never trigger
+automatic selection or authorization. Last-used is only a revalidated preference.
+Authenticated HTTP requests, WebSocket lifecycles, and generation start/finish events
+renew the bounded idle lease. Health/status polling does not, and renewal never extends
+the absolute lease. Close, logout/revoke, stop, and crash reconcile counters.
+
 The API boundary strips caller-supplied gateway/private-network assertions and writes
 the private marker only after validating the distinct gateway credential and exact
-exchange/validate route. The Dashboard proxy denies those routes before rewriting.
+exchange, validate, or activity route. The Dashboard proxy denies those routes before rewriting.
 
 ---
 
@@ -211,11 +215,14 @@ gateway in front of the dashboard.
 
 ### 3. opencode-web (internal :4098)
 
-OpenCode web server. It is a private internal upstream reached through the local root `http://opencode.localhost:3000`. Do not publish or access host port 4098 directly.
+In compatibility mode, OpenCode Web is reached through `http://opencode.localhost:3000`.
+In production that fixed alias returns the common static no-store `404` picker guidance
+and never reaches an absent upstream. Do not publish port 4098.
 
 ### 4. ttyd-opencode (internal :4099)
 
-OpenCode CLI terminal via ttyd. It is a private internal upstream reached through the local root `http://cli.localhost:3000`. Do not publish or access host port 4099 directly.
+In compatibility mode, ttyd is reached through `http://cli.localhost:3000`. Production
+returns the same static `404` as the other aliases. Do not publish port 4099.
 
 ```bash
 ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace
@@ -223,9 +230,9 @@ ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace
 
 ### 5. code-server (internal :4100)
 
-code-server is a private VS Code workspace upstream reached through the exact
-local root `http://vscode.localhost:3000/`. Do not publish or access host port
-4100 directly.
+Compatibility reaches code-server through `http://vscode.localhost:3000/`. Production
+returns the same static `404` and uses only the selected runtime's audience root. Do
+not publish port 4100.
 
 The image bakes the official Open VSX
 `sst-dev.opencode@0.0.13` artifact from
@@ -260,7 +267,7 @@ deployment profile.
 
 | Host Port | Service | Description |
 |-----------|---------|-------------|
-| `3000` | Dashboard + host gateway | WSL-forwardable local `localhost:3000`, `opencode.localhost:3000`, `cli.localhost:3000`, and `vscode.localhost:3000` gateway without HTTP Basic Auth |
+| `3000` | Dashboard + host gateway | Dashboard in both profiles; fixed runtime aliases proxy only in compatibility and return identical static no-store `404` guidance in production |
 | `127.0.0.1:4097` | API boundary | Authenticated host-loopback bearer boundary |
 | internal `4096` | Express API | Private upstream and sole DB authority |
 | internal `4098` | OpenCode Web | Private upstream served through local `opencode.localhost:3000` |
@@ -382,6 +389,11 @@ the `4097` boundary. It also checks supervised process state and the local
 gateway roots. A missing/invalid token therefore makes the container unhealthy;
 health never falls back to an unauthenticated request.
 
+Health validation is profile-aware. Compatibility requires healthy Web, CLI, and VS
+Code aliases. Production requires all three aliases to return byte-identical `404`
+guidance with `Cache-Control: no-store`, `nosniff`, and restrictive CSP; an upgrade
+request must stop at the static response.
+
 The authenticated healthcheck re-executes as `appuser` before reading the token.
 The runtime token is an `appuser`-owned mode-`0600` file, so its owner and mode
 validation require the probe to run under that identity. Do not run the probe as
@@ -402,11 +414,12 @@ healthcheck:
 
 The dashboard `/opencode` page features a **dual-mode** interface:
 
-- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts` using a **two-tier embedding model**:
-  - **Host gateway HTTP**: local root `http://opencode.localhost:3000/` without browser credentials
-  - **Remote/LAN**: requires a separate operator-managed TLS-authenticated profile protecting the dashboard and both explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` root HTTPS origins (for example, `https://opencode.example.com/` and `https://cli.example.com/`). Plain LAN HTTP is not a supported remote profile.
-  - > The old `/opencode-web/` same-origin proxy rewrites are unsupported — OpenCode serves root-relative assets and cannot be proxied under a sub-path.
-- **CLI mode** — Embeds the local root `http://cli.localhost:3000/` gateway, or an explicit dedicated root HTTPS origin via `NEXT_PUBLIC_OPENCODE_CLI_URL`. The old `/opencode-cli/` subpath proxy is unsupported.
+- **Compatibility** — Web, CLI, and VS Code use the exact fixed `.localhost:3000`
+  aliases. The trusted profile descriptor prevents dynamic-manager calls.
+- **Production** — The page renders an authorization-filtered picker and explicit
+  start/resume. Once ready, Web and CLI redeem separate one-time proofs for exact
+  runtime HTTPS roots. There is no fixed-alias or singleton fallback.
+- The old `/opencode-web/` and `/opencode-cli/` subpath rewrites remain unsupported.
 - **Glass tab**: Right-edge toggle (`backdrop-blur-sm`, `fixed right-0 top-1/2`). Expands on hover. Keyboard shortcut: `Ctrl+Shift+\``
 - **Dual-iframe architecture**: Both iframes remain in the DOM. Inactive one hidden via `opacity: 0` / `visibility: hidden` / `pointer-events: none` (not `display:none`) to prevent xterm dimension zeroing
 - **Mode persistence**: Saved in `localStorage` under `opencode-mode`

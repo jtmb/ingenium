@@ -8,9 +8,12 @@ description: Naming, file organization, error handling, git practices, and datab
 ## OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Uses the local root gateway `http://opencode.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_WEB_URL`).
-- **CLI mode** — Uses the local root gateway `http://cli.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_CLI_URL`). OpenCode is not served under a shared dashboard subpath because its root-relative assets and WebSockets require a root origin.
-- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099` remain private upstreams. LAN/remote use requires an operator-managed authenticated TLS profile and both public origins at build time.
+- **Compatibility** — Web/CLI/VS Code use the exact fixed `.localhost:3000` aliases
+  and never call the dynamic runtime manager.
+- **Production** — Always renders the authorization-filtered workspace picker before
+  launching exact runtime audience roots. It never selects a singleton or falls back
+  to compatibility aliases. OpenCode is not served under a shared dashboard subpath.
+- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099` remain private upstreams. LAN/remote use requires the isolated profile's operator-managed TLS runtime domain.
 - **Authentication** — The default Windows↔WSL gateway does not use HTTP Basic Auth or browser bearer tokens. It is a local plain-HTTP profile, not a LAN/remote security profile; remote access requires an operator-managed authenticated TLS profile.
 - **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The standalone pop-out (`/standalone?page=opencode`) uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
@@ -23,7 +26,9 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 ## VS Code workspace
 
 - **Origin** — `/vscode` and `/standalone?page=vscode` use the exact local root `http://vscode.localhost:3000/` on the established port-`3000` virtual-host gateway.
-- **Production origin** — The isolated profile uses `https://vscode--<runtime-id>.<runtime-domain>/`, sharing the user's runtime container but not Web/CLI audience cookies.
+- **Production origin** — The isolated profile uses `https://vscode--<runtime-id>.<runtime-domain>/`
+  only after explicit start/resume, sharing the runtime container but not Web/CLI
+  audience cookies. The fixed VS Code alias returns static `404` guidance.
 - **Boundary** — code-server listens privately at `127.0.0.1:4100`; no host `3002` or public `4100` endpoint is supported. The default Windows/WSL firewall and localhost-forwarding assumption is for local use only, not LAN, remote, shared, or untrusted access.
 - **Embedding** — The trusted separate-origin iframe is unsandboxed and requests only `allow="clipboard-write"`; the page also offers a standalone/new-tab fallback. code-server provides the `/workspace` terminal and stock Open VSX/user-managed extension flow.
 - **Theme defaults** — Use the code-free built-in `configurationDefaults` contribution to enable system color detection with **Dark Modern** and **Light Modern**. User and workspace settings override these defaults; never mutate User `settings.json` or workspace settings to enforce a theme.

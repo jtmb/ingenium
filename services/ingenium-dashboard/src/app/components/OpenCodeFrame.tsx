@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { useRuntimeLaunch } from "@/lib/use-runtime-launch";
+import { useRuntimeLaunch, useRuntimeWorkspace } from "@/lib/use-runtime-launch";
+import RuntimeWorkspacePicker from "./RuntimeWorkspacePicker";
 
 interface OpenCodeFrameProps {
   mode: "web" | "cli";
@@ -35,8 +36,9 @@ export default function OpenCodeFrame({
   const modeRef = useRef(mode);
   const [frameError, setFrameError] = useState<{ mode: "web" | "cli"; message: string } | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
-  const webLaunch = useRuntimeLaunch("web");
-  const cliLaunch = useRuntimeLaunch("cli", cliMounted);
+  const workspace = useRuntimeWorkspace();
+  const webLaunch = useRuntimeLaunch("web", workspace);
+  const cliLaunch = useRuntimeLaunch("cli", workspace, cliMounted);
   const activeLaunch = mode === "web" ? webLaunch : cliLaunch;
   const activeUrl = activeLaunch.url;
   const activeFrameError = frameError?.mode === mode ? frameError.message : null;
@@ -118,6 +120,10 @@ export default function OpenCodeFrame({
     setRetryNonce((value) => value + 1);
     activeLaunch.retry();
   };
+
+  if (workspace.status !== "ready") {
+    return <RuntimeWorkspacePicker controller={workspace} product={mode === "web" ? "OpenCode Web" : "OpenCode CLI"} />;
+  }
 
   if (activeLaunch.status === "loading" || activeLaunch.status === "starting") {
     return (

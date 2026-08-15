@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { loadRuntimeGatewayToken } from "../lib/runtime-gateway-auth.js";
 
 type Audience = "web" | "cli" | "vscode";
+type ActivityKind = "connection_opened" | "connection_closed" | "generation_started" | "generation_finished";
 type RuntimeScope = { audience: Audience; runtimeId: string; host: string; origin: string };
 type ValidatedSession = {
   backendName: string;
@@ -78,7 +79,7 @@ export function gatewayRequestHeaders(token: string): Record<string, string> {
   };
 }
 
-function gatewayApi(path: string, body: unknown): Promise<{ status: number; data?: ValidatedSession & { sessionToken?: string }; error?: unknown }> {
+function gatewayApi<T>(path: string, body: unknown): Promise<{ status: number; data?: T; error?: unknown }> {
   const url = new URL(path, required("INGENIUM_RUNTIME_API_URL"));
   if (url.protocol !== "http:" || url.username || url.password) throw new Error("INGENIUM_RUNTIME_API_URL is invalid");
   return fetch(url, {
@@ -90,13 +91,36 @@ function gatewayApi(path: string, body: unknown): Promise<{ status: number; data
 }
 
 async function validate(scope: RuntimeScope, token: string): Promise<ValidatedSession | undefined> {
-  const result = await gatewayApi("runtimes/gateway/validate", {
+  const result = await gatewayApi<ValidatedSession>("runtimes/gateway/validate", {
     sessionToken: token,
     audience: scope.audience,
     origin: scope.origin,
     host: scope.host,
   });
   return result.status === 200 && result.data?.backendName ? result.data : undefined;
+}
+
+async function recordActivity(scope: RuntimeScope, token: string, kind: ActivityKind): Promise<boolean> {
+  const result = await gatewayApi<{ accepted?: boolean }>("runtimes/gateway/activity", {
+    sessionToken: token,
+    audience: scope.audience,
+    origin: scope.origin,
+    host: scope.host,
+    kind,
+  });
+  return result.status === 200 && result.data?.accepted === true;
+}
+
+export function isRuntimeHealthRequest(request: Pick<IncomingMessage, "method" | "url">): boolean {
+  if (request.method !== "GET" && request.method !== "HEAD" && request.method !== "OPTIONS") return false;
+  const pathname = new URL(request.url ?? "/", "https://runtime.invalid").pathname.toLowerCase();
+  return /\/(?:health|healthz|status)$/.test(pathname);
+}
+
+export function isRuntimeGenerationRequest(request: Pick<IncomingMessage, "method" | "url">): boolean {
+  if (request.method !== "POST") return false;
+  const pathname = new URL(request.url ?? "/", "https://runtime.invalid").pathname;
+  return /^\/session\/[^/]+\/(?:message|prompt|prompt_async|command)$/.test(pathname);
 }
 
 function framePolicy(): string {
@@ -157,7 +181,7 @@ function exchange(request: IncomingMessage, response: ServerResponse, scope: Run
     try {
       const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { proof?: unknown };
       if (typeof parsed.proof !== "string") return reject(response, 401, "Runtime launch proof is invalid");
-      const result = await gatewayApi("runtimes/gateway/exchange", {
+      const result = await gatewayApi<{ sessionToken?: string; session?: { expiresAt?: string } }>("runtimes/gateway/exchange", {
         exchangeProof: parsed.proof,
         audience: scope.audience,
         origin: scope.origin,
@@ -208,6 +232,22 @@ async function proxyHttp(request: IncomingMessage, response: ServerResponse, sco
   if (suppliedOrigin && suppliedOrigin !== scope.origin) return reject(response, 403, "Runtime request origin is not allowed");
   const resolved = await validate(scope, token).catch(() => undefined);
   if (!resolved) return reject(response);
+  const tracked = !isRuntimeHealthRequest(request);
+  const generation = tracked && isRuntimeGenerationRequest(request);
+  if (tracked && !await recordActivity(scope, token, "connection_opened").catch(() => false)) return reject(response);
+  if (generation && !await recordActivity(scope, token, "generation_started").catch(() => false)) {
+    await recordActivity(scope, token, "connection_closed").catch(() => false);
+    return reject(response);
+  }
+  let finished = false;
+  const finish = () => {
+    if (!tracked || finished) return;
+    finished = true;
+    void (async () => {
+      if (generation) await recordActivity(scope, token, "generation_finished").catch(() => false);
+      await recordActivity(scope, token, "connection_closed").catch(() => false);
+    })();
+  };
   const upstream = httpRequest({
     hostname: resolved.backendName,
     port: BACKEND_PORTS[scope.audience],
@@ -223,7 +263,9 @@ async function proxyHttp(request: IncomingMessage, response: ServerResponse, sco
     void validate(scope, token).then((current) => { if (!current) upstream.destroy(); }).catch(() => upstream.destroy());
   }, 5_000);
   recheck.unref();
-  const clear = () => clearInterval(recheck);
+  const clear = () => { clearInterval(recheck); finish(); };
+  response.on("close", finish);
+  request.on("aborted", finish);
   upstream.on("close", clear);
   upstream.on("error", () => { clear(); if (!response.headersSent) reject(response, 502, "Runtime backend is unavailable"); else response.destroy(); });
   request.pipe(upstream);
@@ -247,7 +289,24 @@ async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Bu
     path: request.url,
     headers: sanitizedHeaders(request.headers, scope, true),
   });
-  upstream.on("upgrade", (upstreamResponse, upstreamSocket, upstreamHead) => {
+  upstream.on("upgrade", async (upstreamResponse, upstreamSocket, upstreamHead) => {
+    if (!await recordActivity(scope, token, "connection_opened").catch(() => false)) {
+      socket.destroy();
+      upstreamSocket.destroy();
+      return;
+    }
+    let closed = false;
+    const closeActivity = () => {
+      if (closed) return;
+      closed = true;
+      void recordActivity(scope, token, "connection_closed").catch(() => false);
+    };
+    if (socket.destroyed || upstreamSocket.destroyed) {
+      closeActivity();
+      socket.destroy();
+      upstreamSocket.destroy();
+      return;
+    }
     const lines = [`HTTP/1.1 ${upstreamResponse.statusCode ?? 101} ${upstreamResponse.statusMessage ?? "Switching Protocols"}`];
     for (const [name, value] of Object.entries(upstreamResponse.headers)) {
       if (value !== undefined && !PRIVATE_HEADERS.has(name.toLowerCase())) lines.push(`${name}: ${Array.isArray(value) ? value.join(", ") : value}`);
@@ -261,7 +320,8 @@ async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Bu
         .catch(() => { socket.destroy(); upstreamSocket.destroy(); });
     }, 5_000);
     recheck.unref();
-    socket.on("close", () => clearInterval(recheck));
+    socket.on("close", () => { clearInterval(recheck); closeActivity(); });
+    upstreamSocket.on("close", closeActivity);
   });
   upstream.on("response", () => socket.destroy());
   upstream.on("error", () => socket.destroy());

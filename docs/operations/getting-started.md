@@ -63,10 +63,10 @@ and store them as owner-only `.opencode/.ingenium-mcp-credential` and
 `.opencode/.ingenium-repository-sync-credential` files.
 
 `OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` are required. The
-`NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` settings are
-build-time browser configuration; if you use remote/LAN access, set both to
-operator-managed authenticated root HTTPS origins before building. Do not set
-them only after the container starts.
+`NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` are retained only
+as legacy build-time CSP allowlist inputs; they do not select an iframe target. The
+isolated production profile obtains exact audience roots only after an authorized
+workspace is explicitly selected and started.
 
 This starts the `compatibility` profile in a single container:
 - **Dashboard root** on http://localhost:3000 (WSL-forwardable local gateway, no Basic Auth)
@@ -74,7 +74,7 @@ This starts the `compatibility` profile in a single container:
 - **OpenCode CLI root** on http://cli.localhost:3000 (no Basic Auth)
 - Port `3000` is the browser gateway and is the port Windows reaches through WSL localhost forwarding. The API boundary on `127.0.0.1:4097` is for authenticated MCP clients, while OpenCode/ttyd remain private upstreams on `4098`/`4099`; do not publish, forward, or browse to those ports.
 
-The local dashboard, Web, and CLI roots do not prompt for HTTP Basic Auth and do not receive browser bearer tokens. This plain-HTTP profile is for the local Windows↔WSL path only; use an operator-managed authenticated TLS profile for LAN or remote access.
+The local dashboard, Web, and CLI roots do not prompt for HTTP Basic Auth and do not receive browser bearer tokens. This plain-HTTP compatibility profile is for the local Windows↔WSL path only.
 
 The API server idempotently creates the `global-default` project at startup if none exists — no manual setup needed.
 
@@ -110,7 +110,7 @@ it to browser JavaScript. The exact OAuth callback exception is
 callback listener, which forwards only that exact path to private Express
 `4096`; other paths are rejected.
 
-A source/config or build-time-origin change requires `docker compose --profile compatibility up --build -d`; a secret-only change normally requires `docker compose --profile compatibility up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099 as a workaround. The separate AUTH-108 `production` profile is documented in [Deployment](deployment.md#isolated-production-runtime-profile); its runtime-specific browser routing remains AUTH-109 work.
+A source/config or build-time-origin change requires `docker compose --profile compatibility up --build -d`; a secret-only change normally requires `docker compose --profile compatibility up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099 as a workaround. The isolated `production` profile is documented in [Deployment](deployment.md#isolated-production-runtime-profile). Its dashboard always shows the authorized workspace picker—even for one candidate—and its fixed local runtime aliases intentionally return static `404` guidance.
 
 If the API boundary returns `401`, the bearer header is missing or malformed;
 `403` means the token is wrong. If the dashboard proxy returns `503`, its

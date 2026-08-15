@@ -11,6 +11,9 @@ const dashboardRunner = read("scripts/run-dashboard.sh");
 const gateway = read("nginx/gateway.conf");
 const dashboardProxy = read("nginx/proxy-dashboard.conf");
 const vscodeProxy = read("nginx/proxy-vscode.conf");
+const compatibilityAliases = read("nginx/runtime-aliases-compatibility.conf");
+const productionAliases = read("nginx/runtime-aliases-production.conf");
+const unavailableAlias = read("nginx/runtime-alias-unavailable-location.conf");
 
 function blockFor(source: string, marker: string): string {
   const start = source.indexOf(marker);
@@ -125,5 +128,26 @@ describe("dashboard deployment static contract", () => {
     expect(vscodeProxy).not.toContain("frame-ancestors *");
     expect(vscodeProxy).not.toContain("http://[::1]:3000");
     expect(vscodeProxy).not.toContain("http://192.168.");
+  });
+
+  it("uses one identical no-store 404 for production aliases and no absent upstream proxy", () => {
+    expect(gateway).toContain("include /run/ingenium-gateway/runtime-aliases.conf;");
+    for (const host of ["opencode.localhost", "cli.localhost", "vscode.localhost"]) {
+      expect(productionAliases).toContain(`server_name ${host};`);
+    }
+    expect(productionAliases.match(/include \/app\/nginx\/runtime-alias-unavailable-location\.conf;/g)).toHaveLength(3);
+    expect(productionAliases).not.toContain("proxy_pass");
+    expect(unavailableAlias).toContain('return 404 "Direct local runtime aliases are unavailable in production. Open the Ingenium Dashboard and choose an authorized workspace.\\n";');
+    expect(unavailableAlias).toContain('add_header Cache-Control "no-store" always;');
+    expect(unavailableAlias).toContain('add_header X-Content-Type-Options "nosniff" always;');
+    expect(unavailableAlias).toContain("default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    expect(unavailableAlias).not.toMatch(/runtime[_ -]?id|backend|container|workspace[_ -]?id/i);
+  });
+
+  it("retains healthy compatibility proxy aliases", () => {
+    expect(compatibilityAliases).toContain("proxy_pass http://opencode_web;");
+    expect(compatibilityAliases).toContain("proxy_pass http://opencode_cli;");
+    expect(compatibilityAliases).toContain("proxy_pass http://vscode;");
+    expect(compatibilityAliases).not.toContain("runtime-alias-unavailable-location.conf");
   });
 });

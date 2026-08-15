@@ -1318,18 +1318,29 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 ### OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode experience at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts` using a **two-tier embedding model**:
-  - **Local host gateway**: `http://opencode.localhost:3000/` (Web), without HTTP Basic Auth or browser bearer tokens.
-  - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` pointing to a dedicated root HTTPS origin (e.g., `https://opencode.example.com/`)
-   - **LAN/remote access**: requires an operator-managed authenticated TLS profile and explicit root HTTPS origins for both Web and CLI. The default Compose binding supports Windows-to-WSL localhost forwarding, but plain HTTP is not a supported LAN/remote profile.
+- **Trusted profile descriptor** — The API returns only browser-safe `mode`, `status`,
+  and `reason`. Compatibility uses fixed Web/CLI/VS Code aliases without invoking the
+  dynamic manager. Production never falls back to those aliases or a singleton.
+- **Production workspace picker** — A read lists only owned, authorized workspaces with
+  current organization/project membership and has no start/authorization side effect.
+  Explicit start/resume is idempotent and concurrency-coalesced. Even one candidate
+  requires a choice; last-used is only a revalidated preference.
+- **Web mode** — After the selected runtime is ready, the browser redeems a one-time
+  `web` proof for its exact runtime HTTPS root.
   - The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path.
-- **CLI mode** — Embeds a ttyd terminal through local `http://cli.localhost:3000/`, or an explicit root HTTPS origin via `NEXT_PUBLIC_OPENCODE_CLI_URL`, sharing session state with Web mode.
+- **CLI mode** — Shares runtime state with Web while retaining a distinct audience
+  cookie. Compatibility alone uses `http://cli.localhost:3000/`.
 - **Mode switch** — A right-edge glass tab toggles between Web and CLI modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
 - **Sandbox**: The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). Only `allow="clipboard-write"` (Permissions Policy) is retained.
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
+
+Runtime gateway validation rechecks session generation before use. Accepted HTTP and
+WebSocket connections and generation start/finish events update counters and renew the
+idle lease up to—but never beyond—the absolute lease. Health/status reads do not count.
+Close, logout/revoke, stop, and crash transitions reconcile counters.
 
 ### Project Management
 The Projects page at `/projects` features Active/Archived tab views. Users can:
@@ -1374,7 +1385,8 @@ Inside the container, **supervisord** manages seven processes:
 1. **API boundary** (:4097 → private Express :4096) — authenticated bearer boundary and `express.json({ limit: "2mb" })` for large skill/plugin uploads
 2. **Dashboard** (Next.js on :3000) — 21 primary routes plus the Settings overlay
 3. **API** (private Express on :4096) — sole database authority
-4. **Nginx gateway** (:3000 and :1455) — local root gateways and the exact OAuth callback route
+4. **Nginx gateway** (:3000 and :1455) — compatibility root proxies or production
+   static alias guidance, plus the exact OAuth callback route
 5. **opencode-web** (on :4098) — private OpenCode web upstream behind the local `opencode.localhost:3000` gateway
 6. **ttyd-opencode** (on :4099) — private OpenCode CLI upstream behind the local `cli.localhost:3000` gateway. It serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe.
 7. **code-server** (private on :4100) — VS Code workspace upstream behind the exact local `vscode.localhost:3000` gateway; it is not publicly published.

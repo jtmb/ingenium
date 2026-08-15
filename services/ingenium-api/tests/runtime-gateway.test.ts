@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { gatewayRequestHeaders, proxyResponseHeaders, runtimeCookie, runtimeScope, sanitizedHeaders } from "../scripts/runtime-gateway.js";
+import {
+  gatewayRequestHeaders,
+  isRuntimeGenerationRequest,
+  isRuntimeHealthRequest,
+  proxyResponseHeaders,
+  runtimeCookie,
+  runtimeScope,
+  sanitizedHeaders,
+} from "../scripts/runtime-gateway.js";
 
 const runtimeId = "11111111-1111-4111-8111-111111111111";
 
@@ -79,5 +87,18 @@ describe("AUTH-109 runtime gateway", () => {
     });
     expect(headers).not.toHaveProperty("X-Ingenium-Private-Network");
     expect(headers).not.toHaveProperty("X-Ingenium-Runtime-Gateway");
+  });
+
+  it("excludes health polling while identifying generation request lifecycles", () => {
+    expect(isRuntimeHealthRequest({ method: "GET", url: "/global/health" })).toBe(true);
+    expect(isRuntimeHealthRequest({ method: "HEAD", url: "/healthz" })).toBe(true);
+    expect(isRuntimeHealthRequest({ method: "GET", url: "/session/status" })).toBe(true);
+    expect(isRuntimeHealthRequest({ method: "POST", url: "/global/health" })).toBe(false);
+    expect(isRuntimeHealthRequest({ method: "GET", url: "/session/one/message" })).toBe(false);
+
+    expect(isRuntimeGenerationRequest({ method: "POST", url: "/session/one/message" })).toBe(true);
+    expect(isRuntimeGenerationRequest({ method: "POST", url: "/session/one/prompt_async?directory=%2Fworkspace" })).toBe(true);
+    expect(isRuntimeGenerationRequest({ method: "GET", url: "/session/one/message" })).toBe(false);
+    expect(isRuntimeGenerationRequest({ method: "POST", url: "/health" })).toBe(false);
   });
 });

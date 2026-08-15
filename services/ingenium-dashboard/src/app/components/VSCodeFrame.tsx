@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { useRuntimeLaunch } from "@/lib/use-runtime-launch";
+import { useRuntimeLaunch, useRuntimeWorkspace } from "@/lib/use-runtime-launch";
+import RuntimeWorkspacePicker from "./RuntimeWorkspacePicker";
 
 export const VSCODE_STATUS_MAX_ATTEMPTS = 3;
 export const VSCODE_STATUS_POLL_MS = 2_000;
@@ -73,7 +74,8 @@ export default function VSCodeFrame() {
   const [retryNonce, setRetryNonce] = useState(0);
   const alertRef = useRef<HTMLDivElement>(null);
   const frameTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const launch = useRuntimeLaunch("vscode");
+  const workspace = useRuntimeWorkspace();
+  const launch = useRuntimeLaunch("vscode", workspace);
 
   const clearFrameTimeout = () => {
     if (frameTimeoutRef.current !== null) {
@@ -111,6 +113,10 @@ export default function VSCodeFrame() {
     setRetryNonce((value) => value + 1);
     launch.retry();
   };
+
+  if (workspace.status !== "ready") {
+    return <RuntimeWorkspacePicker controller={workspace} product="VS Code" />;
+  }
 
   if (launch.status === "loading" || launch.status === "starting") {
     return (

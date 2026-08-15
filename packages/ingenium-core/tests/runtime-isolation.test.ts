@@ -179,12 +179,28 @@ describe("AUTH-108 runtime isolation", () => {
       actorId: "manager",
       now: new Date("2026-08-13T00:00:00.500Z"),
     })).toThrowError(RuntimeConflictError);
-    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "PROVISIONING", actorType: "manager", actorId: "manager", maxActiveRuntimes: 1 });
+    runtime = transitionRuntime({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      toState: "PROVISIONING",
+      actorType: "manager",
+      actorId: "manager",
+      maxActiveRuntimes: 1,
+      absoluteExpiresAt: new Date("2026-08-13T00:10:00.000Z"),
+    });
     runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "manager", backendContainerId: "a".repeat(64) });
     runtime = recordRuntimeHealth(runtime.id, runtime.revision, "a".repeat(64), new Date("2026-08-13T00:00:00.750Z"));
     expect(runtime.lastAuthenticatedActivityAt).toBeNull();
     runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "runtime-reconciler" });
-    runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "connection_opened", actorId: first.user.id });
+    runtime = recordRuntimeActivity({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      kind: "connection_opened",
+      actorId: first.user.id,
+      now: new Date("2026-08-13T00:09:00.000Z"),
+      idleLeaseMs: 300_000,
+    });
+    expect(runtime.idleExpiresAt).toBe("2026-08-13T00:10:00.000Z");
     runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "generation_started", actorId: first.user.id });
     expect(runtime).toMatchObject({ activeConnections: 1, activeGenerations: 1 });
     runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "generation_finished", actorId: first.user.id });
@@ -280,8 +296,12 @@ describe("AUTH-108 runtime isolation", () => {
     expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "cli", host: issued.host, origin: issued.origin, now })).toBeUndefined();
     expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "web", host: issued.host, origin: issued.origin, now })?.backendName).toBe(runtime.backendName);
 
+    runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "connection_opened", actorId: first.user.id, now });
+    runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "generation_started", actorId: first.user.id, now });
     revokeRuntimeBrowserSessionsForUser(first.user.id, now);
+    expect(getRuntimeForWorkspace("workspace-browser")).toMatchObject({ activeConnections: 0, activeGenerations: 0 });
     expect(resolveRuntimeBrowserSession({ token: exchanged!.token, audience: "web", host: issued.host, origin: issued.origin, now })).toBeUndefined();
+    runtime = getRuntimeForWorkspace("workspace-browser")!;
 
     const replacementProof = "r".repeat(43);
     const afterLogout = issueRuntimeBrowserLaunchTicket({
@@ -297,5 +317,20 @@ describe("AUTH-108 runtime isolation", () => {
     const replacement = consumeRuntimeBrowserLaunchTicket({ ...afterLogout, exchangeProof: replacementProof, now })!;
     runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "REVOKED", actorType: "manager", actorId: "manager" });
     expect(resolveRuntimeBrowserSession({ token: replacement.token, audience: "vscode", host: afterLogout.host, origin: afterLogout.origin, now })).toBeUndefined();
+  });
+
+  it("reconciles activity counters when a runtime crashes", () => {
+    const first = tenancy("crash-counters");
+    authorizeWorkspace({ id: "workspace-crash", organizationId: first.organizationId, projectId: first.project.id, ownerUserId: first.user.id, storagePath: "/srv/crash/one" });
+    let runtime = createRuntimeInstance("workspace-crash", limits);
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "PROVISIONING", actorType: "manager", actorId: "manager" });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "manager" });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "reconciler" });
+    runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "connection_opened", actorId: first.user.id });
+    runtime = recordRuntimeActivity({ id: runtime.id, expectedRevision: runtime.revision, kind: "generation_started", actorId: first.user.id });
+
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "FAILED", actorType: "system", actorId: "reconciler" });
+
+    expect(runtime).toMatchObject({ state: "FAILED", activeConnections: 0, activeGenerations: 0 });
   });
 });

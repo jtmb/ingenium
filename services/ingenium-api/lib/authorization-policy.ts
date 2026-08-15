@@ -65,7 +65,7 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   if (req.path === "/api/v1/health") return { action: "health.read", resource: "health", permission: "read", target: "installation" };
   if (req.path.startsWith("/_ingenium/")) return { action: "child-mcp.execute", resource: "child-mcp", permission: "execute", target: "project", sensitive: true };
   if (req.path.startsWith("/api/v1/auth/")) return { action: `auth.${permissionFor(req as Request)}`, resource: "auth", permission: permissionFor(req as Request), target: "private", sensitive: !READ_METHODS.has(req.method) };
-  if (/^\/api\/v1\/runtimes\/gateway\/(exchange|validate)$/.test(req.path)) {
+  if (/^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(req.path)) {
     return { action: "runtimes.gateway.execute", resource: "runtime-gateway", permission: "execute", target: "gateway-private", sensitive: true };
   }
   if (req.path.startsWith("/api/v1/runtimes/browser/")) {

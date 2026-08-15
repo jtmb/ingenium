@@ -7,7 +7,7 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 ## Overview
 
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The compatibility profile retains its local `.localhost` roots. Production allocates the current user's ready workspace and launches exact `web--<runtime-id>.<runtime-domain>` and `cli--<runtime-id>.<runtime-domain>` HTTPS roots. Direct 4098/4099 ports remain private.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime HTTPS roots only after explicit start/resume. Direct 4098/4099 ports remain private.
 
 The supported runtime is OpenCode **1.18.9**. Docker verifies the pinned
 archive SHA-256 and executable version, while package compatibility tests verify
@@ -25,11 +25,15 @@ For the conversational chat interface, see [Ingenium Chat](/chat).
 - **Mode switch** — A right-edge glass tab toggles between modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` switches between modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
+- **Workspace preference**: Production may preselect a still-visible last-used workspace,
+  but it never starts it automatically or treats that preference as authority.
 - **Toolbar**: The /opencode page toolbar contains only the Web/CLI mode toggle. Chat navigation is handled through the main navigation bar (not duplicated in the toolbar).
 
 ## Terminal Attachment
 
-Direct attachment to host ports 4098 and 4099 is intentionally unavailable; those listeners remain private. Use the local roots on gateway port `3000` (`opencode.localhost:3000` and `cli.localhost:3000`), which Windows reaches through WSL localhost forwarding. For LAN or remote deployments, an operator must provide a separate TLS-authenticated operator profile protecting the dashboard and both dedicated root HTTPS origins, then configure `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` before rebuilding. The Windows helper only verifies existing gateway reachability and does not configure transport automatically.
+Direct attachment to host ports 4098 and 4099 is intentionally unavailable. The fixed
+gateway roots are compatibility-only. In production they return the same static,
+no-store `404` guidance; use the dashboard picker and selected runtime root instead.
 
 The installation API uses `INGENIUM_API_TOKEN` internally, while external OpenCode
 MCP uses a scoped credential from the ignored, owner-only
@@ -83,6 +87,13 @@ body-only proof, and receives only the audience launch URL/status from the API. 
 never receives the private backend, runtime capability, or runtime session token.
 Expired and unavailable states are retryable; iframe, pop-out, and standalone views
 use the same exchange, and logout/revoke invalidates reconnects.
+
+The production status descriptor contains only bounded `mode`, `status`, and `reason`
+fields—no runtime, backend, path, user, or project identifier. Workspace list reads
+never start or authorize anything. Empty, loading, selection, starting, ready,
+unavailable, and retry states are shared by iframe, pop-out, and standalone views.
+Authenticated HTTP, WebSocket, and generation lifecycles renew the bounded idle lease;
+health/status polling does not, and the absolute lease is never extended.
 
 ### Repository synchronization
 
@@ -167,6 +178,9 @@ service or bridge, and no current-session/OpenCode-session import tool.
   before proxying; ttyd receives only the gateway-injected fixed identity.
   The gateway owns the iframe CSP and permits framing only from the supported
   dashboard loopback origins. Never publish the upstream ports as a workaround.
+- **Production aliases**: `opencode.localhost`, `cli.localhost`, and
+  `vscode.localhost` share one static `404` body and header policy. No WebSocket
+  upgrade is proxied when singleton upstreams are absent.
 - **CLI WebSocket origin check**: the `/ws` gateway route allows only the
   explicit trusted local origins `http://localhost:3000`,
   `http://127.0.0.1:3000`, and `http://cli.localhost:3000`. Nginx preserves the

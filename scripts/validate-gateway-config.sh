@@ -8,6 +8,9 @@ opencode_proxy_path="${config_dir}/proxy-opencode.conf"
 dashboard_proxy_path="${config_dir}/proxy-dashboard.conf"
 oauth_callback_proxy_path="${config_dir}/proxy-oauth-callback.conf"
 vscode_proxy_path="${config_dir}/proxy-vscode.conf"
+compatibility_aliases_path="${config_dir}/runtime-aliases-compatibility.conf"
+production_aliases_path="${config_dir}/runtime-aliases-production.conf"
+unavailable_alias_path="${config_dir}/runtime-alias-unavailable-location.conf"
 
 require_literal() {
   path="$1"
@@ -47,6 +50,12 @@ if [ ! -f "$vscode_proxy_path" ]; then
   echo "ERROR: VS Code proxy hardening configuration was not found: $vscode_proxy_path"
   exit 1
 fi
+for path in "$compatibility_aliases_path" "$production_aliases_path" "$unavailable_alias_path"; do
+  if [ ! -f "$path" ]; then
+    echo "ERROR: runtime alias profile configuration was not found: $path"
+    exit 1
+  fi
+done
 
 require_literal "$config_path" "access_log off;"
 require_literal "$config_path" "pid /run/ingenium-gateway/nginx.pid;"
@@ -79,8 +88,8 @@ require_literal "$config_path" "\"http://localhost:3000\" \"localhost:3000\";"
 require_literal "$config_path" "\"http://127.0.0.1:3000\" \"127.0.0.1:3000\";"
 require_literal "$config_path" "\"http://cli.localhost:3000\" \"cli.localhost:3000\";"
 require_literal "$config_path" "limit_req zone=dashboard_request burst=60 nodelay;"
-require_literal "$config_path" "limit_req zone=opencode_request burst=60 nodelay;"
-require_literal "$config_path" "limit_req zone=vscode_request burst=60 nodelay;"
+require_literal "$compatibility_aliases_path" "limit_req zone=opencode_request burst=60 nodelay;"
+require_literal "$compatibility_aliases_path" "limit_req zone=vscode_request burst=60 nodelay;"
 require_literal "$config_path" "location ^~ /_next/static/ {"
 reject_literal "$config_path" "location ^~ /_next/ {"
 reject_literal "$config_path" "location ^~ /_next/static {"
@@ -88,7 +97,8 @@ reject_literal "$config_path" "zone=gateway_request"
 require_literal "$config_path" "server_name _;"
 require_literal "$config_path" "listen [::]:3000 default_server;"
 require_literal "$config_path" "proxy_pass http://ingenium_dashboard;"
-require_literal "$config_path" "server_name opencode.localhost;"
+require_literal "$config_path" "include /run/ingenium-gateway/runtime-aliases.conf;"
+require_literal "$compatibility_aliases_path" "server_name opencode.localhost;"
 reject_literal "$config_path" "return 444;"
 reject_literal "$config_path" "auth_basic"
 reject_literal "$config_path" "auth_delay"
@@ -101,24 +111,24 @@ require_literal "$config_path" "proxy_pass http://ingenium_api;"
 require_literal "$config_path" "include /app/nginx/proxy-oauth-callback.conf;"
 require_literal "$config_path" "location / {"
 require_literal "$config_path" "return 404;"
-require_literal "$config_path" "location = /_ingenium/health"
-require_literal "$config_path" "proxy_pass http://opencode_cli;"
-require_literal "$config_path" "proxy_set_header X-Ingenium-Authenticated-User healthcheck;"
-require_literal "$config_path" "proxy_set_header X-Ingenium-Authenticated-User local-gateway;"
-require_literal "$config_path" "location = /ws {"
-require_literal "$config_path" "if (\$ttyd_websocket_upstream_host = \"\") {"
-require_literal "$config_path" "return 403;"
-require_literal "$config_path" "proxy_set_header Host \$ttyd_websocket_upstream_host;"
-require_literal "$config_path" "proxy_set_header Origin \$http_origin;"
+require_literal "$compatibility_aliases_path" "location = /_ingenium/health"
+require_literal "$compatibility_aliases_path" "proxy_pass http://opencode_cli;"
+require_literal "$compatibility_aliases_path" "proxy_set_header X-Ingenium-Authenticated-User healthcheck;"
+require_literal "$compatibility_aliases_path" "proxy_set_header X-Ingenium-Authenticated-User local-gateway;"
+require_literal "$compatibility_aliases_path" "location = /ws {"
+require_literal "$compatibility_aliases_path" "if (\$ttyd_websocket_upstream_host = \"\") {"
+require_literal "$compatibility_aliases_path" "return 403;"
+require_literal "$compatibility_aliases_path" "proxy_set_header Host \$ttyd_websocket_upstream_host;"
+require_literal "$compatibility_aliases_path" "proxy_set_header Origin \$http_origin;"
 require_literal "$config_path" "include /app/nginx/proxy-dashboard.conf;"
 require_literal "$config_path" "upstream vscode {"
 require_literal "$config_path" "server 127.0.0.1:4100;"
-require_literal "$config_path" "server_name vscode.localhost;"
-require_literal "$config_path" "proxy_pass http://vscode;"
-require_literal "$config_path" "include /app/nginx/proxy-vscode.conf;"
-require_literal "$config_path" "if (\$vscode_reject_upgrade) {"
-require_literal "$config_path" "proxy_set_header Host \"vscode.localhost:3000\";"
-require_literal "$config_path" "proxy_set_header Origin \$http_origin;"
+require_literal "$compatibility_aliases_path" "server_name vscode.localhost;"
+require_literal "$compatibility_aliases_path" "proxy_pass http://vscode;"
+require_literal "$compatibility_aliases_path" "include /app/nginx/proxy-vscode.conf;"
+require_literal "$compatibility_aliases_path" "if (\$vscode_reject_upgrade) {"
+require_literal "$compatibility_aliases_path" "proxy_set_header Host \"vscode.localhost:3000\";"
+require_literal "$compatibility_aliases_path" "proxy_set_header Origin \$http_origin;"
 require_literal "$config_path" "~^/(?:_static/|static/|stable/) \"\";"
 reject_literal "$config_path" "3002"
 reject_literal "$config_path" "proxy_set_header Origin \"http://vscode.localhost:3000\";"
@@ -126,7 +136,7 @@ reject_literal "$config_path" "proxy_set_header Origin \"http://vscode.localhost
 # Keep the VS Code root on the same dual-stack listener pair as OpenCode. The
 # bounded context is intentional: these two listen directives immediately
 # precede the exact server name in the virtual-host declaration.
-vscode_listener_block="$(grep -B 2 -F 'server_name vscode.localhost;' "$config_path")"
+vscode_listener_block="$(grep -B 2 -F 'server_name vscode.localhost;' "$compatibility_aliases_path")"
 case "$vscode_listener_block" in
   *"listen 3000;"*"listen [::]:3000;"*) ;;
   *)
@@ -178,7 +188,7 @@ require_literal "$oauth_callback_proxy_path" "proxy_set_header Content-Length \"
 require_literal "$oauth_callback_proxy_path" "proxy_pass_request_body off;"
 
 # This endpoint is loopback-only and must route only to ttyd.
-health_locations="$(grep -F -c 'location = /_ingenium/health' "$config_path")"
+health_locations="$(grep -F -c 'location = /_ingenium/health' "$compatibility_aliases_path")"
 if [ "$health_locations" -ne 1 ]; then
   echo "ERROR: gateway must expose exactly one internal health location for ttyd"
   exit 1
@@ -234,11 +244,25 @@ for directive in \
   esac
 done
 
-vscode_servers="$(grep -F -c 'server_name vscode.localhost;' "$config_path")"
+vscode_servers="$(grep -F -c 'server_name vscode.localhost;' "$compatibility_aliases_path")"
 if [ "$vscode_servers" -ne 1 ]; then
   echo "ERROR: gateway must expose exactly one VS Code root host"
   exit 1
 fi
+
+for host in opencode.localhost cli.localhost vscode.localhost; do
+  require_literal "$production_aliases_path" "server_name $host;"
+done
+production_unavailable_includes="$(grep -F -c 'include /app/nginx/runtime-alias-unavailable-location.conf;' "$production_aliases_path")"
+if [ "$production_unavailable_includes" -ne 3 ]; then
+  echo "ERROR: production runtime aliases must share one unavailable response"
+  exit 1
+fi
+require_literal "$unavailable_alias_path" 'add_header Cache-Control "no-store" always;'
+require_literal "$unavailable_alias_path" 'add_header X-Content-Type-Options "nosniff" always;'
+require_literal "$unavailable_alias_path" "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+require_literal "$unavailable_alias_path" 'return 404 "Direct local runtime aliases are unavailable in production. Open the Ingenium Dashboard and choose an authorized workspace.\n";'
+reject_literal "$production_aliases_path" "proxy_pass"
 
 if [ "${GATEWAY_VALIDATE_STATIC_ONLY:-0}" = "1" ]; then
   echo "Gateway static validation passed"

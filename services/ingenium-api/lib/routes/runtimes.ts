@@ -1,8 +1,9 @@
-import { randomBytes } from "node:crypto";
 import { Router } from "express";
-import { getDb, mcpCredentials, runtimes } from "ingenium-core";
+import { getDb, runtimes, securityAudit } from "ingenium-core";
 import { z } from "zod";
-import { inspectManagedRuntime, provisionManagedRuntime, removeManagedRuntime, stopManagedRuntime } from "../runtime-manager-client.js";
+import { inspectManagedRuntime, removeManagedRuntime, stopManagedRuntime } from "../runtime-manager-client.js";
+import { deploymentMode } from "../runtime-mode.js";
+import { ensureRuntime, runtimeNumberSetting } from "../runtime-provisioner.js";
 
 export const runtimesRouter = Router();
 
@@ -17,6 +18,7 @@ const runtimeInput = z.object({ workspaceId: z.string().min(1).max(256) }).stric
 const browserLaunchInput = z.object({
   audience: z.enum(["web", "cli", "vscode"]),
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  workspaceId: z.string().min(1).max(256),
 }).strict();
 const gatewayExchangeInput = z.object({
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
@@ -26,41 +28,70 @@ const gatewayExchangeInput = z.object({
   launcherOrigin: z.string().url().max(512),
 }).strict();
 const gatewayValidateInput = gatewayExchangeInput.omit({ exchangeProof: true, launcherOrigin: true }).extend({ sessionToken: z.string().min(32).max(512) }).strict();
+const gatewayActivityInput = gatewayValidateInput.extend({
+  kind: z.enum(["connection_opened", "connection_closed", "generation_started", "generation_finished"]),
+}).strict();
 
-function numberSetting(name: string, fallback: number, minimum: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  if (!/^[1-9][0-9]*$/.test(raw)) throw new Error(`${name} is invalid`);
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < minimum) throw new Error(`${name} is invalid`);
-  return parsed;
+type BrowserWorkspaceRow = {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  security_epoch: number;
+  organization_name: string;
+  project_name: string;
+};
+
+function browserWorkspaceRows(ownerUserId: string): BrowserWorkspaceRow[] {
+  return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT w.id, w.organization_id, w.project_id, w.security_epoch,
+      o.name AS organization_name, p.name AS project_name
+    FROM authorized_workspaces w
+    JOIN projects p ON p.id = w.project_id AND p.organization_id = w.organization_id AND p.archived_at IS NULL
+    JOIN organizations o ON o.id = w.organization_id AND o.status = 'active'
+    JOIN organization_memberships om ON om.organization_id = w.organization_id
+      AND om.user_id = ? AND om.status = 'active'
+    LEFT JOIN project_memberships pm ON pm.project_id = w.project_id AND pm.user_id = ?
+    WHERE w.owner_user_id = ? AND w.status = 'authorized'
+      AND (om.role IN ('owner', 'admin') OR pm.user_id IS NOT NULL)
+    ORDER BY o.name, p.name, w.created_at, w.id`).all(ownerUserId, ownerUserId, ownerUserId) as BrowserWorkspaceRow[];
 }
 
-function defaultLimits(): runtimes.RuntimeLimits {
+function browserWorkspace(ownerUserId: string, workspaceId: string): BrowserWorkspaceRow | undefined {
+  return browserWorkspaceRows(ownerUserId).find((workspace) => workspace.id === workspaceId);
+}
+
+function browserWorkspaceStatus(workspace: BrowserWorkspaceRow): "ready" | "starting" | "stopped" | "unavailable" {
+  const runtime = runtimes.getRuntimeForWorkspace(workspace.id);
+  if (!runtime) return "stopped";
+  if (runtime.securityEpoch !== workspace.security_epoch || runtime.state === "REVOKED") return "unavailable";
+  if (runtime.state === "READY" || runtime.state === "IDLE") return "ready";
+  if (["PROVISIONING", "STARTING", "STOPPING"].includes(runtime.state)) return "starting";
+  return "stopped";
+}
+
+function browserWorkspaceDto(workspace: BrowserWorkspaceRow) {
   return {
-    cpuMillis: numberSetting("INGENIUM_RUNTIME_CPU_MILLIS", 1_000, 100),
-    memoryBytes: numberSetting("INGENIUM_RUNTIME_MEMORY_BYTES", 1_073_741_824, 134_217_728),
-    pidsLimit: numberSetting("INGENIUM_RUNTIME_PIDS_LIMIT", 256, 16),
-    diskBytes: numberSetting("INGENIUM_RUNTIME_DISK_BYTES", 2_147_483_648, 67_108_864),
-    processLimit: numberSetting("INGENIUM_RUNTIME_PROCESS_LIMIT", 128, 16),
+    id: workspace.id,
+    organizationName: workspace.organization_name,
+    projectName: workspace.project_name,
+    status: browserWorkspaceStatus(workspace),
   };
 }
 
-function projectName(projectId: string): string | undefined {
-  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
-    "SELECT name FROM projects WHERE id = ? AND archived_at IS NULL",
-  ).get(projectId) as { name: string } | undefined)?.name;
+function browserRuntimeAudit(principalId: string, action: string, outcome: "success" | "denied" | "failure", workspace?: BrowserWorkspaceRow): void {
+  securityAudit.appendSecurityAuditEvent({
+    actorType: "user",
+    actorId: principalId,
+    action,
+    organizationId: workspace?.organization_id,
+    projectId: workspace?.project_id,
+    outcome,
+  });
 }
 
-function runtimeServicePrincipalId(runtime: runtimes.RuntimeInstance, name: string): string | undefined {
-  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT sp.id FROM runtime_capability_bindings b
-    JOIN mcp_credentials c ON c.id = b.mcp_credential_id
-    JOIN service_principals sp ON sp.id = c.service_principal_id
-    WHERE b.runtime_id = ? AND sp.organization_id = ? AND sp.security_epoch = ? AND sp.status = 'active'
-    ORDER BY b.created_at DESC LIMIT 1`).get(runtime.id, runtime.organizationId, runtime.securityEpoch) as { id: string } | undefined)?.id
-    ?? (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
-      "SELECT id FROM service_principals WHERE organization_id = ? AND name = ? AND security_epoch = ? AND status = 'active'",
-    ).get(runtime.organizationId, name, runtime.securityEpoch) as { id: string } | undefined)?.id;
+function rejectBrowserInstallationRoute(req: import("express").Request, res: import("express").Response): boolean {
+  if (req.principal?.type !== "user" || !req.principal.session) return false;
+  res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+  return true;
 }
 
 function runtimeError(res: import("express").Response, error: unknown): void {
@@ -86,12 +117,58 @@ function runtimeRootDomain(): string {
 runtimesRouter.get("/browser/status", (req, res) => {
   try {
     const principal = browserPrincipal(req);
-    const owned = runtimes.listRuntimeInstances(principal.id);
-    const status = owned.some((runtime) => runtime.state === "READY" || runtime.state === "IDLE")
-      ? "ready"
-      : owned.some((runtime) => runtime.state === "PROVISIONING" || runtime.state === "STARTING") ? "starting" : "unavailable";
     res.set("Cache-Control", "no-store");
-    res.json({ data: { status } });
+    if (deploymentMode() === "compatibility") {
+      res.json({ data: { mode: "compatibility", status: "ready", reason: null } });
+      return;
+    }
+    if (deploymentMode() !== "control-plane") {
+      res.json({ data: { mode: "isolated", status: "unavailable", reason: "runtime_unavailable" } });
+      return;
+    }
+    const workspaces = browserWorkspaceRows(principal.id);
+    const statuses = workspaces.map(browserWorkspaceStatus);
+    const status = statuses.includes("ready") ? "ready"
+      : statuses.includes("starting") ? "starting" : "no_runtime";
+    const reason = status === "ready" ? null
+      : status === "starting" ? "runtime_starting"
+      : workspaces.length === 0 ? "no_authorized_workspace" : "explicit_start_required";
+    res.json({ data: { mode: "isolated", status, reason } });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.get("/browser/workspaces", (req, res) => {
+  try {
+    const principal = browserPrincipal(req);
+    res.set("Cache-Control", "no-store");
+    res.json({ data: deploymentMode() === "control-plane" ? browserWorkspaceRows(principal.id).map(browserWorkspaceDto) : [] });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.post("/browser/workspaces/:workspaceId/start", async (req, res) => {
+  try {
+    const principal = browserPrincipal(req);
+    if (deploymentMode() !== "control-plane") throw new runtimes.RuntimeConflictError("STATE_CONFLICT");
+    const workspace = browserWorkspace(principal.id, req.params.workspaceId!);
+    if (!workspace) {
+      browserRuntimeAudit(principal.id, "runtime.workspace.start", "denied");
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    let runtime: runtimes.RuntimeInstance;
+    try {
+      runtime = await ensureRuntime(workspace.id);
+    } catch (error) {
+      browserRuntimeAudit(principal.id, "runtime.workspace.start", "failure", workspace);
+      throw error;
+    }
+    const status = runtime.state === "READY" || runtime.state === "IDLE" ? "ready" : "starting";
+    browserRuntimeAudit(principal.id, "runtime.workspace.start", "success", workspace);
+    res.set("Cache-Control", "no-store");
+    res.status(status === "ready" ? 200 : 202).json({ data: { status } });
   } catch (error) {
     runtimeError(res, error);
   }
@@ -105,11 +182,14 @@ runtimesRouter.post("/browser/launch", (req, res) => {
   }
   try {
     const principal = browserPrincipal(req);
-    const runtime = runtimes.listRuntimeInstances(principal.id)
-      .find((candidate) => candidate.state === "READY" || candidate.state === "IDLE");
-    if (!runtime) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (deploymentMode() !== "control-plane") throw new runtimes.RuntimeConflictError("STATE_CONFLICT");
+    const workspace = browserWorkspace(principal.id, parsed.data.workspaceId);
+    const runtime = workspace ? runtimes.getRuntimeForWorkspace(workspace.id) : undefined;
+    if (!workspace || !runtime || runtime.securityEpoch !== workspace.security_epoch
+      || (runtime.state !== "READY" && runtime.state !== "IDLE")) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
     const ticket = runtimes.issueRuntimeBrowserLaunchTicket({
-      ...parsed.data,
+      audience: parsed.data.audience,
+      exchangeProof: parsed.data.exchangeProof,
       runtimeId: runtime.id,
       ownerUserId: principal.id,
       authSessionId: principal.sessionId,
@@ -159,15 +239,51 @@ runtimesRouter.post("/gateway/validate", (req, res) => {
   res.json({ data: { backendName: resolved.backendName, session: resolved.session } });
 });
 
-runtimesRouter.get("/", (_req, res) => {
+runtimesRouter.post("/gateway/activity", (req, res) => {
+  const parsed = gatewayActivityInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime activity request is invalid" } });
+    return;
+  }
+  const resolved = runtimes.resolveRuntimeBrowserSession({
+    token: parsed.data.sessionToken,
+    audience: parsed.data.audience,
+    host: parsed.data.host,
+    origin: parsed.data.origin,
+    touch: true,
+  });
+  const runtime = resolved ? runtimes.getRuntimeInstance(resolved.session.runtimeId) : undefined;
+  if (!resolved || !runtime) {
+    res.status(401).json({ error: { code: "INVALID_RUNTIME_SESSION", message: "Runtime browser session is invalid" } });
+    return;
+  }
+  try {
+    runtimes.recordRuntimeActivity({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      kind: parsed.data.kind,
+      actorId: resolved.session.ownerUserId,
+      idleLeaseMs: runtimeNumberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS", 1_800_000, 60_000),
+    });
+    res.set("Cache-Control", "no-store");
+    res.json({ data: { accepted: true } });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.get("/", (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   res.json({ data: runtimes.listRuntimeInstances() });
 });
 
-runtimesRouter.get("/workspaces", (_req, res) => {
+runtimesRouter.get("/workspaces", (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   res.json({ data: runtimes.listAuthorizedWorkspaces() });
 });
 
 runtimesRouter.post("/workspaces", (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   const parsed = workspaceInput.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Workspace authorization is invalid" } });
@@ -188,91 +304,22 @@ runtimesRouter.post("/workspaces", (req, res) => {
 });
 
 runtimesRouter.post("/", async (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   const parsed = runtimeInput.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "workspaceId is required" } });
     return;
   }
-  let runtime: runtimes.RuntimeInstance | undefined;
-  let capabilityBound = false;
   try {
-    const workspace = runtimes.getAuthorizedWorkspace(parsed.data.workspaceId);
-    if (!workspace || workspace.status !== "authorized") throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
-    runtime = runtimes.getRuntimeForWorkspace(workspace.id) ?? runtimes.createRuntimeInstance(workspace.id, defaultLimits());
-    if (runtime.state !== "ABSENT" && runtime.state !== "STOPPED" && runtime.state !== "FAILED") {
-      res.status(409).json({ error: { code: "STATE_CONFLICT", message: "Runtime is already active" } });
-      return;
-    }
-    const project = projectName(runtime.projectId);
-    if (!project) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
-    const absoluteLeaseMs = numberSetting("INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS", 28_800_000, 60_000);
-    const idleLeaseMs = numberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS", 1_800_000, 60_000);
-    const expiresAt = new Date(Date.now() + absoluteLeaseMs);
-    const principalName = `Runtime ${runtime.id}`;
-    const credential = mcpCredentials.createMcpCredential({
-      servicePrincipalId: runtimeServicePrincipalId(runtime, principalName),
-      servicePrincipalName: principalName,
-      kind: "runtime",
-      audience: "runtime",
-      name: `Runtime ${runtime.id}`,
-      scopes: ["child-mcp:runtime", "projects:read"],
-      organizationId: runtime.organizationId,
-      projectId: runtime.projectId,
-      workspaceId: runtime.workspaceId,
-      launcherWorktree: workspace.storagePath,
-      expiresAt,
-      createdByUserId: runtime.ownerUserId,
-    });
-    runtimes.bindRuntimeCapability(runtime.id, credential.id);
-    capabilityBound = true;
-    runtime = runtimes.claimRuntimeLease({
-      id: runtime.id,
-      expectedRevision: runtime.revision,
-      ownerToken: randomBytes(32).toString("base64url"),
-      ttlMs: 60_000,
-      actorId: "runtime-manager",
-    });
-    runtime = runtimes.transitionRuntime({
-      id: runtime.id,
-      expectedRevision: runtime.revision,
-      toState: "PROVISIONING",
-      actorType: "manager",
-      actorId: "runtime-manager",
-      backendContainerId: null,
-      maxActiveRuntimes: numberSetting("INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER", 2, 1),
-      idleExpiresAt: new Date(Date.now() + idleLeaseMs),
-      absoluteExpiresAt: expiresAt,
-    });
-    const managed = await provisionManagedRuntime({
-      runtime,
-      projectName: project,
-      storagePath: workspace.storagePath,
-      storageMappingHash: workspace.storageMappingHash,
-      capability: credential.token,
-      capabilityExpiresAt: credential.expiresAt,
-    });
-    runtime = runtimes.transitionRuntime({
-      id: runtime.id,
-      expectedRevision: runtime.revision,
-      toState: "STARTING",
-      actorType: "manager",
-      actorId: "runtime-manager",
-      backendContainerId: managed.backendId ?? null,
-    });
+    const runtime = await ensureRuntime(parsed.data.workspaceId);
     res.status(202).json({ data: runtime });
   } catch (error) {
-    if (runtime && capabilityBound) runtimes.revokeRuntimeCapability(runtime.id);
-    if (runtime && runtime.state === "PROVISIONING") {
-      await removeManagedRuntime(runtime.id).catch(() => undefined);
-      try {
-        runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "FAILED", actorType: "system", actorId: "runtime-provisioner" });
-      } catch { /* A concurrent reconciler owns the current revision. */ }
-    }
     runtimeError(res, error);
   }
 });
 
 runtimesRouter.get("/:id", async (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   const runtime = runtimes.getRuntimeInstance(req.params.id!);
   if (!runtime) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Runtime not found" } });
@@ -298,6 +345,7 @@ async function stopRuntime(runtime: runtimes.RuntimeInstance): Promise<runtimes.
 }
 
 runtimesRouter.post("/:id/stop", async (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   const runtime = runtimes.getRuntimeInstance(req.params.id!);
   if (!runtime) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Runtime not found" } });
@@ -307,6 +355,7 @@ runtimesRouter.post("/:id/stop", async (req, res) => {
 });
 
 runtimesRouter.post("/:id/revoke", async (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
   const runtime = runtimes.getRuntimeInstance(req.params.id!);
   if (!runtime) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Runtime not found" } });

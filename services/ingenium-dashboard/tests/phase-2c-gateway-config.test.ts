@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("Phase 2C — build-time gateway configuration", () => {
-  it("exposes exactly the two public OpenCode settings to the browser bundle", async () => {
+  it("exposes only public runtime origin settings to the browser bundle", async () => {
     process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "http://opencode.localhost:3000/";
     process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = "http://cli.localhost:3000/";
     process.env.OPENCODE_SERVER_PASSWORD = "server-secret-must-not-be-public";
@@ -43,6 +43,7 @@ describe("Phase 2C — build-time gateway configuration", () => {
     expect(config.env).toEqual({
       NEXT_PUBLIC_OPENCODE_WEB_URL: "http://opencode.localhost:3000/",
       NEXT_PUBLIC_OPENCODE_CLI_URL: "http://cli.localhost:3000/",
+      NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "",
     });
     expect(Object.keys(config.env)).not.toContain("OPENCODE_SERVER_PASSWORD");
     expect(JSON.stringify(config.env)).not.toContain("server-secret-must-not-be-public");
@@ -59,6 +60,7 @@ describe("Phase 2C — build-time gateway configuration", () => {
     expect(config.env).toEqual({
       NEXT_PUBLIC_OPENCODE_WEB_URL: "https://web.example.test/",
       NEXT_PUBLIC_OPENCODE_CLI_URL: "https://cli.example.test/",
+      NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "",
     });
   });
 

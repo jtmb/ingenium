@@ -3,9 +3,8 @@ function publicOpenCodeOrigin(name) {
   const value = (process.env[name] || "").trim();
   if (!value) return "";
 
-  // Only public, credential-free origin settings are copied into the browser
-  // bundle. The runtime URL module performs the stricter mode-specific
-  // allowlist validation before using the value as an iframe target.
+  // These legacy public origins remain credential-free CSP inputs for
+  // backward-compatible builds. Runtime targets come from the trusted API flow.
   try {
     const url = new URL(value);
     if (url.username || url.password) return "";
@@ -62,9 +61,8 @@ function isGatewayMode() {
 const nextConfig = {
   output: "standalone",
 
-  // Next.js inlines these values at build time. Do not add server credentials
-  // or OPENCODE_SERVER_PASSWORD here; only the two public origin settings are
-  // intentionally available to browser code.
+  // Next.js inlines only non-secret CSP inputs. Never add server credentials or
+  // OPENCODE_SERVER_PASSWORD here.
   env: {
     NEXT_PUBLIC_OPENCODE_WEB_URL: publicOpenCodeOrigin("NEXT_PUBLIC_OPENCODE_WEB_URL"),
     NEXT_PUBLIC_OPENCODE_CLI_URL: publicOpenCodeOrigin("NEXT_PUBLIC_OPENCODE_CLI_URL"),
@@ -75,8 +73,8 @@ const nextConfig = {
    * Proxy /api/v1/* requests to the private API listener in production and
    * the configured API port in development/fixtures, enabling same-origin API
    * access from the dashboard regardless of the client hostname. OpenCode Web
-   * and CLI are intentionally not rewritten here: they must use direct local ports, the
-   * authenticated `.localhost` host gateways, or explicit HTTPS origins.
+   * and CLI are intentionally not rewritten here: they use compatibility
+   * `.localhost` gateways or API-issued runtime HTTPS roots.
    */
   async rewrites() {
     const apiPort = process.env.INGENIUM_API_PORT || (process.env.NODE_ENV === "production" ? "4096" : "4097");

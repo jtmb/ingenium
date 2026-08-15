@@ -169,7 +169,7 @@ describe("authMiddleware — timing-safe comparison", () => {
     });
   });
 
-  it.each(["exchange", "validate"])("authenticates runtime gateway %s only with its separate file credential", (operation) => {
+  it.each(["exchange", "validate", "activity"])("authenticates runtime gateway %s only with its separate file credential", (operation) => {
     configureRuntimeGatewayToken();
     const req = makeReq(`Bearer ${gatewayToken}`, "POST", `/api/v1/runtimes/gateway/${operation}`);
     req.headers = {

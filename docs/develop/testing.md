@@ -247,9 +247,16 @@ RUN_DASHBOARD_MAIL=1 npx playwright test --config=tests/playwright.mail.config.t
 RUN_DASHBOARD_MANUAL=1 npx playwright test --config=tests/playwright.manual.config.ts
 ```
 
-The Docker preflight uses `http://opencode.localhost:3000` and
-`http://cli.localhost:3000` by default. The private container listeners on
-`4098` and `4099` are never Docker-suite defaults. Its focused QA command is:
+Compatibility Docker preflight expects healthy fixed OpenCode/CLI/VS Code aliases.
+Production preflight instead expects those three aliases to return identical static
+no-store `404` guidance with restrictive CSP and no forwarded WebSocket upgrade. The
+private listeners on `4098`, `4099`, and `4100` are never Docker-suite defaults.
+
+Focused runtime UX verification uses the core runtime-isolation test, API runtime
+route/gateway/manager tests, dashboard runtime-launch/frame/standalone tests, and
+gateway static validation. The API cases cover authorization-filtered visibility,
+explicit start, cross-user denial, concurrency, quotas, activity counters, and
+compatibility descriptors. Its focused live QA command is:
 
 ```bash
 RUN_DASHBOARD_DOCKER=1 npx playwright test --config=tests/playwright.docker.config.ts

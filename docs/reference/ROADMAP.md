@@ -2502,11 +2502,14 @@ evidence before the next subwave starts.
   static guidance, broken compatibility proxy, or in-scope visual/accessibility
   failure is `BLOCKING`; unrelated runtime polish is `FOLLOW_UP`; route and lease
   telemetry is `INFORMATIONAL`.
-- **Evidence placeholders:** Source `[pending gateway/API/dashboard diff/tests]`;
-  deploy/health `[pending production + compatibility route evidence]`; visual
-  `[pending 1440x900/390x844 and passive sweep artifacts]`; security `[pending
-  bounded runtime-boundary review]`; containment `[pending strict audit and
-  owned-process/port cleanup]`.
+- **Evidence:** The working-tree implementation based on `7927a1f` passes the
+  7-test core runtime-isolation file, the 12-test API runtime-route file, the
+  31-test dashboard runtime picker/frame/config set, core/API/dashboard
+  typechecks, dashboard lint with zero errors, static gateway validation,
+  Compose interpolation, shell syntax, DB-isolation enforcement, and
+  `git diff --check`. Deployment/health, 1440x900/390x844 visual and passive
+  sweep, bounded security review, fixture E2E, and strict containment remain
+  pending, so no `work-complete` marker is recorded.
 - **Planned marker entries (not live):** append `work-started` for `RUNTIME-100`
   after preflight/ownership, then append one matching `work-complete` entry
   after all gates and non-empty evidence pass.

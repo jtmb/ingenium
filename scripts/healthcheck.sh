@@ -107,6 +107,29 @@ require_cli_root_ok() {
   fi
 }
 
+require_production_aliases_unavailable() {
+  expected_body="Direct local runtime aliases are unavailable in production. Open the Ingenium Dashboard and choose an authorized workspace."
+  for host in opencode.localhost cli.localhost vscode.localhost; do
+    actual="$(curl --silent --show-error --max-time 5 --header "Host: $host" --write-out '|%{http_code}' http://127.0.0.1:3000/)"
+    if [ "$actual" != "${expected_body}|404" ]; then
+      echo "ERROR: production runtime alias did not return the common 404 guidance: $host"
+      exit 1
+    fi
+  done
+  headers="$(curl --silent --show-error --max-time 5 --head --header "Host: opencode.localhost" http://127.0.0.1:3000/)"
+  for expected in "Cache-Control: no-store" "X-Content-Type-Options: nosniff" "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"; do
+    if ! printf '%s\n' "$headers" | tr -d '\r' | grep -F -q "$expected"; then
+      echo "ERROR: production runtime alias is missing a required static header"
+      exit 1
+    fi
+  done
+  upgrade_status="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: opencode.localhost" --header "Connection: Upgrade" --header "Upgrade: websocket" http://127.0.0.1:3000/ || true)"
+  if [ "$upgrade_status" != "404" ]; then
+    echo "ERROR: production alias forwarded a WebSocket upgrade"
+    exit 1
+  fi
+}
+
 programs="ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway"
 if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
   programs="$programs opencode-web ttyd-opencode vscode"
@@ -131,4 +154,6 @@ if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
   require_vscode_gateway_csp
   require_ttyd_gateway_health
   require_cli_root_ok
+else
+  require_production_aliases_unavailable
 fi

@@ -169,7 +169,7 @@ COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh ./
 COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
 # startup, so copy its primary configuration and declared include set together.
-COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf ./nginx/
+COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
 # Validate the rendered Nginx configuration as its production user. Runtime
 # startup recreates these ephemeral directories before Nginx starts.
 RUN install -d -o appuser -g appuser -m 0700 \
@@ -179,6 +179,7 @@ RUN install -d -o appuser -g appuser -m 0700 \
       /run/ingenium-gateway/fastcgi \
       /run/ingenium-gateway/uwsgi \
       /run/ingenium-gateway/scgi && \
+    ln -sf /app/nginx/runtime-aliases-compatibility.conf /run/ingenium-gateway/runtime-aliases.conf && \
     runuser -u appuser -- sh -ec 'for directory in /run/ingenium-gateway /run/ingenium-gateway/client_body /run/ingenium-gateway/proxy /run/ingenium-gateway/fastcgi /run/ingenium-gateway/uwsgi /run/ingenium-gateway/scgi; do test -w "$directory"; done' && \
     runuser -u appuser -- sh /app/scripts/validate-gateway-config.sh
 # OpenCode initialization reads these authoritative declarations from disk.

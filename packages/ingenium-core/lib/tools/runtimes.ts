@@ -333,8 +333,8 @@ export function transitionRuntime(input: {
     const releaseLease = input.toState === "STOPPED" || input.toState === "FAILED" || revoked;
     const changed = db.prepare(`UPDATE runtime_instances SET state = ?, revision = revision + 1,
       backend_container_id = ?, idle_expires_at = ?, absolute_expires_at = ?,
-      active_connections = CASE WHEN ? THEN 0 ELSE active_connections END,
-      active_generations = CASE WHEN ? THEN 0 ELSE active_generations END,
+       active_connections = CASE WHEN ? THEN 0 ELSE active_connections END,
+       active_generations = CASE WHEN ? THEN 0 ELSE active_generations END,
       lease_owner_hash = CASE WHEN ? THEN NULL ELSE lease_owner_hash END,
       lease_expires_at = CASE WHEN ? THEN NULL ELSE lease_expires_at END,
       security_epoch = security_epoch + CASE WHEN ? THEN 1 ELSE 0 END,
@@ -342,7 +342,7 @@ export function transitionRuntime(input: {
       WHERE id = ? AND revision = ?`)
       .run(input.toState, backend, input.idleExpiresAt?.toISOString() ?? current.idle_expires_at,
         input.absoluteExpiresAt?.toISOString() ?? current.absolute_expires_at,
-        revoked ? 1 : 0, revoked ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, revoked ? 1 : 0,
+        releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, revoked ? 1 : 0,
         input.toState === "STOPPED" || revoked ? 1 : 0, timestamp, timestamp, current.id, current.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
     const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
@@ -402,9 +402,12 @@ export function recordRuntimeActivity(input: {
     if (input.idleLeaseMs !== undefined && (!Number.isSafeInteger(input.idleLeaseMs) || input.idleLeaseMs < 1_000)) {
       throw new Error("Invalid idle runtime lease");
     }
-    const idleExpiresAt = input.idleLeaseMs === undefined
+    const requestedIdleExpiry = input.idleLeaseMs === undefined
       ? current.idle_expires_at
       : new Date(new Date(timestamp).getTime() + input.idleLeaseMs).toISOString();
+    const idleExpiresAt = requestedIdleExpiry && current.absolute_expires_at
+      ? [requestedIdleExpiry, current.absolute_expires_at].sort()[0]!
+      : requestedIdleExpiry;
     db.prepare(`UPDATE runtime_instances SET active_connections = ?, active_generations = ?,
       last_authenticated_activity_at = ?, idle_expires_at = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`)
       .run(connections, generations, timestamp, idleExpiresAt, timestamp, current.id, current.revision);
@@ -699,8 +702,12 @@ export function revokeRuntimeBrowserSessionsForUser(userId: string, now = new Da
       WHERE runtime_id IN (SELECT id FROM runtime_instances WHERE owner_user_id = ?)`).run(timestamp, userId);
     db.prepare(`UPDATE runtime_browser_launch_tickets SET consumed_at = ?
       WHERE owner_user_id = ? AND consumed_at IS NULL`).run(timestamp, userId);
-    return db.prepare("UPDATE runtime_browser_sessions SET revoked_at = ? WHERE owner_user_id = ? AND revoked_at IS NULL")
+    const sessions = db.prepare("UPDATE runtime_browser_sessions SET revoked_at = ? WHERE owner_user_id = ? AND revoked_at IS NULL")
       .run(timestamp, userId).changes;
+    db.prepare(`UPDATE runtime_instances SET active_connections = 0, active_generations = 0,
+      revision = revision + 1, updated_at = ?
+      WHERE owner_user_id = ? AND (active_connections > 0 OR active_generations > 0)`).run(timestamp, userId);
+    return sessions;
   });
   checkpointAfterWrite();
   return changed;

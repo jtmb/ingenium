@@ -51,12 +51,14 @@ compatibility, ownership, and that no content or secrets enter evidence.
 | ttyd Terminal (dashboard) | `Dynamic` (see below) | _(removed)_ | OpenCode CLI via ttyd + xterm.js |
 | OpenCode Web (standalone) | `Dynamic` (see below) | _(removed)_ | Standalone OpenCode Web UI |
 | ttyd Terminal (standalone) | `Dynamic` (see below) | _(removed)_ | Standalone OpenCode CLI terminal |
-| VS Code (`/vscode`, standalone) | `http://vscode.localhost:3000/` | _(removed)_ | Local code-server workspace and terminal |
+| VS Code (`/vscode`, standalone) | Compatibility fixed alias or selected runtime `vscode` HTTPS audience | _(removed)_ | code-server workspace and terminal |
 
 ### Dynamic Origin Resolution (Updated)
 
-The iframe `src` is derived at runtime by `services/ingenium-dashboard/src/lib/runtime-urls.ts`
-based on the dashboard's own protocol and hostname. The **same-origin proxy rewrites
+The iframe `src` follows the trusted API profile descriptor. Compatibility uses fixed
+local aliases. Production requires explicit selection/start of an authorized workspace
+and then redeems an audience proof for an exact runtime HTTPS root. It never falls back
+to a fixed alias or singleton. The **same-origin proxy rewrites
 (`/opencode-web/`, `/opencode-cli/`) have been removed** — OpenCode v1.18.3+ serves
 root-relative assets and cannot be proxied under a sub-path.
 
@@ -65,16 +67,12 @@ Resolution is deferred from SSR to post-hydration via `useState(null)` + `useEff
 
 | Dashboard Environment | Web iframe src | CLI iframe src |
 |-----------------------|----------------|----------------|
-| **Default loopback deployment** | `http://opencode.localhost:3000/` | `http://cli.localhost:3000/` |
-| **Authenticated remote HTTPS profile (with both NEXT_PUBLIC_* values set at build time)** | Configured root HTTPS origin | Configured root HTTPS origin |
-| **LAN HTTP or HTTPS without override** | `null` — shows guidance overlay | `null` — shows guidance overlay |
+| **Compatibility** | `http://opencode.localhost:3000/` | `http://cli.localhost:3000/` |
+| **Production after explicit selection** | Exact `web--<runtime>.<domain>` HTTPS root | Exact `cli--<runtime>.<domain>` HTTPS root |
 
-Overrides are available via `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL`.
-They must be supplied before the Next.js image build; changing them only at runtime
-does not change the browser bundle. The Windows helper verifies existing loopback
-transport only and does not create secure transport.
-Only root HTTPS origins are accepted (e.g., `https://opencode.example.com/`). Relative
-same-origin paths are no longer supported.
+Production fixed aliases return a shared static no-store `404` with `nosniff` and a
+restrictive CSP. No upgrade reaches absent singleton backends. Relative same-origin
+paths remain unsupported.
 
 ### Current iframe attributes (both dashboard iframes)
 
@@ -324,12 +322,12 @@ page still works:
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| ttyd is reached through `cli.localhost:3000` | Low | Direct 4099 publication is not supported; the normal local gateway injects only a fixed internal ttyd identity. |
-| OpenCode Web is reached through `opencode.localhost:3000` | Low | Direct 4098 publication is not supported. Remote deployments require explicit HTTPS root configuration. |
+| Compatibility ttyd is reached through `cli.localhost:3000` | Low | Direct 4099 publication is not supported; the local gateway injects only a fixed internal ttyd identity. Production uses an audience-bound runtime root. |
+| Compatibility OpenCode Web is reached through `opencode.localhost:3000` | Low | Direct 4098 publication is not supported. Production uses an API-issued audience root after explicit workspace start. |
 | OpenCode iframes are on separate origins from dashboard | Low | Browser same-origin policy prevents iframe from accessing dashboard's cookies, localStorage, or DOM without a sandbox attribute. No sandbox required because the origin difference provides the isolation. |
-| HTTPS origin configured for remote access | Medium | The configured HTTPS origin must be a trusted deployment. The `NEXT_PUBLIC_OPENCODE_WEB_URL` env var accepts only root HTTPS origins (validated by regex). No relative paths or non-HTTPS origins are accepted. |
+| Production runtime HTTPS root | Medium | Exact audience/runtime hosts, one-time proof exchange, host-only cookies, generation checks, and the operator wildcard TLS domain bind each iframe to its selected runtime. |
 | Dashboard is a management UI — compromise of dashboard origin is critical | High | The default gateway is local-only; remote profiles must add operator-managed TLS authentication. The iframe's separate origin (different hostname) also prevents sharing cookies, localStorage, or DOM state. |
-| Compromise of the embedded OpenCode service | Medium | An attacker who compromises the opencode-web or ttyd service could operate within that service's own origin. Mitigated by: (a) loopback-only deployment in Docker, (b) HTTPS origin must be explicitly configured for remote access, (c) the compromised service would still be on a separate origin from the dashboard. |
+| Compromise of the embedded OpenCode service | Medium | A compromised service remains on a separate origin. Compatibility upstreams stay private; production additionally isolates each runtime by workspace, network, audience cookie, and bounded lease. |
 
 ---
 
@@ -350,27 +348,23 @@ page still works:
 ### ✅ Phase 2 Changes
 
 1. **Sandbox attribute removed** from all OpenCode iframes — OpenCode is trusted
-   first-party content embedded via local gateway roots or configured HTTPS origins.
+   first-party content embedded via compatibility gateway roots or isolated runtime origins.
    The browser same-origin policy (different port/hostname) provides isolation
    without needing a sandbox attribute.
 2. **Same-origin subpath proxy is unsupported** — `/opencode-web/` and `/opencode-cli/`
    reverse-proxy paths are eliminated. OpenCode v1.18.3+ serves root-relative assets
    and cannot be proxied under a sub-path.
-3. **Authenticated host-gateway model** — local browser access uses the protected
-   `.localhost:3000` roots; remote HTTPS
-   requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL`;
-   unsupported LAN shows guidance overlay.
+3. **Profile-aware gateway model** — compatibility uses fixed `.localhost:3000`
+   roots. Production requires explicit workspace start and audience-bound runtime
+   HTTPS roots; its fixed aliases return static no-store `404` guidance.
 4. **Chromium sandbox-escape warning resolved** — removing the `allow-scripts
    allow-same-origin` combination eliminates the browser warning.
 
 ### ⏳ Deferred (Requires Runtime Testing)
 
-1. **Content-Security-Policy headers** — `frame-ancestors` directive on the
-   Express API responses, or on the opencode-web/ttyd backend responses, as
-   an additional defense layer.
-2. **CSP for the iframe responses** — nginx/Express CSP headers for
+1. **CSP for iframe-loaded resources** — service-specific CSP headers for
    opencode-web and ttyd responses, restricting what those services can load.
-3. **Email HTML iframe sandbox audit** — the email reader's iframe currently
+2. **Email HTML iframe sandbox audit** — the email reader's iframe currently
    uses a different, more restrictive sandbox (`allow-same-origin allow-popups
    allow-popups-to-escape-sandbox`, no `allow-scripts`). This should be
    reviewed for completeness.

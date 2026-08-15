@@ -21,9 +21,12 @@ describe("AUTH-102 canonical API policy", () => {
     ["GET", "/api/v1/runtimes", "installation", "read"],
     ["POST", "/api/v1/runtimes", "installation", "write"],
     ["GET", "/api/v1/runtimes/browser/status", "private", "read"],
+    ["GET", "/api/v1/runtimes/browser/workspaces", "private", "read"],
+    ["POST", "/api/v1/runtimes/browser/workspaces/workspace/start", "private", "write"],
     ["POST", "/api/v1/runtimes/browser/launch", "private", "write"],
     ["POST", "/api/v1/runtimes/gateway/exchange", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/gateway/validate", "gateway-private", "execute"],
+    ["POST", "/api/v1/runtimes/gateway/activity", "gateway-private", "execute"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
@@ -69,7 +72,7 @@ describe("AUTH-102 canonical API policy", () => {
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it.each(["exchange", "validate"])("allows the runtime gateway principal on its private %s contract", (operation) => {
+  it.each(["exchange", "validate", "activity"])("allows the runtime gateway principal on its private %s contract", (operation) => {
     const req = {
       method: "POST",
       path: `/api/v1/runtimes/gateway/${operation}`,
