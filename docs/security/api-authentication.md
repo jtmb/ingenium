@@ -255,6 +255,25 @@ same-origin proxy injects that bearer server-side. Do not publish `4098` or
 remote deployment profile; use operator-managed authenticated TLS origins for
 remote access.
 
+## Restore-time invalidation
+
+An authorized database restore never revives restored local bearer state. After
+read-only validation accepts a complete migration-093-or-later security lineage,
+the fixed maintenance process applies only missing guarded migrations through
+102 and verifies integrity; ordinary API startup migrations are not used. After
+the paired swap and restore-ledger rehydrate, but before journal `rehydrated` or
+service restart, one transaction revokes sessions and scoped API/MCP/runtime
+credentials, consumes one-time authorization and launch state, releases task and
+coordination ownership, advances user/service-principal/runtime/browser
+generations, and writes content-free immutable audit evidence. Password hashes,
+OIDC identity links, TOTP factors, and recovery codes are preserved. Partial
+credential schemas and audit failure fail closed into restore rollback. The
+file-backed installation bearer is outside the restored database and follows the
+normal rotation procedure below.
+
+Users and automated clients must authenticate again after a successful restore.
+External identity/provider revocation is not implied by this local invalidation.
+
 ## Rotation and restart procedure
 
 1. Generate a replacement API token without printing it or committing it.

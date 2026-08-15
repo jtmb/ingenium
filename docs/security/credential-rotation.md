@@ -20,6 +20,18 @@ description: Redacted response record and future remediation steps for the histo
 
 No secret values are recorded in this document, issues, commits, logs, or support transcripts.
 
+## Restore boundary
+
+Successful database restore invalidates restored local sessions, scoped API/MCP
+credentials, runtime capabilities/tickets/browser sessions, pending one-time
+states, invitations, task reservations, and coordination ownership before
+services restart. It preserves password hashes, OIDC links, TOTP factors, and
+recovery codes, so it is not a password or external-provider rotation. Require
+fresh local authentication after restore and perform any external provider
+revocation separately. If restore later rolls back, clients or caches that
+already observed revocation may remain invalidated; retain the signed rollback
+evidence rather than attempting to resurrect old tokens.
+
 ## Remediation record
 
 ### 1. Credential verification

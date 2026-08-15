@@ -407,6 +407,10 @@ function zeroAndUnlink(root: string, path: string): void {
   fsyncDirectory(root);
 }
 
+function removeBufferArtifacts(root: string, path: string): void {
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`]) zeroAndUnlink(root, candidate);
+}
+
 function sibling(path: string, runId: string, suffix: "new" | "rollback" | "failed"): string {
   const name = `.${basename(path)}.restore-${runId}.${suffix}`;
   const result = resolve(dirname(path), name);
@@ -881,10 +885,20 @@ async function execute(): Promise<void> {
     if (!run) return;
     targets = captureTargetMetadata(paths);
     if (!targets) throw new MaintenanceError("SWAP_FAILED");
+    try {
+      handoff = backups.getExecutionRestoreStage(global.id, run.id, owner, fence);
+      const validationBuffer = writeBuffer(root, run.id, "ingenium", handoff.ingenium.bytes, handoff.ingenium.sha256);
+      try {
+        backups.validateRestoredSecuritySchemaForMaintenance(validationBuffer);
+      } finally {
+        removeBufferArtifacts(root, validationBuffer);
+      }
+    } catch {
+      throw new MaintenanceError("VERIFY_FAILED");
+    }
     let capsule = backups.captureRestoreExecutionCapsule(global.id, run.id);
     writeJournal(root, run.id, "claimed", capsule, targets);
     journal = readJournal(root);
-    handoff = backups.getExecutionRestoreStage(global.id, run.id, owner, fence);
     run = safeTransition(global.id, run, owner, fence, "quiescing");
     writeJournal(root, run.id, "quiescing", capsule, targets);
     await stopDbUsers();
@@ -936,6 +950,11 @@ async function execute(): Promise<void> {
     writeJournal(root, run.id, "pair_committed", capsule, targets);
 
     closeDbForMaintenance();
+    try {
+      backups.upgradeRestoredSecuritySchemaForMaintenance(boundChild(parents.ingenium, basename(paths.ingenium)));
+    } catch {
+      throw new MaintenanceError("VERIFY_FAILED");
+    }
     run = backups.rehydrateRestoreExecutionCapsule(capsule);
     run = backups.claimPendingRestoreExecution(global.id, owner, fence, queued.id);
     if (!run) throw new MaintenanceError("VERIFY_FAILED");
@@ -943,12 +962,16 @@ async function execute(): Promise<void> {
     run = safeTransition(global.id, run, owner, fence, "snapshotting");
     run = safeTransition(global.id, run, owner, fence, "swapping", { safetyBackupId: safety.backupId });
     run = safeTransition(global.id, run, owner, fence, "verifying");
+    try {
+      backups.invalidateRestoredSecurityState(global.id, run.id);
+    } catch {
+      throw new MaintenanceError("VERIFY_FAILED");
+    }
     backups.recordRestoreExecutionHashes(global.id, run.id, owner, fence, "post", {
       ingenium: sha256File(boundChild(parents.ingenium, basename(paths.ingenium))),
       opencode: sha256File(boundChild(parents.opencode, basename(paths.opencode))),
     });
-    if (sha256File(boundChild(parents.ingenium, basename(paths.ingenium))) !== capsule.stage.ingenium_sha256
-      || sha256File(boundChild(parents.opencode, basename(paths.opencode))) !== capsule.stage.opencode_sha256) {
+    if (sha256File(boundChild(parents.opencode, basename(paths.opencode))) !== capsule.stage.opencode_sha256) {
       throw new MaintenanceError("VERIFY_FAILED");
     }
     checkDatabases(paths, parents);
@@ -1010,16 +1033,12 @@ async function execute(): Promise<void> {
         }
         checkDatabases(paths, parents);
         closeDbForMaintenance();
-        const restoredRun = backups.getRestoreExecutionRun(global?.id ?? journal.capsule.run.project_id, run.id);
-        if (!restoredRun) throw new MaintenanceError("ROLLBACK_FAILED");
-        run = restoredRun;
-        if (run.state !== "rolling_back") run = safeTransition(global?.id ?? journal.capsule.run.project_id, run, owner, fence, "rolling_back", { errorCode: code });
+        lockedTargets = restoreAndCloseLockedTargets(lockedTargets);
         writeJournal(root, run.id, "rolling_back", journal.capsule, journal.targets);
-        run = safeTransition(global?.id ?? journal.capsule.run.project_id, run, owner, fence, "rolled_back", { errorCode: code });
+        run = backups.recoverRestoreExecutionCapsule(journal.capsule, "rolled_back", code);
         writeJournal(root, run.id, "rolled_back", journal.capsule, journal.targets);
         restoreTargetMetadata(parents, paths, journal.targets);
         ensureRuntimeSidecars(parents, paths, journal.targets);
-        lockedTargets = restoreAndCloseLockedTargets(lockedTargets);
         await startRestoredUsers();
         removeTransientPair(parents, paths, root, run.id);
         archiveJournal(root, readJournal(root)!);
@@ -1068,6 +1087,9 @@ function recover(): void {
   const lockRunId = readLock(root);
   if (!journal) {
     if (!lockRunId) return;
+    for (const component of ["ingenium", "opencode"] as const) {
+      removeBufferArtifacts(root, bufferPath(root, lockRunId, component));
+    }
     const global = projects.getGlobalProject();
     const run = global ? backups.getRestoreExecutionRun(global.id, lockRunId) : null;
     if (!run || run.state === "queued") {

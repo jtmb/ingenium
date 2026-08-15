@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { logger } from "./logger.js";
 import {
@@ -3375,8 +3375,8 @@ export function getDb(dbPath?: string): Database.Database {
   // The fixed root restore executor must inspect the live database before it
   // stops appuser processes. Running schema migrations at that point can
   // rebuild a table while those processes still hold the database open. The
-  // executor swaps a previously validated snapshot; the restarted API applies
-  // any pending migrations as appuser after the swap.
+  // executor swaps a previously validated snapshot; its explicit restore-only
+  // upgrader handles 094-102, while ordinary startup migration remains disabled.
   const isRootRestoreMaintenance = process.env.INGENIUM_RESTORE_MAINTENANCE_MODE === "execute"
     && typeof process.getuid === "function" && process.getuid() === 0;
   if (!isRootRestoreMaintenance) runMigrations(db);
@@ -3397,6 +3397,126 @@ export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "09
     "101": inspectRuntimeIsolationMigration(database),
     "102": inspectRuntimeBrowserMigration(database),
   };
+}
+
+type RestoreMaintenanceMigration = {
+  version: string;
+  file: string;
+  inspect: (database: Database.Database) => AuthenticationFoundationMigrationState;
+};
+
+const RESTORE_MAINTENANCE_SECURITY_MIGRATIONS: readonly RestoreMaintenanceMigration[] = [
+  { version: "094", file: "094_authentication.sql", inspect: inspectAuthenticationMigration },
+  { version: "095", file: "095_authorization_audit.sql", inspect: inspectAuthorizationAuditMigration },
+  { version: "096", file: "096_resource_ownership.sql", inspect: inspectResourceOwnershipMigration },
+  { version: "097", file: "097_mail_tenancy.sql", inspect: inspectMailTenancyMigration },
+  { version: "098", file: "098_content_tenancy.sql", inspect: inspectContentTenancyMigration },
+  { version: "099", file: "099_automation_tenancy.sql", inspect: inspectAutomationTenancyMigration },
+  { version: "100", file: "100_mcp_credentials.sql", inspect: inspectMcpCredentialMigration },
+  { version: "101", file: "101_runtime_isolation.sql", inspect: inspectRuntimeIsolationMigration },
+  { version: "102", file: "102_runtime_browser_sessions.sql", inspect: inspectRuntimeBrowserMigration },
+];
+
+function requireRestoreMaintenanceProcess(databasePath: string): void {
+  const testRoot = process.env.INGENIUM_RESTORE_TEST_ROOT
+    ? resolve(process.env.INGENIUM_RESTORE_TEST_ROOT)
+    : "";
+  let disposableTestPath = false;
+  try {
+    disposableTestPath = realpathSync(databasePath).startsWith(`${testRoot}/`);
+  } catch {
+    // The maintenance database opener reports missing or inaccessible files.
+  }
+  const disposableTestExecutor = process.env.NODE_ENV === "test"
+    && /^\/tmp\/ingenium-restore-fixture-[A-Za-z0-9_-]+$/.test(testRoot)
+    && disposableTestPath;
+  const privilegedExecutor = typeof process.getuid === "function" && process.getuid() === 0;
+  if (process.env.INGENIUM_RESTORE_MAINTENANCE_MODE !== "execute"
+    || (!privilegedExecutor && !disposableTestExecutor)) {
+    throw new Error("Restore security migration is restricted to the fixed maintenance executor");
+  }
+}
+
+function assertRestoreMaintenanceIntegrity(database: Database.Database): void {
+  const integrity = database.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+  if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
+    throw new Error("Restore security migration failed database integrity validation");
+  }
+  if (database.prepare("PRAGMA foreign_key_check").all().length > 0) {
+    throw new Error("Restore security migration failed foreign key validation");
+  }
+}
+
+function pendingRestoreMaintenanceMigrations(database: Database.Database): readonly RestoreMaintenanceMigration[] {
+  for (const [version, inspect] of [
+    ["083", inspectRestorePlansMigration],
+    ["084", inspectRestoreExecutorMigration],
+    ["085", inspectRestoreExecutorPhaseEventsMigration],
+    ["093", inspectIdentityTenancyMigration],
+  ] as const) {
+    const state = inspect(database);
+    if (!state.complete) throw restoreMigrationPartialStateError(version, state.missing);
+  }
+
+  let missingPredecessor: string | null = null;
+  const pending: RestoreMaintenanceMigration[] = [];
+  for (const migration of RESTORE_MAINTENANCE_SECURITY_MIGRATIONS) {
+    const state = migration.inspect(database);
+    if (state.any && !state.complete) {
+      throw restoreMigrationPartialStateError(migration.version, state.missing);
+    }
+    if (state.complete) {
+      if (missingPredecessor) {
+        throw restoreMigrationPartialStateError(migration.version, [
+          `migration ${missingPredecessor} prerequisite schema`,
+        ]);
+      }
+      continue;
+    }
+    missingPredecessor ??= migration.version;
+    pending.push(migration);
+  }
+  return pending;
+}
+
+function openRestoreMaintenanceDatabase(databasePath: string, readOnly: boolean): Database.Database {
+  const database = new Database(databasePath, { readonly: readOnly, fileMustExist: true });
+  database.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
+  database.pragma("busy_timeout = 5000");
+  database.pragma("foreign_keys = ON");
+  return database;
+}
+
+/** Validate a staged snapshot without invoking the ordinary startup migration runner. */
+export function validateRestoreSecuritySchemaForMaintenance(databasePath: string): void {
+  requireRestoreMaintenanceProcess(databasePath);
+  const database = openRestoreMaintenanceDatabase(databasePath, true);
+  try {
+    pendingRestoreMaintenanceMigrations(database);
+    assertRestoreMaintenanceIntegrity(database);
+  } finally {
+    database.close();
+  }
+}
+
+/** Upgrade only the supported migration-093-through-102 restore security lineage. */
+export function upgradeRestoreSecuritySchemaForMaintenance(databasePath: string): void {
+  requireRestoreMaintenanceProcess(databasePath);
+  const database = openRestoreMaintenanceDatabase(databasePath, false);
+  try {
+    const migrationsDir = resolve(import.meta.dirname ?? __dirname, "../data/migrations");
+    for (const migration of pendingRestoreMaintenanceMigrations(database)) {
+      database.exec(readFileSync(resolve(migrationsDir, migration.file), "utf-8"));
+      const state = migration.inspect(database);
+      if (!state.complete) throw restoreMigrationPartialStateError(migration.version, state.missing);
+    }
+    if (pendingRestoreMaintenanceMigrations(database).length > 0) {
+      throw new Error("Restore security migration did not reach the current generation");
+    }
+    assertRestoreMaintenanceIntegrity(database);
+  } finally {
+    database.close();
+  }
 }
 
 /**

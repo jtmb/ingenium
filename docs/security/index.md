@@ -290,6 +290,19 @@ rehydrate and record rollback or keep startup blocked with a bounded
 active journal and lock are removed. Tokens and owner/fence values are stored
 only as hashes.
 
+RESTORE-103 adds a token-only barrier between ledger rehydrate and journal
+`rehydrated`. Fixed schema-generation classification rejects partial credential
+groups. One transaction revokes restored sessions, scoped API/MCP/runtime
+credentials, tickets and browser sessions; consumes pending one-time states;
+releases invitations, task reservations, and coordination ownership; advances
+user, service-principal, workspace/runtime, and browser generations; and commits
+content-free security-audit and capsule-phase evidence. Password hashes, OIDC
+identity links, TOTP factors, recovery codes, and resource content are not
+rewritten. Audit failure prevents restart and enters signed-journal rollback.
+Fresh authentication is required after success; external provider revocation and
+the possibility that clients retain an observed revocation after DB rollback are
+explicit residual operator risks.
+
 ## Job vault-reference boundary (VAULT-100)
 
 Vault references are opt-in authorization metadata, not secret access. A job may

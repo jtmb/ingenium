@@ -337,6 +337,31 @@ target parent directories during the swap, snapshots the current pair before
 replacement, and archives terminal signed journals. A partial 084 schema is
 refused at startup rather than resumed or repaired by a live service.
 
+### Restore-time capability invalidation (RESTORE-103)
+
+The executor read-only validates the staged database before stopping users: only
+a complete contiguous migration-093-through-102 lineage is accepted, and 093 is
+the exact supported minimum. Migration 093's `users.updated_at` belongs to the
+identity baseline and does not make authentication migration 094 partial. Any
+partial group or later generation after an absent predecessor fails before swap.
+After swap, a separate maintenance-only Core connection applies exactly the
+missing guarded 094–102 SQL files, then requires `PRAGMA integrity_check = ok`
+and an empty `PRAGMA foreign_key_check`. It does not call ordinary
+`runMigrations`; the API remains stopped until upgrade and invalidation finish.
+After capsule rehydrate, one `execTransaction` revokes/consumes restored token,
+session, ticket, invitation, reservation, and coordination ownership state;
+increments user, service-principal, workspace/runtime, and browser generations;
+and inserts exactly one `restore.tokens_invalidated` security audit plus one
+completed `capsule` phase event. Both records are content-free and immutable.
+The checkpoint remains outside the transaction. Replay observes the paired audit
+records and does not advance generations twice.
+
+The transaction does not update `password_credentials`, `auth_identities`,
+`auth_totp_factors`, `auth_recovery_codes`, mail account credentials, or content
+tables. Audit failure rolls back the invalidation transaction and leaves the
+signed external journal below `rehydrated`; pair rollback and a later recovery
+pass terminalize the run before database users start.
+
 Migration 075 is guarded as none/all/partial: when no coordination components
 exist, the migration runs transactionally; when the complete schema exists, it
 is skipped; any partial schema fails closed with no repair or partial startup.

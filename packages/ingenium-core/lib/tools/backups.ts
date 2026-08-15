@@ -23,7 +23,14 @@ import {
 } from "node:fs";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
-import { checkpointAfterWrite, execTransaction, getDb, resolveCoreDbPath } from "../db.js";
+import {
+  checkpointAfterWrite,
+  execTransaction,
+  getDb,
+  resolveCoreDbPath,
+  upgradeRestoreSecuritySchemaForMaintenance,
+  validateRestoreSecuritySchemaForMaintenance,
+} from "../db.js";
 import { BackupRecord } from "../schema.js";
 import { getGlobalProject } from "./projects.js";
 
@@ -2400,6 +2407,214 @@ export type RestoreExecutionCapsule = {
   safetyRecord: BackupRecord | null;
 };
 
+export type RestoreSecuritySchemaGeneration =
+  | "pre_auth"
+  | "authentication"
+  | "authorization"
+  | "mail"
+  | "mcp"
+  | "runtime"
+  | "runtime_browser";
+
+const RESTORE_SECURITY_BASE_SCHEMA: Record<string, readonly string[]> = {
+  users: ["id", "updated_at"],
+  tasks: ["reservation_state", "reservation_owner", "reservation_worktree", "reservation_token_hash", "revision"],
+  coordination_sessions: ["ownership_token_hash", "revision", "fence", "state", "expires_at", "updated_at"],
+  coordination_claims: ["coordination_session_id", "state", "updated_at", "released_at"],
+  context_checkpoint_maintenance_authorizations: ["confirmation_hash", "expires_at", "consumed_at"],
+  backup_restore_authorizations: ["token_hash", "expires_at", "consumed_at"],
+  backup_restore_execution_authorizations: ["token_hash", "expires_at", "consumed_at"],
+  backup_restore_execution_runs: ["project_id", "plan_id", "backup_id", "state"],
+  backup_restore_execution_phase_events: ["project_id", "plan_id", "backup_id", "run_id", "phase_code", "status"],
+};
+
+const RESTORE_SECURITY_SCHEMA_GROUPS: ReadonlyArray<{
+  generation: RestoreSecuritySchemaGeneration;
+  tables: Record<string, readonly string[]>;
+}> = [
+  {
+    generation: "authentication",
+    tables: {
+      users: ["security_epoch"],
+      auth_identities: ["issuer", "subject"],
+      password_credentials: ["password_hash", "salt"],
+      auth_sessions: ["security_epoch", "revoked_at"],
+      auth_one_time_states: ["consumed_at"],
+      auth_totp_factors: ["encrypted_secret", "revoked_at"],
+      auth_recovery_codes: ["code_hash", "consumed_at"],
+      oidc_authorization_states: ["consumed_at"],
+    },
+  },
+  {
+    generation: "authorization",
+    tables: {
+      service_principals: ["status", "updated_at"],
+      scoped_api_tokens: ["revoked_at"],
+      organization_invitations: ["accepted_at", "revoked_at"],
+      security_audit_events: ["actor_type", "actor_id", "action", "organization_id", "project_id", "outcome", "metadata_json"],
+    },
+  },
+  { generation: "mail", tables: { mail_oauth_attempts: ["consumed_at"] } },
+  {
+    generation: "mcp",
+    tables: {
+      service_principals: ["security_epoch"],
+      mcp_credentials: ["service_principal_id", "security_epoch", "revoked_at"],
+    },
+  },
+  {
+    generation: "runtime",
+    tables: {
+      authorized_workspaces: ["security_epoch", "updated_at"],
+      runtime_instances: ["revision", "security_epoch", "lease_owner_hash", "lease_expires_at", "active_connections", "active_generations", "updated_at"],
+      runtime_capability_bindings: ["security_epoch", "revoked_at"],
+      runtime_launch_tickets: ["consumed_at"],
+    },
+  },
+  {
+    generation: "runtime_browser",
+    tables: {
+      runtime_browser_generations: ["generation", "updated_at"],
+      runtime_browser_launch_tickets: ["generation", "consumed_at"],
+      runtime_browser_sessions: ["generation", "revoked_at"],
+    },
+  },
+];
+
+function restoreSecurityTableState(
+  db: Database.Database,
+  tables: Record<string, readonly string[]>,
+): "absent" | "complete" | "partial" {
+  let present = 0;
+  let required = 0;
+  for (const [table, columns] of Object.entries(tables)) {
+    const actual = new Set((db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map(({ name }) => name));
+    required += columns.length;
+    present += columns.filter((column) => actual.has(column)).length;
+  }
+  if (present === 0) return "absent";
+  return present === required ? "complete" : "partial";
+}
+
+function classifyRestoreSecurityDatabase(db: Database.Database): RestoreSecuritySchemaGeneration {
+  if (restoreSecurityTableState(db, RESTORE_SECURITY_BASE_SCHEMA) !== "complete") {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  let generation: RestoreSecuritySchemaGeneration = "pre_auth";
+  let absentPredecessor = false;
+  for (const group of RESTORE_SECURITY_SCHEMA_GROUPS) {
+    const state = restoreSecurityTableState(db, group.tables);
+    if (state === "partial" || (state === "complete" && absentPredecessor)) throw new BackupError("BACKUP_INVALID");
+    if (state === "absent") absentPredecessor = true;
+    else generation = group.generation;
+  }
+  return generation;
+}
+
+/** Classify the installed restore before migrations can obscure a partial credential generation. */
+export function classifyRestoredSecuritySchema(databasePath: string): RestoreSecuritySchemaGeneration {
+  const restored = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return classifyRestoreSecurityDatabase(restored);
+  } finally {
+    restored.close();
+  }
+}
+
+export function validateRestoredSecuritySchemaForMaintenance(databasePath: string): void {
+  validateRestoreSecuritySchemaForMaintenance(databasePath);
+}
+
+export function upgradeRestoredSecuritySchemaForMaintenance(databasePath: string): void {
+  upgradeRestoreSecuritySchemaForMaintenance(databasePath);
+}
+
+/**
+ * Invalidate restored local capabilities and record both audit boundaries in one
+ * transaction. Long-lived authentication material is deliberately untouched.
+ */
+export function invalidateRestoredSecurityState(projectId: string, runId: string, timestamp = now()): void {
+  const db = getDb(backupDbPath());
+  if (classifyRestoreSecurityDatabase(db) !== "runtime_browser") throw new BackupError("BACKUP_INVALID");
+  execTransaction(() => {
+    const run = getExecutionRunRecord(projectId, runId);
+    const project = db.prepare(
+      "SELECT organization_id FROM projects WHERE id = ? AND is_global = 1 AND archived_at IS NULL",
+    ).get(projectId) as { organization_id: string } | undefined;
+    if (!run || run.state !== "verifying" || !project) throw new BackupError("RESTORE_STATE_CONFLICT", run?.revision);
+
+    const audits = db.prepare(
+      `SELECT id FROM security_audit_events
+       WHERE actor_type = 'system' AND actor_id = ? AND action = 'restore.tokens_invalidated'`,
+    ).all(runId) as Array<{ id: string }>;
+    const phases = db.prepare(
+      `SELECT id FROM backup_restore_execution_phase_events
+       WHERE project_id = ? AND run_id = ? AND phase_code = 'capsule' AND status = 'completed'`,
+    ).all(projectId, runId) as Array<{ id: string }>;
+    if (audits.length > 1 || phases.length > 1 || (audits.length === 1) !== (phases.length === 1)) {
+      throw new BackupError("BACKUP_INVALID");
+    }
+    if (audits.length === 1) return;
+
+    db.prepare("UPDATE users SET security_epoch = security_epoch + 1, updated_at = ?").run(timestamp);
+    db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL").run(timestamp);
+    db.prepare("UPDATE auth_one_time_states SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE oidc_authorization_states SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE scoped_api_tokens SET revoked_at = ? WHERE revoked_at IS NULL").run(timestamp);
+    db.prepare("UPDATE service_principals SET security_epoch = security_epoch + 1, updated_at = ?").run(timestamp);
+    db.prepare("UPDATE mcp_credentials SET revoked_at = ? WHERE revoked_at IS NULL").run(timestamp);
+    db.prepare("UPDATE runtime_capability_bindings SET revoked_at = ? WHERE revoked_at IS NULL").run(timestamp);
+    db.prepare("UPDATE runtime_launch_tickets SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE runtime_browser_launch_tickets SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE runtime_browser_sessions SET revoked_at = ? WHERE revoked_at IS NULL").run(timestamp);
+    db.prepare("UPDATE runtime_browser_generations SET generation = generation + 1, updated_at = ?").run(timestamp);
+    db.prepare("UPDATE authorized_workspaces SET security_epoch = security_epoch + 1, updated_at = ?").run(timestamp);
+    db.prepare(
+      `UPDATE runtime_instances
+       SET security_epoch = security_epoch + 1, revision = revision + 1,
+           lease_owner_hash = NULL, lease_expires_at = NULL,
+           active_connections = 0, active_generations = 0, updated_at = ?`,
+    ).run(timestamp);
+    db.prepare("UPDATE mail_oauth_attempts SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE context_checkpoint_maintenance_authorizations SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE backup_restore_authorizations SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare("UPDATE backup_restore_execution_authorizations SET consumed_at = ? WHERE consumed_at IS NULL").run(timestamp);
+    db.prepare(
+      `UPDATE organization_invitations SET revoked_at = ?
+       WHERE accepted_at IS NULL AND revoked_at IS NULL`,
+    ).run(timestamp);
+    db.prepare(
+      `UPDATE tasks
+       SET reservation_state = 'available', reservation_owner = NULL,
+           reservation_worktree = NULL, reservation_token_hash = NULL,
+           revision = revision + 1, updated_at = ?
+       WHERE reservation_state <> 'available'`,
+    ).run(timestamp);
+    db.prepare(
+      `UPDATE coordination_claims
+       SET state = 'released', released_at = ?, updated_at = ?
+       WHERE state = 'active'`,
+    ).run(timestamp, timestamp);
+    db.prepare(
+      `UPDATE coordination_sessions
+       SET state = 'closed', revision = revision + 1, expires_at = ?, updated_at = ?
+       WHERE state <> 'closed'`,
+    ).run(timestamp, timestamp);
+
+    db.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, actor_id, action, organization_id, project_id, outcome, metadata_json, created_at)
+       VALUES (?, 'system', ?, 'restore.tokens_invalidated', ?, ?, 'success', '{}', ?)`,
+    ).run(randomUUID(), runId, project.organization_id, projectId, timestamp);
+    db.prepare(
+      `INSERT INTO backup_restore_execution_phase_events
+       (id, project_id, plan_id, backup_id, run_id, phase_code, status, error_code, created_at)
+       VALUES (?, ?, ?, ?, ?, 'capsule', 'completed', NULL, ?)`,
+    ).run(randomUUID(), projectId, run.plan_id, run.backup_id, runId, timestamp);
+  });
+  checkpointAfterWrite();
+}
+
 /** Capture the exact durable restore metadata before replacing the Ingenium DB. */
 export function captureRestoreExecutionCapsule(projectId: string, runId: string): RestoreExecutionCapsule {
   const run = getExecutionRunRecord(projectId, runId);
@@ -2457,6 +2672,8 @@ function insertBackupRecordIfMissing(record: BackupRecord): void {
 export function rehydrateRestoreExecutionCapsule(capsule: RestoreExecutionCapsule): RestoreExecutionRun {
   const result = execTransaction(() => {
     const db = getDb(backupDbPath());
+    const existing = getExecutionRunRecord(capsule.run.project_id, capsule.run.id);
+    if (existing) return existing;
     insertBackupRecordIfMissing(capsule.sourceRecord);
     if (capsule.safetyRecord) insertBackupRecordIfMissing(capsule.safetyRecord);
     db.prepare(
@@ -2520,8 +2737,6 @@ export function rehydrateRestoreExecutionCapsule(capsule: RestoreExecutionCapsul
         receipt["request_hash"], receipt["result_json"], receipt["created_at"],
       );
     }
-    const existing = getExecutionRunRecord(capsule.run.project_id, capsule.run.id);
-    if (existing) return existing;
     const authorization = capsule.executionAuthorization;
     db.prepare(
       `INSERT INTO backup_restore_execution_authorizations

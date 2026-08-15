@@ -288,6 +288,29 @@ runtime is provisioning, starting, ready, idle, or stopping. Stop all isolated
 runtimes first; runtime HOME/XDG state is ephemeral tmpfs and is not part of the
 database backup bundle.
 
+Before stopping database users or swapping files, the executor accepts only a
+complete, contiguous migration-093-through-102 security lineage. Migration 093
+is the oldest supported snapshot; its existing `users.updated_at` column is
+baseline identity schema, not evidence of a partial authentication migration.
+After the paired swap, the root maintenance process applies only the missing
+guarded 094–102 files, verifies database and foreign-key integrity, rehydrates
+the restore ledger, and atomically invalidates restored local capabilities
+before the journal may record `rehydrated`. It never invokes ordinary startup
+`runMigrations`, and no API process performs this upgrade. This revokes user and
+runtime browser sessions, scoped API/MCP/runtime credentials, runtime tickets,
+pending reset/verification/OIDC/mail/context/restore authorizations,
+invitations, task reservations, and coordination ownership. User,
+service-principal, workspace/runtime, and browser generations advance. Password
+hashes, OIDC identity links, TOTP factors, recovery codes, and resource content
+remain unchanged. A partial credential generation or failed content-free audit
+fails closed and enters signed-journal rollback/recovery; services do not restart
+first. The installation bearer file is not restored from the database bundle.
+
+Require fresh authentication after a successful restore. A database rollback
+cannot make an already observed revocation disappear from clients or external
+caches, so retained rollback evidence is authoritative and external provider
+revocation remains a separate operator action.
+
 ---
 
 ## Migration Recovery

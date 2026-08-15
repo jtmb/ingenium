@@ -40,6 +40,7 @@ import {
   authorizeRestore,
   authorizeRestoreExecution,
   captureRestoreExecutionCapsule,
+  classifyRestoredSecuritySchema,
   claimPendingRestoreExecution,
   confirmRestore,
   createSnapshot,
@@ -844,5 +845,44 @@ describe("RESTORE-100 restore plans", () => {
     expect(failRestoreExecutionSetup(globalProjectId, claimed.id, owner, fence, claimed.revision)).toMatchObject({
       state: "executor_setup_failed", errorCode: "EXECUTOR_SETUP_FAILED", completedAt: expect.any(String),
     });
+  });
+
+  it("classifies migration-093 users.updated_at as pre-auth and rejects partial credential groups", async () => {
+    const preAuth = join(tempDir, "pre-auth-security-schema.db");
+    const preAuthDatabase = new Database(preAuth);
+    preAuthDatabase.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY, updated_at TEXT NOT NULL);
+      CREATE TABLE tasks (reservation_state TEXT, reservation_owner TEXT, reservation_worktree TEXT, reservation_token_hash TEXT, revision INTEGER);
+      CREATE TABLE coordination_sessions (ownership_token_hash TEXT, revision INTEGER, fence INTEGER, state TEXT, expires_at TEXT, updated_at TEXT);
+      CREATE TABLE coordination_claims (coordination_session_id TEXT, state TEXT, updated_at TEXT, released_at TEXT);
+      CREATE TABLE context_checkpoint_maintenance_authorizations (confirmation_hash TEXT, expires_at TEXT, consumed_at TEXT);
+      CREATE TABLE backup_restore_authorizations (token_hash TEXT, expires_at TEXT, consumed_at TEXT);
+      CREATE TABLE backup_restore_execution_authorizations (token_hash TEXT, expires_at TEXT, consumed_at TEXT);
+      CREATE TABLE backup_restore_execution_runs (project_id TEXT, plan_id TEXT, backup_id TEXT, state TEXT);
+      CREATE TABLE backup_restore_execution_phase_events (project_id TEXT, plan_id TEXT, backup_id TEXT, run_id TEXT, phase_code TEXT, status TEXT);
+    `);
+    preAuthDatabase.close();
+    expect(classifyRestoredSecuritySchema(preAuth)).toBe("pre_auth");
+
+    const partialAuthentication = new Database(preAuth);
+    partialAuthentication.exec(
+      "ALTER TABLE users ADD COLUMN security_epoch INTEGER NOT NULL DEFAULT 0 CHECK(security_epoch >= 0)",
+    );
+    partialAuthentication.close();
+    expect(() => classifyRestoredSecuritySchema(preAuth)).toThrow(expect.objectContaining({ code: "BACKUP_INVALID" }));
+
+    const created = await snapshot();
+    const source = join(backupsDir, created.backupId, "ingenium.db");
+    expect(classifyRestoredSecuritySchema(source)).toBe("runtime_browser");
+
+    const partial = join(tempDir, "partial-security-schema.db");
+    copyFileSync(source, partial);
+    chmodSync(partial, 0o600);
+    const database = new Database(partial);
+    database.pragma("foreign_keys = OFF");
+    database.exec("DROP TABLE runtime_browser_sessions");
+    database.close();
+
+    expect(() => classifyRestoredSecuritySchema(partial)).toThrow(expect.objectContaining({ code: "BACKUP_INVALID" }));
   });
 });
