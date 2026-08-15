@@ -61,5 +61,22 @@ services:
     command: ["node", "-e", "setInterval(() => {}, 60000)"]
     networks: [runtime-control]
 
+  workspace-source-probe:
+    image: node:22.23.1-bookworm-slim
+    profiles: [fixture-probe]
+    command:
+      - node
+      - -e
+      - |
+        const mountInfo = require("node:fs").readFileSync("/proc/self/mountinfo", "utf8");
+        const line = mountInfo.split("\n").find((entry) => entry.split(" - ")[0].split(" ")[4] === "/mnt/runtime-workspace");
+        if (!line) process.exit(1);
+        process.stdout.write(line.split(" ")[3].replace(/\\(040|011|012|134)/g, (_match, code) => ({ "040": " ", "011": "\t", "012": "\n", "134": "\\" })[code]));
+    volumes:
+      - ${RUNTIME_WORKSPACE_HOST:?RUNTIME_WORKSPACE_HOST is required}:/mnt/runtime-workspace:rw
+    network_mode: none
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
 networks:
   runtime-control:

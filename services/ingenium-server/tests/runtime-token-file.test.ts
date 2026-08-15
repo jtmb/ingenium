@@ -44,12 +44,15 @@ vi.mock("node:fs", async (importOriginal) => {
 
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+const originalInternalService = process.env.INGENIUM_INTERNAL_SERVICE;
 
 afterEach(() => {
   if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
   else process.env.INGENIUM_API_TOKEN = originalToken;
   if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
   else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+  if (originalInternalService === undefined) delete process.env.INGENIUM_INTERNAL_SERVICE;
+  else process.env.INGENIUM_INTERNAL_SERVICE = originalInternalService;
   runtimeToken.enabled = false;
   runtimeToken.path = "";
   runtimeToken.opened = 0;
@@ -63,6 +66,7 @@ describe("runtime MCP token file", () => {
     runtimeToken.path = "/run/ingenium-secrets/api-token";
     delete process.env.INGENIUM_API_TOKEN;
     process.env.INGENIUM_API_TOKEN_FILE = runtimeToken.path;
+    process.env.INGENIUM_INTERNAL_SERVICE = "1";
 
     const { apiRequestHeaders } = await import("../config/index.js");
 
@@ -76,6 +80,7 @@ describe("runtime MCP token file", () => {
     runtimeToken.path = "/run/ingenium-secrets/other-token";
     delete process.env.INGENIUM_API_TOKEN;
     process.env.INGENIUM_API_TOKEN_FILE = runtimeToken.path;
+    process.env.INGENIUM_INTERNAL_SERVICE = "1";
 
     const { apiRequestHeaders } = await import("../config/index.js");
 

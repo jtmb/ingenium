@@ -24,11 +24,17 @@ runtime_network="${RUNTIME_NETWORK_PREFIX}${runtime_id//-/}"
 mkdir -p "$RUNTIME_WORKSPACE_HOST"
 printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' > "$MANAGER_TOKEN_FILE"
 chmod 0600 "$MANAGER_TOKEN_FILE"
+
+compose() {
+  docker compose -p "$project" -f "$repo_root/tests/runtime-manager.compose.yml" "$@"
+}
+
+export RUNTIME_WORKSPACE_SOURCE="$(compose run --rm --no-deps workspace-source-probe)"
 node -e '
   const fs = require("node:fs");
   const crypto = require("node:crypto");
   const workspaceId = "manager-fixture-workspace";
-  const storagePath = process.env.RUNTIME_WORKSPACE_HOST;
+  const storagePath = process.env.RUNTIME_WORKSPACE_SOURCE;
   fs.writeFileSync(process.env.WORKSPACE_MAP_FILE, JSON.stringify({ version: 1, workspaces: [{ id: workspaceId, hostPath: storagePath, validationPath: "/mnt/runtime-workspace" }] }));
   fs.writeFileSync(process.env.PROVISION_REQUEST_FILE, JSON.stringify({
     runtimeId: process.argv[1],
@@ -48,10 +54,6 @@ node -e '
   }));
 ' "$runtime_id"
 chmod 0600 "$WORKSPACE_MAP_FILE" "$PROVISION_REQUEST_FILE"
-
-compose() {
-  docker compose -p "$project" -f "$repo_root/tests/runtime-manager.compose.yml" "$@"
-}
 
 manager_request() {
   method="$1"

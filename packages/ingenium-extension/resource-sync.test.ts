@@ -28,6 +28,7 @@ let worktree = "";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   resetIncrementalSyncThrottle();
   resetProjectCache();
@@ -232,13 +233,16 @@ describe("agent resource sync", () => {
     expect(manifest.resources.agents["ingenium-llm-broker"]).toBeUndefined();
   });
 
-  it("adds the protected fallback bearer token to resource-sync requests", async () => {
+  it("adds the protected repository-sync credential to resource-sync requests", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
     const opencodeDir = join(worktree, ".opencode");
     mkdirSync(opencodeDir);
-    const tokenPath = join(opencodeDir, ".ingenium-api-token");
+    const tokenPath = join(opencodeDir, ".ingenium-repository-sync-credential");
     writeFileSync(tokenPath, "test_resource_sync_token_0123456789\n", { mode: 0o600 });
     chmodSync(tokenPath, 0o600);
+    vi.stubEnv("INGENIUM_MCP_AUDIENCE", "repository-sync");
+    vi.stubEnv("INGENIUM_MCP_CREDENTIAL", "{file:.opencode/.ingenium-repository-sync-credential}");
+    vi.stubEnv("INGENIUM_MCP_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 

@@ -79,6 +79,8 @@ node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[
 
 if ! OPENCODE_SERVER_PASSWORD=compose-config-validation-password \
   INGENIUM_EMAIL_ENCRYPTION_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
+  DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \
   IMAGE_REVISION="$REVISION" \
   docker compose --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config | grep -Fq "IMAGE_REVISION: $REVISION"; then
   fail "Compose config does not pass the current Git SHA as IMAGE_REVISION"

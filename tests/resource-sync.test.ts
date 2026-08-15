@@ -102,12 +102,11 @@ describe("Project Resolution", () => {
     resetProjectCache();
   });
 
-  it("falls back to worktree basename when env var is empty", async () => {
+  it("requires a credential-bound project locator when env var is empty", async () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    const result = resolveProject("/home/user/repos/gh-llm-bootstrap");
-    expect(result).toBe("gh-llm-bootstrap");
+    expect(() => resolveProject("/home/user/repos/gh-llm-bootstrap")).toThrow(/credential-bound INGENIUM_PROJECT/);
     resetProjectCache();
   });
 
@@ -134,9 +133,7 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    const result = resolveProject("/some/path/valid-worktree");
-    expect(result).toBe("valid-worktree");
-    expect(result).not.toBe("global-default");
+    expect(() => resolveProject("/some/path/valid-worktree")).toThrow(/credential-bound INGENIUM_PROJECT/);
     resetProjectCache();
   });
 
@@ -144,7 +141,7 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/")).toThrow(/safe project name/);
+    expect(() => resolveProject("/")).toThrow(/credential-bound INGENIUM_PROJECT/);
     resetProjectCache();
   });
 
@@ -152,7 +149,7 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/workspace")).toThrow(/Cannot derive a project from \/workspace/);
+    expect(() => resolveProject("/workspace")).toThrow(/credential-bound INGENIUM_PROJECT/);
   });
 
   it("allows the container workspace only with an explicit global project", async () => {
@@ -176,14 +173,32 @@ describe("Project Resolution", () => {
 
   it("deduplicates concurrent extension project provisioning and retries failures", async () => {
     process.env.INGENIUM_PROJECT = "provisioned-project";
+    process.env.INGENIUM_WORKSPACE_ID = "fixture-workspace";
     vi.resetModules();
     const { ensureExtensionProject, resetEnsuredProjects } = await import("../packages/ingenium-extension/project-resolver.js");
-    let projectAttempts = 0;
+    let detailAttempts = 0;
     const fetchMock = vi.fn(async (url: string | URL) => {
       const path = new URL(String(url)).pathname;
-      if (path.endsWith("/auth/preflight")) return { ok: true, status: 200 } as Response;
-      projectAttempts += 1;
-      return { ok: projectAttempts === 2 ? false : true, status: projectAttempts === 2 ? 500 : 201 } as Response;
+      if (path.endsWith("/auth/preflight")) return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: {
+          scopes: ["projects:read"],
+          organizationId: "fixture-organization",
+          projectId: "fixture-project-id",
+          projectIds: ["fixture-project-id"],
+          audience: "mcp",
+          workspaceId: "fixture-workspace",
+          launcherWorktree: "/worktrees/provisioned-project",
+          restartRequiredOnCredentialChange: true,
+        } }),
+      } as Response;
+      detailAttempts += 1;
+      return {
+        ok: detailAttempts !== 2,
+        status: detailAttempts === 2 ? 500 : 200,
+        json: async () => ({ data: { project: { id: "fixture-project-id" } } }),
+      } as Response;
     });
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
@@ -192,13 +207,13 @@ describe("Project Resolution", () => {
       ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1"),
     ])).resolves.toEqual(["provisioned-project", "provisioned-project"]);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects/provisioned-project/detail"))).toHaveLength(1);
 
     resetEnsuredProjects();
-    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).rejects.toMatchObject({ failure: "unavailable" });
+    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).rejects.toMatchObject({ failure: "rejected" });
     await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).resolves.toBe("provisioned-project");
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(3);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects"))).toHaveLength(3);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects/provisioned-project/detail"))).toHaveLength(3);
     resetEnsuredProjects();
   });
 

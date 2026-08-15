@@ -35,6 +35,8 @@ rendered_config="$(
   HOME="$RENDER_HOME" \
   OPENCODE_SERVER_PASSWORD=compose-config-validation-password \
   INGENIUM_EMAIL_ENCRYPTION_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
+  DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \
   IMAGE_REVISION="$REVISION" \
   docker compose --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config
 )"
@@ -46,6 +48,8 @@ expected_mount=$'        source: /tmp/ingenium-workspace-contract-home/repos\n  
 if env -u HOME \
   OPENCODE_SERVER_PASSWORD=compose-config-validation-password \
   INGENIUM_EMAIL_ENCRYPTION_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
+  DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \
   IMAGE_REVISION="$REVISION" \
   docker compose --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config; then
   fail 'Compose config succeeded without HOME'
