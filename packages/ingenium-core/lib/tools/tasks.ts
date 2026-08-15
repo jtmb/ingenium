@@ -1105,6 +1105,8 @@ export function deleteTask(
     );
     if (preflight.replay !== undefined) return { deleted: preflight.replay, written: false };
     const task = preflight.task!;
+    // Migration 099 proves receipt scope against the live task; this transaction rolls it back if deletion fails.
+    const deletionReceipt = writeReceipt(db, projectId, taskId, "delete", options.idempotencyKey, preflight.hash, true);
 
     // Threaded comment parent links do not cascade, so delete task comments explicitly.
     db.prepare("DELETE FROM task_comments WHERE task_id = ?").run(taskId);
@@ -1125,7 +1127,7 @@ export function deleteTask(
     if (!deleted) throw new TaskCoordinationError("REVISION_CONFLICT", requireScopedTask(db, projectId, taskId).revision);
 
     return {
-      deleted: writeReceipt(db, projectId, taskId, "delete", options.idempotencyKey, preflight.hash, true),
+      deleted: deletionReceipt,
       written: true,
     };
   });

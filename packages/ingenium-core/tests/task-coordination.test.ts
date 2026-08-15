@@ -215,13 +215,50 @@ describe("COORD-100 task coordination", () => {
     expect(getTask(alpha.id, task.id)).toMatchObject({ title: "defined fields", description: null });
   });
 
-  it("allows receipt cascading only through a parent project delete while retaining update immutability", () => {
+  it("retains a scoped delete receipt for replay until its parent project is deleted", () => {
     const { db, alpha } = setup();
     const task = createTask(alpha.id, "receipt", undefined, undefined, undefined, { idempotencyKey: "project-cascade-1" });
     expect(() => db.prepare("UPDATE task_mutation_receipts SET operation = 'tampered'").run()).toThrow(/immutable/);
     expect(deleteTask(alpha.id, task.id, undefined, { idempotencyKey: "project-cascade-delete-1" })).toBe(true);
+    expect(getTask(alpha.id, task.id)).toBeUndefined();
+    expect(deleteTask(alpha.id, task.id, undefined, { idempotencyKey: "project-cascade-delete-1" })).toBe(true);
+    expect(db.prepare(
+      "SELECT project_id, organization_id, task_id, operation, result_json FROM task_mutation_receipts WHERE project_id = ? AND idempotency_key = ?",
+    ).get(alpha.id, "project-cascade-delete-1")).toEqual({
+      project_id: alpha.id,
+      organization_id: alpha.organization_id,
+      task_id: task.id,
+      operation: "delete",
+      result_json: "true",
+    });
     expect(db.prepare("DELETE FROM projects WHERE id = ?").run(alpha.id).changes).toBe(1);
     expect(db.prepare("SELECT COUNT(*) AS count FROM task_mutation_receipts WHERE project_id = ?").get(alpha.id)).toEqual({ count: 0 });
+  });
+
+  it("denies foreign delete receipts and rolls an injected delete failure back atomically", () => {
+    const { db, alpha, beta } = setup();
+    const task = createTask(alpha.id, "rollback");
+    addComment(alpha.id, task.id, "actor", "retained on rollback");
+    const revisionBeforeDelete = getTask(alpha.id, task.id)!.revision;
+
+    expectCode(() => deleteTask(beta.id, task.id, undefined, { idempotencyKey: "foreign-delete-1" }), "TASK_NOT_FOUND");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM task_mutation_receipts WHERE idempotency_key = ?")
+      .get("foreign-delete-1")).toEqual({ count: 0 });
+    expect(() => db.prepare(
+      `INSERT INTO task_mutation_receipts
+       (id, project_id, organization_id, task_id, operation, idempotency_key, request_hash, result_json, created_at)
+       VALUES (?, ?, ?, ?, 'delete', 'forged-delete-1', ?, 'true', ?)`,
+    ).run("forged-delete-receipt", beta.id, beta.organization_id, task.id, "a".repeat(64), new Date().toISOString()))
+      .toThrow(/task mutation receipt scope mismatch/);
+
+    db.exec(`CREATE TRIGGER fail_task_delete BEFORE DELETE ON tasks
+      BEGIN SELECT RAISE(ABORT, 'forced task delete failure'); END`);
+    expect(() => deleteTask(alpha.id, task.id, undefined, { idempotencyKey: "rollback-delete-1" }))
+      .toThrow(/forced task delete failure/);
+    expect(getTask(alpha.id, task.id)).toMatchObject({ revision: revisionBeforeDelete });
+    expect(getComments(alpha.id, task.id)).toHaveLength(1);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM task_mutation_receipts WHERE idempotency_key = ?")
+      .get("rollback-delete-1")).toEqual({ count: 0 });
   });
 
   it("uses the exact discriminated claim grammar and segment-aware overlap matrix", () => {
