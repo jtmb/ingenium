@@ -2781,3 +2781,25 @@ overflow/CSP issues. Remaining items are non-blocking FOLLOW_UP/INFORMATIONAL:
 user-accepted preserved-auth rollback risk, unrelated dependency advisories,
 existing dashboard lint warnings, unrun mail/provider/manual/destructive suites,
 retained historical/manual evidence classes, and QA Vision tool availability.
+
+Evidence BUG-100: Follow-up project-locator closure at commit
+`0fa5eb22e28fa1dd748d8627b3248907fdfc4ec9`: the root cause was that
+`INGENIUM_PROJECT` existed only in the child MCP environment while parent
+OpenCode plugins did not inherit it. The resolver now uses a safe worktree
+basename fallback after explicit `--project`, then `INGENIUM_PROJECT`, keeps
+the credential-issued UUID authoritative, and fails closed for canonical
+`/workspace` and unsafe names. The focused Vitest files
+`project-resolver.test.ts`, `mcp-launcher.test.ts`, and
+`plugin-loader-v1-compat.test.ts` passed 24/24; the extension build,
+280-registration MCP transport parity check, and
+`npm pack --workspace=packages/ingenium-extension --dry-run` passed.
+Deployment evidence is exact: production `ingenium-control-plane` started at
+`2026-08-16T00:46:39.593169378Z` with image digest
+`sha256:b431bfd9ab569ad0dcc9889650dca15ef32642786f6bd42fcc35a0fa975211ad`,
+OCI revision `0fa5eb22e28fa1dd748d8627b3248907fdfc4ec9`, and source
+`https://github.com/jtmb/ingenium`; the provenance validator passed, the
+authenticated container healthcheck exited 0, container health was `healthy`,
+and `ingenium-api`, `ingenium-api-boundary`, `ingenium-dashboard`, and
+`ingenium-gateway` were `RUNNING`. The post-start resolver-rejection scan was
+zero. Plugin/config changes still require rebuilding the extension and
+restarting OpenCode.

@@ -27,8 +27,10 @@ ingenium-init-project --apply [--docs-only] [--project <name>]
 ```
 
 `--project` is validated and takes precedence over `INGENIUM_PROJECT`, which in
-turn takes precedence over the validated worktree basename. The CLI never
-defaults to `global-default`.
+turn takes precedence over the validated worktree basename. Unsafe explicit
+values, unsafe basenames, and the canonical `/workspace` worktree fail closed;
+the basename is only a display locator and the credential-issued project UUID
+is authoritative. The CLI never defaults to `global-default`.
 
 ### Repository scan boundaries
 

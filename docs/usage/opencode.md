@@ -61,6 +61,12 @@ explicit locators and unsafe basenames (including `/workspace`) fail closed; the
 API-authorized project UUID remains authoritative. The project must exist before
 credential issuance because its immutable UUID is part of the credential grant.
 
+OpenCode loads plugins in the parent process; the `environment` block on the
+`ingenium` MCP entry belongs only to the child MCP process and does not supply
+`INGENIUM_PROJECT` to parent plugins. Parent plugins therefore use the same
+explicit-precedence and safe-basename resolver, with the canonical `/workspace`
+worktree remaining fail-closed.
+
 The container also projects its persistent global config at startup so the
 `auto-observer`, `observer`, and `resource-sync` plugins resolve the owner-only
 `.opencode/.ingenium-repository-sync-credential`, while the MCP child resolves

@@ -76,9 +76,14 @@ toggle path in `tests/ingenium-dashboard/mcp-tool-controls.spec.ts`.
 
 The built-in Ingenium transport is the packaged
 `@ingenium/extension` launcher. Before exposing its stdio tool catalog, it
-requires a protected scoped credential and explicit project, workspace, and exact
-launcher-worktree bindings. External sessions do not inherit the installation
-bearer or derive authority from a basename. Run
+requires a protected scoped credential, workspace, and exact launcher-worktree
+bindings. Its display locator precedence is explicit `--project`, then
+`INGENIUM_PROJECT`, then the validated worktree basename. Unsafe explicit values,
+unsafe basenames, and the canonical `/workspace` worktree fail closed; a
+basename is only a locator, while the credential-issued project UUID is the
+authority. The child MCP environment does not propagate to parent OpenCode
+plugins, so plugins use this same resolver rather than relying on the child
+environment. Run
 `npm run build --workspace=packages/ingenium-extension` after changing the
 launcher or transport. A safe read smoke test is `ingenium_health_check`; it
 does not require a project argument. Authentication, unavailable transport, and
