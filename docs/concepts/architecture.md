@@ -22,18 +22,18 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 ### External Sessions
 - **Project name**: A display locator that must resolve to an immutable project UUID granted by the scoped credential
 - **Used by**: External OpenCode sessions (CLI, VS Code) that connect via the `@ingenium/extension` plugins
-- **Plugin target**: The `INGENIUM_PROJECT` environment variable in the MCP server's `opencode.json` entry controls which project extension plugins write to
+- **Plugin target**: Explicit `--project` or `INGENIUM_PROJECT` locators take precedence; otherwise extension plugins use the validated worktree basename
 - **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the observer, skill-sync, and auto-observer plugins
 
 ### External Worktree Project Initialization
 
 When an external OpenCode session (CLI, VS Code) loads the `@ingenium/extension` plugins, the extension's **resource-sync** module (`packages/ingenium-extension/resource-sync.ts`) calls `ensureExtensionProject()` which:
 
-1. Requires explicit project, workspace, and exact launcher-worktree bindings.
+1. Resolves a safe display locator from explicit `--project`, `INGENIUM_PROJECT`, or the validated worktree basename, in that order, while requiring workspace and exact launcher-worktree bindings.
 2. Authenticates the scoped credential and receives the server-derived principal, organization, immutable project grants, scopes, and audience.
 3. Resolves the display locator to the immutable UUID already granted to the credential; mismatched or missing targets remain `404`.
 
-> 🔴 **Never defaults or derives authority from a basename.** Names locate; server-issued UUID grants authorize.
+> 🔴 **A basename is only a locator, never authority.** Server-issued UUID grants authorize, and `/workspace` or any unsafe basename fails closed.
 
 ### Global-Default Semantics
 
@@ -72,7 +72,7 @@ This check is applied in the API route handler (`services/ingenium-api/lib/route
   - The **ProjectDropdown** (folder icon + chevron) in the nav bar, positioned before the settings gear — available on all pages except `/mail` and `/opencode`, where it is disabled (`opacity-50 cursor-not-allowed`)
   - The `/projects` page, which shows an ACTIVE badge on the current project and a "Set Active" button on others
   - MCP tools like `ingenium_project_init` and `ingenium_project_set_global`
-- When writing shared resources (skills, plugins, configs, settings), use `global-default`. When working from an external session, the `INGENIUM_PROJECT` env var determines the target
+- When writing shared resources (skills, plugins, configs, settings), use `global-default`. External sessions resolve explicit `--project`, then `INGENIUM_PROJECT`, then a validated worktree basename; the credential-authorized UUID remains authoritative
 
 ### Key Rule
 > **Never assume a worktree-derived project name is the shared namespace.** The `global-default` project (with `is_global=1`) is the sole server/public namespace for shared resources. External sessions (like this repo's worktree-derived project) have their own isolated workspace — shared resources (skills, plugins, configs, settings) must be written to `global-default` explicitly, never to the worktree-derived project.

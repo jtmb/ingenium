@@ -19,7 +19,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands |
-| `INGENIUM_PROJECT` | _(none; required for external MCP)_ | extension plugins | Display locator for a credential-authorized immutable project UUID. It is not authority and must match a credential project grant. |
+| `INGENIUM_PROJECT` | validated worktree basename for external sessions | extension plugins | Optional explicit display locator for a credential-authorized immutable project UUID. Explicit values take precedence and fail closed when unsafe; `/workspace` requires an explicit safe locator. It is not authority and must match a credential project grant. |
 | `INGENIUM_PROJECT_ID` | _(runtime-injected)_ | isolated runtime launchers | Immutable project UUID for the current isolated runtime. |
 | `INGENIUM_ORGANIZATION_ID` | _(runtime-injected)_ | isolated runtime launchers | Immutable organization UUID for the current isolated runtime. |
 | `INGENIUM_WORKTREE` | current working directory | extension launcher and `ingenium-init-project` | Exact launcher worktree binding checked by the API on scoped requests. |

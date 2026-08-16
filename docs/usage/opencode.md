@@ -54,9 +54,11 @@ service build path. Build it before starting a local OpenCode session:
 npm run build --workspace=packages/ingenium-extension
 ```
 
-The launcher checks the scoped credential and explicit project/workspace/worktree
-bindings before loading the transport. `INGENIUM_PROJECT` is a display locator;
-the API-authorized project UUID is authoritative. The project must exist before
+The launcher checks the scoped credential and project/workspace/worktree bindings
+before loading the transport. It resolves the display locator from explicit
+`--project`, then `INGENIUM_PROJECT`, then a validated worktree basename. Unsafe
+explicit locators and unsafe basenames (including `/workspace`) fail closed; the
+API-authorized project UUID remains authoritative. The project must exist before
 credential issuance because its immutable UUID is part of the credential grant.
 
 The container also projects its persistent global config at startup so the

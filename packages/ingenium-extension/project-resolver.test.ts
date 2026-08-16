@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   ExtensionProjectStartupError,
   ensureExtensionProject,
   resetEnsuredProjects,
+  resolveExtensionProject,
 } from "./project-resolver.js";
 
 const token = "r".repeat(32);
@@ -43,6 +44,70 @@ afterEach(() => {
 });
 
 describe("extension project startup readiness", () => {
+  it("uses the safe worktree basename as a locator and attests its credential grant", async () => {
+    delete process.env.INGENIUM_PROJECT;
+    const project = basename(worktree);
+    const request = vi.fn(async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/auth/preflight")) return Response.json({ data: {
+        scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
+        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+        restartRequiredOnCredentialChange: true,
+      } });
+      expect(path).toBe(`/api/v1/projects/${project}/detail`);
+      return Response.json({ data: { project: { id: "project-id" } } });
+    });
+
+    await expect(ensureExtensionProject(worktree, apiBase, undefined, {
+      request: request as unknown as typeof fetch,
+      readiness: { retryDelayMs: 0 },
+    })).resolves.toBe(project);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps requested-project and environment precedence over basename fallback", () => {
+    process.env.INGENIUM_PROJECT = "environment-project";
+
+    expect(resolveExtensionProject("/workspace", "requested-project")).toBe("requested-project");
+    expect(resolveExtensionProject(worktree)).toBe("environment-project");
+  });
+
+  it("allows workspace as a safe basename outside the canonical container worktree", () => {
+    delete process.env.INGENIUM_PROJECT;
+
+    expect(resolveExtensionProject("/tmp/safe/workspace")).toBe("workspace");
+  });
+
+  it("fails closed on unsafe explicit locators instead of using the basename", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    expect(() => resolveExtensionProject(worktree, "../requested-project"))
+      .toThrow("--project is not a safe project name");
+    process.env.INGENIUM_PROJECT = "../environment-project";
+    expect(() => resolveExtensionProject(worktree))
+      .toThrow("INGENIUM_PROJECT is not a safe project name");
+
+    const output = stderr.mock.calls.flat().join("");
+    expect(output).not.toContain("../requested-project");
+    expect(output).not.toContain("../environment-project");
+    expect(output).not.toContain(worktree);
+  });
+
+  it("fails closed with sanitized diagnostics for unsafe worktree basenames", () => {
+    delete process.env.INGENIUM_PROJECT;
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    for (const unsafeWorktree of ["/workspace", "/tmp/../workspace", "/", "", "/safe/..", "/safe/bad\u0000name"]) {
+      expect(() => resolveExtensionProject(unsafeWorktree))
+        .toThrow("Worktree does not resolve to a safe project name");
+    }
+
+    const output = stderr.mock.calls.flat().join("");
+    expect(output).not.toContain("/workspace");
+    expect(output).not.toContain("/safe/");
+    expect(output).not.toContain("\u0000");
+  });
+
   it("performs a finite authenticated readiness retry before project attestation", async () => {
     let preflightAttempts = 0;
     const sleep = vi.fn(async () => undefined);

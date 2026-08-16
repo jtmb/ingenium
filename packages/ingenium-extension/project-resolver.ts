@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import {
   apiRequestHeaders,
   waitForAuthenticatedApiReadiness,
@@ -62,7 +62,11 @@ export function resolveExtensionProject(worktree: string, requestedProject?: str
     if (!isValidProjectName(explicit)) return rejectProjectResolution("INGENIUM_PROJECT is not a safe project name");
     return explicit;
   }
-  return rejectProjectResolution("A credential-bound INGENIUM_PROJECT locator is required");
+  const derived = basename(worktree);
+  if (resolve(worktree) === "/workspace" || !isValidProjectName(derived)) {
+    return rejectProjectResolution("Worktree does not resolve to a safe project name");
+  }
+  return derived;
 }
 
 /** Idempotently provision the resolved project before an extension writes resources. */

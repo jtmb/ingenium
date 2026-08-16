@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { getMcpTransportUrl, preflightMcpLauncher, runMcpLauncher } from "./scripts/mcp-server.js";
@@ -59,16 +59,23 @@ describe("packaged Ingenium MCP launcher", () => {
     });
   });
 
-  it("requires an explicit credential-bound project locator", () => {
+  it("uses the validated worktree basename when no explicit project locator is set", () => {
     writeProtectedToken();
 
     expect(preflightMcpLauncher(worktree)).toEqual({
+      ok: true,
+      project: basename(worktree),
+    });
+  });
+
+  it("rejects the canonical container workspace without exposing an unsafe identity", () => {
+    expect(preflightMcpLauncher("/workspace")).toEqual({
       ok: false,
       message: "Ingenium MCP could not resolve a safe project identity. Set INGENIUM_PROJECT to a valid project name.",
     });
   });
 
-  it("rejects the container workspace without exposing an unsafe identity", () => {
+  it("allows workspace as a safe basename outside the canonical container worktree", () => {
     const parent = mkdtempSync(join(tmpdir(), "ingenium-mcp-workspace-parent-"));
     temporaryDirectories.push(parent);
     const containerWorktree = join(parent, "workspace");
@@ -77,10 +84,9 @@ describe("packaged Ingenium MCP launcher", () => {
     chmodSync(join(containerWorktree, ".opencode", ".ingenium-mcp-credential"), 0o600);
 
     expect(preflightMcpLauncher(containerWorktree)).toEqual({
-      ok: false,
-      message: "Ingenium MCP could not resolve a safe project identity. Set INGENIUM_PROJECT to a valid project name.",
+      ok: true,
+      project: "workspace",
     });
-
   });
 
   it("projects local and Docker configs onto the same packaged launcher without tracking a token", () => {

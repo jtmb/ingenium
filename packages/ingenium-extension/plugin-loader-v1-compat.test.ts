@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resetEnsuredProjects } from "./project-resolver.js";
 import { resetProjectCache } from "./resource-sync.js";
@@ -249,6 +250,32 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(Object.keys(autoHooks.tool)).toEqual(["auto_observe_now"]);
     expect(Object.keys(observerHooks.tool)).toEqual(["synthesize_observations"]);
     expect(resourceSyncHooks.tool).toBeUndefined();
+  });
+
+  it("starts resource sync without resolver stderr when the parent plugin environment has no project", async () => {
+    delete process.env.INGENIUM_PROJECT;
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-fallback-"));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({
+      docs: { summary: {} },
+      resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+    }) }] });
+
+    try {
+      const resourceWrapper = await import("./plugins/resource-sync.js");
+      const hooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], {
+        worktree,
+        client: { app: { log: vi.fn() } },
+      }) as { event: (input: unknown) => Promise<void> };
+
+      await expect(hooks.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
+      expect(mockCallMcpTool).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({
+        project: basename(worktree),
+      }));
+      expect(stderr).not.toHaveBeenCalled();
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it("keeps API authentication failures from every V1 lifecycle wrapper off stdio", async () => {
