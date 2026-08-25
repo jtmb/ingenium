@@ -5,25 +5,26 @@
  */
 import { api } from "../client.js";
 import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
+import { textResult } from "./result.js";
 
 /** Create a new backup with an optional type (e.g. "full", "skills", "config"). */
 export async function backupCreate(project: string, type?: string) {
   const body: Record<string, unknown> = {};
   if (type) body.type = type;
   const res = await api.post("/backups", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List all backups for a project. */
 export async function backupList(project: string) {
   const res = await api.get("/backups", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get a single backup by ID. */
 export async function backupGet(project: string, backupId: string) {
   const res = await api.get(`/backups/${backupId}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /**
@@ -66,13 +67,13 @@ export async function backupDelete(project: string, backupId: string) {
 /** Create or replay a durable dry-run restore plan. */
 export async function backupRestorePreview(project: string, backupId: string, dryRun: true, idempotencyKey: string) {
   const res = await api.post("/backups/restore/preview", { backupId, dryRun, idempotencyKey }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Issue one opaque confirmation token. This wrapper neither logs nor persists it. */
 export async function backupRestoreAuthorize(project: string, planId: string, expectedRevision: number) {
   const res = await api.post(`/backups/restore/${encodeURIComponent(planId)}/authorize`, { expectedRevision }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Confirm a plan; this advances only to ready_for_executor and never applies a backup. */
@@ -88,7 +89,7 @@ export async function backupRestoreStart(
     { expectedRevision, confirmationToken, idempotencyKey },
     { project },
   );
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Issue the distinct one-time maintenance execution token for a ready plan. */
@@ -98,7 +99,7 @@ export async function backupRestoreExecutionAuthorize(project: string, planId: s
     { expectedRevision },
     { project },
   );
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Queue a fixed maintenance executor. No process or path arguments are accepted. */
@@ -114,13 +115,13 @@ export async function backupRestoreExecute(
     { expectedRevision, executionToken, idempotencyKey },
     { project },
   );
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get a restore plan's content-free current state. */
 export async function backupRestoreStatus(project: string, planId: string) {
   const res = await api.get(`/backups/restore/${encodeURIComponent(planId)}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List bounded immutable restore-plan audit evidence. */
@@ -129,17 +130,17 @@ export async function backupRestoreAuditList(project: string, planId: string, li
     project,
     ...(limit === undefined ? {} : { limit: String(limit) }),
   });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get the current backup schedule configuration. */
 export async function backupScheduleGet(project: string) {
   const res = await api.get("/backups/schedule", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Set/update the backup schedule configuration. */
 export async function backupScheduleSet(project: string, configData: Record<string, unknown>) {
   const res = await api.put("/backups/schedule", configData, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }

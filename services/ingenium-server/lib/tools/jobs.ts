@@ -4,11 +4,12 @@
  * Supports job CRUD, manual triggering, run history, log streaming, and run cancellation.
  */
 import { api } from "../client.js";
+import { textResult } from "./result.js";
 
 /** List all jobs for a project. */
 export async function jobList(project: string) {
   const res = await api.get("/jobs", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Create a new job with optional schedule cron, trigger event, and timeout. */
@@ -30,7 +31,7 @@ export async function jobCreate(
   if (timeout_minutes !== undefined) body.timeout_minutes = timeout_minutes;
   if (vault_item_ids !== undefined) body.vault_item_ids = vault_item_ids;
   const res = await api.post("/jobs", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Update an existing job's fields with an explicit revision CAS. */
@@ -41,7 +42,7 @@ export async function jobUpdate(
   expectedRevision: number,
 ) {
   const res = await api.patch(`/jobs/${jobId}`, { ...fields, expected_revision: expectedRevision }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Delete a job by ID. */
@@ -53,13 +54,13 @@ export async function jobDelete(project: string, jobId: string, expectedRevision
 /** Manually trigger a job run. */
 export async function jobRun(project: string, jobId: string) {
   const res = await api.post(`/jobs/${jobId}/run`, {}, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List all runs for a job. */
 export async function jobRuns(project: string, jobId: string) {
   const res = await api.get(`/jobs/${jobId}/runs`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get log entries for a specific run, optionally after a sequence number for tail polling. */
@@ -67,23 +68,23 @@ export async function jobRunLogs(project: string, runId: string, after?: number)
   const params: Record<string, string> = { project };
   if (after !== undefined) params.after = String(after);
   const res = await api.get(`/jobs/runs/${runId}/logs`, params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Cancel a running job. */
 export async function jobRunCancel(project: string, runId: string) {
   const res = await api.post(`/jobs/runs/${runId}/cancel`, {}, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get a single job by ID. */
 export async function jobGet(project: string, jobId: string) {
   const res = await api.get(`/jobs/${jobId}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get LLM-generated job suggestions based on a natural-language description. */
 export async function jobSuggest(project: string, description: string) {
   const res = await api.post("/jobs/suggest", { description }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }

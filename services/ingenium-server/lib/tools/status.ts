@@ -4,6 +4,7 @@
  * Supports fetching overall health, application detail, process detail, and process logs.
  */
 import { api } from "../client.js";
+import { textResult } from "./result.js";
 
 /** Hard cap on log chunk size (10KB) to prevent oversized MCP responses and memory pressure. */
 const MAX_LOG_BYTES = 10000;
@@ -11,19 +12,19 @@ const MAX_LOG_BYTES = 10000;
 /** Get overall service health — supervisord process states + application health */
 export async function serviceStatus(project: string) {
   const res = await api.get("/services/status", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get detailed status for a specific application (email-client or synthesis-engine) */
 export async function serviceApplicationDetail(project: string, name: string) {
   const res = await api.get(`/services/applications/${encodeURIComponent(name)}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get single process detail via supervisor.getProcessInfo */
 export async function serviceProcessDetail(project: string, name: string) {
   const res = await api.get(`/services/${encodeURIComponent(name)}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Read process logs with byte-size cap — 🔴 enforce limit (max 10000 bytes) */

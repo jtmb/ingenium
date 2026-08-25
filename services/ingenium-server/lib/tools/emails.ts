@@ -5,6 +5,7 @@
  */
 import { api } from "../client.js";
 import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
+import { textResult } from "./result.js";
 
 // ── Basic Email Tools ──────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ export async function emailList(project: string, account: string, folder?: strin
     page: String(page ?? 1),
     limit: "20",
   });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Search emails by keyword, sender, subject, or date range */
@@ -26,7 +27,7 @@ export async function emailSearch(project: string, account: string, query: strin
     q: query,
     folder: folder ?? "INBOX",
   });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Read a full email by its UID */
@@ -34,7 +35,7 @@ export async function emailRead(project: string, account: string, uid: number, f
   const params: Record<string, string> = { project, account };
   if (folder) params.folder = folder;
   const res = await api.get(`/emails/${uid}`, params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Compose and send an email */
@@ -48,7 +49,7 @@ export async function emailSend(
   if (cc) body.cc = cc.split(",").map((s: string) => ({ address: s.trim() }));
   if (bcc) body.bcc = bcc.split(",").map((s: string) => ({ address: s.trim() }));
   const res = await api.post("/emails", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Save a draft email without sending */
@@ -58,19 +59,19 @@ export async function emailDraft(
   const body: any = { account, to: to.split(",").map((s: string) => ({ address: s.trim() })), subject };
   if (html) body.html = html;
   const res = await api.post("/emails/draft", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List all email folders for an account */
 export async function emailFolders(project: string, account: string) {
   const res = await api.get("/emails/folders", { project, account });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List connected email accounts */
 export async function emailAccounts(project: string) {
   const res = await api.get("/emails/accounts", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 // ── Email Assistance Tools ─────────────────────────────────────────────────
@@ -81,7 +82,7 @@ export async function emailTriage(project: string, account: string, limit?: numb
     project, account,
     limit: String(limit ?? 20),
   });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Suggest an email response based on learned user patterns */
@@ -89,7 +90,7 @@ export async function emailSuggestResponse(project: string, account: string, uid
   const params: Record<string, string> = { project, account };
   if (folder) params.folder = folder;
   const res = await api.get(`/emails/suggest/${uid}`, params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Auto-draft a response to an email based on learned patterns or LLM smart-replies */
@@ -126,13 +127,13 @@ export async function emailPatterns(project: string) {
 /** Start IMAP IDLE watcher for real-time email monitoring */
 export async function emailWatchStart(project: string, account: string) {
   const res = await api.post("/emails/watch/start", { account }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Check if the IMAP IDLE watcher is running for an account */
 export async function emailWatchStatus(project: string, account: string) {
   const res = await api.get("/emails/watch/status", { project, account });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 // ── Admin / Operations Email Tools ──────────────────────────────────────────
@@ -151,7 +152,7 @@ export async function emailAccountCreate(
   if (imapPort) body.imapPort = imapPort;
   if (smtpPort) body.smtpPort = smtpPort;
   const res = await api.post("/emails/accounts", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Delete an email account and clear its cached data */
@@ -163,7 +164,7 @@ export async function emailAccountDelete(project: string, account: string) {
 /** Test IMAP connection for an account */
 export async function emailAccountTest(project: string, account: string) {
   const res = await api.post(`/emails/accounts/${account}/test`, {}, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get OAuth authorization URL — 🔴 NEVER returns tokens, only the URL */
@@ -195,7 +196,7 @@ export async function emailSummarize(project: string, account: string, uid: numb
   const params: Record<string, string> = { project, account };
   if (folder) params.folder = folder;
   const res = await api.get(`/emails/summarize/${uid}`, params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** LLM-powered draft review and improvement */
@@ -203,19 +204,19 @@ export async function emailReviewDraft(project: string, text: string, subject?: 
   const body: any = { text };
   if (subject) body.subject = subject;
   const res = await api.post("/emails/review-draft", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Move an email to another folder */
 export async function emailMove(project: string, account: string, uid: number, fromFolder: string, toFolder: string) {
   const res = await api.patch(`/emails/${uid}/move`, { account, fromFolder, toFolder }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Set flags on an email */
 export async function emailSetFlags(project: string, account: string, uid: number, folder: string, flags: string[]) {
   const res = await api.patch(`/emails/${uid}/flags`, { account, folder, flags }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Delete an email (moves to Trash via IMAP) */
@@ -231,19 +232,19 @@ export async function emailSync(project: string, account: string, folder?: strin
   const body: any = { account };
   if (folder) body.folder = folder;
   const res = await api.post("/emails/sync", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get per-folder sync status from the engine */
 export async function emailSyncStatus(project: string, account: string) {
   const res = await api.get("/emails/sync-status", { project, account });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Stop IMAP IDLE watcher */
 export async function emailWatchStop(project: string, account: string) {
   const res = await api.post("/emails/watch/stop", { account }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /**
