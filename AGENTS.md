@@ -249,6 +249,8 @@ The orchestrator follows a **behavioral** concurrency policy for parallel subage
 
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates.
 
+Use configured protected credentials and already-authorized supported grant paths continuously. Never persist plaintext credentials or ask again for a credential already available in the active orchestration context. Credential/access escalation is valid only after the configured path has actually failed and the failure evidence is retained.
+
 OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. Return `ESCALATE_USER` in the normal response only when a required external credential or access remains unavailable after the attempted configured path; a destructive or irreversible operation lacks authorization; a mutually exclusive product decision is required; the user requirement is genuinely ambiguous; or bounded diagnosis cannot establish a reproducible root cause.
 
 QA and security each report scope-classified findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a writer fixes an in-scope reviewer blocker, run only the minimum targeted regression for that root cause. Do not rerun QA or security unless the source change in that review boundary requires the reviewer’s originally declared check; never create a recursive reviewer handoff.
@@ -262,6 +264,11 @@ paths. Use ordinary non-interactive Git for local commits and `gh` for GitHub
 pushes, pull requests, and checks. Never commit unrelated changes, rewrite
 published history, or force-push without explicit authorization.
 
+For the coordination rollout, the user has explicitly authorized scoped Git
+commits. At each evidence-backed boundary, perform the inspection above, stage
+the exact intended paths, and commit without waiting for another request. Never
+commit an incomplete or unverified coordination rollout as complete.
+
 ### Concurrency Limits
 
 | Limit | Value | Scope |
@@ -270,6 +277,10 @@ published history, or force-push without explicit authorization.
 | **Concurrent writers per wave** | 3 | Subagents with `edit: allow` or `write: allow` permissions |
 | **Remaining capacity** | 3 | Available to non-writer agents (explore, scout, QA, vision, security) |
 | **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
+
+Default to the maximum safe parallelism available within these limits for
+independent, non-overlapping work. Any serialization must name the concrete
+dependency or writer-territory conflict that requires it.
 
 ### Writer Tiers and Routing
 
@@ -324,6 +335,24 @@ Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. A f
 ### 🔴 Autonomous Roadmap Completion Contract
 
 Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. QA/security run once per declared boundary; writer fixes trigger only targeted rechecks and never recursive reviewer loops. Before the final response, reconcile roadmap markers and `TodoWrite` with evidence-backed state.
+
+Maintain `TodoWrite` and [`docs/reference/ROADMAP.md`](docs/reference/ROADMAP.md)
+markers/checklists continuously as evidence changes, not only at task close.
+Reconcile both before every terminal response; an open roadmap gate cannot be
+ignored or summarized as complete.
+
+### Coordination Shared-Memory Acceptance and Evidence
+
+For the coordination rollout, shared-memory acceptance requires simultaneous
+external A, external B, and internal C OpenCode processes using one canonical
+workspace identity. They must demonstrate persistent typed operational memory
+for actions, changed paths, checks and results, task/todo/status/next-work, and
+restart replay. File visibility or native OpenCode forks alone are not shared
+memory, and no `PASS` is valid without retained real three-window evidence.
+
+Keep evidence classes explicit: source tests prove source behavior, deployed
+canaries prove the deployed runtime path, and actual model/session artifacts
+prove model/session behavior. A missing artifact is never summarized as proof.
 
 ### Bounded QA, Documentation, and Visual Gates
 

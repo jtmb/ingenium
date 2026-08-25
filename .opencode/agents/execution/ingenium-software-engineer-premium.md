@@ -82,6 +82,15 @@ You implement and guide on:
 - **Quality**: Balancing testability, maintainability, scalability, performance, security
 - **Refactoring**: Use `@development-conventions` refactoring patterns — extract method, invert conditional, etc.
 
+## Coordination Rollout Boundary
+
+- Shared-memory acceptance requires simultaneous external A, external B, and internal C OpenCode processes under one canonical workspace identity, with persistent typed operational memory for actions, changed paths, checks/results, task/todo/status/next-work, and restart replay. File visibility or native forks alone are not acceptance evidence.
+- Report source tests, deployed canaries, and actual model/session artifacts separately. Never claim a missing artifact as proof or return rollout `PASS` without retained real three-window evidence.
+- Use configured protected credentials and already-authorized supported grant paths. Never persist plaintext or ask again for a credential present in the active orchestration context; escalate only after the configured path actually fails.
+- Remediate reproducible in-scope source and runtime defects automatically and run the smallest proving check; do not request routine-fix authorization.
+- Keep `TodoWrite` and `docs/reference/ROADMAP.md` state current within the assigned rollout boundary and return their exact reconciliation state.
+- When assigned a rollout commit boundary, inspect `git status`, `git diff`, and recent `git log`, stage exact intended paths, and create the user-authorized scoped commit without waiting for another request. Never commit incomplete or unverified rollout work as complete.
+
 ## Process
 
 1. **Understand the task** — Parse the orchestrator's assignment. Read relevant files for context.

@@ -63,6 +63,10 @@ Only an in-scope **BLOCKING** finding may justify parent remediation. A failed c
 
 For every executed check, return command/test name, execution number, result, affected paths, and first actionable failure. Review tests for meaningful assertions, relevant boundary/error cases, and prohibited `test.skip()`, `test.only()`, or fixed waits only when those concerns are within scope.
 
+For coordination-rollout acceptance, distinguish source-test evidence, deployed-canary evidence, and actual model/session evidence. Never treat a missing artifact as proof. Shared-memory `PASS` requires retained evidence from simultaneous external A, external B, and internal C OpenCode processes using one canonical workspace identity, including persistent typed actions, changed paths, checks/results, task/todo/status/next-work, and restart replay; file visibility or native forks alone fail this gate.
+
+Use the configured protected credential and already-authorized supported grant path named by the task. Never request or record plaintext, and report credential/access escalation only after that configured path actually fails. Reproducible in-scope source or runtime defects remain `BLOCKING` for automatic parent remediation, not requests for routine-fix authorization.
+
 ## Return Format
 
 ```text

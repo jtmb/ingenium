@@ -2803,3 +2803,117 @@ and `ingenium-api`, `ingenium-api-boundary`, `ingenium-dashboard`, and
 `ingenium-gateway` were `RUNNING`. The post-start resolver-rejection scan was
 zero. Plugin/config changes still require rebuilding the extension and
 restarting OpenCode.
+
+## Shared-memory rollout in progress (2026-08-25)
+
+This status is evidence-backed but not a completion claim. It preserves all
+historical markers and counts; no `work-complete` marker is valid for
+`COORD-103`–`COORD-106` until the remaining internal/external shared-memory
+acceptance gates pass.
+
+### Current task state
+
+- **COORD-103 — IN PROGRESS; source substantially complete:** The current source
+  has canonical worktree identity derived from workspace and storage-mapping
+  identity, runtime `coordination:read`/`coordination:write` scopes, typed
+  Context-backed operational memory, restart replay, public redaction, and
+  migrations 107–108. The external A/B changed-path proof is retained at
+  `tests/artifacts/test-runs/run-20260825T034332Z-external-coordination-proof-final/`.
+  Final internal/external shared-memory acceptance remains pending, so this task
+  is not complete.
+- **COORD-104 — PARTIAL:** Exact `write` and `edit` hooks perform bounded
+  preclaims and release their caller-held claim keys. This does not establish
+  general managed mutation coverage and does not claim mutating Bash or broader
+  write-tool enforcement complete.
+- **COORD-105 — PARTIAL:** Resource sync can hold one `@repository` claim around
+  its session-triggered operation. General repository/git/build mutation
+  serialization, stale-fence recovery, and complete coarse-claim enforcement are
+  not complete.
+- **COORD-106 — PENDING:** Acceptance requires external A, external B, and
+  internal C running simultaneously; A/B/C cross-awareness; restart replay;
+  independent and conflicting write cases; owned cleanup; and final QA,
+  security, and deployment evidence. The two-process A/B proof is necessary
+  evidence, not three-window completion.
+
+### Evidence boundary
+
+- Focused source fixtures cover typed operational-memory append/replay,
+  same-storage-mapping identity, public projection redaction, exact `write`/`edit`
+  preclaims, and the bounded repository claim. Migration guards for 107 and 108
+  are present in the current source.
+- The cited external proof records `PASS` for two isolated host OpenCode
+  processes, one sanitized changed-path handoff, exact peer read, duplicate/self
+  exclusion, credential replay denial, and owned cleanup. It also records loaded
+  coordinator build/source hashes at repository HEAD `713c914`; this is the
+  current external A/B deployment foundation, not final internal/external rollout
+  acceptance.
+- Security foundations evidenced by source and the artifact include typed-only
+  operational payloads, encoded relative paths, fixed untrusted-metadata framing,
+  omitted ownership/session identifiers in public projections, hash-only claim
+  keys, and post-revocation `401`. Final bounded security acceptance remains open.
+
+### Current execution checklist
+
+- [x] Source foundation: canonical identity, runtime scopes, typed Context-backed
+  memory, restart replay, redaction, and migrations 107–108.
+- [x] Security foundation: typed/redacted public projection, untrusted-metadata
+  framing, hash-only claim keys, and credential replay denial.
+- [x] Deployment foundation: external A/B loaded the coordinator in isolated host
+  OpenCode processes and completed the sanitized changed-path proof with owned
+  cleanup.
+- [ ] Runtime recovery: prove the final internal and external restart/recovery
+  paths against the rollout build.
+- [ ] Three-window proof: run external A, external B, and internal C
+  simultaneously and prove A/B/C cross-awareness, restart replay, independent
+  progress, conflict blocking, and cleanup.
+- [ ] Final acceptance: retain targeted QA, security, deployment/health, and
+  cleanup evidence without broadening the V1 guarantee.
+- [ ] Final docs: update only directly affected canonical documentation after the
+  runtime gates pass and reconcile Todo/markers without inventing completion.
+- [ ] Scoped commits: create only the authorized coordination/source,
+  verification, and final-doc commits after acceptance; no commit is recorded by
+  this status update.
+
+### Work marker log (continued)
+<!-- (work-started) COORD-103 2026-08-25T19:45:03Z ingenium-docs -->
+Evidence COORD-103: Current source and focused fixtures establish canonical storage-mapping identity, runtime coordination scopes, typed Context-backed operational memory, restart replay, public redaction, migrations 107–108, and the external A/B changed-path proof at `tests/artifacts/test-runs/run-20260825T034332Z-external-coordination-proof-final/`; final internal/external shared-memory acceptance remains pending and no completion is claimed.
+<!-- (work-started) COORD-104 2026-08-25T19:45:04Z ingenium-docs -->
+Evidence COORD-104: Exact `write`/`edit` preclaim and keyed release paths are present and fixture-covered; general managed mutation and mutating Bash enforcement remain open, so no completion is claimed.
+<!-- (work-started) COORD-105 2026-08-25T19:45:05Z ingenium-docs -->
+Evidence COORD-105: The session-triggered resource-sync path is fixture-covered under one `@repository` claim; general repository/git/build serialization and stale-fence recovery remain open, so no completion is claimed.
+<!-- (work-started) COORD-106 2026-08-25T19:45:06Z ingenium-docs -->
+Evidence COORD-106: The external A/B artifact proves a sanitized two-process changed-path handoff and owned cleanup only; simultaneous external A, external B, internal C cross-awareness, restart replay, conflict, cleanup, QA, security, and deployment gates remain pending and no completion is claimed.
+
+### Coordination execution checklist update (2026-08-25)
+
+`COORD-103` remains in progress, and `COORD-104`–`COORD-106` remain incomplete.
+The existing start markers and evidence above are authoritative; no duplicate
+start or completion marker is added by this update. The checklist below
+supersedes the earlier execution checklist's commit timing while preserving its
+historical text and evidence.
+
+- [ ] External MCP connection blocker: exercise the configured protected-
+  credential and already-authorized supported grant path, retain the first
+  actionable connection failure and causal remediation, and do not infer a
+  credential cause or successful connection without its artifact.
+- [ ] Internal runtime recovery and deployment: rebuild/restart the rollout
+  source, recover internal C through the supported runtime path, and retain
+  health plus restart evidence tied to the deployed build.
+- [ ] Three-window shared-memory proof: run external A, external B, and internal
+  C OpenCode processes simultaneously under one canonical workspace identity;
+  prove cross-awareness and persistent typed actions, changed paths,
+  checks/results, task/todo/status/next-work, conflict behavior, and restart
+  replay. File visibility or native forks alone do not pass.
+- [ ] Evidence reconciliation: label source tests, deployed canaries, and actual
+  model/session artifacts separately; never summarize a missing artifact as
+  proof.
+- [ ] Final bounded review and docs: after runtime acceptance, retain the
+  declared QA and security results, update only directly affected canonical
+  docs, and do not trigger recursive QA/Docs work.
+- [ ] Scoped commits: at each evidence-backed rollout boundary, inspect status,
+  diff, and recent log; stage exact intended paths and create the user-authorized
+  scoped commit without unrelated changes. Never commit incomplete or unverified
+  coordination rollout work as complete.
+- [ ] Terminal reconciliation: continuously maintain TodoWrite and this roadmap
+  checklist/marker state, then reconcile both before any terminal response; no
+  open gate may be ignored.

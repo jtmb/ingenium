@@ -87,6 +87,8 @@ A compile, test, package, scanner, configuration, or runtime defect with a concr
 
 Only Plan mode may use interactive decision questions. Orchestration never invokes the `question` tool. Return `ESCALATE_USER` in the normal response only when: (1) a required external credential or access remains unavailable after the attempted configured path; (2) a destructive or irreversible operation lacks authorization; (3) a mutually exclusive product decision is required; (4) the user requirement is genuinely ambiguous; or (5) bounded diagnosis cannot establish a reproducible root cause.
 
+Use configured protected credentials and already-authorized supported grant paths continuously. Never persist plaintext credentials or ask again for a credential already available in the active orchestration context. Credential/access escalation is permitted only after the configured path actually fails and its evidence is retained.
+
 ## 🔴 Autonomous-Completion State Machine
 
 **🔴 Open-roadmap turn rule:** While any roadmap task or `TodoWrite` item remains open, the orchestrator must not emit a normal final/progress response, end a turn as a status update, or require a user reprompt. It must immediately dispatch the next declared phase. Token/turn pressure, partial agent completion, and unverified source changes are never terminal reasons. Only `PASS`, `ESCALATE_USER`, an explicit user-requested `STOP`, or an explicit user-requested `CANCELLED` may end a turn.
@@ -96,6 +98,12 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 Runtime-impacting changes require a named, authorized deployment owner and deployment wave before implementation. The owner must be a writer agent whose permissions authorize Docker/Compose execution (for example, `@ingenium-software-engineer-premium`), and must rebuild and restart the current merged source, then health-check actual routes and record the evidence; testing an old process or image is not deployment verification. Visual/UI gates and full acceptance are mandatory before terminal `PASS`.
 
 The state machine is: `ROADMAP_OPEN → IMPLEMENT → SOURCE_VERIFY → DEPLOY_OWNER_WAVE → RUNTIME_HEALTH → VISUAL_UI_GATE (when applicable) → FULL_ACCEPTANCE → RECONCILE_MARKERS_TODOWRITE → PASS`. Any failed gate returns to the current reproducible root-cause remediation state, not completion. QA and security each run once per declared review boundary; a writer fix triggers only its targeted proving recheck and never a recursive reviewer loop. `STOP` or `CANCELLED` is valid only when explicitly requested, and must preserve resumable state and evidence rather than reinterpret a remediation request as terminal. Before the final response, reconcile roadmap markers and `TodoWrite` state with the evidence-backed task state.
+
+Maintain `TodoWrite` and `docs/reference/ROADMAP.md` markers/checklists continuously as evidence changes. Reconcile both before every terminal response; never ignore an open roadmap gate.
+
+For the coordination rollout, shared-memory acceptance requires simultaneous external A, external B, and internal C OpenCode processes under one canonical workspace identity. Retained evidence must prove persistent typed operational memory for actions, changed paths, checks/results, task/todo/status/next-work, and restart replay. File visibility or native OpenCode forks alone do not satisfy this gate, and no `PASS` is valid without real three-window evidence.
+
+Label evidence honestly: source tests, deployed canaries, and actual model/session artifacts prove different boundaries. Never present a missing artifact as proof.
 
 `FULL_ACCEPTANCE` means the declared acceptance checks for that task, not automatically all repository tests. Ordinary feature work must not expand into broad suites: use affected workspace typecheck/lint when relevant and directly affected test file(s), optionally narrowed by test name. Root `npm test`, entire Playwright configs, and Docker/provider/mail/route-parity/manual suites run only when the task explicitly declares a full, release, or cross-cutting acceptance gate. A focused Playwright run that uses the fixture also includes `npx tsx tests/suite-containment-audit.ts --strict`.
 
@@ -135,6 +143,11 @@ intended paths. Use ordinary non-interactive Git for local commits and `gh` for
 GitHub operations such as pushes, pull requests, and checks. Never commit unrelated
 changes, rewrite published history, amend, or force-push without explicit user
 authorization.
+
+The user has explicitly authorized scoped commits for the coordination rollout.
+At every evidence-backed boundary, perform the inspection above, stage only the
+intended rollout paths, and commit without waiting for another request. Never
+commit an incomplete or unverified coordination rollout as complete.
 
 ## Terminal States
 
@@ -203,7 +216,7 @@ Before a phase, declare the task contract and:
 4. **Dependencies** — serialization order for writers sharing territories across waves
 5. **Verification owners** — owner and targeted checks in the verification plan
 
-Independent, non-overlapping work may run in parallel. Serialize overlapping writer territories. A new phase never resets the task verification or remediation budget.
+Default to maximum safe parallelism for independent, non-overlapping work within the 6-active/3-writer limits. Serialization requires a declared dependency or writer-territory reason. A new phase never resets the task verification or remediation budget.
 
 ## Bounded Execution Flow
 
