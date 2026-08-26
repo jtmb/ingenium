@@ -69,3 +69,16 @@
 - **Consolidation map**: `.opencode/skills/consolidation-map.json`
 - **Pre-migration snapshot**: commit `4639e38`
 - **Rollback evidence**: `/tmp/opencode/gh-llm-bootstrap-phase0-20260716/`
+
+## Tombstone Cleanup Contract
+
+- Full repository sync runs lineage-proven cleanup before the skill scan and MCP
+  projection; docs-only sync does not.
+- A removable legacy directory must be a contained, non-symlink, marker-only
+  directory whose exact marker, canonical target, and source-index path agree
+  with the valid consolidation map. Apply revalidates before unlinking the marker
+  and removing the empty directory; every unproven candidate fails closed.
+- The worktree currently has zero `MIGRATED-TO.md` markers and zero root-level
+  legacy skill directories named by the mappings. The consolidation map and all 28 canonical
+  `references/sources/*/source-index.md` files remain authoritative lineage
+  artifacts and are not cleanup targets.

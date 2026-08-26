@@ -51,3 +51,17 @@ projection. In the production image, configured plugin sources are copied next
 to the extension distribution at their repository paths, while
 `ingenium-init-project` is exposed through the stable
 `/usr/local/bin/ingenium-init-project` path.
+
+### Legacy tombstone cleanup
+
+An `all`-scope repository sync runs `cleanupLegacySkillTombstones()` before the
+full skill scan and MCP call. Docs-only sync skips cleanup. Dry-run reports
+removable/rejected paths without mutation; apply mode revalidates each candidate,
+unlinks only its exact `MIGRATED-TO.md`, and removes the now-empty directory.
+
+Candidates must be contained, non-symlink, marker-only directories with a unique
+safe entry in the valid canonical consolidation map, exact marker target/link,
+an existing canonical target skill, and the exact regular canonical source-index
+path. Malformed, unmapped, nonempty, symlinked, traversal-mapped, or otherwise
+unproven candidates fail closed and remain untouched. The consolidation map and
+canonical source indexes are preserved.

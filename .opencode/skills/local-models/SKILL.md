@@ -128,15 +128,15 @@ agent in the current root configuration.
 
 | Agent | Model | Variant |
 |---|---|---|
-| `ingenium-orchestrator` | OpenAI GPT-5.6 Terra | `high` |
-| `ingenium-software-engineer-premium` | OpenAI GPT-5.6 Terra | `xhigh` |
-| `ingenium-docs` | OpenAI GPT-5.6 Luna | `medium` |
-| `ingenium-qa` | OpenAI GPT-5.6 Terra | `xhigh` |
-| `ingenium-qa-vision` | OpenAI GPT-5.6 Luna | `high` |
-| `ingenium-software-engineer-fast` | OpenAI GPT-5.6 Luna | `xhigh` |
+| `ingenium-orchestrator` | OpenAI GPT-5.6 Sol | `high` |
+| `ingenium-software-engineer-premium` | OpenAI GPT-5.6 Sol | `high` |
+| `ingenium-docs` | OpenAI GPT-5.6 Luna | `max` |
+| `ingenium-qa` | OpenAI GPT-5.6 Terra | `high` |
+| `ingenium-qa-vision` | OpenAI GPT-5.6 Luna | `max` |
+| `ingenium-software-engineer-fast` | OpenAI GPT-5.6 Luna | `max` |
 | `ingenium-explore` | OpenAI GPT-5.6 Sol | `medium` |
-| `ingenium-scout` | OpenAI GPT-5.6 Luna | `high` |
-| `ingenium-chat` | DeepSeek V4 Flash | `high` |
+| `ingenium-scout` | OpenAI GPT-5.6 Luna | `max` |
+| `ingenium-chat` | DeepSeek V4 Flash | `max` |
 | `ingenium-security-auditor` | OpenAI GPT-5.6 Sol | `high` |
 | `browser-agent` | OpenAI GPT-5.6 Luna | `max` |
 | `ingenium-llm-broker` | unmapped (hidden system agent) | — |

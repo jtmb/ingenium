@@ -2917,3 +2917,38 @@ historical text and evidence.
 - [ ] Terminal reconciliation: continuously maintain TodoWrite and this roadmap
   checklist/marker state, then reconcile both before any terminal response; no
   open gate may be ignored.
+
+## Agent and skill cleanup source evidence (2026-08-26)
+
+This append-only source/configuration update adds no coordination completion marker and makes no deployment, visual, or three-window model claim.
+
+### Agent configuration and skill-policy source evidence
+
+- Root `opencode.json` now contains the guarded exact model, variant, and
+  canonical profile path for all 11 non-broker custom agents; the protected
+  broker remains absent from root mappings. The built-in `explore` mapping is
+  separately guarded. This is configuration/source evidence, not proof that an
+  already-running session loaded every mapping.
+- Active profile frontmatter is the authority for role/task skill access. Fast,
+  Premium, Docs, QA, and Security allow all 10 canonical skills plus Ponytail;
+  the remaining profiles have their narrower role-matching allowlists. Chat has
+  only Ponytail skill access, and the broker remains wildcard-denied with no
+  skill or tool access.
+- TodoWrite remains allowed only for Orchestrator, Fast, and Premium. Their
+  profiles require nonempty initialization before work, updates after every
+  implementation/evidence transition, terminal reconciliation, and explicit
+  failure reporting. No completion is inferred merely from a roadmap marker.
+
+### Skill-taxonomy cleanup source evidence
+
+- `cleanupLegacySkillTombstones()` runs before an `all`-scope repository skill
+  scan and MCP projection, while docs-only sync leaves tombstones untouched.
+  Dry-run is non-mutating; apply revalidates and removes only an exact marker
+  followed by its empty mapped directory. Malformed, nonempty, symlinked, and
+  traversal-mapped fixtures fail closed.
+- The current worktree has zero `MIGRATED-TO.md` markers and zero root-level
+  legacy skill directories named by the mappings. The 28 mappings, full source hashes, canonical source
+  paths, and preserved source indexes remain in
+  `.opencode/skills/consolidation-map.json` and the 10 canonical skill trees.
+  This is source/worktree evidence only; no repository-sync deployment is claimed
+  by this docs update.

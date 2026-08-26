@@ -1,6 +1,6 @@
 {
   "name": "database-conventions",
-  "description": "Database conventions — sole API DB authority, MCP boundary, SQL/PostgreSQL schema design, SQLite WAL safety, migration management, and FTS5 integrity.",
+  "description": "Database conventions — SQL/PostgreSQL schema design, query optimization, SQLite WAL safety, migration management, FTS5 integrity. Use when writing SQL, designing schemas, writing migrations, or debugging database issues.",
   "tags": ["database", "api-boundary", "mcp", "sql", "postgresql", "sqlite", "migrations", "wal"],
   "alwaysApply": true
 }

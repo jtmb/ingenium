@@ -14,6 +14,7 @@ permission:
   bash:
     "*": allow
     "next-steps-plan/**": deny
+  todowrite: allow
   glob: allow
   grep: allow
   webfetch: allow
@@ -24,12 +25,14 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
+    "@database-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
-    "@documentation": allow
     "@local-models": allow
+    "@security-audit": allow
+    "@documentation": allow
+    "@self-learning": allow
     "@skill-maintenance": allow
-    "@database-conventions": allow
     "@ponytail": allow
     "*": deny
 ---
@@ -45,6 +48,10 @@ this agent's default permissions. It requires an explicit user request and the
 documented process.
 
 **Use this agent for**: Standard bug fixes, simple refactors, documentation code blocks, test authoring, straightforward implementation tasks. **Use `@ingenium-software-engineer-premium` for**: Complex multi-file refactoring, architectural changes, performance-critical code, security-sensitive work.
+
+## 🔴 HARD RULE — TodoWrite Is Mandatory
+
+Immediately on every nonterminal task, initialize a nonempty TodoWrite containing every implementation, verification, restart, and reconciliation item before any dispatch, edit, or command. Update TodoWrite after every implementation or evidence transition. Reconcile every item against retained evidence before any terminal response. If TodoWrite fails or is unavailable, report the exact failure explicitly; never silently replace unavailable TodoWrite with prose.
 
 ## 🔴 HARD RULE — Use Write/Edit Tools, Never Bash For Files
 

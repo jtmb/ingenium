@@ -47,11 +47,14 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
+    "@database-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
-    "@security-audit": allow
     "@local-models": allow
-    "@database-conventions": allow
+    "@security-audit": allow
+    "@documentation": allow
+    "@self-learning": allow
+    "@skill-maintenance": allow
     "@ponytail": allow
     "*": deny
 ---

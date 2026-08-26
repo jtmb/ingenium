@@ -20,12 +20,14 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
-    "@engineering-workflow": allow
-    "@local-models": allow
-    "@mcp-tooling": allow
-    "@documentation": allow
-    "@security-audit": allow
     "@database-conventions": allow
+    "@engineering-workflow": allow
+    "@mcp-tooling": allow
+    "@local-models": allow
+    "@security-audit": allow
+    "@documentation": allow
+    "@self-learning": allow
+    "@skill-maintenance": allow
     "@ponytail": allow
     "*": deny
 ---

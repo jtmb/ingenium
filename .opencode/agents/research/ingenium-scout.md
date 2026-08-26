@@ -13,6 +13,8 @@ permission:
   ingenium_docs_get_page: allow
   skill:
     "@local-models": allow
+    "@mcp-tooling": allow
+    "@documentation": allow
     "@ponytail": allow
     "*": deny
 ---

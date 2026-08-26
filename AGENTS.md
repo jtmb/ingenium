@@ -123,19 +123,50 @@ services/
 | **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions`, `ponytail` |
 | **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | `ponytail` |
 | **ingenium-explore** | Subagent | Research and exploration | `local-models`, `ponytail` |
-| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models`, `ponytail` |
-| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `ponytail` |
-| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions`, `ponytail` |
-| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions`, `ponytail` |
-| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions`, `ponytail` |
-| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation`, `ponytail` |
-| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions`, `ponytail` |
-| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow`, `ponytail` |
+| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models`, `mcp-tooling`, `documentation`, `ponytail` |
+| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `ponytail` |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All 10 canonical skills, plus `ponytail` |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All 10 canonical skills, plus `ponytail` |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All 10 canonical skills, plus `ponytail` |
+| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All 10 canonical skills, plus `ponytail` |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All 10 canonical skills, plus `ponytail` |
+| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `ponytail` |
 | **ingenium-llm-broker** | Subagent | System-internal LLM broker (`enabled: true`, `hidden: true`), immutable, wildcard-denied with no tool allowances | — |
 
 > Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. Archived profiles at `.opencode/archive/agents/`.
 >
 > > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 12-agent total.
+
+### Root-authoritative agent mappings
+
+The active custom-agent runtime mappings are exact, case-sensitive entries in
+root [`opencode.json`](./opencode.json). The built-in `explore` mapping is
+separate from `ingenium-explore`; the protected broker intentionally has no root
+mapping.
+
+| Agent | Model | Variant | Canonical profile |
+|---|---|---|---|
+| `browser-agent` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/browser-agent.md` |
+| `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
+| `ingenium-qa` | `openai/gpt-5.6-terra` | `high` | `.opencode/agents/execution/ingenium-qa.md` |
+| `ingenium-qa-vision` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa-vision.md` |
+| `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
+| `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
+| `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/primary/ingenium-orchestrator.md` |
+| `ingenium-explore` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
+| `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
+| `ingenium-chat` | `deepseek/deepseek-v4-flash` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
+| `ingenium-security-auditor` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/security/ingenium-security-auditor.md` |
+
+### TodoWrite ownership
+
+Only `ingenium-orchestrator`, `ingenium-software-engineer-fast`, and
+`ingenium-software-engineer-premium` have `todowrite: allow`. On every
+nonterminal task, each owner initializes a nonempty list before dispatch, edit,
+or command; updates it after every implementation or evidence transition;
+reconciles every item against retained evidence before a terminal response; and
+reports an unavailable or failed TodoWrite explicitly instead of replacing it
+with prose. No other active profile receives TodoWrite permission.
 
 ### MCP Tool Naming Convention
 

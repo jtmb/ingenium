@@ -41,7 +41,13 @@ an extension CLI or API endpoint as a substitute.
 2. The MCP operation resolves the project with validated `--project` first, then
    validated `INGENIUM_PROJECT`, otherwise a validated worktree basename; it
    never defaults to `global-default`.
-3. Report its JSON result. Surface errors without retrying with resource-specific
+3. For `all` scope, lineage-proven legacy tombstone cleanup runs before the full
+   skill scan and MCP call. Dry-run reports cleanup candidates without deleting
+   them. Apply revalidates and removes only an exact `MIGRATED-TO.md` from an
+   otherwise empty mapped legacy directory, then removes that directory. The
+   consolidation map and canonical source indexes remain untouched. `--docs-only`
+   does not run tombstone cleanup.
+4. Report its JSON result. Surface errors without retrying with resource-specific
    create/update loops. Rebuild/restart the extension and restart OpenCode when
    the transport or plugin source changes; a repository content change alone is
    consumed by the next sync lifecycle event.
@@ -63,6 +69,10 @@ unmanaged remote resource are not initialization inputs in this workflow.
   contain a regular `SKILL.md` whose frontmatter `name` matches the directory.
   Symlinks, support files/directories without that entry point, and directories
   containing `MIGRATED-TO.md` are excluded.
+  Before an `all`-scope scan, cleanup accepts only candidates proven by the exact
+  consolidation mapping, marker text, canonical target, regular source index,
+  containment, and marker-only directory shape. Every rejected candidate remains
+  untouched with a bounded reason.
 - **Agents** include complete profiles in an agent category directory or a
   root-level compatibility mirror. Incomplete notes/diagnostics, symlinks, and
   the reserved `ingenium-llm-broker` profile are excluded. A canonical profile

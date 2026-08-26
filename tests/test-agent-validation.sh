@@ -74,6 +74,32 @@ profile_has_exact_question_deny() {
   ' "$1"
 }
 
+profile_has_exact_todowrite_allow() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  todowrite:[[:space:]]*allow[[:space:]]*$/ { allowed++; next }
+    /^  todowrite:/ { other++ }
+
+    END { exit(allowed == 1 && other == 0 ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_todowrite_permission() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  todowrite:/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
 profile_has_broker_wildcard_deny_only() {
   awk '
     NR == 1 && $0 != "---" { exit 1 }
@@ -114,6 +140,105 @@ if [[ "$ponytail_permissions_valid" -eq 1 ]]; then
   pass "all non-broker profiles explicitly allow @ponytail"
 fi
 
+node - "$AGENTS_DIR" "$REPO_ROOT" <<'NODE' || FAILED=1
+const fs = require("fs");
+const path = require("path");
+const [agentsDir, repoRoot] = process.argv.slice(2);
+const canonical = [
+  "development-conventions",
+  "devops-conventions",
+  "database-conventions",
+  "engineering-workflow",
+  "mcp-tooling",
+  "local-models",
+  "security-audit",
+  "documentation",
+  "self-learning",
+  "skill-maintenance",
+];
+const allCanonical = [...canonical.map((name) => `@${name}`), "@ponytail"];
+const expected = {
+  "ingenium-orchestrator": allCanonical,
+  "ingenium-software-engineer-fast": allCanonical,
+  "ingenium-software-engineer-premium": allCanonical,
+  "ingenium-qa": allCanonical,
+  "ingenium-docs": allCanonical,
+  "ingenium-security-auditor": allCanonical,
+  "ingenium-chat": ["@ponytail"],
+  "ingenium-explore": ["@local-models", "@ponytail"],
+  "ingenium-scout": ["@local-models", "@mcp-tooling", "@documentation", "@ponytail"],
+  "ingenium-qa-vision": ["@development-conventions", "@devops-conventions", "@engineering-workflow", "@mcp-tooling", "@local-models", "@ponytail"],
+  "browser-agent": ["@development-conventions", "@devops-conventions", "@engineering-workflow", "@mcp-tooling", "@local-models", "@skill-maintenance", "@ponytail"],
+  "ingenium-llm-broker": [],
+};
+const errors = [];
+const skillsDir = path.join(repoRoot, ".opencode", "skills");
+const consolidationMap = JSON.parse(fs.readFileSync(path.join(skillsDir, "consolidation-map.json"), "utf8"));
+const legacy = new Set(consolidationMap.mappings.map((mapping) => `@${mapping.source}`));
+
+for (const name of canonical) {
+  const skillDir = path.join(skillsDir, name);
+  const skillMd = path.join(skillDir, "SKILL.md");
+  const stat = fs.lstatSync(skillDir);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !fs.statSync(skillMd).isFile()) {
+    errors.push(`canonical skill must be a regular directory with SKILL.md: ${name}`);
+  }
+}
+
+function profiles(root) {
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(root, entry.name);
+    return entry.isDirectory() ? profiles(fullPath) : entry.name.endsWith(".md") ? [fullPath] : [];
+  });
+}
+
+function skillPermissions(frontmatter) {
+  const values = [];
+  let inSkill = false;
+  for (const line of frontmatter.split("\n")) {
+    if (/^  skill:\s*$/.test(line)) {
+      inSkill = true;
+      continue;
+    }
+    if (inSkill && /^  \S/.test(line)) break;
+    if (!inSkill) continue;
+    const match = line.match(/^    "(@[^"]+)":\s*allow\s*$/);
+    if (match) values.push(match[1]);
+  }
+  return values;
+}
+
+const seen = new Set();
+for (const profilePath of profiles(agentsDir)) {
+  const source = fs.readFileSync(profilePath, "utf8");
+  if (!source.startsWith("---\n")) continue;
+  const frontmatter = source.split("\n---\n", 1)[0];
+  const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  if (!name || !Object.hasOwn(expected, name)) {
+    errors.push(`unexpected or unnamed active profile: ${profilePath}`);
+    continue;
+  }
+  seen.add(name);
+  const actual = skillPermissions(frontmatter);
+  const wanted = expected[name];
+  if (actual.some((skill) => legacy.has(skill))) errors.push(`${name} references a legacy skill`);
+  if ([...actual].sort().join("\n") !== [...wanted].sort().join("\n")) {
+    errors.push(`${name} skill permissions must be exactly [${wanted.join(", ")}], found [${actual.join(", ")}]`);
+  }
+}
+for (const name of Object.keys(expected)) if (!seen.has(name)) errors.push(`missing active profile: ${name}`);
+
+const chat = fs.readFileSync(path.join(agentsDir, "chat", "ingenium-chat.md"));
+const mirror = fs.readFileSync(path.join(agentsDir, "ingenium-chat.md"));
+if (!chat.equals(mirror)) errors.push("ingenium-chat compatibility mirror differs from canonical chat profile");
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: exact role skill matrices, canonical skill existence, no legacy grants, broker exception, and chat mirror parity");
+NODE
+
 question_permissions_valid=1
 for file in "${AGENT_FILES[@]}"; do
   profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
@@ -126,6 +251,56 @@ done
 if [[ "$question_permissions_valid" -eq 1 ]]; then
   pass "all non-broker profiles explicitly deny the question tool"
 fi
+
+declare -A TODOWRITE_OWNER_NAMES=(
+  [ingenium-orchestrator]=1
+  [ingenium-software-engineer-fast]=1
+  [ingenium-software-engineer-premium]=1
+)
+todowrite_permissions_valid=1
+for file in "${AGENT_FILES[@]}"; do
+  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  if [[ -n "${TODOWRITE_OWNER_NAMES[$profile_name]:-}" ]]; then
+    if ! profile_has_exact_todowrite_allow "$file"; then
+      fail "$profile_name must define exactly one scalar todowrite: allow permission"
+      todowrite_permissions_valid=0
+    fi
+  elif profile_has_todowrite_permission "$file"; then
+    fail "$profile_name must not receive TodoWrite permission"
+    todowrite_permissions_valid=0
+  fi
+done
+if [[ "$todowrite_permissions_valid" -eq 1 ]]; then
+  pass "TodoWrite is allowed only for the orchestrator and both software-engineer writers"
+fi
+
+node - \
+  "$AGENTS_DIR/primary/ingenium-orchestrator.md" \
+  "$AGENTS_DIR/execution/ingenium-software-engineer-fast.md" \
+  "$AGENTS_DIR/execution/ingenium-software-engineer-premium.md" <<'NODE' || FAILED=1
+const fs = require("fs");
+const errors = [];
+const requiredLanguage = [
+  "Immediately on every nonterminal task, initialize a nonempty TodoWrite",
+  "before any dispatch, edit, or command.",
+  "Update TodoWrite after every implementation or evidence transition.",
+  "Reconcile every item against retained evidence before any terminal response.",
+  "If TodoWrite fails or is unavailable, report the exact failure explicitly; never silently replace unavailable TodoWrite with prose.",
+];
+
+for (const profilePath of process.argv.slice(2)) {
+  const normalized = fs.readFileSync(profilePath, "utf8").replace(/\s+/g, " ");
+  for (const phrase of requiredLanguage) {
+    if (!normalized.includes(phrase)) errors.push(`${profilePath} is missing mandatory TodoWrite language: ${phrase}`);
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: TodoWrite owners require initialize, update, reconcile, and explicit failure reporting");
+NODE
 
 BROKER_PROFILE="$AGENTS_DIR/execution/ingenium-llm-broker.md"
 if [[ ! -r "$BROKER_PROFILE" ]] || ! profile_has_broker_wildcard_deny_only "$BROKER_PROFILE"; then
@@ -271,12 +446,48 @@ if [[ "${#CHECK_NAMES[@]}" -gt 0 ]]; then
   else
     pass "$((EXPECTED_LOGICAL_AGENT_COUNT - 1)) non-broker profiles require centralized model mappings"
   fi
-  node - "$CONFIG" "${CHECK_NAMES[@]}" <<'NODE' || FAILED=1
+  node - "$CONFIG" "$REPO_ROOT" "${CHECK_NAMES[@]}" <<'NODE' || FAILED=1
 const fs = require("fs");
-const [configPath, ...activeNames] = process.argv.slice(2);
+const path = require("path");
+const [configPath, repoRoot, ...activeNames] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const agent = config.agent || {};
 const errors = [];
+const expected = {
+  "browser-agent": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/browser-agent.md"],
+  "ingenium-docs": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-docs.md"],
+  "ingenium-qa": ["openai/gpt-5.6-terra", "high", ".opencode/agents/execution/ingenium-qa.md"],
+  "ingenium-qa-vision": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-qa-vision.md"],
+  "ingenium-software-engineer-fast": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-software-engineer-fast.md"],
+  "ingenium-software-engineer-premium": ["openai/gpt-5.6-sol", "high", ".opencode/agents/execution/ingenium-software-engineer-premium.md"],
+  "ingenium-orchestrator": ["openai/gpt-5.6-sol", "high", ".opencode/agents/primary/ingenium-orchestrator.md"],
+  "ingenium-explore": ["openai/gpt-5.6-sol", "medium", ".opencode/agents/research/ingenium-explore.md"],
+  "ingenium-scout": ["openai/gpt-5.6-luna", "max", ".opencode/agents/research/ingenium-scout.md"],
+  "ingenium-chat": ["deepseek/deepseek-v4-flash", "max", ".opencode/agents/chat/ingenium-chat.md"],
+  "ingenium-security-auditor": ["openai/gpt-5.6-sol", "high", ".opencode/agents/security/ingenium-security-auditor.md"],
+};
+
+if (activeNames.length !== Object.keys(expected).length || activeNames.some((name) => !expected[name])) {
+  errors.push(`active non-broker agent set does not match the ${Object.keys(expected).length} canonical mappings`);
+}
+for (const [name, [model, variant, profilePath]] of Object.entries(expected)) {
+  const projection = agent[name];
+  const prompt = `{file:${profilePath}}`;
+  if (!projection) {
+    errors.push(`canonical agent "${name}" is missing from opencode.json`);
+    continue;
+  }
+  if (projection.model !== model) errors.push(`${name} model must be ${model}, found ${projection.model}`);
+  if (projection.variant !== variant) errors.push(`${name} variant must be ${variant}, found ${projection.variant}`);
+  if (projection.prompt !== prompt) errors.push(`${name} prompt must reference ${profilePath}, found ${projection.prompt}`);
+  if (!fs.statSync(path.join(repoRoot, profilePath)).isFile()) errors.push(`${name} canonical profile is not a file: ${profilePath}`);
+}
+if (agent.explore?.model !== "openai/gpt-5.6-luna" || agent.explore?.variant !== "max") {
+  errors.push("built-in explore mapping must remain openai/gpt-5.6-luna/max");
+}
+if (agent["ingenium-llm-broker"] !== undefined) {
+  errors.push("protected hidden broker must remain absent from root agent mappings");
+}
 
 // Allowed variants by provider (case-sensitive)
 const VARIANT_RULES = {
@@ -325,7 +536,7 @@ if (errors.length) {
   console.error(errors.join("\n"));
   process.exit(1);
 }
-console.log("PASS: centralized config model mappings + case-sensitive variant validation");
+console.log("PASS: exact centralized model/variant/profile mappings, broker exception, and variant validation");
 NODE
 else
   pass "no active non-hidden agents to check (skipped)"

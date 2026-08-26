@@ -83,6 +83,26 @@ Git-authoritative projection path:
 | Build/runtime | Extension or plugin change | Rebuild extension and restart OpenCode |
 | Scheduled learning | Every 15 min (API scheduler) | Runs extraction → synthesis; this is separate from resource sync |
 
+### Lineage-proven tombstone cleanup
+
+Before an `all`-scope repository sync scans skills or calls the authenticated MCP
+projection, the extension removes only marker-only legacy directories proven by
+`.opencode/skills/consolidation-map.json`. Docs-only sync skips this step. Dry-run
+reports candidates without deleting them.
+
+The cleanup requires an exact canonical-skill set, unique safe mapping names, a
+64-digit lowercase hexadecimal source hash, a contained non-symlink directory
+whose only child is a regular and exact `MIGRATED-TO.md`, an existing canonical
+target `SKILL.md`, and the exact regular canonical source-index path. It
+revalidates before apply, removes only the marker, then removes the empty legacy
+directory. Any malformed, unmapped, nonempty, symlinked, traversal-mapped, or
+otherwise unproven candidate fails closed and remains on disk. The consolidation
+map and canonical `references/sources/*/source-index.md` lineage are preserved.
+
+The canonical worktree currently contains zero `MIGRATED-TO.md` markers and zero
+root-level legacy skill directories named by the mappings; all 28 source indexes
+remain under their 10 canonical skills.
+
 ## Maintenance Locks
 
 Skill mutations respect **maintenance locks** — a lease-based coordination system:

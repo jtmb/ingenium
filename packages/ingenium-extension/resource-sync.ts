@@ -88,6 +88,18 @@ export const REPOSITORY_MAX_DOC_BYTES = 1_500 * 1024;
 export const REPOSITORY_MAX_RESOURCE_TOTAL_BYTES = 1_500 * 1024;
 const REPOSITORY_PLUGIN_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const REPOSITORY_PLUGIN_ROOTS = [".opencode/plugins/", "packages/"] as const;
+const CANONICAL_SKILL_NAMES = [
+  "development-conventions",
+  "devops-conventions",
+  "database-conventions",
+  "engineering-workflow",
+  "mcp-tooling",
+  "local-models",
+  "security-audit",
+  "documentation",
+  "self-learning",
+  "skill-maintenance",
+] as const;
 
 export class RepositorySyncScanError extends Error {
   constructor(message = "Repository resource scan rejected an unsafe path or content") {
@@ -457,6 +469,7 @@ function scanRepositorySkills(
   if (!skillsRoot) return [];
   const entries: RepositorySkillManifestEntry[] = [];
   for (const name of readdirSync(skillsRoot).sort((a, b) => a.localeCompare(b))) {
+    if (name === TOMBSTONE_QUARANTINE_DIR) continue;
     if (!safeRepositoryName(name)) throw new RepositorySyncScanError();
     const skillDir = resolve(skillsRoot, name);
     // `.opencode/skills` also owns support artifacts such as the consolidation
@@ -981,6 +994,415 @@ function emptyResult(): SyncResult {
  * of absorbed legacy skills.
  */
 const MIGRATED_TO_MARKER = "MIGRATED-TO.md";
+const TOMBSTONE_QUARANTINE_DIR = ".ingenium-tombstone-cleanup";
+const STAGED_TOMBSTONE_DIR = "tombstone";
+const STAGE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+type TombstoneCleanupReason =
+  | "invalid-consolidation-map"
+  | "unsafe-skills-root"
+  | "unsafe-candidate"
+  | "not-mapped"
+  | "missing-marker"
+  | "marker-not-regular"
+  | "marker-mismatch"
+  | "invalid-target-skill"
+  | "invalid-source-index"
+  | "nonempty-directory"
+  | "unsafe-staging-root"
+  | "unsafe-staging-entry"
+  | "staging-conflict"
+  | "stage-failed"
+  | "post-stage-validation-failed"
+  | "unlink-failed"
+  | "rmdir-failed"
+  | "restore-failed"
+  | "recovery-failed";
+
+export interface TombstoneCleanupResult {
+  dryRun: boolean;
+  removable: string[];
+  removed: string[];
+  rejected: Array<{ path: string; reason: TombstoneCleanupReason }>;
+}
+
+interface ConsolidationMapping {
+  source: string;
+  target: string;
+  sourcePath: string;
+  sourceHash: string;
+}
+
+function parseConsolidationMap(value: unknown): Map<string, ConsolidationMapping> | null {
+  if (!repositoryIsRecord(value)
+    || !Array.isArray(value.canonicalSkills)
+    || !Array.isArray(value.mappings)) return null;
+
+  const canonical = value.canonicalSkills;
+  if (canonical.length !== CANONICAL_SKILL_NAMES.length
+    || canonical.some((name) => typeof name !== "string")
+    || [...canonical].sort().join("\n") !== [...CANONICAL_SKILL_NAMES].sort().join("\n")) return null;
+
+  const mappings = new Map<string, ConsolidationMapping>();
+  for (const candidate of value.mappings) {
+    if (!repositoryIsRecord(candidate)
+      || !safeRepositoryName(candidate.source)
+      || CANONICAL_SKILL_NAMES.includes(candidate.source as typeof CANONICAL_SKILL_NAMES[number])
+      || typeof candidate.target !== "string"
+      || typeof candidate.sourcePath !== "string"
+      || typeof candidate.sourceHash !== "string"
+      || !/^[a-f0-9]{64}$/.test(candidate.sourceHash)
+      || mappings.has(candidate.source)) return null;
+    mappings.set(candidate.source, candidate as unknown as ConsolidationMapping);
+  }
+  return mappings;
+}
+
+function expectedTombstoneMarker(mapping: ConsolidationMapping): string {
+  return `**Canonical target**: \`${mapping.target}\`\n\n[source-index.md](../${mapping.target}/references/sources/${mapping.source}/source-index.md)\n`;
+}
+
+/** Remove only lineage-proven, marker-only legacy skill directories. */
+export function cleanupLegacySkillTombstones(
+  worktree: string,
+  options: { dryRun?: boolean } = {},
+): TombstoneCleanupResult {
+  const dryRun = options.dryRun === true;
+  const result: TombstoneCleanupResult = { dryRun, removable: [], removed: [], rejected: [] };
+  let root: string;
+  let skillsRoot: string;
+  let mappings: Map<string, ConsolidationMapping>;
+
+  try {
+    root = repositoryWorktreeRoot(worktree);
+    const verifiedSkillsRoot = assertContainedDirectory(root, resolve(root, ".opencode", "skills"));
+    if (!verifiedSkillsRoot) return result;
+    skillsRoot = verifiedSkillsRoot;
+  } catch {
+    result.rejected.push({ path: ".opencode/skills", reason: "unsafe-skills-root" });
+    return result;
+  }
+
+  try {
+    const parsed = JSON.parse(readRepositoryRegularText(root, resolve(skillsRoot, "consolidation-map.json")));
+    const verifiedMappings = parseConsolidationMap(parsed);
+    if (!verifiedMappings) throw new RepositorySyncScanError();
+    mappings = verifiedMappings;
+  } catch {
+    result.rejected.push({ path: ".opencode/skills/consolidation-map.json", reason: "invalid-consolidation-map" });
+    return result;
+  }
+
+  const relativeCandidatePath = (name: string) => `.opencode/skills/${name}`;
+  const reject = (path: string, reason: TombstoneCleanupReason) => {
+    result.rejected.push({ path: path.startsWith(".opencode/") ? path : relativeCandidatePath(path), reason });
+  };
+  const validate = (name: string, mapping: ConsolidationMapping, candidatePath: string): TombstoneCleanupReason | null => {
+    let candidateStat;
+    try {
+      candidateStat = lstatSync(candidatePath);
+      const canonicalCandidate = realpathSync(candidatePath);
+      if (candidateStat.isSymbolicLink()
+        || !candidateStat.isDirectory()
+        || !canonicalCandidate.startsWith(skillsRoot + sep)) return "unsafe-candidate";
+    } catch {
+      return "unsafe-candidate";
+    }
+
+    let children: string[];
+    try {
+      children = readdirSync(candidatePath);
+    } catch {
+      return "unsafe-candidate";
+    }
+    if (!children.includes(MIGRATED_TO_MARKER)) return "missing-marker";
+    if (children.length !== 1) return "nonempty-directory";
+
+    const markerPath = resolve(candidatePath, MIGRATED_TO_MARKER);
+    try {
+      const markerStat = lstatSync(markerPath);
+      if (markerStat.isSymbolicLink() || !markerStat.isFile()) return "marker-not-regular";
+      const marker = normalizeRepositoryText(readRepositoryRegularText(root, markerPath));
+      if (marker !== expectedTombstoneMarker(mapping)) return "marker-mismatch";
+    } catch {
+      return "marker-not-regular";
+    }
+
+    if (!CANONICAL_SKILL_NAMES.includes(mapping.target as typeof CANONICAL_SKILL_NAMES[number])) {
+      return "invalid-target-skill";
+    }
+    try {
+      readRepositoryRegularText(root, resolve(skillsRoot, mapping.target, "SKILL.md"));
+    } catch {
+      return "invalid-target-skill";
+    }
+
+    const expectedSourcePath = `.opencode/skills/${mapping.target}/references/sources/${name}/source-index.md`;
+    if (mapping.sourcePath !== expectedSourcePath) return "invalid-source-index";
+    try {
+      readRepositoryRegularText(root, resolve(root, mapping.sourcePath));
+    } catch {
+      return "invalid-source-index";
+    }
+    return null;
+  };
+
+  const quarantinePath = resolve(skillsRoot, TOMBSTONE_QUARANTINE_DIR);
+  const containedDirectory = (path: string, parent: string): boolean => {
+    try {
+      const stat = lstatSync(path);
+      const canonical = realpathSync(path);
+      return !stat.isSymbolicLink()
+        && stat.isDirectory()
+        && canonical === path
+        && path.startsWith(parent + sep);
+    } catch {
+      return false;
+    }
+  };
+  const privateContainedDirectory = (path: string, parent: string): boolean => {
+    if (!containedDirectory(path, parent)) return false;
+    const stat = lstatSync(path);
+    return (stat.mode & 0o077) === 0
+      && (typeof process.getuid !== "function" || stat.uid === process.getuid());
+  };
+  const openQuarantine = (create: boolean): string | null => {
+    try {
+      let exists = true;
+      try {
+        lstatSync(quarantinePath);
+      } catch (error) {
+        if (!isMissingPathError(error)) throw error;
+        exists = false;
+      }
+      if (!exists) {
+        if (!create) return null;
+        mkdirSync(quarantinePath, { mode: 0o700 });
+      }
+      return privateContainedDirectory(quarantinePath, skillsRoot) ? quarantinePath : null;
+    } catch {
+      return null;
+    }
+  };
+  const pathExists = (path: string): boolean => {
+    try {
+      lstatSync(path);
+      return true;
+    } catch (error) {
+      if (isMissingPathError(error)) return false;
+      throw error;
+    }
+  };
+  const sourceForStage = (stageName: string): string | null => {
+    if (!stageName.startsWith("stage-")) return null;
+    const uuid = stageName.slice(-36);
+    if (!STAGE_UUID_PATTERN.test(uuid) || stageName.at(-37) !== "-") return null;
+    const source = stageName.slice(6, -37);
+    return mappings.has(source) ? source : null;
+  };
+  const stageRelativePath = (stageName: string) => `${relativeCandidatePath(TOMBSTONE_QUARANTINE_DIR)}/${stageName}`;
+  const removeEmptyQuarantine = () => {
+    try {
+      rmdirSync(quarantinePath);
+    } catch { /* retained when nonempty or concurrently changed */ }
+  };
+  const restore = (
+    name: string,
+    mapping: ConsolidationMapping,
+    stagedPath: string,
+    stagePath: string,
+  ): boolean => {
+    const originalPath = resolve(skillsRoot, name);
+    try {
+      if (pathExists(originalPath) || validate(name, mapping, stagedPath) !== null) return false;
+      renameSync(stagedPath, originalPath);
+      if (validate(name, mapping, originalPath) !== null) {
+        if (!pathExists(stagedPath)) renameSync(originalPath, stagedPath);
+        return false;
+      }
+      try { rmdirSync(stagePath); } catch { /* empty helper-owned stage is recovered next run */ }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const deleteStaged = (
+    name: string,
+    mapping: ConsolidationMapping,
+    stagedPath: string,
+    stagePath: string,
+    rejectionPath: string,
+  ): boolean => {
+    try {
+      unlinkSync(resolve(stagedPath, MIGRATED_TO_MARKER));
+    } catch {
+      reject(rejectionPath, restore(name, mapping, stagedPath, stagePath) ? "unlink-failed" : "restore-failed");
+      return false;
+    }
+    try {
+      rmdirSync(stagedPath);
+      rmdirSync(stagePath);
+    } catch {
+      reject(rejectionPath, "rmdir-failed");
+      return false;
+    }
+    return true;
+  };
+
+  const stagedSources = new Set<string>();
+  if (!dryRun) {
+    let quarantineExists = false;
+    try {
+      quarantineExists = pathExists(quarantinePath);
+    } catch {
+      quarantineExists = true;
+    }
+    const quarantine = openQuarantine(false);
+    if (quarantineExists && !quarantine) {
+      reject(relativeCandidatePath(TOMBSTONE_QUARANTINE_DIR), "unsafe-staging-root");
+    } else if (quarantine) {
+      let stageNames: string[];
+      try {
+        stageNames = readdirSync(quarantine).sort((left, right) => left.localeCompare(right));
+      } catch {
+        stageNames = [];
+        reject(relativeCandidatePath(TOMBSTONE_QUARANTINE_DIR), "unsafe-staging-root");
+      }
+      for (const stageName of stageNames) {
+        const stagePath = resolve(quarantine, stageName);
+        const source = sourceForStage(stageName);
+        const rejectionPath = stageRelativePath(stageName);
+        if (!source || !privateContainedDirectory(stagePath, quarantine)) {
+          reject(rejectionPath, "unsafe-staging-entry");
+          continue;
+        }
+        const mapping = mappings.get(source)!;
+        let children: string[];
+        try {
+          children = readdirSync(stagePath);
+        } catch {
+          reject(rejectionPath, "unsafe-staging-entry");
+          continue;
+        }
+        if (children.length === 0) {
+          try {
+            rmdirSync(stagePath);
+          } catch {
+            reject(rejectionPath, "recovery-failed");
+            stagedSources.add(source);
+          }
+          continue;
+        }
+        stagedSources.add(source);
+        if (children.length !== 1 || children[0] !== STAGED_TOMBSTONE_DIR) {
+          reject(rejectionPath, "unsafe-staging-entry");
+          continue;
+        }
+        const stagedPath = resolve(stagePath, STAGED_TOMBSTONE_DIR);
+        if (!containedDirectory(stagedPath, stagePath)) {
+          reject(rejectionPath, "unsafe-staging-entry");
+          continue;
+        }
+        if (pathExists(resolve(skillsRoot, source))) {
+          reject(rejectionPath, "staging-conflict");
+          continue;
+        }
+        const stagedReason = validate(source, mapping, stagedPath);
+        if (stagedReason === "missing-marker") {
+          try {
+            if (readdirSync(stagedPath).length !== 0) throw new RepositorySyncScanError();
+            rmdirSync(stagedPath);
+            rmdirSync(stagePath);
+            result.removed.push(relativeCandidatePath(source));
+          } catch {
+            reject(rejectionPath, "recovery-failed");
+          }
+          continue;
+        }
+        if (stagedReason) {
+          reject(rejectionPath, "unsafe-staging-entry");
+          continue;
+        }
+        result.removable.push(relativeCandidatePath(source));
+        if (deleteStaged(source, mapping, stagedPath, stagePath, rejectionPath)) {
+          result.removed.push(relativeCandidatePath(source));
+        }
+      }
+      removeEmptyQuarantine();
+    }
+  }
+
+  let directChildren: string[];
+  try {
+    directChildren = readdirSync(skillsRoot).sort((left, right) => left.localeCompare(right));
+  } catch {
+    result.rejected.push({ path: ".opencode/skills", reason: "unsafe-skills-root" });
+    return result;
+  }
+
+  for (const name of directChildren) {
+    if (name === TOMBSTONE_QUARANTINE_DIR || stagedSources.has(name)) continue;
+    if (!safeRepositoryName(name)) continue;
+    const candidatePath = resolve(skillsRoot, name);
+    const mapping = mappings.get(name);
+    if (!mapping) {
+      try {
+        const candidateStat = lstatSync(candidatePath);
+        if (!candidateStat.isSymbolicLink()
+          && candidateStat.isDirectory()
+          && readdirSync(candidatePath).includes(MIGRATED_TO_MARKER)) reject(name, "not-mapped");
+      } catch { /* non-candidate support artifacts remain untouched */ }
+      continue;
+    }
+
+    const reason = validate(name, mapping, candidatePath);
+    if (reason) {
+      reject(name, reason);
+      continue;
+    }
+
+    const relativePath = relativeCandidatePath(name);
+    result.removable.push(relativePath);
+    if (dryRun) continue;
+
+    const finalReason = validate(name, mapping, candidatePath);
+    if (finalReason) {
+      result.removable.pop();
+      reject(name, finalReason);
+      continue;
+    }
+    const quarantine = openQuarantine(true);
+    if (!quarantine) {
+      reject(name, "unsafe-staging-root");
+      continue;
+    }
+    const stageName = `stage-${name}-${randomUUID()}`;
+    const stagePath = resolve(quarantine, stageName);
+    const stagedPath = resolve(stagePath, STAGED_TOMBSTONE_DIR);
+    try {
+      mkdirSync(stagePath, { mode: 0o700 });
+      if (!privateContainedDirectory(stagePath, quarantine) || readdirSync(stagePath).length !== 0 || pathExists(stagedPath)) {
+        throw new RepositorySyncScanError();
+      }
+      renameSync(candidatePath, stagedPath);
+    } catch {
+      try { rmdirSync(stagePath); } catch { /* retain unexpected or concurrently changed content */ }
+      reject(name, "stage-failed");
+      continue;
+    }
+    if (pathExists(candidatePath) || validate(name, mapping, stagedPath) !== null) {
+      reject(name, "post-stage-validation-failed");
+      continue;
+    }
+    if (deleteStaged(name, mapping, stagedPath, stagePath, name)) {
+      result.removed.push(relativePath);
+    }
+  }
+
+  if (!dryRun) removeEmptyQuarantine();
+
+  return result;
+}
 
 /** Scan disk for skill directories and return name→content-hash map. */
 function scanDiskSkills(worktree: string): Map<string, string> {
@@ -1000,6 +1422,7 @@ function scanDiskSkills(worktree: string): Map<string, string> {
   if (!existsSync(skillsDir)) return map;
   try {
     for (const entry of readdirSync(skillsDir)) {
+      if (entry === TOMBSTONE_QUARANTINE_DIR) continue;
       // Skip unsafe names and directory symlinks
       if (!isSafeName(entry)) continue;
       const dir = resolve(skillsDir, entry);
@@ -2801,6 +3224,7 @@ export async function repositorySync(
 ): Promise<RepositorySyncResult> {
   const dryRun = options.dryRun === true;
   const scope = options.scope ?? "all";
+  if (scope === "all") cleanupLegacySkillTombstones(worktree, { dryRun });
   const project = resolveExtensionProject(worktree, options.project);
   _projectCache = project;
   _projectResolved = true;

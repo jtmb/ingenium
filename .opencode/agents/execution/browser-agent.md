@@ -18,8 +18,12 @@ permission:
   grep: allow
   webfetch: deny
   skill:
-    "@mcp-tooling": allow
+    "@development-conventions": allow
+    "@devops-conventions": allow
     "@engineering-workflow": allow
+    "@mcp-tooling": allow
+    "@local-models": allow
+    "@skill-maintenance": allow
     "@ponytail": allow
     "*": deny
 ---

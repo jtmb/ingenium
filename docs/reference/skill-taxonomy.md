@@ -64,8 +64,35 @@ The Phase 3 taxonomy consolidation reduced **36 legacy skills → 10 canonical s
 Every absorbed legacy source retains:
 - A **`source-index.md`** at `.opencode/skills/<canonical>/references/sources/<legacy-name>/source-index.md`
 - A **lineage record** in `skill_lineage`
-- The **consolidation map** at `.opencode/skills/consolidation-map.json`
+- Its authoritative mapping, full SHA-256 source hash, and canonical source path
+  in `.opencode/skills/consolidation-map.json`
 - A **pre-migration snapshot** at commit `4639e38` for rollback
+
+## Legacy Tombstone Cleanup
+
+The worktree no longer retains the 28 root-level legacy skill directories named
+by the mappings or any `MIGRATED-TO.md` markers. Full repository sync (`scope: "all"`) runs
+`cleanupLegacySkillTombstones()` before the skill scan and before the authenticated
+MCP projection. Docs-only sync does not run this cleanup.
+
+Cleanup is intentionally narrow and fail-closed. A directory is removable only
+when all of these are true:
+
+- its name has one unique entry in the valid consolidation map, whose canonical
+  skill set exactly matches the 10 names above and whose source hash is 64-digit
+  lowercase hexadecimal;
+- the candidate is a contained, regular directory rather than a symlink;
+- its only child is a regular `MIGRATED-TO.md` whose canonical target and
+  source-index link exactly match the mapping;
+- the target canonical `SKILL.md` exists, and the mapped source path is the exact
+  canonical `references/sources/<legacy-name>/source-index.md` regular file.
+
+Dry-run reports removable and rejected candidates without mutation. Apply mode
+revalidates immediately before deletion, unlinks only `MIGRATED-TO.md`, and then
+removes the now-empty legacy directory. Malformed, unmapped, nonempty, symlinked,
+traversal-mapped, or otherwise unproven candidates remain untouched with a
+bounded rejection reason. The consolidation map, canonical skills, and preserved
+source indexes are never cleanup targets.
 
 ## Agent Allowlist Mapping
 
@@ -86,4 +113,4 @@ When updating agent `permission.skill` allowlists, use this exact mapping:
 
 ---
 
-*See also: `.opencode/SKILL-INDEX.md`, `concepts/skill-system.md`, `.opencode/skills/consolidation-map.json`*
+*See also: `.opencode/SKILL-INDEX.md` and [Skill System](../concepts/skill-system.md).*

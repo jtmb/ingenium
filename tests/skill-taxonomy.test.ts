@@ -3,11 +3,11 @@
  *
  * Validates the canonical taxonomy and its preserved source mappings by checking:
  *   - Canonical SKILL.md count (10)
- *   - MIGRATED-TO.md marker count (28)
+ *   - MIGRATED-TO.md marker count (0 after automatic cleanup)
  *   - source-index.md preserved source count (28)
  *   - All canonical SKILL.md files have valid YAML frontmatter (name + description)
- *   - All MIGRATED-TO.md markers reference valid canonical targets
  *   - consolidation-map.json integrity (version, mappings, source/target consistency)
+ *   - metadata.json agrees with source-proven SKILL.md frontmatter fields
  *
  * Run:  npx vitest run tests/skill-taxonomy.test.ts
  */
@@ -28,6 +28,7 @@ const SKILLS_DIR = resolve(PROJECT_ROOT, ".opencode", "skills");
 
 const EXPECTED_CANONICAL = 10;
 const EXPECTED_MIGRATED = 28;
+const EXPECTED_TOMBSTONES = 0;
 const EXPECTED_SOURCES = 28;
 const CONSOLIDATION_MAP_VERSION = "1.0.0";
 const DEVELOPMENT_CONVENTIONS_DIR = resolve(
@@ -89,13 +90,6 @@ function parseFrontmatter(content: string): Record<string, string> {
     fields[m[1]] = value;
   }
   return fields;
-}
-
-/** Extract the target canonical skill name from a MIGRATED-TO.md file. */
-function getMigratedTargetName(filePath: string): string | null {
-  const content = readFileSync(filePath, "utf-8");
-  const match = content.match(/\*\*Canonical target\*\*:\s*`([^`]+)`/);
-  return match ? match[1] : null;
 }
 
 function isPathInside(root: string, candidate: string): boolean {
@@ -248,62 +242,14 @@ describe("Canonical SKILL.md files", () => {
 
 describe("MIGRATED-TO.md markers", () => {
   let migratedFiles: string[];
-  let canonicalNames: Set<string>;
 
   beforeAll(() => {
     migratedFiles = findFiles(SKILLS_DIR, "MIGRATED-TO.md");
     migratedFiles.sort();
-
-    const canonicalFiles = findFiles(SKILLS_DIR, "SKILL.md").filter(
-      f => !f.includes("/references/")
-    );
-    canonicalNames = new Set(
-      canonicalFiles.map(f => {
-        const fm = parseFrontmatter(readFileSync(f, "utf-8"));
-        return fm.name;
-      })
-    );
   });
 
-  it(`finds exactly ${EXPECTED_MIGRATED} MIGRATED-TO.md markers`, () => {
-    expect(migratedFiles).toHaveLength(EXPECTED_MIGRATED);
-  });
-
-  it("every MIGRATED-TO.md references a valid canonical target", () => {
-    for (const file of migratedFiles) {
-      const target = getMigratedTargetName(file);
-      const dirName = basename(resolve(file, ".."));
-
-      expect(
-        target,
-        `${file}: "Canonical target" field not found in MIGRATED-TO.md`
-      ).toBeTruthy();
-
-      expect(
-        canonicalNames.has(target!),
-        `${file}: target "${target}" (from directory "${dirName}") is not in canonical set [${[...canonicalNames].join(", ")}]`
-      ).toBe(true);
-    }
-  });
-
-  it("every MIGRATED-TO.md directory name matches a consolidation-map source", () => {
-    const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
-    if (!existsSync(mapPath)) {
-      // Skip if map doesn't exist — covered in separate test
-      return;
-    }
-    const map = JSON.parse(readFileSync(mapPath, "utf-8"));
-    const mapSources = new Set(
-      (map.mappings as Array<{ source: string }>).map(m => m.source)
-    );
-
-    for (const file of migratedFiles) {
-      const dirName = basename(resolve(file, ".."));
-      expect(
-        mapSources.has(dirName),
-        `MIGRATED-TO.md directory "${dirName}" not found in consolidation-map.json mappings`
-      ).toBe(true);
-    }
+  it(`finds exactly ${EXPECTED_TOMBSTONES} MIGRATED-TO.md markers`, () => {
+    expect(migratedFiles).toHaveLength(EXPECTED_TOMBSTONES);
   });
 });
 
@@ -320,6 +266,10 @@ describe("source-index.md preserved sources", () => {
   });
 
   it("every source-index.md exists under a valid canonical target's references/sources/", () => {
+    const map = JSON.parse(readFileSync(resolve(SKILLS_DIR, "consolidation-map.json"), "utf-8"));
+    const mappedTargets = new Map(
+      (map.mappings as Array<{ source: string; target: string }>).map(mapping => [mapping.source, mapping.target])
+    );
     const canonicalDirs = new Set(
       getSubdirs(SKILLS_DIR)
         .filter(d => existsSync(resolve(d, "SKILL.md")))
@@ -341,13 +291,10 @@ describe("source-index.md preserved sources", () => {
       expect(parts[skillsIdx + 3]).toBe("sources");
 
       const sourceName = parts[skillsIdx + 4];
-      const migratedPath = resolve(
-        SKILLS_DIR, sourceName, "MIGRATED-TO.md"
-      );
       expect(
-        existsSync(migratedPath),
-        `${file}: no MIGRATED-TO.md marker found at ${migratedPath}`
-      ).toBe(true);
+        mappedTargets.get(sourceName),
+        `${file}: source "${sourceName}" is not retained in consolidation-map.json`
+      ).toBe(canonicalDir);
     }
   });
 });
@@ -389,16 +336,15 @@ describe("consolidation-map.json integrity", () => {
     }
   });
 
-  it("all mapping source names correspond to existing MIGRATED-TO.md directories", () => {
-    const migratedDirs = new Set(
-      findFiles(SKILLS_DIR, "MIGRATED-TO.md").map(f => basename(resolve(f, "..")))
-    );
-
+  it("all mapping source names are unique and their tombstone directories are absent", () => {
+    const sources = new Set<string>();
     for (const mapping of map.mappings) {
+      expect(sources.has(mapping.source), `duplicate mapping source "${mapping.source}"`).toBe(false);
+      sources.add(mapping.source);
       expect(
-        migratedDirs.has(mapping.source),
-        `Mapping source "${mapping.source}" has no corresponding MIGRATED-TO.md directory. Existing: [${[...migratedDirs].join(", ")}]`
-      ).toBe(true);
+        existsSync(resolve(SKILLS_DIR, mapping.source)),
+        `cleaned tombstone directory still exists for mapping source "${mapping.source}"`
+      ).toBe(false);
     }
   });
 
@@ -425,18 +371,12 @@ describe("consolidation-map.json integrity", () => {
 });
 
 describe("Cross-consistency checks", () => {
-  it("MIGRATED-TO.md count equals source-index.md count", () => {
-    const migratedCount = findFiles(SKILLS_DIR, "MIGRATED-TO.md").length;
+  it("source-index.md count equals consolidation-map mappings count", () => {
     const sourceCount = findFiles(SKILLS_DIR, "source-index.md").length;
-    expect(migratedCount).toBe(sourceCount);
-  });
-
-  it("MIGRATED-TO.md count equals consolidation-map mappings count", () => {
     const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
     if (!existsSync(mapPath)) return;
     const map = JSON.parse(readFileSync(mapPath, "utf-8"));
-    const migratedCount = findFiles(SKILLS_DIR, "MIGRATED-TO.md").length;
-    expect(migratedCount).toBe(map.mappings.length);
+    expect(sourceCount).toBe(map.mappings.length);
   });
 
   it("canonical skills listed in map match the 10 canonical directories", () => {
@@ -456,6 +396,23 @@ describe("Cross-consistency checks", () => {
         mapCanonicalSet.has(dir),
         `Directory "${dir}" has a SKILL.md but is not in consolidation-map.canonicalSkills`
       ).toBe(true);
+    }
+  });
+});
+
+describe("canonical metadata parity", () => {
+  it("matches source-proven SKILL.md name, description, and alwaysApply fields", () => {
+    for (const skillDir of getSubdirs(SKILLS_DIR).filter(dir => existsSync(resolve(dir, "SKILL.md")))) {
+      const metadataPath = resolve(skillDir, "metadata.json");
+      if (!existsSync(metadataPath)) continue;
+      const frontmatter = parseFrontmatter(readFileSync(resolve(skillDir, "SKILL.md"), "utf-8"));
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf-8"));
+      for (const field of ["name", "description"] as const) {
+        if (metadata[field] !== undefined) expect(metadata[field], `${metadataPath}: ${field}`).toBe(frontmatter[field]);
+      }
+      if (metadata.alwaysApply !== undefined) {
+        expect(metadata.alwaysApply, `${metadataPath}: alwaysApply`).toBe(frontmatter.alwaysApply === "true");
+      }
     }
   });
 });
