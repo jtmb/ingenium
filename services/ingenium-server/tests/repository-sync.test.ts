@@ -16,6 +16,10 @@ const docsManifest = {
   files: [{ path: "docs/index.md", sha256: "a".repeat(64), content: "# Docs\n", fileType: "regular", isSymlink: false }],
 };
 const resourcesManifest = { version: 2, skills: [], agents: [], plugins: [] };
+const claim = {
+  worktree_id: "worktree-main", session_id: "session-main", incarnation: 1, expected_revision: 1,
+  fence: 1, ownership_token: "A".repeat(32), client_claim_key: "B".repeat(32), accepted_epoch: 1,
+};
 
 describe("repository sync MCP tool adapter", () => {
   beforeEach(() => {
@@ -23,24 +27,20 @@ describe("repository sync MCP tool adapter", () => {
   });
 
   it("proxies docs then resources with the bound project and returns summaries only", async () => {
-    mockPost
-      .mockResolvedValueOnce({
-        ok: true,
-        data: { dryRun: false, summary: { created: 1, unchanged: 0, source: "must-not-return" } },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: { summary: {
+    mockPost.mockResolvedValueOnce({
+      ok: true,
+      data: { dryRun: false, generation: 1, manifestHash: "a".repeat(64),
+        docs: { summary: { created: 1, unchanged: 0, source: "must-not-return" } },
+        resources: { summary: {
           skill: { created: 1 }, agent: { unchanged: 2 }, plugin: { removed: 1 },
-        } },
-      });
+        } } },
+    });
 
-    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, false);
+    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 0, claim, false);
     const output = JSON.parse(result.content[0]!.text);
 
     expect(mockPost.mock.calls).toEqual([
-      ["/docs/repository/sync", { manifest: docsManifest, dryRun: false }, { project: "repository-project" }],
-      ["/repository/resources/sync", { manifest: resourcesManifest, dryRun: false }, { project: "repository-project" }],
+      ["/repository/sync", { docsManifest, resourcesManifest, expectedGeneration: 0, claim, dryRun: false }, { project: "repository-project" }],
     ]);
     expect(output).toMatchObject({
       project: "repository-project",
@@ -54,7 +54,7 @@ describe("repository sync MCP tool adapter", () => {
   it("stops after a failed docs sync and never exposes transport details", async () => {
     mockPost.mockRejectedValueOnce(new Error("Bearer secret-token"));
 
-    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, false);
+    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 0, claim, false);
 
     expect(mockPost).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ isError: true });
@@ -74,7 +74,7 @@ describe("repository sync MCP tool adapter", () => {
       plugins: [],
     };
 
-    const result = await repositorySync("repository-project", docsManifest, oversizedResources, false);
+    const result = await repositorySync("repository-project", docsManifest, oversizedResources, 0, claim, false);
 
     expect(mockPost).not.toHaveBeenCalled();
     expect(result).toMatchObject({ isError: true });
@@ -93,7 +93,7 @@ describe("repository sync MCP tool adapter", () => {
       skills: [entry],
       agents: [],
       plugins: [],
-    }, false);
+    }, 0, claim, false);
 
     expect(mockPost).not.toHaveBeenCalled();
     expect(result).toMatchObject({ isError: true });

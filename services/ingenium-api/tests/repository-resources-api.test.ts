@@ -2,17 +2,24 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projects, resetDbForTest } from "ingenium-core";
+import { coordination, getDb, projects, resetDbForTest } from "ingenium-core";
 import { repositoryRouter } from "../lib/routes/repository.js";
+import { errorHandler } from "../lib/middleware/errors.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const directory = mkdtempSync(join(tmpdir(), "ingenium-repository-resources-api-"));
 const projectName = "repository-resources-api";
 let server: Server;
 let baseUrl: string;
+let projectId: string;
+const binding = {
+  workspaceId: "repository-api-workspace",
+  launcherWorktree: "/fixtures/repository-api",
+  storageMappingHash: createHash("sha256").update("repository-api-binding").digest("hex"),
+};
 
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
@@ -55,19 +62,21 @@ beforeAll(async () => {
   process.env.INGENIUM_HOME = join(directory, "home");
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
   resetDbForTest();
-  projects.createProject(projectName);
+  projectId = projects.createProject(projectName).id;
   const app = express();
   app.use(express.json({ limit: "2mb" }));
+  app.use((req, _res, next) => {
+    (req as any).principal = { kind: "service", ...binding };
+    next();
+  });
   app.use("/api/v1/repository", repositoryRouter);
+  app.use(errorHandler);
   server = createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => {
-    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    resolve();
-  }));
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeHttpServer(server);
   resetDbForTest();
   delete process.env.INGENIUM_HOME;
   delete process.env.INGENIUM_CORE_DB_PATH;
@@ -75,52 +84,62 @@ afterAll(async () => {
 });
 
 describe("repository resources sync API", () => {
-  it("provides deterministic dry-run/apply summaries without returning source payloads", async () => {
-    const preview = await request({ manifest: manifest(), dryRun: true });
-    expect(preview.status).toBe(200);
-    expect(preview.body.data).toMatchObject({ dryRun: true, summary: { skill: { created: 1 }, agent: { created: 1 }, plugin: { created: 1 } } });
-
-    const applied = await request({ manifest: manifest(), dryRun: false });
-    expect(applied.status).toBe(200);
-    expect(applied.body.data).toMatchObject({ dryRun: false, summary: { skill: { created: 1 }, agent: { created: 1 }, plugin: { created: 1 } } });
-    expect(JSON.stringify(applied.body)).not.toContain("export {};");
-
-    const repeated = await request({ manifest: manifest(), dryRun: true });
-    expect(repeated.body.data.summary).toMatchObject({ skill: { unchanged: 1 }, agent: { unchanged: 1 }, plugin: { unchanged: 1 } });
+  it("denies unclaimed and stale legacy callers without mutating repository rows", async () => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH!);
+    const before = db.prepare("SELECT COUNT(*) AS count FROM skills WHERE project_id = ?").get(projectId);
+    for (const payload of [
+      { manifest: manifest(), dryRun: false },
+      { manifest: manifest(), dryRun: false, expectedGeneration: 0, claim: { accepted_epoch: 1, fence: 0 } },
+    ]) {
+      expect(await request(payload)).toEqual({
+        status: 409,
+        body: {
+          error: {
+            code: "REPOSITORY_SYNC_COORDINATION_REQUIRED",
+            message: "Use the coordinated repository synchronization endpoint",
+          },
+        },
+      });
+    }
+    expect(db.prepare("SELECT COUNT(*) AS count FROM skills WHERE project_id = ?").get(projectId)).toEqual(before);
   });
 
-  it("rejects malformed and broker manifests with a generic response", async () => {
-    const invalid = await request({ manifest: { version: 2, skills: [], agents: [], plugins: [], commands: [] } });
-    expect(invalid).toEqual({
-      status: 422,
-      body: { error: { code: "INVALID_REPOSITORY_RESOURCES_MANIFEST", message: "Repository resource manifest is invalid" } },
+  it("atomically applies one claimed generation and rejects its stale replay", async () => {
+    const worktreeId = coordination.coordinationWorktreeId(binding.workspaceId, binding.storageMappingHash);
+    const ownershipToken = "A".repeat(32);
+    const registered = coordination.registerCoordinationSession(projectId, {
+      worktreeId, sessionId: "repository-sync-session", incarnation: 1, ownershipToken,
+      ttlMs: 300_000, idempotencyKey: "repository-sync-register",
     });
+    const clientClaimKey = "B".repeat(32);
+    const claimed = coordination.claimCoordinationBatch(projectId, {
+      worktreeId, sessionId: "repository-sync-session", incarnation: 1,
+      expectedRevision: registered.revision, fence: registered.fence, ownershipToken,
+      idempotencyKey: "repository-sync-claim", clientClaimKey, operation: "repository",
+      claims: [{ claim: { kind: "reserved", name: "@repository" } }],
+    });
+    const claim = {
+      worktree_id: worktreeId,
+      session_id: "repository-sync-session",
+      incarnation: 1,
+      expected_revision: claimed.session.revision,
+      fence: claimed.session.fence,
+      ownership_token: ownershipToken,
+      client_claim_key: clientClaimKey,
+      accepted_epoch: claimed.acceptedEpoch,
+    };
+    const body = { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: [], agents: [], plugins: [] }, dryRun: false, expectedGeneration: 0, claim };
+    const response = await fetch(`${baseUrl}/api/v1/repository/sync?project=${projectName}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const applied = await response.json();
+    expect(response.status, JSON.stringify(applied)).toBe(200);
+    expect(applied.data).toMatchObject({ dryRun: false, generation: 1, manifestHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
 
-    const protectedManifest = manifest();
-    protectedManifest.agents[0]!.name = "ingenium-llm-broker";
-    const protectedResponse = await request({ manifest: protectedManifest });
-    expect(protectedResponse.status).toBe(422);
-    expect(protectedResponse.body.error.code).toBe("INVALID_REPOSITORY_RESOURCES_MANIFEST");
-  });
-
-  it("rejects unsafe plugin sources and secret-like option keys with the generic contract", async () => {
-    const unsafeSource = manifest();
-    unsafeSource.plugins[0]!.path = ".env/plugin.ts";
-    const unsafeSourceResponse = await request({ manifest: unsafeSource });
-    expect(unsafeSourceResponse).toEqual({
-      status: 422,
-      body: { error: { code: "INVALID_REPOSITORY_RESOURCES_MANIFEST", message: "Repository resource manifest is invalid" } },
+    const stale = await fetch(`${baseUrl}/api/v1/repository/sync?project=${projectName}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-
-    const secretOptionsManifest = manifest();
-    secretOptionsManifest.plugins[0] = entry("plugin:api", {
-      path: ".opencode/plugins/api-plugin.ts", name: "api-plugin", source: "export {};\n", fileType: "regular", isSymlink: false,
-      enabled: true, order: 0, options: { apiKey: "do-not-persist" },
-    });
-    const secretOptionsResponse = await request({ manifest: secretOptionsManifest });
-    expect(secretOptionsResponse).toEqual({
-      status: 422,
-      body: { error: { code: "INVALID_REPOSITORY_RESOURCES_MANIFEST", message: "Repository resource manifest is invalid" } },
-    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe("MANIFEST_GENERATION_CONFLICT");
   });
 });

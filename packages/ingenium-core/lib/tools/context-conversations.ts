@@ -707,13 +707,12 @@ export function createContextConversation(
   return result.conversation;
 }
 
-/** Append one immutable message only when the caller's observed revision is current. */
-export function appendContextMessage(
+function appendParsedContextMessageInTransaction(
+  db: Db,
   projectId: string,
   conversationId: string,
-  input: unknown,
-): ContextMessageAppendResult {
-  const value = parseMessageInput(input);
+  value: ReturnType<typeof parseMessageInput>,
+) {
   const contentHash = sha256(value.content);
   const hash = requestHash({
     role: value.role,
@@ -723,46 +722,145 @@ export function appendContextMessage(
     metadata: value.metadata,
     expectedRevision: value.expectedRevision,
   });
-  const result = execTransaction(() => {
-    const db = getDb(dbPath());
-    requireConversation(db, projectId, conversationId);
-    const existing = idempotencyRow(db, "context_messages", projectId, value.idempotencyKey, conversationId);
-    if (existing) {
-      requireMatchingIdempotency(existing, hash);
-      const message = readMessage(db.prepare(
-        "SELECT * FROM context_messages WHERE project_id = ? AND conversation_id = ? AND id = ?",
-      ).get(projectId, conversationId, existing.id));
-      return { message, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
-    }
+  requireConversation(db, projectId, conversationId);
+  const existing = idempotencyRow(db, "context_messages", projectId, value.idempotencyKey, conversationId);
+  if (existing) {
+    requireMatchingIdempotency(existing, hash);
+    const message = readMessage(db.prepare(
+      "SELECT * FROM context_messages WHERE project_id = ? AND conversation_id = ? AND id = ?",
+    ).get(projectId, conversationId, existing.id));
+    return { message, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
+  }
 
-    requireActiveConversation(db, projectId, conversationId);
-    const revision = currentRevision(db, projectId, conversationId);
-    requireExpectedRevision(revision, value.expectedRevision);
-    const id = randomUUID();
-    const createdAt = now();
-    const inserted = db.prepare(
-      `INSERT INTO context_messages
-       (id, project_id, conversation_id, sequence, role, content, content_hash, request_hash, idempotency_key, tags, priority, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(project_id, conversation_id, idempotency_key) DO NOTHING`,
-    ).run(
-      id, projectId, conversationId, revision, value.role, value.content, contentHash, hash,
-      value.idempotencyKey ?? null, JSON.stringify(value.tags), value.priority, JSON.stringify(value.metadata), createdAt,
-    );
-    if (inserted.changes === 0 && value.idempotencyKey) {
-      const concurrent = idempotencyRow(db, "context_messages", projectId, value.idempotencyKey, conversationId);
-      if (!concurrent) throw new Error("Context message idempotency lookup failed");
-      requireMatchingIdempotency(concurrent, hash);
-      const message = readMessage(db.prepare(
-        "SELECT * FROM context_messages WHERE project_id = ? AND conversation_id = ? AND id = ?",
-      ).get(projectId, conversationId, concurrent.id));
-      return { message, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
-    }
-    const message = readMessage(db.prepare("SELECT * FROM context_messages WHERE id = ?").get(id));
-    return { message, revision: revision + 1, idempotent: false, written: true };
-  });
+  requireActiveConversation(db, projectId, conversationId);
+  const revision = currentRevision(db, projectId, conversationId);
+  requireExpectedRevision(revision, value.expectedRevision);
+  const id = randomUUID();
+  const createdAt = now();
+  const inserted = db.prepare(
+    `INSERT INTO context_messages
+     (id, project_id, conversation_id, sequence, role, content, content_hash, request_hash, idempotency_key, tags, priority, metadata, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_id, conversation_id, idempotency_key) DO NOTHING`,
+  ).run(
+    id, projectId, conversationId, revision, value.role, value.content, contentHash, hash,
+    value.idempotencyKey ?? null, JSON.stringify(value.tags), value.priority, JSON.stringify(value.metadata), createdAt,
+  );
+  if (inserted.changes === 0 && value.idempotencyKey) {
+    const concurrent = idempotencyRow(db, "context_messages", projectId, value.idempotencyKey, conversationId);
+    if (!concurrent) throw new Error("Context message idempotency lookup failed");
+    requireMatchingIdempotency(concurrent, hash);
+    const message = readMessage(db.prepare(
+      "SELECT * FROM context_messages WHERE project_id = ? AND conversation_id = ? AND id = ?",
+    ).get(projectId, conversationId, concurrent.id));
+    return { message, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
+  }
+  const message = readMessage(db.prepare("SELECT * FROM context_messages WHERE id = ?").get(id));
+  return { message, revision: revision + 1, idempotent: false, written: true };
+}
+
+/** Share the Context CAS primitive with API-internal aggregate transactions. */
+export function appendContextMessageInTransaction(
+  db: Db,
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+) {
+  return appendParsedContextMessageInTransaction(db, projectId, conversationId, parseMessageInput(input));
+}
+
+/** Append one immutable message only when the caller's observed revision is current. */
+export function appendContextMessage(
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+): ContextMessageAppendResult {
+  const value = parseMessageInput(input);
+  const result = execTransaction(() => appendParsedContextMessageInTransaction(getDb(dbPath()), projectId, conversationId, value));
   if (result.written) checkpointAfterWrite();
   return { message: result.message, revision: result.revision, idempotent: result.idempotent };
+}
+
+function createContextCheckpointInTransaction(
+  db: Db,
+  projectId: string,
+  conversationId: string,
+  value: ReturnType<typeof parseCheckpointInput>,
+) {
+  const hash = requestHash({
+    ragSourceIds: value.ragSourceIds,
+    metadata: value.metadata,
+    expectedRevision: value.expectedRevision,
+  });
+  requireConversation(db, projectId, conversationId);
+  const existing = idempotencyRow(db, "context_checkpoints", projectId, value.idempotencyKey, conversationId);
+  if (existing) {
+    requireMatchingIdempotency(existing, hash);
+    const checkpoint = requireCheckpoint(db, projectId, conversationId, existing.id);
+    return { checkpoint, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
+  }
+
+  requireActiveConversation(db, projectId, conversationId);
+  const revision = currentRevision(db, projectId, conversationId);
+  requireExpectedRevision(revision, value.expectedRevision);
+  if (revision === 0) throw new ContextConversationError("NO_MESSAGES");
+  const messages = db.prepare(
+    `SELECT * FROM context_messages
+     WHERE project_id = ? AND conversation_id = ?
+     ORDER BY sequence ASC`,
+  ).all(projectId, conversationId).map(readMessage);
+
+  if (value.ragSourceIds.length > 0) {
+    const placeholders = value.ragSourceIds.map(() => "?").join(",");
+    const owned = db.prepare(
+      `SELECT source.id FROM rag_sources source
+       JOIN context_conversations conversation ON conversation.project_id = ? AND conversation.id = ?
+       WHERE source.id IN (${placeholders}) AND source.organization_id = conversation.organization_id
+         AND ((conversation.visibility = 'private' AND source.visibility = 'restricted' AND source.owner_user_id = conversation.owner_user_id)
+           OR (conversation.visibility = 'organization' AND source.visibility = 'organization')
+           OR (conversation.visibility = 'project' AND source.visibility = 'project' AND source.project_id = conversation.project_id))`,
+    ).all(projectId, conversationId, ...value.ragSourceIds) as Array<{ id: string }>;
+    if (owned.length !== value.ragSourceIds.length) {
+      throw new ContextConversationError("RAG_SOURCE_NOT_FOUND");
+    }
+  }
+
+  const sequence = (db.prepare(
+    `SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence
+     FROM context_checkpoints
+     WHERE project_id = ? AND conversation_id = ?`,
+  ).get(projectId, conversationId) as { sequence: number }).sequence;
+  const id = randomUUID();
+  const createdAt = now();
+  const throughMessage = messages[messages.length - 1]!;
+  const inserted = db.prepare(
+    `INSERT INTO context_checkpoints
+     (id, project_id, conversation_id, sequence, through_message_id, message_count, state_hash, request_hash, idempotency_key, metadata, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_id, conversation_id, idempotency_key) DO NOTHING`,
+  ).run(
+    id, projectId, conversationId, sequence, throughMessage.id, messages.length,
+    checkpointStateHash(messages), hash, value.idempotencyKey ?? null, JSON.stringify(value.metadata), createdAt,
+  );
+  if (inserted.changes === 0 && value.idempotencyKey) {
+    const concurrent = idempotencyRow(db, "context_checkpoints", projectId, value.idempotencyKey, conversationId);
+    if (!concurrent) throw new Error("Context checkpoint idempotency lookup failed");
+    requireMatchingIdempotency(concurrent, hash);
+    return {
+      checkpoint: requireCheckpoint(db, projectId, conversationId, concurrent.id),
+      revision: currentRevision(db, projectId, conversationId),
+      idempotent: true,
+      written: false,
+    };
+  }
+  insertCheckpointRagSources(
+    db,
+    projectId,
+    id,
+    value.ragSourceIds.map((rag_source_id, ordinal) => ({ rag_source_id, ordinal, metadata: "{}" })),
+    createdAt,
+  );
+  return { checkpoint: requireCheckpoint(db, projectId, conversationId, id), revision, idempotent: false, written: true };
 }
 
 /** Record a hash-addressed snapshot of the full stream visible at expectedRevision. */
@@ -772,83 +870,7 @@ export function createContextCheckpoint(
   input: unknown,
 ): ContextCheckpointCreateResult {
   const value = parseCheckpointInput(input);
-  const hash = requestHash({
-    ragSourceIds: value.ragSourceIds,
-    metadata: value.metadata,
-    expectedRevision: value.expectedRevision,
-  });
-  const result = execTransaction(() => {
-    const db = getDb(dbPath());
-    requireConversation(db, projectId, conversationId);
-    const existing = idempotencyRow(db, "context_checkpoints", projectId, value.idempotencyKey, conversationId);
-    if (existing) {
-      requireMatchingIdempotency(existing, hash);
-      const checkpoint = requireCheckpoint(db, projectId, conversationId, existing.id);
-      return { checkpoint, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
-    }
-
-    requireActiveConversation(db, projectId, conversationId);
-    const revision = currentRevision(db, projectId, conversationId);
-    requireExpectedRevision(revision, value.expectedRevision);
-    if (revision === 0) throw new ContextConversationError("NO_MESSAGES");
-    const messages = db.prepare(
-      `SELECT * FROM context_messages
-       WHERE project_id = ? AND conversation_id = ?
-       ORDER BY sequence ASC`,
-    ).all(projectId, conversationId).map(readMessage);
-
-    if (value.ragSourceIds.length > 0) {
-      const placeholders = value.ragSourceIds.map(() => "?").join(",");
-      const owned = db.prepare(
-        `SELECT source.id FROM rag_sources source
-         JOIN context_conversations conversation ON conversation.project_id = ? AND conversation.id = ?
-         WHERE source.id IN (${placeholders}) AND source.organization_id = conversation.organization_id
-           AND ((conversation.visibility = 'private' AND source.visibility = 'restricted' AND source.owner_user_id = conversation.owner_user_id)
-             OR (conversation.visibility = 'organization' AND source.visibility = 'organization')
-             OR (conversation.visibility = 'project' AND source.visibility = 'project' AND source.project_id = conversation.project_id))`,
-      ).all(projectId, conversationId, ...value.ragSourceIds) as Array<{ id: string }>;
-      if (owned.length !== value.ragSourceIds.length) {
-        throw new ContextConversationError("RAG_SOURCE_NOT_FOUND");
-      }
-    }
-
-    const sequence = (db.prepare(
-      `SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence
-       FROM context_checkpoints
-       WHERE project_id = ? AND conversation_id = ?`,
-    ).get(projectId, conversationId) as { sequence: number }).sequence;
-    const id = randomUUID();
-    const createdAt = now();
-    const throughMessage = messages[messages.length - 1]!;
-    const inserted = db.prepare(
-      `INSERT INTO context_checkpoints
-       (id, project_id, conversation_id, sequence, through_message_id, message_count, state_hash, request_hash, idempotency_key, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(project_id, conversation_id, idempotency_key) DO NOTHING`,
-    ).run(
-      id, projectId, conversationId, sequence, throughMessage.id, messages.length,
-      checkpointStateHash(messages), hash, value.idempotencyKey ?? null, JSON.stringify(value.metadata), createdAt,
-    );
-    if (inserted.changes === 0 && value.idempotencyKey) {
-      const concurrent = idempotencyRow(db, "context_checkpoints", projectId, value.idempotencyKey, conversationId);
-      if (!concurrent) throw new Error("Context checkpoint idempotency lookup failed");
-      requireMatchingIdempotency(concurrent, hash);
-      return {
-        checkpoint: requireCheckpoint(db, projectId, conversationId, concurrent.id),
-        revision: currentRevision(db, projectId, conversationId),
-        idempotent: true,
-        written: false,
-      };
-    }
-    insertCheckpointRagSources(
-      db,
-      projectId,
-      id,
-      value.ragSourceIds.map((rag_source_id, ordinal) => ({ rag_source_id, ordinal, metadata: "{}" })),
-      createdAt,
-    );
-    return { checkpoint: requireCheckpoint(db, projectId, conversationId, id), revision, idempotent: false, written: true };
-  });
+  const result = execTransaction(() => createContextCheckpointInTransaction(getDb(dbPath()), projectId, conversationId, value));
   if (result.written) checkpointAfterWrite();
   return { checkpoint: result.checkpoint, revision: result.revision, idempotent: result.idempotent };
 }
@@ -1098,8 +1120,9 @@ export function listContextConversations(
          (SELECT count(*) FROM context_messages m WHERE m.project_id = c.project_id AND m.conversation_id = c.id) AS message_count,
          (SELECT count(*) FROM context_checkpoints cp WHERE cp.project_id = c.project_id AND cp.conversation_id = c.id) AS checkpoint_count,
          (SELECT id FROM context_messages m WHERE m.project_id = c.project_id AND m.conversation_id = c.id ORDER BY m.sequence DESC LIMIT 1) AS latest_message_id
-       FROM context_conversations c
-        WHERE c.project_id = ?
+        FROM context_conversations c
+         WHERE c.project_id = ?
+          AND json_extract(c.metadata, '$.kind') IS NOT 'coordination_operational_memory'
           AND COALESCE((
             SELECT event_type FROM context_checkpoint_audit_events audit
             WHERE audit.project_id = c.project_id AND audit.conversation_id = c.id
@@ -1114,8 +1137,9 @@ export function listContextConversations(
          (SELECT count(*) FROM context_messages m WHERE m.project_id = c.project_id AND m.conversation_id = c.id) AS message_count,
          (SELECT count(*) FROM context_checkpoints cp WHERE cp.project_id = c.project_id AND cp.conversation_id = c.id) AS checkpoint_count,
          (SELECT id FROM context_messages m WHERE m.project_id = c.project_id AND m.conversation_id = c.id ORDER BY m.sequence DESC LIMIT 1) AS latest_message_id
-       FROM context_conversations c
-        WHERE c.project_id = ?
+        FROM context_conversations c
+         WHERE c.project_id = ?
+          AND json_extract(c.metadata, '$.kind') IS NOT 'coordination_operational_memory'
           AND COALESCE((
             SELECT event_type FROM context_checkpoint_audit_events audit
             WHERE audit.project_id = c.project_id AND audit.conversation_id = c.id

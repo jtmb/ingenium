@@ -320,9 +320,9 @@ describe("agent resource sync", () => {
     const tokenPath = join(opencodeDir, ".ingenium-repository-sync-credential");
     writeFileSync(tokenPath, "test_resource_sync_token_0123456789\n", { mode: 0o600 });
     chmodSync(tokenPath, 0o600);
-    vi.stubEnv("INGENIUM_MCP_AUDIENCE", "repository-sync");
-    vi.stubEnv("INGENIUM_MCP_CREDENTIAL", "{file:.opencode/.ingenium-repository-sync-credential}");
-    vi.stubEnv("INGENIUM_MCP_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
+    vi.stubEnv("INGENIUM_PROJECT", "project");
+    vi.stubEnv("INGENIUM_WORKSPACE_ID", "repository-workspace");
+    vi.stubEnv("INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -447,6 +447,33 @@ describe("agent resource sync", () => {
 
     expect(result).toMatchObject({ pushed: 1, conflicts: 0, errors: 0 });
     expect(manifest.resources.config.hash).toBe(hashContent(source));
+  });
+
+  it("preserves the prior command baseline when a disk push fails", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
+    const commandPath = join(worktree, ".opencode", "commands", "local-command.md");
+    mkdirSync(join(commandPath, ".."), { recursive: true });
+    writeFileSync(commandPath, "# Disk changed");
+    const baseline = hashContent("# Baseline");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{
+        name: "local-command",
+        file_path: ".opencode/commands/local-command.md",
+        content: "# Baseline",
+      }] }) })
+      .mockResolvedValueOnce({ ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+    const manifest: SyncManifest = {
+      version: 1,
+      project: "project",
+      lastFullSync: "",
+      resources: { skills: {}, agents: {}, plugins: {}, commands: { "local-command": baseline }, config: {} },
+    };
+
+    const result = await syncCommands(worktree, "project", manifest, { isInitialSync: false });
+
+    expect(result).toMatchObject({ pushed: 0, errors: 1, conflicts: 0 });
+    expect(manifest.resources.commands["local-command"]).toBe(baseline);
   });
 });
 
@@ -699,21 +726,62 @@ describe("legacy skill tombstone cleanup", () => {
     vi.stubEnv("INGENIUM_WORKSPACE_ID", "cleanup-workspace");
     vi.stubEnv("INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
     const legacyPath = join(worktree, ".opencode", "skills", "legacy-skill");
-    mockCallMcpTool.mockImplementation(async () => {
+    mockCallMcpTool.mockImplementation(async (_worktree, _tool, args) => {
       return { content: [{ type: "text", text: JSON.stringify({
         docs: { summary: {} },
         resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+        generation: (args.expectedGeneration as number) + 1,
+        manifestHash: "a".repeat(64),
       }) }] };
     });
+    const claim = (manifestGeneration: number) => ({
+      manifestGeneration,
+      proof: () => ({}),
+      renew: vi.fn(async () => undefined),
+      verify: vi.fn(async () => undefined),
+      quarantine: vi.fn(async () => undefined),
+    });
 
-    const docsOnly = await repositorySync(worktree, { scope: "docs" });
+    const docsOnly = await repositorySync(worktree, { scope: "docs", claim: claim(0) });
     expect(docsOnly.docs.errors).toBe(0);
     expect(existsSync(legacyPath)).toBe(true);
-    const result = await repositorySync(worktree);
+    const result = await repositorySync(worktree, { claim: claim(1) });
 
     expect(result.skills.errors).toBe(0);
     expect(mockCallMcpTool).toHaveBeenCalledTimes(2);
     expect(existsSync(legacyPath)).toBe(false);
+  });
+
+  it("performs zero cleanup filesystem mutations when repository ownership verification fails", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-denied-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const credentialPath = join(worktree, ".opencode", ".ingenium-repository-sync-credential");
+    writeFileSync(credentialPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    chmodSync(credentialPath, 0o600);
+    vi.stubEnv("INGENIUM_PROJECT", "cleanup-denied-project");
+    vi.stubEnv("INGENIUM_WORKSPACE_ID", "cleanup-denied-workspace");
+    vi.stubEnv("INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
+    const fileSystem = {
+      mkdir: vi.fn(),
+      rename: vi.fn(),
+      unlink: vi.fn(),
+      rmdir: vi.fn(),
+    };
+
+    await expect(repositorySync(worktree, {
+      cleanupFileSystem: fileSystem,
+      claim: {
+        manifestGeneration: 0,
+        proof: () => ({}),
+        renew: vi.fn(async () => undefined),
+        verify: vi.fn(async () => { throw new Error("stale claim"); }),
+        quarantine: vi.fn(async () => undefined),
+      },
+    })).rejects.toThrow("stale claim");
+
+    expect(Object.values(fileSystem).every((operation) => operation.mock.calls.length === 0)).toBe(true);
+    expect(existsSync(join(worktree, ".opencode", "skills", "legacy-skill"))).toBe(true);
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
   });
 });
 
@@ -738,8 +806,12 @@ describe("incremental resource sync recovery", () => {
 
   it("does not consume the idle throttle when an incremental reconciliation fails", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-idle-"));
+    mkdirSync(join(worktree, ".opencode"));
+    writeFileSync(join(worktree, ".opencode", ".ingenium-repository-sync-credential"), `${"r".repeat(32)}\n`, { mode: 0o600 });
     const originalProject = process.env.INGENIUM_PROJECT;
+    const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
     process.env.INGENIUM_PROJECT = "idle-recovery-project";
+    process.env.INGENIUM_WORKSPACE_ID = "idle-recovery-workspace";
     let calls = 0;
     mockCallMcpTool.mockImplementation(async () => {
       calls += 1;
@@ -747,6 +819,8 @@ describe("incremental resource sync recovery", () => {
       return { content: [{ type: "text", text: JSON.stringify({
         docs: { summary: {} },
         resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+        generation: 1,
+        manifestHash: "a".repeat(64),
       }) }] };
     });
 
@@ -762,6 +836,8 @@ describe("incremental resource sync recovery", () => {
     } finally {
       if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
       else process.env.INGENIUM_PROJECT = originalProject;
+      if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+      else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
     }
   });
 });

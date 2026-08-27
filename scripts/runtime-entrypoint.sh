@@ -6,7 +6,7 @@ if [ "$(id -u)" -ne 1000 ] || [ "$(id -g)" -ne 1000 ]; then
   exit 1
 fi
 
-for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME INGENIUM_API_URL INGENIUM_PROJECT INGENIUM_PROJECT_ID INGENIUM_ORGANIZATION_ID INGENIUM_RUNTIME_ID INGENIUM_RUNTIME_OWNER_ID INGENIUM_WORKSPACE_ID; do
+for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME INGENIUM_API_URL INGENIUM_PROJECT INGENIUM_PROJECT_ID INGENIUM_ORGANIZATION_ID INGENIUM_RUNTIME_ID INGENIUM_RUNTIME_OWNER_ID INGENIUM_WORKSPACE_ID INGENIUM_STORAGE_MAPPING_HASH; do
   eval "value=\${$name:-}"
   if [ -z "$value" ]; then
     echo "ERROR: runtime identity is incomplete"
@@ -43,11 +43,13 @@ fi
 
 mkdir -p \
   "/home/appuser/.config/opencode/agents" \
+  "/home/appuser/.config/opencode/runtime" \
   "/home/appuser/.local/share/opencode/log" \
   "/home/appuser/.local/state" \
   "/home/appuser/vscode-data/user-data" \
   "/home/appuser/vscode-data/extensions"
 chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state" "/home/appuser/vscode-data"
+chmod 0700 "/home/appuser/.config/opencode/runtime"
 
 /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/agents
 
@@ -67,15 +69,17 @@ cat > "$config_file" <<EOF
         "INGENIUM_MCP_AUDIENCE": "runtime",
         "INGENIUM_PROJECT": "$INGENIUM_PROJECT",
         "INGENIUM_WORKSPACE_ID": "$INGENIUM_WORKSPACE_ID",
+        "INGENIUM_STORAGE_MAPPING_HASH": "$INGENIUM_STORAGE_MAPPING_HASH",
         "INGENIUM_WORKTREE": "/workspace"
       }
     }
   },
   "plugin": [
-    "/app/packages/ingenium-extension/plugins/observer.ts",
-    "/app/packages/ingenium-extension/plugins/auto-observer.ts",
-    "/app/packages/ingenium-extension/plugins/resource-sync.ts",
-    "/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
   ]
 }
 EOF

@@ -666,19 +666,18 @@ function applyPlanInTransaction(projectId: string, plan: SyncPlan): RepositoryDo
  * already managed by this project; unmanaged Docs Workspace pages are untouched.
  */
 export function syncRepositoryDocs(projectId: string, manifestInput: unknown, dryRun = false): RepositoryDocsSyncResult {
-  const manifest = validateManifest(manifestInput);
-  if (dryRun) return resultForPlan(buildPlan(getDb(dbPath()), projectId, manifest), true);
-
-  const result = execTransaction(() => {
-    const plan = buildPlan(getDb(dbPath()), projectId, manifest);
-    return applyPlanInTransaction(projectId, plan);
-  });
+  if (dryRun) return syncRepositoryDocsInTransaction(projectId, manifestInput, true);
+  const result = execTransaction(() => syncRepositoryDocsInTransaction(projectId, manifestInput, false));
   if (
     result.operations.some((operation) => operation.kind !== "unchanged")
     || result.space.action === "created"
     || result.space.action === "repaired"
-  ) {
-    checkpointAfterWrite();
-  }
+  ) checkpointAfterWrite();
   return result;
+}
+
+export function syncRepositoryDocsInTransaction(projectId: string, manifestInput: unknown, dryRun = false): RepositoryDocsSyncResult {
+  const manifest = validateManifest(manifestInput);
+  if (dryRun) return resultForPlan(buildPlan(getDb(dbPath()), projectId, manifest), true);
+  return applyPlanInTransaction(projectId, buildPlan(getDb(dbPath()), projectId, manifest));
 }

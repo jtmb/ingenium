@@ -3,6 +3,10 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiRequestHeaders } from "../api-auth.js";
+import {
+  credentialPurposeFromEnvironment,
+  resolveExtensionBinding,
+} from "../extension-binding.js";
 import { ensureExtensionProject, resolveExtensionProject } from "../project-resolver.js";
 
 export type McpLauncherPreflight =
@@ -31,12 +35,18 @@ export function preflightMcpLauncher(
   const resolvedWorktree = resolve(worktree);
   let project: string;
   try {
-    project = resolveExtensionProject(resolvedWorktree);
+    const purpose = credentialPurposeFromEnvironment();
+    const binding = resolveExtensionBinding(resolvedWorktree, { purpose });
+    project = resolveExtensionProject(resolvedWorktree, binding.project);
+    if (!apiRequestHeaders(resolvedWorktree, undefined, { binding }).has("Authorization")) {
+      return { ok: false, message: MISSING_TOKEN_MESSAGE };
+    }
   } catch {
-    return { ok: false, message: INVALID_PROJECT_MESSAGE };
-  }
-
-  if (!apiRequestHeaders(resolvedWorktree).has("Authorization") || !process.env.INGENIUM_WORKSPACE_ID) {
+    try {
+      resolveExtensionProject(resolvedWorktree);
+    } catch {
+      return { ok: false, message: INVALID_PROJECT_MESSAGE };
+    }
     return { ok: false, message: MISSING_TOKEN_MESSAGE };
   }
 
@@ -76,15 +86,20 @@ export async function runMcpLauncher(
     // Preserve the validated preflight result rather than repeating resolution
     // after its dynamic import has started.
     const ensureProject = options.ensureProject ?? ((resolvedWorktree: string, apiBase: string, project: string) =>
-      ensureExtensionProject(resolvedWorktree, apiBase, project));
+      ensureExtensionProject(resolvedWorktree, apiBase, project, {
+        credentialPurpose: credentialPurposeFromEnvironment(),
+      }));
     const resolvedWorktree = resolve(worktree);
+    const binding = resolveExtensionBinding(resolvedWorktree, { purpose: credentialPurposeFromEnvironment() });
     const project = await ensureProject(
       resolvedWorktree,
-      process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1",
+      binding.apiUrl,
       preflight.project,
     );
     process.env.INGENIUM_PROJECT = project;
     process.env.INGENIUM_WORKTREE = resolvedWorktree;
+    process.env.INGENIUM_API_URL = binding.apiUrl;
+    process.env.INGENIUM_API_URL_TRUSTED = "1";
     const importTransport = options.importTransport ?? ((transportUrl: URL) => import(transportUrl.href));
     await importTransport(getMcpTransportUrl());
     return 0;

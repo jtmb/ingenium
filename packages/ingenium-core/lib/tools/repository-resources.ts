@@ -549,18 +549,20 @@ function syncPluginsInTransaction(projectId: string, entries: RepositoryPluginEn
 
 /** Preview or apply all non-document repository resources atomically. */
 export function syncRepositoryResources(projectId: string, input: unknown, dryRun = false): RepositoryResourcesSyncResult {
-  const manifest = validateManifest(input);
-  const apply = () => {
-    const skills = syncSkillsInTransaction(projectId, manifest.skills, dryRun);
-    const agents = syncAgentsInTransaction(projectId, manifest.agents, dryRun);
-    const plugins = syncPluginsInTransaction(projectId, manifest.plugins, dryRun);
-    return {
-      dryRun,
-      summary: { skill: skills.summary, agent: agents.summary, plugin: plugins.summary },
-      confirmed: [...skills.confirmed, ...agents.confirmed, ...plugins.confirmed],
-    };
-  };
-  const result = dryRun ? apply() : execTransaction(apply);
-  if (!dryRun && result.confirmed.length > 0) checkpointAfterWrite();
+  if (dryRun) return syncRepositoryResourcesInTransaction(projectId, input, true);
+  const result = execTransaction(() => syncRepositoryResourcesInTransaction(projectId, input, false));
+  if (result.confirmed.length > 0) checkpointAfterWrite();
   return result;
+}
+
+export function syncRepositoryResourcesInTransaction(projectId: string, input: unknown, dryRun = false): RepositoryResourcesSyncResult {
+  const manifest = validateManifest(input);
+  const skills = syncSkillsInTransaction(projectId, manifest.skills, dryRun);
+  const agents = syncAgentsInTransaction(projectId, manifest.agents, dryRun);
+  const plugins = syncPluginsInTransaction(projectId, manifest.plugins, dryRun);
+  return {
+    dryRun,
+    summary: { skill: skills.summary, agent: agents.summary, plugin: plugins.summary },
+    confirmed: [...skills.confirmed, ...agents.confirmed, ...plugins.confirmed],
+  };
 }

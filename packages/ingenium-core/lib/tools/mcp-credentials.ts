@@ -20,6 +20,7 @@ export interface McpCredential {
   projectName: string;
   workspaceId: string;
   launcherWorktree: string;
+  storageMappingHash: string;
   securityEpoch: number;
   expiresAt: string;
   revokedAt: string | null;
@@ -49,6 +50,7 @@ type CredentialRow = {
   id: string; service_principal_id: string; kind: McpCredentialKind; audience: McpCredentialAudience;
   name: string; token_prefix: string; scopes_json: string; organization_id: string; project_id: string;
   project_grants_json: string; project_name: string; workspace_id: string; launcher_worktree: string;
+  storage_mapping_hash: string;
   security_epoch: number; expires_at: string; revoked_at: string | null; rotated_to_id: string | null;
   last_used_at: string | null; created_by_user_id: string; created_at: string;
 };
@@ -57,9 +59,11 @@ const SELECT_CREDENTIAL = `SELECT mcp_credentials.id, mcp_credentials.service_pr
   mcp_credentials.audience, mcp_credentials.name, mcp_credentials.token_prefix, mcp_credentials.scopes_json,
   mcp_credentials.organization_id, mcp_credentials.project_id, mcp_credentials.project_grants_json,
   projects.name AS project_name, mcp_credentials.workspace_id, mcp_credentials.launcher_worktree,
+  authorized_workspaces.storage_mapping_hash,
   mcp_credentials.security_epoch, mcp_credentials.expires_at, mcp_credentials.revoked_at,
   mcp_credentials.rotated_to_id, mcp_credentials.last_used_at, mcp_credentials.created_by_user_id,
-  mcp_credentials.created_at FROM mcp_credentials JOIN projects ON projects.id = mcp_credentials.project_id`;
+  mcp_credentials.created_at FROM mcp_credentials JOIN projects ON projects.id = mcp_credentials.project_id
+  JOIN authorized_workspaces ON authorized_workspaces.id = mcp_credentials.workspace_id`;
 
 function normalizeText(value: string, maximum: number, label: string): string {
   const normalized = value.trim();
@@ -115,6 +119,7 @@ function toCredential(row: CredentialRow): McpCredential {
     projectName: row.project_name,
     workspaceId: row.workspace_id,
     launcherWorktree: row.launcher_worktree,
+    storageMappingHash: row.storage_mapping_hash,
     securityEpoch: row.security_epoch,
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
@@ -223,8 +228,7 @@ export function resolveMcpCredential(token: string, audience: McpCredentialAudie
   const timestamp = now.toISOString();
   const runtimeScope = audience === "runtime" ? `
       JOIN runtime_capability_bindings ON runtime_capability_bindings.mcp_credential_id = mcp_credentials.id
-      JOIN runtime_instances ON runtime_instances.id = runtime_capability_bindings.runtime_id
-      JOIN authorized_workspaces ON authorized_workspaces.id = runtime_instances.workspace_id` : "";
+      JOIN runtime_instances ON runtime_instances.id = runtime_capability_bindings.runtime_id` : "";
   const runtimePredicate = audience === "runtime" ? `
       AND runtime_capability_bindings.revoked_at IS NULL AND runtime_capability_bindings.expires_at > ?
       AND runtime_instances.state IN ('PROVISIONING','STARTING','READY','IDLE')

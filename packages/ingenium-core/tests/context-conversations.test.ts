@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -127,6 +127,7 @@ function replaceWithRecoverablePartial063Shape(db: ReturnType<typeof getDb>): vo
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   resetDbForTest();
   if (directory) rmSync(directory, { recursive: true, force: true });
   directory = "";
@@ -563,6 +564,47 @@ describe("immutable context conversations", () => {
       confirmationToken: restoreAuthorization.confirmationToken,
       idempotencyKey: "restore-one",
     })).toMatchObject({ idempotent: true, conversation: { id: restored.conversation.id } });
+  });
+
+  it("excludes coordination memory before conversation pagination and cursor generation", () => {
+    const { first } = setup();
+    vi.useFakeTimers();
+    const timestamps = Array.from({ length: 6 }, (_, index) => `2026-08-24T00:00:0${6 - index}.000Z`);
+    const createAt = (index: number, title: string, hidden = false) => {
+      vi.setSystemTime(new Date(timestamps[index]!));
+      return createContextConversation(first.id, {
+        title,
+        ...(hidden ? { metadata: {
+          kind: "coordination_operational_memory", version: 1, worktreeId: `worktree-${index}`,
+        } } : {}),
+      });
+    };
+    const hiddenHead = createAt(0, "hidden-head", true);
+    const visibleNewest = createAt(1, "visible-newest");
+    const hiddenMiddle = createAt(2, "hidden-middle", true);
+    const visibleMiddle = createAt(3, "visible-middle");
+    const visibleOldest = createAt(4, "visible-oldest");
+    const hiddenTail = createAt(5, "hidden-tail", true);
+    vi.useRealTimers();
+    const visible = [visibleNewest, visibleMiddle, visibleOldest];
+    const hidden = [hiddenHead, hiddenMiddle, hiddenTail];
+    const ordered = [hiddenHead, visibleNewest, hiddenMiddle, visibleMiddle, visibleOldest, hiddenTail];
+
+    const firstPage = listContextConversations(first.id, { limit: 1 });
+    const secondPage = listContextConversations(first.id, { limit: 1, cursor: firstPage.nextCursor! });
+    const thirdPage = listContextConversations(first.id, { limit: 1, cursor: secondPage.nextCursor! });
+
+    expect([firstPage.data[0]?.id, secondPage.data[0]?.id, thirdPage.data[0]?.id])
+      .toEqual(visible.map(({ id }) => id));
+    expect([firstPage.nextCursor, secondPage.nextCursor, thirdPage.nextCursor])
+      .toEqual([expect.any(String), expect.any(String), null]);
+    const decodedCursors = [firstPage.nextCursor!, secondPage.nextCursor!]
+      .map((cursor) => Buffer.from(cursor, "base64url").toString("utf8"));
+    for (const conversation of hidden) {
+      const hiddenTimestamp = timestamps[ordered.findIndex(({ id }) => id === conversation.id)]!;
+      expect(JSON.stringify({ pages: [firstPage, secondPage, thirdPage], decodedCursors }))
+        .not.toMatch(new RegExp(`${conversation.id}|${hiddenTimestamp}`));
+    }
   });
 
   it("previews content-free candidates, requires one-time authorization, and archives reversibly", () => {

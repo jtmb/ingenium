@@ -10,7 +10,12 @@ import { authMiddleware } from "../lib/middleware/auth.js";
 import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
-import { rateLimit } from "../lib/middleware/rate-limit.js";
+import {
+  coordinationRateLimit,
+  rateLimit,
+  recordCandidateAuthenticationFailure,
+  recordCoordinationAttestationFailure,
+} from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
@@ -131,8 +136,10 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
 app.use(rateLimit);
 app.use(authMiddleware);
+app.use(recordCandidateAuthenticationFailure);
 app.use(csrfMiddleware);
 app.use(authorizationMiddleware);
+app.use(recordCoordinationAttestationFailure);
 
 // OpenAI redirects the browser to localhost:1455/auth/callback. The Nginx
 // listener on that port proxies only this exact GET path. authMiddleware owns
@@ -157,6 +164,7 @@ app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/tasks", tasksRouter);
+app.use("/api/v1/coordination", coordinationRateLimit);
 app.use("/api/v1/coordination", coordinationRouter);
 app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);

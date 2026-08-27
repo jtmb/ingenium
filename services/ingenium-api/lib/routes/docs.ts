@@ -1,11 +1,10 @@
 import { Router } from "express";
-import { authorization, docs, organizations, projects, repositoryDocs, MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE, getDb, execTransaction, checkpointAfterWrite } from "ingenium-core";
+import { authorization, docs, organizations, projects, MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE, getDb, execTransaction, checkpointAfterWrite } from "ingenium-core";
 import formidable from "formidable";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync, createReadStream, statSync } from "node:fs";
 import { resolve, extname, basename, sep } from "node:path";
 import { realpathSync } from "node:fs";
-import { requireProject } from "../helpers.js";
 import { authorizationPrincipal } from "../authorization-policy.js";
 
 // Converts snake_case core types → camelCase wire format.
@@ -251,40 +250,13 @@ router.use((req, res, next) => {
 });
 
 
-// POST /repository/sync?project=... — repository-authoritative Markdown manifest
-// The API receives content only as an authenticated manifest and never resolves
-// repository paths itself. This keeps filesystem authority in the extension and
-// makes dry-run/apply deterministic across hosts.
-router.post("/repository/sync", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-
-  const body = req.body;
-  const hasValidEnvelope = body !== null && typeof body === "object" && !Array.isArray(body)
-    && Object.keys(body).every((key) => key === "manifest" || key === "dryRun")
-    && Object.prototype.hasOwnProperty.call(body, "manifest")
-    && (body.dryRun === undefined || typeof body.dryRun === "boolean");
-  if (!hasValidEnvelope) {
-    res.status(422).json({ error: { code: "INVALID_REPOSITORY_DOCS_MANIFEST", message: "Repository documentation manifest is invalid" } });
-    return;
-  }
-
-  try {
-    const result = repositoryDocs.syncRepositoryDocs(projectId, body.manifest, body.dryRun === true);
-    res.json({ data: result });
-  } catch (error) {
-    // Manifest contents can include documentation text. Do not log or return an
-    // exception because it could disclose a source fragment or a secret match.
-    if (error instanceof repositoryDocs.RepositoryDocsManifestError) {
-      res.status(422).json({ error: { code: "INVALID_REPOSITORY_DOCS_MANIFEST", message: "Repository documentation manifest is invalid" } });
-      return;
-    }
-    if (error instanceof repositoryDocs.RepositoryDocsSpaceConflictError) {
-      res.status(409).json({ error: { code: "REPOSITORY_DOCS_SPACE_CONFLICT", message: "Repository documentation space conflicts with an existing space" } });
-      return;
-    }
-    res.status(500).json({ error: { code: "REPOSITORY_DOCS_SYNC_FAILED", message: "Repository documentation synchronization failed" } });
-  }
+router.post("/repository/sync", (_req, res) => {
+  res.status(409).json({
+    error: {
+      code: "REPOSITORY_SYNC_COORDINATION_REQUIRED",
+      message: "Use the coordinated repository synchronization endpoint",
+    },
+  });
 });
 
 // ── SPACES ────────────────────────────────────────────────────────────────────

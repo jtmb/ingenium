@@ -24,7 +24,9 @@ describe("MCP server startup", () => {
 
     expect(source).toContain('const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";');
     expect(source).toContain("let childGateway: ChildMcpGateway | null = null;");
-    expect(source).toContain('const preflight = await api.get("/auth/preflight");');
+    expect(source).toContain('const preflight = await api.settled.get("/auth/preflight");');
+    expect(source).toContain('if (preflight.status === 429) throw new Error("MCP_AUTH_PREFLIGHT_RATE_LIMITED");');
+    expect(source).toContain('if (!preflight.ok) throw new Error("MCP_AUTH_PREFLIGHT_UNAVAILABLE");');
     expect(source).toContain("binding,");
     expect(source).toContain("if (childGateway) await childGateway.start();");
     expect(source).toContain("if (childGateway) await childGateway.shutdown();");

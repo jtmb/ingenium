@@ -45,7 +45,7 @@ const ADMIN = new Set([
 
 const EXECUTE = new Set([
   "setting_test_llm", "repository_sync", "skill_sync", "skill_consolidate", "skill_sync_all", "skill_sync_all_preview", "synthesis_run", "synthesis_cross_project", "extraction_run",
-  "task_reserve", "task_release", "coordination_update", "coordination_claim", "coordination_release", "config_sync", "server_update", "server_sync_all", "agent_sync",
+  "task_reserve", "task_release", "config_sync", "server_update", "server_sync_all", "agent_sync",
   "email_send", "email_triage", "email_suggest", "email_draft_response", "email_watch_start", "email_account_test", "email_oauth_url", "email_oauth_exchange", "email_review_draft", "email_sync", "email_watch_stop",
   "job_run", "job_run_cancel", "job_suggest", "docs_ask", "provider_connect", "provider_disconnect", "vault_password_gen",
 ]);
@@ -71,7 +71,7 @@ const ORGANIZATION = new Set(["project_init"]);
 const UNBOUND = new Set(["project_list", "project_init", "project_delete", "project_restore", "project_list_archived", "project_purge", "project_set_global", "project_rename", "project_detail", "project_migrate_workspace", "health_check"]);
 const WRITE = new Set([
   "setting_set", "skill_create", "skill_update", "skill_lineage_create", "skill_proposal_create", "skill_proposal_submit", "observe", "observation_update", "observation_enrich", "personality_set_trait", "personality_trait_dismiss",
-  "task_create", "task_move", "task_complete", "task_update", "task_comment", "task_link", "task_board_config_set", "task_subtask_create", "task_comment_edit", "task_comment_react", "task_notification_read", "task_bulk_update",
+  "task_create", "task_move", "task_complete", "task_update", "task_comment", "task_link", "task_board_config_set", "task_subtask_create", "task_comment_edit", "task_comment_react", "task_notification_read", "task_bulk_update", "coordination_update", "coordination_claim", "coordination_release", "coordination_handoff",
   "plan_save", "context_update", "context_upload_file", "context_conversation_create", "context_message_append", "context_checkpoint_create", "project_init", "plugin_create", "plugin_update", "command_create", "command_update", "config_set", "server_add", "server_remove", "agent_create", "agent_update",
   "email_draft", "email_account_create", "email_move", "email_set_flags", "job_create", "job_update", "pipeline_event_log", "docs_create_space", "docs_update_space", "docs_create_page", "docs_update_page", "docs_publish_page", "docs_move_page", "docs_save_draft", "docs_create_comment", "docs_resolve_comment", "docs_add_tag", "docs_remove_tag", "docs_create_template", "docs_update_template", "docs_link_project", "docs_unlink_project", "docs_toggle_favorite", "docs_import_pages", "docs_ingest", "docs_rag_reingest", "vault_item_create", "vault_item_update", "backup_create",
   "synthesize_observations", "auto_observe_now",
@@ -88,13 +88,20 @@ export function explicitMcpAuthorizationPolicy(toolName: string, category: strin
     : INSTALLATION.has(transportName) ? "installation"
     : ORGANIZATION.has(transportName) ? "organization"
     : "project";
-  const resource = transportName === "repository_sync" ? "repository" : category.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const resource = transportName === "repository_sync" ? "repository"
+    : transportName.startsWith("coordination_") ? "coordination"
+    : category.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const repositoryCoordination = new Set(["coordination_update", "coordination_claim", "coordination_release"]);
   return {
     action: `${resource}.${permission}`,
     resource,
     permission,
     target,
-    scopes: [transportName === "repository_sync" ? "repository:sync" : `${resource}:${permission}`],
+    scopes: [transportName === "repository_sync" ? "repository:sync"
+      : resource === "coordination" ? `coordination:${permission === "read" ? "read" : "write"}`
+      : `${resource}:${permission}`,
+      ...(repositoryCoordination.has(transportName) ? ["repository:sync"] : []),
+    ],
     launcherBinding: UNBOUND.has(transportName) || target === "installation" ? "none" : "required",
   };
 }

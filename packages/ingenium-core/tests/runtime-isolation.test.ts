@@ -9,6 +9,7 @@ import { createOrganization } from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
 import { createServicePrincipal } from "../lib/tools/security-tokens.js";
 import { createSession } from "../lib/tools/authentication.js";
+import { coordinationWorktreeId, registerCoordinationSession } from "../lib/tools/coordination.js";
 import { createMcpCredential, resolveMcpCredential } from "../lib/tools/mcp-credentials.js";
 import {
   authorizeWorkspace,
@@ -22,8 +23,10 @@ import {
   issueRuntimeLaunchTicket,
   issueRuntimeBrowserLaunchTicket,
   recordRuntimeActivity,
+  recordRuntimeCapabilityActivity,
   recordRuntimeHealth,
   resolveRuntimeBrowserSession,
+  revokeAuthorizedWorkspace,
   revokeRuntimeCapability,
   revokeRuntimeBrowserSessionsForUser,
   RuntimeConflictError,
@@ -147,10 +150,49 @@ describe("AUTH-108 runtime isolation", () => {
       actorType: "manager",
       actorId: "manager",
     });
-    expect(resolveMcpCredential(foreignCredential.token, "runtime")?.projectId).toBe(second.project.id);
+    expect(resolveMcpCredential(foreignCredential.token, "runtime")).toMatchObject({
+      projectId: second.project.id,
+      workspaceId: "workspace-two",
+      storageMappingHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     expect(resolveMcpCredential(foreignCredential.token, "mcp")).toBeUndefined();
     revokeRuntimeCapability(foreignRuntime.id);
     expect(resolveMcpCredential(foreignCredential.token, "runtime")).toBeUndefined();
+  });
+
+  it("retains a revoked workspace tombstone while authorizing its canonical storage replacement", () => {
+    const scope = tenancy("supersession");
+    const storagePath = "/srv/supersession/repository";
+    const original = authorizeWorkspace({
+      id: "acceptance-workspace",
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      ownerUserId: scope.user.id,
+      storagePath,
+    });
+    let runtime = createRuntimeInstance(original.id, limits);
+    runtime = transitionRuntime({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      toState: "REVOKED",
+      actorType: "manager",
+      actorId: "manager",
+    });
+    const revoked = revokeAuthorizedWorkspace(original.id, new Date("2026-08-25T00:00:00.000Z"));
+    const replacement = authorizeWorkspace({
+      id: "shared-memory-workspace",
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      ownerUserId: scope.user.id,
+      storagePath,
+    });
+
+    expect(revoked).toMatchObject({ id: original.id, status: "revoked", securityEpoch: 1 });
+    expect(replacement).toMatchObject({ id: "shared-memory-workspace", status: "authorized", storagePath });
+    expect(revokeAuthorizedWorkspace(original.id, new Date("2026-08-26T00:00:00.000Z"))).toEqual(revoked);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    resetDbForTest();
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).not.toThrow();
   });
 
   it("uses CAS leases, bounded lifecycle, activity-backed idle state, revoke, and orphan recovery", () => {
@@ -224,6 +266,79 @@ describe("AUTH-108 runtime isolation", () => {
     ]);
   });
 
+  it("renews only the capability-bound runtime with a live coordination peer and makes replays inert", () => {
+    const scope = tenancy("capability-activity");
+    const workspace = authorizeWorkspace({
+      id: "workspace-capability-activity",
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      ownerUserId: scope.user.id,
+      storagePath: "/srv/capability/activity",
+    });
+    const credential = createMcpCredential({
+      servicePrincipalId: createServicePrincipal(scope.organizationId, "runtime activity"),
+      kind: "runtime",
+      audience: "runtime",
+      name: "runtime activity",
+      scopes: ["child-mcp:runtime", "runtime:activity"],
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      workspaceId: workspace.id,
+      launcherWorktree: workspace.storagePath,
+      expiresAt: new Date(Date.now() + 600_000),
+      createdByUserId: scope.user.id,
+    });
+    const observedAt = new Date();
+    let runtime = createRuntimeInstance(workspace.id, limits);
+    bindRuntimeCapability(runtime.id, credential.id);
+    runtime = transitionRuntime({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      toState: "PROVISIONING",
+      actorType: "manager",
+      actorId: "manager",
+      idleExpiresAt: new Date(observedAt.getTime() + 1_000),
+      absoluteExpiresAt: new Date(observedAt.getTime() + 600_000),
+    });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "manager" });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "reconciler" });
+    const worktreeId = coordinationWorktreeId(workspace.id, workspace.storageMappingHash);
+    registerCoordinationSession(scope.project.id, {
+      worktreeId,
+      sessionId: "session-capability-activity",
+      incarnation: 1,
+      ownershipToken: "o".repeat(32),
+      ttlMs: 60_000,
+      idempotencyKey: "register-capability-activity",
+    });
+    const input = {
+      runtimeId: runtime.id,
+      credentialId: credential.id,
+      servicePrincipalId: credential.servicePrincipalId,
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      workspaceId: workspace.id,
+      storageMappingHash: workspace.storageMappingHash,
+      observedAt,
+      idleLeaseMs: 60_000,
+    };
+
+    const renewed = recordRuntimeCapabilityActivity({ ...input, now: observedAt });
+    expect(renewed).toMatchObject({ renewed: true, runtime: { id: runtime.id, idleExpiresAt: new Date(observedAt.getTime() + 60_000).toISOString() } });
+    const replayed = recordRuntimeCapabilityActivity({ ...input, now: new Date(observedAt.getTime() + 10_000) });
+    expect(replayed).toMatchObject({ renewed: false, runtime: { revision: renewed.runtime.revision } });
+    expect(() => recordRuntimeCapabilityActivity({ ...input, workspaceId: "foreign-workspace", now: observedAt }))
+      .toThrowError(expect.objectContaining({ code: "SCOPE_UNAVAILABLE" }));
+
+    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("UPDATE coordination_sessions SET expires_at = ? WHERE project_id = ? AND worktree_id = ?")
+      .run(observedAt.toISOString(), scope.project.id, worktreeId);
+    expect(() => recordRuntimeCapabilityActivity({
+      ...input,
+      observedAt: new Date(observedAt.getTime() + 20_000),
+      now: new Date(observedAt.getTime() + 20_000),
+    })).toThrowError(expect.objectContaining({ code: "ACTIVITY_UNAVAILABLE" }));
+  });
+
   it("stores hash-only audience tickets and rejects expiry, replay, wrong runtime, and foreign owners", () => {
     const first = tenancy("tickets-one");
     const second = tenancy("tickets-two");
@@ -264,6 +379,7 @@ describe("AUTH-108 runtime isolation", () => {
       authSessionId: authSession.session.id,
       audience: "web",
       rootDomain: "runtime.example.test",
+      scheme: "https",
       launcherOrigin: "https://dashboard.example.test",
       exchangeProof,
       now,
@@ -284,6 +400,7 @@ describe("AUTH-108 runtime isolation", () => {
       authSessionId: authSession.session.id,
       audience: "cli",
       rootDomain: "runtime.example.test",
+      scheme: "https",
       launcherOrigin: "https://dashboard.example.test",
       exchangeProof: expiringProof,
       now,
@@ -316,6 +433,7 @@ describe("AUTH-108 runtime isolation", () => {
       authSessionId: authSession.session.id,
       audience: "vscode",
       rootDomain: "runtime.example.test",
+      scheme: "https",
       launcherOrigin: "https://dashboard.example.test",
       exchangeProof: replacementProof,
       now,

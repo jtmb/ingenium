@@ -1,5 +1,6 @@
 import { logger, runtimes } from "ingenium-core";
 import { inspectManagedRuntime, removeManagedRuntime, stopManagedRuntime } from "./runtime-manager-client.js";
+import { runtimeNumberSetting } from "./runtime-provisioner.js";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -39,7 +40,19 @@ export async function reconcileRuntimes(now = new Date()): Promise<void> {
         runtime = runtimes.recordRuntimeHealth(runtime.id, runtime.revision, backend.backendId, now);
       }
       if (runtime.state === "STARTING" && backend.state === "running" && backend.health === "healthy") {
-        runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "runtime-reconciler" });
+        const requestedIdleExpiry = now.getTime()
+          + runtimeNumberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS", 1_800_000, 60_000);
+        const idleExpiry = runtime.absoluteExpiresAt === null
+          ? requestedIdleExpiry
+          : Math.min(requestedIdleExpiry, Date.parse(runtime.absoluteExpiresAt));
+        runtimes.transitionRuntime({
+          id: runtime.id,
+          expectedRevision: runtime.revision,
+          toState: "READY",
+          actorType: "system",
+          actorId: "runtime-reconciler",
+          idleExpiresAt: new Date(idleExpiry),
+        });
         continue;
       }
       const absoluteExpired = runtime.absoluteExpiresAt !== null && runtime.absoluteExpiresAt <= now.toISOString();

@@ -88,7 +88,8 @@ services:
       args:
         NEXT_PUBLIC_OPENCODE_WEB_URL: "${NEXT_PUBLIC_OPENCODE_WEB_URL:-http://opencode.localhost:3000/}"
         NEXT_PUBLIC_OPENCODE_CLI_URL: "${NEXT_PUBLIC_OPENCODE_CLI_URL:-http://cli.localhost:3000/}"
-        NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "${INGENIUM_RUNTIME_ROOT_DOMAIN:?INGENIUM_RUNTIME_ROOT_DOMAIN is required}"
+        NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "${INGENIUM_RUNTIME_ROOT_DOMAIN:-runtime.localhost}"
+        NEXT_PUBLIC_RUNTIME_SCHEME: "${INGENIUM_RUNTIME_SCHEME:-http}"
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
     restart: unless-stopped
@@ -112,7 +113,8 @@ services:
       - INGENIUM_RUNTIME_MANAGER_URL=http://runtime-manager:4110/
       - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token
       - INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-runtime-gateway/token
-      - INGENIUM_RUNTIME_ROOT_DOMAIN=${INGENIUM_RUNTIME_ROOT_DOMAIN:?INGENIUM_RUNTIME_ROOT_DOMAIN is required}
+      - INGENIUM_RUNTIME_ROOT_DOMAIN=${INGENIUM_RUNTIME_ROOT_DOMAIN:-runtime.localhost}
+      - INGENIUM_RUNTIME_SCHEME=${INGENIUM_RUNTIME_SCHEME:-http}
       - INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS=${INGENIUM_RUNTIME_RECONCILE_INTERVAL_MS:-15000}
       - INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER=${INGENIUM_RUNTIME_MAX_ACTIVE_PER_USER:-2}
       - INGENIUM_RUNTIME_CPU_MILLIS=${INGENIUM_RUNTIME_CPU_MILLIS:-1000}
@@ -180,6 +182,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
       - "${INGENIUM_RUNTIME_WORKSPACE_MAP_FILE:-./config/runtime-workspaces.example.json}:/etc/ingenium/runtime-workspaces.json:ro"
+      - "${INGENIUM_RUNTIME_WORKSPACE_VALIDATION_SOURCE:-./config}:${INGENIUM_RUNTIME_WORKSPACE_VALIDATION_TARGET:-/workspace-validation}:ro"
     networks:
       - runtime-control
     security_opt:
@@ -204,10 +207,13 @@ services:
     labels:
       com.ingenium.runtime-gateway: "true"
     ports:
-      - "443:8443"
+      - "${INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS:-127.0.0.1}:${INGENIUM_RUNTIME_GATEWAY_HOST_PORT:-80}:${INGENIUM_RUNTIME_GATEWAY_PORT:-8080}"
     environment:
-      - INGENIUM_RUNTIME_GATEWAY_PORT=8443
-      - INGENIUM_RUNTIME_ROOT_DOMAIN=${INGENIUM_RUNTIME_ROOT_DOMAIN:?INGENIUM_RUNTIME_ROOT_DOMAIN is required}
+      - INGENIUM_RUNTIME_SCHEME=${INGENIUM_RUNTIME_SCHEME:-http}
+      - INGENIUM_RUNTIME_ROOT_DOMAIN=${INGENIUM_RUNTIME_ROOT_DOMAIN:-runtime.localhost}
+      - INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS=${INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS:-127.0.0.1}
+      - INGENIUM_RUNTIME_GATEWAY_HOST_PORT=${INGENIUM_RUNTIME_GATEWAY_HOST_PORT:-80}
+      - INGENIUM_RUNTIME_GATEWAY_PORT=${INGENIUM_RUNTIME_GATEWAY_PORT:-8080}
       - INGENIUM_RUNTIME_API_URL=http://ingenium-control-plane:4097/api/v1/
       - INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-runtime-gateway/token
       - INGENIUM_RUNTIME_TLS_CERT_FILE=/run/ingenium-runtime-tls/tls.crt

@@ -3,13 +3,17 @@ import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  createRuntimeGatewayServer,
   gatewayRequestHeaders,
   handleRuntimeGatewayRequest,
   isRuntimeGenerationRequest,
   isRuntimeHealthRequest,
   proxyResponseHeaders,
   runtimeBackendHealthPath,
+  runtimeAudienceSessionCookie,
   runtimeCookie,
+  runtimeCookies,
+  runtimeGatewayTransportConfig,
   runtimeSessionCookie,
   runtimeScope,
   sanitizedHeaders,
@@ -19,14 +23,14 @@ const runtimeId = "11111111-1111-4111-8111-111111111111";
 const webCookieName = "__Host-ingenium_runtime_web";
 const sessionToken = `rbs_${"a".repeat(43)}`;
 
-function gatewayRequest(port: number, cookie?: string): Promise<number> {
+function gatewayRequest(port: number, cookie?: string, host = `web--${runtimeId}.runtime.example.test`): Promise<number> {
   return new Promise((resolve, reject) => {
     const request = httpRequest({
       hostname: "127.0.0.1",
       port,
       path: "/",
       headers: {
-        Host: `web--${runtimeId}.runtime.example.test`,
+        Host: host,
         ...(cookie === undefined ? {} : { Cookie: cookie }),
       },
     }, (response) => {
@@ -38,14 +42,42 @@ function gatewayRequest(port: number, cookie?: string): Promise<number> {
   });
 }
 
+function gatewayCorsRequest(port: number, origin: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined> }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: "127.0.0.1",
+      port,
+      method: "OPTIONS",
+      path: "/__ingenium/health",
+      headers: {
+        Host: `web--${runtimeId}.runtime.localhost`,
+        Origin: origin,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "cache-control,pragma",
+      },
+    }, (response) => {
+      response.resume();
+      response.once("end", () => resolve({ status: response.statusCode ?? 0, headers: response.headers }));
+    });
+    request.once("error", reject);
+    request.end();
+  });
+}
+
 beforeEach(() => {
   process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
+  process.env.INGENIUM_RUNTIME_SCHEME = "https";
   process.env.DASHBOARD_ALLOWED_ORIGINS = "https://dashboard.example.test";
 });
 
 afterEach(() => {
   delete process.env.INGENIUM_RUNTIME_ROOT_DOMAIN;
+  delete process.env.INGENIUM_RUNTIME_SCHEME;
   delete process.env.DASHBOARD_ALLOWED_ORIGINS;
+  delete process.env.INGENIUM_RUNTIME_GATEWAY_PORT;
+  delete process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
+  delete process.env.INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS;
+  delete process.env.INGENIUM_RUNTIME_GATEWAY_HOST_PORT;
 });
 
 describe("AUTH-109 runtime gateway", () => {
@@ -58,6 +90,106 @@ describe("AUTH-109 runtime gateway", () => {
     });
     expect(runtimeScope({ headers: { host: `cli--${runtimeId}.runtime.example.test.evil.test` } })).toBeUndefined();
     expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test:443` } })).toBeUndefined();
+  });
+
+  it("uses trustworthy HTTP only for special-use localhost runtime roots", () => {
+    process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.localhost";
+    process.env.INGENIUM_RUNTIME_SCHEME = "http";
+    expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.localhost` } })?.origin)
+      .toBe(`http://web--${runtimeId}.runtime.localhost`);
+
+    process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
+    process.env.INGENIUM_RUNTIME_SCHEME = "https";
+    expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test` } })?.origin)
+      .toBe(`https://web--${runtimeId}.runtime.example.test`);
+  });
+
+  it("validates coherent local and remote transport configuration", () => {
+    const local = {
+      INGENIUM_RUNTIME_SCHEME: "http",
+      INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.localhost",
+      INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS: "127.0.0.1",
+      INGENIUM_RUNTIME_GATEWAY_HOST_PORT: "80",
+      INGENIUM_RUNTIME_GATEWAY_PORT: "8080",
+    };
+    expect(runtimeGatewayTransportConfig(local)).toEqual({
+      scheme: "http",
+      rootDomain: "runtime.localhost",
+      hostBindAddress: "127.0.0.1",
+      hostPort: 80,
+      containerPort: 8080,
+    });
+    expect(() => runtimeGatewayTransportConfig({ ...local, INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS: "0.0.0.0" }))
+      .toThrow("Local runtime HTTP must use 127.0.0.1:80 and container port 8080");
+    expect(() => runtimeGatewayTransportConfig({ ...local, INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.example.test" }))
+      .toThrow("Runtime scheme and root domain are incompatible");
+    const remote = runtimeGatewayTransportConfig({
+      INGENIUM_RUNTIME_SCHEME: "https",
+      INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.example.test",
+      INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS: "0.0.0.0",
+      INGENIUM_RUNTIME_GATEWAY_HOST_PORT: "443",
+      INGENIUM_RUNTIME_GATEWAY_PORT: "8443",
+    });
+    expect(remote).toMatchObject({ scheme: "https", rootDomain: "runtime.example.test", hostPort: 443, containerPort: 8443 });
+    expect(() => runtimeGatewayTransportConfig({
+      ...local,
+      INGENIUM_RUNTIME_SCHEME: "https",
+      INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.example.test",
+    })).toThrow("Remote runtime HTTPS must use 0.0.0.0:443 and container port 8443");
+    expect(() => createRuntimeGatewayServer({
+      INGENIUM_RUNTIME_SCHEME: "https",
+      INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.example.test",
+      INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS: "0.0.0.0",
+      INGENIUM_RUNTIME_GATEWAY_HOST_PORT: "443",
+      INGENIUM_RUNTIME_GATEWAY_PORT: "8443",
+    })).toThrow("INGENIUM_RUNTIME_TLS_CERT_FILE is required");
+  });
+
+  it("creates the validated localhost gateway as HTTP without TLS credentials", async () => {
+    process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.localhost";
+    process.env.INGENIUM_RUNTIME_SCHEME = "http";
+    const { server } = createRuntimeGatewayServer({
+      INGENIUM_RUNTIME_SCHEME: "http",
+      INGENIUM_RUNTIME_ROOT_DOMAIN: "runtime.localhost",
+      INGENIUM_RUNTIME_GATEWAY_BIND_ADDRESS: "127.0.0.1",
+      INGENIUM_RUNTIME_GATEWAY_HOST_PORT: "80",
+      INGENIUM_RUNTIME_GATEWAY_PORT: "8080",
+    });
+    try {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const port = (server.address() as AddressInfo).port;
+      expect(await gatewayRequest(port, undefined, `web--${runtimeId}.runtime.localhost`)).toBe(401);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("answers Chromium's credentialed health preflight only for the exact dashboard origin", async () => {
+    process.env.INGENIUM_RUNTIME_ROOT_DOMAIN = "runtime.localhost";
+    process.env.INGENIUM_RUNTIME_SCHEME = "http";
+    process.env.DASHBOARD_ALLOWED_ORIGINS = "http://localhost:3000";
+    const server = createServer(handleRuntimeGatewayRequest);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const trusted = await gatewayCorsRequest(port, "http://localhost:3000");
+      expect(trusted).toMatchObject({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "http://localhost:3000",
+          "access-control-allow-credentials": "true",
+          "access-control-allow-methods": "GET, OPTIONS",
+          "access-control-allow-headers": "cache-control, pragma",
+        },
+      });
+      expect(trusted.headers["access-control-allow-origin"]).not.toBe("*");
+
+      const untrusted = await gatewayCorsRequest(port, "http://localhost:3000.evil.test");
+      expect(untrusted.status).toBe(403);
+      expect(untrusted.headers).not.toHaveProperty("access-control-allow-origin");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it("strips browser identity and injects only the fixed CLI identity", () => {
@@ -91,6 +223,11 @@ describe("AUTH-109 runtime gateway", () => {
       `__Host-ingenium_runtime_${audience}=${sessionToken}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=60`,
     );
     expect(runtimeCookie(audience, sessionToken, 60)).not.toContain("Domain=");
+    expect(runtimeCookies(audience, sessionToken, 60)).toEqual([
+      `__Host-ingenium_runtime_${audience}=${sessionToken}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=60`,
+      `__Host-ingenium_runtime_${audience}_partitioned=${sessionToken}; Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=60`,
+    ]);
+    expect(runtimeCookies(audience, sessionToken, 60).join(";")).not.toContain("Domain=");
     const scope = runtimeScope({ headers: { host: `${audience}--${runtimeId}.runtime.example.test` } })!;
     const headers = proxyResponseHeaders({
       "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
@@ -113,6 +250,10 @@ describe("AUTH-109 runtime gateway", () => {
     expect(runtimeSessionCookie({ headers: { cookie: `${webCookieName}=${"a".repeat(4_097)}` } }, webCookieName)).toBeUndefined();
     expect(runtimeSessionCookie({ headers: { cookie: `${cookie}; ${cookie}` } }, webCookieName)).toBeUndefined();
     expect(runtimeSessionCookie({ headers: { cookie: `${Array.from({ length: 64 }, (_, index) => `c${index}=x`).join(";")};${cookie}` } }, webCookieName)).toBeUndefined();
+    const partitioned = `__Host-ingenium_runtime_web_partitioned=${sessionToken}`;
+    expect(runtimeAudienceSessionCookie({ headers: { cookie: partitioned } }, "web")).toBe(sessionToken);
+    expect(runtimeAudienceSessionCookie({ headers: { cookie: `${cookie}; ${partitioned}` } }, "web")).toBe(sessionToken);
+    expect(runtimeAudienceSessionCookie({ headers: { cookie: `${cookie}; __Host-ingenium_runtime_web_partitioned=rbs_${"b".repeat(43)}` } }, "web")).toBeUndefined();
   });
 
   it("denies malformed percent encoding without terminating the gateway process", async () => {

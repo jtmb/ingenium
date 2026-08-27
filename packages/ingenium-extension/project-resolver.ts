@@ -5,6 +5,11 @@ import {
   type ApiAuthenticationFailureKind,
   type ApiAuthenticationReadinessOptions,
 } from "./api-auth.js";
+import {
+  isValidExtensionProjectName,
+  resolveExtensionBinding,
+  type ExtensionCredentialPurpose,
+} from "./extension-binding.js";
 
 const MAX_PROJECT_NAME_LENGTH = 64;
 const ensuredProjects = new Map<string, Promise<string>>();
@@ -27,6 +32,7 @@ export class ExtensionProjectStartupError extends Error {
 export interface EnsureExtensionProjectOptions {
   request?: typeof fetch;
   readiness?: Omit<ApiAuthenticationReadinessOptions, "request">;
+  credentialPurpose?: ExtensionCredentialPurpose;
 }
 
 /** Extract only a stable, non-sensitive category for lifecycle diagnostics. */
@@ -35,9 +41,7 @@ export function classifyExtensionProjectFailure(error: unknown): ExtensionProjec
 }
 
 export function isValidProjectName(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= MAX_PROJECT_NAME_LENGTH &&
-    value.trim().length > 0 && value === value.trim() && value !== "." && value !== ".." &&
-    !/[\\/\u0000-\u001f\u007f]/.test(value);
+  return isValidExtensionProjectName(value) && value.length <= MAX_PROJECT_NAME_LENGTH;
 }
 
 function rejectProjectResolution(reason: string): never {
@@ -76,12 +80,17 @@ export async function ensureExtensionProject(
   requestedProject?: string,
   options: EnsureExtensionProjectOptions = {},
 ): Promise<string> {
-  const project = resolveExtensionProject(worktree, requestedProject);
-  const normalizedApiBase = apiBase.replace(/\/+$/, "");
+  const expectedBinding = resolveExtensionBinding(worktree, {
+    purpose: options.credentialPurpose,
+    apiUrl: apiBase,
+    project: requestedProject,
+  });
+  const project = resolveExtensionProject(worktree, requestedProject ?? expectedBinding.project);
+  const normalizedApiBase = expectedBinding.apiUrl;
   // The protected bearer may be worktree-local. Keep two worktrees with the
   // same explicit project from sharing a cached request made with another
   // worktree's credential source.
-  const cacheKey = `${normalizedApiBase}\u0000${resolve(worktree)}\u0000${project}`;
+  const cacheKey = `${normalizedApiBase}\u0000${resolve(worktree)}\u0000${project}\u0000${expectedBinding.purpose}\u0000${expectedBinding.credentialFile}`;
   const existing = ensuredProjects.get(cacheKey);
   if (existing) return existing;
 
@@ -89,6 +98,7 @@ export async function ensureExtensionProject(
     const request = options.request ?? fetch;
     const readiness = await waitForAuthenticatedApiReadiness(normalizedApiBase, worktree, {
       ...options.readiness,
+      credentialPurpose: options.credentialPurpose,
       request,
     });
     if (!readiness.authenticated) {
@@ -97,13 +107,14 @@ export async function ensureExtensionProject(
 
     const binding = readiness.binding!;
     if (binding.launcherWorktree !== resolve(worktree)
-      || binding.workspaceId !== process.env.INGENIUM_WORKSPACE_ID
+      || binding.workspaceId !== expectedBinding.workspaceId
+      || binding.audience !== expectedBinding.audience
       || !binding.projectIds.includes(binding.projectId)) {
       throw new ExtensionProjectStartupError("not_found");
     }
 
     const metadata = await request(`${normalizedApiBase}/projects/${encodeURIComponent(project)}/detail`, {
-      headers: apiRequestHeaders(worktree),
+      headers: apiRequestHeaders(worktree, undefined, { binding: expectedBinding }),
       signal: AbortSignal.timeout(apiTimeoutMs()),
     }).catch(() => null);
     if (metadata?.ok) {

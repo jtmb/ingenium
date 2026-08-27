@@ -2952,3 +2952,45 @@ This append-only source/configuration update adds no coordination completion mar
   `.opencode/skills/consolidation-map.json` and the 10 canonical skill trees.
   This is source/worktree evidence only; no repository-sync deployment is claimed
   by this docs update.
+
+### Deployed COORD-103–COORD-106 acceptance and rollout completion (2026-08-27)
+
+- The deployed acceptance retained at
+  `tests/artifacts/test-runs/run-20260827T0022Z-coord106-r24/` is **PASS** at
+  repository revision `5ea014a6624e88242ae40e03ce886b9ebaa020e3`. External A,
+  external B, and internal C ran simultaneously with OpenCode `1.18.9`,
+  `ingenium-software-engineer-premium`, `openai/gpt-5.6-sol`, variant `high`,
+  and one canonical project/workspace/worktree identity.
+- Actual model/session evidence proves typed operational memory for actions,
+  changed paths, checks/results, todo/status/next-work, A/B/C peer receipt,
+  duplicate suppression, independent concurrent writes, same-path pre-write
+  conflict, and restart replay under a new PID and incarnation exactly once.
+- Deployed canary evidence proves migration 112 atomic recovery: exact
+  quarantined-owner proof and fresh footprint reconciliation advance the epoch,
+  one concurrent recovery wins, the loser and old proof are fenced, dirty
+  footprint mismatch remains quarantined, and successor path and reserved claims
+  succeed without worktree mutation.
+- Deployed repository evidence proves quarantine blocking, scoped recovery,
+  generation advancement from 4 to 6, stale API and local manifest rejection,
+  and full projection convergence. The bounded API-outage scenario allowed reads
+  and status only while refusing all five mutation classes.
+- Cleanup deleted all three run sessions, revoked all four scoped credentials,
+  removed private homes, credential files, and synthetic paths, closed external
+  ports 48451 and 48452, and left the control plane, Runtime Manager, and bound
+  runtime healthy. The retained privacy audit excludes credentials and raw
+  session/fence/claim identifiers; all 29 retained evidence files match
+  `checksums.json`.
+- Focused Core, API, MCP, Extension, and repository-sync credential tests and
+  typechecks passed. One bounded QA review and one bounded security review report
+  no `BLOCKING` or `FOLLOW_UP` findings. Source tests, deployed canaries, and
+  real three-process model/session artifacts remain separate evidence classes in
+  the retained run.
+- This evidence closes COORD-103 typed shared memory, COORD-104 mutation/conflict
+  enforcement, COORD-105 repository synchronization, and COORD-106 deployed
+  multi-window rollout. Separate-worktree isolation remains future scope and is
+  not part of this V1 completion claim.
+
+<!-- (work-complete) COORD-103 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->
+<!-- (work-complete) COORD-104 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->
+<!-- (work-complete) COORD-105 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->
+<!-- (work-complete) COORD-106 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->

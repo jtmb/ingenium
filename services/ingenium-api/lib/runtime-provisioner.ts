@@ -30,7 +30,14 @@ function projectName(projectId: string): string | undefined {
 }
 
 function runtimeServicePrincipalId(runtime: runtimes.RuntimeInstance, name: string): string | undefined {
-  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT sp.id FROM runtime_capability_bindings b
+  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT principal.id FROM automation_principal_grants grant_row
+    JOIN service_principals principal ON principal.id = grant_row.service_principal_id
+    WHERE grant_row.organization_id = ? AND grant_row.project_id = ?
+      AND grant_row.permission = 'execute' AND grant_row.status = 'active'
+      AND principal.organization_id = ? AND principal.security_epoch = ? AND principal.status = 'active'
+    ORDER BY grant_row.created_at, grant_row.id LIMIT 1`)
+    .get(runtime.organizationId, runtime.projectId, runtime.organizationId, runtime.securityEpoch) as { id: string } | undefined)?.id
+    ?? (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT sp.id FROM runtime_capability_bindings b
     JOIN mcp_credentials c ON c.id = b.mcp_credential_id
     JOIN service_principals sp ON sp.id = c.service_principal_id
     WHERE b.runtime_id = ? AND sp.organization_id = ? AND sp.security_epoch = ? AND sp.status = 'active'
@@ -75,7 +82,7 @@ async function provision(workspaceId: string): Promise<runtimes.RuntimeInstance>
       kind: "runtime",
       audience: "runtime",
       name: principalName,
-      scopes: ["child-mcp:runtime", "projects:read"],
+      scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"],
       organizationId: runtime.organizationId,
       projectId: runtime.projectId,
       workspaceId: runtime.workspaceId,

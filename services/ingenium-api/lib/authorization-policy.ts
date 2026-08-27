@@ -3,7 +3,7 @@ import { authentication, authorization, projects, securityAudit } from "ingenium
 import { AppError } from "./middleware/errors.js";
 import { isRuntimeGatewayPrivateRequest, type RequestPrincipal } from "./middleware/auth.js";
 
-export type PolicyTarget = "installation" | "organization" | "project" | "private" | "gateway-private" | "public";
+export type PolicyTarget = "installation" | "organization" | "project" | "private" | "gateway-private" | "runtime-capability" | "public";
 export type PolicyPermission = authorization.AuthorizationPermission;
 
 export interface AuthorizationPolicy {
@@ -46,6 +46,17 @@ const PUBLIC_AUTH_PATHS = new Set([
   "GET /api/v1/auth/invitations/preview", "GET /api/v1/auth/oidc/providers", "POST /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
 ]);
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const REPOSITORY_COORDINATION_ROUTES = new Set([
+  "POST /api/v1/coordination/register",
+  "POST /api/v1/coordination/heartbeat",
+  "POST /api/v1/coordination/close",
+  "POST /api/v1/coordination/claims/batch",
+  "POST /api/v1/coordination/claims/verify",
+  "POST /api/v1/coordination/claims/renew",
+  "POST /api/v1/coordination/claims/quarantine",
+  "POST /api/v1/coordination/claims/complete",
+  "POST /api/v1/coordination/claims/release",
+]);
 
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
@@ -62,11 +73,14 @@ function resourceFor(path: string): string {
 export function policyForRequest(req: Pick<Request, "method" | "path">): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
   if ((req.method === "GET" && req.path === "/auth/callback") || PUBLIC_AUTH_PATHS.has(route)) return PUBLIC_POLICY;
-  if (req.path === "/api/v1/health") return { action: "health.read", resource: "health", permission: "read", target: "installation" };
+  if (req.path === "/api/v1/health") return PUBLIC_POLICY;
   if (req.path.startsWith("/_ingenium/")) return { action: "child-mcp.execute", resource: "child-mcp", permission: "execute", target: "project", sensitive: true };
   if (req.path.startsWith("/api/v1/auth/")) return { action: `auth.${permissionFor(req as Request)}`, resource: "auth", permission: permissionFor(req as Request), target: "private", sensitive: !READ_METHODS.has(req.method) };
   if (isRuntimeGatewayPrivateRequest(req)) {
     return { action: "runtimes.gateway.execute", resource: "runtime-gateway", permission: "execute", target: "gateway-private", sensitive: true };
+  }
+  if (req.method === "POST" && req.path === "/api/v1/runtimes/activity") {
+    return { action: "runtimes.activity.write", resource: "runtimes", permission: "write", target: "runtime-capability", sensitive: true };
   }
   if (req.path.startsWith("/api/v1/runtimes/browser/")) {
     const permission = permissionFor(req as Request);
@@ -233,14 +247,34 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     audit(req.principal, policy, "success");
     return next();
   }
+  if (policy.target === "runtime-capability") {
+    if (req.principal.type !== "service" || req.principal.audience !== "runtime"
+      || !req.principal.tokenId || !req.principal.organizationId || !req.principal.projectId
+      || !req.principal.workspaceId || !req.principal.storageMappingHash
+      || !req.principal.scopes.includes("runtime:activity")) {
+      audit(req.principal, policy, "denied");
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    audit(req.principal, policy, "success", {
+      allowed: true,
+      visible: true,
+      organizationId: req.principal.organizationId,
+      projectId: req.principal.projectId,
+    });
+    return next();
+  }
   if (req.principal.type === "compatibility") {
     audit(req.principal, policy, "success");
     return next();
   }
   const servicePreflight = req.method === "GET" && req.path === "/api/v1/auth/preflight";
+  const repositoryCoordination = req.principal.type === "service"
+    && req.principal.audience === "repository-sync"
+    && REPOSITORY_COORDINATION_ROUTES.has(`${req.method} ${req.path}`);
   if (req.principal.type === "service" && req.principal.audience === "repository-sync" && !servicePreflight
     && policy.resource !== "repository" && policy.resource !== "repository-sync" && policy.resource !== "projects"
-    && policy.resource !== "mcp-tools" && policy.resource !== "docs" && policy.resource !== "child-mcp") {
+    && policy.resource !== "mcp-tools" && policy.resource !== "docs" && policy.resource !== "child-mcp"
+    && !repositoryCoordination) {
     throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
   }
   const principal = toAuthorizationPrincipal(req.principal);
@@ -277,7 +311,9 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     const lifecycle = policy.resource === "projects" && policy.permission === "admin" ? projectLifecycleTarget(req) : undefined;
     if (lifecycle) req.authorizedProjectTarget = lifecycle;
     const project = lifecycle ?? requestedProject(req);
-    decision = lifecycle
+    decision = repositoryCoordination && project
+      ? authorization.requireProjectPermission(principal, project.id, "repository", "execute")
+      : lifecycle
       ? authorization.requireProjectLifecyclePermission(principal, lifecycle.id)
       : project
       ? authorization.requireProjectPermission(principal, project.id, policy.resource, policy.permission)
@@ -292,6 +328,7 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     audit(req.principal, policy, "denied", decision);
     throw new AppError(decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found", decision.visible ? "FORBIDDEN" : "NOT_FOUND", decision.visible ? 403 : 404);
   }
+  if (decision.projectId) req.authorizedProjectId = decision.projectId;
   audit(req.principal, policy, "success", decision);
   next();
 }
@@ -308,6 +345,7 @@ declare global {
     interface Request {
       authorizationPolicy?: AuthorizationPolicy;
       authorizedProjectTarget?: AuthorizedProjectTarget;
+      authorizedProjectId?: string;
     }
   }
 }

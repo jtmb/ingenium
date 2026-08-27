@@ -17,8 +17,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   resolveExtensionProject,
 } from "./project-resolver.js";
+import { ExtensionBindingError, resolveExtensionBinding } from "./extension-binding.js";
 import { apiRequestHeaders } from "./api-auth.js";
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
+import { sessionCoordinatorFor, type RepositoryClaimContext } from "./session-coordinator.js";
 import { callMcpTool, mcpToolData } from "./mcp-client.js";
 
 // Compatibility-only helpers below retain legacy exports; lifecycle hooks use repositorySync via MCP.
@@ -677,6 +679,15 @@ interface PluginConfigEntry {
   options: Record<string, unknown>;
 }
 
+const CANONICAL_PROJECT_PLUGIN_PREFIX = "file://{env:PWD}/";
+
+function configuredRepositoryPluginPath(worktree: string, configuredPath: string): string {
+  if (configuredPath.startsWith(CANONICAL_PROJECT_PLUGIN_PREFIX)) {
+    return repositoryRelativePath(worktree, configuredPath.slice(CANONICAL_PROJECT_PLUGIN_PREFIX.length));
+  }
+  return repositoryRelativePath(worktree, configuredPath);
+}
+
 function parseConfiguredPlugins(worktree: string): PluginConfigEntry[] {
   const configPath = resolve(worktree, "opencode.json");
   try {
@@ -698,7 +709,7 @@ function parseConfiguredPlugins(worktree: string): PluginConfigEntry[] {
         ? entry.path
         : undefined;
     if (!configuredPath) throw new RepositorySyncScanError("Invalid plugin entry");
-    const normalizedPath = repositoryRelativePath(worktree, configuredPath);
+    const normalizedPath = configuredRepositoryPluginPath(worktree, configuredPath);
     if (!isAllowedRepositoryPluginPath(normalizedPath)) throw new RepositorySyncScanError("Plugin source is outside the allowed roots");
     if (typeof entry === "string") return { path: normalizedPath, enabled: true, order, options: {} };
     if (!repositoryIsRecord(entry) || typeof entry.path !== "string") throw new RepositorySyncScanError("Invalid plugin entry");
@@ -804,6 +815,7 @@ export interface SyncManifest {
   project: string;
   /** Immutable API project ID. A changed ID means the API database was recreated. */
   projectId?: string;
+  generation?: number;
   lastFullSync: string;
   resources: {
     skills: ResourceHashes;
@@ -836,6 +848,7 @@ function emptyManifest(project: string): SyncManifest {
     version: 2,
     project,
     lastFullSync: new Date().toISOString(),
+    generation: 0,
     resources: {
       skills: {},
       agents: {},
@@ -891,6 +904,7 @@ export function loadManifest(worktree: string, project: string): SyncManifest {
     // If project changed, start fresh
     if (parsed.project !== project) return emptyManifest(project);
     const manifest = parsed as SyncManifest;
+    if (!Number.isSafeInteger(manifest.generation) || manifest.generation! < 0) return emptyManifest(project);
     manifest.version = 2;
     manifest.resources.repository ??= { docs: {}, skills: {}, agents: {}, plugins: {} };
     return manifest;
@@ -899,7 +913,11 @@ export function loadManifest(worktree: string, project: string): SyncManifest {
   }
 }
 
-export function saveManifest(worktree: string, manifest: SyncManifest): void {
+export function saveManifest(
+  worktree: string,
+  manifest: SyncManifest,
+  generation?: { expected: number; next: number },
+): void {
   const directory = verifiedManifestDirectory(worktree, true);
   if (!directory) throw new RepositorySyncScanError();
   const manifestPath = resolve(directory, ".ingenium-sync-state.json");
@@ -911,6 +929,13 @@ export function saveManifest(worktree: string, manifest: SyncManifest): void {
       if (error instanceof RepositorySyncScanError) throw error;
       throw new RepositorySyncScanError();
     }
+  }
+  if (generation) {
+    const current = loadManifest(worktree, manifest.project);
+    if ((current.generation ?? 0) !== generation.expected || generation.next <= generation.expected) {
+      throw new RepositorySyncScanError("Repository manifest generation changed");
+    }
+    manifest.generation = generation.next;
   }
 
   const temporaryPath = resolve(directory, `.ingenium-sync-state.${process.pid}.${randomUUID()}.tmp`);
@@ -944,6 +969,27 @@ export function saveManifest(worktree: string, manifest: SyncManifest): void {
   }
 }
 
+function retainRepositoryRecoveryEvidence(worktree: string, reason: "apply_uncertain" | "save_rejected", generation: number): void {
+  try {
+    const directory = verifiedManifestDirectory(worktree, true);
+    if (!directory) return;
+    const recovery = resolve(directory, ".ingenium-sync-recovery");
+    try { mkdirSync(recovery, { mode: 0o700 }); } catch (error) { if (!isMissingPathError(error) && !existsSync(recovery)) return; }
+    const stat = lstatSync(recovery);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) return;
+    const evidence = resolve(recovery, `recovery-${process.pid}-${randomUUID()}.json`);
+    const descriptor = openSync(evidence, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try {
+      writeSync(descriptor, JSON.stringify({ version: 1, reason, generation, timestamp: new Date().toISOString() }) + "\n");
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+  } catch {
+    // Recovery evidence is best effort; the remote epoch remains quarantined.
+  }
+}
+
 /**
  * Generic HTTP GET helper for the Ingenium API.
  * Returns null on any failure (non-2xx, network error, parse error) for resilient sync.
@@ -951,7 +997,9 @@ export function saveManifest(worktree: string, manifest: SyncManifest): void {
  */
 async function apiGet<T>(worktree: string, path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, { headers: apiRequestHeaders(worktree) });
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: apiRequestHeaders(worktree, undefined, { purpose: "repository-sync" }),
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -1026,6 +1074,13 @@ export interface TombstoneCleanupResult {
   rejected: Array<{ path: string; reason: TombstoneCleanupReason }>;
 }
 
+export interface TombstoneCleanupFileSystem {
+  mkdir: typeof mkdirSync;
+  rename: typeof renameSync;
+  unlink: typeof unlinkSync;
+  rmdir: typeof rmdirSync;
+}
+
 interface ConsolidationMapping {
   source: string;
   target: string;
@@ -1065,9 +1120,15 @@ function expectedTombstoneMarker(mapping: ConsolidationMapping): string {
 /** Remove only lineage-proven, marker-only legacy skill directories. */
 export function cleanupLegacySkillTombstones(
   worktree: string,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; fileSystem?: Partial<TombstoneCleanupFileSystem> } = {},
 ): TombstoneCleanupResult {
   const dryRun = options.dryRun === true;
+  const fileSystem: TombstoneCleanupFileSystem = {
+    mkdir: options.fileSystem?.mkdir ?? mkdirSync,
+    rename: options.fileSystem?.rename ?? renameSync,
+    unlink: options.fileSystem?.unlink ?? unlinkSync,
+    rmdir: options.fileSystem?.rmdir ?? rmdirSync,
+  };
   const result: TombstoneCleanupResult = { dryRun, removable: [], removed: [], rejected: [] };
   let root: string;
   let skillsRoot: string;
@@ -1177,7 +1238,7 @@ export function cleanupLegacySkillTombstones(
       }
       if (!exists) {
         if (!create) return null;
-        mkdirSync(quarantinePath, { mode: 0o700 });
+        fileSystem.mkdir(quarantinePath, { mode: 0o700 });
       }
       return privateContainedDirectory(quarantinePath, skillsRoot) ? quarantinePath : null;
     } catch {
@@ -1203,7 +1264,7 @@ export function cleanupLegacySkillTombstones(
   const stageRelativePath = (stageName: string) => `${relativeCandidatePath(TOMBSTONE_QUARANTINE_DIR)}/${stageName}`;
   const removeEmptyQuarantine = () => {
     try {
-      rmdirSync(quarantinePath);
+      fileSystem.rmdir(quarantinePath);
     } catch { /* retained when nonempty or concurrently changed */ }
   };
   const restore = (
@@ -1215,12 +1276,12 @@ export function cleanupLegacySkillTombstones(
     const originalPath = resolve(skillsRoot, name);
     try {
       if (pathExists(originalPath) || validate(name, mapping, stagedPath) !== null) return false;
-      renameSync(stagedPath, originalPath);
+      fileSystem.rename(stagedPath, originalPath);
       if (validate(name, mapping, originalPath) !== null) {
-        if (!pathExists(stagedPath)) renameSync(originalPath, stagedPath);
+        if (!pathExists(stagedPath)) fileSystem.rename(originalPath, stagedPath);
         return false;
       }
-      try { rmdirSync(stagePath); } catch { /* empty helper-owned stage is recovered next run */ }
+      try { fileSystem.rmdir(stagePath); } catch { /* empty helper-owned stage is recovered next run */ }
       return true;
     } catch {
       return false;
@@ -1234,14 +1295,14 @@ export function cleanupLegacySkillTombstones(
     rejectionPath: string,
   ): boolean => {
     try {
-      unlinkSync(resolve(stagedPath, MIGRATED_TO_MARKER));
+      fileSystem.unlink(resolve(stagedPath, MIGRATED_TO_MARKER));
     } catch {
       reject(rejectionPath, restore(name, mapping, stagedPath, stagePath) ? "unlink-failed" : "restore-failed");
       return false;
     }
     try {
-      rmdirSync(stagedPath);
-      rmdirSync(stagePath);
+      fileSystem.rmdir(stagedPath);
+      fileSystem.rmdir(stagePath);
     } catch {
       reject(rejectionPath, "rmdir-failed");
       return false;
@@ -1286,7 +1347,7 @@ export function cleanupLegacySkillTombstones(
         }
         if (children.length === 0) {
           try {
-            rmdirSync(stagePath);
+            fileSystem.rmdir(stagePath);
           } catch {
             reject(rejectionPath, "recovery-failed");
             stagedSources.add(source);
@@ -1311,8 +1372,8 @@ export function cleanupLegacySkillTombstones(
         if (stagedReason === "missing-marker") {
           try {
             if (readdirSync(stagedPath).length !== 0) throw new RepositorySyncScanError();
-            rmdirSync(stagedPath);
-            rmdirSync(stagePath);
+            fileSystem.rmdir(stagedPath);
+            fileSystem.rmdir(stagePath);
             result.removed.push(relativeCandidatePath(source));
           } catch {
             reject(rejectionPath, "recovery-failed");
@@ -1380,13 +1441,13 @@ export function cleanupLegacySkillTombstones(
     const stagePath = resolve(quarantine, stageName);
     const stagedPath = resolve(stagePath, STAGED_TOMBSTONE_DIR);
     try {
-      mkdirSync(stagePath, { mode: 0o700 });
+      fileSystem.mkdir(stagePath, { mode: 0o700 });
       if (!privateContainedDirectory(stagePath, quarantine) || readdirSync(stagePath).length !== 0 || pathExists(stagedPath)) {
         throw new RepositorySyncScanError();
       }
-      renameSync(candidatePath, stagedPath);
+      fileSystem.rename(candidatePath, stagedPath);
     } catch {
-      try { rmdirSync(stagePath); } catch { /* retain unexpected or concurrently changed content */ }
+      try { fileSystem.rmdir(stagePath); } catch { /* retain unexpected or concurrently changed content */ }
       reject(name, "stage-failed");
       continue;
     }
@@ -1422,8 +1483,8 @@ function scanDiskSkills(worktree: string): Map<string, string> {
   if (!existsSync(skillsDir)) return map;
   try {
     for (const entry of readdirSync(skillsDir)) {
-      if (entry === TOMBSTONE_QUARANTINE_DIR) continue;
       // Skip unsafe names and directory symlinks
+      if (entry === TOMBSTONE_QUARANTINE_DIR) continue;
       if (!isSafeName(entry)) continue;
       const dir = resolve(skillsDir, entry);
       try {
@@ -2017,11 +2078,11 @@ function mergePluginsIntoConfig(
     // Build set of enabled API plugin file paths
     const apiPaths = new Set(apiPlugins.filter((p) => p.enabled !== false).map((p) => p.file_path));
 
-    // Preserve user plugins plus the three bootstrap plugins that make project
+    // Preserve user plugins plus the bootstrap plugins that make project
     // provisioning and sync possible. Those bootstrap entries must survive an
     // API database reset even though the recreated project has no plugin rows yet.
     const isIngenium = (p: string) => p.includes("ingenium-extension");
-    const isBootstrapPlugin = (p: string) => /(?:^|\/)plugins\/(?:auto-observer|observer|resource-sync)(?:\.ts|\.js)?$/.test(p);
+    const isBootstrapPlugin = (p: string) => /(?:^|\/)plugins\/(?:auto-observer|observer|resource-sync|session-coordinator)(?:\.ts|\.js)?$/.test(p);
     const userPlugins = existing.filter((p) => !isIngenium(p) || isBootstrapPlugin(p));
 
     // Build new plugin array: user plugins + API-managed plugins
@@ -2449,6 +2510,42 @@ function hashAgentDefinition(content: string, permissions: string, metadata: str
  * - Both changed → LOG CONFLICT, preserve both
  * - No changes → skip
  */
+type ResourceResolutionAction = "synced" | "pushed" | "removed" | "conflicted" | "errored" | "none";
+type ResourceBaselineResolution = "api" | "disk" | "remove" | "preserve";
+
+interface ResourceResolutionOutcome {
+  action: ResourceResolutionAction;
+  baseline: ResourceBaselineResolution;
+}
+
+function resolutionOutcome(
+  result: SyncResult,
+  action: ResourceResolutionAction,
+  baseline: ResourceBaselineResolution,
+): ResourceResolutionOutcome {
+  if (action === "synced") result.synced++;
+  if (action === "pushed") result.pushed++;
+  if (action === "removed") result.removed++;
+  if (action === "errored") result.errors++;
+  if (action === "conflicted") {
+    result.conflicts++;
+    result.skipped++;
+  }
+  return { action, baseline };
+}
+
+function resolvedBaselineHash(
+  currentHash: string | undefined,
+  outcome: ResourceResolutionOutcome,
+  apiHash: string | undefined,
+  diskHash: string | undefined,
+): string | undefined {
+  if (outcome.baseline === "api") return apiHash;
+  if (outcome.baseline === "disk") return diskHash;
+  if (outcome.baseline === "remove") return undefined;
+  return currentHash;
+}
+
 async function resolveResource(
   apiHash: string | undefined,
   diskHash: string | undefined,
@@ -2459,12 +2556,11 @@ async function resolveResource(
     pushToApi: () => Promise<boolean>;
   },
   result: SyncResult,
-): Promise<void> {
+): Promise<ResourceResolutionOutcome> {
   // API-only: exists in API, not on disk
   if (apiHash !== undefined && diskHash === undefined) {
     const wrote = opts.writeToDisk();
-    if (wrote) result.synced++;
-    return;
+    return resolutionOutcome(result, wrote ? "synced" : "none", "api");
   }
 
   // Disk-only: exists on disk, not in API
@@ -2472,12 +2568,12 @@ async function resolveResource(
     if (baselineHash !== undefined) {
       // Was in manifest → API deleted → remove from disk
       opts.removeFromDisk();
-      result.removed++;
+      return resolutionOutcome(result, "removed", "remove");
     } else {
       // Never in manifest → user-added locally → push to API
       // (actual push happens in the onboarding phase)
+      return resolutionOutcome(result, "none", "preserve");
     }
-    return;
   }
 
   // Both exist — compare against baseline
@@ -2488,20 +2584,20 @@ async function resolveResource(
     if (apiChanged && !diskChanged) {
       // API changed, disk is at baseline → PULL API→disk
       const wrote = opts.writeToDisk();
-      if (wrote) result.synced++;
+      return resolutionOutcome(result, wrote ? "synced" : "none", "api");
     } else if (diskChanged && !apiChanged) {
       // Disk changed, API is at baseline → PUSH disk→API
       const ok = await opts.pushToApi();
-      if (ok) result.pushed++;
-      else result.errors++;
+      return resolutionOutcome(result, ok ? "pushed" : "errored", ok ? "disk" : "preserve");
     } else if (apiChanged && diskChanged) {
       // Both changed → CONFLICT
-      result.conflicts++;
-      result.skipped++;
+      return resolutionOutcome(result, "conflicted", "preserve");
     }
     // else: no changes → skip (counted as skipped)
-    return;
+    return resolutionOutcome(result, "none", "api");
   }
+
+  return resolutionOutcome(result, "none", "remove");
 }
 
 /** Controls sync behaviour: initial/onboarding sync pushes all disk items to API first. */
@@ -2579,7 +2675,9 @@ function logSync(
 
 /** API base URL for skill mutation calls that carry a lock token. */
 function apiHeaders(worktree: string, lockToken?: string): Headers {
-  const headers = apiRequestHeaders(worktree, { "Content-Type": "application/json" });
+  const headers = apiRequestHeaders(worktree, { "Content-Type": "application/json" }, {
+    purpose: "repository-sync",
+  });
   if (lockToken) headers.set("x-ingenium-lock-token", lockToken);
   return headers;
 }
@@ -2669,14 +2767,7 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
       const diskHash = diskMap.get(name);
       const baselineHash = manifest.resources.skills[name];
 
-      // Track counters before resolve to detect what happened
-      const syncedBefore = result.synced;
-      const pushedBefore = result.pushed;
-      const removedBefore = result.removed;
-      const errorsBefore = result.errors;
-      const conflictsBefore = result.conflicts;
-
-      await resolveResource(
+      const outcome = await resolveResource(
         apiHash,
         diskHash,
         baselineHash,
@@ -2691,31 +2782,9 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
         result,
       );
 
-      // Update manifest baseline based on what actually happened.
-      // Each item's baseline advances independently — siblings are unaffected.
-      const synced = result.synced > syncedBefore;
-      const pushed = result.pushed > pushedBefore;
-      const removed = result.removed > removedBefore;
-      const errored = result.errors > errorsBefore;
-      const conflicted = result.conflicts > conflictsBefore;
-
-      if (synced && apiEntry) {
-        // API→disk pull or API-only write: set baseline to API hash
-        manifest.resources.skills[name] = apiEntry.hash;
-      } else if (pushed && diskHash !== undefined) {
-        // Disk→API push succeeded: baseline is now the disk hash (API = disk)
-        manifest.resources.skills[name] = diskHash;
-      } else if (removed) {
-        // Confirmed deletion from API: remove baseline
-        delete manifest.resources.skills[name];
-      } else if (errored || conflicted) {
-        // Failed push or unresolved conflict: preserve existing baseline unchanged.
-        // Do NOT advance to apiEntry.hash or delete — the item's state is unresolved.
-      } else if (apiEntry) {
-        // No change detected (both match baseline): ensure baseline is set
-        manifest.resources.skills[name] = apiEntry.hash;
-      }
-      // else: disk-only not in manifest, no API entry, no action → baseline unchanged
+      const nextBaseline = resolvedBaselineHash(baselineHash, outcome, apiHash, diskHash);
+      if (nextBaseline === undefined) delete manifest.resources.skills[name];
+      else manifest.resources.skills[name] = nextBaseline;
     }
 
     // Prune stale manifest entries: names that exist in the manifest but
@@ -2848,13 +2917,7 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
     const apiHash = apiEntry?.hash;
     const diskHash = diskMap.get(name);
     const baselineHash = manifest.resources.agents[name];
-    const syncedBefore = result.synced;
-    const pushedBefore = result.pushed;
-    const removedBefore = result.removed;
-    const errorsBefore = result.errors;
-    const conflictsBefore = result.conflicts;
-
-    await resolveResource(
+    const outcome = await resolveResource(
       apiHash,
       diskHash,
       baselineHash,
@@ -2869,22 +2932,9 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
       result,
     );
 
-    const synced = result.synced > syncedBefore;
-    const pushed = result.pushed > pushedBefore;
-    const removed = result.removed > removedBefore;
-    const errored = result.errors > errorsBefore;
-    const conflicted = result.conflicts > conflictsBefore;
-    if (synced && apiEntry) {
-      manifest.resources.agents[name] = apiEntry.hash;
-    } else if (pushed && diskHash !== undefined) {
-      manifest.resources.agents[name] = diskHash;
-    } else if (removed) {
-      delete manifest.resources.agents[name];
-    } else if (errored || conflicted) {
-      // Preserve unresolved baselines until a later successful sync.
-    } else if (apiEntry) {
-      manifest.resources.agents[name] = apiEntry.hash;
-    }
+    const nextBaseline = resolvedBaselineHash(baselineHash, outcome, apiHash, diskHash);
+    if (nextBaseline === undefined) delete manifest.resources.agents[name];
+    else manifest.resources.agents[name] = nextBaseline;
   }
 
   for (const name of Object.keys(manifest.resources.agents)) {
@@ -2937,13 +2987,7 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
     const diskHash = diskMap.get(name);
     const baselineHash = manifest.resources.plugins[name];
 
-    const syncedBefore = result.synced;
-    const pushedBefore = result.pushed;
-    const removedBefore = result.removed;
-    const errorsBefore = result.errors;
-    const conflictsBefore = result.conflicts;
-
-    await resolveResource(
+    const outcome = await resolveResource(
       apiHash,
       diskHash,
       baselineHash,
@@ -2958,22 +3002,9 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
       result,
     );
 
-    const synced = result.synced > syncedBefore;
-    const pushed = result.pushed > pushedBefore;
-    const removed = result.removed > removedBefore;
-    const errored = result.errors > errorsBefore;
-    const conflicted = result.conflicts > conflictsBefore;
-    if (synced && apiEntry) {
-      manifest.resources.plugins[name] = apiEntry.hash;
-    } else if (pushed && diskHash !== undefined) {
-      manifest.resources.plugins[name] = diskHash;
-    } else if (removed) {
-      delete manifest.resources.plugins[name];
-    } else if (errored || conflicted) {
-      // Preserve an unresolved item's prior baseline.
-    } else if (apiEntry) {
-      manifest.resources.plugins[name] = apiEntry.hash;
-    }
+    const nextBaseline = resolvedBaselineHash(baselineHash, outcome, apiHash, diskHash);
+    if (nextBaseline === undefined) delete manifest.resources.plugins[name];
+    else manifest.resources.plugins[name] = nextBaseline;
   }
 
   // Prune stale manifest entries: names that exist in the manifest but
@@ -3032,13 +3063,7 @@ export async function syncCommands(worktree: string, project: string, manifest: 
     const diskHash = diskMap.get(name);
     const baselineHash = manifest.resources.commands[name];
 
-    const syncedBefore = result.synced;
-    const pushedBefore = result.pushed;
-    const removedBefore = result.removed;
-    const errorsBefore = result.errors;
-    const conflictsBefore = result.conflicts;
-
-    await resolveResource(
+    const outcome = await resolveResource(
       apiHash,
       diskHash,
       baselineHash,
@@ -3053,22 +3078,9 @@ export async function syncCommands(worktree: string, project: string, manifest: 
       result,
     );
 
-    const synced = result.synced > syncedBefore;
-    const pushed = result.pushed > pushedBefore;
-    const removed = result.removed > removedBefore;
-    const errored = result.errors > errorsBefore;
-    const conflicted = result.conflicts > conflictsBefore;
-    if (synced && apiEntry) {
-      manifest.resources.commands[name] = apiEntry.hash;
-    } else if (pushed && diskHash !== undefined) {
-      manifest.resources.commands[name] = diskHash;
-    } else if (removed) {
-      delete manifest.resources.commands[name];
-    } else if (errored || conflicted) {
-      // Preserve an unresolved item's prior baseline.
-    } else if (apiEntry) {
-      manifest.resources.commands[name] = apiEntry.hash;
-    }
+    const nextBaseline = resolvedBaselineHash(baselineHash, outcome, apiHash, diskHash);
+    if (nextBaseline === undefined) delete manifest.resources.commands[name];
+    else manifest.resources.commands[name] = nextBaseline;
   }
 
   // Prune stale manifest entries: names that exist in the manifest but
@@ -3110,12 +3122,7 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
     }
   }
 
-  const syncedBefore = result.synced;
-  const pushedBefore = result.pushed;
-  const errorsBefore = result.errors;
-  const conflictsBefore = result.conflicts;
-
-  await resolveResource(
+  const outcome = await resolveResource(
     apiHash,
     diskHash ?? undefined,
     baselineHash,
@@ -3130,21 +3137,9 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
     result,
   );
 
-  const synced = result.synced > syncedBefore;
-  const pushed = result.pushed > pushedBefore;
-  const errored = result.errors > errorsBefore;
-  const conflicted = result.conflicts > conflictsBefore;
-  if (synced && apiHash) {
-    manifest.resources.config.hash = apiHash;
-  } else if (pushed && diskHash) {
-    manifest.resources.config.hash = diskHash;
-  } else if (errored || conflicted) {
-    // Keep the last resolved baseline until a later sync succeeds.
-  } else if (apiHash) {
-    manifest.resources.config.hash = apiHash;
-  } else {
-    delete manifest.resources.config.hash;
-  }
+  const nextBaseline = resolvedBaselineHash(baselineHash, outcome, apiHash, diskHash ?? undefined);
+  if (nextBaseline === undefined) delete manifest.resources.config.hash;
+  else manifest.resources.config.hash = nextBaseline;
 
   return result;
 }
@@ -3220,26 +3215,48 @@ function pluginFingerprint(entry: RepositoryPluginManifestEntry): string {
  */
 export async function repositorySync(
   worktree: string,
-  options: { dryRun?: boolean; scope?: RepositorySyncScope; project?: string } = {},
+  options: {
+    dryRun?: boolean;
+    scope?: RepositorySyncScope;
+    project?: string;
+    claim?: RepositoryClaimContext;
+    cleanupFileSystem?: Partial<TombstoneCleanupFileSystem>;
+  } = {},
 ): Promise<RepositorySyncResult> {
   const dryRun = options.dryRun === true;
   const scope = options.scope ?? "all";
-  if (scope === "all") cleanupLegacySkillTombstones(worktree, { dryRun });
-  const project = resolveExtensionProject(worktree, options.project);
+  const binding = resolveExtensionBinding(worktree, { purpose: "repository-sync", project: options.project });
+  const project = resolveExtensionProject(worktree, options.project ?? binding.project);
   _projectCache = project;
   _projectResolved = true;
+  const claim = options.claim;
   const manifest = loadManifest(worktree, project);
-  const projection = scope === "all"
-    ? buildRepositoryManifestV2(worktree, manifest)
-    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
+  const localGeneration = manifest.generation ?? 0;
+  if (claim && localGeneration !== claim.manifestGeneration) {
+    manifest.resources.repository = { docs: {}, skills: {}, agents: {}, plugins: {} };
+    manifest.generation = claim.manifestGeneration;
+  }
+  let projection!: RepositoryManifestV2;
   const docsResult = emptyResult();
   const skillsResult = emptyResult();
   const agentsResult = emptyResult();
   const pluginsResult = emptyResult();
   let docsConfirmed = false;
   let resourcesConfirmed = false;
+  let applyStarted = false;
+  let nextGeneration = claim?.manifestGeneration ?? localGeneration;
 
   try {
+    await claim?.renew();
+    await claim?.verify();
+    if (scope === "all" && claim) cleanupLegacySkillTombstones(worktree, {
+      dryRun,
+      fileSystem: options.cleanupFileSystem,
+    });
+    projection = scope === "all"
+      ? buildRepositoryManifestV2(worktree, manifest)
+      : { version: 2, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
+    applyStarted = true;
     const response = mcpToolData(await callMcpTool(worktree, "repository_sync", {
       project,
       docsManifest: { files: projection.docs },
@@ -3247,15 +3264,26 @@ export async function repositorySync(
         ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins }
         : undefined,
       dryRun,
+      expectedGeneration: claim?.manifestGeneration ?? localGeneration,
+      claim: claim?.proof(),
     })) as {
       docs?: { summary?: Record<string, number> };
       resources?: { summary?: Record<string, Record<string, number>> };
+      generation?: number;
+      manifestHash?: string;
     };
     if (typeof response !== "object" || response === null) throw new Error("Invalid MCP response");
     const payload = response as {
       docs?: { summary?: Record<string, number> };
       resources?: { summary?: Record<string, Record<string, number>> };
+      generation?: number;
+      manifestHash?: string;
     };
+    if (!Number.isSafeInteger(payload.generation) || payload.generation! < (claim?.manifestGeneration ?? localGeneration)
+      || typeof payload.manifestHash !== "string" || !/^[0-9a-f]{64}$/.test(payload.manifestHash)) {
+      throw new Error("Invalid MCP response");
+    }
+    nextGeneration = payload.generation!;
     Object.assign(docsResult, resultFromRepositorySummary(payload.docs?.summary));
     docsConfirmed = true;
     if (scope === "all") {
@@ -3265,7 +3293,12 @@ export async function repositorySync(
       Object.assign(pluginsResult, resultFromRepositorySummary(payload.resources.summary.plugin));
       resourcesConfirmed = true;
     }
-  } catch {
+  } catch (error) {
+    if (!applyStarted) throw error;
+    if (applyStarted && claim) {
+      retainRepositoryRecoveryEvidence(worktree, "apply_uncertain", claim.manifestGeneration);
+      await claim.quarantine("uncertain_apply").catch(() => undefined);
+    }
     docsResult.errors = 1;
     return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
   }
@@ -3285,7 +3318,17 @@ export async function repositorySync(
     }
     if (docsConfirmed || resourcesConfirmed) {
       manifest.lastFullSync = new Date().toISOString();
-      saveManifest(worktree, manifest);
+      try {
+        await claim?.renew();
+        await claim?.verify();
+        saveManifest(worktree, manifest, claim ? { expected: localGeneration, next: nextGeneration } : undefined);
+      } catch {
+        if (!claim) throw new RepositorySyncScanError("Repository manifest save failed");
+        retainRepositoryRecoveryEvidence(worktree, "save_rejected", nextGeneration);
+        await claim?.quarantine("uncertain_apply").catch(() => undefined);
+        docsResult.errors += 1;
+        return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
+      }
     }
   }
 
@@ -3306,8 +3349,8 @@ export async function repositorySync(
  * `/init-project`. Legacy commands/config synchronization is deliberately not
  * invoked from this path.
  */
-export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
-  const result = await repositorySync(worktree);
+export async function fullSync(worktree: string, claim?: RepositoryClaimContext): Promise<FullSyncResult & { restartRequired: boolean }> {
+  const result = await repositorySync(worktree, { claim });
   return {
     docs: result.docs,
     skills: result.skills,
@@ -3340,12 +3383,12 @@ function hasSyncErrors(result: FullSyncResult): boolean {
  * Incremental sync — triggered on session.idle.
  * Only syncs items with content hash mismatches, throttled to max 1 per 60s.
  */
-export async function incrementalSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean } | null> {
+export async function incrementalSync(worktree: string, claim?: RepositoryClaimContext): Promise<FullSyncResult & { restartRequired: boolean } | null> {
   const now = Date.now();
   if (incrementalSyncInFlight || now - lastIncrementalSync < INCREMENTAL_THROTTLE_MS) return null;
   incrementalSyncInFlight = true;
   try {
-    const result = await fullSync(worktree);
+    const result = await fullSync(worktree, claim);
     // A failed reconciliation is intentionally eligible for the next idle
     // event. Advancing the throttle here used to turn a startup race into a
     // guaranteed one-minute recovery delay.
@@ -3377,6 +3420,16 @@ function resultSummary(label: string, r: SyncResult): string {
  */
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
+  const managedRuntime = process.env.INGENIUM_MCP_AUDIENCE === "runtime";
+  const managedCoordinator = managedRuntime ? sessionCoordinatorFor(ctx) : undefined;
+  await managedCoordinator?.ensureReady();
+  const coordinatedSync = async <T>(sessionId: unknown, action: (claim: RepositoryClaimContext) => Promise<T>): Promise<T | undefined> => {
+    if (typeof sessionId !== "string") {
+      if (managedRuntime) throw new ExtensionBindingError();
+      throw new ExtensionBindingError();
+    }
+    return (managedCoordinator ?? sessionCoordinatorFor(ctx)).withRepositoryClaim(sessionId, action);
+  };
   const reportWarning = (operation: "resource_sync", reason: "request_failed") => {
     logPluginLifecycle(ctx.client, "resource-sync", "warn", `${operation}: ${reason}`);
   };
@@ -3385,7 +3438,8 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
         try {
-          const result = await fullSync(worktree);
+          const result = await coordinatedSync(event.properties?.info?.id, (claim) => fullSync(worktree, claim));
+          if (!result) return;
           const lines: string[] = [
             resultSummary("docs", result.docs ?? emptyResult()),
             resultSummary("skills", result.skills),
@@ -3405,7 +3459,7 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
 
       if (event.type === "session.idle") {
         try {
-          const result = await incrementalSync(worktree);
+          const result = await coordinatedSync(event.properties?.sessionID, (claim) => incrementalSync(worktree, claim));
           if (result) {
             const lines: string[] = [
               resultSummary("docs", result.docs ?? emptyResult()),

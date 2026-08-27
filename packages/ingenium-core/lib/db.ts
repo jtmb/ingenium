@@ -940,6 +940,133 @@ function inspectCoordinationRegistryMigration(db: Database.Database): Coordinati
   return { any, complete: missing.length === 0, missing };
 }
 
+function inspectCoordinationHandoffMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const indexes = [
+    "idx_coordination_handoff_events_worktree_sequence",
+    "idx_coordination_handoff_cursors_worktree",
+  ];
+  const state = inspectMigrationComponents(db, {
+    coordination_handoff_events: [
+      "sequence", "id", "project_id", "worktree_id", "source_coordination_session_id", "source_revision", "operation", "path",
+      "baseline_sha256", "current_task_id", "current_task_revision", "context_conversation_id", "context_revision", "created_at",
+    ],
+    coordination_handoff_cursors: [
+      "project_id", "coordination_session_id", "worktree_id", "last_sequence", "updated_at",
+    ],
+  }, indexes, []);
+  if (state.any && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "107_coordination_handoffs.sql",
+      `CREATE TABLE projects (id TEXT PRIMARY KEY);
+       CREATE TABLE tasks (project_id TEXT, id TEXT, UNIQUE(project_id, id));
+       CREATE TABLE context_conversations (project_id TEXT, id TEXT, UNIQUE(project_id, id));
+       CREATE TABLE coordination_worktrees (
+         project_id TEXT, worktree_id TEXT, PRIMARY KEY(project_id, worktree_id)
+       );
+       CREATE TABLE coordination_sessions (
+         id TEXT, project_id TEXT, worktree_id TEXT, updated_at TEXT,
+         UNIQUE(project_id, id)
+       );`,
+      ["coordination_handoff_events", "coordination_handoff_cursors", ...indexes],
+    ));
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
+function inspectCoordinationClientClaimKeyMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const column = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('coordination_claims') WHERE name = 'client_claim_key_hash'",
+  ).get() as { count: number }).count === 1;
+  const index = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_coordination_claims_client_key'",
+  ).get() as { count: number }).count === 1;
+  const triggers = [
+    "coordination_claims_require_client_key_insert",
+    "coordination_claims_require_client_key_update",
+  ].map((name) => (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ? AND tbl_name = 'coordination_claims'",
+  ).get(name) as { count: number }).count === 1);
+  const missing = [
+    ...(!column ? ["coordination_claims client_claim_key_hash column"] : []),
+    ...(!index ? ["idx_coordination_claims_client_key index"] : []),
+    ...(!triggers[0] ? ["coordination_claims_require_client_key_insert trigger"] : []),
+    ...(!triggers[1] ? ["coordination_claims_require_client_key_update trigger"] : []),
+  ];
+  return { any: column || index || triggers.some(Boolean), complete: missing.length === 0, missing };
+}
+
+function inspectCoordinationMemoryCursorMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const indexes = ["idx_coordination_memory_cursors_worktree"];
+  const state = inspectMigrationComponents(db, {
+    coordination_memory_cursors: [
+      "project_id", "coordination_session_id", "worktree_id", "conversation_id", "last_revision", "updated_at",
+    ],
+  }, indexes, []);
+  if (state.any && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "110_coordination_memory_cursors.sql",
+      `CREATE TABLE projects (id TEXT PRIMARY KEY);
+       CREATE TABLE context_conversations (project_id TEXT, id TEXT, UNIQUE(project_id, id));
+       CREATE TABLE context_messages (project_id TEXT, conversation_id TEXT);
+       CREATE TABLE coordination_worktrees (
+         project_id TEXT, worktree_id TEXT, PRIMARY KEY(project_id, worktree_id)
+       );
+       CREATE TABLE coordination_sessions (
+         id TEXT, project_id TEXT, worktree_id TEXT, context_conversation_id TEXT, updated_at TEXT,
+         UNIQUE(project_id, id)
+       );`,
+      ["coordination_memory_cursors", ...indexes],
+    ));
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
+function inspectManagedMutationRepositorySerializationMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  return inspectMigrationComponents(db, {
+    coordination_worktree_epochs: ["project_id", "worktree_id", "accepted_epoch", "state", "quarantine_code", "updated_at"],
+    coordination_managed_paths: ["project_id", "worktree_id", "path", "accepted_sha256", "accepted_epoch", "updated_at"],
+    coordination_managed_operations: [
+      "id", "project_id", "coordination_session_id", "worktree_id", "incarnation", "fence", "accepted_epoch",
+      "client_claim_key_hash", "operation", "state", "declared_paths_hash", "footprint_hash", "created_at", "completed_at",
+    ],
+    repository_sync_generations: ["project_id", "worktree_id", "generation", "manifest_hash", "updated_at"],
+  }, ["idx_coordination_managed_operations_session"], ["coordination_managed_operations_immutable_delete"]);
+}
+
+function inspectAtomicEpochRecoveryMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const columns = [
+    ["coordination_claims", "accepted_epoch"],
+    ["coordination_worktree_epochs", "quarantined_coordination_session_id"],
+    ["coordination_worktree_epochs", "quarantined_incarnation"],
+    ["coordination_worktree_epochs", "quarantined_fence"],
+    ["coordination_worktree_epochs", "reconciliation_footprint_hash"],
+  ].map(([table, column]) => (db.prepare(
+    `SELECT count(*) AS count FROM pragma_table_info('${table}') WHERE name = ?`,
+  ).get(column) as { count: number }).count === 1);
+  const index = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_coordination_claims_epoch_owner'",
+  ).get() as { count: number }).count === 1;
+  const triggerNames = [
+    "coordination_claims_require_accepted_epoch_insert",
+    "coordination_claims_accepted_epoch_immutable",
+    "coordination_epochs_require_quarantine_owner",
+    "coordination_epochs_clear_recovery_proof",
+  ];
+  const triggers = triggerNames.map((name) => (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+  ).get(name) as { count: number }).count === 1);
+  const missing = [
+    ...columns.flatMap((present, index) => present ? [] : [`atomic epoch recovery column ${index + 1}`]),
+    ...(!index ? ["idx_coordination_claims_epoch_owner index"] : []),
+    ...triggers.flatMap((present, index) => present ? [] : [`${triggerNames[index]} trigger`]),
+  ];
+  return { any: columns.some(Boolean) || index || triggers.some(Boolean), complete: missing.length === 0, missing };
+}
+
 /** Probe JOB-100 as one append-only boundary; a partial event catalog is unsafe. */
 function inspectTrustedJobEventsMigration(db: Database.Database): TrustedJobEventsMigrationState {
   const table = "trusted_job_events";
@@ -2287,7 +2414,12 @@ const RUNTIME_ISOLATION_TRIGGERS = [
 function inspectRuntimeIsolationMigration(db: Database.Database): RuntimeIsolationMigrationState {
   const state = inspectMigrationComponents(db, RUNTIME_ISOLATION_TABLES, RUNTIME_ISOLATION_INDEXES, RUNTIME_ISOLATION_TRIGGERS);
   if (!state.any || state.missing.length > 0) return state;
-  const objects = [...Object.keys(RUNTIME_ISOLATION_TABLES), ...RUNTIME_ISOLATION_INDEXES, ...RUNTIME_ISOLATION_TRIGGERS];
+  const workspaceSupersessionApplied = (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_authorized_workspaces_active_storage'",
+  ).get() as { count: number }).count === 1;
+  const tables = Object.keys(RUNTIME_ISOLATION_TABLES)
+    .filter((table) => table !== "authorized_workspaces" || !workspaceSupersessionApplied);
+  const objects = [...tables, ...RUNTIME_ISOLATION_INDEXES, ...RUNTIME_ISOLATION_TRIGGERS];
   state.missing.push(...compareMigrationDefinitions(db, "101_runtime_isolation.sql", `
     CREATE TABLE organizations (id TEXT PRIMARY KEY);
     CREATE TABLE users (id TEXT PRIMARY KEY);
@@ -2322,6 +2454,24 @@ function inspectRuntimeIsolationMigration(db: Database.Database): RuntimeIsolati
   }
   state.complete = state.missing.length === 0;
   return state;
+}
+
+function inspectRuntimeWorkspaceSupersessionMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const table = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'authorized_workspaces'",
+  ).get() as { sql?: string } | undefined;
+  const activeStorageIndex = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_authorized_workspaces_active_storage'",
+  ).get() as { sql?: string } | undefined;
+  const tableMigrated = Boolean(table?.sql && !normalizeSchemaSql(table.sql).includes("storage_path text not null unique"));
+  const indexMigrated = Boolean(activeStorageIndex?.sql
+    && normalizeSchemaSql(activeStorageIndex.sql).includes("on authorized_workspaces(storage_path) where status = 'authorized'"));
+  const any = tableMigrated || Boolean(activeStorageIndex);
+  const missing = [
+    ...(tableMigrated ? [] : ["authorized_workspaces revoked-storage schema"]),
+    ...(indexMigrated ? [] : ["idx_authorized_workspaces_active_storage index"]),
+  ];
+  return { any, complete: missing.length === 0, missing };
 }
 
 const RUNTIME_BROWSER_TABLES: Record<string, string[]> = {
@@ -2366,8 +2516,14 @@ function inspectRuntimeBrowserMigration(db: Database.Database): AuthenticationFo
   const launcherOriginAdded = (db.prepare(
     "SELECT count(*) AS count FROM pragma_table_info('runtime_browser_sessions') WHERE name = 'launcher_origin'",
   ).get() as { count: number }).count === 1;
+  const localhostOriginsAdded = (db.prepare(
+    `SELECT count(*) AS count FROM sqlite_master
+     WHERE type = 'table' AND name IN ('runtime_browser_launch_tickets', 'runtime_browser_sessions')
+       AND sql LIKE '%host GLOB ''*.localhost'' AND origin = ''http://'' || host%'`,
+  ).get() as { count: number }).count === 2;
   state.missing.push(...definitionMissing.filter((component) =>
-    !(launcherOriginAdded && component === "runtime_browser_sessions definition")));
+    !((launcherOriginAdded || localhostOriginsAdded) && component === "runtime_browser_sessions definition")
+      && !(localhostOriginsAdded && component === "runtime_browser_launch_tickets definition")));
   if (state.missing.length === 0) {
     const missingGenerations = db.prepare(`SELECT count(*) AS count FROM runtime_instances r
       WHERE NOT EXISTS (SELECT 1 FROM runtime_browser_generations g WHERE g.runtime_id = r.id)`).get() as { count: number };
@@ -4904,6 +5060,123 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("103", ["runtime browser launcher origin or foreign key integrity"]);
     }
     logger.info("db", "Applied migration 103_runtime_browser_launcher_origin.sql");
+  }
+
+  const runtimeLocalhostOriginTables = db.prepare(
+    `SELECT count(*) AS count FROM sqlite_master
+     WHERE type = 'table' AND name IN ('runtime_browser_launch_tickets', 'runtime_browser_sessions')
+       AND sql LIKE '%host GLOB ''*.localhost'' AND origin = ''http://'' || host%'`,
+  ).get() as { count: number };
+  if (runtimeLocalhostOriginTables.count !== 0 && runtimeLocalhostOriginTables.count !== 2) {
+    throw restoreMigrationPartialStateError("105", ["runtime browser localhost origin constraints"]);
+  }
+  if (runtimeLocalhostOriginTables.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "105_runtime_localhost_browser_origins.sql"), "utf-8"));
+    const applied = db.prepare(
+      `SELECT count(*) AS count FROM sqlite_master
+       WHERE type = 'table' AND name IN ('runtime_browser_launch_tickets', 'runtime_browser_sessions')
+         AND sql LIKE '%host GLOB ''*.localhost'' AND origin = ''http://'' || host%'`,
+    ).get() as { count: number };
+    if (applied.count !== 2 || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("105", ["runtime browser localhost origins or foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 105_runtime_localhost_browser_origins.sql");
+  }
+
+  const coordinationHandoffs = inspectCoordinationHandoffMigration(db);
+  if (coordinationHandoffs.any && !coordinationHandoffs.complete) {
+    throw restoreMigrationPartialStateError("107", coordinationHandoffs.missing);
+  }
+  if (!coordinationHandoffs.complete) {
+    if (!inspectCoordinationRegistryMigration(db).complete) {
+      throw restoreMigrationPartialStateError("107", ["migration 075 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "107_coordination_handoffs.sql"), "utf-8"));
+    const applied = inspectCoordinationHandoffMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("107", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 107_coordination_handoffs.sql");
+  }
+
+  const coordinationClientClaimKeys = inspectCoordinationClientClaimKeyMigration(db);
+  if (coordinationClientClaimKeys.any && !coordinationClientClaimKeys.complete) {
+    throw restoreMigrationPartialStateError("108", coordinationClientClaimKeys.missing);
+  }
+  if (!coordinationClientClaimKeys.complete) {
+    if (!inspectCoordinationRegistryMigration(db).complete) {
+      throw restoreMigrationPartialStateError("108", ["migration 075 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "108_coordination_client_claim_keys.sql"), "utf-8"));
+    const applied = inspectCoordinationClientClaimKeyMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("108", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 108_coordination_client_claim_keys.sql");
+  }
+
+  const runtimeWorkspaceSupersession = inspectRuntimeWorkspaceSupersessionMigration(db);
+  if (runtimeWorkspaceSupersession.any && !runtimeWorkspaceSupersession.complete) {
+    throw restoreMigrationPartialStateError("109", runtimeWorkspaceSupersession.missing);
+  }
+  if (!runtimeWorkspaceSupersession.complete) {
+    if (!inspectRuntimeIsolationMigration(db).complete) {
+      throw restoreMigrationPartialStateError("109", ["migration 101 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "109_runtime_workspace_supersession.sql"), "utf-8"));
+    const applied = inspectRuntimeWorkspaceSupersessionMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("109", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 109_runtime_workspace_supersession.sql");
+  }
+
+  const coordinationMemoryCursors = inspectCoordinationMemoryCursorMigration(db);
+  if (coordinationMemoryCursors.any && !coordinationMemoryCursors.complete) {
+    throw restoreMigrationPartialStateError("110", coordinationMemoryCursors.missing);
+  }
+  if (!coordinationMemoryCursors.complete) {
+    if (!inspectCoordinationHandoffMigration(db).complete) {
+      throw restoreMigrationPartialStateError("110", ["migration 107 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "110_coordination_memory_cursors.sql"), "utf-8"));
+    const applied = inspectCoordinationMemoryCursorMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("110", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 110_coordination_memory_cursors.sql");
+  }
+
+  const managedMutationRepositorySerialization = inspectManagedMutationRepositorySerializationMigration(db);
+  if (managedMutationRepositorySerialization.any && !managedMutationRepositorySerialization.complete) {
+    throw restoreMigrationPartialStateError("111", managedMutationRepositorySerialization.missing);
+  }
+  if (!managedMutationRepositorySerialization.complete) {
+    if (!inspectCoordinationClientClaimKeyMigration(db).complete) {
+      throw restoreMigrationPartialStateError("111", ["migration 108 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "111_managed_mutation_repository_serialization.sql"), "utf-8"));
+    const applied = inspectManagedMutationRepositorySerializationMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("111", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 111_managed_mutation_repository_serialization.sql");
+  }
+
+  const atomicEpochRecovery = inspectAtomicEpochRecoveryMigration(db);
+  if (atomicEpochRecovery.any && !atomicEpochRecovery.complete) {
+    throw restoreMigrationPartialStateError("112", atomicEpochRecovery.missing);
+  }
+  if (!atomicEpochRecovery.complete) {
+    if (!inspectManagedMutationRepositorySerializationMigration(db).complete) {
+      throw restoreMigrationPartialStateError("112", ["migration 111 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "112_atomic_epoch_recovery.sql"), "utf-8"));
+    const applied = inspectAtomicEpochRecoveryMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("112", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 112_atomic_epoch_recovery.sql");
   }
 
   enforceReservedBrokerInvariant(db);

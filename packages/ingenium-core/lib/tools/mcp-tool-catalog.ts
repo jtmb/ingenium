@@ -1044,11 +1044,12 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: TASKS_ENDPOINTS,
   },
 
-  // ── Task Coordination (4) ─────────────────────────────
+  // ── Task Coordination (5) ─────────────────────────────
   { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["GET /api/v1/coordination/snapshot"] },
-  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot with optimistic revision control.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
+  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot or renew its attested runtime activity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/runtimes/activity", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
   { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/batch"] },
   { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/release"] },
+  { name: "ingenium_coordination_handoff", category: "Tasks", description: "Publish, read, and acknowledge sanitized same-worktree peer-write handoffs.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/handoffs/publish", "POST /api/v1/coordination/handoffs/read", "POST /api/v1/coordination/handoffs/ack"] },
 
   // ── Plans (3) ────────────────────────────────────────
   {

@@ -400,6 +400,7 @@ authPreflightRouter.get("/preflight", (req, res) => {
       audience: principal.audience,
       workspaceId: principal.workspaceId,
       launcherWorktree: principal.launcherWorktree,
+      storageMappingHash: principal.storageMappingHash,
       restartRequiredOnCredentialChange: true,
     } : {}),
   } });

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ServerResponse } from "node:http";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,6 +9,7 @@ import {
   validateWorkspaceMapping,
   type RuntimeProvisionRequest,
 } from "../lib/runtime-manager-contract.js";
+import { respondWithRuntimeInspect } from "../scripts/runtime-manager.js";
 
 let root = "";
 
@@ -39,6 +41,25 @@ function mountInfo(hostPath: string, validationPath: string): string {
 }
 
 describe("AUTH-108 runtime manager contract", () => {
+  it("does not commit a response before Docker inspection succeeds", async () => {
+    const end = vi.fn();
+    const writeHead = vi.fn(() => ({ end }));
+    const response = { writeHead } as unknown as ServerResponse;
+
+    await expect(respondWithRuntimeInspect(response, async () => {
+      throw new Error("Docker unavailable");
+    })).rejects.toThrow("Docker unavailable");
+    expect(writeHead).not.toHaveBeenCalled();
+
+    await respondWithRuntimeInspect(response, async () => ({
+      Id: "a".repeat(64),
+      Name: "/ingenium-runtime-test",
+      State: { Status: "running", Health: { Status: "healthy" } },
+    }));
+    expect(writeHead).toHaveBeenCalledWith(200);
+    expect(end).toHaveBeenCalledOnce();
+  });
+
   it("rejects workspace symlinks and host-to-validation mapping mismatch", () => {
     const real = join(root, "real");
     const linked = join(root, "linked");
@@ -95,6 +116,7 @@ describe("AUTH-108 runtime manager contract", () => {
       "XDG_DATA_HOME=/home/appuser/.local/share",
       "TMPDIR=/home/appuser/.tmp",
       "INGENIUM_WORKTREE=/workspace",
+      `INGENIUM_STORAGE_MAPPING_HASH=${runtimeStorageMappingHash("workspace-one", firstHost)}`,
       "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability",
     ]));
     expect(first.Env.join("\n")).not.toMatch(/INGENIUM_API_TOKEN|VAULT|BACKUP|AUTH_ENCRYPTION|OPENCODE_SERVER_PASSWORD|DOCKER/);

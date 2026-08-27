@@ -10,10 +10,9 @@ import {
 } from "./project-resolver.js";
 
 const token = "r".repeat(32);
-const apiBase = "http://api.test/api/v1";
+const apiBase = "https://api.test/api/v1";
+const storageMappingHash = "a".repeat(64);
 let worktree = "";
-let originalProject: string | undefined;
-let originalWorkspace: string | undefined;
 
 function writeProtectedToken(directory: string, value = token): void {
   const opencode = join(directory, ".opencode");
@@ -24,20 +23,16 @@ function writeProtectedToken(directory: string, value = token): void {
 }
 
 beforeEach(() => {
-  originalProject = process.env.INGENIUM_PROJECT;
-  originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
-  process.env.INGENIUM_PROJECT = "external-startup-project";
-  process.env.INGENIUM_WORKSPACE_ID = "workspace-fixture";
+  vi.stubEnv("INGENIUM_PROJECT", "external-startup-project");
+  vi.stubEnv("INGENIUM_WORKSPACE_ID", "workspace-fixture");
+  vi.stubEnv("INGENIUM_TRUSTED_API_URL", apiBase);
   worktree = mkdtempSync(join(tmpdir(), "ingenium-project-readiness-"));
   writeProtectedToken(worktree);
   resetEnsuredProjects();
 });
 
 afterEach(() => {
-  if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
-  else process.env.INGENIUM_PROJECT = originalProject;
-  if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
-  else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
+  vi.unstubAllEnvs();
   resetEnsuredProjects();
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
@@ -51,7 +46,7 @@ describe("extension project startup readiness", () => {
       const path = new URL(String(url)).pathname;
       if (path.endsWith("/auth/preflight")) return Response.json({ data: {
         scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
-        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree, storageMappingHash,
         restartRequiredOnCredentialChange: true,
       } });
       expect(path).toBe(`/api/v1/projects/${project}/detail`);
@@ -118,7 +113,7 @@ describe("extension project startup readiness", () => {
         preflightAttempts += 1;
         return new Response(preflightAttempts < 3 ? "not ready" : JSON.stringify({ data: {
           scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
-          audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree, restartRequiredOnCredentialChange: true,
+          audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree, storageMappingHash, restartRequiredOnCredentialChange: true,
         } }), { status: preflightAttempts < 3 ? 503 : 200, headers: { "Content-Type": "application/json" } });
       }
       expect(path).toBe("/api/v1/projects/external-startup-project/detail");
@@ -174,6 +169,7 @@ describe("extension project startup readiness", () => {
         if (path.endsWith("/auth/preflight")) return new Response(JSON.stringify({ data: {
           scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
           audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: authorization === `Bearer ${secondToken}` ? secondWorktree : worktree,
+          storageMappingHash,
           restartRequiredOnCredentialChange: true,
         } }), { status: 200, headers: { "Content-Type": "application/json" } });
         return Response.json({ data: { project: { id: "project-id" } } });
@@ -198,7 +194,7 @@ describe("extension project startup readiness", () => {
       const path = new URL(String(url)).pathname;
       if (path.endsWith("/auth/preflight")) return Response.json({ data: {
         scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
-        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree, storageMappingHash,
         restartRequiredOnCredentialChange: true,
       } });
       return Response.json({ data: { project: { id: "different-project-id" } } });
@@ -216,7 +212,7 @@ describe("extension project startup readiness", () => {
       const path = new URL(String(url)).pathname;
       if (path.endsWith("/auth/preflight")) return Response.json({ data: {
         scopes: ["projects:read", "projects:create"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
-        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+        audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree, storageMappingHash,
         restartRequiredOnCredentialChange: true,
       } });
       return new Response(null, { status: 404 });
@@ -227,5 +223,23 @@ describe("extension project startup readiness", () => {
       readiness: { retryDelayMs: 0 },
     })).rejects.toMatchObject({ failure: "not_found" });
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["malformed", "A".repeat(64)],
+  ])("fails closed when the preflight storage mapping hash is %s", async (_label, invalidHash) => {
+    const request = vi.fn(async () => Response.json({ data: {
+      scopes: ["projects:read"], organizationId: "org-id", projectId: "project-id", projectIds: ["project-id"],
+      audience: "mcp", workspaceId: "workspace-fixture", launcherWorktree: worktree,
+      ...(invalidHash === undefined ? {} : { storageMappingHash: invalidHash }),
+      restartRequiredOnCredentialChange: true,
+    } }));
+
+    await expect(ensureExtensionProject(worktree, apiBase, undefined, {
+      request: request as unknown as typeof fetch,
+      readiness: { retryDelayMs: 0 },
+    })).rejects.toMatchObject({ failure: "authentication" });
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });

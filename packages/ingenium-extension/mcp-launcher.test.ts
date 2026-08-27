@@ -9,10 +9,6 @@ const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
 let worktree = "";
 const temporaryDirectories: string[] = [];
-let originalProject: string | undefined;
-let originalToken: string | undefined;
-let originalTokenFile: string | undefined;
-let originalWorkspace: string | undefined;
 
 function writeProtectedToken(value = "a".repeat(32)): void {
   const tokenPath = join(worktree, ".opencode", ".ingenium-mcp-credential");
@@ -21,27 +17,16 @@ function writeProtectedToken(value = "a".repeat(32)): void {
 }
 
 beforeEach(() => {
-  originalProject = process.env.INGENIUM_PROJECT;
-  originalToken = process.env.INGENIUM_MCP_CREDENTIAL;
-  originalTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
-  originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
-  delete process.env.INGENIUM_PROJECT;
-  delete process.env.INGENIUM_MCP_CREDENTIAL;
-  delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
-  process.env.INGENIUM_WORKSPACE_ID = "launcher-workspace";
+  vi.stubEnv("INGENIUM_PROJECT", undefined);
+  vi.stubEnv("INGENIUM_MCP_CREDENTIAL", undefined);
+  vi.stubEnv("INGENIUM_MCP_CREDENTIAL_FILE", undefined);
+  vi.stubEnv("INGENIUM_WORKSPACE_ID", "launcher-workspace");
   worktree = mkdtempSync(join(tmpdir(), "ingenium-mcp-launcher-"));
   mkdirSync(join(worktree, ".opencode"));
 });
 
 afterEach(() => {
-  if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
-  else process.env.INGENIUM_PROJECT = originalProject;
-  if (originalToken === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL;
-  else process.env.INGENIUM_MCP_CREDENTIAL = originalToken;
-  if (originalTokenFile === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
-  else process.env.INGENIUM_MCP_CREDENTIAL_FILE = originalTokenFile;
-  if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
-  else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
+  vi.unstubAllEnvs();
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -99,16 +84,31 @@ describe("packaged Ingenium MCP launcher", () => {
     expect(localConfig.mcp.ingenium.command).toEqual([
       "/usr/bin/env",
       "node",
-      "packages/ingenium-extension/dist/scripts/mcp-server.js",
+      "{env:PWD}/packages/ingenium-extension/dist/scripts/mcp-server.js",
     ]);
     expect(localConfig.mcp.ingenium.command.join(" ")).not.toContain("services/ingenium-server/dist");
-    expect(localConfig.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL).toBe("{file:.opencode/.ingenium-mcp-credential}");
+    expect(localConfig.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL).toBeUndefined();
+    expect(localConfig.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE).toBe(".opencode/.ingenium-mcp-credential");
     expect(localConfig.mcp.ingenium.environment.INGENIUM_PROJECT).toBe("ingenium");
     expect(entrypoint).toContain('"command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"]');
-    expect(entrypoint).toContain('"INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}"');
+    expect(entrypoint).toContain('"INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential"');
+    expect(entrypoint).not.toContain('"INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}"');
     expect(entrypoint).toContain('"INGENIUM_PROJECT": "global-default"');
     expect(entrypoint).not.toContain('"INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token"');
     expect(dockerfile).toContain('"command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"]');
+  });
+
+  it("keeps legacy credential content out of launcher diagnostics", async () => {
+    const sentinel = "sentinel_credential_content_123456";
+    process.env.INGENIUM_PROJECT = "launcher-project";
+    process.env.INGENIUM_MCP_CREDENTIAL = sentinel;
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await expect(runMcpLauncher(worktree)).resolves.toBe(2);
+
+    const captured = write.mock.calls.map(([value]) => String(value)).join("");
+    expect(captured).toBe("[ingenium-mcp] Ingenium MCP could not read a protected scoped credential. Configure INGENIUM_MCP_CREDENTIAL_FILE.\n");
+    expect(captured).not.toContain(sentinel);
   });
 
   it("loads the packaged transport artifact rather than the server workspace path", () => {

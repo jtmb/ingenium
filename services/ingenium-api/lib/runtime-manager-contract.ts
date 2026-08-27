@@ -226,6 +226,7 @@ export function buildRuntimeContainerSpec(
       `INGENIUM_RUNTIME_ID=${input.runtimeId}`,
       `INGENIUM_RUNTIME_OWNER_ID=${input.ownerUserId}`,
       `INGENIUM_WORKSPACE_ID=${input.workspaceId}`,
+      `INGENIUM_STORAGE_MAPPING_HASH=${input.storageMappingHash}`,
       "INGENIUM_WORKTREE=/workspace",
       "INGENIUM_MCP_AUDIENCE=runtime",
       "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability",

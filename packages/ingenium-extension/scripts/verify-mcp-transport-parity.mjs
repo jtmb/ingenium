@@ -2,11 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const TRANSPORT_REGISTRATION_PATTERN = /server\.registerTool\(\s*"([^"]+)"\s*,/g;
+const TRANSPORT_REGISTRATION_PATTERN = /(?:server\.registerTool|registerProjectTool)\(\s*"([^"]+)"\s*,/g;
 const CATALOG_NAME_PATTERN = /\bname:\s*"([^"]+)"/g;
 // Current built-in registrations in services/ingenium-server/scripts/mcp-server.ts.
 // Update only with an intentional server/catalog parity change.
-const EXPECTED_TRANSPORT_REGISTRATION_COUNT = 280;
+const EXPECTED_TRANSPORT_REGISTRATION_COUNT = 281;
 const CONTEXT_UPLOAD_TRANSPORT_NAME = "context_upload_file";
 const CONTEXT_UPLOAD_CATALOG_NAME = `ingenium_${CONTEXT_UPLOAD_TRANSPORT_NAME}`;
 const CONTEXT_UPLOAD_SCHEMA_MARKER = "contextUploadFilePathParam";

@@ -103,25 +103,33 @@ export async function repositorySync(
   project: string,
   docsManifest: unknown,
   resourcesManifest: unknown | undefined,
+  expectedGeneration: number,
+  claim: Record<string, unknown>,
   dryRun = false,
 ) {
   if (!hasBoundedRepositoryManifests(docsManifest, resourcesManifest)) return unavailable();
   try {
-    const docs = await api.post("/docs/repository/sync", { manifest: docsManifest, dryRun }, { project });
-    if (!isRecord(docs.data)) return unavailable();
+    const applied = await api.post("/repository/sync", {
+      docsManifest, resourcesManifest, expectedGeneration, claim, dryRun,
+    }, { project });
+    if (!isRecord(applied.data) || !isRecord(applied.data.docs)
+      || !Number.isSafeInteger(applied.data.generation) || typeof applied.data.manifestHash !== "string"
+      || !/^[0-9a-f]{64}$/.test(applied.data.manifestHash)) return unavailable();
     const response: Record<string, unknown> = {
       project,
-      dryRun: docs.data.dryRun === true,
-      docs: { summary: summary(docs.data.summary, DOC_SUMMARY_KEYS) },
+      dryRun: applied.data.dryRun === true,
+      generation: applied.data.generation,
+      manifestHash: applied.data.manifestHash,
+      docs: { summary: summary(applied.data.docs.summary, DOC_SUMMARY_KEYS) },
     };
     if (resourcesManifest !== undefined) {
-      const resources = await api.post("/repository/resources/sync", { manifest: resourcesManifest, dryRun }, { project });
-      if (!isRecord(resources.data) || !isRecord(resources.data.summary)) return unavailable();
+      const resources = applied.data.resources;
+      if (!isRecord(resources) || !isRecord(resources.summary)) return unavailable();
       response.resources = {
         summary: {
-          skill: summary(resources.data.summary.skill, RESOURCE_SUMMARY_KEYS),
-          agent: summary(resources.data.summary.agent, RESOURCE_SUMMARY_KEYS),
-          plugin: summary(resources.data.summary.plugin, RESOURCE_SUMMARY_KEYS),
+          skill: summary(resources.summary.skill, RESOURCE_SUMMARY_KEYS),
+          agent: summary(resources.summary.agent, RESOURCE_SUMMARY_KEYS),
+          plugin: summary(resources.summary.plugin, RESOURCE_SUMMARY_KEYS),
         },
       };
     }

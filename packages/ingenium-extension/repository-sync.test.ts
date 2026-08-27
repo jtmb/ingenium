@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,7 @@ const configuredPluginPaths = [
   "packages/ingenium-extension/plugins/auto-observer.ts",
   "packages/ingenium-extension/plugins/observer.ts",
   "packages/ingenium-extension/plugins/resource-sync.ts",
+  "packages/ingenium-extension/plugins/session-coordinator.ts",
   "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
 ];
 
@@ -70,8 +71,23 @@ function fixture(): void {
   write(".opencode/agents/execution/ingenium-llm-broker.md", "---\nname: ingenium-llm-broker\n---\nUnsafe\n");
   write(".opencode/agents/browser-agent-errors.md", "# Browser diagnostic\n");
   write(".opencode/plugins/nested/local-plugin.ts", "export const local = true;\n");
+  write(".opencode/.ingenium-repository-sync-credential", `${"a".repeat(32)}\n`);
+  chmodSync(join(worktree, ".opencode", ".ingenium-repository-sync-credential"), 0o600);
   write("packages/custom-plugin.ts", "export const custom = true;\n");
   write("opencode.json", JSON.stringify({
+    mcp: {
+      ingenium: {
+        type: "local",
+        enabled: true,
+        environment: {
+          INGENIUM_API_URL: "http://localhost:4097/api/v1",
+          INGENIUM_MCP_AUDIENCE: "repository-sync",
+          INGENIUM_PROJECT: "repository-fixture",
+          INGENIUM_WORKSPACE_ID: "repository-workspace",
+          INGENIUM_WORKTREE: worktree,
+        },
+      },
+    },
     plugin: [
       { path: "packages/custom-plugin.ts", enabled: true, options: { level: "strict", apiKey: "do-not-persist", nested: { accessToken: "do-not-persist" } } },
       ".opencode/plugins/nested/local-plugin.ts",
@@ -86,6 +102,8 @@ function successfulMcp(): ReturnType<typeof vi.fn> {
       content: [{ type: "text", text: JSON.stringify({
         project: args.project,
         dryRun: args.dryRun,
+        generation: args.dryRun ? args.expectedGeneration : (args.expectedGeneration as number) + 1,
+        manifestHash: "a".repeat(64),
         docs: { summary: { created: 2, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } },
         resources: args.resourcesManifest === undefined ? undefined : { summary: {
           skill: { created: 1, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
@@ -272,7 +290,8 @@ describe("repository-authoritative manifest v2", () => {
   it("enforces the configured-plugin allowlist through pushDiskToApi", async () => {
     fixture();
     write("secrets/plugin.ts", "export const secret = true;\n");
-    write("opencode.json", JSON.stringify({ plugin: ["secrets/plugin.ts"] }));
+    const config = JSON.parse(readFileSync(join(worktree, "opencode.json"), "utf8"));
+    write("opencode.json", JSON.stringify({ ...config, plugin: ["secrets/plugin.ts"] }));
     successfulMcp();
 
     await expect(pushDiskToApi(worktree)).rejects.toBeInstanceOf(RepositorySyncScanError);
@@ -338,6 +357,36 @@ describe("repository-authoritative manifest v2", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it("rejects a stale local manifest generation without replacing newer state", () => {
+    fixture();
+    const current = manifest();
+    current.generation = 1;
+    saveManifest(worktree, current);
+    const stale = manifest();
+    expect(() => saveManifest(worktree, stale, { expected: 0, next: 2 }))
+      .toThrow("Repository manifest generation changed");
+    expect(loadManifest(worktree, "repository-fixture").generation).toBe(1);
+  });
+
+  it("quarantines an uncertain remote apply and retains content-free recovery evidence", async () => {
+    fixture();
+    mockCallMcpTool.mockRejectedValueOnce(new Error("connection lost after apply"));
+    const quarantine = vi.fn(async () => undefined);
+    const result = await repositorySync(worktree, { claim: {
+      manifestGeneration: 0,
+      proof: () => ({}),
+      renew: vi.fn(async () => undefined),
+      verify: vi.fn(async () => undefined),
+      quarantine,
+    } });
+    expect(result.docs.errors).toBe(1);
+    expect(quarantine).toHaveBeenCalledWith("uncertain_apply");
+    const recovery = join(worktree, ".opencode", ".ingenium-sync-recovery");
+    const evidence = JSON.parse(readFileSync(join(recovery, readdirSync(recovery)[0]!), "utf8"));
+    expect(evidence).toMatchObject({ version: 1, reason: "apply_uncertain", generation: 0 });
+    expect(JSON.stringify(evidence)).not.toContain("connection lost");
   });
 
   it("rejects symlink traversal instead of following repository content", () => {

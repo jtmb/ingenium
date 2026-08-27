@@ -6,6 +6,7 @@ export const RUNTIME_STATES = [
 ] as const;
 export type RuntimeState = typeof RUNTIME_STATES[number];
 export type RuntimeLaunchAudience = "web" | "cli" | "vscode";
+export type RuntimeTransportScheme = "http" | "https";
 
 export interface RuntimeLimits {
   cpuMillis: number;
@@ -83,7 +84,7 @@ export interface RuntimeBrowserSession {
 }
 
 export class RuntimeConflictError extends Error {
-  constructor(readonly code: "REVISION_CONFLICT" | "STATE_CONFLICT" | "LEASE_CONFLICT" | "QUOTA_EXCEEDED" | "SCOPE_UNAVAILABLE") {
+  constructor(readonly code: "REVISION_CONFLICT" | "STATE_CONFLICT" | "LEASE_CONFLICT" | "QUOTA_EXCEEDED" | "SCOPE_UNAVAILABLE" | "ACTIVITY_UNAVAILABLE") {
     super(code);
   }
 }
@@ -157,11 +158,19 @@ function normalizeRuntimeRootDomain(value: string): string {
   return domain;
 }
 
-export function runtimeAudienceOrigin(runtimeId: string, audience: RuntimeLaunchAudience, rootDomain: string): { origin: string; host: string } {
+export function runtimeAudienceOrigin(
+  runtimeId: string,
+  audience: RuntimeLaunchAudience,
+  rootDomain: string,
+  scheme: RuntimeTransportScheme,
+): { origin: string; host: string } {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runtimeId)
     || !["web", "cli", "vscode"].includes(audience)) throw new Error("Invalid runtime browser scope");
-  const host = `${audience}--${runtimeId.toLowerCase()}.${normalizeRuntimeRootDomain(rootDomain)}`;
-  return { host, origin: `https://${host}` };
+  const domain = normalizeRuntimeRootDomain(rootDomain);
+  if ((domain.endsWith(".localhost") && scheme !== "http")
+    || (!domain.endsWith(".localhost") && scheme !== "https")) throw new Error("Invalid runtime transport");
+  const host = `${audience}--${runtimeId.toLowerCase()}.${domain}`;
+  return { host, origin: `${scheme}://${host}` };
 }
 
 function workspaceDto(row: WorkspaceRow): AuthorizedWorkspace {
@@ -228,6 +237,27 @@ export function listAuthorizedWorkspaces(ownerUserId?: string): AuthorizedWorksp
     ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)
     : getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces ORDER BY created_at, id").all();
   return (rows as WorkspaceRow[]).map(workspaceDto);
+}
+
+export function revokeAuthorizedWorkspace(id: string, now = new Date()): AuthorizedWorkspace | undefined {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
+    if (!workspace || workspace.status === "revoked") return workspace ? workspaceDto(workspace) : undefined;
+    const runtime = db.prepare("SELECT state FROM runtime_instances WHERE workspace_id = ?").get(id) as { state: RuntimeState } | undefined;
+    if (runtime && runtime.state !== "REVOKED") throw new RuntimeConflictError("STATE_CONFLICT");
+    const timestamp = now.toISOString();
+    db.prepare("UPDATE mcp_credentials SET revoked_at = ? WHERE workspace_id = ? AND revoked_at IS NULL")
+      .run(timestamp, id);
+    db.prepare("UPDATE runtime_capability_bindings SET revoked_at = ? WHERE workspace_id = ? AND revoked_at IS NULL")
+      .run(timestamp, id);
+    db.prepare(`UPDATE authorized_workspaces
+      SET status = 'revoked', security_epoch = security_epoch + 1, updated_at = ?
+      WHERE id = ? AND status = 'authorized'`).run(timestamp, id);
+    return workspaceDto(db.prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(id) as WorkspaceRow);
+  });
+  if (result) checkpointAfterWrite();
+  return result;
 }
 
 function assertLimits(limits: RuntimeLimits): void {
@@ -300,6 +330,52 @@ export function listRuntimeInstances(ownerUserId?: string): RuntimeInstance[] {
     ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)
     : getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances ORDER BY created_at, id").all();
   return (rows as RuntimeRow[]).map(runtimeDto);
+}
+
+/** Resolve a background runtime only when its bound principal has an active automation grant. */
+export function getReadyRuntimeForProject(projectId: string): RuntimeInstance | undefined {
+  const now = new Date().toISOString();
+  const rows = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT runtime.* FROM runtime_instances runtime
+     JOIN authorized_workspaces workspace
+       ON workspace.id = runtime.workspace_id
+      AND workspace.organization_id = runtime.organization_id
+      AND workspace.project_id = runtime.project_id
+      AND workspace.owner_user_id = runtime.owner_user_id
+       AND workspace.security_epoch = runtime.security_epoch
+       AND workspace.status = 'authorized'
+     JOIN runtime_capability_bindings binding
+       ON binding.runtime_id = runtime.id
+      AND binding.organization_id = runtime.organization_id
+      AND binding.project_id = runtime.project_id
+      AND binding.owner_user_id = runtime.owner_user_id
+      AND binding.workspace_id = runtime.workspace_id
+      AND binding.security_epoch = runtime.security_epoch
+      AND binding.revoked_at IS NULL AND binding.expires_at > ?
+     JOIN mcp_credentials credential
+       ON credential.id = binding.mcp_credential_id
+      AND credential.organization_id = runtime.organization_id
+      AND credential.project_id = runtime.project_id
+      AND credential.workspace_id = runtime.workspace_id
+      AND credential.created_by_user_id = runtime.owner_user_id
+      AND credential.security_epoch = runtime.security_epoch
+      AND credential.kind = 'runtime' AND credential.audience = 'runtime'
+      AND credential.revoked_at IS NULL AND credential.expires_at > ?
+     JOIN service_principals principal
+       ON principal.id = credential.service_principal_id
+      AND principal.organization_id = runtime.organization_id
+      AND principal.security_epoch = runtime.security_epoch
+      AND principal.status = 'active'
+     JOIN automation_principal_grants automation_grant
+       ON automation_grant.organization_id = runtime.organization_id
+      AND automation_grant.project_id = runtime.project_id
+      AND automation_grant.service_principal_id = principal.id
+      AND automation_grant.permission = 'execute' AND automation_grant.status = 'active'
+     WHERE runtime.project_id = ? AND runtime.state IN ('READY', 'IDLE')
+     ORDER BY runtime.created_at, runtime.id
+     LIMIT 2`,
+  ).all(now, now, projectId) as RuntimeRow[];
+  return rows.length === 1 ? runtimeDto(rows[0]!) : undefined;
 }
 
 function appendEvent(runtime: RuntimeRow, eventType: string, actorType: "user" | "manager" | "system", actorId: string, fromState?: RuntimeState): void {
@@ -417,6 +493,90 @@ export function recordRuntimeActivity(input: {
     return runtimeDto(updated);
   });
   checkpointAfterWrite();
+  return result;
+}
+
+export function recordRuntimeCapabilityActivity(input: {
+  runtimeId: string;
+  credentialId: string;
+  servicePrincipalId: string;
+  organizationId: string;
+  projectId: string;
+  workspaceId: string;
+  storageMappingHash: string;
+  observedAt: Date;
+  idleLeaseMs: number;
+  now?: Date;
+}): { runtime: RuntimeInstance; renewed: boolean } {
+  const currentTime = input.now ?? new Date();
+  const observedTime = input.observedAt.getTime();
+  if (!Number.isFinite(observedTime) || observedTime < currentTime.getTime() - 30_000
+    || observedTime > currentTime.getTime() + 5_000
+    || !Number.isSafeInteger(input.idleLeaseMs) || input.idleLeaseMs < 60_000) {
+    throw new RuntimeConflictError("ACTIVITY_UNAVAILABLE");
+  }
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const timestamp = currentTime.toISOString();
+    const runtime = db.prepare(`SELECT runtime.* FROM runtime_instances runtime
+      JOIN authorized_workspaces workspace
+        ON workspace.id = runtime.workspace_id
+       AND workspace.organization_id = runtime.organization_id
+       AND workspace.project_id = runtime.project_id
+       AND workspace.owner_user_id = runtime.owner_user_id
+       AND workspace.security_epoch = runtime.security_epoch
+       AND workspace.status = 'authorized'
+      JOIN runtime_capability_bindings binding
+        ON binding.runtime_id = runtime.id
+       AND binding.organization_id = runtime.organization_id
+       AND binding.project_id = runtime.project_id
+       AND binding.owner_user_id = runtime.owner_user_id
+       AND binding.workspace_id = runtime.workspace_id
+       AND binding.security_epoch = runtime.security_epoch
+       AND binding.revoked_at IS NULL AND binding.expires_at > ?
+      JOIN mcp_credentials credential
+        ON credential.id = binding.mcp_credential_id
+       AND credential.organization_id = runtime.organization_id
+       AND credential.project_id = runtime.project_id
+       AND credential.workspace_id = runtime.workspace_id
+       AND credential.created_by_user_id = runtime.owner_user_id
+       AND credential.security_epoch = runtime.security_epoch
+       AND credential.kind = 'runtime' AND credential.audience = 'runtime'
+       AND credential.revoked_at IS NULL AND credential.expires_at > ?
+      JOIN service_principals principal
+        ON principal.id = credential.service_principal_id
+       AND principal.organization_id = runtime.organization_id
+       AND principal.security_epoch = runtime.security_epoch
+       AND principal.status = 'active'
+      WHERE runtime.id = ? AND binding.mcp_credential_id = ? AND principal.id = ?
+        AND runtime.organization_id = ? AND runtime.project_id = ? AND runtime.workspace_id = ?
+        AND workspace.storage_mapping_hash = ? AND runtime.state IN ('READY', 'IDLE')
+        AND runtime.absolute_expires_at > ?
+        AND EXISTS (SELECT 1 FROM json_each(credential.scopes_json) WHERE value = 'runtime:activity')`)
+      .get(timestamp, timestamp, input.runtimeId, input.credentialId, input.servicePrincipalId,
+        input.organizationId, input.projectId, input.workspaceId, input.storageMappingHash, timestamp) as RuntimeRow | undefined;
+    if (!runtime) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const worktreeId = `worktree-${sha256(`${input.workspaceId}\0${input.storageMappingHash}`)}`;
+    const activeSession = db.prepare(`SELECT 1 FROM coordination_sessions
+      WHERE project_id = ? AND worktree_id = ? AND state = 'active' AND expires_at > ? LIMIT 1`)
+      .get(input.projectId, worktreeId, timestamp);
+    if (!activeSession) throw new RuntimeConflictError("ACTIVITY_UNAVAILABLE");
+    const requestedExpiry = new Date(observedTime + input.idleLeaseMs).toISOString();
+    const idleExpiresAt = [requestedExpiry, runtime.absolute_expires_at!].sort()[0]!;
+    if (runtime.idle_expires_at && runtime.idle_expires_at >= idleExpiresAt) {
+      return { runtime: runtimeDto(runtime), renewed: false };
+    }
+    const changed = db.prepare(`UPDATE runtime_instances
+      SET last_authenticated_activity_at = ?, idle_expires_at = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ? AND state IN ('READY', 'IDLE')`)
+      .run(timestamp, idleExpiresAt, timestamp, runtime.id, runtime.revision);
+    if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
+    return {
+      runtime: runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(runtime.id) as RuntimeRow),
+      renewed: true,
+    };
+  });
+  if (result.renewed) checkpointAfterWrite();
   return result;
 }
 
@@ -568,6 +728,7 @@ export function issueRuntimeBrowserLaunchTicket(input: {
   authSessionId: string;
   audience: RuntimeLaunchAudience;
   rootDomain: string;
+  scheme: RuntimeTransportScheme;
   launcherOrigin: string;
   exchangeProof: string;
   ttlMs?: number;
@@ -576,7 +737,7 @@ export function issueRuntimeBrowserLaunchTicket(input: {
   const ttlMs = input.ttlMs ?? 60_000;
   if (!Number.isSafeInteger(ttlMs) || ttlMs < 1_000 || ttlMs > 60_000
     || !/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof)) throw new Error("Invalid runtime browser launch ticket");
-  const scope = runtimeAudienceOrigin(input.runtimeId, input.audience, input.rootDomain);
+  const scope = runtimeAudienceOrigin(input.runtimeId, input.audience, input.rootDomain, input.scheme);
   const launcher = new URL(input.launcherOrigin);
   if (launcher.origin !== input.launcherOrigin || launcher.username || launcher.password
     || (launcher.protocol !== "https:" && !(launcher.protocol === "http:" && ["localhost", "127.0.0.1"].includes(launcher.hostname)))) {

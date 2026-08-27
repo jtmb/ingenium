@@ -31,17 +31,17 @@
       "command": [
         "/usr/bin/env",
         "node",
-        "packages/ingenium-extension/dist/scripts/mcp-server.js"
+        "{env:PWD}/packages/ingenium-extension/dist/scripts/mcp-server.js"
       ],
       "enabled": true,
       "environment": {
         "PATH": "/home/brajam/.local/bin:/usr/local/bin:/usr/bin:/bin",
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
         "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
         "INGENIUM_MCP_AUDIENCE": "mcp",
         "INGENIUM_PROJECT": "ingenium",
-        "INGENIUM_WORKSPACE_ID": "acceptance-ingenium",
+        "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium",
+        "INGENIUM_WORKTREE": "/home/brajam/repos/ingenium",
         "INGENIUM_API_TIMEOUT": "10000",
         "LOG_LEVEL": "info"
       }
@@ -66,6 +66,7 @@
     "./packages/ingenium-extension/plugins/auto-observer.ts",
     "./packages/ingenium-extension/plugins/observer.ts",
     "./packages/ingenium-extension/plugins/resource-sync.ts",
+    "./packages/ingenium-extension/plugins/session-coordinator.ts",
     "./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
   ]
 }

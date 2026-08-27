@@ -334,6 +334,14 @@ function publicInspect(inspect: DockerInspect | null): object {
   } : { state: "absent", health: "absent" };
 }
 
+export async function respondWithRuntimeInspect(
+  response: import("node:http").ServerResponse,
+  operation: () => Promise<DockerInspect | null>,
+): Promise<void> {
+  const inspect = await operation();
+  response.writeHead(200).end(JSON.stringify({ data: publicInspect(inspect) }));
+}
+
 async function readJsonBody(request: import("node:http").IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -371,11 +379,11 @@ export function startRuntimeManager(): import("node:http").Server {
       const match = /^\/v1\/runtimes\/([0-9a-f-]+)(\/stop)?$/.exec(url.pathname);
       if (match && UUID.test(match[1]!)) {
         if (request.method === "GET" && !match[2]) {
-          response.writeHead(200).end(JSON.stringify({ data: publicInspect(await inspectRuntime(match[1]!)) }));
+          await respondWithRuntimeInspect(response, () => inspectRuntime(match[1]!));
           return;
         }
         if (request.method === "POST" && match[2] === "/stop") {
-          response.writeHead(200).end(JSON.stringify({ data: publicInspect(await stopRuntime(match[1]!)) }));
+          await respondWithRuntimeInspect(response, () => stopRuntime(match[1]!));
           return;
         }
         if (request.method === "DELETE" && !match[2]) {

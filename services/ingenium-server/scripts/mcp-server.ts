@@ -160,6 +160,7 @@ const toolVisibilityApi: ToolVisibilityApi = {
       project,
       include_categories: "true",
     });
+    if (response.status === 429) throw new Error("MCP_TOOL_STATE_RATE_LIMITED");
     if (!response.ok) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
     const data = response.data;
     const attestation = getProjectStateAttestation(response.payload, project);
@@ -207,6 +208,16 @@ const repositoryResourcesManifestParam = z.object({
     context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
   }
 });
+const repositoryClaimProofParam = z.object({
+  worktree_id: z.string().min(1).max(512),
+  session_id: z.string().min(1).max(512),
+  incarnation: z.number().int().positive(),
+  expected_revision: z.number().int().nonnegative(),
+  fence: z.number().int().positive(),
+  ownership_token: z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/),
+  client_claim_key: z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/),
+  accepted_epoch: z.number().int().positive(),
+}).strict();
 const jobVaultItemIdsParam = z.array(z.string().uuid()).max(16).refine(
   (itemIds) => new Set(itemIds).size === itemIds.length,
   "vault_item_ids must be unique",
@@ -290,11 +301,13 @@ server.registerTool(
       project: projectParam,
       docsManifest: repositoryDocsManifestParam,
       resourcesManifest: repositoryResourcesManifestParam.optional(),
+      expectedGeneration: z.number().int().nonnegative(),
+      claim: repositoryClaimProofParam,
       dryRun: z.boolean().optional(),
     },
   },
-  wrapLauncherBoundHandler(C("repository_sync"), launcherProject, async ({ project, docsManifest, resourcesManifest, dryRun }) =>
-    repositorySync(project, docsManifest, resourcesManifest, dryRun)),
+  wrapLauncherBoundHandler(C("repository_sync"), launcherProject, async ({ project, docsManifest, resourcesManifest, expectedGeneration, claim, dryRun }) =>
+    repositorySync(project, docsManifest, resourcesManifest, expectedGeneration, claim, dryRun)),
 );
 
 server.registerTool(
@@ -815,13 +828,46 @@ const coordinationClaimParam = z.discriminatedUnion("kind", [
 const coordinationClaimInputParam = z.object({
   claim: coordinationClaimParam,
   baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  current_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  repository_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
 }).strict();
 const coordinationClaimBatchParam = z.array(coordinationClaimInputParam).min(1).max(128);
-const coordinationClaimIdsParam = z.array(z.string().uuid()).min(1).max(128).refine(
-  (ids) => new Set(ids).size === ids.length,
-  "Claim IDs must be unique",
-);
 const coordinationSnapshotParam = z.record(z.unknown());
+const coordinationEncodedPathParam = z.array(z.string().min(1).max(342).regex(/^[A-Za-z0-9_-]+$/)).min(1).max(128);
+const coordinationMemoryEntryParam = z.object({
+  status: z.enum(["active", "working", "idle", "completed", "error"]),
+  actions: z.array(z.object({
+    kind: z.enum(["read", "search", "write", "edit", "execute"]),
+    result: z.literal("succeeded"),
+    pathSegments: coordinationEncodedPathParam.nullable(),
+    targetHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  }).strict()).max(64),
+  checks: z.array(z.object({
+    kind: z.enum(["test", "typecheck", "lint", "build", "format", "security", "other"]),
+    result: z.enum(["passed", "failed"]),
+    targetHash: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict()).max(32),
+  todos: z.object({
+    total: coordinationRevisionParam,
+    pending: coordinationRevisionParam,
+    inProgress: coordinationRevisionParam,
+    completed: coordinationRevisionParam,
+    cancelled: coordinationRevisionParam,
+    state: z.enum(["none", "pending", "in_progress", "complete", "cancelled", "mixed"]),
+  }).strict(),
+  currentTaskId: z.string().regex(/^task-[0-9a-f]{64}$/).nullable(),
+  changedPaths: z.array(z.object({
+    pathSegments: coordinationEncodedPathParam,
+    operation: z.enum(["write", "edit"]),
+    additions: coordinationRevisionParam,
+    deletions: coordinationRevisionParam,
+    changeRevision: coordinationPositiveParam,
+  }).strict()).max(32),
+  nextWork: z.object({
+    kind: z.enum(["none", "continue_task", "review_changes", "run_checks", "address_failure"]),
+    referenceHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  }).strict(),
+}).strict();
 
 server.registerTool(
   "task_create",
@@ -1151,10 +1197,11 @@ server.registerTool(
       worktree_id: coordinationOpaqueIdParam,
       session_id: coordinationOpaqueIdParam,
       incarnation: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
     },
   },
-  wrapHandler(C("coordination_status"), async ({ project, worktree_id, session_id, incarnation }) =>
-    coordinationTools.coordinationStatus(project, worktree_id, session_id, incarnation)),
+  wrapHandler(C("coordination_status"), async ({ project, worktree_id, session_id, incarnation, ownership_token }) =>
+    coordinationTools.coordinationStatus(project, worktree_id, session_id, incarnation, ownership_token)),
 );
 
 server.registerTool(
@@ -1163,7 +1210,7 @@ server.registerTool(
     description: "Update a coordination session with an exact registry operation.",
     inputSchema: {
       project: projectParam,
-      operation: z.enum(["register", "recover", "update", "heartbeat", "close", "takeover"]),
+      operation: z.enum(["register", "recover", "recovery_state", "reconcile_epoch", "recover_epoch", "update", "heartbeat", "runtime_activity", "close", "takeover"]),
       worktree_id: coordinationOpaqueIdParam,
       session_id: coordinationOpaqueIdParam,
       incarnation: coordinationPositiveParam,
@@ -1177,8 +1224,14 @@ server.registerTool(
       snapshot_revision: coordinationRevisionParam.optional(),
       current_task_id: coordinationOpaqueIdParam.nullable().optional(),
       current_task_revision: coordinationRevisionParam.nullable().optional(),
-      context_conversation_id: z.string().uuid().nullable().optional(),
-      context_revision: coordinationRevisionParam.nullable().optional(),
+      quarantined_session_id: coordinationOpaqueIdParam.optional(),
+      quarantined_incarnation: coordinationPositiveParam.optional(),
+      quarantined_fence: coordinationPositiveParam.optional(),
+      quarantined_actor_id: z.string().regex(/^actor-[0-9a-f]{64}$/).optional(),
+      accepted_epoch: coordinationPositiveParam.optional(),
+      recovery_footprint_hash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+      runtime_id: z.string().uuid().optional(),
+      observed_at: z.string().datetime({ offset: true }).optional(),
     },
   },
   wrapHandler(C("coordination_update"), async ({ project, operation, ...input }) =>
@@ -1197,12 +1250,28 @@ server.registerTool(
       expected_revision: coordinationRevisionParam,
       fence: coordinationPositiveParam,
       ownership_token: coordinationTokenParam,
-      claims: coordinationClaimBatchParam,
+      client_claim_key: coordinationTokenParam,
+      action: z.enum(["acquire", "verify", "renew", "mark", "quarantine", "complete"]).optional(),
+      claims: coordinationClaimBatchParam.optional(),
+      operation: z.enum(["write", "edit", "create", "delete", "rename", "apply_patch", "repository", "build"]).optional(),
+      accepted_epoch: coordinationPositiveParam.optional(),
+      ttl_ms: coordinationTtlParam.optional(),
+      state: z.enum(["dirty", "quarantined", "collision"]).optional(),
+      code: z.enum(["uncertain_apply", "dirty_baseline"]).optional(),
+      operation_id: z.string().uuid().optional(),
+      footprint: z.array(z.object({
+        path: coordinationPathParam.optional(),
+        path_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        before_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+        after_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+      }).strict()).max(256).optional(),
       idempotency_key: coordinationKeyParam,
     },
   },
-  wrapHandler(C("coordination_claim"), async ({ project, ...input }) =>
-    coordinationTools.coordinationClaim(project, input)),
+  wrapHandler(C("coordination_claim"), async ({ project, action = "acquire", ...input }) =>
+    action === "acquire"
+      ? coordinationTools.coordinationClaim(project, input as coordinationTools.CoordinationClaimBatchInput)
+      : coordinationTools.coordinationClaimAction(project, action, input as coordinationTools.CoordinationClaimProofInput)),
 );
 
 server.registerTool(
@@ -1217,12 +1286,39 @@ server.registerTool(
       expected_revision: coordinationRevisionParam,
       fence: coordinationPositiveParam,
       ownership_token: coordinationTokenParam,
-      claim_ids: coordinationClaimIdsParam,
+      client_claim_key: coordinationTokenParam,
       idempotency_key: coordinationKeyParam,
     },
   },
   wrapHandler(C("coordination_release"), async ({ project, ...input }) =>
     coordinationTools.coordinationRelease(project, input)),
+);
+
+server.registerTool(
+  "coordination_handoff",
+  {
+    description: "Publish or consume sanitized same-worktree peer-write handoffs.",
+    inputSchema: {
+      project: projectParam,
+      operation: z.enum(["publish", "read", "ack", "consume", "memory", "memory_read", "memory_ack"]),
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      idempotency_key: coordinationKeyParam,
+      operation_kind: z.enum(["write", "edit"]).optional(),
+      path: z.string().max(1024).optional(),
+      baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+      limit: z.number().int().min(1).max(32).optional(),
+      through_sequence: coordinationRevisionParam.optional(),
+      through_revision: coordinationRevisionParam.optional(),
+      memory_entry: coordinationMemoryEntryParam.optional(),
+    },
+  },
+  wrapHandler(C("coordination_handoff"), async ({ project, operation, ...input }) =>
+    coordinationTools.coordinationHandoff(project, operation, input)),
 );
 
 server.registerTool(
@@ -2231,7 +2327,7 @@ server.registerTool(
 
 server.registerTool(
   "health_check",
-  { description: "API health check — returns status and uptime.", inputSchema: {} },
+  { description: "API health check — returns status and uptime. No project param needed.", inputSchema: {} },
   wrapLauncherScopedHandler(C("health_check"), launcherProject, async () => healthCheck()),
 );
 
@@ -2981,7 +3077,9 @@ async function main() {
   const transport = new StdioServerTransport();
   await toolVisibility.prepare();
   if (!mcpReportMode) {
-    const preflight = await api.get("/auth/preflight");
+    const preflight = await api.settled.get("/auth/preflight");
+    if (preflight.status === 429) throw new Error("MCP_AUTH_PREFLIGHT_RATE_LIMITED");
+    if (!preflight.ok) throw new Error("MCP_AUTH_PREFLIGHT_UNAVAILABLE");
     const binding = launcherAuthorizationBinding(preflight.data);
     if (!binding) throw new Error("MCP_LAUNCHER_BINDING_UNAVAILABLE");
     childGateway = new ChildMcpGateway(
@@ -3011,9 +3109,13 @@ async function shutdown(exitCode: number, reason: "SIGTERM" | "SIGINT" | "fatal"
   process.exit(exitCode);
 }
 
-main().catch(() => {
+main().catch((error) => {
   // Do not serialize the error: its message can include dependency payloads.
-  logger.fatal({ boundary: "parent-mcp-transport" }, "Fatal error in MCP server");
+  const reason = error instanceof Error
+    && (error.message === "MCP_TOOL_STATE_RATE_LIMITED" || error.message === "MCP_AUTH_PREFLIGHT_RATE_LIMITED")
+    ? "rate_limited"
+    : "startup_failed";
+  logger.fatal({ boundary: "parent-mcp-transport", reason }, "Fatal error in MCP server");
   void shutdown(1, "fatal");
 });
 

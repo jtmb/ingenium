@@ -60,6 +60,7 @@ export * as usage from "./tools/usage.js";
 export * as docs from "./tools/docs.js";
 export * as repositoryDocs from "./tools/repository-docs.js";
 export * as repositoryResources from "./tools/repository-resources.js";
+export * as repositorySync from "./tools/repository-sync.js";
 export * as maintenanceLocks from "./tools/maintenance-locks.js";
 export * as vault from "./tools/vault.js";
 export * as vaultCrypto from "./tools/vault-crypto.js";

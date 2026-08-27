@@ -10,16 +10,29 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 
 describe("rateLimit — sliding window", () => {
   let rateLimit: (req: Request, res: Response, next: NextFunction) => void;
+  let coordinationRateLimit: (req: Request, res: Response, next: NextFunction) => void;
+  let coordinationRateLimitKeys: (req: Request) => { credential: string; workspace: string } | undefined;
+  let recordCandidateAuthenticationFailure: (error: unknown, req: Request, res: Response, next: NextFunction) => void;
+  let recordCoordinationAttestationFailure: (error: unknown, req: Request, res: Response, next: NextFunction) => void;
+  let coordinationCredentialMaxRequests: number;
+  let coordinationWorkspaceMaxRequests: number;
   let clearRateLimitEntries: () => void;
 
   beforeEach(async () => {
     // Dynamic import for fresh module state each test
     const mod = await import("../lib/middleware/rate-limit.js");
     rateLimit = mod.rateLimit;
+    coordinationRateLimit = mod.coordinationRateLimit;
+    coordinationRateLimitKeys = mod.coordinationRateLimitKeys;
+    recordCandidateAuthenticationFailure = mod.recordCandidateAuthenticationFailure;
+    recordCoordinationAttestationFailure = mod.recordCoordinationAttestationFailure;
+    coordinationCredentialMaxRequests = mod.COORDINATION_CREDENTIAL_MAX_REQUESTS;
+    coordinationWorkspaceMaxRequests = mod.COORDINATION_WORKSPACE_MAX_REQUESTS;
     clearRateLimitEntries = mod.clearRateLimitEntries;
     clearRateLimitEntries();
   });
@@ -29,7 +42,7 @@ describe("rateLimit — sliding window", () => {
   });
 
   function makeReq(ip: string = "10.0.0.1"): Partial<Request> {
-    return { ip } as Partial<Request>;
+    return { ip, socket: { remoteAddress: ip } as Request["socket"] } as Partial<Request>;
   }
 
   function makeRes(): Partial<Response> {
@@ -46,12 +59,69 @@ describe("rateLimit — sliding window", () => {
       ip: remoteAddress,
       method: "POST",
       path: "/api/v1/runtimes/gateway/validate",
+      originalUrl: "/api/v1/runtimes/gateway/validate",
+      url: "/api/v1/runtimes/gateway/validate",
       headers: {
         "x-ingenium-audience": "runtime-gateway",
         "x-ingenium-private-network": "runtime-gateway",
       },
       socket: { remoteAddress } as Request["socket"],
     };
+  }
+
+  function makeCoordinationRequest(
+    credentialId: string,
+    workspaceId = "workspace-a",
+    ip = "127.0.0.1",
+    path = "/api/v1/coordination/memory/read",
+    options: {
+      projectId?: string;
+      credentialProjectId?: string;
+      projectIds?: string[];
+      audience?: "mcp" | "runtime";
+      launcherWorktree?: string;
+      storageMappingHash?: string;
+      attested?: boolean;
+    } = {},
+  ): Partial<Request> {
+    const projectId = options.projectId ?? `project-${workspaceId}`;
+    const storageMappingHash = options.storageMappingHash ?? createHash("sha256").update(workspaceId).digest("hex");
+    const request = {
+      ip,
+      method: "POST",
+      path,
+      originalUrl: path,
+      url: path,
+      headers: { authorization: "Bearer raw-token-must-not-be-keyed" },
+      socket: { remoteAddress: ip } as Request["socket"],
+      authorizedProjectId: projectId,
+      principal: {
+        type: "service",
+        id: `principal-${credentialId}`,
+        scopes: ["coordination:read", "coordination:write"],
+        tokenId: credentialId,
+        organizationId: "organization-a",
+        projectId: options.credentialProjectId ?? projectId,
+        projectIds: options.projectIds ?? [projectId],
+        audience: options.audience ?? "mcp",
+        workspaceId,
+        launcherWorktree: options.launcherWorktree ?? `/worktrees/${workspaceId}`,
+        storageMappingHash,
+      },
+    } as unknown as Partial<Request>;
+    if (options.attested !== false) {
+      request.attestedCoordinationIdentity = Object.freeze({ credentialId, workspaceId, storageMappingHash });
+    }
+    return request;
+  }
+
+  function runCoordinationMiddlewareChain(request: Partial<Request>) {
+    const response = makeRes();
+    const next = vi.fn();
+    rateLimit(request as Request, response as Response, () => {
+      coordinationRateLimit(request as Request, response as Response, next);
+    });
+    return { response, next };
   }
 
   it("allows first request from an IP", () => {
@@ -85,6 +155,26 @@ describe("rateLimit — sliding window", () => {
     rateLimit(req as Request, res as Response, next);
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(429);
+  });
+
+  it("keeps the exact public health probe available after the client bucket is exhausted", () => {
+    const ip = "10.0.0.2";
+    const limit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    for (let i = 0; i <= limit; i++) {
+      rateLimit(makeReq(ip) as Request, makeRes() as Response, vi.fn());
+    }
+
+    const healthRequest = {
+      ...makeReq(ip),
+      method: "GET",
+      path: "/api/v1/health",
+    } as Request;
+    const response = makeRes();
+    const next = vi.fn();
+    rateLimit(healthRequest, response as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(response.status).not.toHaveBeenCalled();
   });
 
   it("resets window after 60 seconds", () => {
@@ -146,6 +236,246 @@ describe("rateLimit — sliding window", () => {
     rateLimit(makeGatewayReq("172.18.0.9") as Request, response as Response, next);
     expect(next).not.toHaveBeenCalled();
     expect(response.status).toHaveBeenCalledWith(429);
+  });
+
+  it("uses the socket address, canonicalizes mapped IPv4 and loopback, and ignores forwarding headers", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const mapped = makeReq("::ffff:192.0.2.10");
+    mapped.headers = { "x-forwarded-for": "198.51.100.1" };
+    for (let index = 0; index < strictLimit; index += 1) rateLimit(mapped as Request, makeRes() as Response, vi.fn());
+
+    const sameIpv4 = makeReq("192.0.2.10");
+    sameIpv4.headers = { "x-forwarded-for": "203.0.113.9" };
+    const mappedResponse = makeRes();
+    const mappedNext = vi.fn();
+    rateLimit(sameIpv4 as Request, mappedResponse as Response, mappedNext);
+    expect(mappedNext).not.toHaveBeenCalled();
+    expect(mappedResponse.status).toHaveBeenCalledWith(429);
+
+    const ipv6 = makeReq("2001:db8::10");
+    const ipv6Response = makeRes();
+    const ipv6Next = vi.fn();
+    rateLimit(ipv6 as Request, ipv6Response as Response, ipv6Next);
+    expect(ipv6Next).toHaveBeenCalledOnce();
+
+    clearRateLimitEntries();
+    for (let index = 0; index < strictLimit; index += 1) rateLimit(makeReq("127.0.0.1") as Request, makeRes() as Response, vi.fn());
+    const loopbackResponse = makeRes();
+    const loopbackNext = vi.fn();
+    rateLimit(makeReq("::1") as Request, loopbackResponse as Response, loopbackNext);
+    expect(loopbackNext).not.toHaveBeenCalled();
+    expect(loopbackResponse.status).toHaveBeenCalledWith(429);
+  });
+
+  it("allows valid coordination traffic past 100 calls and enforces the exact 300/minute credential burst", () => {
+    const request = makeCoordinationRequest("credential-a");
+    expect(coordinationCredentialMaxRequests).toBe(300);
+    for (let index = 0; index < coordinationCredentialMaxRequests; index += 1) {
+      expect(runCoordinationMiddlewareChain(request).next).toHaveBeenCalledOnce();
+    }
+
+    const limited = runCoordinationMiddlewareChain(request);
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(limited.response.set).toHaveBeenCalledWith("Retry-After", expect.stringMatching(/^\d+$/));
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "300");
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Remaining", "0");
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Reset", expect.stringMatching(/^\d+$/));
+    expect(limited.response.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: "RATE_LIMITED" }),
+    }));
+  });
+
+  it("shares one credential bucket when the same credential switches authorized projects", () => {
+    const projectIds = ["project-a", "project-b"];
+    const firstProject = makeCoordinationRequest("credential-multi-project", "workspace-a", "127.0.0.1", undefined, {
+      projectId: "project-a",
+      credentialProjectId: "project-a",
+      projectIds,
+    });
+    const secondProject = makeCoordinationRequest("credential-multi-project", "workspace-a", "127.0.0.1", undefined, {
+      projectId: "project-b",
+      credentialProjectId: "project-a",
+      projectIds,
+    });
+    expect(coordinationRateLimitKeys(firstProject as Request)?.credential)
+      .toBe(coordinationRateLimitKeys(secondProject as Request)?.credential);
+    expect(coordinationRateLimitKeys(firstProject as Request)?.workspace)
+      .not.toBe(coordinationRateLimitKeys(secondProject as Request)?.workspace);
+
+    for (let index = 0; index < coordinationCredentialMaxRequests / 2; index += 1) {
+      expect(runCoordinationMiddlewareChain(firstProject).next).toHaveBeenCalledOnce();
+      expect(runCoordinationMiddlewareChain(secondProject).next).toHaveBeenCalledOnce();
+    }
+
+    const limited = runCoordinationMiddlewareChain(secondProject);
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "300");
+  });
+
+  it("shares one aggregate bucket across external host and managed runtime aliases", () => {
+    expect(coordinationWorkspaceMaxRequests).toBe(600);
+    const storageMappingHash = createHash("sha256").update("shared-memory-ingenium\0canonical-storage").digest("hex");
+    const external = makeCoordinationRequest("external-credential", "shared-memory-ingenium", "127.0.0.1", undefined, {
+      launcherWorktree: "/home/brajam/repos/ingenium",
+      storageMappingHash,
+    });
+    const runtime = makeCoordinationRequest("runtime-credential", "shared-memory-ingenium", "172.20.0.12", undefined, {
+      audience: "runtime",
+      launcherWorktree: "/workspace",
+      storageMappingHash,
+    });
+    expect(coordinationRateLimitKeys(external as Request)?.workspace)
+      .toBe(coordinationRateLimitKeys(runtime as Request)?.workspace);
+    expect(coordinationRateLimitKeys(external as Request)?.credential)
+      .not.toBe(coordinationRateLimitKeys(runtime as Request)?.credential);
+
+    for (let index = 0; index < coordinationCredentialMaxRequests; index += 1) {
+      expect(runCoordinationMiddlewareChain(external).next).toHaveBeenCalledOnce();
+      expect(runCoordinationMiddlewareChain(runtime).next).toHaveBeenCalledOnce();
+    }
+
+    const aggregateLimited = runCoordinationMiddlewareChain(makeCoordinationRequest(
+      "fresh-credential",
+      "shared-memory-ingenium",
+      "127.0.0.2",
+      undefined,
+      { storageMappingHash },
+    ));
+    expect(aggregateLimited.next).not.toHaveBeenCalled();
+    expect(aggregateLimited.response.status).toHaveBeenCalledWith(429);
+    expect(aggregateLimited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "600");
+    expect(runCoordinationMiddlewareChain(makeCoordinationRequest("fresh-credential", "different-workspace")).next)
+      .toHaveBeenCalledOnce();
+  });
+
+  it("requires immutable workspace attestation before allocating coordination buckets", () => {
+    const request = makeCoordinationRequest("credential-attested", "workspace-attested");
+    (request.principal as Extract<Request["principal"], { type: "service" }>).storageMappingHash = "f".repeat(64);
+
+    expect(coordinationRateLimitKeys(request as Request)).toBeUndefined();
+    const response = makeRes();
+    const next = vi.fn();
+    coordinationRateLimit(request as Request, response as Response, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("keeps invalid, revoked, and unattested coordination requests in the shared socket bucket", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const request = makeCoordinationRequest("revoked-credential");
+    delete request.principal;
+    delete request.authorizedProjectId;
+    const invalidAttempts = Math.floor(strictLimit / 2);
+
+    for (let index = 0; index < invalidAttempts; index += 1) {
+      request.headers = {
+        authorization: `Bearer attacker-selected-${index}`,
+        "x-ingenium-workspace": `attacker-workspace-${index}`,
+      };
+      const admitted = vi.fn();
+      rateLimit(request as Request, makeRes() as Response, admitted);
+      expect(admitted).toHaveBeenCalledOnce();
+      recordCandidateAuthenticationFailure(new Error("invalid credential"), request as Request, makeRes() as Response, vi.fn());
+    }
+    request.principal = makeCoordinationRequest("valid-but-unattested").principal;
+    for (let index = invalidAttempts; index < strictLimit; index += 1) {
+      const admitted = vi.fn();
+      rateLimit(request as Request, makeRes() as Response, admitted);
+      expect(admitted).toHaveBeenCalledOnce();
+      recordCoordinationAttestationFailure(new Error("project attestation failed"), request as Request, makeRes() as Response, vi.fn());
+    }
+
+    const blocked = runCoordinationMiddlewareChain(makeCoordinationRequest("fresh-credential"));
+    expect(blocked.next).not.toHaveBeenCalled();
+    expect(blocked.response.status).toHaveBeenCalledWith(429);
+
+    const otherSocket = makeCoordinationRequest("fresh-credential", "workspace-a", "127.0.0.2");
+    for (let index = 0; index < coordinationCredentialMaxRequests; index += 1) {
+      expect(runCoordinationMiddlewareChain(otherSocket).next).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("uses digest-only limiter keys and keeps concurrent accounting atomic", async () => {
+    const request = makeCoordinationRequest("credential-raw-identity");
+    const keys = coordinationRateLimitKeys(request as Request)!;
+    expect(keys.credential).toMatch(/^[0-9a-f]{64}$/);
+    expect(keys.workspace).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(keys)).not.toMatch(/credential-raw-identity|workspace-a|worktrees|raw-token/i);
+
+    const results = await Promise.all(Array.from({ length: coordinationCredentialMaxRequests + 1 }, async () => {
+      const result = runCoordinationMiddlewareChain(request);
+      return result.next.mock.calls.length === 1;
+    }));
+    expect(results.filter(Boolean)).toHaveLength(coordinationCredentialMaxRequests);
+    expect(results.filter((allowed) => !allowed)).toHaveLength(1);
+  });
+
+  it("expires coordination limiter state after its bounded 60-second TTL", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-25T00:00:00.000Z"));
+      const request = makeCoordinationRequest("credential-ttl");
+      for (let index = 0; index < coordinationCredentialMaxRequests; index += 1) {
+        expect(runCoordinationMiddlewareChain(request).next).toHaveBeenCalledOnce();
+      }
+      expect(runCoordinationMiddlewareChain(request).response.status).toHaveBeenCalledWith(429);
+
+      vi.advanceTimersByTime(60_001);
+      expect(runCoordinationMiddlewareChain(request).next).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("enforces the shared aggregate only after a mixed three-stream workload reaches 600 calls", () => {
+    const callsPerStream = 128;
+    const storageMappingHash = createHash("sha256").update("shared-memory-ingenium\0canonical-storage").digest("hex");
+    const streams = [
+      makeCoordinationRequest("external-a", "shared-memory-ingenium", "127.0.0.1", undefined, {
+        launcherWorktree: "/home/brajam/repos/ingenium",
+        storageMappingHash,
+      }),
+      makeCoordinationRequest("external-b", "shared-memory-ingenium", "127.0.0.2", undefined, {
+        launcherWorktree: "/home/brajam/repos/ingenium",
+        storageMappingHash,
+      }),
+      makeCoordinationRequest("internal-runtime", "shared-memory-ingenium", "172.20.0.12", undefined, {
+        audience: "runtime",
+        launcherWorktree: "/workspace",
+        storageMappingHash,
+      }),
+    ];
+    const paths = [
+      "/api/v1/coordination/update",
+      "/api/v1/coordination/memory/read",
+      "/api/v1/coordination/memory/ack",
+      "/api/v1/coordination/handoffs/read",
+      "/api/v1/coordination/handoffs/ack",
+    ];
+
+    for (let index = 0; index < callsPerStream; index += 1) {
+      for (const [streamIndex, stream] of streams.entries()) {
+        stream.path = paths[(index + streamIndex) % paths.length];
+        expect(runCoordinationMiddlewareChain(stream).next).toHaveBeenCalledOnce();
+      }
+    }
+
+    for (let index = 0; index < 72; index += 1) {
+      for (const stream of streams) expect(runCoordinationMiddlewareChain(stream).next).toHaveBeenCalledOnce();
+    }
+
+    const aggregateLimited = runCoordinationMiddlewareChain(makeCoordinationRequest(
+      "threshold-probe",
+      "shared-memory-ingenium",
+      "127.0.0.3",
+      undefined,
+      { storageMappingHash },
+    ));
+    expect(aggregateLimited.next).not.toHaveBeenCalled();
+    expect(aggregateLimited.response.status).toHaveBeenCalledOnce();
+    expect(aggregateLimited.response.status).toHaveBeenCalledWith(429);
+    expect(aggregateLimited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "600");
   });
 });
 

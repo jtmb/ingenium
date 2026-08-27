@@ -31,9 +31,11 @@ RUN sh scripts/validate-deployment-config.sh
 ARG NEXT_PUBLIC_OPENCODE_WEB_URL="http://opencode.localhost:3000/"
 ARG NEXT_PUBLIC_OPENCODE_CLI_URL="http://cli.localhost:3000/"
 ARG NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN=""
+ARG NEXT_PUBLIC_RUNTIME_SCHEME=""
 ENV NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL}
 ENV NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL}
 ENV NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN=${NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN}
+ENV NEXT_PUBLIC_RUNTIME_SCHEME=${NEXT_PUBLIC_RUNTIME_SCHEME}
 RUN npm run build
 
 RUN npm prune --omit=dev
@@ -138,6 +140,8 @@ COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/obs
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/observer.ts ./packages/ingenium-extension/plugins/observer.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/resource-sync.ts ./packages/ingenium-extension/resource-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/resource-sync.ts ./packages/ingenium-extension/plugins/resource-sync.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/session-coordinator.ts ./packages/ingenium-extension/session-coordinator.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/session-coordinator.ts ./packages/ingenium-extension/plugins/session-coordinator.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/project-resolver.ts ./packages/ingenium-extension/project-resolver.ts
@@ -206,7 +210,7 @@ RUN mkdir -p /home/appuser/vscode-data/user-data /home/appuser/vscode-data/exten
     chown -R appuser:appuser /home/appuser/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
- RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["/app/packages/ingenium-extension/plugins/auto-observer.ts","/app/packages/ingenium-extension/plugins/observer.ts","/app/packages/ingenium-extension/plugins/resource-sync.ts","/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
+ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts","file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts","file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 
@@ -222,7 +226,7 @@ ENTRYPOINT ["node", "/app/services/ingenium-api/dist/scripts/runtime-manager.js"
 
 FROM runtime-base AS runtime-gateway
 USER appuser
-EXPOSE 8443
+EXPOSE 8080 8443
 ENTRYPOINT ["node", "/app/services/ingenium-api/dist/scripts/runtime-gateway.js"]
 
 FROM runtime-base AS control-plane

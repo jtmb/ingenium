@@ -398,7 +398,6 @@ if [ ! -f "$OC_CONFIG" ]; then
       "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
         "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
         "INGENIUM_MCP_AUDIENCE": "mcp",
         "INGENIUM_PROJECT": "global-default",

@@ -7,8 +7,14 @@ import { loadRuntimeGatewayToken, runtimeGatewayTokensEqual } from "../runtime-g
 export type RequestPrincipal =
   | { type: "compatibility"; id: "legacy-server-bearer"; scopes: readonly ["legacy:*"] }
   | { type: "user"; id: string; scopes: readonly string[]; session?: authentication.AuthSession; tokenId?: string; organizationId?: string | null; projectId?: string | null }
-  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null; projectIds?: readonly string[]; audience?: mcpCredentials.McpCredentialAudience; workspaceId?: string; launcherWorktree?: string }
+  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null; projectIds?: readonly string[]; audience?: mcpCredentials.McpCredentialAudience; workspaceId?: string; launcherWorktree?: string; storageMappingHash?: string }
   | { type: "runtime-service"; id: "runtime-gateway"; scopes: readonly ["runtime-gateway:exchange"]; audience: "runtime-gateway"; network: "runtime-gateway" };
+
+export interface AttestedCoordinationIdentity {
+  credentialId: string;
+  workspaceId: string;
+  storageMappingHash: string;
+}
 
 export const RUNTIME_GATEWAY_AUDIENCE = "runtime-gateway";
 export const RUNTIME_GATEWAY_NETWORK_HEADER = "x-ingenium-private-network";
@@ -22,6 +28,7 @@ declare global {
   namespace Express {
     interface Request {
       principal?: RequestPrincipal;
+      attestedCoordinationIdentity?: Readonly<AttestedCoordinationIdentity>;
     }
   }
 }
@@ -52,6 +59,10 @@ export function isPublicLocalAuthRequest(req: Request): boolean {
   return PUBLIC_LOCAL_AUTH.has(`${req.method} ${req.path}`);
 }
 
+export function isPublicHealthRequest(req: Request): boolean {
+  return req.method === "GET" && req.path === "/api/v1/health";
+}
+
 function cookieValue(req: Request, name: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
@@ -78,7 +89,7 @@ function cookieValue(req: Request, name: string): string | undefined {
  * and inline configuration have the same strength and timing-safe guarantees.
  */
 export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  if (isPublicOAuthCallbackRequest(req) || isPublicLocalAuthRequest(req)) {
+  if (isPublicOAuthCallbackRequest(req) || isPublicLocalAuthRequest(req) || isPublicHealthRequest(req)) {
     next();
     return;
   }
@@ -141,9 +152,13 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     if (audience !== "mcp" && audience !== "runtime" && audience !== "repository-sync") {
       throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
     }
+    if (req.get("x-ingenium-storage-mapping-hash") !== undefined) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
     const resolved = mcpCredentials.resolveMcpCredential(authHeader.slice(7), audience);
     if (!resolved) throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
-    if (req.get("x-ingenium-workspace") !== resolved.workspaceId || req.get("x-ingenium-launcher-worktree") !== resolved.launcherWorktree) {
+    const launcherWorktree = audience === "runtime" ? "/workspace" : resolved.launcherWorktree;
+    if (req.get("x-ingenium-workspace") !== resolved.workspaceId || req.get("x-ingenium-launcher-worktree") !== launcherWorktree) {
       throw new AppError("Resource not found", "NOT_FOUND", 404);
     }
     req.principal = {
@@ -156,8 +171,16 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
       projectIds: resolved.projectIds,
       audience: resolved.audience,
       workspaceId: resolved.workspaceId,
-      launcherWorktree: resolved.launcherWorktree,
+      launcherWorktree,
+      storageMappingHash: resolved.storageMappingHash,
     };
+    if (audience === "mcp" || audience === "runtime") {
+      req.attestedCoordinationIdentity = Object.freeze({
+        credentialId: resolved.id,
+        workspaceId: resolved.workspaceId,
+        storageMappingHash: resolved.storageMappingHash,
+      });
+    }
     next();
     return;
   }

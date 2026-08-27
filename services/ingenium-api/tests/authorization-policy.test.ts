@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextFunction, Request, Response } from "express";
-import { securityAudit } from "ingenium-core";
+import { authorization, projects, securityAudit } from "ingenium-core";
 import { assertAuthorizationPolicyCoverage, authorizationMiddleware, policyForRequest } from "../lib/authorization-policy.js";
 
 describe("AUTH-102 canonical API policy", () => {
@@ -27,6 +27,7 @@ describe("AUTH-102 canonical API policy", () => {
     ["POST", "/api/v1/runtimes/gateway/exchange", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/gateway/validate", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/gateway/activity", "gateway-private", "execute"],
+    ["POST", "/api/v1/runtimes/activity", "runtime-capability", "write"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
@@ -110,6 +111,40 @@ describe("AUTH-102 canonical API policy", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it("allows only the exact runtime activity capability scope", () => {
+    const principal = {
+      type: "service",
+      id: "service-id",
+      tokenId: "credential-id",
+      scopes: ["runtime:activity"],
+      organizationId: "organization-id",
+      projectId: "project-id",
+      projectIds: ["project-id"],
+      audience: "runtime",
+      workspaceId: "workspace-id",
+      launcherWorktree: "/workspace",
+      storageMappingHash: "a".repeat(64),
+    };
+    const next = vi.fn();
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+
+    authorizationMiddleware({
+      method: "POST",
+      path: "/api/v1/runtimes/activity",
+      principal,
+    } as unknown as Request, {} as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(() => authorizationMiddleware({
+      method: "POST",
+      path: "/api/v1/runtimes/activity",
+      principal: { ...principal, scopes: ["child-mcp:runtime"] },
+    } as unknown as Request, {} as Response, vi.fn())).toThrowError(expect.objectContaining({
+      code: "NOT_FOUND",
+      statusCode: 404,
+    }));
+  });
+
   it.each(["mcp", "repository-sync"] as const)("allows %s service credentials to run exact preflight", (audience) => {
     const req = {
       method: "GET",
@@ -132,6 +167,47 @@ describe("AUTH-102 canonical API policy", () => {
     authorizationMiddleware(req, {} as Response, next);
 
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("retains the immutable authorized project for post-auth coordination limiting", () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    vi.spyOn(projects, "getProject").mockReturnValue({
+      id: projectId,
+      name: "coordination-project",
+      organization_id: "22222222-2222-4222-8222-222222222222",
+      archived_at: null,
+    } as ReturnType<typeof projects.getProject>);
+    vi.spyOn(authorization, "requireProjectPermission").mockReturnValue({
+      allowed: true,
+      visible: true,
+      projectId,
+      organizationId: "22222222-2222-4222-8222-222222222222",
+    });
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+    const req = {
+      method: "POST",
+      path: "/api/v1/coordination/memory/read",
+      query: { project: "coordination-project" },
+      params: {},
+      principal: {
+        type: "service",
+        id: "service-id",
+        tokenId: "credential-id",
+        scopes: ["coordination:read"],
+        organizationId: "22222222-2222-4222-8222-222222222222",
+        projectId,
+        projectIds: [projectId],
+        audience: "mcp",
+        workspaceId: "workspace-id",
+        launcherWorktree: "/workspace",
+      },
+    } as unknown as Request;
+    const next = vi.fn();
+
+    authorizationMiddleware(req, {} as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.authorizedProjectId).toBe(projectId);
   });
 
 });

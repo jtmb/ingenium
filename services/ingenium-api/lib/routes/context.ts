@@ -82,6 +82,19 @@ function contextOwnerScope(req: Request): string | null | undefined {
   return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
 }
 
+function isCoordinationMemory(metadata: unknown): boolean {
+  let value = metadata;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return false;
+    }
+  }
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).kind === "coordination_operational_memory";
+}
+
 function maintenanceProvenance(req: Request): contextConversations.ContextMaintenanceProvenance {
   const principal = req.principal;
   return {
@@ -427,6 +440,10 @@ contextRouter.post("/conversations", (req, res) => {
   try {
     const actor = requestContentActor(req, projectId);
     const input = mutationInput(req);
+    if (isCoordinationMemory(input.metadata)) {
+      sendConversationError(res, new contextConversations.ContextConversationError("INVALID_CONTEXT_INPUT"));
+      return;
+    }
     const conversation = contextConversations.createContextConversation(projectId, {
       ...input,
       organizationId: actor?.organizationId,
@@ -444,6 +461,10 @@ contextRouter.param("conversationId", (req, res, next, conversationId) => {
   if (!projectId) return;
   const conversation = contextConversations.getContextConversation(projectId, conversationId);
   if (!conversation) {
+    res.status(404).json({ error: { code: "CONVERSATION_NOT_FOUND", message: "Context conversation not found" } });
+    return;
+  }
+  if (isCoordinationMemory(conversation.metadata)) {
     res.status(404).json({ error: { code: "CONVERSATION_NOT_FOUND", message: "Context conversation not found" } });
     return;
   }
@@ -467,7 +488,7 @@ contextRouter.post("/conversations/maintenance/preview", (req, res) => {
     const principal = requestAuthorizationPrincipal(req);
     const data = contextConversations.previewContextMaintenance(projectId, req.body ?? {}).filter((candidate) => {
       const conversation = contextConversations.getContextConversation(projectId, candidate.conversationId);
-      return conversation && authorization.requireContentPermission(principal, {
+      return conversation && !isCoordinationMemory(conversation.metadata) && authorization.requireContentPermission(principal, {
         resourceType: "context_conversation", resourceId: conversation.id,
         organizationId: conversation.organization_id, projectId: conversation.project_id,
         visibility: conversation.visibility, ownerUserId: conversation.owner_user_id,

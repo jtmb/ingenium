@@ -15,6 +15,10 @@ const workspaceInput = z.object({
   storagePath: z.string().min(1).max(1024),
 }).strict();
 const runtimeInput = z.object({ workspaceId: z.string().min(1).max(256) }).strict();
+const runtimeActivityInput = z.object({
+  runtimeId: z.string().uuid(),
+  observedAt: z.string().datetime(),
+}).strict();
 const browserLaunchInput = z.object({
   audience: z.enum(["web", "cli", "vscode"]),
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
@@ -70,11 +74,15 @@ function browserWorkspaceStatus(workspace: BrowserWorkspaceRow): "ready" | "star
 }
 
 function browserWorkspaceDto(workspace: BrowserWorkspaceRow) {
+  const runtime = runtimes.getRuntimeForWorkspace(workspace.id);
+  const ready = runtime?.securityEpoch === workspace.security_epoch
+    && (runtime.state === "READY" || runtime.state === "IDLE");
   return {
     id: workspace.id,
     organizationName: workspace.organization_name,
     projectName: workspace.project_name,
     status: browserWorkspaceStatus(workspace),
+    runtimeId: ready ? runtime.id : null,
   };
 }
 
@@ -112,6 +120,12 @@ function browserPrincipal(req: import("express").Request): { id: string; session
 function runtimeRootDomain(): string {
   const value = process.env.INGENIUM_RUNTIME_ROOT_DOMAIN?.trim();
   if (!value) throw new Error("Runtime browser roots are not configured");
+  return value;
+}
+
+function runtimeScheme(): runtimes.RuntimeTransportScheme {
+  const value = process.env.INGENIUM_RUNTIME_SCHEME?.trim();
+  if (value !== "http" && value !== "https") throw new Error("Runtime browser transport is not configured");
   return value;
 }
 
@@ -212,7 +226,7 @@ runtimesRouter.post("/browser/workspaces/:workspaceId/start", async (req, res) =
     const status = runtime.state === "READY" || runtime.state === "IDLE" ? "ready" : "starting";
     browserRuntimeAudit(principal.id, "runtime.workspace.start", "success", workspace);
     res.set("Cache-Control", "no-store");
-    res.status(status === "ready" ? 200 : 202).json({ data: { status } });
+    res.status(status === "ready" ? 200 : 202).json({ data: { status, runtimeId: status === "ready" ? runtime.id : null } });
   } catch (error) {
     runtimeError(res, error);
   }
@@ -238,6 +252,7 @@ runtimesRouter.post("/browser/launch", (req, res) => {
       ownerUserId: principal.id,
       authSessionId: principal.sessionId,
       rootDomain: runtimeRootDomain(),
+      scheme: runtimeScheme(),
       launcherOrigin: req.get("origin") ?? "",
     });
     res.set("Cache-Control", "no-store");
@@ -316,6 +331,39 @@ runtimesRouter.post("/gateway/activity", (req, res) => {
   }
 });
 
+runtimesRouter.post("/activity", (req, res) => {
+  const parsed = runtimeActivityInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime activity request is invalid" } });
+    return;
+  }
+  const principal = req.principal;
+  if (principal?.type !== "service" || principal.audience !== "runtime"
+    || !principal.tokenId || !principal.organizationId || !principal.projectId
+    || !principal.workspaceId || !principal.storageMappingHash
+    || !principal.scopes.includes("runtime:activity")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+    return;
+  }
+  try {
+    const activity = runtimes.recordRuntimeCapabilityActivity({
+      runtimeId: parsed.data.runtimeId,
+      credentialId: principal.tokenId,
+      servicePrincipalId: principal.id,
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      workspaceId: principal.workspaceId,
+      storageMappingHash: principal.storageMappingHash,
+      observedAt: new Date(parsed.data.observedAt),
+      idleLeaseMs: runtimeNumberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS", 1_800_000, 60_000),
+    });
+    res.set("Cache-Control", "no-store");
+    res.json({ data: { accepted: true, renewed: activity.renewed } });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
 runtimesRouter.get("/", (req, res) => {
   if (rejectBrowserInstallationRoute(req, res)) return;
   res.json({ data: runtimes.listRuntimeInstances() });
@@ -342,6 +390,20 @@ runtimesRouter.post("/workspaces", (req, res) => {
   }
   try {
     res.status(201).json({ data: runtimes.authorizeWorkspace(parsed.data) });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.post("/workspaces/:id/revoke", (req, res) => {
+  if (rejectBrowserInstallationRoute(req, res)) return;
+  try {
+    const workspace = runtimes.revokeAuthorizedWorkspace(req.params.id!);
+    if (!workspace) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Workspace not found" } });
+      return;
+    }
+    res.json({ data: workspace });
   } catch (error) {
     runtimeError(res, error);
   }

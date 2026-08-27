@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Request, Response, NextFunction } from "express";
 import { mcpCredentials } from "ingenium-core";
-import { authMiddleware, isPublicLocalAuthRequest, isPublicOAuthCallbackRequest } from "../lib/middleware/auth.js";
+import { authMiddleware, isPublicHealthRequest, isPublicLocalAuthRequest, isPublicOAuthCallbackRequest } from "../lib/middleware/auth.js";
 import {
   ApiTokenConfigurationError,
   isValidApiToken,
@@ -63,7 +63,7 @@ describe("authMiddleware — timing-safe comparison", () => {
   function makeReq(
     authHeader?: string,
     method = "GET",
-    path = "/api/v1/health",
+    path = "/api/v1/projects",
   ): Partial<Request> {
     const headers = authHeader === undefined ? {} : { authorization: authHeader };
     return {
@@ -87,6 +87,15 @@ describe("authMiddleware — timing-safe comparison", () => {
     chmodSync(tokenFile, 0o600);
     process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE = tokenFile;
   }
+
+  it("allows credential-free GET health only", () => {
+    const req = makeReq(undefined, "GET", "/api/v1/health");
+    const next = vi.fn();
+    authMiddleware(req as Request, makeRes() as Response, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(isPublicHealthRequest(req as Request)).toBe(true);
+    expect(isPublicHealthRequest(makeReq(undefined, "POST", "/api/v1/health") as Request)).toBe(false);
+  });
 
   it("fails closed when INGENIUM_API_TOKEN is not configured", () => {
     const req = makeReq();
@@ -261,6 +270,7 @@ describe("authMiddleware — timing-safe comparison", () => {
       projectName: "project",
       workspaceId: "workspace-id",
       launcherWorktree: "/workspace/project",
+      storageMappingHash: "a".repeat(64),
       securityEpoch: 0,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       revokedAt: null,
@@ -283,7 +293,14 @@ describe("authMiddleware — timing-safe comparison", () => {
 
     expect(resolveCredential).toHaveBeenCalledWith(scopedToken, "mcp");
     expect(next).toHaveBeenCalledOnce();
-    expect((req as Request).principal).toMatchObject({ type: "service", id: "service-id", projectIds: ["project-id"] });
+    expect((req as Request).principal).toMatchObject({
+      type: "service", id: "service-id", projectIds: ["project-id"], storageMappingHash: "a".repeat(64),
+    });
+    expect((req as Request).attestedCoordinationIdentity).toEqual({
+      credentialId: "credential-id",
+      workspaceId: "workspace-id",
+      storageMappingHash: "a".repeat(64),
+    });
   });
 
   it("returns not-found semantics when a scoped credential launcher bound is forged", () => {
@@ -292,7 +309,7 @@ describe("authMiddleware — timing-safe comparison", () => {
       id: "credential-id", servicePrincipalId: "service-id", kind: "service", audience: "mcp", name: "fixture",
       tokenPrefix: `ing_${"d".repeat(12)}`, scopes: ["projects:read"], organizationId: "organization-id",
       projectId: "project-id", projectIds: ["project-id"], projectName: "project", workspaceId: "workspace-id",
-      launcherWorktree: "/workspace/project", securityEpoch: 0, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      launcherWorktree: "/workspace/project", storageMappingHash: "a".repeat(64), securityEpoch: 0, expiresAt: new Date(Date.now() + 60_000).toISOString(),
       revokedAt: null, rotatedToId: null, lastUsedAt: null, createdByUserId: "user-id", createdAt: new Date().toISOString(),
     });
     const req = makeReq(`Bearer ${scopedToken}`);
@@ -308,6 +325,60 @@ describe("authMiddleware — timing-safe comparison", () => {
       statusCode: 404,
       code: "NOT_FOUND",
     }));
+  });
+
+  it("rejects a caller-supplied storage mapping hash before credential resolution", () => {
+    const scopedToken = `ing_${"s".repeat(12)}_${"h".repeat(43)}`;
+    const resolveCredential = vi.spyOn(mcpCredentials, "resolveMcpCredential");
+    const req = makeReq(`Bearer ${scopedToken}`);
+    req.path = "/api/v1/coordination/memory/read";
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "mcp",
+      "x-ingenium-workspace": "workspace-id",
+      "x-ingenium-launcher-worktree": "/workspace/project",
+      "x-ingenium-storage-mapping-hash": "f".repeat(64),
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+
+    expect(() => authMiddleware(req as Request, makeRes() as Response, vi.fn())).toThrowError(expect.objectContaining({
+      statusCode: 404,
+      code: "NOT_FOUND",
+    }));
+    expect(resolveCredential).not.toHaveBeenCalled();
+    expect((req as Request).attestedCoordinationIdentity).toBeUndefined();
+  });
+
+  it("maps a runtime credential's validated host storage binding to its fixed container worktree", () => {
+    const scopedToken = `ing_${"r".repeat(12)}_${"t".repeat(43)}`;
+    vi.spyOn(mcpCredentials, "resolveMcpCredential").mockReturnValue({
+      id: "credential-id", servicePrincipalId: "service-id", kind: "runtime", audience: "runtime", name: "fixture",
+      tokenPrefix: `ing_${"r".repeat(12)}`, scopes: ["projects:read"], organizationId: "organization-id",
+      projectId: "project-id", projectIds: ["project-id"], projectName: "project", workspaceId: "workspace-id",
+      launcherWorktree: "/srv/approved/project", storageMappingHash: "b".repeat(64), securityEpoch: 0, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      revokedAt: null, rotatedToId: null, lastUsedAt: null, createdByUserId: "user-id", createdAt: new Date().toISOString(),
+    });
+    const req = makeReq(`Bearer ${scopedToken}`);
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "runtime",
+      "x-ingenium-workspace": "workspace-id",
+      "x-ingenium-launcher-worktree": "/workspace",
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+    const next = vi.fn();
+
+    authMiddleware(req as Request, makeRes() as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect((req as Request).principal).toMatchObject({
+      audience: "runtime", launcherWorktree: "/workspace", storageMappingHash: "b".repeat(64),
+    });
+    expect((req as Request).attestedCoordinationIdentity).toEqual({
+      credentialId: "credential-id",
+      workspaceId: "workspace-id",
+      storageMappingHash: "b".repeat(64),
+    });
   });
 
   it("recognizes an internal installation token before scoped ing_ token parsing", () => {
