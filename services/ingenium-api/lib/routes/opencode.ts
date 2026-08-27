@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import multer from "multer";
+import formidable from "formidable";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -52,18 +52,8 @@ try {
   }
 } catch { /* non-critical */ }
 
-const uploadStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const safeName = path
-      .basename(file.originalname || "file")
-      .replace(/[^a-zA-Z0-9._-]/g, "_");
-    cb(null, `${randomUUID()}-${safeName}`);
-  },
-});
-
 /** MIME allowlist — only safe types for chat file uploads. */
-const ALLOWED_MIMES = [
+const ALLOWED_MIMES = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",
@@ -76,19 +66,17 @@ const ALLOWED_MIMES = [
   "application/pdf",
   "text/typescript",
   "text/javascript",
-];
+]);
 
-const upload = multer({
-  storage: uploadStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIMES.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Unsupported file type: ${file.mimetype}`));
-    }
-  },
-});
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
+
+function removeUploads(paths: Iterable<string>): void {
+  for (const filepath of paths) {
+    try {
+      if (existsSync(filepath)) unlinkSync(filepath);
+    } catch { /* non-critical — file may already be removed */ }
+  }
+}
 
 /**
  * Handles /api/v1/opencode — reads recent user messages from the OpenCode SQLite DB,
@@ -432,56 +420,88 @@ function sendBrowserProviderCatalogError(res: Response, result: unknown): void {
    File upload endpoint — POST /upload (multipart)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-opencodeRouter.post("/upload", (req, res) => {
+opencodeRouter.post("/upload", async (req, res) => {
   if (!guardPassword(req, res)) return;
 
-  upload.single("file")(req, res, (err) => {
-    if (err) {
-      if (err instanceof multer.MulterError) {
-        // Multer-specific errors (file too large, wrong field name, etc.)
-        const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-        logger.warn(SOURCE, `Upload multer error: ${err.code}`, {
-          code: err.code,
-          field: err.field,
-        });
-        res.status(status).json({
-          error: { code: err.code, message: err.message },
-        });
-        return;
-      }
-      // Custom file-filter error or other errors
-      logger.warn(SOURCE, `Upload error: ${err.message}`);
-      res.status(400).json({
-        error: { code: "UPLOAD_REJECTED", message: err.message },
-      });
-      return;
-    }
+  const createdPaths = new Set<string>();
+  let receivedFileCount = 0;
+  let unexpectedFile = false;
+  const form = formidable({
+    uploadDir: UPLOAD_DIR,
+    maxFiles: 1,
+    maxFileSize: MAX_UPLOAD_SIZE,
+    maxTotalFileSize: MAX_UPLOAD_SIZE,
+    allowEmptyFiles: true,
+    minFileSize: 0,
+    filter: (part) => {
+      receivedFileCount += 1;
+      if (part.name === "file" && receivedFileCount === 1) return true;
+      unexpectedFile = true;
+      return false;
+    },
+    filename: (_name, _extension, part) => {
+      const safeName = path.basename(part.originalFilename || "file").replace(/[^a-zA-Z0-9._-]/g, "_");
+      return `${randomUUID()}-${safeName}`;
+    },
+  });
+  form.on("fileBegin", (_name, file) => createdPaths.add(file.filepath));
 
-    if (!req.file) {
+  try {
+    const [, files] = await form.parse(req);
+    const fileEntries = Object.values(files).flatMap((value) => value ?? []);
+    const uploadedFile = files.file?.[0];
+
+    if (!uploadedFile && fileEntries.length === 0 && receivedFileCount === 0) {
       res.status(400).json({
         error: { code: "NO_FILE", message: "No file uploaded" },
       });
       return;
     }
 
+    if (unexpectedFile || !uploadedFile || fileEntries.length !== 1) {
+      removeUploads(fileEntries.map((file) => file.filepath));
+      res.status(400).json({
+        error: { code: "LIMIT_UNEXPECTED_FILE", message: "Unexpected field" },
+      });
+      return;
+    }
+
+    const mime = uploadedFile.mimetype || "application/octet-stream";
+    if (!ALLOWED_MIMES.has(mime)) {
+      removeUploads([uploadedFile.filepath]);
+      const message = `Unsupported file type: ${mime}`;
+      logger.warn(SOURCE, `Upload error: ${message}`);
+      res.status(400).json({
+        error: { code: "UPLOAD_REJECTED", message },
+      });
+      return;
+    }
+
     res.json({
       data: {
-        url: `file:///tmp/ingenium-chat-uploads/${path.basename(req.file.filename)}`,
-        filename: req.file.originalname,
-        mime: req.file.mimetype,
-        size: req.file.size,
+        url: `file:///tmp/ingenium-chat-uploads/${path.basename(uploadedFile.filepath)}`,
+        filename: uploadedFile.originalFilename,
+        mime,
+        size: uploadedFile.size,
       },
     });
 
-    // Deferred cleanup: remove file after 1 hour
-    setTimeout(() => {
-      try {
-        if (existsSync(req.file!.path)) {
-          unlinkSync(req.file!.path);
-        }
-      } catch { /* non-critical — file may already be removed */ }
-    }, 60 * 60 * 1000);
-  });
+    setTimeout(() => removeUploads([uploadedFile.filepath]), 60 * 60 * 1000).unref();
+  } catch (error) {
+    removeUploads(createdPaths);
+    const message = error instanceof Error ? error.message : "Upload failed";
+    if (/max(?:Total)?FileSize/.test(message)) {
+      logger.warn(SOURCE, "Upload error: LIMIT_FILE_SIZE", { code: "LIMIT_FILE_SIZE" });
+      res.status(413).json({ error: { code: "LIMIT_FILE_SIZE", message: "File too large" } });
+      return;
+    }
+    if (/maxFiles/.test(message)) {
+      res.status(400).json({ error: { code: "LIMIT_UNEXPECTED_FILE", message: "Unexpected field" } });
+      return;
+    }
+    logger.warn(SOURCE, `Upload error: ${message}`);
+    res.status(400).json({ error: { code: "UPLOAD_REJECTED", message } });
+  }
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
