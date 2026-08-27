@@ -38,6 +38,7 @@ type TraceEvent =
   | "claim_state"
   | "recoverable_failure"
   | "recover_success"
+  | "credential_reset"
   | "drop_session";
 type TraceOperation = "session.created" | "session.idle" | "tool.execute.before" | "tool.execute.after" | "experimental.chat.system.transform";
 type DropReason = "close" | "close_missing" | "heartbeat_failure" | "snapshot_failure" | "consume_failure"
@@ -62,6 +63,7 @@ interface TraceRecord {
   bridgeStage?: "connect" | "call" | "close";
   errorCode?: string;
   claimState?: "claimed" | "claim_failed" | "quarantined" | "quarantine_failed" | "completed" | "released";
+  resetState?: "accepted" | "rejected";
 }
 
 function sessionHash(sessionId: string): string {
@@ -250,6 +252,7 @@ interface ManagedMutationDescriptor {
   paths: string[];
   reserved?: "@repository" | "@build";
   readOnly?: boolean;
+  coordinationReset?: true;
 }
 
 export interface RepositoryClaimContext {
@@ -384,6 +387,12 @@ function worktreeSnapshot(worktree: string): WorktreeSnapshot {
   return snapshot;
 }
 
+function worktreeFootprintHash(worktree: string): string {
+  return createHash("sha256").update(JSON.stringify(
+    [...worktreeSnapshot(worktree)].sort(([left], [right]) => left.localeCompare(right)),
+  )).digest("hex");
+}
+
 function changedFootprint(before: WorktreeSnapshot, after: WorktreeSnapshot) {
   const entries: Array<{ path?: string; path_sha256: string; before_sha256: string | null; after_sha256: string | null }> = [];
   for (const path of new Set([...before.keys(), ...after.keys()])) {
@@ -445,6 +454,9 @@ function managedMutation(worktree: string, toolValue: string, args: unknown): Ma
   }
   if (tool === "bash" || tool === "shell") {
     if (typeof args.command !== "string") return undefined;
+    if (hasExactKeys(args, ["command"]) && args.command === "ingenium-coordination-reset reset") {
+      return { operation: "build", paths: [], readOnly: true, coordinationReset: true };
+    }
     if (/^(?:pwd|git (?:status(?: --short)?|diff(?: --stat)?|log --oneline(?: -\d+)?|show --stat|rev-parse (?:HEAD|--show-toplevel)))$/.test(args.command)) {
       return { operation: "build", paths: [], readOnly: true };
     }
@@ -805,10 +817,14 @@ export class SessionCoordinator {
   private readonly heartbeatEnabled: boolean;
   private lastIncarnation = 0;
   private heartbeat?: NodeJS.Timeout;
+  private credentialFingerprint?: string;
+  private reconnecting?: Promise<void>;
+  private acceptedCredentialEpoch?: number;
 
   constructor(private readonly ctx: CoordinatorContext, dependencies: SessionCoordinatorDependencies = {}) {
     this.binding = dependencies.binding ?? resolveExtensionBinding(ctx.worktree, {
       purpose: coordinationCredentialPurpose(),
+      allowMissingCredential: true,
     });
     this.callTool = dependencies.callTool;
     this.openClient = dependencies.openClient ?? ((worktree) => openMcpToolClient(worktree, {
@@ -824,6 +840,141 @@ export class SessionCoordinator {
     this.heartbeatEnabled = !dependencies.disableHeartbeat;
     this.preflight = dependencies.preflight ?? preflightApiAuthentication;
     this.request = dependencies.request ?? fetch;
+    this.credentialFingerprint = this.readCredentialFingerprint();
+  }
+
+  private readCredentialFingerprint(): string | undefined {
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(this.binding.credentialFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const stat = fstatSync(descriptor);
+      const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
+      if (!stat.isFile() || (stat.mode & 0o777) !== 0o600 || (owner !== undefined && stat.uid !== owner)) return undefined;
+      const value = readFileSync(descriptor, "utf8");
+      return /^[A-Za-z0-9_-]{32,128}\n?$/.test(value)
+        ? createHash("sha256").update(value.endsWith("\n") ? value.slice(0, -1) : value).digest("hex")
+        : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
+  }
+
+  private retainOperationalState(sessionId: string, state: SessionState): void {
+    this.recoverableOperationalState.set(sessionId, {
+      status: state.status,
+      todos: { ...state.todos },
+      changedPaths: state.changedPaths.map((entry) => ({ ...entry })),
+      currentTaskId: state.currentTaskId,
+      actions: state.actions.map((entry) => ({ ...entry, pathSegments: entry.pathSegments ? [...entry.pathSegments] : null })),
+      checks: state.checks.map((entry) => ({ ...entry })),
+      memoryDirty: state.memoryDirty,
+    });
+  }
+
+  private async attestGeneralBinding(): Promise<void> {
+    if (this.binding.purpose !== "general") return;
+    const result = await this.preflight(this.binding.apiUrl, this.ctx.worktree, this.request, {
+      credentialPurpose: "general",
+    });
+    const attested = result.binding;
+    const requiredScopes = ["coordination:read", "coordination:write", "projects:read", "repository:sync"];
+    if (!result.authenticated || !attested || attested.audience !== "mcp"
+      || attested.projectIds.length !== 1 || attested.projectId !== attested.projectIds[0]
+      || attested.workspaceId !== this.binding.workspaceId
+      || attested.launcherWorktree !== this.binding.launcherWorktree
+      || requiredScopes.some((scope) => !attested.scopes.includes(scope))) throw new ExtensionBindingError();
+    const project = await this.request(
+      `${this.binding.apiUrl}/projects/${encodeURIComponent(this.binding.project)}/detail`,
+      { headers: apiRequestHeaders(this.ctx.worktree, undefined, { binding: this.binding }), signal: AbortSignal.timeout(5_000) },
+    ).catch(() => null);
+    const payload = project?.ok
+      ? await project.json().catch(() => null) as { data?: { project?: { id?: unknown; name?: unknown } } } | null
+      : null;
+    if (payload?.data?.project?.id !== attested.projectId || payload.data.project.name !== this.binding.project) {
+      throw new ExtensionBindingError();
+    }
+  }
+
+  async reconnectAfterCredentialReset(sessionId: string): Promise<void> {
+    if (this.binding.purpose !== "general") throw new ExtensionBindingError();
+    if (this.reconnecting) return this.reconnecting;
+    const pending = (async () => {
+      const fingerprint = this.readCredentialFingerprint();
+      if (!fingerprint || fingerprint === this.credentialFingerprint || this.pendingMutations.size > 0) {
+        trace({ event: "credential_reset", resetState: "rejected", failure: "authentication" });
+        throw new ExtensionBindingError();
+      }
+      const sessionIds = new Set([sessionId, ...this.sessions.keys()]);
+      for (const [id, state] of this.sessions) this.retainOperationalState(id, state);
+      if (this.heartbeat) {
+        clearInterval(this.heartbeat);
+        this.heartbeat = undefined;
+      }
+      await this.closeBridge();
+      this.attestation = undefined;
+      this.canonicalWorktree = undefined;
+      this.sessions.clear();
+      this.registering.clear();
+      this.snapshotCursors.clear();
+      this.credentialFingerprint = fingerprint;
+      await this.attestGeneralBinding();
+      for (const id of sessionIds) await this.register(id);
+      const callId = `credential-reset-${randomUUID()}`;
+      try {
+        await this.preclaim(sessionId, callId, { operation: "build", paths: [], reserved: "@build" });
+      } catch (error) {
+        if (!(error instanceof McpBridgeError) || error.errorCode !== "EPOCH_QUARANTINED") throw error;
+        await this.recoverQuarantinedEpoch(sessionId);
+        await this.preclaim(sessionId, callId, { operation: "build", paths: [], reserved: "@build" });
+      }
+      const proof = this.pendingMutations.get(this.pendingKey(sessionId, callId));
+      if (!proof) throw new Error("credential reset claim unavailable");
+      this.acceptedCredentialEpoch = proof.acceptedEpoch;
+      await this.releasePending(sessionId, callId);
+      trace({ event: "credential_reset", resetState: "accepted" });
+    })().catch(async (error) => {
+      await this.closeBridge();
+      throw error;
+    }).finally(() => {
+      this.reconnecting = undefined;
+    });
+    this.reconnecting = pending;
+    return pending;
+  }
+
+  private async recoverQuarantinedEpoch(sessionId: string): Promise<void> {
+    await this.serialized(sessionId, async (state) => {
+      const recovery = await this.invoke("coordination_update", {
+        ...this.lease(state), operation: "recovery_state",
+      });
+      if (!Number.isSafeInteger(recovery.acceptedEpoch) || (recovery.acceptedEpoch as number) < 1
+        || typeof recovery.quarantinedSessionId !== "string"
+        || !Number.isSafeInteger(recovery.quarantinedIncarnation) || (recovery.quarantinedIncarnation as number) < 1
+        || !Number.isSafeInteger(recovery.quarantinedFence) || (recovery.quarantinedFence as number) < 1
+        || typeof recovery.quarantinedActorId !== "string" || !/^actor-[0-9a-f]{64}$/.test(recovery.quarantinedActorId)) {
+        throw new Error("invalid coordination recovery state");
+      }
+      const acceptedEpoch = recovery.acceptedEpoch as number;
+      const proof = {
+        quarantined_session_id: recovery.quarantinedSessionId,
+        quarantined_incarnation: recovery.quarantinedIncarnation,
+        quarantined_fence: recovery.quarantinedFence,
+        quarantined_actor_id: recovery.quarantinedActorId,
+        accepted_epoch: acceptedEpoch,
+        recovery_footprint_hash: worktreeFootprintHash(this.ctx.worktree),
+      };
+      let result = await this.invoke("coordination_update", {
+        ...this.lease(state), operation: "reconcile_epoch", ...proof,
+      });
+      this.apply(state, result.session);
+      result = await this.invoke("coordination_update", {
+        ...this.lease(state), operation: "recover_epoch", ...proof,
+      });
+      this.apply(state, result.session);
+      if (result.acceptedEpoch !== acceptedEpoch + 1) throw new Error("invalid recovered coordination epoch");
+    });
   }
 
   /** Authenticate the runtime capability and bind coordination to its attested identity. */
@@ -1012,15 +1163,7 @@ export class SessionCoordinator {
   private async closeAfterFailure(sessionId: string, reason: DropReason): Promise<void> {
     const failed = this.sessions.get(sessionId);
     if (failed) {
-      this.recoverableOperationalState.set(sessionId, {
-        status: failed.status,
-        todos: { ...failed.todos },
-        changedPaths: failed.changedPaths.map((entry) => ({ ...entry })),
-        currentTaskId: failed.currentTaskId,
-        actions: failed.actions.map((entry) => ({ ...entry, pathSegments: entry.pathSegments ? [...entry.pathSegments] : null })),
-        checks: failed.checks.map((entry) => ({ ...entry })),
-        memoryDirty: failed.memoryDirty,
-      });
+      this.retainOperationalState(sessionId, failed);
     }
     if (!this.sessions.has(sessionId)) {
       this.dropSession(sessionId, reason);
@@ -1836,6 +1979,7 @@ export class SessionCoordinator {
       "tool.execute.after": async ({ tool, sessionID, callID, args }, result) => {
         const descriptor = managedMutation(this.ctx.worktree, tool, args);
         if (descriptor?.readOnly) {
+          if (descriptor.coordinationReset) await this.reconnectAfterCredentialReset(sessionID);
           await this.recordSuccessfulTool(sessionID, tool, args);
           return;
         }

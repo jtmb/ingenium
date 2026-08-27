@@ -37,6 +37,7 @@ export interface ResolveExtensionBindingOptions {
   workspaceId?: string;
   launcherWorktree?: string;
   credentialFile?: string;
+  allowMissingCredential?: boolean;
 }
 
 export function effectiveExtensionCredentialPurpose(
@@ -231,7 +232,12 @@ function operationCredentialFile(
     ?? `.opencode/${PURPOSE_FILES.general}`;
 }
 
-function validatedCredentialFile(worktree: string, reference: string, purpose: ExtensionCredentialPurpose): string {
+function validatedCredentialFile(
+  worktree: string,
+  reference: string,
+  purpose: ExtensionCredentialPurpose,
+  allowMissing = false,
+): string {
   const expectedName = PURPOSE_FILES[purpose];
   const path = isAbsolute(reference) ? resolve(reference) : resolve(worktree, reference);
   if (basename(path) !== expectedName) fail();
@@ -255,7 +261,8 @@ function validatedCredentialFile(worktree: string, reference: string, purpose: E
     const file = lstatSync(path);
     if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o400) === 0 || (file.mode & 0o077) !== 0
       || (process.platform !== "win32" && typeof process.getuid === "function" && file.uid !== process.getuid())) fail();
-  } catch {
+  } catch (error) {
+    if (allowMissing && (error as NodeJS.ErrnoException).code === "ENOENT") return path;
     fail();
   }
   return path;
@@ -316,6 +323,7 @@ export function resolveExtensionBinding(
       root,
       operationCredentialFile(purpose, config, options.credentialFile, operationEnvironment),
       purpose,
+      options.allowMissingCredential === true,
     ),
     purpose,
   };

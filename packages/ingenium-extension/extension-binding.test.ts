@@ -131,6 +131,24 @@ describe("extension binding resolution", () => {
     expect(() => resolveExtensionBinding(worktree)).toThrow(ExtensionBindingError);
   });
 
+  it("exposes only the canonical missing locator to the coordinator recovery boundary", () => {
+    prepare();
+    config({
+      INGENIUM_PROJECT: basename(worktree),
+      INGENIUM_WORKSPACE_ID: "workspace-marker",
+      INGENIUM_WORKTREE: worktree,
+      INGENIUM_MCP_AUDIENCE: "mcp",
+      INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
+    });
+
+    expect(() => resolveExtensionBinding(worktree)).toThrow(ExtensionBindingError);
+    expect(resolveExtensionBinding(worktree, { allowMissingCredential: true }).credentialFile)
+      .toBe(join(worktree, ".opencode", ".ingenium-mcp-credential"));
+
+    symlinkSync(join(worktree, "missing-target"), join(worktree, ".opencode", ".ingenium-mcp-credential"));
+    expect(() => resolveExtensionBinding(worktree, { allowMissingCredential: true })).toThrow(ExtensionBindingError);
+  });
+
   it("keeps learning, repository-sync, and general credentials separate", () => {
     prepare();
     token(".ingenium-learning-credential");

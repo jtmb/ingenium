@@ -883,6 +883,20 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await expect(hooks["tool.execute.before"]!(rawShell, { args: rawShell.args }))
       .rejects.toThrow("Managed shell coordination denied the command");
 
+    const reset = { tool: "bash", sessionID, callID: "reset", args: { command: "ingenium-coordination-reset reset" } };
+    await expect(hooks["tool.execute.before"]!(reset, { args: reset.args })).resolves.toBeUndefined();
+    for (const [callID, args] of [
+      ["reset-lookalike", { command: "./ingenium-coordination-reset reset" }],
+      ["reset-shell", { command: "ingenium-coordination-reset reset && npm test" }],
+      ["reset-extra", { command: "ingenium-coordination-reset reset extra" }],
+      ["reset-env", { command: "INGENIUM_PROJECT=other ingenium-coordination-reset reset" }],
+      ["reset-endpoint", { command: "ingenium-coordination-reset reset", environment: { INGENIUM_API_URL: "https://attacker.invalid" } }],
+      ["reset-project", { command: "ingenium-coordination-reset reset", project: "other" }],
+    ] as const) {
+      await expect(hooks["tool.execute.before"]!({ tool: "bash", sessionID, callID }, { args }))
+        .rejects.toThrow("Managed shell coordination denied the command");
+    }
+
     for (const [callID, executable, argv, reserved] of [
       ["repository-wrapper", "ingenium-repository", ["add", "src/file.ts"], "@repository"],
       ["build-wrapper", "ingenium-build", ["run", "typecheck"], "@build"],
@@ -893,6 +907,115 @@ describe("SessionCoordinatorPlugin hooks", () => {
       expect(fixture.calls.slice().reverse().find((call) => call.tool === "coordination_claim" && !call.args.action)?.args.claims)
         .toEqual([{ claim: { kind: "reserved", name: reserved } }]);
       await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
+    }
+  });
+
+  it("rereads a replaced credential, closes the old bridge, and establishes a fresh zero-mutation epoch", async () => {
+    const fixture = coordinationFixture();
+    const privateDirectory = mkdtempSync(join(tmpdir(), "ingenium-coordination-hot-reset-"));
+    const credentialFile = join(privateDirectory, "credential");
+    writeFileSync(credentialFile, `${"a".repeat(43)}\n`, { mode: 0o600 });
+    chmodSync(credentialFile, 0o600);
+    const process = processHarness("ingenium", privateDirectory, privateDirectory, 43026, {});
+    process.binding.credentialFile = credentialFile;
+    const closed: number[] = [];
+    let generation = 0;
+    let claimRejected = false;
+    let epochRecovered = false;
+    const openClient = vi.fn(async () => {
+      const current = ++generation;
+      return {
+        callTool: async (tool: string, args: Args) => {
+          if (current >= 2 && tool === "coordination_claim" && args.operation === "build" && !claimRejected) {
+            claimRejected = true;
+            throw new McpBridgeError("request_failed", "", "call", undefined, "EPOCH_QUARANTINED");
+          }
+          if (current >= 2 && tool === "coordination_update" && args.operation === "recovery_state") {
+            fixture.calls.push({ tool, args });
+            return text({
+              acceptedEpoch: 1,
+              quarantineCode: "uncertain_apply",
+              quarantinedSessionId: "session-quarantined",
+              quarantinedIncarnation: 1,
+              quarantinedFence: 1,
+              quarantinedActorId: `actor-${"a".repeat(64)}`,
+              reconciliationRecorded: false,
+            });
+          }
+          const response = await fixture.callTool(process.worktree, tool, args);
+          if (current >= 2 && tool === "coordination_update"
+            && (args.operation === "reconcile_epoch" || args.operation === "recover_epoch")) {
+            const data = JSON.parse((response.content[0] as { text: string }).text);
+            if (args.operation === "recover_epoch") epochRecovered = true;
+            return text({ ...data, acceptedEpoch: args.operation === "recover_epoch" ? 2 : 1, manifestGeneration: 0 });
+          }
+          return response;
+        },
+        close: vi.fn(async () => { closed.push(current); }),
+      };
+    });
+    const preflight = vi.fn(async (): Promise<ApiAuthenticationPreflightResult> => ({
+      authenticated: true,
+      binding: {
+        scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync"],
+        organizationId: "00000000-0000-4000-8000-000000000002",
+        projectId: "00000000-0000-4000-8000-000000000001",
+        projectIds: ["00000000-0000-4000-8000-000000000001"],
+        audience: "mcp",
+        workspaceId: process.binding.workspaceId,
+        launcherWorktree: process.binding.launcherWorktree,
+        storageMappingHash: process.binding.storageMappingHash!,
+        restartRequiredOnCredentialChange: true,
+      },
+    }));
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      data: { project: { id: "00000000-0000-4000-8000-000000000001", name: "ingenium" } },
+    }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      openClient,
+      preflight,
+      request,
+      now: () => 400,
+      token: () => "H".repeat(32),
+      disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "hot-reset-session";
+    const reset = { tool: "bash", sessionID, callID: "hot-reset", args: { command: "ingenium-coordination-reset reset" } };
+    const before = execFileSync("git", ["-C", sharedWorktree, "status", "--porcelain=v1", "-z"]);
+    try {
+      await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      expect(openClient).toHaveBeenCalledTimes(1);
+      writeFileSync(credentialFile, `${"b".repeat(43)}\n`, { mode: 0o600 });
+      chmodSync(credentialFile, 0o600);
+
+      await hooks["tool.execute.before"]!(reset, { args: reset.args });
+      await hooks["tool.execute.after"]!(reset, { title: "", output: "", metadata: {} });
+
+      expect(openClient).toHaveBeenCalledTimes(3);
+      expect(closed).toEqual([1, 2]);
+      expect(preflight).toHaveBeenCalledOnce();
+      const registrations = fixture.calls.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "register");
+      expect(registrations).toHaveLength(2);
+      expect(registrations[1]!.args.incarnation).toBeGreaterThan(registrations[0]!.args.incarnation);
+      expect(claimRejected).toBe(true);
+      expect(epochRecovered).toBe(true);
+      expect(fixture.calls.filter(({ tool, args }) => tool === "coordination_update"
+        && ["recovery_state", "reconcile_epoch", "recover_epoch"].includes(args.operation)).map(({ args }) => args.operation))
+        .toEqual(["recovery_state", "reconcile_epoch", "recover_epoch"]);
+      expect(fixture.calls).toEqual(expect.arrayContaining([
+        expect.objectContaining({ tool: "coordination_claim", args: expect.objectContaining({
+          operation: "build", claims: [{ claim: { kind: "reserved", name: "@build" } }],
+        }) }),
+        expect.objectContaining({ tool: "coordination_release" }),
+      ]));
+      expect((coordinator as any).acceptedCredentialEpoch).toBe(1);
+      expect((coordinator as any).pendingMutations.size).toBe(0);
+      expect(execFileSync("git", ["-C", sharedWorktree, "status", "--porcelain=v1", "-z"])).toEqual(before);
+    } finally {
+      await hooks.dispose?.();
+      rmSync(privateDirectory, { recursive: true, force: true });
     }
   });
 

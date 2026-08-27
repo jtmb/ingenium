@@ -44,8 +44,11 @@ build/
 .opencode/.ingenium-sync-state.json
 .opencode/.ingenium-api-token
 .opencode/.ingenium-mcp-credential
+.opencode/.ingenium-coordination-owner-provider.json
+.opencode/.ingenium-learning-credential
 .opencode/.ingenium-repository-sync-credential
 .opencode/.ingenium-runtime-credential
+**/.opencode/.ingenium-learning-credential
 
 # Editor and temporary files
 .agents/.lm-studio-env

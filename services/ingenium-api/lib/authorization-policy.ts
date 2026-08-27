@@ -60,6 +60,7 @@ const REPOSITORY_COORDINATION_ROUTES = new Set([
 
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
+  if (req.method === "POST" && req.path === "/api/v1/coordination/epoch/recover") return "write";
   if (/\/(run|sync|execute|test|connect|disconnect|prompt|command|abort|compact|fork|revert|unrevert)(?:\/|$)/.test(req.path)) return "execute";
   if (req.method === "DELETE" || /\/(purge|restore|global|authorize|approve|rollback|recover)(?:\/|$)/.test(req.path)) return "admin";
   return "write";

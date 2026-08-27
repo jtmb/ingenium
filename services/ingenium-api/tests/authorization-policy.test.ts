@@ -28,6 +28,7 @@ describe("AUTH-102 canonical API policy", () => {
     ["POST", "/api/v1/runtimes/gateway/validate", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/gateway/activity", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/activity", "runtime-capability", "write"],
+    ["POST", "/api/v1/coordination/epoch/recover", "project", "write"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
