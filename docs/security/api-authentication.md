@@ -175,6 +175,37 @@ database or call mutation REST endpoints directly. `ingenium-core` is internal
 to the API. Administrative skill sync tools are repair/import only. Rebuild the
 extension and restart OpenCode when plugin or config sources change.
 
+If only the external coordination credential is invalid, run the package-owned
+`ingenium-coordination-reset reset` command. The bootstrap-owner secret must be
+provided through exactly one protected mode-`0600` file or already-open regular
+file descriptor. If neither override exists, reset uses only the fixed ignored
+`.opencode/.ingenium-coordination-owner-provider.json` reference. That file
+contains paths and provider metadata, never plaintext or ciphertext. The
+referenced AES-256-GCM bundle lives outside the worktree under a separate
+owner-only directory and is authenticated to the exact bootstrap account,
+project, and workspace. Its protected key follows the existing email-key file
+format but cannot share the ciphertext directory. Wrong keys, altered metadata
+or ciphertext, symlinks, unsafe ownership/modes, and mismatched bindings fail
+closed.
+
+`ingenium-coordination-reset store --key-file <absolute-path>
+--bundle-directory <absolute-path>` creates or rotates this provider while the
+protected plaintext override is present. It atomically validates the new bundle
+before replacing the ignored reference and removes the superseded ciphertext;
+interruption retains the prior usable reference. Neither operation accepts a
+secret through argv or logs secret-derived values. Reset accepts no endpoint,
+project, workspace, worktree, or scope argument. It reuses the normal login,
+recent-step-up, project authorization, and scoped MCP issuance routes, validates
+the exact configured coordination binding, and atomically replaces the
+owner-only credential file.
+When the session-coordinator plugin is already loaded, its exact reset-command
+exception reconnects the MCP client and registers a fresh accepted epoch in the
+same OpenCode process. Lookalike commands and unrelated mutations remain denied.
+`ingenium-coordination-reset reset-learning` independently restores the exact
+seven-scope learning credential through the same encrypted provider and fixed
+binding. It does not replace the general MCP credential or receive the
+same-process coordination exception.
+
 `ingenium-init-project` and extension project provisioning perform an
 authenticated `GET /api/v1/auth/preflight` before a project is created or a
 repository projection begins. Extension startup permits at most three probes,

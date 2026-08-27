@@ -39,6 +39,8 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
 | `OBSERVER_CHECK_INTERVAL` | `0` | `observer.ts` | Session idle check interval; `0` disables observer checks. |
+| `INGENIUM_COORDINATION_OWNER_SECRET_FILE` | _(none)_ | `ingenium-coordination-reset` | Absolute path to an owner-private mode-`0600` JSON file containing the bootstrap owner's login and step-up credentials. Exactly one protected file or descriptor source is required; the value is never accepted through argv or printed. |
+| `INGENIUM_COORDINATION_OWNER_SECRET_FD` | _(none)_ | `ingenium-coordination-reset` | Already-open owner-private regular-file descriptor containing the same JSON payload. Mutually exclusive with `INGENIUM_COORDINATION_OWNER_SECRET_FILE`; descriptor numbers below 3 are rejected. |
 
 ## API (`services/ingenium-api`)
 

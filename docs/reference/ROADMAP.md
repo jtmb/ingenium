@@ -2994,3 +2994,198 @@ This append-only source/configuration update adds no coordination completion mar
 <!-- (work-complete) COORD-104 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->
 <!-- (work-complete) COORD-105 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->
 <!-- (work-complete) COORD-106 2026-08-27T11:56:29Z ingenium-software-engineer-premium -->
+
+## Protected coordination credential reset (COORD-RESET-100)
+
+- **IN_SCOPE:** A package-owned `ingenium-coordination-reset` executable; protected
+  owner authentication through login and recent step-up; reuse of scoped MCP
+  credential issuance; atomic installation of the exact Ingenium coordination
+  binding; an exact reset-only coordinator exemption; same-process credential,
+  client, session, and accepted-epoch refresh; focused source/runtime tests;
+  deployment, health, synthesis, scoped commit, and authenticated browser handoff.
+- **OUT_OF_SCOPE:** Password rotation, plaintext-secret persistence or output,
+  broad authentication changes, global configuration, shell/curl exemptions,
+  unrelated dirty changes, and clearing foreign, live, or uncertain claims.
+- **Owner / deployment / verification:** `ingenium-software-engineer-premium`
+  works directly as the sole writer and owns targeted verification and deployment.
+- **Acceptance / STOP_CONDITION:** PASS only after source tests, actual protected
+  access restoration, same-process broken-binding recovery with a fresh accepted
+  epoch and zero-mutation `@build` claim/release, restored plugin configuration,
+  deployment health/provenance, synthesis, visual-gate reconciliation, exact
+  commit, browser handoff readiness, and TodoWrite/roadmap reconciliation.
+- **Escalation:** Only unavailable configured access, an unauthorized irreversible
+  operation, a mutually exclusive product decision, genuine ambiguity, or a root
+  cause that remains unreproducible after bounded diagnosis.
+- **Rollback/safety:** Secret values never enter argv, environment values, logs,
+  output, source, retained evidence, or Git. Credential replacement uses a
+  contained no-follow path, same-directory mode-`0600` temporary file, fsync,
+  rename, and rollback. Reconnection never clears foreign/live claims or uncertain
+  footprints; concurrent reset has one winner.
+- **Tests / docs:** Focused Extension and API contracts cover missing/revoked
+  recovery, owner/step-up and identity/scope rejection, path/mode/symlink and
+  interruption rollback, exact exemption negatives, old token/epoch denial,
+  same-process reconnect, no-source-mutation, and unchanged fail-closed behavior.
+  Update only this roadmap and directly affected security/operations guidance.
+- **Phase/counts / territory:** One active writer, no subagents; exclusive
+  Extension reset/coordinator, focused auth contract, root plugin entry, affected
+  docs/tests, deployment evidence, and exact staging territory.
+
+### Work started and bootstrap deadlock root cause
+
+<!-- (work-started) COORD-RESET-100 2026-08-27T16:52:15Z ingenium-software-engineer-premium -->
+
+The disabled-state preflight verified that root `opencode.json` did not load the
+session coordinator, while an apply-patch write canary and a Node command canary
+both succeeded and the temporary canary was removed. The bootstrap deadlock is in
+the existing source boundary: the coordinator denies every unrecognized shell
+mutation when coordination is unavailable, provides no exact credential-reset
+escape, resolves the credential binding once, and caches the MCP bridge, session,
+and epoch state. The deployment guide consequently requires an OpenCode restart
+after scoped credential replacement. Source, deployed, current-process, visual,
+and completion evidence remain open and are not interchangeable.
+
+### Source evidence and configured-access status
+
+<!-- (source-verified) COORD-RESET-100 2026-08-27T17:10:22Z ingenium-software-engineer-premium -->
+
+The package-owned reset executable, exact coordinator exemption, atomic
+credential replacement, and same-process reconnect path are implemented. The
+Extension typecheck, 55 focused reset/coordinator/binding tests, Extension build,
+MCP transport parity check, package dry-run, scoped diff check, exact plugin-entry
+assertion, and agent validator pass. The focused long-lived coordinator test
+replaces its protected credential, closes its first bridge, re-attests, registers
+a higher incarnation, performs a zero-path `@build` claim/release, accepts the
+fresh epoch, and leaves the source snapshot unchanged. The directly affected
+security, deployment, and environment-variable guidance is updated. This is
+source evidence only; it is not deployed/current-session acceptance.
+
+The package was installed into the configured user prefix and the exact
+`ingenium-coordination-reset reset` command was exercised against the live
+checkout. It failed closed with the content-free `binding` class: neither
+`INGENIUM_COORDINATION_OWNER_SECRET_FILE` nor
+`INGENIUM_COORDINATION_OWNER_SECRET_FD` is present in this orchestration context,
+and the existing scoped credential now fails authenticated preflight. No browser
+process carrying an authenticated owner session is available. Actual credential
+rotation, old-token denial, live claim/release, synthesis, authenticated browser
+handoff, commit, deployment, health/provenance, and terminal reconciliation remain
+open pending configured protected owner access. The non-UI change has no visual
+route gate, but that not-applicable state is not terminal acceptance by itself.
+
+### Resumed live-reset evidence and authentication blocker
+
+<!-- (blocked) COORD-RESET-100 2026-08-27T17:24:00Z ingenium-software-engineer-premium -->
+
+The confirmed owner secret was reconstructed only inside controlled writer
+processes. Each live reset attempt used a random owner-private temporary
+directory, a no-follow regular mode-`0600` JSON file, and a child-only
+`INGENIUM_COORDINATION_OWNER_SECRET_FILE` path. Cleanup ran in `finally`; the
+secret file and directory are absent, and no secret-derived value, hash, length,
+cookie, or identity was retained.
+
+The first live attempt reproduced a source defect: owner login was sent to the
+bearer-only host MCP boundary on port 4097, where unauthenticated CSRF correctly
+returned 401. The reset now sends owner CSRF/login/step-up, project authorization,
+issuance, listing, and revocation through the dashboard boundary on port 3000,
+while scoped MCP preflight remains on port 4097. Extension typecheck, the 55
+focused tests, build, and transport parity pass after that remediation.
+
+The remediated canonical reset reaches the real owner login but returns the
+content-free `authentication` failure. A bounded direct check through the same
+dashboard route, including the canonical dashboard marker, returned HTTP 401 with
+stable code `AUTHENTICATION_FAILED` for the sole active bootstrap-organization
+owner. This proves the task contract's permitted external-authentication blocker;
+password recovery/rotation is out of scope. No credential was rotated, no claim
+was changed, and deployment, synthesis, commit, and browser handoff remain open.
+
+### Dashboard mutation-marker source remediation
+
+<!-- (source-fixed) COORD-RESET-100 2026-08-27T17:44:21Z ingenium-software-engineer-premium -->
+
+Bounded read-only diagnosis established that Dashboard mutations require the
+exact `x-ingenium-ui: dashboard` request marker before the proxy strips and
+reinstalls its trusted downstream marker. The reset client reached port 3000 but
+omitted that browser-side contract marker, so its mutation was rejected before
+local password verification. The reset-owned login, MFA challenge, step-up,
+credential issuance, and credential revocation requests now carry the fixed
+module-owned marker. Dashboard GETs remain marker-free, and scoped MCP preflight
+remains marker-free on port 4097. Focused success, MFA, and rejected-CSRF route
+tests cover the boundary. This is source-fix evidence only; live reset,
+deployment, synthesis, commit, browser handoff, and completion remain open.
+
+### Encrypted recovery-provider source evidence
+
+<!-- (source-verified) COORD-RESET-100 2026-08-27T14:32:35Z ingenium-software-engineer-premium -->
+
+The current scope explicitly authorizes persistent encrypted owner recovery
+instead of treating missing transient overrides as a terminal blocker. No OS
+keyring tooling is installed, and the application Vault requires an in-memory
+passphrase while unsealed, so unattended recovery uses the repository's existing
+protected host-key format and AES-256-GCM convention. The ciphertext bundle and
+key remain in separate owner-only directories outside Git; the ignored worktree
+file stores references only. Fallback occurs only when both plaintext overrides
+are absent. Exact account/project/workspace AAD, wrong-key/tamper rejection,
+mode/symlink checks, interrupted-store rollback, rotation cleanup, no-log
+behavior, and reset fallback are covered by 19 passing focused tests. Extension
+typecheck and scoped diff checks also pass. This remains source evidence; live
+recovery, persistence, reset/reconnect, deployment, synthesis, passive browser
+handoff, commit, and terminal reconciliation remain open.
+
+### Encrypted-provider live access blocker
+
+<!-- (blocked) COORD-RESET-100 2026-08-27T14:36:00Z ingenium-software-engineer-premium -->
+
+The protected host key has the required owner and mode metadata, production
+services are healthy, bootstrap status is still claimed, neither plaintext
+override is configured, and no encrypted provider reference exists yet. A
+bounded filename-only scan found no retained task artifact containing the
+previously confirmed code-point credential; only generic password-policy text
+exists in the roadmap. The value was deliberately omitted from retained
+summaries and cannot be recovered from password hashes. Substituting or guessing
+a different password would violate the authorized exact-account recovery scope.
+Live recovery therefore requires the already-authorized original value to be
+restored through a protected mode-`0600` file or descriptor; it must not be sent
+through chat, argv, logs, source, or artifacts. No recovery, provider
+persistence, MCP rotation, claim mutation, or deployment mutation occurred in
+this resumed live phase.
+
+### Protected reset completion and blocker resolution
+
+The two retained `(blocked)` entries above describe bounded historical attempts
+and are superseded by this completion evidence. The already-authorized owner
+secret was reconstructed only inside controlled writer processes, imported into
+the separate-key AES-256-GCM provider, verified, and removed with its transient
+mode-`0600` source. No plaintext, ciphertext, credential value, secret-derived
+diagnostic, or machine-local path entered retained evidence or Git.
+
+The sole bootstrap owner completed the authorized recovery at security epoch
+117. Prior sessions, CSRF grants, recovery state, and scoped credentials were
+invalidated; old-session denial, login, recent step-up, logout, audit increment,
+and zero residual state passed. The canonical coordination reset then rotated
+the general credential, rejected the old token, recovered a quarantined epoch,
+accepted epoch 23 in the same OpenCode process, and completed a zero-mutation
+`@build` claim/release. A fresh process completed a second zero-mutation claim
+without restart or source change. The isolated `reset-learning` command rotated
+only the exact seven-scope learning credential, after which protected synthesis
+settled with zero pending work and no incomplete batch.
+
+Source commit `f6c5c07df995cb5d4694431f318862f93a9e4ca5` contains the scoped reset,
+same-process reconnect, epoch-recovery, and authorization-policy changes. Final
+verification passed 67 focused Extension tests, 42 API authorization tests, 17
+MCP server tests, all three affected typechecks, Extension build with 281
+registration parity, the agent validator, diff checks, ignore checks, and staged
+secret/ciphertext/local-path scans. The production control plane, runtime
+manager, and runtime gateway were rebuilt from that revision; OCI provenance,
+service health, Supervisor state, database integrity and foreign keys, dashboard
+redirect, production OpenCode/CLI/VS Code routes, scoped MCP discovery, and an
+expected content-free coordination `SESSION_NOT_FOUND` canary all passed.
+
+The passive nonsecret browser gate passed at 1440x900 and 390x844. Both login
+views retained the required heading, labels, button, and recovery link with zero
+console errors, failed requests, or HTTP error responses; browser cleanup passed.
+Screenshots are retained under
+`tests/artifacts/visual-qa/run-20260827-coordination-recovery/`. The earlier
+credential-access blockers are therefore resolved, and no in-scope blocker or
+follow-up remains.
+
+<!-- (work-complete) COORD-RESET-100 2026-08-27T19:44:41Z ingenium-software-engineer-premium -->
+Evidence COORD-RESET-100: protected owner recovery, encrypted-provider persistence, general and learning credential rotation, same-process epoch recovery, source and focused tests, committed production deployment, MCP canaries, settled synthesis, passive desktop/mobile visual evidence, cleanup, and redaction/staging checks all passed without retaining secret material.

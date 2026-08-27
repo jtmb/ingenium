@@ -32,6 +32,28 @@ values, unsafe basenames, and the canonical `/workspace` worktree fail closed;
 the basename is only a display locator and the credential-issued project UUID
 is authoritative. The CLI never defaults to `global-default`.
 
+## Coordination owner recovery provider
+
+`ingenium-coordination-reset reset` first uses exactly one protected owner-secret
+file or descriptor. When neither override exists, it reads the fixed ignored
+`.opencode/.ingenium-coordination-owner-provider.json` reference. Provision that
+reference without passing secret bytes through argv:
+
+```text
+ingenium-coordination-reset store --key-file /absolute/protected/key --bundle-directory /absolute/owner-only/directory
+```
+
+`store` requires the plaintext source through the protected file/descriptor
+override, writes only AES-256-GCM authenticated ciphertext outside the worktree,
+and atomically installs the nonsecret reference. The key and bundle must have
+separate owner-only mode-`0700` parents and mode-`0600` regular files. The
+provider is fixed to `bootstrap-admin@localhost`, project `ingenium`, and
+workspace `shared-memory-ingenium`; tampering, wrong keys, symlinks, unsafe
+permissions, or binding mismatches fail closed without logging secret material.
+`ingenium-coordination-reset reset-learning` uses the same provider and fixed
+binding to atomically rotate only the seven-scope learning credential; it does
+not reconnect or replace the general coordination credential.
+
 ### Repository scan boundaries
 
 The `all` projection scans only repository-authoritative resources:
