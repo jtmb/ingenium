@@ -1,0 +1,253 @@
+{
+  "schema": "ingenium.multi-session-proof/v1",
+  "schemaVersion": 1,
+  "bundleCreatedAt": "2026-08-27T23:48:59Z",
+  "result": "PASS",
+  "originalRun": {
+    "runId": "run-20260827T0022Z-coord106-r24",
+    "startedAt": "2026-08-27T11:12:09.616Z",
+    "endedAt": "2026-08-27T11:45:31.213Z",
+    "retainedArtifactCount": 29,
+    "reportedRepositoryRevision": "5ea014a6624e88242ae40e03ce886b9ebaa020e3"
+  },
+  "actualProcessClasses": [
+    {
+      "label": "external-a",
+      "class": "external",
+      "simultaneous": true
+    },
+    {
+      "label": "external-b",
+      "class": "external",
+      "simultaneous": true
+    },
+    {
+      "label": "internal-c",
+      "class": "internal",
+      "simultaneous": true
+    }
+  ],
+  "runtime": {
+    "openCodeVersion": "1.18.9",
+    "agent": "ingenium-software-engineer-premium",
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "variant": "high",
+    "allProvidersConnected": true,
+    "allMcpConnectionsEstablished": true
+  },
+  "canonicalIdentity": {
+    "projectName": "ingenium",
+    "projectIdSha256": "7df74cd0e98a7484177910c5061b55a7558b9b50011178088f5dc6638a6b9488",
+    "workspaceName": "shared-memory-ingenium",
+    "workspaceNameSha256": "878732d084fe6c6a411c87f7faa5561c7e93a34e62602439ab3a98d1b4919e9b",
+    "worktreeIdSha256": "022367cba996eeaae8463af2b45d14186a62967255e5591894b211a1a54ca5ed",
+    "launcherLocationSha256": "e207731f565be7ac0b6c1fd1636782d6e9dbf6387409887ba11c7f07797a5ac7",
+    "storageMappingSha256": "7f974be496b11344a6cf803cf224260dd16117841c32f8633ba3943fd7bea31d"
+  },
+  "evidenceClasses": [
+    {
+      "name": "actual_model_session",
+      "proves": "Observed OpenCode/model process behavior and tool events"
+    },
+    {
+      "name": "deployed_canary",
+      "proves": "Observed deployed coordination and repository behavior"
+    },
+    {
+      "name": "source",
+      "proves": "Versioned implementation and focused source checks"
+    },
+    {
+      "name": "review",
+      "proves": "Bounded retained QA and security conclusions"
+    }
+  ],
+  "sourceProvenance": {
+    "runReportedRevision": {
+      "commit": "5ea014a6624e88242ae40e03ce886b9ebaa020e3",
+      "tree": "2aeee241aae29cc6fdb375d54234b3c2a73fb6c9"
+    },
+    "acceptedSourceCapture": {
+      "commit": "2d825b9f48fb7f51df37dd7e9f91dcd9072c855b",
+      "tree": "138c99f609b22c9608540152df4338f6fbd8a820",
+      "directParent": "5ea014a6624e88242ae40e03ce886b9ebaa020e3",
+      "relationship": "post-run accepted coordination source capture"
+    },
+    "protectedReset": {
+      "commit": "f6c5c07df995cb5d4694431f318862f93a9e4ca5",
+      "tree": "a74f9395f3f84c83350385baf9033cb832d57716",
+      "r24BehaviorExercised": false,
+      "evidenceClasses": [
+        "source",
+        "deployed_canary"
+      ]
+    },
+    "resetClosureRecord": {
+      "commit": "86e268e6943c453cc30a58a55b39a47f804cd0ac",
+      "tree": "1e494c3ba6032310ff5e83da7c86290ffec78d6d",
+      "directParent": "f6c5c07df995cb5d4694431f318862f93a9e4ca5"
+    }
+  },
+  "gateRecords": [
+    {
+      "gate": "original_artifact_integrity",
+      "status": "PASS",
+      "evidenceClass": "review",
+      "artifacts": ["artifact-ledger.json"],
+      "facts": {"matched": 29, "failed": 0}
+    },
+    {
+      "gate": "scoped_credential_preflight",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["preflight.json", "pre-semantic.json"]
+    },
+    {
+      "gate": "exact_runtime_and_model",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["resolved-runtime.json", "readiness.json"]
+    },
+    {
+      "gate": "clean_epoch_preflight",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["clean-epoch-preflight.json", "claim-preflight.json"]
+    },
+    {
+      "gate": "simultaneous_three_process_readiness",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["readiness.json", "timeline.json"]
+    },
+    {
+      "gate": "runtime_heartbeat_during_wait",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["runtime-heartbeat.json"]
+    },
+    {
+      "gate": "typed_operational_memory",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["authoritative-memory.json", "transforms.json"]
+    },
+    {
+      "gate": "peer_memory_external_a_to_external_b",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["transforms.json", "turns.json"]
+    },
+    {
+      "gate": "peer_memory_external_a_and_b_to_internal_c",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["transforms.json", "turns.json"]
+    },
+    {
+      "gate": "peer_memory_internal_c_to_external_a_and_b",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["transforms.json", "turns.json"]
+    },
+    {
+      "gate": "second_transform_duplicate_suppression",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["transforms.json", "turns.json"]
+    },
+    {
+      "gate": "independent_concurrent_writes",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["turns.json", "authoritative-memory.json"]
+    },
+    {
+      "gate": "same_target_loser_blocked_before_mutation",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["conflict.json"]
+    },
+    {
+      "gate": "crash_quarantine_and_recovery",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["crash-recovery-generation.json", "recovery-canary.json"]
+    },
+    {
+      "gate": "coordination_outage_fails_closed",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["outage.json"]
+    },
+    {
+      "gate": "stale_generation_rejected_and_rescanned",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["crash-recovery-generation.json", "repository-sync-canary.json"]
+    },
+    {
+      "gate": "restart_new_incarnation_replay_once",
+      "status": "PASS",
+      "evidenceClass": "actual_model_session",
+      "artifacts": ["restart.json", "turns.json"]
+    },
+    {
+      "gate": "privacy",
+      "status": "PASS",
+      "evidenceClass": "review",
+      "artifacts": ["privacy.json"],
+      "facts": {"credentialsExcluded": true, "rawOperationalIdsExcluded": true}
+    },
+    {
+      "gate": "owned_cleanup",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["cleanup.json", "credential-meta.json"]
+    },
+    {
+      "gate": "deployment_health",
+      "status": "PASS",
+      "evidenceClass": "deployed_canary",
+      "artifacts": ["cleanup.json", "machine.json"]
+    },
+    {
+      "gate": "bounded_qa_review",
+      "status": "PASS",
+      "evidenceClass": "review",
+      "artifacts": ["qa-review.json"]
+    },
+    {
+      "gate": "bounded_security_review",
+      "status": "PASS",
+      "evidenceClass": "review",
+      "artifacts": ["security-review.json"]
+    },
+    {
+      "gate": "accepted_source_captured",
+      "status": "PASS",
+      "evidenceClass": "source",
+      "commits": ["2d825b9f48fb7f51df37dd7e9f91dcd9072c855b"]
+    },
+    {
+      "gate": "protected_reset_source_and_deployment_recorded_separately",
+      "status": "PASS",
+      "evidenceClass": "source",
+      "commits": [
+        "f6c5c07df995cb5d4694431f318862f93a9e4ca5",
+        "86e268e6943c453cc30a58a55b39a47f804cd0ac"
+      ],
+      "facts": {"r24BehaviorExercised": false}
+    }
+  ],
+  "provenance": {
+    "originalArtifacts": "artifact-ledger.json",
+    "sanitizedExcerpts": "event-excerpts.json",
+    "bundleManifest": "bundle-checksums.json",
+    "runClosureRepositoryDocument": "docs/reference/ROADMAP.md",
+    "runClosureDocumentCommit": "2d825b9f48fb7f51df37dd7e9f91dcd9072c855b",
+    "resetClosureRepositoryDocument": "docs/reference/ROADMAP.md",
+    "resetClosureDocumentCommit": "86e268e6943c453cc30a58a55b39a47f804cd0ac"
+  }
+}
