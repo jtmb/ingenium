@@ -1940,23 +1940,27 @@ const expectedAuthenticationSchema = new Map<string, Map<string, string>>();
 
 function compareMigrationDefinitions(
   db: Database.Database,
-  migrationFile: string,
+  migrationFiles: string | readonly string[],
   prerequisiteSql: string,
   objectNames: string[],
 ): string[] {
-  let expected = expectedAuthenticationSchema.get(migrationFile);
+  const files = typeof migrationFiles === "string" ? [migrationFiles] : migrationFiles;
+  const cacheKey = [...files, ...objectNames].join("\0");
+  let expected = expectedAuthenticationSchema.get(cacheKey);
   if (!expected) {
     const reference = new Database(":memory:");
     try {
       reference.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
       reference.exec(prerequisiteSql);
-      reference.exec(readFileSync(resolve(import.meta.dirname ?? __dirname, "../data/migrations", migrationFile), "utf-8"));
+      for (const migrationFile of files) {
+        reference.exec(readFileSync(resolve(import.meta.dirname ?? __dirname, "../data/migrations", migrationFile), "utf-8"));
+      }
       expected = new Map(objectNames.map((name) => {
         const row = reference.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name) as { sql?: string } | undefined;
-        if (!row?.sql) throw new Error(`Migration ${migrationFile} reference object is missing: ${name}`);
+        if (!row?.sql) throw new Error(`Migration ${files.join(" → ")} reference object is missing: ${name}`);
         return [name, normalizeSchemaSql(row.sql)];
       }));
-      expectedAuthenticationSchema.set(migrationFile, expected);
+      expectedAuthenticationSchema.set(cacheKey, expected);
     } finally {
       reference.close();
     }
@@ -2061,12 +2065,19 @@ function isAuth100AuthenticationSchema(db: Database.Database): boolean {
     && oidcProvider.count === 0;
 }
 
-function inspectAuthorizationAuditMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+function inspectAuthorizationAuditMigration(
+  db: Database.Database,
+  expectLegacyPost104CollisionGap = false,
+): AuthenticationFoundationMigrationState {
   const tables = ["installation_admins", "service_principals", "scoped_api_tokens", "organization_invitations", "security_audit_events"];
   const indexes = ["idx_scoped_api_tokens_user", "idx_scoped_api_tokens_service", "idx_organization_invitations_scope", "idx_security_audit_scope"];
+  const auditProjectForeignKey = db.prepare(
+    "SELECT 1 FROM pragma_foreign_key_list('security_audit_events') WHERE \"from\" = 'project_id' AND \"table\" = 'projects'",
+  ).get();
   const triggers = [
     "security_audit_events_immutable_update",
     "security_audit_events_immutable_delete",
+    ...(!auditProjectForeignKey && !expectLegacyPost104CollisionGap ? ["security_audit_events_primary_key_collision"] : []),
     "security_audit_events_project_organization_insert",
     "scoped_api_tokens_identity_immutable",
     "scoped_api_tokens_project_organization_insert",
@@ -2080,14 +2091,33 @@ function inspectAuthorizationAuditMigration(db: Database.Database): Authenticati
     organization_invitations: ["id", "organization_id", "email_normalized", "role", "token_hash", "expires_at", "accepted_at", "revoked_at", "created_at"],
     security_audit_events: ["id", "actor_type", "actor_id", "action", "organization_id", "project_id", "outcome", "metadata_json", "created_at"],
   }, indexes, triggers);
+  if (expectLegacyPost104CollisionGap) {
+    if (auditProjectForeignKey) state.missing.push("security_audit_events post-104 project history definition");
+    if (db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_primary_key_collision'",
+    ).get()) state.missing.push("security_audit_events_primary_key_collision must be absent for compatibility upgrade");
+    const auditTriggers = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'security_audit_events' ORDER BY name",
+    ).all() as Array<{ name: string }>).map(({ name }) => name);
+    const expectedAuditTriggers = [
+      "security_audit_events_immutable_delete",
+      "security_audit_events_immutable_update",
+      "security_audit_events_project_organization_insert",
+    ];
+    if (JSON.stringify(auditTriggers) !== JSON.stringify(expectedAuditTriggers)) {
+      state.missing.push("security_audit_events legacy trigger inventory");
+    }
+  }
   if (state.any && state.missing.length === 0) {
     const authorizationTables = db.prepare("SELECT 1 FROM pragma_table_info('service_principals') WHERE name = 'security_epoch'").get()
       ? tables.filter((table) => table !== "service_principals")
       : tables;
     state.missing.push(...compareMigrationDefinitions(
       db,
-      "095_authorization_audit.sql",
-      "CREATE TABLE users (id TEXT PRIMARY KEY); CREATE TABLE organizations (id TEXT PRIMARY KEY); CREATE TABLE projects (id TEXT PRIMARY KEY);",
+      auditProjectForeignKey && !expectLegacyPost104CollisionGap
+        ? "095_authorization_audit.sql"
+        : ["095_authorization_audit.sql", "104_security_audit_project_history.sql"],
+      "CREATE TABLE users (id TEXT PRIMARY KEY); CREATE TABLE organizations (id TEXT PRIMARY KEY); CREATE TABLE projects (id TEXT PRIMARY KEY, organization_id TEXT);",
       [...authorizationTables, ...indexes, ...triggers],
     ));
   }
@@ -4896,6 +4926,8 @@ function runMigrations(db: Database.Database): void {
   for (const [migration, file, inspect] of authenticationFoundations) {
     const state = inspect(db);
     if (state.any && !state.complete) {
+      const securityAuditCollisionUpgrade = migration === "095"
+        && inspectAuthorizationAuditMigration(db, true).complete;
       const auth100Upgrade = migration === "094"
         && state.missing.includes("users.email_verified_at column")
         && state.missing.includes("oidc_providers table")
@@ -4907,7 +4939,17 @@ function runMigrations(db: Database.Database): void {
       const authorization101Upgrade = migration === "095"
         && state.missing.length === 1
         && state.missing[0] === "organization_invitations_consume_once definition";
-      if (auth100Upgrade) {
+      if (securityAuditCollisionUpgrade) {
+        execTransaction(() => {
+          db.exec(readFileSync(resolve(migrationsDir, "104_security_audit_project_history_collision_upgrade.sql"), "utf-8"));
+          const upgraded = inspectAuthorizationAuditMigration(db);
+          if (!upgraded.complete) throw restoreMigrationPartialStateError("104", upgraded.missing);
+          if (db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+            throw restoreMigrationPartialStateError("104", ["foreign key integrity"]);
+          }
+        });
+        checkpointAfterWrite();
+      } else if (auth100Upgrade) {
         db.exec(readFileSync(resolve(migrationsDir, "094_authentication_auth101_upgrade.sql"), "utf-8"));
       } else if (authorization100Upgrade) {
         db.exec(readFileSync(resolve(migrationsDir, "095_authorization_auth101_upgrade.sql"), "utf-8"));
@@ -5060,6 +5102,30 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("103", ["runtime browser launcher origin or foreign key integrity"]);
     }
     logger.info("db", "Applied migration 103_runtime_browser_launcher_origin.sql");
+  }
+
+  const securityAuditProjectForeignKey = db.prepare(
+    "SELECT count(*) AS count FROM pragma_foreign_key_list('security_audit_events') WHERE \"from\" = 'project_id' AND \"table\" = 'projects'",
+  ).get() as { count: number };
+  if (securityAuditProjectForeignKey.count > 0) {
+    const preMigration = inspectAuthorizationAuditMigration(db);
+    if (!preMigration.complete) {
+      throw restoreMigrationPartialStateError("104", preMigration.missing);
+    }
+    try {
+      db.exec(readFileSync(resolve(migrationsDir, "104_security_audit_project_history.sql"), "utf-8"));
+      const applied = inspectAuthorizationAuditMigration(db);
+      if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+        throw restoreMigrationPartialStateError("104", [...applied.missing, "foreign key integrity"]);
+      }
+    } catch (error) {
+      if (db.inTransaction) db.exec("ROLLBACK");
+      throw error;
+    }
+    logger.info("db", "Applied migration 104_security_audit_project_history.sql");
+  } else {
+    const applied = inspectAuthorizationAuditMigration(db);
+    if (!applied.complete) throw restoreMigrationPartialStateError("104", applied.missing);
   }
 
   const runtimeLocalhostOriginTables = db.prepare(

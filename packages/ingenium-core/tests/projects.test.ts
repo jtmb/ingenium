@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
+import { appendSecurityAuditEvent } from "../lib/tools/security-audit.js";
 import {
   archiveProject,
   createProject,
@@ -103,6 +104,34 @@ describe("project identity", () => {
 
     expect(deleteProject(project.name)).toEqual({ status: "has_children", childTables: ["tasks"] });
     expect(db.prepare("SELECT name FROM projects WHERE id = ?").get(project.id)).toEqual({ name: "referenced-project" });
+  });
+
+  it("purges a project while retaining its immutable security audit history", () => {
+    const db = database();
+    const project = createProject("audited-project");
+    const auditId = appendSecurityAuditEvent({
+      actorType: "compatibility",
+      action: "project.lifecycle",
+      organizationId: project.organization_id,
+      projectId: project.id,
+      outcome: "success",
+    });
+
+    expect(deleteProject(project.name)).toEqual({ status: "deleted" });
+    expect(db.prepare("SELECT organization_id, project_id, metadata_json FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({
+      organization_id: project.organization_id,
+      project_id: project.id,
+      metadata_json: "{}",
+    });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(() => db.prepare("DELETE FROM security_audit_events WHERE id = ?").run(auditId)).toThrow(/immutable/);
+    expect(() => appendSecurityAuditEvent({
+      actorType: "compatibility",
+      action: "project.lifecycle.after-purge",
+      organizationId: project.organization_id,
+      projectId: project.id,
+      outcome: "success",
+    })).toThrow(/project must belong to organization/);
   });
 
   it("renames only the database project path and does not create the new directory", () => {

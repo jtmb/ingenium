@@ -241,6 +241,159 @@ nonce hash; it never stores a payload, prompt, environment, or plaintext token.
 Incomplete 077 schemas fail closed at startup rather than resuming an ambiguous
 lease or duplicating execution.
 
+### Security Audit Project History Migration (104)
+
+| # | File | Purpose |
+|---|------|---------|
+| 104 | `104_security_audit_project_history.sql` | Retains immutable security-audit project UUIDs as historical references after an otherwise-empty project is purged. New audit rows still require an existing project in the same organization; ordinary project child rows continue to block purge. |
+
+Migration 104 is the forward-compatible continuation of the migration 095
+security-audit schema. It changes only the lifetime of the project reference:
+existing audit rows keep their `project_id` after the project row is deleted,
+while a newly written row carrying both `organization_id` and `project_id` must
+still refer to a live project in that organization.
+
+#### Pre- and post-104 schema
+
+Both versions retain the following common columns and checks:
+
+- `id TEXT PRIMARY KEY CHECK(length(id) = 36)`
+- `actor_type TEXT NOT NULL CHECK(actor_type IN ('compatibility', 'user', 'service', 'system'))`
+- nullable `actor_id` bounded to 1–128 characters
+- non-empty, 1–128-character `action`
+- `organization_id TEXT REFERENCES organizations(id) ON DELETE RESTRICT`
+- `outcome TEXT NOT NULL CHECK(outcome IN ('success', 'denied', 'failure'))`
+- `metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(metadata_json = '{}')`
+- non-empty, 1–64-character `created_at`
+
+The schema delta is intentionally limited to `project_id` and the objects
+recreated around the table:
+
+| Element | Pre-104 (migration 095) | Post-104 |
+|---|---|---|
+| `project_id` | `TEXT REFERENCES projects(id) ON DELETE RESTRICT` | `TEXT` with no foreign key to `projects` |
+| `organization_id` | Foreign key to `organizations` with `ON DELETE RESTRICT` | Unchanged |
+| Scope index | `idx_security_audit_scope` on `(organization_id, project_id, created_at DESC, id DESC)` | Same index definition, recreated |
+| Audit triggers | Immutable update, immutable delete, and project/organization insert guard | Same three triggers plus the primary-key collision guard, recreated |
+
+The project/organization insert trigger remains the write-time guard. When both
+values are non-null, it requires a row satisfying
+`projects.id = NEW.project_id AND projects.organization_id = NEW.organization_id`
+and aborts with `security audit project must belong to organization` otherwise.
+Projectless rows remain allowed because this trigger is conditional on both
+values being present.
+The immutable update and delete triggers continue to abort with
+`security audit events are immutable`.
+The `security_audit_events_primary_key_collision` trigger rejects a duplicate
+event ID before SQLite can apply `INSERT OR REPLACE`, preserving the original
+immutable row whether `recursive_triggers` is enabled or disabled.
+
+#### Row, foreign-key, and trigger preservation
+
+SQLite cannot remove this foreign key with a column-level `ALTER TABLE`, so the
+migration uses `BEGIN IMMEDIATE` and `COMMIT` around a table rebuild:
+
+1. Drop the three pre-104 audit triggers and `idx_security_audit_scope`
+   temporarily.
+2. Rename the old table to `security_audit_events__project_fk`.
+3. Create the post-104 table and copy all nine columns from the old table with
+   no filtering or value transformation.
+4. Drop the temporary table, then recreate the scope index, the three pre-104
+   audit triggers, and the primary-key collision trigger.
+
+Thus existing rows—including null or historical `project_id` values—are
+preserved as the same column values, without filtering or transformation. The
+organization foreign key remains restrictive; only the project foreign key is
+removed. The startup runner checks `PRAGMA foreign_key_check` after the rebuild
+and refuses the result if any violation remains.
+
+#### Project-purge retention
+
+`projectChildTables()` intentionally excludes `security_audit_events` from its
+scan of tables that contain `project_id`. Consequently:
+
+- `purgeExpiredProjects(retentionDays)` considers only archived projects whose
+  `archived_at` is older than the retention cutoff, skips a project when any
+  other project-scoped child table still has rows, and then deletes the project;
+  retained security-audit rows do not block that purge.
+- The API retention endpoint defaults omitted `retention_days` to 7 days and
+  accepts an integer from 0 through 3,650. The explicit
+  `DELETE /api/v1/projects/:name/purge` path uses the same child-row exclusion
+  without the scheduled age filter.
+- After the project delete, its audit rows remain with the historical UUID.
+  The `organization_id` foreign key is still `ON DELETE RESTRICT`, so the
+  retained history continues to protect its organization row.
+
+#### Exact startup guard and idempotent reopen
+
+Before deciding whether to run the file, `runMigrations()` executes this exact
+probe:
+
+```sql
+SELECT count(*) AS count
+FROM pragma_foreign_key_list('security_audit_events')
+WHERE "from" = 'project_id' AND "table" = 'projects';
+```
+
+- If the count is greater than zero, the project foreign key is still present
+  and `104_security_audit_project_history.sql` is executed. The runner then
+  re-probes the complete authorization/audit schema and runs
+  `PRAGMA foreign_key_check`; an incomplete schema or any violation raises the
+  migration-104 partial-state error. If the SQL rebuild itself fails while its
+  `BEGIN IMMEDIATE` transaction is still open, the runner rolls it back; a
+  post-`COMMIT` validation failure fails closed and requires schema recovery.
+- If the count is zero, the table-rebuild SQL is not rerun. The
+  authorization/audit probe must still find the five required tables
+  (`installation_admins`, `service_principals`, `scoped_api_tokens`,
+  `organization_invitations`, and `security_audit_events`), their required
+  columns, the four required indexes, the eight required authorization/audit
+  triggers, and definitions matching the expected migration chain
+  (`095_authorization_audit.sql` followed by
+  `104_security_audit_project_history.sql`).
+- One compatibility exception upgrades an exact legacy post-104 schema whose
+  only gap is the absent `security_audit_events_primary_key_collision` trigger.
+  The audit table, index, foreign keys, checks, and three prior audit triggers
+  must match exactly, with no alternate audit trigger. The runner applies
+  `104_security_audit_project_history_collision_upgrade.sql` in a transaction,
+  re-probes the complete schema and foreign keys before commit, and invokes the
+  WAL checkpoint helper after the transaction. Rows are not rebuilt or copied.
+  Any near match fails closed without mutation.
+
+Other missing or mismatched components fail closed with:
+
+  ```text
+  Migration 104 is in a PARTIAL state. Missing required components: ... Restore the migration's complete schema before retrying.
+  ```
+
+The earlier migration-095 probe runs before this branch, so an incomplete
+authorization schema that does not match the narrow compatibility exception is
+rejected as migration 095 rather than repaired by 104.
+
+This zero-project-FK branch is what makes a successful 104 upgrade idempotent
+on reopen: it verifies the post-104 shape instead of rebuilding the table again.
+The SQL file has no `IF EXISTS` recovery path, so operators must not hand-edit a
+partial table or rerun the file against an incomplete schema.
+
+#### Backup and rollback guidance
+
+Create and retain a consistent backup before applying 104. In WAL mode, use the
+SQLite Backup API or the documented [Backup and Restore Procedures](../operations/backup-restore.md);
+do not copy only the main database file while `data-wal` may contain committed
+writes. If a file-level backup is unavoidable, preserve `data`, `data-wal`, and
+`data-shm` together.
+
+A failure during the 104 SQL rebuild is rolled back by its transaction; preserve
+the startup error and restore the migration's complete schema before retrying
+rather than dropping audit objects or deleting history manually. Migration 104
+has no in-place down step. To reverse a committed database state, use the supported
+verified backup restore flow—preview, authorize, confirm, then execute—rather
+than copying snapshot files over a live WAL database. Run `PRAGMA integrity_check`
+and `PRAGMA foreign_key_check` after recovery and keep the pre-migration backup
+until those checks and API health verification pass.
+
+> **Release boundary:** This section documents migration 104 schema behavior
+> only. It does not claim AUTH-102 or AUTH-103 release completion.
+
 ### Job Vault Reference Migration (080)
 
 Migration 080 stores `job_vault_references` as a normalized `(project_id,

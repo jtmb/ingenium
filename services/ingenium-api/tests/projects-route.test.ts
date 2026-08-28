@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { projects, resetDbForTest, settings, tasks, vault } from "ingenium-core";
+import { authentication, getDb, identity, organizations, projects, resetDbForTest, securityAudit, settings, tasks, vault } from "ingenium-core";
 import { resetEmailRuntimeForTest } from "ingenium-email";
 import { getEmailEncryptionKeyFingerprint } from "../../../packages/ingenium-email/lib/credential-crypto.js";
 import { configureEmailRuntimeForApi } from "../lib/email-runtime.js";
@@ -315,6 +315,65 @@ describe("project route validation", () => {
 });
 
 describe("project restore authorization", () => {
+  it("lets an owner archive, list, and restore an eligible project while rejecting the protected home project", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "ingenium-project-owner-lifecycle-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
+    process.env.INGENIUM_HOME = join(tempDir, "home");
+    const organization = organizations.createOrganization("Lifecycle Owner", "lifecycle-owner");
+    const owner = identity.createUser("lifecycle-owner@example.test", "Lifecycle Owner");
+    organizations.addOrganizationMember(organization, owner.id, "owner");
+    const home = projects.createProject("global-default", true, organization);
+    const eligible = projects.createProject("owner-lifecycle-project", false, organization);
+    const auditId = securityAudit.appendSecurityAuditEvent({
+      actorType: "system",
+      action: "project.purge.fixture",
+      organizationId: eligible.organization_id,
+      projectId: eligible.id,
+      outcome: "success",
+    });
+    const db = getDb();
+    const auditBeforePurge = db.prepare("SELECT id, metadata_json FROM security_audit_events WHERE id = ?").get(auditId);
+    expect(auditBeforePurge).toEqual({ id: auditId, metadata_json: "{}" });
+    const { session } = authentication.createSession(owner.id, new Date(), "test", true);
+    const baseUrl = await startPolicyRouter({ type: "user", id: owner.id, scopes: ["user:*"], session });
+
+    const archived = await fetch(`${baseUrl}/api/v1/projects/${eligible.name}`, { method: "DELETE" });
+    expect(archived.status).toBe(200);
+    expect((await (await fetch(`${baseUrl}/api/v1/projects`)).json()).data.map((project: { name: string }) => project.name)).toEqual([home.name]);
+    expect((await (await fetch(`${baseUrl}/api/v1/projects/archive`)).json()).data.map((project: { name: string }) => project.name)).toEqual([eligible.name]);
+
+    const protectedResponse = await fetch(`${baseUrl}/api/v1/projects/${home.name}`, { method: "DELETE" });
+    expect(protectedResponse.status).toBe(403);
+    await expect(protectedResponse.json()).resolves.toMatchObject({
+      error: { code: "GLOBAL_PROJECT_LIFECYCLE_FORBIDDEN" },
+    });
+
+    const restored = await fetch(`${baseUrl}/api/v1/projects/${eligible.name}/restore`, { method: "POST" });
+    expect(restored.status).toBe(200);
+    expect((await (await fetch(`${baseUrl}/api/v1/projects`)).json()).data.map((project: { name: string }) => project.name).sort()).toEqual([home.name, eligible.name].sort());
+    expect((await (await fetch(`${baseUrl}/api/v1/projects/archive`)).json()).data).toEqual([]);
+
+    expect((await fetch(`${baseUrl}/api/v1/projects/${eligible.name}`, { method: "DELETE" })).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/v1/projects/${eligible.name}/purge`, { method: "DELETE" })).status).toBe(204);
+    expect(projects.getProject(eligible.name)).toBeUndefined();
+    expect(db.prepare("SELECT id, metadata_json FROM security_audit_events WHERE id = ?").get(auditId)).toEqual(auditBeforePurge);
+    expect(() => db.prepare("UPDATE security_audit_events SET action = ? WHERE id = ?").run("tampered", auditId)).toThrow(/immutable/);
+    expect(() => db.prepare("DELETE FROM security_audit_events WHERE id = ?").run(auditId)).toThrow(/immutable/);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+    const blocked = projects.createProject("owner-lifecycle-blocked", false, organization);
+    tasks.createTask(blocked.id, "child");
+    const blockedResponse = await fetch(`${baseUrl}/api/v1/projects/${blocked.name}/purge`, { method: "DELETE" });
+    expect(blockedResponse.status).toBe(409);
+    await expect(blockedResponse.json()).resolves.toEqual({
+      error: {
+        code: "PROJECT_HAS_CHILDREN",
+        message: "Project has referenced data and cannot be permanently deleted",
+        details: { child_tables: ["tasks"] },
+      },
+    });
+  });
+
   it("authorizes the archived target identity rather than the query project", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "ingenium-project-restore-authz-"));
     process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");

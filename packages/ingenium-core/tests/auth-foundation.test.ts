@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getAuthenticationFoundationMigrationStatus, getDb, resetDbForTest } from "../lib/db.js";
 import { claimBootstrap, BootstrapAlreadyClaimedError, getBootstrapStatus } from "../lib/tools/bootstrap.js";
 import { createSession, derivePassword, hashSecurityToken, resolveSession, revokeSession } from "../lib/tools/authentication.js";
@@ -19,8 +19,11 @@ const originalPath = process.env.INGENIUM_CORE_DB_PATH;
 
 function createLegacyDatabaseThrough(migration: number): Database.Database {
   const database = new Database(process.env.INGENIUM_CORE_DB_PATH!);
+  database.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
   const migrations = join(import.meta.dirname, "../data/migrations");
-  for (const file of readdirSync(migrations).filter((name) => Number.parseInt(name.slice(0, 3), 10) <= migration).sort()) {
+  for (const file of readdirSync(migrations)
+    .filter((name) => !name.endsWith("_upgrade.sql") && Number.parseInt(name.slice(0, 3), 10) <= migration)
+    .sort()) {
     database.exec(readFileSync(join(migrations, file), "utf8"));
   }
   return database;
@@ -40,6 +43,22 @@ afterEach(() => {
 });
 
 describe("AUTH-100 migration and bootstrap foundation", () => {
+  it("installs the exact post-104 audit schema on a fresh database", () => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const table = database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'security_audit_events'",
+    ).get() as { sql: string };
+
+    expect(table.sql).toContain("104_project_history");
+    expect(database.prepare("PRAGMA foreign_key_list('security_audit_events')").all()).toEqual([
+      expect.objectContaining({ table: "organizations", from: "organization_id", on_delete: "RESTRICT" }),
+    ]);
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_security_audit_scope'").get()).toBeTruthy();
+    expect(database.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'security_audit_events_%'").get()).toEqual({ count: 4 });
+    expect(getAuthenticationFoundationMigrationStatus()["095"]).toEqual({ any: true, complete: true, missing: [] });
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
   it("creates a fresh complete schema and preserves existing project IDs on a 092-shaped upgrade", () => {
     const legacy = createLegacyDatabaseThrough(92);
     const projectId = randomUUID();
@@ -96,9 +115,213 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
 
   it("fails closed when a complete-looking security table has an ambiguous definition", () => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    db.exec("DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_project_organization_insert; DROP INDEX idx_security_audit_scope; ALTER TABLE security_audit_events RENAME TO security_audit_events_expected; CREATE TABLE security_audit_events (id TEXT PRIMARY KEY, actor_type TEXT, actor_id TEXT, action TEXT, organization_id TEXT, project_id TEXT, outcome TEXT, metadata_json TEXT, created_at TEXT); CREATE INDEX idx_security_audit_scope ON security_audit_events(organization_id, project_id, created_at DESC, id DESC); CREATE TRIGGER security_audit_events_immutable_update BEFORE UPDATE ON security_audit_events BEGIN SELECT RAISE(ABORT, 'security audit events are immutable'); END; CREATE TRIGGER security_audit_events_immutable_delete BEFORE DELETE ON security_audit_events BEGIN SELECT RAISE(ABORT, 'security audit events are immutable'); END; CREATE TRIGGER security_audit_events_project_organization_insert BEFORE INSERT ON security_audit_events WHEN NEW.organization_id IS NOT NULL AND NEW.project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id) BEGIN SELECT RAISE(ABORT, 'security audit project must belong to organization'); END; DROP TABLE security_audit_events_expected;");
+    db.exec("DROP TRIGGER security_audit_events_immutable_update; DROP TRIGGER security_audit_events_immutable_delete; DROP TRIGGER security_audit_events_primary_key_collision; DROP TRIGGER security_audit_events_project_organization_insert; DROP INDEX idx_security_audit_scope; ALTER TABLE security_audit_events RENAME TO security_audit_events_expected; CREATE TABLE security_audit_events (id TEXT PRIMARY KEY, actor_type TEXT, actor_id TEXT, action TEXT, organization_id TEXT, project_id TEXT, outcome TEXT, metadata_json TEXT, created_at TEXT); CREATE INDEX idx_security_audit_scope ON security_audit_events(organization_id, project_id, created_at DESC, id DESC); CREATE TRIGGER security_audit_events_immutable_update BEFORE UPDATE ON security_audit_events BEGIN SELECT RAISE(ABORT, 'security audit events are immutable'); END; CREATE TRIGGER security_audit_events_immutable_delete BEFORE DELETE ON security_audit_events BEGIN SELECT RAISE(ABORT, 'security audit events are immutable'); END; CREATE TRIGGER security_audit_events_primary_key_collision BEFORE INSERT ON security_audit_events WHEN EXISTS (SELECT 1 FROM security_audit_events WHERE id = NEW.id) BEGIN SELECT RAISE(ABORT, 'security audit event id already exists'); END; CREATE TRIGGER security_audit_events_project_organization_insert BEFORE INSERT ON security_audit_events WHEN NEW.organization_id IS NOT NULL AND NEW.project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id AND organization_id = NEW.organization_id) BEGIN SELECT RAISE(ABORT, 'security audit project must belong to organization'); END; DROP TABLE security_audit_events_expected;");
     resetDbForTest();
-    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 095 is in a PARTIAL state.*security_audit_events definition/);
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 095 is in a PARTIAL state.*security_audit_events.*definition/);
+  });
+
+  it("rejects a malformed exact pre-104 schema before rebuilding the audit table", () => {
+    const legacy = createLegacyDatabaseThrough(103);
+    const auditId = randomUUID();
+    const timestamp = new Date().toISOString();
+    legacy.prepare(
+      "INSERT INTO security_audit_events (id, actor_type, action, outcome, metadata_json, created_at) VALUES (?, 'system', 'migration.preflight', 'failure', '{}', ?)",
+    ).run(auditId, timestamp);
+    legacy.exec("DROP INDEX idx_security_audit_scope; CREATE INDEX idx_security_audit_scope ON security_audit_events(project_id, created_at)");
+    legacy.close();
+
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 095 is in a PARTIAL state.*idx_security_audit_scope definition/);
+    resetDbForTest();
+
+    const unchanged = new Database(process.env.INGENIUM_CORE_DB_PATH!);
+    const table = unchanged.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'security_audit_events'").get() as { sql: string };
+    expect(table.sql).not.toContain("104_project_history");
+    expect(unchanged.prepare("SELECT action FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({ action: "migration.preflight" });
+    expect(unchanged.prepare("PRAGMA foreign_key_list('security_audit_events')").all()).toContainEqual(
+      expect.objectContaining({ table: "projects", from: "project_id", on_delete: "RESTRICT" }),
+    );
+    expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE name = 'security_audit_events__project_fk'").get()).toBeUndefined();
+    expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE name = 'security_audit_events_primary_key_collision'").get()).toBeUndefined();
+    expect(unchanged.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    unchanged.close();
+  });
+
+  it("upgrades the exact pre-104 audit schema, preserves rows, and reopens idempotently", () => {
+    const legacy = createLegacyDatabaseThrough(103);
+    const projectId = randomUUID();
+    const auditId = randomUUID();
+    const timestamp = new Date().toISOString();
+    legacy.prepare(
+      `INSERT INTO projects (id, name, path, organization_id, is_global, created_at, updated_at)
+       VALUES (?, 'audit-upgrade', '/audit-upgrade', ?, 0, ?, ?)`,
+    ).run(projectId, BOOTSTRAP_ORGANIZATION_ID, timestamp, timestamp);
+    legacy.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, action, organization_id, project_id, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'migration.104', ?, ?, 'success', '{}', ?)`,
+    ).run(auditId, BOOTSTRAP_ORGANIZATION_ID, projectId, timestamp);
+    expect(legacy.prepare("PRAGMA foreign_key_list('security_audit_events')").all()).toContainEqual(
+      expect.objectContaining({ table: "projects", from: "project_id", on_delete: "RESTRICT" }),
+    );
+    legacy.close();
+
+    const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(upgraded.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(auditId)).toMatchObject({
+      id: auditId,
+      action: "migration.104",
+      organization_id: BOOTSTRAP_ORGANIZATION_ID,
+      project_id: projectId,
+      metadata_json: "{}",
+    });
+    expect(upgraded.prepare("PRAGMA foreign_key_list('security_audit_events')").all()).toEqual([
+      expect.objectContaining({ table: "organizations", from: "organization_id", on_delete: "RESTRICT" }),
+    ]);
+    expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(upgraded.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_primary_key_collision'").get()).toBeTruthy();
+    expect(getAuthenticationFoundationMigrationStatus()["095"]).toEqual({ any: true, complete: true, missing: [] });
+
+    resetDbForTest();
+    const reopened = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(reopened.prepare("SELECT project_id FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({ project_id: projectId });
+    expect(reopened.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("upgrades the exact legacy post-104 collision gap without changing audit rows", () => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const auditId = randomUUID();
+    const uniqueId = randomUUID();
+    const timestamp = new Date().toISOString();
+    database.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, action, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'migration.104.compatibility', 'success', '{}', ?)`,
+    ).run(auditId, timestamp);
+    const before = database.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(auditId);
+    database.exec("DROP TRIGGER security_audit_events_primary_key_collision");
+    resetDbForTest();
+
+    const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(upgraded.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(auditId)).toEqual(before);
+    expect(upgraded.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_primary_key_collision'",
+    ).get()).toBeTruthy();
+    for (const recursiveTriggers of ["OFF", "ON"] as const) {
+      upgraded.pragma(`recursive_triggers = ${recursiveTriggers}`);
+      expect(() => upgraded.prepare(
+        `INSERT OR REPLACE INTO security_audit_events
+         (id, actor_type, action, outcome, metadata_json, created_at)
+         VALUES (?, 'system', 'migration.104.replaced', 'failure', '{}', ?)`,
+      ).run(auditId, timestamp)).toThrow(/security audit event id already exists/);
+    }
+    expect(() => upgraded.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, action, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'migration.104.unique', 'success', '{}', ?)`,
+    ).run(uniqueId, timestamp)).not.toThrow();
+    expect(upgraded.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(auditId)).toEqual(before);
+    expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+    resetDbForTest();
+    const reopened = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(reopened.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(auditId)).toEqual(before);
+    expect(reopened.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_primary_key_collision'",
+    ).get()).toEqual({ count: 1 });
+    expect(reopened.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it.each([
+    {
+      component: "missing prior index",
+      mutate: "DROP INDEX idx_security_audit_scope",
+      verify: (database: Database.Database) => expect(database.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_security_audit_scope'",
+      ).get()).toBeUndefined(),
+    },
+    {
+      component: "malformed prior trigger",
+      mutate: "DROP TRIGGER security_audit_events_immutable_delete; CREATE TRIGGER security_audit_events_immutable_delete BEFORE DELETE ON security_audit_events BEGIN SELECT RAISE(ABORT, 'wrong guard'); END",
+      verify: (database: Database.Database) => expect((database.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_immutable_delete'",
+      ).get() as { sql: string }).sql).toContain("wrong guard"),
+    },
+    {
+      component: "alternate audit trigger",
+      mutate: "CREATE TRIGGER security_audit_events_collision_alternate BEFORE INSERT ON security_audit_events BEGIN SELECT RAISE(ABORT, 'alternate guard'); END",
+      verify: (database: Database.Database) => expect(database.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_collision_alternate'",
+      ).get()).toBeTruthy(),
+    },
+  ])("does not repair a legacy post-104 collision gap with a $component", ({ mutate, verify }) => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const auditId = randomUUID();
+    database.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, action, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'migration.104.near-match', 'failure', '{}', ?)`,
+    ).run(auditId, new Date().toISOString());
+    database.exec(`DROP TRIGGER security_audit_events_primary_key_collision; ${mutate}`);
+    resetDbForTest();
+
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 095 is in a PARTIAL state/);
+    resetDbForTest();
+
+    const unchanged = new Database(process.env.INGENIUM_CORE_DB_PATH!);
+    expect(unchanged.prepare("SELECT action FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({ action: "migration.104.near-match" });
+    expect(unchanged.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_primary_key_collision'",
+    ).get()).toBeUndefined();
+    verify(unchanged);
+    expect(unchanged.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    unchanged.close();
+  });
+
+  it.each([
+    {
+      component: "index",
+      mutate: "DROP INDEX idx_security_audit_scope; CREATE INDEX idx_security_audit_scope ON security_audit_events(project_id, created_at)",
+      expected: /Migration 095 is in a PARTIAL state.*definition/,
+    },
+    {
+      component: "trigger",
+      mutate: "DROP TRIGGER security_audit_events_immutable_delete; CREATE TRIGGER security_audit_events_immutable_delete BEFORE DELETE ON security_audit_events BEGIN SELECT RAISE(ABORT, 'wrong guard'); END",
+      expected: /Migration 095 is in a PARTIAL state.*definition/,
+    },
+    {
+      component: "malformed primary-key collision trigger",
+      mutate: "DROP TRIGGER security_audit_events_primary_key_collision; CREATE TRIGGER security_audit_events_primary_key_collision BEFORE INSERT ON security_audit_events WHEN NEW.id = '' BEGIN SELECT RAISE(ABORT, 'wrong guard'); END",
+      expected: /Migration 095 is in a PARTIAL state.*security_audit_events_primary_key_collision definition/,
+    },
+  ])("rejects a malformed post-104 $component definition", ({ mutate, expected }) => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    database.exec(mutate);
+    resetDbForTest();
+
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(expected);
+  });
+
+  it("rolls back an interrupted 104 table rebuild", () => {
+    const legacy = createLegacyDatabaseThrough(103);
+    const auditId = randomUUID();
+    const timestamp = new Date().toISOString();
+    legacy.prepare(
+      "INSERT INTO security_audit_events (id, actor_type, action, outcome, metadata_json, created_at) VALUES (?, 'system', 'migration.interrupted', 'failure', '{}', ?)",
+    ).run(auditId, timestamp);
+    const migration = readFileSync(
+      join(import.meta.dirname, "../data/migrations/104_security_audit_project_history.sql"),
+      "utf8",
+    ).replace("DROP TABLE security_audit_events__project_fk;", "SELECT missing_migration_104_step;\nDROP TABLE security_audit_events__project_fk;");
+
+    expect(() => legacy.exec(migration)).toThrow();
+    expect(legacy.inTransaction).toBe(true);
+    legacy.exec("ROLLBACK");
+    expect(legacy.prepare("SELECT action FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({ action: "migration.interrupted" });
+    expect(legacy.prepare("PRAGMA foreign_key_list('security_audit_events')").all()).toContainEqual(
+      expect.objectContaining({ table: "projects", from: "project_id" }),
+    );
+    expect(legacy.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'security_audit_events_immutable_delete'").get()).toBeTruthy();
+    expect(legacy.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    legacy.close();
   });
 
   it("claims bootstrap exactly once and persists only the password derivation", async () => {
@@ -206,6 +429,48 @@ describe("AUTH-100 memberships, sessions, tokens, and audit", () => {
     expect(() => db.prepare("UPDATE security_audit_events SET action = 'changed' WHERE id = ?").run(id)).toThrow(/immutable/);
     expect(() => db.prepare("DELETE FROM security_audit_events WHERE id = ?").run(id)).toThrow(/immutable/);
     expect(JSON.stringify(db.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(id))).not.toContain("password");
+  });
+
+  it.each(["OFF", "ON"] as const)("blocks INSERT OR REPLACE audit mutation with recursive_triggers %s", (recursiveTriggers) => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    database.pragma(`recursive_triggers = ${recursiveTriggers}`);
+    const auditId = randomUUID();
+    const uniqueId = randomUUID();
+    const timestamp = new Date().toISOString();
+    database.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, action, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'audit.original', 'success', '{}', ?)`,
+    ).run(auditId, timestamp);
+
+    expect(() => database.prepare(
+      `INSERT OR REPLACE INTO security_audit_events
+       (id, actor_type, action, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'audit.replaced', 'failure', '{}', ?)`,
+    ).run(auditId, timestamp)).toThrow(/security audit event id already exists/);
+    expect(database.prepare("SELECT action, outcome, metadata_json FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({
+      action: "audit.original",
+      outcome: "success",
+      metadata_json: "{}",
+    });
+    expect(() => database.prepare("UPDATE security_audit_events SET action = 'audit.updated' WHERE id = ?").run(auditId)).toThrow(/immutable/);
+    expect(() => database.prepare("DELETE FROM security_audit_events WHERE id = ?").run(auditId)).toThrow(/immutable/);
+    expect(() => database.prepare(
+      `INSERT INTO security_audit_events
+       (id, actor_type, action, outcome, metadata_json, created_at)
+       VALUES (?, 'system', 'audit.unique', 'success', '{}', ?)`,
+    ).run(uniqueId, timestamp)).not.toThrow();
+
+    resetDbForTest();
+    const reopened = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(reopened.prepare("SELECT action, outcome, metadata_json FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({
+      action: "audit.original",
+      outcome: "success",
+      metadata_json: "{}",
+    });
+    expect(reopened.prepare("SELECT action FROM security_audit_events WHERE id = ?").get(uniqueId)).toEqual({ action: "audit.unique" });
+    expect(reopened.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(getAuthenticationFoundationMigrationStatus()["095"]).toEqual({ any: true, complete: true, missing: [] });
   });
 
   it("requires an audit project to belong to the event organization", () => {

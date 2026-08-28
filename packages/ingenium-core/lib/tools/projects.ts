@@ -251,7 +251,7 @@ export type ProjectDeletionResult =
   | { status: "has_children"; childTables: string[] };
 
 function projectChildTables(db: ReturnType<typeof getDb>, projectId: string): string[] {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'projects'").all() as Array<{ name: string }>;
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('projects', 'security_audit_events')").all() as Array<{ name: string }>;
   return tables.flatMap(({ name }) => {
     const columns = db.prepare(`PRAGMA table_info(${quoteIdentifier(name)})`).all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "project_id")) return [];

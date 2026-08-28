@@ -120,6 +120,7 @@ describe("Phase 4C core database boundaries", () => {
       "094_authentication_auth101_upgrade.sql",
       "095_authorization_auth101_upgrade.sql",
       "095_authorization_auth103_upgrade.sql",
+      "104_security_audit_project_history_collision_upgrade.sql",
     ]);
     expect(expected.at(-1)).toBe(latestMigration);
 
