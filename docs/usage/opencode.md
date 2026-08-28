@@ -18,6 +18,23 @@ the current contract is tested against 1.18.9.
 
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
+For coordinated external A/B and internal C sessions sharing one canonical
+worktree, see [Multi-session OpenCode](multi-session.md).
+
+### Runtime selection and binding
+
+In the isolated production profile, the dashboard creates an OpenCode client only
+after an authorized workspace is explicitly selected and its start/resume request
+returns a ready runtime ID. That confirmed ID is attached to runtime API calls;
+there is no singleton, global, or user-runtime fallback. Compatibility mode is the
+fixed-alias path and does not use a runtime ID.
+
+A workspace shown as `stopped` remains selectable but is never started by a list
+read or a remembered preference. Choose it and select **Open workspace** to start
+or resume it. Starting is polled for a bounded interval; if it remains starting,
+becomes unavailable, or is no longer authorized, the dashboard keeps the client
+unbound and offers refresh/retry instead of embedding a fallback runtime.
+
 ## OpenCode Web/CLI Mode Switch
 
 - **Web mode** — Redeems a browser-generated one-time `web` exchange proof before embedding its runtime HTTPS root.

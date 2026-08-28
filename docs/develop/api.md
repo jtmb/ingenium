@@ -424,49 +424,128 @@ Both routes return the task in `data` and use `422 INVALID_TASK_MUTATION_INPUT`,
 
 ### Coordination registry (COORD-102)
 
-The project-scoped coordination transport exposes nine routes. Every route uses
-`?project=<name>`; mutation bodies use snake_case fields and an
+The project-scoped coordination transport exposes 24 routes. Every route uses
+`?project=<name>`; mutation bodies use strict snake_case fields and require an
 `Idempotency-Key` header or matching `idempotency_key` body field. The raw
-ownership token is caller-held and is never returned.
+ownership token is caller-held, stored only as a SHA-256 hash, and is never
+returned. The `GET /snapshot` ownership proof is sent in the
+`X-Ingenium-Coordination-Ownership` header rather than in the query or body.
+
+Coordination is a project-scoped authorization family. The route handler
+requires an authenticated service principal with the exact workspace and
+storage-mapping binding that derives the submitted `worktree_id`; when a
+request reaches that handler, user, compatibility, and foreign-worktree callers
+are neutralized as `SESSION_NOT_FOUND`. The MCP catalog policies are
+`coordination:read` for `ingenium_coordination_status`, and
+`coordination:write` for `ingenium_coordination_update`,
+`ingenium_coordination_claim`, `ingenium_coordination_release`, and
+`ingenium_coordination_handoff`. The update, claim, and release tools also
+require `repository:sync`; all five require the launcher binding. A dedicated
+packaged MCP transport uses the `mcp` audience; runtime capability calls use
+the `runtime` audience where applicable. A dedicated `repository-sync`
+audience may use only register, heartbeat, close, batch claim, claim
+verify/renew/quarantine/complete, and claim release, subject to the repository
+project authorization. Coordination requests are additionally
+limited to 300 per minute per attested credential and 600 per minute per
+project/worktree; failed authentication or attestation is charged to the
+strict 100-per-minute pre-authentication bucket.
+
+The common `lease` fields are `worktree_id`, `session_id`, `incarnation`,
+`expected_revision`, `fence`, and `ownership_token`, plus the idempotency key.
+`incarnation` and `fence` are positive integers; revisions are nonnegative.
+Session registration has no prior revision or fence. Lease TTLs are integer
+milliseconds from 1,000 through 300,000. Claims use a caller-held
+`client_claim_key`, which is separate from the ownership token and is never
+returned. An API body may omit `idempotency_key` only when the header supplies
+it; if both are supplied they must match.
 
 | Method | Endpoint | Required body/query fields | Purpose |
 |--------|----------|-----------------------------|---------|
 | POST | `/api/v1/coordination/register?project=<name>` | `worktree_id`, `session_id`, `incarnation`, `ownership_token`, `ttl_ms`, `idempotency_key` | Register an active session and allocate its fence. |
 | POST | `/api/v1/coordination/recover?project=<name>` | Lease fields plus `next_ownership_token`, `ttl_ms` | Prove the prior lease, rotate ownership, and advance the fence. |
-| PATCH | `/api/v1/coordination/update?project=<name>` | Lease fields plus `snapshot`, `snapshot_revision`, task/context pointer pairs | Update the bounded snapshot and exact project-owned pointers. |
+| PATCH | `/api/v1/coordination/update?project=<name>` | Lease fields plus `snapshot`, `snapshot_revision`, `current_task_id`, `current_task_revision` | Update the bounded snapshot and exact project-owned task pointer. The context-memory pointer is server-managed. |
 | POST | `/api/v1/coordination/heartbeat?project=<name>` | Lease fields plus `ttl_ms` | Extend an unexpired active lease. |
-| GET | `/api/v1/coordination/snapshot?project=<name>&worktree_id=…&session_id=…&incarnation=…` | Query identity | Read redacted session and claim status. |
-| POST | `/api/v1/coordination/claims/batch?project=<name>` | Lease fields plus `claims[]` with optional `baseline_sha256` | Atomically claim a non-overlapping batch. |
-| POST | `/api/v1/coordination/claims/release?project=<name>` | Lease fields plus `claim_ids` | Atomically release owned claims. |
+| GET | `/api/v1/coordination/snapshot?project=<name>&worktree_id=…&session_id=…&incarnation=…` | Query identity plus `X-Ingenium-Coordination-Ownership` | Read redacted session, claim, and active peer status. |
+| POST | `/api/v1/coordination/claims/batch?project=<name>` | Lease fields plus `client_claim_key`, `claims[]`, optional `operation` | Atomically claim a non-overlapping batch. |
+| POST | `/api/v1/coordination/claims/release?project=<name>` | Lease fields plus `client_claim_key` | Atomically release the claims bound to that caller-held key. |
+| POST | `/api/v1/coordination/claims/verify?project=<name>` | Lease fields plus `client_claim_key`, `accepted_epoch` | Verify the exact active claim proof and accepted epoch. |
+| POST | `/api/v1/coordination/claims/renew?project=<name>` | Lease fields plus `client_claim_key`, `accepted_epoch`, `ttl_ms` | Verify the claim proof and extend the holder's lease. |
+| POST | `/api/v1/coordination/claims/mark?project=<name>` | Lease fields plus `client_claim_key`, `accepted_epoch`, `state` | Mark owned claims `dirty`, `quarantined`, or `collision` without releasing them. |
+| POST | `/api/v1/coordination/claims/quarantine?project=<name>` | Lease fields plus `client_claim_key`, `accepted_epoch`, optional `code` | Quarantine an uncertain operation and its accepted worktree epoch. |
+| POST | `/api/v1/coordination/claims/complete?project=<name>` | Lease fields plus `client_claim_key`, `accepted_epoch`, `operation_id`, `operation`, `footprint[]` | Verify the managed mutation footprint, advance accepted baselines, and release the matching claim batch. |
+| POST | `/api/v1/coordination/epoch/recovery-state?project=<name>` | Lease fields | Read the bounded proof for the quarantined epoch. |
+| POST | `/api/v1/coordination/epoch/reconcile?project=<name>` | Lease fields plus the epoch recovery proof | Record the authoritative recovery footprint while the old owner remains fenced. |
+| POST | `/api/v1/coordination/epoch/recover?project=<name>` | Lease fields plus the epoch recovery proof | Retire the proven old owner, advance the accepted epoch, and fence the successor. |
 | POST | `/api/v1/coordination/close?project=<name>` | Lease fields | Close the session and release active claims while retaining evidence. |
-| POST | `/api/v1/coordination/takeover?project=<name>` | `worktree_id`, `session_id`, `incarnation`, `expected_revision`, `fence`, `next_ownership_token`, `ttl_ms`, `idempotency_key` | Perform an API-authorized takeover without accepting the old token; returns a non-secret `takeoverEvidenceId`. |
+| POST | `/api/v1/coordination/takeover?project=<name>` | Lease fields plus `next_ownership_token`, `ttl_ms` | Replace an active or quarantined owner after proving the current token; returns a non-secret `takeoverEvidenceId`. |
+| POST | `/api/v1/coordination/handoffs/publish?project=<name>` | Lease fields plus `operation` (`write` or `edit`), `path`, optional `baseline_sha256` | Publish one sanitized same-worktree peer-write handoff. |
+| POST | `/api/v1/coordination/memory/publish?project=<name>` | Lease fields plus typed `entry` | Append one bounded typed operational-memory entry. |
+| POST | `/api/v1/coordination/memory/read?project=<name>` | Lease fields plus optional `limit` (maximum 8) | Read unseen typed operational memory without advancing the receiver cursor. |
+| POST | `/api/v1/coordination/memory/ack?project=<name>` | Lease fields plus `through_revision` | Advance the durable memory cursor after the receiver validates the entries. |
+| POST | `/api/v1/coordination/handoffs/consume?project=<name>` | Lease fields plus optional `limit` (maximum 32) | Consume the next bounded peer-write batch and advance the receiver cursor atomically. |
+| POST | `/api/v1/coordination/handoffs/read?project=<name>` | Lease fields plus optional `limit` (maximum 32) | Read a bounded peer-write batch without advancing the receiver cursor. |
+| POST | `/api/v1/coordination/handoffs/ack?project=<name>` | Lease fields plus `through_sequence` | Advance the durable handoff cursor after the receiver validates and injects the batch. |
 
-Lease fields are `worktree_id`, `session_id`, `incarnation`,
-`expected_revision`, `fence`, and `ownership_token`. Snapshot pointers are
-`current_task_id`/`current_task_revision` and
-`context_conversation_id`/`context_revision`. Successful mutations return
-`data.session`; claim mutations also return `claimIds`. Status returns
-`data.session`, redacted claim records (`id`, `kind`, `state`, timestamps),
-`claimCount`, and `claimsTruncated`; claim values, baselines, and token
-material are not returned.
+The claim shapes are `path` or `tree` with a safe relative `path`, or
+`reserved` with the name `@build` or `@repository`. A batch accepts at most 128
+claims. Claim operations are `write`, `edit`, `create`, `delete`, `rename`,
+`apply_patch`, `repository`, and `build`. The epoch recovery proof contains
+`quarantined_session_id`, `quarantined_incarnation`, `quarantined_fence`,
+the derived `quarantined_actor_id`, `accepted_epoch`, and a SHA-256
+`recovery_footprint_hash`; reconciliation must precede epoch recovery.
+
+The managed-memory `entry` is an operational record containing `status`,
+successful `actions`, `checks`, todo counts/state, an optional opaque task ID,
+encoded changed-path segments, and `nextWork`. Action kinds are `read`,
+`search`, `write`, `edit`, and `execute`; check kinds are `test`, `typecheck`,
+`lint`, `build`, `format`, `security`, and `other`. Entries allow at most 64
+actions, 32 checks, and 32 changed paths. Handoff paths are safe relative paths;
+memory paths are base64url-encoded UTF-8 segments. Typed memory entries contain
+no prompt, command, or source-content fields, and snapshot/peer projections do
+not return credential-bearing material or token material.
+
+Successful registration, handoff publication, and memory publication return
+`201`; other successful coordination routes return `200`. Mutation session
+projections return `actorId`, `revision`, `fence`, `state`, lease timestamps,
+snapshot/task/context revisions, and `updatedAt`, but not the database session
+ID or ownership token. Registration also returns the initial `memory` window;
+claim mutations return `acceptedEpoch`, `manifestGeneration`, and an optional
+managed `operationId`—never claim identifiers. Status returns `data.session`, claims
+containing only `kind`, `state`, and lifecycle timestamps, `claimCount`,
+`claimsTruncated`, and bounded active peer snapshots. Claim IDs, claim values,
+baselines, client claim keys, ownership hashes, and token material are not
+returned. Handoff responses contain sanitized event sequence/path/hash/actor
+metadata; memory responses contain only the typed operational record and cursor
+metadata.
 
 Validation errors return `422 INVALID_COORDINATION_INPUT`; missing projects,
 sessions, claims, or pointers return `404`; conflicts return `409` with typed
 codes including `SESSION_IDENTITY_CONFLICT`, `SESSION_CLOSED`,
 `SESSION_NOT_ACTIVE`, `SESSION_EXPIRED`, `REVISION_CONFLICT`, `FENCE_CONFLICT`,
-`OWNERSHIP_TOKEN_MISMATCH`, `IDEMPOTENCY_KEY_REUSED`, `CLAIM_CONFLICT`,
-`CLAIM_NOT_OWNED`, and `POINTER_REVISION_CONFLICT`. Integrity failures return
-`500 COORDINATION_INTEGRITY_ERROR`. A revision conflict may include
-`currentRevision`; error messages do not disclose token material.
+`IDEMPOTENCY_KEY_REUSED`, `CLAIM_CONFLICT`, `CLAIM_KEY_REUSED`,
+`CLAIM_NOT_OWNED`, `EPOCH_QUARANTINED`, `BASELINE_MISMATCH`,
+`FOOTPRINT_MISMATCH`, `MANIFEST_GENERATION_CONFLICT`, and
+`POINTER_REVISION_CONFLICT`. An ownership-token mismatch is deliberately
+returned as neutral `404 SESSION_NOT_FOUND` rather than disclosing ownership.
+Integrity failures return `500 COORDINATION_INTEGRITY_ERROR`; rate limiting
+returns `429 RATE_LIMITED`. A revision conflict may include `currentRevision`,
+and error messages do not disclose token material.
 
-The four MCP tools map to these operations: `ingenium_coordination_status`
-reads `GET /snapshot`; `ingenium_coordination_update` dispatches `register`,
-`recover`, `update`, `heartbeat`, `close`, or `takeover`; and
-`ingenium_coordination_claim` and `ingenium_coordination_release` dispatch
-`POST /claims/batch` and `POST /claims/release`. The MCP adapter projects only
-allowlisted redacted fields, converts malformed API data to
-`COORDINATION_INVALID_RESPONSE`, and converts transport failures to
-`COORDINATION_UNAVAILABLE`; it does not expose raw upstream errors or tokens.
+The five MCP tools map to these operations. `ingenium_coordination_status` reads
+`GET /snapshot`. `ingenium_coordination_update` dispatches `register`,
+`recover`, `recovery_state`, `reconcile_epoch`, `recover_epoch`, `update`,
+`heartbeat`, `close`, or `takeover`; its `runtime_activity` operation instead
+dispatches `POST /api/v1/runtimes/activity` with `runtime_id` and `observed_at`
+under the separate runtime-capability authorization. The claim tool defaults to
+`acquire` and dispatches batch claim; its other actions are `verify`, `renew`,
+`mark`, `quarantine`, and `complete`. Release dispatches claim release.
+`ingenium_coordination_handoff` dispatches publish/read/ack/consume handoffs and
+publish/read/ack typed memory. The MCP adapter projects only allowlisted
+redacted fields, converts malformed API data to
+`COORDINATION_INVALID_RESPONSE`, converts transport failures to
+`COORDINATION_UNAVAILABLE`, and reduces upstream failures to an allowlisted
+typed code with the fixed message `The coordination request failed.`; it does
+not expose raw upstream errors or tokens.
 
 Task references attach a task to one trusted source using a server-derived,
 metadata-only snapshot. The five supported `source_type` values are `email`,

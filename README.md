@@ -252,6 +252,7 @@ The MCP stdio server is not a supervisord process — it is bundled in the `@ing
 | Docs Workspace Reference | [docs/reference/docs-workspace.md](docs/reference/docs-workspace.md) |
 | Extension Architecture | [docs/concepts/architecture.md](docs/concepts/architecture.md#resource-sync-engine) |
 | Dashboard Styling Guide | [services/ingenium-dashboard/STYLING-GUIDE.md](services/ingenium-dashboard/STYLING-GUIDE.md) |
+| Multi-session OpenCode | [docs/usage/multi-session.md](docs/usage/multi-session.md) |
 | Agent Protocol | [AGENTS.md](AGENTS.md) |
 
 ## How Major Systems Work

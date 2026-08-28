@@ -276,7 +276,7 @@ the page and counts tools are the bounded read surface.
 
 ## TASKS — Full task management (Kanban)
 
-30 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_update, coordination_claim, coordination_release.
+31 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_update, coordination_claim, coordination_release, coordination_handoff.
 
 `ingenium_task_reserve` and `ingenium_task_release` are cooperative managed-agent
 operations. They require the same project and canonical worktree boundary,
@@ -285,16 +285,50 @@ expected revision, idempotency key, owner, worktree, and a caller-held
 hash is stored; neither the token nor hash is returned. Manual editors and
 external processes are outside the guarantee.
 
-The coordination tools are project-scoped and use snake_case inputs. They map
-to status (`GET /coordination/snapshot`), session operations (`register`,
-`recover`, `update`, `heartbeat`, `close`, `takeover`), atomic claim batches
-(`POST /coordination/claims/batch`), and atomic releases
-(`POST /coordination/claims/release`). Status claims are redacted to IDs,
-kind/state, and timestamps; token material, claim values, and baselines are
-never returned. Transport failures return the fixed
-`COORDINATION_UNAVAILABLE`; malformed API data returns
-`COORDINATION_INVALID_RESPONSE`; upstream errors are reduced to an allowlisted
-typed code with a fixed message.
+The five coordination tools are project-scoped and use strict snake_case
+inputs. Their catalog authorization is `coordination:read` for
+`ingenium_coordination_status`, `coordination:write` for the other four, and
+the update, claim, and release tools additionally require `repository:sync`.
+All five require the exact launcher/workspace binding. The packaged transport
+uses the `mcp` audience; runtime activity uses the separate `runtime` audience,
+and repository-authoritative synchronization uses `repository-sync` with its
+restricted route set. The API also verifies the project and derived worktree
+identity; the MCP transport never accesses the database directly.
+
+| Tool | Operation and API mapping |
+|------|---------------------------|
+| `ingenium_coordination_status` | Requires `project`, `worktree_id`, `session_id`, `incarnation`, and `ownership_token`; reads `GET /api/v1/coordination/snapshot` and sends the ownership proof in the dedicated header. |
+| `ingenium_coordination_update` | Requires `project`, `operation`, the session identity, and operation-specific lease fields. Operations are `register` → `POST /api/v1/coordination/register`, `recover` → `POST /api/v1/coordination/recover`, `recovery_state` → `POST /api/v1/coordination/epoch/recovery-state`, `reconcile_epoch` → `POST /api/v1/coordination/epoch/reconcile`, `recover_epoch` → `POST /api/v1/coordination/epoch/recover`, `update` → `PATCH /api/v1/coordination/update`, `heartbeat` → `POST /api/v1/coordination/heartbeat`, `close` → `POST /api/v1/coordination/close`, and `takeover` → `POST /api/v1/coordination/takeover`. `runtime_activity` maps to `POST /api/v1/runtimes/activity` with `runtime_id` and `observed_at`. |
+| `ingenium_coordination_claim` | Defaults to `action: acquire` and posts `/api/v1/coordination/claims/batch`; `verify`, `renew`, `mark`, `quarantine`, and `complete` post their matching `/api/v1/coordination/claims/<action>` routes. Acquire requires `client_claim_key` and `claims[]`; proof actions require `client_claim_key` and `accepted_epoch`; renew adds `ttl_ms`, mark adds `state`, quarantine may add `code`, and complete adds `operation_id`, `operation`, and `footprint[]`. |
+| `ingenium_coordination_release` | Requires the session lease plus `client_claim_key`; posts `/api/v1/coordination/claims/release`. |
+| `ingenium_coordination_handoff` | `publish`, `read`, `ack`, and `consume` map to the matching `/api/v1/coordination/handoffs/*` routes. `memory`, `memory_read`, and `memory_ack` map to `/api/v1/coordination/memory/publish`, `/api/v1/coordination/memory/read`, and `/api/v1/coordination/memory/ack`. Handoff reads use a durable sequence cursor; memory reads use a durable revision cursor. |
+
+Common lease fields are `worktree_id`, `session_id`, `incarnation`,
+`expected_revision`, `fence`, and caller-held `ownership_token`; mutation
+operations require `idempotency_key` (or the equivalent `Idempotency-Key`
+header). Tokens are 32–512 URL-safe characters, TTLs are 1,000–300,000 ms,
+claim batches are limited to 128 entries, handoff batches to 32, and memory
+windows to 8. Claims are safe relative `path`/`tree` values or reserved
+`@build`/`@repository` claims. All operation-specific fields are validated
+strictly, including SHA-256 baselines, accepted epochs, safe footprint paths,
+and typed operational-memory entries. Successful results still expose only the
+allowlisted sanitized path/hash metadata defined for each operation.
+
+Status responses contain only redacted session/peer metadata and claim
+`kind`, `state`, and lifecycle timestamps—never claim IDs, claim values,
+baselines, client claim keys, ownership hashes, or tokens. Claim mutations
+return the redacted session, `acceptedEpoch`, `manifestGeneration`, and an
+optional managed `operationId`; they do not echo request fields or expose claim
+identifiers. Handoff and memory responses are similarly allowlisted and bounded;
+memory records contain operational actions/checks/todos/changed paths and
+`nextWork`, not prompts, commands, or source content.
+
+Every coordination failure is returned as `isError: true`. Transport failures
+return `COORDINATION_UNAVAILABLE`; malformed or unexpected API data returns
+`COORDINATION_INVALID_RESPONSE`; an unrecognized upstream failure becomes
+`COORDINATION_REQUEST_FAILED`. Recognized upstream codes are allowlisted and
+all use the fixed message `The coordination request failed.`; raw upstream
+messages, tokens, and claim data never enter the MCP response.
 
 ## PLANS — Saved notes & context (legacy)
 

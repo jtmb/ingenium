@@ -3189,3 +3189,15 @@ follow-up remains.
 
 <!-- (work-complete) COORD-RESET-100 2026-08-27T19:44:41Z ingenium-software-engineer-premium -->
 Evidence COORD-RESET-100: protected owner recovery, encrypted-provider persistence, general and learning credential rotation, same-process epoch recovery, source and focused tests, committed production deployment, MCP canaries, settled synthesis, passive desktop/mobile visual evidence, cleanup, and redaction/staging checks all passed without retaining secret material.
+
+## Multi-session OpenCode operator documentation (2026-08-27)
+
+The completed COORD-103–COORD-106 rollout is documented for operators in
+[Multi-session OpenCode](../usage/multi-session.md). The guide links the
+three-window acceptance evidence, distinguishes actual model/session artifacts
+from deployed canaries and source/review evidence, and records the supported
+launch, claim, typed-memory, recovery, privacy, and cleanup boundaries.
+
+This is a documentation navigation update only; it adds no new completion marker,
+does not change the V1 guarantee, and does not treat the separately recorded
+protected credential-reset behavior as exercised by the r24 run.
