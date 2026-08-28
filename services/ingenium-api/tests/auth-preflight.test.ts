@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { authPreflightReadRateLimit, clearRateLimitEntries, rateLimit } from "../lib/middleware/rate-limit.js";
 import { errorHandler } from "../lib/middleware/errors.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { oidcAuthentication } from "ingenium-core";
 import { AppError } from "../lib/middleware/errors.js";
 import { clearAuthAttemptRateLimit } from "../lib/middleware/auth-rate-limit.js";
 import { authPreflightRouter, publicOidcError } from "../lib/routes/auth-preflight.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const token = "a".repeat(32);
 let server: Server | undefined;
@@ -21,21 +23,21 @@ beforeEach(async () => {
   process.env.INGENIUM_API_TOKEN = token;
   delete process.env.INGENIUM_API_TOKEN_FILE;
   clearAuthAttemptRateLimit();
+  clearRateLimitEntries();
   const app = express();
+  app.use(authPreflightReadRateLimit);
+  app.use(rateLimit);
   app.use(authMiddleware);
+  app.use(authorizationMiddleware);
   app.use("/api/v1/auth", authPreflightRouter);
   app.use(errorHandler);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
-  await new Promise<void>((resolve) => server!.close(() => resolve()));
+  await closeHttpServer(server!);
+  clearRateLimitEntries();
   if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
   else process.env.INGENIUM_API_TOKEN = originalToken;
   if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
@@ -59,6 +61,30 @@ describe("extension authentication preflight", () => {
     expect(response.status).toBe(401);
     expect(JSON.stringify(body)).not.toContain(token);
     expect(body.error).toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
+
+describe("login preflight reads", () => {
+  it.each([
+    "/api/v1/auth/csrf",
+    "/api/v1/auth/oidc/providers",
+  ])("serves side-effect-free HEAD for %s", async (path) => {
+    const response = await fetch(`${baseUrl}${path}`, { method: "HEAD" });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.text()).toBe("");
+  });
+
+  it.each([
+    ["POST", "/api/v1/auth/csrf"],
+    ["GET", "/api/v1/auth/csrf/"],
+    ["GET", "/api/v1/auth/%63srf"],
+    ["GET", "/api/v1/auth//csrf"],
+    ["GET", "/api/v1/auth/oidc/providers/"],
+  ])("does not public-allowlist %s %s", async (method, path) => {
+    expect((await fetch(`${baseUrl}${path}`, { method })).status).toBe(401);
   });
 });
 

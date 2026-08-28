@@ -44,6 +44,7 @@ export function isPublicOAuthCallbackRequest(req: Request): boolean {
 
 const PUBLIC_LOCAL_AUTH = new Set([
   "GET /api/v1/auth/csrf",
+  "HEAD /api/v1/auth/csrf",
   "POST /api/v1/auth/login",
   "POST /api/v1/auth/mfa/challenge",
   "POST /api/v1/auth/password/forgot",
@@ -51,6 +52,7 @@ const PUBLIC_LOCAL_AUTH = new Set([
   "POST /api/v1/auth/email/verify",
   "GET /api/v1/auth/invitations/preview",
   "GET /api/v1/auth/oidc/providers",
+  "HEAD /api/v1/auth/oidc/providers",
   "POST /api/v1/auth/oidc/start",
   "GET /api/v1/auth/oidc/callback",
 ]);

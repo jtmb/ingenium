@@ -11,6 +11,7 @@ import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import {
+  authPreflightReadRateLimit,
   coordinationRateLimit,
   rateLimit,
   recordCandidateAuthenticationFailure,
@@ -134,6 +135,7 @@ app.use(express.json({ limit: "2mb" }));
 // MAX_ATTACHMENT_SIZE (from ingenium-core) sets the body parser limit for file uploads;
 // converting bytes → MB for the human-readable `limit` string passed to urlencoded.
 app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
+app.use(authPreflightReadRateLimit);
 app.use(rateLimit);
 app.use(authMiddleware);
 app.use(recordCandidateAuthenticationFailure);

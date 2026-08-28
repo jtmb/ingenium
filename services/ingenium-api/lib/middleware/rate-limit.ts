@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { createHash } from "node:crypto";
-import { coordination } from "ingenium-core";
+import { authentication, coordination } from "ingenium-core";
 import { config } from "../../config/index.js";
 import { isPublicHealthRequest, isRuntimeGatewayPrivateRequest } from "./auth.js";
 
@@ -28,6 +28,7 @@ import { isPublicHealthRequest, isRuntimeGatewayPrivateRequest } from "./auth.js
  */
 const MAX_ENTRIES = 10_000;
 const RUNTIME_GATEWAY_MAX_REQUESTS = 10_000;
+export const AUTH_PREFLIGHT_READ_MAX_REQUESTS = 60;
 // Credential grants and runtime launcher aliases can vary without changing the
 // immutable credential or canonical workspace identities that own these limits.
 export const COORDINATION_CREDENTIAL_MAX_REQUESTS = 300;
@@ -40,6 +41,23 @@ function normalizeTrustedClientIp(req: Request): string {
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1"
     ? "loopback"
     : normalized;
+}
+
+const AUTH_PREFLIGHT_READ_PATHS = new Set([
+  "/api/v1/auth/csrf",
+  "/api/v1/auth/oidc/providers",
+]);
+
+function hasAuthenticationCredential(req: Request): boolean {
+  if (req.headers.authorization !== undefined) return true;
+  return req.headers.cookie?.split(";").some((part) => part.trim().startsWith(`${authentication.SESSION_COOKIE_NAME}=`)) ?? false;
+}
+
+export function isUnauthenticatedAuthPreflightRead(req: Request): boolean {
+  return (req.method === "GET" || req.method === "HEAD")
+    && req.originalUrl === req.path
+    && AUTH_PREFLIGHT_READ_PATHS.has(req.originalUrl)
+    && !hasAuthenticationCredential(req);
 }
 
 export function isBoundaryAttestedRuntimeGatewayRequest(req: Request): boolean {
@@ -116,6 +134,11 @@ export function createRateLimiter(
 }
 
 const defaultRateLimiter = createRateLimiter(config.rateLimit);
+const authPreflightReadRateLimiter = createRateLimiter(
+  AUTH_PREFLIGHT_READ_MAX_REQUESTS,
+  60_000,
+  (req) => `${normalizeTrustedClientIp(req)}\0${req.originalUrl}`,
+);
 const coordinationCredentialRateLimiter = createRateLimiter(
   COORDINATION_CREDENTIAL_MAX_REQUESTS,
   COORDINATION_RATE_LIMIT_WINDOW_MS,
@@ -132,9 +155,18 @@ const runtimeGatewayRateLimiter = createRateLimiter(RUNTIME_GATEWAY_MAX_REQUESTS
 /** Reset the default rate-limit store entirely — exposed for test cleanup only. */
 export function clearRateLimitEntries(): void {
   defaultRateLimiter.clear();
+  authPreflightReadRateLimiter.clear();
   coordinationCredentialRateLimiter.clear();
   coordinationWorkspaceRateLimiter.clear();
   runtimeGatewayRateLimiter.clear();
+}
+
+export function authPreflightReadRateLimit(req: Request, res: Response, next: NextFunction): void {
+  if (!isUnauthenticatedAuthPreflightRead(req)) {
+    next();
+    return;
+  }
+  authPreflightReadRateLimiter(req, res, next);
 }
 
 export function isCoordinationApiRequest(req: Pick<Request, "path">): boolean {
@@ -162,6 +194,10 @@ export function coordinationRateLimitKeys(req: Request): { credential: string; w
 export const rateLimit = Object.assign(
   (req: Request, res: Response, next: NextFunction) => {
     if (isPublicHealthRequest(req)) {
+      next();
+      return;
+    }
+    if (isUnauthenticatedAuthPreflightRead(req)) {
       next();
       return;
     }

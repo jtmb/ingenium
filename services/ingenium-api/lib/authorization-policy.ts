@@ -41,9 +41,9 @@ const PROJECT_PREFIXES = [
   "/api/v1/repository", "/api/v1/rag", "/api/v1/usage", "/api/v1/synthesis",
 ];
 const PUBLIC_AUTH_PATHS = new Set([
-  "GET /api/v1/auth/csrf", "POST /api/v1/auth/login", "POST /api/v1/auth/mfa/challenge",
+  "GET /api/v1/auth/csrf", "HEAD /api/v1/auth/csrf", "POST /api/v1/auth/login", "POST /api/v1/auth/mfa/challenge",
   "POST /api/v1/auth/password/forgot", "POST /api/v1/auth/password/reset", "POST /api/v1/auth/email/verify",
-  "GET /api/v1/auth/invitations/preview", "GET /api/v1/auth/oidc/providers", "POST /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
+  "GET /api/v1/auth/invitations/preview", "GET /api/v1/auth/oidc/providers", "HEAD /api/v1/auth/oidc/providers", "POST /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
 ]);
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const REPOSITORY_COORDINATION_ROUTES = new Set([

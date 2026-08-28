@@ -90,6 +90,11 @@ function requireRecentStepUp(req: Request) {
   return principal;
 }
 
+function preflightHead(_req: Request, res: Response): void {
+  res.set("Cache-Control", "no-store");
+  res.status(200).end();
+}
+
 export function publicOidcError(error: unknown): unknown {
   if (error instanceof z.ZodError || error instanceof AppError) return error;
   if (error instanceof oidcAuthentication.OidcError) {
@@ -100,6 +105,7 @@ export function publicOidcError(error: unknown): unknown {
   return new AppError("OIDC provider is unavailable", "OIDC_PROVIDER_UNAVAILABLE", 502);
 }
 
+authPreflightRouter.head("/csrf", preflightHead);
 authPreflightRouter.get("/csrf", issuePreAuthCsrf);
 authPreflightRouter.post("/fixture-bootstrap", (req, res) => {
   const projectName = fixtureProjectName(req);
@@ -125,6 +131,7 @@ authPreflightRouter.post("/fixture-session", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({ data: { authenticated: true } });
 });
+authPreflightRouter.head("/oidc/providers", preflightHead);
 authPreflightRouter.get("/oidc/providers", (_req, res) => {
   res.json({
     data: oidcAuthentication.listOidcProviders()
