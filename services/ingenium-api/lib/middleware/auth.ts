@@ -1,13 +1,18 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "./errors.js";
-import { apiTokensEqual, loadApiToken } from "./api-token.js";
+import { apiTokensEqual, loadApiToken, readApiTokenFile } from "./api-token.js";
 import { authentication, mcpCredentials, securityTokens } from "ingenium-core";
 import { loadRuntimeGatewayToken, runtimeGatewayTokensEqual } from "../runtime-gateway-auth.js";
+import {
+  MCP_REPORT_AUDIENCE,
+  MCP_REPORT_WORKTREE,
+  resolveMcpReportCredential,
+} from "../mcp-report-auth.js";
 
 export type RequestPrincipal =
   | { type: "compatibility"; id: "legacy-server-bearer"; scopes: readonly ["legacy:*"] }
   | { type: "user"; id: string; scopes: readonly string[]; session?: authentication.AuthSession; tokenId?: string; organizationId?: string | null; projectId?: string | null }
-  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null; projectIds?: readonly string[]; audience?: mcpCredentials.McpCredentialAudience; workspaceId?: string; launcherWorktree?: string; storageMappingHash?: string }
+  | { type: "service"; id: string; scopes: readonly string[]; tokenId: string; organizationId: string | null; projectId: string | null; projectIds?: readonly string[]; audience?: mcpCredentials.McpCredentialAudience | typeof MCP_REPORT_AUDIENCE; workspaceId?: string; launcherWorktree?: string; storageMappingHash?: string; reportToolNames?: readonly string[] }
   | { type: "runtime-service"; id: "runtime-gateway"; scopes: readonly ["runtime-gateway:exchange"]; audience: "runtime-gateway"; network: "runtime-gateway" };
 
 export interface AttestedCoordinationIdentity {
@@ -125,11 +130,61 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     return;
   }
 
+  if (req.get("x-ingenium-audience") === MCP_REPORT_AUDIENCE) {
+    const project = req.get("x-ingenium-project");
+    const workspaceId = req.get("x-ingenium-workspace");
+    const launcherWorktree = req.get("x-ingenium-launcher-worktree");
+    if (req.get("x-ingenium-mcp-report") !== "1" || req.headers.cookie !== undefined || req.get("origin") !== undefined
+      || !authHeader?.startsWith("Bearer ") || !project || !workspaceId || launcherWorktree !== MCP_REPORT_WORKTREE) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    const credential = resolveMcpReportCredential(authHeader.slice(7), {
+      project,
+      projectId: workspaceId,
+      workspaceId,
+      launcherWorktree: MCP_REPORT_WORKTREE,
+    });
+    if (!credential) throw new AppError("Resource not found", "NOT_FOUND", 404);
+    req.principal = {
+      type: "service",
+      id: `mcp-report:${credential.id}`,
+      scopes: ["mcp-report:inspect"],
+      tokenId: credential.id,
+      organizationId: null,
+      projectId: credential.projectId,
+      projectIds: [credential.projectId],
+      audience: MCP_REPORT_AUDIENCE,
+      workspaceId: credential.workspaceId,
+      launcherWorktree: credential.launcherWorktree,
+      reportToolNames: credential.toolNames,
+    };
+    next();
+    return;
+  }
+
   const sessionToken = cookieValue(req, authentication.SESSION_COOKIE_NAME);
-  if (!authHeader && sessionToken) {
+  if (sessionToken) {
     const session = authentication.resolveSession(sessionToken, new Date(), true);
     if (!session) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
     req.principal = { type: "user", id: session.user_id, scopes: ["user:*"], session };
+    next();
+    return;
+  }
+
+  if (req.get("x-ingenium-dashboard-service") === "bootstrap"
+    && (req.path === "/api/v1/bootstrap/status" || req.path === "/api/v1/bootstrap/claim")) {
+    const tokenFile = process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
+    let dashboardToken: string;
+    try {
+      if (!tokenFile) throw new Error();
+      dashboardToken = readApiTokenFile(tokenFile);
+    } catch {
+      throw new AppError("Dashboard bootstrap authentication is not configured", "API_AUTH_NOT_CONFIGURED", 503);
+    }
+    if (!authHeader?.startsWith("Bearer ") || !apiTokensEqual(authHeader.slice(7), dashboardToken)) {
+      throw new AppError("Invalid authorization token", "INVALID_TOKEN", 401);
+    }
+    req.principal = { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] };
     next();
     return;
   }

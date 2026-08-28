@@ -1,6 +1,8 @@
-import { logger } from "ingenium-core";
+import { logger, runtimes } from "ingenium-core";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { config } from "../config/index.js";
-import { currentOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
+import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
 
 /**
  * Server-side typed HTTP client for the OpenCode v1.18.9 REST API.
@@ -454,8 +456,26 @@ type SafeProviderOperation =
  * should validate this before issuing requests.
  */
 /** @internal — exported for testing */
+function readProtectedOpenCodePassword(path: string): string {
+  const parent = lstatSync(dirname(path));
+  if (!parent.isDirectory() || parent.uid !== process.getuid?.() || parent.gid !== process.getgid?.() || (parent.mode & 0o777) !== 0o700) return "";
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = fstatSync(descriptor);
+    if (!metadata.isFile() || metadata.uid !== process.getuid?.() || metadata.gid !== process.getgid?.() || (metadata.mode & 0o777) !== 0o600 || metadata.size > 65) return "";
+    const contents = readFileSync(descriptor, "utf8");
+    const password = contents.endsWith("\n") ? contents.slice(0, -1) : contents;
+    return /^[A-Za-z0-9_-]{64}$/.test(password) ? password : "";
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function buildAuthHeader(): string | null {
-  const password = process.env.OPENCODE_SERVER_PASSWORD;
+  const file = process.env.OPENCODE_SERVER_PASSWORD_FILE?.trim();
+  const inline = process.env.OPENCODE_SERVER_PASSWORD;
+  if (file && inline) return null;
+  const password = file ? readProtectedOpenCodePassword(file) : inline;
   if (!password) return null;
   const encoded = Buffer.from(`opencode:${password}`).toString("base64");
   return `Basic ${encoded}`;
@@ -1257,13 +1277,19 @@ export function createBackgroundSynthesisBrokerExecutor(projectId: string): (par
   user: string;
   timeoutMs: number;
 }) => Promise<{ ok: boolean; content: string; error?: string }> {
-  return ({ system, user, timeoutMs }) => executeSynthesisBroker({
-    projectId,
-    system,
-    user,
-    timeoutMs,
-    timeoutPolicy: "background",
-  });
+  return async ({ system, user, timeoutMs }) => {
+    const runtime = runtimes.getReadyRuntimeForProject(projectId);
+    if (runtime) {
+      return withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098` }, () => executeSynthesisBroker({
+        projectId,
+        system,
+        user,
+        timeoutMs,
+        timeoutPolicy: "background",
+      }));
+    }
+    return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+  };
 }
 
 export async function executeSynthesisBroker(params: {

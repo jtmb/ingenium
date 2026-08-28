@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { createHash } from "node:crypto";
 import { authentication, coordination } from "ingenium-core";
 import { config } from "../../config/index.js";
+import { isDashboardSafeReadCandidate } from "../dashboard-safe-read-policy.js";
 import { isPublicHealthRequest, isRuntimeGatewayPrivateRequest } from "./auth.js";
 
 /**
@@ -12,9 +13,9 @@ import { isPublicHealthRequest, isRuntimeGatewayPrivateRequest } from "./auth.js
  * restarts. For multi-replica deployments, replace with Redis or an external
  * rate-limit store.
  *
- * Placement: strict traffic is limited before auth. Coordination requests pass
- * initial admission without consuming the strict bucket, then authenticated
- * requests are charged to credential and canonical-workspace buckets.
+ * Placement: strict traffic is limited before auth. Positive Dashboard GET
+ * candidates pass a shared admission ceiling; failed authentication is charged
+ * back to the strict bucket, and only valid browser sessions get safe accounting.
  *
  * The window is 60 seconds (60_000ms) — fine-grained enough to catch bursts
  * without causing spurious rejections from short traffic spikes. The
@@ -29,6 +30,7 @@ import { isPublicHealthRequest, isRuntimeGatewayPrivateRequest } from "./auth.js
 const MAX_ENTRIES = 10_000;
 const RUNTIME_GATEWAY_MAX_REQUESTS = 10_000;
 export const AUTH_PREFLIGHT_READ_MAX_REQUESTS = 60;
+export const DASHBOARD_READ_MAX_REQUESTS = 480;
 // Credential grants and runtime launcher aliases can vary without changing the
 // immutable credential or canonical workspace identities that own these limits.
 export const COORDINATION_CREDENTIAL_MAX_REQUESTS = 300;
@@ -139,6 +141,12 @@ const authPreflightReadRateLimiter = createRateLimiter(
   60_000,
   (req) => `${normalizeTrustedClientIp(req)}\0${req.originalUrl}`,
 );
+const dashboardReadAdmissionRateLimiter = createRateLimiter(DASHBOARD_READ_MAX_REQUESTS);
+const dashboardReadRateLimiter = createRateLimiter(
+  DASHBOARD_READ_MAX_REQUESTS,
+  60_000,
+  (req) => `${normalizeTrustedClientIp(req)}\0${req.principal?.type === "user" ? req.principal.session?.id ?? "no-session" : "no-session"}`,
+);
 const coordinationCredentialRateLimiter = createRateLimiter(
   COORDINATION_CREDENTIAL_MAX_REQUESTS,
   COORDINATION_RATE_LIMIT_WINDOW_MS,
@@ -156,6 +164,8 @@ const runtimeGatewayRateLimiter = createRateLimiter(RUNTIME_GATEWAY_MAX_REQUESTS
 export function clearRateLimitEntries(): void {
   defaultRateLimiter.clear();
   authPreflightReadRateLimiter.clear();
+  dashboardReadAdmissionRateLimiter.clear();
+  dashboardReadRateLimiter.clear();
   coordinationCredentialRateLimiter.clear();
   coordinationWorkspaceRateLimiter.clear();
   runtimeGatewayRateLimiter.clear();
@@ -209,6 +219,10 @@ export const rateLimit = Object.assign(
       defaultRateLimiter.check(req, res, next);
       return;
     }
+    if (isDashboardSafeReadCandidate(req)) {
+      defaultRateLimiter.check(req, res, () => dashboardReadAdmissionRateLimiter(req, res, next));
+      return;
+    }
     defaultRateLimiter(req, res, next);
   },
   { clear: clearRateLimitEntries },
@@ -220,9 +234,9 @@ export function recordCandidateAuthenticationFailure(
   _res: Response,
   next: NextFunction,
 ): void {
-  // Coordination calls are not charged up front, so failed authentication records
-  // a strict attempt before the next request reaches repeated credential work.
-  if (isCoordinationApiRequest(req)) defaultRateLimiter.record(req);
+  // Candidate reads are not charged up front, so only failed authentication
+  // records a strict attempt; the next request is blocked before repeated auth work.
+  if (isDashboardSafeReadCandidate(req) || isCoordinationApiRequest(req)) defaultRateLimiter.record(req);
   next(error);
 }
 
@@ -243,6 +257,18 @@ export function coordinationRateLimit(req: Request, res: Response, next: NextFun
     return;
   }
   coordinationWorkspaceRateLimiter(req, res, () => coordinationCredentialRateLimiter(req, res, next));
+}
+
+export function authenticatedReadRateLimit(req: Request, res: Response, next: NextFunction): void {
+  if (!isDashboardSafeReadCandidate(req)) {
+    next();
+    return;
+  }
+  if (req.principal?.type === "user" && req.principal.session) {
+    dashboardReadRateLimiter(req, res, next);
+    return;
+  }
+  defaultRateLimiter(req, res, next);
 }
 
 /**

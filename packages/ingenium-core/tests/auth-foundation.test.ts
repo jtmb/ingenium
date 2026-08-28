@@ -94,6 +94,33 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
     raw.close();
   });
 
+  it("upgrades a 105-shaped database with cascading session CSRF grants", () => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    database.exec(`
+      DROP TRIGGER users_delete_csrf_grants_on_security_change;
+      DROP TRIGGER auth_sessions_delete_csrf_grants_on_revoke;
+      DROP TABLE auth_session_csrf_grants;
+    `);
+    resetDbForTest();
+
+    const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(upgraded.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'auth_session_csrf_grants'",
+    ).get()).toEqual({ count: 1 });
+    expect(upgraded.prepare("PRAGMA foreign_key_list('auth_session_csrf_grants')").all()).toContainEqual(
+      expect.objectContaining({ table: "auth_sessions", from: "session_id", on_delete: "CASCADE" }),
+    );
+    expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("fails closed on a partial session CSRF grant migration", () => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    database.exec("DROP INDEX idx_auth_session_csrf_grants_expiry");
+    resetDbForTest();
+
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow("Migration 106 is in a PARTIAL state");
+  });
+
   it("upgrades an exact AUTH-100 authentication schema and preserves valid one-time states", () => {
     const legacy = createLegacyDatabaseThrough(93);
     legacy.exec(readFileSync(join(import.meta.dirname, "auth100-authentication.sql"), "utf8"));

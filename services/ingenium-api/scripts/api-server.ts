@@ -3,7 +3,8 @@ import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
 import { pathToFileURL } from "node:url";
-import { agents, authentication, backups, jobs, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { agents, authentication, backups, emailKeyTransition, jobs, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { getEmailEncryptionKeyFingerprint } from "ingenium-email/lib/credential-crypto";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
@@ -12,6 +13,7 @@ import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import {
   authPreflightReadRateLimit,
+  authenticatedReadRateLimit,
   coordinationRateLimit,
   rateLimit,
   recordCandidateAuthenticationFailure,
@@ -89,7 +91,7 @@ configureEmailRuntimeForApi();
  *
  * Idempotent: if the project already exists, this is a no-op.
  */
-function ensureGlobalProject(): string | null {
+export function ensureGlobalProject(): string | null {
   try {
     const global = projectsDb.ensureCanonicalGlobalProject();
     // The broker is a system-owned profile. Its dedicated core bootstrap emits
@@ -111,7 +113,11 @@ function ensureGlobalProject(): string | null {
       logger.info("api", "Server-global provider recovery completed", providerRecovery);
     }
     return global.id;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Reserved LLM broker")) {
+      logger.error("api", "Reserved LLM broker startup validation failed; refusing unsafe startup");
+      throw error;
+    }
     logger.warn("api", "Failed to create the global-default project. Email engine and cross-project features will be unavailable until one is created via /init-project or the Settings page.");
     return null;
   }
@@ -139,6 +145,7 @@ app.use(authPreflightReadRateLimit);
 app.use(rateLimit);
 app.use(authMiddleware);
 app.use(recordCandidateAuthenticationFailure);
+app.use(authenticatedReadRateLimit);
 app.use(csrfMiddleware);
 app.use(authorizationMiddleware);
 app.use(recordCoordinationAttestationFailure);
@@ -355,6 +362,21 @@ export function startApiServer(): ApiServerHandle | null {
   try {
     assertApiTokenConfigured();
     authentication.validateAuthEncryptionKeyFile();
+    if (process.env.INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION === "1") {
+      const project = projectsDb.ensureCanonicalGlobalProject();
+      const transition = emailKeyTransition.transitionEmptyEmailEncryptionKey({
+        projectId: project.id,
+        fingerprint: getEmailEncryptionKeyFingerprint(),
+        actorType: "system",
+        actorId: "deployment",
+      });
+      if (transition.status === "blocked" || transition.status === "concurrent_change") {
+        throw new Error("Email encryption key transition requires destructive rekey review");
+      }
+      if (transition.status === "transitioned") {
+        logger.info("security", "Completed empty-mail email encryption key transition", { auditId: transition.auditId });
+      }
+    }
   } catch {
     console.error("[api] FATAL API authentication configuration is invalid");
     process.exitCode = 1;

@@ -11,10 +11,10 @@ set -eu
 # keep the browser-to-terminal boundary in that gateway.
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  HOME="/home/appuser" \
-  XDG_CONFIG_HOME="/home/appuser/.config" \
-  XDG_DATA_HOME="/home/appuser/.local/share" \
-  TMPDIR="/home/appuser/.tmp" \
+  HOME="/home/ingenium-ttyd" \
+  XDG_CONFIG_HOME="/home/ingenium-ttyd/.config" \
+  XDG_DATA_HOME="/home/ingenium-ttyd/.local/share" \
+  TMPDIR="/home/ingenium-ttyd/.tmp" \
   OPENCODE_SERVER_PASSWORD="" \
   ttyd \
     --interface "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}" \

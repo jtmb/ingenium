@@ -12,6 +12,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildAuthHeader,
   redactHeaders,
@@ -56,8 +59,10 @@ function mockNetworkError(): Error {
 /* ── Tests ───────────────────────────────────────────────────────────────── */
 
 describe("buildAuthHeader", () => {
+  const directories: string[] = [];
   afterEach(() => {
     vi.unstubAllEnvs();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
   it("returns null when OPENCODE_SERVER_PASSWORD is not set", () => {
@@ -85,6 +90,27 @@ describe("buildAuthHeader", () => {
     expect(authA).not.toBeNull();
     expect(authB).not.toBeNull();
     expect(authA).not.toBe(authB);
+  });
+
+  it("prefers a protected file and rejects conflicts or unsafe files", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-opencode-password-"));
+    directories.push(directory);
+    chmodSync(directory, 0o700);
+    const file = join(directory, "password");
+    writeFileSync(file, `${"e".repeat(64)}\n`, { mode: 0o600 });
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", file);
+    expect(buildAuthHeader()).toMatch(/^Basic /);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "conflict");
+    expect(buildAuthHeader()).toBeNull();
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    chmodSync(file, 0o640);
+    expect(buildAuthHeader()).toBeNull();
+    chmodSync(file, 0o600);
+    const link = `${file}.link`;
+    symlinkSync(file, link);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", link);
+    expect(() => buildAuthHeader()).toThrow();
   });
 });
 

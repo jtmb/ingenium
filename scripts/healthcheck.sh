@@ -7,15 +7,10 @@ set -eu
 # after the entrypoint has consumed a bootstrap secret. Re-exec before any
 # probe so readiness never receives plaintext credentials by inheritance.
 if [ "${INGENIUM_HEALTHCHECK_CLEAN_ENV:-}" != "1" ]; then
-  # The entrypoint writes the mode-0600 runtime token for appuser, which is
-  # also the user of every token-consuming supervised service. Docker invokes
-  # this health command as the container user, so drop to appuser before the
-  # authenticated probe validates and reads that file.
-  exec runuser -u appuser -- env -i \
+  exec env -i \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    HOME="/home/appuser" \
+    HOME="/root" \
     INGENIUM_DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}" \
-    INGENIUM_API_TOKEN_FILE="${INGENIUM_API_TOKEN_FILE:-/run/ingenium-secrets/api-token}" \
     INGENIUM_HEALTHCHECK_CLEAN_ENV="1" \
     /bin/sh "$0"
 fi
@@ -40,7 +35,7 @@ require_api_ok() {
 }
 
 require_vault_job_secret_root() {
-  if ! /app/scripts/validate-vault-job-secret-root.sh verify; then
+  if ! /app/scripts/validate-vault-job-secret-root.sh verify /dev/shm/ingenium-job-secrets 1101 1101; then
     echo "ERROR: vault job secret root validation failed"
     exit 1
   fi
@@ -131,9 +126,9 @@ require_production_aliases_unavailable() {
   fi
 }
 
-programs="ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway"
+programs="restore-handoff ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway"
 if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
-  programs="$programs opencode-web ttyd-opencode vscode"
+  programs="$programs opencode-web opencode-internal-proxy ttyd-opencode vscode"
 fi
 for program in $programs; do
   require_running "$program"

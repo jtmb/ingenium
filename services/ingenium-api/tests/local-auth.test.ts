@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +11,7 @@ import { errorHandler } from "../lib/middleware/errors.js";
 import { clearAuthAttemptRateLimit } from "../lib/middleware/auth-rate-limit.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
 import { organizationsRouter } from "../lib/routes/organizations.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let directory = "";
 let server: Server;
@@ -40,12 +40,11 @@ beforeEach(async () => {
   app.use("/api/v1/organizations", organizationsRouter);
   app.use(errorHandler);
   server = createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeHttpServer(server);
   resetDbForTest();
   rmSync(directory, { recursive: true, force: true });
   if (originalDb === undefined) delete process.env.INGENIUM_CORE_DB_PATH; else process.env.INGENIUM_CORE_DB_PATH = originalDb;
@@ -168,11 +167,14 @@ describe("AUTH-101 local API", () => {
     runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "test" });
     runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "test" });
     const exchangeProof = "p".repeat(43);
-    const ticket = runtimes.issueRuntimeBrowserLaunchTicket({ runtimeId: runtime.id, ownerUserId: ownerId, authSessionId: authSession.id, audience: "web", rootDomain: "runtime.example.test", launcherOrigin: origin, exchangeProof });
+    const ticket = runtimes.issueRuntimeBrowserLaunchTicket({ runtimeId: runtime.id, ownerUserId: ownerId, authSessionId: authSession.id, audience: "web", rootDomain: "runtime.example.test", scheme: "https", launcherOrigin: origin, exchangeProof });
     const browser = runtimes.consumeRuntimeBrowserLaunchTicket({ exchangeProof, audience: "web", origin: ticket.origin, host: ticket.host, launcherOrigin: origin })!;
     expect(runtimes.resolveRuntimeBrowserSession({ token: browser.token, audience: "web", origin: ticket.origin, host: ticket.host })).toBeDefined();
     const accepted = await fetch(`${baseUrl}/api/v1/auth/logout`, { method: "POST", headers: { origin, cookie: sessionCookie, "x-csrf-token": sessionCsrf } });
     expect(accepted.status).toBe(204);
+    expect(accepted.headers.get("set-cookie")).toBe("__Host-ingenium_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0");
+    const replay = await fetch(`${baseUrl}/api/v1/auth/session`, { headers: { cookie: sessionCookie } });
+    expect(replay.status).toBe(401);
     expect(runtimes.resolveRuntimeBrowserSession({ token: browser.token, audience: "web", origin: ticket.origin, host: ticket.host })).toBeUndefined();
   });
 
@@ -195,11 +197,49 @@ describe("AUTH-101 local API", () => {
     expect(JSON.stringify(body)).not.toMatch(/token_hash|csrf_hash|password/i);
   });
 
-  it("bootstraps session CSRF and revokes other sessions after step-up", async () => {
+  it("issues concurrent session CSRF grants without rotating the cookie", async () => {
     const session = await login();
-    const csrf = await fetch(`${baseUrl}/api/v1/auth/session/csrf`, { method: "POST", headers: { origin, "x-ingenium-ui": "dashboard", cookie: session.cookie } });
-    expect(csrf.status).toBe(200);
-    expect((await csrf.json()).data.csrfToken).toHaveLength(43);
+    const bootstrap = () => fetch(`${baseUrl}/api/v1/auth/session/csrf`, {
+      method: "POST",
+      headers: { origin, "x-ingenium-ui": "dashboard", cookie: session.cookie },
+    });
+    const [first, second] = await Promise.all([bootstrap(), bootstrap()]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.headers.get("set-cookie")).toBeNull();
+    expect(second.headers.get("set-cookie")).toBeNull();
+    const firstToken = (await first.json()).data.csrfToken as string;
+    const secondToken = (await second.json()).data.csrfToken as string;
+    expect(firstToken).toHaveLength(43);
+    expect(secondToken).toHaveLength(43);
+    expect(secondToken).not.toBe(firstToken);
+
+    expect((await fetch(`${baseUrl}/api/v1/auth/session`, { headers: { cookie: session.cookie } })).status).toBe(200);
+    for (const csrfToken of [firstToken, secondToken]) {
+      const mutation = await fetch(`${baseUrl}/api/v1/auth/email/resend`, {
+        method: "POST",
+        headers: { origin, cookie: session.cookie, "x-csrf-token": csrfToken },
+      });
+      expect(mutation.status).toBe(200);
+    }
+
+    expect((await fetch(`${baseUrl}/api/v1/auth/session/csrf`, {
+      method: "POST",
+      headers: { origin, "x-ingenium-ui": "dashboard" },
+    })).status).toBe(401);
+    expect((await fetch(`${baseUrl}/api/v1/auth/session/csrf`, {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        "x-ingenium-ui": "dashboard",
+        "x-csrf-token": session.csrfToken,
+        cookie: session.cookie,
+      },
+    })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/v1/auth/session/csrf`, {
+      method: "POST",
+      headers: { origin, cookie: session.cookie, "x-csrf-token": session.csrfToken },
+    })).status).toBe(403);
   });
 
   it("denies undeclared session and scoped-token routes and enforces exact scopes", async () => {

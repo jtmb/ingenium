@@ -9,6 +9,8 @@ const LEARNING_CREDENTIAL_FILE_NAME = ".ingenium-learning-credential";
 const REPOSITORY_SYNC_CREDENTIAL_FILE_NAME = ".ingenium-repository-sync-credential";
 const RUNTIME_CREDENTIAL_FILE_NAME = ".ingenium-runtime-credential";
 const RUNTIME_CAPABILITY_FILE = "/run/ingenium-runtime/capability";
+const MCP_REPORT_CREDENTIAL_DIRECTORY = "/run/ingenium-secrets/api";
+const MCP_REPORT_CREDENTIAL_NAME = /^mcp-report-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_API_URL = "http://localhost:4097/api/v1";
 
 function trustedApiUrl(): string {
@@ -102,9 +104,20 @@ function readTokenFile(reference: string, expectedFileName: string): string | un
   }
 }
 
+function readMcpReportCredential(): string | undefined {
+  const reference = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  if (process.env.INGENIUM_MCP_REPORT_MODE !== "1" || process.env.INGENIUM_MCP_AUDIENCE !== "mcp-report"
+    || !reference || !isAbsolute(reference)) return undefined;
+  const resolved = resolve(reference);
+  if (dirname(resolved) !== MCP_REPORT_CREDENTIAL_DIRECTORY || !MCP_REPORT_CREDENTIAL_NAME.test(basename(resolved))) return undefined;
+  return readPrivateTokenFile(resolved);
+}
+
 /** Resolve a scoped credential first; installation fallback requires an explicit internal launcher. */
 function resolveApiCredential(): { token?: string; installation: boolean } {
   if (process.env.INGENIUM_MCP_CREDENTIAL !== undefined) return { installation: false };
+  const reportToken = readMcpReportCredential();
+  if (reportToken) return { token: reportToken, installation: false };
   const purpose = process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE;
   const audience = process.env.INGENIUM_MCP_AUDIENCE ?? "mcp";
   if ((purpose !== undefined && purpose !== "general" && purpose !== "learning" && purpose !== "repository-sync" && purpose !== "runtime")
@@ -163,6 +176,10 @@ export function apiRequestHeaders(headers?: HeadersInit, audience = process.env.
   requestHeaders.set("X-Ingenium-Audience", audience);
   if (process.env.INGENIUM_WORKSPACE_ID) requestHeaders.set("X-Ingenium-Workspace", process.env.INGENIUM_WORKSPACE_ID);
   if (process.env.INGENIUM_WORKTREE) requestHeaders.set("X-Ingenium-Launcher-Worktree", process.env.INGENIUM_WORKTREE);
+  if (audience === "mcp-report" && process.env.INGENIUM_MCP_REPORT_MODE === "1" && process.env.INGENIUM_PROJECT) {
+    requestHeaders.set("X-Ingenium-MCP-Report", "1");
+    requestHeaders.set("X-Ingenium-Project", process.env.INGENIUM_PROJECT);
+  }
   if (credential.installation) {
     requestHeaders.set("X-Ingenium-Internal-Service", "1");
   }

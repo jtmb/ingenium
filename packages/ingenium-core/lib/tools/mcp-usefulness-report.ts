@@ -171,7 +171,7 @@ function validateVisibilityReason(status: McpToolVisibilityStatus, reason: McpTo
   if (status === "reachable" && reason === null) return;
   if (status === "unreachable" && (reason === "not-listed" || reason === "transport-unavailable" || reason === "list-unavailable" || reason === "TOOL_DISABLED" || reason === "TOOL_STATE_UNAVAILABLE")) return;
   if (status === "unknown" && (reason === "not-requested" || reason === "transport-unavailable" || reason === "list-unavailable" || reason === "TOOL_STATE_UNAVAILABLE")) return;
-  if (status === "not-applicable" && reason === "not-requested") return;
+  if (status === "not-applicable" && (reason === "not-requested" || reason === "TOOL_DISABLED")) return;
   invalid();
 }
 

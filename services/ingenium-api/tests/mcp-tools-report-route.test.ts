@@ -9,6 +9,7 @@ import { mcpToolStates, projects, resetDbForTest } from "ingenium-core";
 import {
   createFixtureMcpUsefulnessCollector,
   type McpUsefulnessConnection,
+  type McpUsefulnessLaunchRequest,
 } from "../lib/mcp-usefulness-collector.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -37,7 +38,7 @@ function fixtureConnection(overrides: Partial<McpUsefulnessConnection> = {}): Mc
   };
 }
 
-async function start(launch: () => McpUsefulnessConnection = fixtureConnection): Promise<void> {
+async function start(launch: (request: McpUsefulnessLaunchRequest) => McpUsefulnessConnection = fixtureConnection): Promise<void> {
   const app = express();
   app.use(express.json());
   app.use(authMiddleware);
@@ -107,9 +108,42 @@ describe("MCP usefulness report route", () => {
     const body = await response.json();
     expect(Object.keys(body)).toEqual(["project", "project_id", "data", "total"]);
     expect(body).toMatchObject({ project: projectAName, project_id: projectAId, total: body.data.tools.length });
-    expect(body.data).toMatchObject({ provenance: "fixture", catalog: { status: "unknown", issues: [] } });
+    expect(body.data).toMatchObject({
+      provenance: "fixture",
+      catalog: {
+        status: "conformant",
+        issues: [],
+        authorizedVisibleExpected: {
+          toolCount: body.data.tools.length,
+          categoryCount: expect.any(Number),
+        },
+      },
+    });
     expect(body.data.tools.every((entry: Record<string, unknown>) => "category" in entry && "enabled" in entry)).toBe(true);
+    expect(tool(body, "ingenium_project_set_global")).toMatchObject({
+      enabled: false,
+      visibility: { status: "not-applicable", reason: "TOOL_DISABLED" },
+    });
     expect(Buffer.byteLength(JSON.stringify(body), "utf8")).toBeLessThanOrEqual(64 * 1024);
+  });
+
+  it("binds collection to the caller's complete authorization-filtered catalog", async () => {
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    let launchRequest: McpUsefulnessLaunchRequest | undefined;
+    await start((request) => {
+      launchRequest = request;
+      return fixtureConnection();
+    });
+
+    const response = await report("");
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(launchRequest).toEqual({
+      project: projectAName,
+      projectId: projectAId,
+      toolNames: body.data.tools.map((tool: { name: string }) => tool.name).sort(),
+    });
   });
 
   it("uses each project's current effective toggle while preserving isolated report observations", async () => {
@@ -121,9 +155,45 @@ describe("MCP usefulness report route", () => {
     const bodyA = await responseA.json();
     const bodyB = await responseB.json();
 
-    expect(tool(bodyA, "ingenium_health_check")).toMatchObject({ enabled: false, visibility: { reason: "TOOL_DISABLED" } });
+    expect(tool(bodyA, "ingenium_health_check")).toMatchObject({
+      enabled: false,
+      visibility: { status: "not-applicable", reason: "TOOL_DISABLED" },
+    });
     expect(tool(bodyB, "ingenium_health_check")).toMatchObject({ enabled: true, visibility: { status: "reachable" } });
     expect(bodyB.project_id).toBe(projectBId);
+  });
+
+  it("reports a reachable representative for every enabled visible MCP category while invoking only health", async () => {
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    await start((request) => fixtureConnection({
+      listTools: async () => ({
+        tools: request.toolNames
+          .filter((name) => name.startsWith("ingenium_") && mcpToolStates.getToolState(request.projectId, name))
+          .map((name) => ({ name: name.slice("ingenium_".length) })),
+      }),
+    }));
+
+    const response = await report("");
+    const body = await response.json();
+    const enabledMcpTools = body.data.tools.filter((entry: { enabled: boolean; boundary: string }) => (
+      entry.enabled && entry.boundary === "mcp-stdio"
+    ));
+    const categories = new Set(enabledMcpTools.map((entry: { category: string }) => entry.category));
+
+    expect(response.status).toBe(200);
+    expect(enabledMcpTools.every((entry: { visibility: { status: string } }) => entry.visibility.status === "reachable")).toBe(true);
+    for (const category of categories) {
+      expect(enabledMcpTools.some((entry: { category: string; visibility: { status: string } }) => (
+        entry.category === category && entry.visibility.status === "reachable"
+      ))).toBe(true);
+    }
+    expect(tool(body, "ingenium_health_check").invocation).toEqual({
+      status: "success",
+      reason: null,
+    });
+    expect(body.data.tools.filter((entry: { name: string; invocation: { status: string } }) => (
+      entry.name !== "ingenium_health_check" && entry.invocation.status === "success"
+    ))).toEqual([]);
   });
 
   it("filters deterministically and returns a valid empty report", async () => {

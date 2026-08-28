@@ -1,11 +1,14 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { mcpUsefulnessEvidence } from "ingenium-core";
-import { timingSafeEqual } from "node:crypto";
 import { dirname, resolve } from "node:path";
-import { config } from "../config/index.js";
 import { isPackagedMcpLauncher, resolvePackagedMcpLauncher } from "./mcp-launcher.js";
-import { readApiTokenFile } from "./middleware/api-token.js";
+import {
+  disposeMcpReportCredential,
+  issueMcpReportCredential,
+  MCP_REPORT_AUDIENCE,
+  MCP_REPORT_WORKTREE,
+} from "./mcp-report-auth.js";
 
 export const MCP_USEFULNESS_TIMEOUT_MS = 5_000;
 export const MCP_USEFULNESS_CACHE_TTL_MS = 30_000;
@@ -48,11 +51,13 @@ export interface McpUsefulnessConnection {
   listTools(): Promise<unknown>;
   callHealthCheck(): Promise<unknown>;
   close(): Promise<void>;
+  dispose?(): void;
 }
 
 export interface McpUsefulnessLaunchRequest {
   project: string;
   projectId: string;
+  toolNames: readonly string[];
 }
 
 export interface McpUsefulnessReportCollector {
@@ -166,25 +171,41 @@ function cacheNumber(value: number | undefined, fallback: number, maximum: numbe
 }
 
 function validRequest(request: McpUsefulnessLaunchRequest): boolean {
-  return SAFE_PROJECT_NAME.test(request.project) && UUID.test(request.projectId);
+  return SAFE_PROJECT_NAME.test(request.project) && UUID.test(request.projectId)
+    && Array.isArray(request.toolNames) && request.toolNames.length <= 1_000
+    && new Set(request.toolNames).size === request.toolNames.length
+    && request.toolNames.every((name) => SAFE_TOOL_NAME.test(name));
 }
 
-function resolveProbeWorktree(launcherPath: string, runtimeToken: string): string {
-  const packageRoot = resolve(dirname(launcherPath), "../../../..");
-  for (const worktree of [packageRoot, "/workspace"]) {
-    const tokenFile = resolve(worktree, ".opencode/.ingenium-api-token");
-    try {
-      const candidate = readApiTokenFile(tokenFile);
-      const expectedBytes = Buffer.from(runtimeToken);
-      const candidateBytes = Buffer.from(candidate);
-      if (expectedBytes.length === candidateBytes.length && timingSafeEqual(expectedBytes, candidateBytes)) {
-        return worktree;
-      }
-    } catch {
-      // Try the next fixed server-owned worktree location.
-    }
-  }
-  throw unavailable();
+const RUNTIME_API_BOUNDARY_URL = "http://127.0.0.1:4097/api/v1";
+
+export function serverOwnedLaunchOptions(
+  transportPath: string,
+  tokenFile: string,
+  request: McpUsefulnessLaunchRequest,
+) {
+  return {
+    command: process.execPath,
+    args: [transportPath],
+    cwd: resolve(dirname(transportPath), "../../../.."),
+    env: {
+      HOME: "/home/ingenium-api",
+      XDG_CONFIG_HOME: "/home/ingenium-api/.config",
+      XDG_DATA_HOME: "/home/ingenium-api/.local/share",
+      PATH: "/usr/local/bin:/usr/bin:/bin",
+      NODE_ENV: "production",
+      INGENIUM_MCP_CREDENTIAL_FILE: tokenFile,
+      INGENIUM_MCP_AUDIENCE: MCP_REPORT_AUDIENCE,
+      INGENIUM_WORKSPACE_ID: request.projectId,
+      INGENIUM_WORKTREE: MCP_REPORT_WORKTREE,
+      INGENIUM_API_URL: RUNTIME_API_BOUNDARY_URL,
+      INGENIUM_API_TIMEOUT: String(MCP_USEFULNESS_TIMEOUT_MS),
+      INGENIUM_MCP_REPORT_MODE: "1",
+      INGENIUM_PROJECT: request.project,
+    },
+    stderr: "pipe" as const,
+    shell: false,
+  };
 }
 
 /**
@@ -195,36 +216,32 @@ function createServerOwnedConnection(request: McpUsefulnessLaunchRequest): McpUs
   if (!validRequest(request)) throw unavailable();
 
   const launcherPath = resolvePackagedMcpLauncher(import.meta.url);
-  if (!isPackagedMcpLauncher(launcherPath)) throw unavailable();
+  const transportPath = resolve(dirname(launcherPath), "mcp-transport.js");
+  if (!isPackagedMcpLauncher(launcherPath) || !isPackagedMcpLauncher(transportPath)) throw unavailable();
 
-  const tokenFile = process.env.INGENIUM_API_TOKEN_FILE;
-  if (!tokenFile) throw unavailable();
-  let worktree: string;
+  let credential: ReturnType<typeof issueMcpReportCredential>;
   try {
-    const runtimeToken = readApiTokenFile(tokenFile);
-    worktree = resolveProbeWorktree(launcherPath, runtimeToken);
+    credential = issueMcpReportCredential({
+      project: request.project,
+      projectId: request.projectId,
+      workspaceId: request.projectId,
+      launcherWorktree: MCP_REPORT_WORKTREE,
+      toolNames: request.toolNames,
+    });
   } catch {
     throw unavailable();
   }
 
-  if (!Number.isSafeInteger(config.port) || config.port < 1 || config.port > 65_535) throw unavailable();
-  const options = {
-    command: process.execPath,
-    args: [launcherPath],
-    cwd: worktree,
-    env: {
-      INGENIUM_API_TOKEN_FILE: ".opencode/.ingenium-api-token",
-      INGENIUM_API_URL: `http://127.0.0.1:${config.port}/api/v1`,
-      INGENIUM_API_TIMEOUT: String(MCP_USEFULNESS_TIMEOUT_MS),
-      INGENIUM_MCP_REPORT_MODE: "1",
-      INGENIUM_PROJECT: request.project,
-    },
-    stderr: "pipe" as const,
-    shell: false,
-  };
-  const transport = new StdioClientTransport(
-    options as ConstructorParameters<typeof StdioClientTransport>[0] & { shell: false },
-  );
+  const options = serverOwnedLaunchOptions(transportPath, credential.tokenFile, request);
+  let transport: StdioClientTransport;
+  try {
+    transport = new StdioClientTransport(
+      options as ConstructorParameters<typeof StdioClientTransport>[0] & { shell: false },
+    );
+  } catch {
+    disposeMcpReportCredential(credential.id);
+    throw unavailable();
+  }
   // Do not buffer, log, or expose child diagnostics.
   (transport as unknown as { stderr?: NodeJS.ReadableStream }).stderr?.resume();
   const client = new Client({ name: "ingenium-mcp-usefulness-report", version: "1.0.0" });
@@ -234,6 +251,7 @@ function createServerOwnedConnection(request: McpUsefulnessLaunchRequest): McpUs
     listTools: () => client.listTools(),
     callHealthCheck: () => client.callTool({ name: "health_check", arguments: {} }),
     close: () => client.close(),
+    dispose: () => disposeMcpReportCredential(credential.id),
   };
 }
 
@@ -260,28 +278,29 @@ class Collector implements McpUsefulnessReportCollector {
     }
     if (!Number.isFinite(now)) return Promise.reject(unavailable());
 
-    const cached = this.cache.get(request.projectId);
+    const requestKey = `${request.projectId}\0${[...request.toolNames].sort().join("\0")}`;
+    const cached = this.cache.get(requestKey);
     if (cached && cached.expiresAt > now) {
       // Map insertion order is a compact LRU queue.
-      this.cache.delete(request.projectId);
-      this.cache.set(request.projectId, cached);
+      this.cache.delete(requestKey);
+      this.cache.set(requestKey, cached);
       return Promise.resolve(cached.observation);
     }
-    if (cached) this.cache.delete(request.projectId);
+    if (cached) this.cache.delete(requestKey);
 
-    const existing = this.inFlight.get(request.projectId);
+    const existing = this.inFlight.get(requestKey);
     if (existing) return existing;
     if (this.active >= this.options.maxConcurrent) return Promise.reject(new McpUsefulnessCollectionError("MCP_REPORT_BUSY"));
 
     this.active += 1;
     const collection = this.collectFresh(request).then((observation) => {
-      if (observation.transport.state === "listed") this.store(request.projectId, observation, now);
+      if (observation.transport.state === "listed") this.store(requestKey, observation, now);
       return observation;
     }).finally(() => {
       this.active -= 1;
-      this.inFlight.delete(request.projectId);
+      this.inFlight.delete(requestKey);
     });
-    this.inFlight.set(request.projectId, collection);
+    this.inFlight.set(requestKey, collection);
     return collection;
   }
 
@@ -337,6 +356,7 @@ class Collector implements McpUsefulnessReportCollector {
         // A child that may still be alive is unavailable, never a partial report.
         failed = true;
       }
+      connection.dispose?.();
     }
     if (failed) throw unavailable();
 
@@ -374,7 +394,7 @@ export function createFixtureMcpUsefulnessCollector(
   });
 }
 
-/** Build the core-owned report without claiming source or registration conformance. */
+/** Build a report over the complete authorization-filtered catalog and effective state. */
 export function buildMcpUsefulnessReport(
   observation: McpUsefulnessObservation,
   tools: readonly McpUsefulnessCatalogEntry[],
@@ -394,8 +414,7 @@ export function buildMcpUsefulnessReport(
       observedAt: observation.observedAt,
       freshnessDurationMs,
       catalog: tools.map(({ enabled: _enabled, ...tool }) => tool),
-      // This transport probe cannot certify source registration or catalog parity.
-      conformance: { status: "unknown", issues: [] },
+      conformance: { status: "known", issues: [] },
       effectiveState: {
         status: "known",
         states: tools.map(({ name, enabled }) => ({ toolName: name, enabled })),
@@ -411,7 +430,12 @@ export function buildMcpUsefulnessReport(
 export function enrichMcpUsefulnessReport(
   report: McpToolUsefulnessReport,
   tools: readonly McpUsefulnessCatalogEntry[],
-): McpToolUsefulnessReport & { tools: Array<McpToolUsefulnessReport["tools"][number] & { category: string; enabled: boolean }> } {
+): McpToolUsefulnessReport & {
+  catalog: McpToolUsefulnessReport["catalog"] & {
+    authorizedVisibleExpected: { toolCount: number; categoryCount: number };
+  };
+  tools: Array<McpToolUsefulnessReport["tools"][number] & { category: string; enabled: boolean }>;
+} {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   if (byName.size !== tools.length || report.tools.length !== byName.size) throw unavailable();
 
@@ -420,5 +444,15 @@ export function enrichMcpUsefulnessReport(
     if (!current) throw unavailable();
     return { ...tool, category: current.category, enabled: current.enabled };
   });
-  return { ...report, tools: enriched };
+  return {
+    ...report,
+    catalog: {
+      ...report.catalog,
+      authorizedVisibleExpected: {
+        toolCount: tools.length,
+        categoryCount: new Set(tools.map(({ category }) => category)).size,
+      },
+    },
+    tools: enriched,
+  };
 }

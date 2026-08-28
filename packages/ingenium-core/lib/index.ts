@@ -56,6 +56,7 @@ export * as mcpUsefulnessReport from "./tools/mcp-usefulness-report.js";
 export * as emailCache from "./tools/email-cache.js";
 export * as emailSuggestionQueue from "./tools/email-suggestion-queue.js";
 export * as emailWatcherMarkers from "./tools/email-watcher-markers.js";
+export * as emailKeyTransition from "./tools/email-key-transition.js";
 export * as usage from "./tools/usage.js";
 export * as docs from "./tools/docs.js";
 export * as repositoryDocs from "./tools/repository-docs.js";

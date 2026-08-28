@@ -8,6 +8,14 @@ import {
 } from "../application-health.js";
 import { runtimeManagerHealth } from "../runtime-manager-client.js";
 import { isControlPlaneMode } from "../runtime-mode.js";
+import {
+  GET_ALL_PROCESS_INFO_XML,
+  escapeSupervisorXml,
+  parseSupervisorProcessInfo,
+  parseSupervisorProcesses,
+  parseSupervisorString,
+  supervisorRpc,
+} from "../supervisor-client.js";
 
 /** Handles /api/v1/services — supervisord process status, logs, and application health checks (email-client, synthesis-engine). */
 export const servicesRouter = Router();
@@ -21,6 +29,7 @@ interface ServiceInfo {
   restartCount: number;
   port: number;
   description: string;
+  required: boolean;
   pid?: number;
   exitstatus?: number;
   spawnerr?: string;
@@ -36,13 +45,13 @@ type AppInfo = ApplicationHealth;
 
 type OverallHealth = "healthy" | "degraded" | "down";
 
-/** Supervisord XML-RPC endpoint — localhost:9001, container-internal only. */
-const SUPERVISOR_RPC = "http://127.0.0.1:9001/RPC2";
-
 const PORT_MAP: Record<string, number> = {
   "restore-maintenance": 0,
-  "ingenium-api": 4097,
-  "ingenium-dashboard": 3000,
+  "restore-handoff": 0,
+  "ingenium-api": 4096,
+  "ingenium-api-boundary": 4097,
+  "ingenium-dashboard": 3001,
+  "ingenium-gateway": 3000,
   "opencode-web": 4098,
   "ttyd-opencode": 4099,
   vscode: 4100,
@@ -50,9 +59,13 @@ const PORT_MAP: Record<string, number> = {
 
 const DESCRIPTION_MAP: Record<string, string> = {
   "restore-maintenance": "One-shot restore maintenance executor",
-  "ingenium-api": "REST API Gateway (sole DB authority)",
+  "restore-handoff": "Fixed restore maintenance handoff",
+  "ingenium-api": "Private REST API (sole DB authority)",
+  "ingenium-api-boundary": "Authenticated host API boundary",
   "ingenium-dashboard": "Next.js Dashboard UI",
+  "ingenium-gateway": "Browser gateway",
   "opencode-web": "OpenCode Web Server",
+  "opencode-internal-proxy": "OpenCode internal auth proxy",
   "ttyd-opencode": "OpenCode CLI Terminal (ttyd)",
   vscode: "VS Code Server (code-server)",
 };
@@ -72,26 +85,24 @@ const STATE_MAP: Record<string, ServiceInfo["state"]> = {
   STOPPED: "stopped",
 };
 
-const GET_ALL_PROCESS_INFO_XML = "<?xml version=\"1.0\"?><methodCall><methodName>supervisor.getAllProcessInfo</methodName></methodCall>";
+const CONTROL_PLANE_REQUIRED_PROCESSES = [
+  "restore-handoff",
+  "ingenium-api",
+  "ingenium-api-boundary",
+  "ingenium-dashboard",
+  "ingenium-gateway",
+] as const;
 
-function escapeXml(value: string): string {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "'": "&apos;",
-    "\"": "&quot;",
-  })[character]!);
-}
+const COMPATIBILITY_REQUIRED_PROCESSES = [
+  ...CONTROL_PLANE_REQUIRED_PROCESSES,
+  "opencode-web",
+  "opencode-internal-proxy",
+  "ttyd-opencode",
+  "vscode",
+] as const;
 
-function unescapeXml(value: string): string {
-  return value.replace(/&(amp|lt|gt|apos|quot);/g, (_match, entity: string) => ({
-    amp: "&",
-    lt: "<",
-    gt: ">",
-    apos: "'",
-    quot: "\"",
-  })[entity]!);
+function requiredSupervisorProcesses(): readonly string[] {
+  return isControlPlaneMode() ? CONTROL_PLANE_REQUIRED_PROCESSES : COMPATIBILITY_REQUIRED_PROCESSES;
 }
 
 function sendServiceError(
@@ -116,127 +127,12 @@ function resolveGlobalProjectId(): string {
   }
 }
 
-/**
- * Extract a member value from a supervisord XML-RPC struct snippet.
- * Uses regex to avoid heavyweight XML parser dependency.
- * Handles both `<string>` and `<i4>` value types.
- */
-function extractMember(struct: string, memberName: string): string {
-  const regex = new RegExp(
-    `<member>\\s*<name>${memberName}</name>\\s*<value>\\s*(<string>(.*?)</string>|<int>(.*?)</int>|<i4>(.*?)</i4>)\\s*</value>\\s*</member>`,
-    "s"
-  );
-  const match = struct.match(regex);
-  return unescapeXml(match?.[2] ?? match?.[3] ?? match?.[4] ?? "");
-}
-
-/**
- * Parse supervisord XML-RPC getAllProcessInfo response into structured records.
- * Uses regex to avoid heavyweight XML parser dependencies.
- */
-function parseSupervisorResponse(
-  xml: string
-): Array<{
-  name: string;
-  statename: string;
-  start: number;
-  spawnerr: string;
-  pid: number;
-  exitstatus: number;
-  stop: number;
-}> {
-  const results: Array<{
-    name: string;
-    statename: string;
-    start: number;
-    spawnerr: string;
-    pid: number;
-    exitstatus: number;
-    stop: number;
-  }> = [];
-
-  const structRegex = /<struct>(.*?)<\/struct>/gs;
-  let match: RegExpExecArray | null;
-  while ((match = structRegex.exec(xml)) !== null) {
-    const struct = match[1];
-    if (!struct) continue;
-    const name = extractMember(struct, "name");
-    const statename = extractMember(struct, "statename");
-    const startStr = extractMember(struct, "start");
-    const spawnerr = extractMember(struct, "spawnerr") || "";
-    const pidStr = extractMember(struct, "pid");
-    const exitstatusStr = extractMember(struct, "exitstatus");
-    const stopStr = extractMember(struct, "stop");
-    results.push({
-      name,
-      statename,
-      start: parseInt(startStr, 10) || 0,
-      spawnerr,
-      pid: parseInt(pidStr, 10) || 0,
-      exitstatus: parseInt(exitstatusStr, 10) || 0,
-      stop: parseInt(stopStr, 10) || 0,
-    });
-  }
-
-  return results;
-}
-
-/**
- * Send an XML-RPC request to supervisord and return the response body text.
- * Throws on network errors, non-OK responses, or timeout.
- */
-async function supervisorRpc(xmlBody: string): Promise<string> {
-  const response = await fetch(SUPERVISOR_RPC, {
-    method: "POST",
-    headers: { "Content-Type": "text/xml" },
-    body: xmlBody,
-    signal: AbortSignal.timeout(5000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return response.text();
-}
-
-/**
- * Parse a supervisord getProcessInfo XML-RPC response (single struct).
- * Returns a record with all process fields extracted.
- */
-function parseProcessInfo(xml: string): Record<string, string> {
-  const structMatch = xml.match(/<struct>([\s\S]*?)<\/struct>/);
-  if (!structMatch || !structMatch[1]) return {};
-
-  const struct = structMatch[1];
-  const fields = [
-    "name", "group", "start", "stop", "now", "statename",
-    "spawnerr", "exitstatus", "logfile", "stdout_logfile",
-    "stderr_logfile", "pid", "description",
-  ];
-
-  const result: Record<string, string> = {};
-  for (const field of fields) {
-    result[field] = extractMember(struct, field);
-  }
-  return result;
-}
-
-/**
- * Parse a supervisord readProcessStderrLog XML-RPC response.
- * Returns the log text string.
- */
-function parseReadLog(xml: string): string {
-  const match = xml.match(/<string>(.*?)<\/string>/s);
-  if (!match) return "";
-  return unescapeXml(match[1] ?? "");
-}
 
 async function resolveSupervisorProcessName(name: string): Promise<string | undefined> {
   const processName = Object.entries(DISPLAY_NAME_MAP).find(
     ([, display]) => display === name,
   )?.[0] ?? name;
-  const processes = parseSupervisorResponse(await supervisorRpc(GET_ALL_PROCESS_INFO_XML));
+  const processes = parseSupervisorProcesses(await supervisorRpc(GET_ALL_PROCESS_INFO_XML));
   return processes.some((process) => process.name === processName) ? processName : undefined;
 }
 
@@ -247,7 +143,7 @@ function buildServiceDetail(info: Record<string, string>): ServiceDetail {
   const pid = parseInt(info["pid"] || "0", 10) || 0;
   const exitstatus = parseInt(info["exitstatus"] || "0", 10) || 0;
   const stop = parseInt(info["stop"] || "0", 10) || 0;
-  const now = Math.floor(Date.now() / 1000);
+  const now = parseInt(info["now"] || "0", 10) || Math.floor(Date.now() / 1000);
   const uptime = start > 0 && statename === "RUNNING" ? now - start : 0;
 
   return {
@@ -258,6 +154,7 @@ function buildServiceDetail(info: Record<string, string>): ServiceDetail {
     restartCount: 0,
     port: PORT_MAP[name] ?? 0,
     description: DESCRIPTION_MAP[name] ?? info["description"] ?? name,
+    required: requiredSupervisorProcesses().includes(name),
     pid: pid || undefined,
     exitstatus: statename === "EXITED" ? (exitstatus || undefined) : undefined,
     spawnerr: info["spawnerr"] || undefined,
@@ -352,23 +249,40 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
   try {
     const xml = await supervisorRpc(GET_ALL_PROCESS_INFO_XML);
 
-    const processes = parseSupervisorResponse(xml);
+    const processes = parseSupervisorProcesses(xml);
+    const requiredProcessNames = requiredSupervisorProcesses();
 
-    const now = Math.floor(Date.now() / 1000);
     const services: ServiceInfo[] = processes.map((proc) => ({
       name: DISPLAY_NAME_MAP[proc.name] ?? proc.name,
       state: STATE_MAP[proc.statename] ?? "error",
-      uptime: proc.start > 0 && STATE_MAP[proc.statename] === "running" ? now - proc.start : 0,
+      uptime: proc.start > 0 && STATE_MAP[proc.statename] === "running"
+        ? Math.max(0, (proc.now || Math.floor(Date.now() / 1000)) - proc.start)
+        : 0,
       restartCount: 0,
       port: PORT_MAP[proc.name] ?? 0,
       description: DESCRIPTION_MAP[proc.name] ?? proc.name,
+      required: requiredProcessNames.includes(proc.name),
       pid: proc.pid || undefined,
       exitstatus: proc.statename === "EXITED" ? (proc.exitstatus || undefined) : undefined,
       spawnerr: proc.spawnerr || undefined,
       stop: proc.stop || undefined,
     }));
 
-    const requiredServices = services.filter((service) => service.name !== "restore-maintenance");
+    const reportedProcessNames = new Set(processes.map((process) => process.name));
+    for (const name of requiredProcessNames) {
+      if (reportedProcessNames.has(name)) continue;
+      services.push({
+        name: DISPLAY_NAME_MAP[name] ?? name,
+        state: "stopped",
+        uptime: 0,
+        restartCount: 0,
+        port: PORT_MAP[name] ?? 0,
+        description: DESCRIPTION_MAP[name] ?? name,
+        required: true,
+      });
+    }
+
+    const requiredServices = services.filter((service) => service.required);
     const runningCount = requiredServices.filter((s) => s.state === "running").length;
     const totalCount = requiredServices.length;
     const maintenance = services.find((service) => service.name === "restore-maintenance");
@@ -395,16 +309,16 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
     }
 
     res.json({ data: { services, applications, overall } });
-  } catch (err: any) {
-    logger.error("services", `Supervisord RPC failed: ${err.message}`, {
-      name: err.name,
+  } catch (error) {
+    logger.error("services", "Supervisor status is unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
     });
     res.json({
       data: {
         services: [],
         applications,
         overall: "down" as OverallHealth,
-        error: err.message,
+        error: "Supervisor status unavailable",
       },
     });
   }
@@ -526,10 +440,10 @@ servicesRouter.get("/:name", async (req, res): Promise<void> => {
       return;
     }
     const xml = await supervisorRpc(
-      `<?xml version="1.0"?><methodCall><methodName>supervisor.getProcessInfo</methodName><params><param><value><string>${escapeXml(processName)}</string></value></param></params></methodCall>`,
+      `<?xml version="1.0"?><methodCall><methodName>supervisor.getProcessInfo</methodName><params><param><value><string>${escapeSupervisorXml(processName)}</string></value></param></params></methodCall>`,
     );
 
-    const info = parseProcessInfo(xml);
+    const info = parseSupervisorProcessInfo(xml);
 
     if (info["name"] !== processName) {
       sendServiceError(res, 404, "PROCESS_NOT_FOUND", "Process not found");
@@ -539,8 +453,10 @@ servicesRouter.get("/:name", async (req, res): Promise<void> => {
     const detail = buildServiceDetail(info);
 
     res.json({ data: detail });
-  } catch (err: any) {
-    logger.error("services", `getProcessInfo failed for "${name}": ${err.message}`);
+  } catch (error) {
+    logger.error("services", "Supervisor process detail is unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     sendServiceError(res, 502, "SUPERVISOR_UNAVAILABLE", "Unable to fetch process details");
   }
 });
@@ -562,10 +478,10 @@ servicesRouter.get("/:name/logs", async (req, res): Promise<void> => {
       ? "supervisor.readProcessStderrLog"
       : "supervisor.readProcessStdoutLog";
     const xml = await supervisorRpc(
-      `<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params><param><value><string>${escapeXml(processName)}</string></value></param><param><value><i4>${offset}</i4></value></param><param><value><i4>${limit}</i4></value></param></params></methodCall>`,
+      `<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params><param><value><string>${escapeSupervisorXml(processName)}</string></value></param><param><value><i4>${offset}</i4></value></param><param><value><i4>${limit}</i4></value></param></params></methodCall>`,
     );
 
-    const logText = parseReadLog(xml);
+    const logText = parseSupervisorString(xml);
 
     res.json({
       data: {
@@ -575,8 +491,10 @@ servicesRouter.get("/:name/logs", async (req, res): Promise<void> => {
         more: logText.length > 0,
       },
     });
-  } catch (err: any) {
-    logger.error("services", `readProcessStderrLog failed for "${name}": ${err.message}`);
+  } catch (error) {
+    logger.error("services", "Supervisor process logs are unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     sendServiceError(res, 502, "SUPERVISOR_UNAVAILABLE", "Unable to fetch process logs");
   }
 });

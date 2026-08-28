@@ -1,15 +1,11 @@
 /**
- * Authenticated API readiness probe. Reading the credential in Node keeps the
- * bearer value out of curl/process arguments and constrains it to the API port.
+ * Credential-free liveness probe. This endpoint returns only service health;
+ * management routes remain authenticated.
  */
-import { loadApiToken } from "/app/services/ingenium-api/dist/lib/middleware/api-token.js";
-
 const probeUrl = process.env.INGENIUM_API_PROBE_URL ?? "http://127.0.0.1:4097/api/v1/health";
 
 try {
-  const token = loadApiToken(process.env);
   const response = await fetch(probeUrl, {
-    headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) {

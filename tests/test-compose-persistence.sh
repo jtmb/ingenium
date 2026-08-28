@@ -13,8 +13,11 @@ RUN_ID="$(node -e 'process.stdout.write(require("node:crypto").randomUUID().repl
 PROJECT="ingenium-persistence-${RUN_ID}"
 SENTINEL="compose-persistence:${PROJECT}"
 TEST_API_TOKEN="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+TEST_API_TOKEN_FILE="$RUN_ROOT/installation-api.token"
 TEST_EMAIL_ENCRYPTION_KEY="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-TEST_OPENCODE_PASSWORD="compose-persistence-test-password"
+TEST_OPENCODE_PASSWORD="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+TEST_EMAIL_ENCRYPTION_KEY_FILE="$RUN_ROOT/email-encryption.key"
+TEST_OPENCODE_PASSWORD_FILE="$RUN_ROOT/opencode-server.password"
 ownership_verified=0
 resources_created=0
 
@@ -24,7 +27,7 @@ fail() {
 }
 
 compose_command() (
-  unset COMPOSE_FILE INGENIUM_API_TOKEN_FILE
+  unset COMPOSE_FILE
   if [[ "${1:-}" == "--environment-project" ]]; then
     export COMPOSE_PROJECT_NAME="$2"
     shift 2
@@ -34,10 +37,11 @@ compose_command() (
   export HOME="$RUN_HOME"
   export IMAGE_REVISION="$REVISION"
   export IMAGE_SOURCE="https://github.com/jtmb/ingenium"
-  export OPENCODE_SERVER_PASSWORD="$TEST_OPENCODE_PASSWORD"
-  export INGENIUM_API_TOKEN="$TEST_API_TOKEN"
-  export INGENIUM_EMAIL_ENCRYPTION_KEY="$TEST_EMAIL_ENCRYPTION_KEY"
+  export OPENCODE_SERVER_PASSWORD_FILE="$TEST_OPENCODE_PASSWORD_FILE"
+  export INGENIUM_API_TOKEN_FILE="$TEST_API_TOKEN_FILE"
+  export INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$TEST_EMAIL_ENCRYPTION_KEY_FILE"
   export INGENIUM_RUNTIME_ROOT_DOMAIN="runtime.example.test"
+  export INGENIUM_RUNTIME_SCHEME="https"
   export DASHBOARD_ALLOWED_ORIGINS="https://dashboard.example.test"
   export GOOGLE_OAUTH_CLIENT_ID=""
   export GOOGLE_OAUTH_CLIENT_SECRET=""
@@ -52,6 +56,11 @@ compose_command() (
 compose() {
   compose_command -p "$PROJECT" --profile compatibility --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" "$@"
 }
+
+printf '%s\n' "$TEST_OPENCODE_PASSWORD" > "$TEST_OPENCODE_PASSWORD_FILE"
+printf '%s\n' "$TEST_EMAIL_ENCRYPTION_KEY" > "$TEST_EMAIL_ENCRYPTION_KEY_FILE"
+printf '%s\n' "$TEST_API_TOKEN" > "$TEST_API_TOKEN_FILE"
+chmod 0600 "$TEST_API_TOKEN_FILE" "$TEST_OPENCODE_PASSWORD_FILE" "$TEST_EMAIL_ENCRYPTION_KEY_FILE"
 
 cleanup() {
   local status=$?
@@ -98,8 +107,8 @@ assert_default_compose_contract() {
     if (config.name !== "ingenium") throw new Error(`expected canonical project name ingenium, got ${String(config.name)}`);
     const expected = new Map([
       ["/app/.ingenium", "ingenium-data"],
-      ["/home/appuser/.config", "opencode-config"],
-      ["/home/appuser/.local", "opencode-data"],
+      ["/home/ingenium-opencode/.config", "opencode-config"],
+      ["/home/ingenium-opencode/.local", "opencode-data"],
     ]);
     const mounts = config.services?.ingenium?.volumes ?? [];
     for (const [target, source] of expected) {
@@ -195,8 +204,8 @@ write_sentinels() {
       set -eu
       for sentinel_path in \
         /app/.ingenium/.compose-persistence-sentinel \
-        /home/appuser/.config/opencode/.compose-persistence-sentinel \
-        /home/appuser/.local/share/opencode/.compose-persistence-sentinel; do
+        /home/ingenium-opencode/.config/opencode/.compose-persistence-sentinel \
+        /home/ingenium-opencode/.local/share/opencode/.compose-persistence-sentinel; do
         printf "%s\n" "$PERSISTENCE_SENTINEL" > "$sentinel_path"
       done
     '
@@ -209,8 +218,8 @@ verify_sentinels() {
       set -eu
       for sentinel_path in \
         /app/.ingenium/.compose-persistence-sentinel \
-        /home/appuser/.config/opencode/.compose-persistence-sentinel \
-        /home/appuser/.local/share/opencode/.compose-persistence-sentinel; do
+        /home/ingenium-opencode/.config/opencode/.compose-persistence-sentinel \
+        /home/ingenium-opencode/.local/share/opencode/.compose-persistence-sentinel; do
         [ -f "$sentinel_path" ] || { printf "missing sentinel: %s\n" "$sentinel_path" >&2; exit 1; }
         [ "$(cat "$sentinel_path")" = "$PERSISTENCE_SENTINEL" ] \
           || { printf "changed sentinel: %s\n" "$sentinel_path" >&2; exit 1; }

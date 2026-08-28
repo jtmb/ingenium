@@ -1,30 +1,37 @@
 #!/bin/sh
-# code-server shares appuser and /workspace with the local container session.
+# Compatibility uses its dedicated identity; isolated user runtimes retain their
+# container-wide appuser identity and private tmpfs home.
 # This auth-none, full-terminal administrator-grade profile is unsupported for LAN, remote, shared, or untrusted users.
 set -eu
 
-# Supervisor starts this service as appuser. Re-exec before any filesystem or
+# Re-exec before any filesystem or
 # code-server operation so inherited deployment secrets never reach code-server.
 if [ "${1:-}" != "--clean-env" ]; then
   if [ "$#" -ne 0 ]; then
     echo "ERROR: start-vscode does not accept arguments"
     exit 1
   fi
+  deployment_mode="${INGENIUM_DEPLOYMENT_MODE:?INGENIUM_DEPLOYMENT_MODE is required}"
+  if [ "$deployment_mode" = "user-runtime" ]; then
+    service_home="/home/appuser"
+  else
+    service_home="/home/ingenium-vscode"
+  fi
   exec env -i \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    HOME="/home/appuser" \
-    XDG_CONFIG_HOME="/home/appuser/.config" \
-    XDG_DATA_HOME="/home/appuser/.local/share" \
+    HOME="$service_home" \
+    XDG_CONFIG_HOME="$service_home/.config" \
+    XDG_DATA_HOME="$service_home/.local/share" \
+    INGENIUM_DEPLOYMENT_MODE="$deployment_mode" \
     INGENIUM_RUNTIME_BIND_HOST="${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}" \
     /bin/sh "$0" --clean-env
 fi
 
-if [ "$(id -un)" != "appuser" ]; then
-  echo "ERROR: code-server must run as appuser"
-  exit 1
-fi
-
-VSCODE_DATA_DIR="/home/appuser/vscode-data"
+case "$INGENIUM_DEPLOYMENT_MODE:$(id -un)" in
+  user-runtime:appuser) VSCODE_DATA_DIR="/home/appuser/vscode-data" ;;
+  compatibility:ingenium-vscode) VSCODE_DATA_DIR="/home/ingenium-vscode/vscode-data" ;;
+  *) echo "ERROR: code-server process identity is invalid"; exit 1 ;;
+esac
 VSCODE_EXTENSION_FILE="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"
 VSCODE_EXTENSION_ID="sst-dev.opencode@0.0.13"
 VSCODE_EXTENSION_SHA256="e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4"

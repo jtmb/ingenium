@@ -49,8 +49,16 @@ cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
 printf '%s\n' 'unowned source profile' > "$SOURCE_AGENTS_DIR/research/unowned.md"
 printf '%s\n' 'operator-managed global profile' > "$GLOBAL_AGENTS_DIR/operator-profile.md"
 chmod 0600 "$GLOBAL_AGENTS_DIR/operator-profile.md"
+cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
+  "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md"
+chmod 0600 "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md"
+global_broker_metadata_before="$(stat -c '%i:%Y:%a:%u:%g' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md")"
 printf '%s\n' 'workspace compatibility profile' > "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
 chmod 0600 "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
+  "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md"
+chmod 0644 "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md"
+workspace_broker_metadata_before="$(stat -c '%i:%Y:%a:%u:%g' "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md")"
 printf '%s\n' 'outside profile must remain unchanged' > "$OUTSIDE_PROFILE"
 chmod 0600 "$OUTSIDE_PROFILE"
 
@@ -65,7 +73,9 @@ cmp -s "$SOURCE_AGENTS_DIR/execution/ingenium-llm-broker.md" "$GLOBAL_AGENTS_DIR
   || fail 'operator-managed global profile content was modified'
 require_mode "$GLOBAL_AGENTS_DIR/operator-profile.md" 600
 require_mode "$GLOBAL_AGENTS_DIR/ingenium-chat.md" 644
-require_mode "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 644
+require_mode "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 600
+[[ "$global_broker_metadata_before" == "$(stat -c '%i:%Y:%a:%u:%g' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md")" ]] \
+  || fail 'unprivileged projection touched the reserved broker profile'
 require_link_count "$GLOBAL_AGENTS_DIR/ingenium-chat.md" 1
 require_link_count "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 1
 
@@ -195,6 +205,9 @@ sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"
 [[ "$(<"$WORKSPACE_AGENTS_DIR/workspace-profile.md")" == 'workspace compatibility profile' ]] \
   || fail 'workspace profile content changed during normalization'
 require_mode "$WORKSPACE_AGENTS_DIR/workspace-profile.md" 644
+require_mode "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md" 644
+[[ "$workspace_broker_metadata_before" == "$(stat -c '%i:%Y:%a:%u:%g' "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md")" ]] \
+  || fail 'unprivileged normalization touched the reserved broker profile'
 rm "$OUTSIDE_HARDLINK_PROFILE"
 cp "$WORKSPACE_AGENTS_DIR/workspace-profile.md" "$OUTSIDE_HARDLINK_PROFILE"
 chmod 0600 "$OUTSIDE_HARDLINK_PROFILE"

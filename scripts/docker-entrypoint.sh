@@ -9,6 +9,146 @@
 # - Supervisord is exec'd so it receives container lifecycle signals as PID 1
 set -eu
 
+secure_persistent_path() {
+  node - "$@" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [operation, target, uidText, gidText, directoryMode, fileMode = "-", excludedName = ""] = process.argv.slice(2);
+const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
+const fileFlags = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+const uid = uidText === "-" ? undefined : Number.parseInt(uidText, 10);
+const gid = gidText === "-" ? undefined : Number.parseInt(gidText, 10);
+
+function fail() {
+  process.stderr.write(`ERROR: persistent path containment validation failed: ${target}\n`);
+  process.exit(1);
+}
+
+function parseMode(value, metadata) {
+  if (value === "-") return undefined;
+  if (value === "user-only") return metadata.mode & 0o700;
+  const mode = Number.parseInt(value, 8);
+  if (!Number.isInteger(mode) || mode < 0 || mode > 0o7777) fail();
+  return mode;
+}
+
+function sameObject(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function openDirectory(parentDescriptor, name, create) {
+  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
+  let metadata;
+  try {
+    metadata = fs.lstatSync(childPath);
+  } catch (error) {
+    if (!create || error.code !== "ENOENT") fail();
+    try {
+      fs.mkdirSync(childPath, { mode: 0o700 });
+      metadata = fs.lstatSync(childPath);
+    } catch {
+      fail();
+    }
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) fail();
+  let descriptor;
+  try {
+    descriptor = fs.openSync(childPath, directoryFlags);
+  } catch {
+    fail();
+  }
+  const opened = fs.fstatSync(descriptor);
+  if (!opened.isDirectory() || !sameObject(metadata, opened)) fail();
+  return descriptor;
+}
+
+function openRegularFile(parentDescriptor, name) {
+  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
+  let metadata;
+  let descriptor;
+  try {
+    metadata = fs.lstatSync(childPath);
+    if (metadata.isSymbolicLink() || !metadata.isFile()) fail();
+    descriptor = fs.openSync(childPath, fileFlags);
+  } catch {
+    fail();
+  }
+  const opened = fs.fstatSync(descriptor);
+  if (!opened.isFile() || !sameObject(metadata, opened)) fail();
+  return descriptor;
+}
+
+function verifyStillLinked(parentDescriptor, name, descriptor) {
+  try {
+    const linked = fs.lstatSync(`/proc/self/fd/${parentDescriptor}/${name}`);
+    if (!sameObject(linked, fs.fstatSync(descriptor))) fail();
+  } catch {
+    fail();
+  }
+}
+
+function applyMetadata(descriptor, modeSpec) {
+  if (uid !== undefined || gid !== undefined) {
+    const metadata = fs.fstatSync(descriptor);
+    fs.fchownSync(descriptor, uid ?? metadata.uid, gid ?? metadata.gid);
+  }
+  const mode = parseMode(modeSpec, fs.fstatSync(descriptor));
+  if (mode !== undefined) fs.fchmodSync(descriptor, mode);
+  const metadata = fs.fstatSync(descriptor);
+  if ((uid !== undefined && metadata.uid !== uid) || (gid !== undefined && metadata.gid !== gid)
+    || (mode !== undefined && (metadata.mode & 0o7777) !== mode)) fail();
+}
+
+function walkTree(descriptor, rootDevice, relative = "") {
+  const directoryPath = `/proc/self/fd/${descriptor}`;
+  for (const name of fs.readdirSync(directoryPath)) {
+    if (!relative && name === excludedName) continue;
+    const childPath = `${directoryPath}/${name}`;
+    const metadata = fs.lstatSync(childPath);
+    if (metadata.isSymbolicLink() || metadata.dev !== rootDevice) fail();
+    if (metadata.isDirectory()) {
+      const child = openDirectory(descriptor, name, false);
+      walkTree(child, rootDevice, relative ? `${relative}/${name}` : name);
+      applyMetadata(child, directoryMode);
+      verifyStillLinked(descriptor, name, child);
+      fs.closeSync(child);
+    } else if (metadata.isFile()) {
+      const child = openRegularFile(descriptor, name);
+      applyMetadata(child, fileMode);
+      verifyStillLinked(descriptor, name, child);
+      fs.closeSync(child);
+    } else {
+      fail();
+    }
+  }
+}
+
+if (process.platform !== "linux" || !fs.constants.O_NOFOLLOW || !fs.constants.O_DIRECTORY
+  || !path.isAbsolute(target) || path.resolve(target) !== target || target === "/"
+  || !["directory", "file", "tree"].includes(operation)
+  || (uid !== undefined && !Number.isInteger(uid)) || (gid !== undefined && !Number.isInteger(gid))) fail();
+
+const components = target.split("/").filter(Boolean);
+const finalName = components.pop();
+let parent = fs.openSync("/", directoryFlags);
+for (const component of components) {
+  const child = openDirectory(parent, component, false);
+  fs.closeSync(parent);
+  parent = child;
+}
+
+const targetDescriptor = operation === "file"
+  ? openRegularFile(parent, finalName)
+  : openDirectory(parent, finalName, operation === "directory");
+if (operation === "tree") walkTree(targetDescriptor, fs.fstatSync(targetDescriptor).dev);
+applyMetadata(targetDescriptor, directoryMode);
+verifyStillLinked(parent, finalName, targetDescriptor);
+fs.closeSync(targetDescriptor);
+fs.closeSync(parent);
+NODE
+}
+
 DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}"
 case "$DEPLOYMENT_MODE" in
   compatibility|control-plane) ;;
@@ -22,6 +162,8 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: vault job secret root provisioning requires root"
   exit 1
 fi
+
+node /app/scripts/validate-root-entrypoint-chain.mjs
 
 TRUSTED_ARTIFACT_UID_FILE="/usr/local/share/ingenium/appuser-uid"
 TRUSTED_ARTIFACT_GID_FILE="/usr/local/share/ingenium/appuser-gid"
@@ -41,7 +183,23 @@ if [ "$TRUSTED_ARTIFACT_UID" != "$(id -u appuser)" ] || [ "$TRUSTED_ARTIFACT_GID
 fi
 export INGENIUM_TRUSTED_ARTIFACT_UID="$TRUSTED_ARTIFACT_UID"
 export INGENIUM_TRUSTED_ARTIFACT_GID="$TRUSTED_ARTIFACT_GID"
-/app/scripts/validate-vault-job-secret-root.sh provision
+/app/scripts/validate-vault-job-secret-root.sh provision /dev/shm/ingenium-job-secrets "$(id -u ingenium-api)" "$(id -g ingenium-api)"
+
+API_UID="$(cat /usr/local/share/ingenium/api-uid)"
+API_GID="$(cat /usr/local/share/ingenium/api-gid)"
+DASHBOARD_UID="$(cat /usr/local/share/ingenium/dashboard-uid)"
+DASHBOARD_GID="$(cat /usr/local/share/ingenium/dashboard-gid)"
+OPENCODE_UID="$(cat /usr/local/share/ingenium/opencode-uid)"
+OPENCODE_GID="$(cat /usr/local/share/ingenium/opencode-gid)"
+RESTORE_UID="$(cat /usr/local/share/ingenium/restore-uid)"
+RESTORE_GID="$(cat /usr/local/share/ingenium/restore-gid)"
+RESTORE_DATA_GID="$(cat /usr/local/share/ingenium/restore-data-gid)"
+OPENCODE_CONFIG_GID="$(getent group ingenium-opencode-config | cut -d: -f3)"
+VSCODE_UID="$(id -u ingenium-vscode)"
+VSCODE_GID="$(id -g ingenium-vscode)"
+for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$VSCODE_UID:$VSCODE_GID"; do
+  case "$identity" in *[!0-9:]*|:*|*:) echo "ERROR: immutable service identity is invalid"; exit 1 ;; esac
+done
 
 # RESTORE-100: keep the backup signing key beside persistent application data,
 # never inside the backup tree. The path is deliberately one direct child so
@@ -59,15 +217,11 @@ if [ "$BACKUP_SIGNING_KEY_PARENT" != "/app/.ingenium" ] || [ "$BACKUP_SIGNING_KE
   echo "ERROR: backup signing key must be outside backups and directly below /app/.ingenium"
   exit 1
 fi
-if [ -L /app/.ingenium ]; then
-  echo "ERROR: backup signing-key parent must not be a symbolic link"
-  exit 1
-fi
-mkdir -p /app/.ingenium
-if [ ! -d /app/.ingenium ] || [ -L /app/.ingenium ]; then
-  echo "ERROR: backup signing-key parent must be a real directory"
-  exit 1
-fi
+secure_persistent_path directory /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770
+secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" - -
+# Signed bundles enforce stricter per-artifact modes and must survive restarts unchanged.
+secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups
+secure_persistent_path directory /app/.ingenium "$RESTORE_UID" "$RESTORE_DATA_GID" 3770
 # A fresh named volume contains no SQLite file, while the API starts as appuser
 # after this parent becomes root-owned and non-writable. Publish the fixed file
 # before dropping that write access; never follow or replace a final-path link.
@@ -79,8 +233,7 @@ fi
 if [ ! -e "$CORE_DB_PATH" ]; then
   core_db_tmp="$(mktemp /app/.ingenium/.data.XXXXXX)"
   trap 'rm -f "$core_db_tmp"' EXIT HUP INT TERM
-  chown appuser:appuser "$core_db_tmp"
-  chmod 0600 "$core_db_tmp"
+  secure_persistent_path file "$core_db_tmp" "$API_UID" "$RESTORE_DATA_GID" 0660
   if ! ln "$core_db_tmp" "$CORE_DB_PATH"; then
     rm -f "$core_db_tmp"
     trap - EXIT HUP INT TERM
@@ -96,9 +249,9 @@ fi
 # A WAL database needs its sibling files before the parent becomes root-owned.
 # Initializing as the future runtime user also applies the complete migration
 # inventory to a fresh named volume instead of leaving an empty SQLite file.
-if ! runuser -u appuser -- env -i \
+if ! runuser -u ingenium-api -- env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  HOME="/home/appuser" \
+  HOME="/home/ingenium-api" \
   INGENIUM_CORE_DB_PATH="$CORE_DB_PATH" \
   node --input-type=module -e 'import { getDb } from "ingenium-core"; getDb();'; then
   echo "ERROR: core database initialization failed"
@@ -114,8 +267,7 @@ for sidecar in "$CORE_DB_PATH-wal" "$CORE_DB_PATH-shm"; do
   if [ ! -e "$sidecar" ]; then
     sidecar_tmp="$(mktemp /app/.ingenium/.data-sidecar.XXXXXX)"
     trap 'rm -f "$sidecar_tmp"' EXIT HUP INT TERM
-    chown appuser:appuser "$sidecar_tmp"
-    chmod 0600 "$sidecar_tmp"
+    secure_persistent_path file "$sidecar_tmp" "$API_UID" "$RESTORE_DATA_GID" 0660
     if ! ln "$sidecar_tmp" "$sidecar"; then
       rm -f "$sidecar_tmp"
       trap - EXIT HUP INT TERM
@@ -129,30 +281,20 @@ for sidecar in "$CORE_DB_PATH-wal" "$CORE_DB_PATH-shm"; do
     fi
   fi
 done
+secure_persistent_path file "$CORE_DB_PATH" "$API_UID" "$RESTORE_DATA_GID" 0660
+secure_persistent_path file "$CORE_DB_PATH-wal" "$API_UID" "$RESTORE_DATA_GID" 0660
+secure_persistent_path file "$CORE_DB_PATH-shm" "$API_UID" "$RESTORE_DATA_GID" 0660
 # Project resources are created by the API after startup; reserve a writable
 # child before the maintenance parent is locked down.
 PROJECTS_DIR="/app/.ingenium/projects"
-if [ -L "$PROJECTS_DIR" ] || { [ -e "$PROJECTS_DIR" ] && [ ! -d "$PROJECTS_DIR" ]; }; then
-  echo "ERROR: projects root must be a real non-symlink directory"
-  exit 1
-fi
-mkdir -p "$PROJECTS_DIR"
-chown appuser:appuser "$PROJECTS_DIR"
-chmod 0700 "$PROJECTS_DIR"
+secure_persistent_path directory "$PROJECTS_DIR" "$API_UID" "$API_GID" 0700
 # Backups are published by the API and cannot create their root after the
 # maintenance parent becomes root-owned.
 BACKUPS_DIR="/app/.ingenium/backups"
-if [ -L "$BACKUPS_DIR" ] || { [ -e "$BACKUPS_DIR" ] && [ ! -d "$BACKUPS_DIR" ]; }; then
-  echo "ERROR: backups root must be a real non-symlink directory"
-  exit 1
-fi
-mkdir -p "$BACKUPS_DIR"
-chown appuser:appuser "$BACKUPS_DIR"
-chmod 0700 "$BACKUPS_DIR"
+secure_persistent_path directory "$BACKUPS_DIR" "$API_UID" "$RESTORE_DATA_GID" 2770
 # SQLite may create or replace journal siblings after a restore. The sticky bit
 # lets appuser do that without allowing it to unlink root-owned maintenance state.
-chown root:appuser /app/.ingenium
-chmod 1770 /app/.ingenium
+secure_persistent_path directory /app/.ingenium "$RESTORE_UID" "$RESTORE_DATA_GID" 3770
 if [ -L "$BACKUP_SIGNING_KEY_FILE" ] || { [ -e "$BACKUP_SIGNING_KEY_FILE" ] && [ ! -f "$BACKUP_SIGNING_KEY_FILE" ]; }; then
   echo "ERROR: backup signing key must be a regular non-symlink file"
   exit 1
@@ -162,8 +304,7 @@ if [ ! -e "$BACKUP_SIGNING_KEY_FILE" ]; then
   trap 'rm -f "$backup_key_tmp"' EXIT HUP INT TERM
   umask 077
   dd if=/dev/urandom of="$backup_key_tmp" bs=32 count=1
-  chown appuser:appuser "$backup_key_tmp"
-  chmod 0600 "$backup_key_tmp"
+  secure_persistent_path file "$backup_key_tmp" 0 0 0600
   # link(2) fails rather than replacing an unexpected final path, so it does
   # not follow a late symlink or clobber a concurrently provisioned key.
   if ! ln "$backup_key_tmp" "$BACKUP_SIGNING_KEY_FILE"; then
@@ -180,8 +321,10 @@ if [ ! -e "$BACKUP_SIGNING_KEY_FILE" ]; then
 fi
 backup_key_metadata="$(stat -c '%a:%U:%G' "$BACKUP_SIGNING_KEY_FILE")"
 backup_key_bytes="$(wc -c < "$BACKUP_SIGNING_KEY_FILE")"
-if [ "$backup_key_metadata" != "600:appuser:appuser" ] || [ "$backup_key_bytes" -lt 32 ]; then
-  echo "ERROR: backup signing key must be appuser-owned mode 0600 with at least 32 bytes"
+secure_persistent_path file "$BACKUP_SIGNING_KEY_FILE" 0 0 0600
+backup_key_metadata="$(stat -c '%a:%U:%G' "$BACKUP_SIGNING_KEY_FILE")"
+if [ "$backup_key_metadata" != "600:root:root" ] || [ "$backup_key_bytes" -lt 32 ]; then
+  echo "ERROR: backup signing key must be root-owned mode 0600 with at least 32 bytes"
   exit 1
 fi
 export INGENIUM_BACKUP_SIGNING_KEY_FILE="$BACKUP_SIGNING_KEY_FILE"
@@ -196,7 +339,10 @@ if [ "$AUTH_ENCRYPTION_KEY_PARENT" != "/app/.ingenium" ] || [ "$AUTH_ENCRYPTION_
   echo "ERROR: auth encryption key path is invalid"
   exit 1
 fi
-/app/scripts/provision-auth-encryption-key.sh "$AUTH_ENCRYPTION_KEY_FILE" appuser appuser
+if [ -e "$AUTH_ENCRYPTION_KEY_FILE" ]; then
+  secure_persistent_path file "$AUTH_ENCRYPTION_KEY_FILE" 0 0 0600
+fi
+/app/scripts/provision-auth-encryption-key.sh "$AUTH_ENCRYPTION_KEY_FILE" root root
 export INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$AUTH_ENCRYPTION_KEY_FILE"
 
 # RESTORE-100 stages verified copies outside the mutable backup-source tree.
@@ -213,12 +359,7 @@ if [ "$RESTORE_STAGING_PARENT" != "/app/.ingenium" ] || [ "$RESTORE_STAGING_DIR"
   echo "ERROR: restore staging must be a separate direct directory outside backups and the signing key"
   exit 1
 fi
-if [ -L "$RESTORE_STAGING_DIR" ] || { [ -e "$RESTORE_STAGING_DIR" ] && [ ! -d "$RESTORE_STAGING_DIR" ]; }; then
-  echo "ERROR: restore staging must be a real non-symlink directory"
-  exit 1
-fi
-mkdir -p "$RESTORE_STAGING_DIR"
-chmod 0700 "$RESTORE_STAGING_DIR"
+secure_persistent_path directory "$RESTORE_STAGING_DIR" "$API_UID" "$RESTORE_DATA_GID" 2770
 export INGENIUM_RESTORE_STAGING_DIR="$RESTORE_STAGING_DIR"
 
 # RESTORE-101 journal state is intentionally separate from the backup HMAC
@@ -229,13 +370,7 @@ if [ -n "${INGENIUM_RESTORE_MAINTENANCE_DIR:-}" ] || { [ -n "${INGENIUM_RESTORE_
 fi
 RESTORE_MAINTENANCE_DIR="/app/.ingenium/restore-maintenance"
 RESTORE_JOURNAL_KEY_FILE="/app/.ingenium/restore-journal-key"
-if [ -L "$RESTORE_MAINTENANCE_DIR" ] || { [ -e "$RESTORE_MAINTENANCE_DIR" ] && [ ! -d "$RESTORE_MAINTENANCE_DIR" ]; }; then
-  echo "ERROR: restore maintenance root must be a real non-symlink directory"
-  exit 1
-fi
-mkdir -p "$RESTORE_MAINTENANCE_DIR"
-chown root:root "$RESTORE_MAINTENANCE_DIR"
-chmod 0700 "$RESTORE_MAINTENANCE_DIR"
+secure_persistent_path directory "$RESTORE_MAINTENANCE_DIR" "$RESTORE_UID" "$RESTORE_GID" 0700
 if [ -L "$RESTORE_JOURNAL_KEY_FILE" ] || { [ -e "$RESTORE_JOURNAL_KEY_FILE" ] && [ ! -f "$RESTORE_JOURNAL_KEY_FILE" ]; }; then
   echo "ERROR: restore journal key must be a regular non-symlink file"
   exit 1
@@ -245,8 +380,7 @@ if [ ! -e "$RESTORE_JOURNAL_KEY_FILE" ]; then
   trap 'rm -f "$journal_key_tmp"' EXIT HUP INT TERM
   umask 077
   dd if=/dev/urandom of="$journal_key_tmp" bs=32 count=1
-  chown root:root "$journal_key_tmp"
-  chmod 0600 "$journal_key_tmp"
+  secure_persistent_path file "$journal_key_tmp" "$RESTORE_UID" "$RESTORE_GID" 0600
   if ! ln "$journal_key_tmp" "$RESTORE_JOURNAL_KEY_FILE"; then
     rm -f "$journal_key_tmp"
     trap - EXIT HUP INT TERM
@@ -261,77 +395,97 @@ if [ ! -e "$RESTORE_JOURNAL_KEY_FILE" ]; then
 fi
 journal_key_metadata="$(stat -c '%a:%U:%G' "$RESTORE_JOURNAL_KEY_FILE")"
 journal_key_bytes="$(wc -c < "$RESTORE_JOURNAL_KEY_FILE")"
-if [ "$journal_key_metadata" != "600:root:root" ] || [ "$journal_key_bytes" -lt 32 ]; then
-  echo "ERROR: restore journal key must be root-owned mode 0600 with at least 32 bytes"
+secure_persistent_path file "$RESTORE_JOURNAL_KEY_FILE" "$RESTORE_UID" "$RESTORE_GID" 0600
+journal_key_metadata="$(stat -c '%a:%U:%G' "$RESTORE_JOURNAL_KEY_FILE")"
+if [ "$journal_key_metadata" != "600:ingenium-restore:ingenium-restore" ] || [ "$journal_key_bytes" -lt 32 ]; then
+  echo "ERROR: restore journal key must be restore-owned mode 0600 with at least 32 bytes"
   exit 1
 fi
 export INGENIUM_RESTORE_JOURNAL_KEY_FILE="$RESTORE_JOURNAL_KEY_FILE"
 
+# Install each secret into only the identities that consume it.
+RUNTIME_SECRET_DIR="/run/ingenium-secrets"
+RUNTIME_API_SECRET_DIR="${RUNTIME_SECRET_DIR}/api"
+RUNTIME_DASHBOARD_SECRET_DIR="${RUNTIME_SECRET_DIR}/dashboard"
+RUNTIME_OPENCODE_SECRET_DIR="${RUNTIME_SECRET_DIR}/opencode"
+RUNTIME_RESTORE_SECRET_DIR="${RUNTIME_SECRET_DIR}/restore"
+RUNTIME_API_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/installation-api-token"
+RUNTIME_API_OPENCODE_PASSWORD_FILE="${RUNTIME_API_SECRET_DIR}/opencode-server-password"
+RUNTIME_OPENCODE_PASSWORD_FILE="${RUNTIME_OPENCODE_SECRET_DIR}/opencode-server-password"
+RUNTIME_EMAIL_ENCRYPTION_KEY_FILE="${RUNTIME_API_SECRET_DIR}/email-encryption-key"
+RUNTIME_API_BACKUP_SIGNING_KEY_FILE="${RUNTIME_API_SECRET_DIR}/backup-signing-key"
+RUNTIME_RESTORE_BACKUP_SIGNING_KEY_FILE="${RUNTIME_RESTORE_SECRET_DIR}/backup-signing-key"
+RUNTIME_API_AUTH_ENCRYPTION_KEY_FILE="${RUNTIME_API_SECRET_DIR}/auth-encryption-key"
+RUNTIME_RESTORE_JOURNAL_KEY_FILE="${RUNTIME_RESTORE_SECRET_DIR}/restore-journal-key"
+RUNTIME_API_DASHBOARD_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/dashboard-bootstrap-token"
+RUNTIME_DASHBOARD_TOKEN_FILE="${RUNTIME_DASHBOARD_SECRET_DIR}/bootstrap-token"
+umask 077
+install -d -o root -g root -m 0711 "$RUNTIME_SECRET_DIR"
+install -d -o ingenium-api -g ingenium-api -m 0700 "$RUNTIME_API_SECRET_DIR"
+install -d -o ingenium-dashboard -g ingenium-dashboard -m 0700 "$RUNTIME_DASHBOARD_SECRET_DIR"
+install -d -o ingenium-opencode -g ingenium-opencode -m 0700 "$RUNTIME_OPENCODE_SECRET_DIR"
+install -d -o ingenium-restore -g ingenium-restore -m 0700 "$RUNTIME_RESTORE_SECRET_DIR"
+install -d -o root -g root -m 0700 /run/ingenium-bootstrap
+node /app/scripts/read-protected-api-token.mjs \
+  "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE is required}" \
+  "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_API_TOKEN_FILE" installation-api 0 0 "$API_UID" "$API_GID"
+unset INGENIUM_API_TOKEN
+export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"
+node /app/scripts/read-protected-api-token.mjs \
+  "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE is required}" \
+  "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_API_OPENCODE_PASSWORD_FILE" opencode-server 0 0 "$API_UID" "$API_GID"
+node /app/scripts/read-protected-api-token.mjs \
+  "$OPENCODE_SERVER_PASSWORD_FILE" \
+  "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_OPENCODE_PASSWORD_FILE" opencode-server 0 0 "$OPENCODE_UID" "$OPENCODE_GID"
+node /app/scripts/read-protected-api-token.mjs \
+  "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE is required}" \
+  "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_EMAIL_ENCRYPTION_KEY_FILE" email-encryption 0 0 "$API_UID" "$API_GID"
+node /app/scripts/read-protected-api-token.mjs \
+  "$BACKUP_SIGNING_KEY_FILE" 0 0 "$RUNTIME_API_BACKUP_SIGNING_KEY_FILE" opaque "$RESTORE_UID" "$RESTORE_DATA_GID" "$API_UID" "$API_GID" 770
+node /app/scripts/read-protected-api-token.mjs \
+  "$BACKUP_SIGNING_KEY_FILE" 0 0 "$RUNTIME_RESTORE_BACKUP_SIGNING_KEY_FILE" opaque "$RESTORE_UID" "$RESTORE_DATA_GID" "$RESTORE_UID" "$RESTORE_GID" 770
+node /app/scripts/read-protected-api-token.mjs \
+  "$AUTH_ENCRYPTION_KEY_FILE" 0 0 "$RUNTIME_API_AUTH_ENCRYPTION_KEY_FILE" opaque "$RESTORE_UID" "$RESTORE_DATA_GID" "$API_UID" "$API_GID" 770
+node /app/scripts/read-protected-api-token.mjs \
+  "$RESTORE_JOURNAL_KEY_FILE" "$RESTORE_UID" "$RESTORE_GID" "$RUNTIME_RESTORE_JOURNAL_KEY_FILE" opaque "$RESTORE_UID" "$RESTORE_DATA_GID" "$RESTORE_UID" "$RESTORE_GID" 770
+node /app/scripts/provision-dashboard-bootstrap-token.mjs \
+  "$RUNTIME_API_DASHBOARD_TOKEN_FILE" "$API_UID" "$API_GID" \
+  "$RUNTIME_DASHBOARD_TOKEN_FILE" "$DASHBOARD_UID" "$DASHBOARD_GID"
+unset OPENCODE_SERVER_PASSWORD INGENIUM_EMAIL_ENCRYPTION_KEY
+export OPENCODE_SERVER_PASSWORD_FILE="$RUNTIME_API_OPENCODE_PASSWORD_FILE"
+export INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$RUNTIME_EMAIL_ENCRYPTION_KEY_FILE"
+export INGENIUM_BACKUP_SIGNING_KEY_FILE="$RUNTIME_API_BACKUP_SIGNING_KEY_FILE"
+export INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$RUNTIME_API_AUTH_ENCRYPTION_KEY_FILE"
+export INGENIUM_RESTORE_JOURNAL_KEY_FILE="$RUNTIME_RESTORE_JOURNAL_KEY_FILE"
+export INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE="$RUNTIME_API_DASHBOARD_TOKEN_FILE"
+
+if [ "$DEPLOYMENT_MODE" = "control-plane" ]; then
+  install -d -o root -g root -m 0700 /run/ingenium-runtime-manager /run/ingenium-runtime-gateway
+  RUNTIME_API_MANAGER_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/runtime-manager-token"
+  RUNTIME_API_GATEWAY_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/runtime-gateway-token"
+  node /app/scripts/read-protected-api-token.mjs \
+    "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:?INGENIUM_RUNTIME_MANAGER_TOKEN_FILE is required}" \
+    "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_API_MANAGER_TOKEN_FILE" installation-api 0 0 "$API_UID" "$API_GID"
+  node /app/scripts/read-protected-api-token.mjs \
+    "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:?INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE is required}" \
+    "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_API_GATEWAY_TOKEN_FILE" installation-api 0 0 "$API_UID" "$API_GID"
+  export INGENIUM_RUNTIME_MANAGER_TOKEN_FILE="$RUNTIME_API_MANAGER_TOKEN_FILE"
+  export INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE="$RUNTIME_API_GATEWAY_TOKEN_FILE"
+fi
+
 # Resolve any signed interrupted maintenance journal before Supervisor can start
-# DB users. A malformed journal fails closed: no API/OpenCode/ttyd/VS Code user
-# process starts, and the helper emits only a bounded diagnostic code.
-if ! /app/scripts/recover-restore-maintenance.sh; then
+# DB users. A malformed journal fails closed.
+if ! runuser -u ingenium-restore -- /app/scripts/recover-restore-maintenance.sh; then
   echo "ERROR: restore maintenance recovery refused startup"
   exit 1
 fi
 
-# SECURITY: Require the server-side credential used by API OpenCode proxy routes.
-# Browser-facing OpenCode children clear this variable and remain behind the
-# private gateway upstreams.
-if [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
-  echo "ERROR: OPENCODE_SERVER_PASSWORD environment variable is required"
-  exit 1
-fi
-
-# API management endpoints require an opaque, high-entropy Bearer credential.
-# Compose may provide the bootstrap value inline or through a mounted secret
-# file. The API process performs the canonical validation again before binding.
-if [ -n "${INGENIUM_API_TOKEN_FILE:-}" ]; then
-  if [ -L "$INGENIUM_API_TOKEN_FILE" ] || [ ! -f "$INGENIUM_API_TOKEN_FILE" ]; then
-    echo "ERROR: INGENIUM_API_TOKEN_FILE must name a regular non-symlink file"
-    exit 1
-  fi
-  api_token="$(cat "$INGENIUM_API_TOKEN_FILE")"
-elif [ -n "${INGENIUM_API_TOKEN:-}" ]; then
-  api_token="$INGENIUM_API_TOKEN"
-else
-  echo "ERROR: INGENIUM_API_TOKEN or INGENIUM_API_TOKEN_FILE is required"
-  exit 1
-fi
-api_token_bytes="$(printf '%s' "$api_token" | LC_ALL=C wc -c)"
-if [ "$api_token_bytes" -lt 32 ] || [ "$api_token_bytes" -gt 128 ]; then
-  echo "ERROR: API token must contain 32 to 128 base64url characters"
-  exit 1
-fi
-if ! printf '%s' "$api_token" | LC_ALL=C grep -qE '^[A-Za-z0-9_-]+$'; then
-  echo "ERROR: API token must contain only base64url characters"
-  exit 1
-fi
-
-# Copy the bootstrap token to an ephemeral, private file before supervisord
-# forks service processes. The parent then drops plaintext from its environment;
-# API/boundary/dashboard launchers consume only this path. mktemp + rename does
-# not follow a final-path symlink, and the containing directory is mode 0700.
-RUNTIME_SECRET_DIR="/run/ingenium-secrets"
-RUNTIME_API_TOKEN_FILE="${RUNTIME_SECRET_DIR}/api-token"
-umask 077
-mkdir -p "$RUNTIME_SECRET_DIR"
-chown appuser:appuser "$RUNTIME_SECRET_DIR"
-chmod 0700 "$RUNTIME_SECRET_DIR"
-runtime_token_tmp="$(mktemp "${RUNTIME_SECRET_DIR}/.api-token.XXXXXX")"
-trap 'rm -f "$runtime_token_tmp"' EXIT HUP INT TERM
-printf '%s\n' "$api_token" > "$runtime_token_tmp"
-chown appuser:appuser "$runtime_token_tmp"
-chmod 0600 "$runtime_token_tmp"
-mv -f "$runtime_token_tmp" "$RUNTIME_API_TOKEN_FILE"
-trap - EXIT HUP INT TERM
-unset api_token
-unset INGENIUM_API_TOKEN
-export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"
+install -d -o root -g ingenium-api -m 0770 /run/ingenium-supervisor
+install -d -o ingenium-restore -g ingenium-api -m 0710 /run/ingenium-restore-handoff
 
 GATEWAY_RUNTIME_DIR="/run/ingenium-gateway"
 GATEWAY_ERROR_LOG="${GATEWAY_RUNTIME_DIR}/nginx-error.log"
-# Nginx runs as appuser and must create its pid, lock, and temporary files.
+# Nginx runs as its dedicated user and must create its pid, lock, and temporary files.
 # `/run` is ephemeral, so these paths remain outside persistent application
 # volumes and are recreated with owner-only access on every start.
 for dir in \
@@ -341,53 +495,49 @@ for dir in \
   "$GATEWAY_RUNTIME_DIR/fastcgi" \
   "$GATEWAY_RUNTIME_DIR/uwsgi" \
   "$GATEWAY_RUNTIME_DIR/scgi"; do
-  install -d -o appuser -g appuser -m 0700 "$dir"
+  install -d -o ingenium-gateway -g ingenium-gateway -m 0700 "$dir"
 done
 # Nginx reopens its error log as appuser; Supervisor reads this same file as
 # the gateway stdout log. Replace only this ephemeral runtime artifact before
 # either process opens it, preventing a stale owner from blocking either side.
 rm -f "$GATEWAY_ERROR_LOG"
-install -o appuser -g appuser -m 0600 /dev/null "$GATEWAY_ERROR_LOG"
+install -o ingenium-gateway -g ingenium-gateway -m 0600 /dev/null "$GATEWAY_ERROR_LOG"
+install -d -o ingenium-api -g ingenium-api -m 0700 /home/ingenium-api /home/ingenium-api/.config /home/ingenium-api/.local /home/ingenium-api/.local/share
+install -d -o ingenium-dashboard -g ingenium-dashboard -m 0700 /home/ingenium-dashboard
+install -d -o ingenium-boundary -g ingenium-boundary -m 0700 /home/ingenium-boundary
+install -d -o ingenium-ttyd -g ingenium-ttyd -m 0700 /home/ingenium-ttyd /home/ingenium-ttyd/.tmp /home/ingenium-ttyd/.config /home/ingenium-ttyd/.local /home/ingenium-ttyd/.local/share
 
-# SECURITY: Validate email encryption key format before supervisor starts.
-# Accept a 32-byte hex key or a 64-character base64url secret. The latter is
-# deterministically reduced to an AES-256 key by the email package.
-if [ -z "${INGENIUM_EMAIL_ENCRYPTION_KEY:-}" ]; then
-  echo "ERROR: INGENIUM_EMAIL_ENCRYPTION_KEY is required (64 hex characters or 64-character base64url secret)"
-  exit 1
-fi
-if ! printf '%s\n' "${INGENIUM_EMAIL_ENCRYPTION_KEY}" | grep -qE '^[A-Za-z0-9_-]{64}$'; then
-  echo "ERROR: INGENIUM_EMAIL_ENCRYPTION_KEY must be 64 hex or base64url characters"
-  exit 1
-fi
+GLOBAL_AGENTS_DIR="/home/ingenium-opencode/.config/opencode/agents"
+secure_persistent_path directory /home/ingenium-opencode/.config "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 2770
+secure_persistent_path directory /home/ingenium-opencode/.config/opencode "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 2770
+secure_persistent_path tree /home/ingenium-opencode/.config "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 2770 0660
+secure_persistent_path directory /home/ingenium-opencode/.config/opencode/runtime "$OPENCODE_UID" "$OPENCODE_GID" 0700
+secure_persistent_path directory /home/ingenium-opencode/.local "$OPENCODE_UID" "$OPENCODE_GID" 0700
+secure_persistent_path directory /home/ingenium-opencode/.local/share "$OPENCODE_UID" "$OPENCODE_GID" 0700
+secure_persistent_path directory /home/ingenium-opencode/.local/share/opencode "$OPENCODE_UID" "$OPENCODE_GID" 0700
+secure_persistent_path directory /home/ingenium-opencode/.local/share/opencode/log "$OPENCODE_UID" "$OPENCODE_GID" 0700
+secure_persistent_path tree /home/ingenium-opencode/.local "$OPENCODE_UID" "$OPENCODE_GID" 0700 0600
+# Backup and restore need traversal without exposing unrelated home contents.
+setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share
+setfacl -R -m u:ingenium-api:r-X,u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
+setfacl -m d:u:ingenium-api:r-X,d:u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
+secure_persistent_path directory /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700
+secure_persistent_path directory /home/ingenium-vscode/vscode-data/user-data "$VSCODE_UID" "$VSCODE_GID" 0700
+secure_persistent_path directory /home/ingenium-vscode/vscode-data/extensions "$VSCODE_UID" "$VSCODE_GID" 0700
+secure_persistent_path tree /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700 user-only
 
-# HACK: chown errors are suppressed (2>/dev/null || true) because the
-# container may run as non-root in some environments (e.g. OpenShift);
-# the directories themselves are the critical requirement, ownership
-# is best-effort
-for dir in /app/.ingenium /app/.ingenium/logs /app/.opencode/skills /home/appuser/.config/opencode /home/appuser/.config/opencode/agents /home/appuser/.local/share/opencode/log; do
-  if [ ! -d "$dir" ]; then
-    mkdir -p "$dir"
-  fi
-done
-chown -R appuser:appuser /app/.opencode /home/appuser 2>/dev/null || true
-for dir in /app/.ingenium/data /app/.ingenium/backups /app/.ingenium/restore-staging /app/.ingenium/logs; do
-  if [ -e "$dir" ]; then
-    chown -R appuser:appuser "$dir"
-  fi
-done
-chown root:appuser /app/.ingenium
-chmod 1770 /app/.ingenium
-chown root:root "$RESTORE_MAINTENANCE_DIR" "$RESTORE_JOURNAL_KEY_FILE"
-chmod 0700 "$RESTORE_MAINTENANCE_DIR"
-chmod 0600 "$RESTORE_JOURNAL_KEY_FILE"
+/app/scripts/validate-process-isolation.sh
 
 # Compatibility mode retains the historical single-user OpenCode/VS Code state.
 if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
+# Preserve host ownership while granting only the three interactive workspace
+# identities access to the mounted workspace.
+setfacl -R -m u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX /workspace
+setfacl -R -m d:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX /workspace
 # Seed OpenCode config with Ingenium MCP on first start
-OC_CONFIG="/home/appuser/.config/opencode/opencode.jsonc"
+OC_CONFIG="/home/ingenium-opencode/.config/opencode/opencode.jsonc"
 if [ ! -f "$OC_CONFIG" ]; then
-  mkdir -p "$(dirname "$OC_CONFIG")"
+  secure_persistent_path directory "$(dirname "$OC_CONFIG")" "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 2770
   cat > "$OC_CONFIG" << 'OCEOF'
 {
   "$schema": "https://opencode.ai/config.json",
@@ -407,10 +557,11 @@ if [ ! -f "$OC_CONFIG" ]; then
     }
   },
   "plugin": [
-    "/app/packages/ingenium-extension/plugins/observer.ts",
-    "/app/packages/ingenium-extension/plugins/auto-observer.ts",
-    "/app/packages/ingenium-extension/plugins/resource-sync.ts",
-    "/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
   ]
 }
 OCEOF
@@ -418,26 +569,24 @@ OCEOF
 fi
 # Vault-backed child runs copy this provider-bearing config into tmpfs only when
 # it is owner-private. The persistent OpenCode server still reads the same file.
-chown appuser:appuser "$OC_CONFIG"
-chmod 0600 "$OC_CONFIG"
+secure_persistent_path file "$OC_CONFIG" "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 0660
 
-OC_AUTH="/home/appuser/.local/share/opencode/auth.json"
+OC_AUTH="/home/ingenium-opencode/.local/share/opencode/auth.json"
 if [ -L "$OC_AUTH" ] || { [ -e "$OC_AUTH" ] && [ ! -f "$OC_AUTH" ]; }; then
   echo "ERROR: OpenCode auth path must be a regular non-symlink file"
   exit 1
 fi
 if [ -f "$OC_AUTH" ]; then
-  chown appuser:appuser "$OC_AUTH"
-  chmod 0600 "$OC_AUTH"
+  secure_persistent_path file "$OC_AUTH" "$OPENCODE_UID" "$OPENCODE_GID" 0600
 fi
 
 # The global config lives on a persistent volume and may predate protected token
 # files or the unified resource-sync plugin. Project the container-owned entries
 # on every start while preserving unrelated operator configuration.
-runuser -u appuser -- env -i \
+runuser -u ingenium-opencode -- env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  HOME="/home/appuser" \
-  XDG_CONFIG_HOME="/home/appuser/.config" \
+  HOME="/home/ingenium-opencode" \
+  XDG_CONFIG_HOME="/home/ingenium-opencode/.config" \
   node /app/scripts/project-opencode-global-config.mjs "$OC_CONFIG"
 
 # OpenCode receives only separately issued scoped credentials. Remove the
@@ -453,9 +602,7 @@ if [ -e "$WORKSPACE_OPENCODE_DIR" ] && [ ! -d "$WORKSPACE_OPENCODE_DIR" ]; then
   echo "ERROR: OpenCode workspace path must be a directory"
   exit 1
 fi
-mkdir -p "$WORKSPACE_OPENCODE_DIR"
-chown appuser:appuser "$WORKSPACE_OPENCODE_DIR"
-chmod 0700 "$WORKSPACE_OPENCODE_DIR"
+secure_persistent_path directory "$WORKSPACE_OPENCODE_DIR" - - -
 if [ -e "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" ]; then
   if [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ ! -f "$LEGACY_WORKSPACE_TOKEN_FILE" ] \
     || ! cmp -s "$RUNTIME_API_TOKEN_FILE" "$LEGACY_WORKSPACE_TOKEN_FILE"; then
@@ -465,31 +612,37 @@ if [ -e "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" 
   rm -f "$LEGACY_WORKSPACE_TOKEN_FILE"
 fi
 
-# Project the two server-owned profiles into OpenCode's persistent global
-# discovery directory. OpenCode runs from /workspace but loads its persisted
-# global config from /home/appuser/.config/opencode; keeping these copies global
-# makes the chat and broker profiles discoverable without overwriting operator
-# profiles. The containing directory is created before the recursive ownership
-# repair above so a persisted opencode-config volume remains writable by appuser.
-GLOBAL_AGENTS_DIR="/home/appuser/.config/opencode/agents"
+# Project the ordinary chat profile into OpenCode's persistent global directory.
+# The broker is discovered only from the protected image path.
 if [ -L "$GLOBAL_AGENTS_DIR" ] || { [ -e "$GLOBAL_AGENTS_DIR" ] && [ ! -d "$GLOBAL_AGENTS_DIR" ]; }; then
   echo "ERROR: OpenCode global agents directory must be a real directory"
   exit 1
 fi
-mkdir -p "$GLOBAL_AGENTS_DIR"
-chmod 0700 "$GLOBAL_AGENTS_DIR"
+secure_persistent_path directory "$GLOBAL_AGENTS_DIR" "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 0700
+LEGACY_GLOBAL_BROKER="${GLOBAL_AGENTS_DIR}/ingenium-llm-broker.md"
+if [ -L "$LEGACY_GLOBAL_BROKER" ] || [ -f "$LEGACY_GLOBAL_BROKER" ]; then
+  rm -f "$LEGACY_GLOBAL_BROKER"
+elif [ -e "$LEGACY_GLOBAL_BROKER" ]; then
+  echo "ERROR: legacy global broker path is not a regular file"
+  exit 1
+fi
 /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents "$GLOBAL_AGENTS_DIR"
 
-# Copy all agent profiles to the workspace before OpenCode starts. OpenCode scans its
-# worktree's .opencode/agents/ directory, while the source agents live in /app.
-# The orchestrator-based topology includes primary, execution, research, security,
-# and chat agent profiles — all copied flat into the workspace for discovery.
+# Copy ordinary agent profiles into the workspace for project discovery. The
+# protected broker is deliberately excluded.
 WORKSPACE_AGENTS_DIR="${WORKSPACE_OPENCODE_DIR}/agents"
 if [ -L "$WORKSPACE_AGENTS_DIR" ] || { [ -e "$WORKSPACE_AGENTS_DIR" ] && [ ! -d "$WORKSPACE_AGENTS_DIR" ]; }; then
   echo "ERROR: OpenCode workspace agents directory must be a real directory"
   exit 1
 fi
-mkdir -p "$WORKSPACE_AGENTS_DIR"
+secure_persistent_path directory "$WORKSPACE_AGENTS_DIR" - - -
+LEGACY_WORKSPACE_BROKER="${WORKSPACE_AGENTS_DIR}/ingenium-llm-broker.md"
+if [ -L "$LEGACY_WORKSPACE_BROKER" ] || [ -f "$LEGACY_WORKSPACE_BROKER" ]; then
+  rm -f "$LEGACY_WORKSPACE_BROKER"
+elif [ -e "$LEGACY_WORKSPACE_BROKER" ]; then
+  echo "ERROR: legacy workspace broker path is not a regular file"
+  exit 1
+fi
 copy_agent_profile() {
   source_profile="$1"
   target_profile="${WORKSPACE_AGENTS_DIR}/$(basename "$source_profile")"
@@ -503,19 +656,23 @@ copy_agent_profile /app/.opencode/agents/chat/ingenium-chat.md
 for dir in primary execution research security; do
   for source_profile in /app/.opencode/agents/$dir/*.md; do
     [ -f "$source_profile" ] || continue
+    [ "$(basename "$source_profile")" = "ingenium-llm-broker.md" ] && continue
     copy_agent_profile "$source_profile"
   done
 done
 # Mounted repositories can retain historical root-owned mode-0600 profiles.
 # Repair only regular non-symlink Markdown profiles before appuser runs
-# repository initialization; secrets and configuration stay untouched.
+# repository initialization; the reserved broker remains deployment-read-only.
 /app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"
 fi
+
+# Persistent setup must not weaken or replace any executable root-owned startup artifact.
+node /app/scripts/validate-root-entrypoint-chain.mjs
 
 # Refuse to start if a templating or package change made the gateway unsafe.
 # Validate as the supervised Nginx user so validation cannot leave root-owned
 # PID, lock, temp, or log artifacts in the shared runtime directory.
-runuser -u appuser -- env -i \
+runuser -u ingenium-gateway -- env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   /app/scripts/validate-gateway-config.sh
 

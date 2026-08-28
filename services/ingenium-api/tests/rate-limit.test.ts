@@ -12,13 +12,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
+import { authentication } from "ingenium-core";
 
 describe("rateLimit — sliding window", () => {
   let rateLimit: (req: Request, res: Response, next: NextFunction) => void;
+  let authPreflightReadRateLimit: (req: Request, res: Response, next: NextFunction) => void;
+  let authenticatedReadRateLimit: (req: Request, res: Response, next: NextFunction) => void;
   let coordinationRateLimit: (req: Request, res: Response, next: NextFunction) => void;
   let coordinationRateLimitKeys: (req: Request) => { credential: string; workspace: string } | undefined;
   let recordCandidateAuthenticationFailure: (error: unknown, req: Request, res: Response, next: NextFunction) => void;
   let recordCoordinationAttestationFailure: (error: unknown, req: Request, res: Response, next: NextFunction) => void;
+  let dashboardReadMaxRequests: number;
+  let authPreflightReadMaxRequests: number;
   let coordinationCredentialMaxRequests: number;
   let coordinationWorkspaceMaxRequests: number;
   let clearRateLimitEntries: () => void;
@@ -27,10 +32,14 @@ describe("rateLimit — sliding window", () => {
     // Dynamic import for fresh module state each test
     const mod = await import("../lib/middleware/rate-limit.js");
     rateLimit = mod.rateLimit;
+    authPreflightReadRateLimit = mod.authPreflightReadRateLimit;
+    authenticatedReadRateLimit = mod.authenticatedReadRateLimit;
     coordinationRateLimit = mod.coordinationRateLimit;
     coordinationRateLimitKeys = mod.coordinationRateLimitKeys;
     recordCandidateAuthenticationFailure = mod.recordCandidateAuthenticationFailure;
     recordCoordinationAttestationFailure = mod.recordCoordinationAttestationFailure;
+    dashboardReadMaxRequests = mod.DASHBOARD_READ_MAX_REQUESTS;
+    authPreflightReadMaxRequests = mod.AUTH_PREFLIGHT_READ_MAX_REQUESTS;
     coordinationCredentialMaxRequests = mod.COORDINATION_CREDENTIAL_MAX_REQUESTS;
     coordinationWorkspaceMaxRequests = mod.COORDINATION_WORKSPACE_MAX_REQUESTS;
     clearRateLimitEntries = mod.clearRateLimitEntries;
@@ -67,6 +76,23 @@ describe("rateLimit — sliding window", () => {
       },
       socket: { remoteAddress } as Request["socket"],
     };
+  }
+
+  function makeBrowserRead(ip: string, sessionId: string, path = "/api/v1/context/conversations"): Partial<Request> {
+    return {
+      ip,
+      method: "GET",
+      path,
+      originalUrl: path,
+      url: path,
+      socket: { remoteAddress: ip } as Request["socket"],
+      principal: {
+        type: "user",
+        id: `user-${sessionId}`,
+        scopes: ["user:*"],
+        session: { id: sessionId },
+      },
+    } as unknown as Partial<Request>;
   }
 
   function makeCoordinationRequest(
@@ -124,6 +150,24 @@ describe("rateLimit — sliding window", () => {
     return { response, next };
   }
 
+  function runMiddlewareChain(request: Partial<Request>) {
+    const response = makeRes();
+    const next = vi.fn();
+    rateLimit(request as Request, response as Response, () => {
+      authenticatedReadRateLimit(request as Request, response as Response, next);
+    });
+    return { response, next };
+  }
+
+  function runPreflightLimiterChain(request: Partial<Request>) {
+    const response = makeRes();
+    const next = vi.fn();
+    authPreflightReadRateLimit(request as Request, response as Response, () => {
+      rateLimit(request as Request, response as Response, next);
+    });
+    return { response, next };
+  }
+
   it("allows first request from an IP", () => {
     const req = makeReq();
     const res = makeRes();
@@ -175,6 +219,92 @@ describe("rateLimit — sliding window", () => {
 
     expect(next).toHaveBeenCalledOnce();
     expect(response.status).not.toHaveBeenCalled();
+  });
+
+  it("isolates exact unauthenticated auth preflight reads from the default loopback bucket", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const background = {
+      ...makeReq("127.0.0.1"),
+      method: "GET",
+      path: "/api/v1/unknown",
+      originalUrl: "/api/v1/unknown",
+      url: "/api/v1/unknown",
+      headers: {},
+    } as Request;
+    for (let index = 0; index < strictLimit; index += 1) {
+      rateLimit(background, makeRes() as Response, vi.fn());
+    }
+
+    for (const [method, path] of [
+      ["GET", "/api/v1/auth/csrf"],
+      ["HEAD", "/api/v1/auth/csrf"],
+      ["GET", "/api/v1/auth/oidc/providers"],
+      ["HEAD", "/api/v1/auth/oidc/providers"],
+    ]) {
+      const request = { ...makeReq("::1"), method, path, originalUrl: path, url: path, headers: {} } as Request;
+      expect(runPreflightLimiterChain(request).next).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("keeps methods, credentials, and non-canonical auth preflight paths strict", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const requests = [
+      ["POST", "/api/v1/auth/csrf", {}],
+      ["GET", "/api/v1/auth/csrf/", {}],
+      ["GET", "/api/v1/auth/%63srf", {}],
+      ["GET", "/api/v1/auth//csrf", {}],
+      ["GET", "/api/v1/auth/./csrf", {}],
+      ["GET", "/api/v1/auth/csrf", { authorization: "Bearer candidate" }],
+      ["GET", "/api/v1/auth/oidc/providers", { cookie: `${authentication.SESSION_COOKIE_NAME}=candidate` }],
+    ].map(([method, originalUrl, headers]) => ({ method, path: originalUrl, originalUrl, headers }));
+    requests.push(
+      { method: "GET", path: "/api/v1/auth/csrf", originalUrl: "/api/v1/auth/csrf?cache=1", headers: {} },
+      { method: "HEAD", path: "/api/v1/auth/oidc/providers", originalUrl: "/api/v1/auth/oidc/providers?cache=1", headers: {} },
+    );
+
+    for (const [index, { method, path, originalUrl, headers }] of requests.entries()) {
+      const ip = `10.2.0.${index + 1}`;
+      const request = { ...makeReq(ip), method, path, originalUrl, url: originalUrl, headers } as Request;
+      for (let count = 0; count < strictLimit; count += 1) {
+        expect(runPreflightLimiterChain(request).next).toHaveBeenCalledOnce();
+      }
+      expect(runPreflightLimiterChain(request).response.status).toHaveBeenCalledWith(429);
+    }
+  });
+
+  it("uses trusted socket IP and separate route buckets for bounded preflight reads", () => {
+    expect(authPreflightReadMaxRequests).toBe(60);
+    const csrf = {
+      ...makeReq("127.0.0.1"),
+      method: "GET",
+      path: "/api/v1/auth/csrf",
+      originalUrl: "/api/v1/auth/csrf",
+      url: "/api/v1/auth/csrf",
+      headers: { "x-forwarded-for": "198.51.100.10" },
+    } as Request;
+    for (let index = 0; index < authPreflightReadMaxRequests; index += 1) {
+      csrf.headers["x-forwarded-for"] = `198.51.100.${index + 1}`;
+      expect(runPreflightLimiterChain(csrf).next).toHaveBeenCalledOnce();
+    }
+
+    const limited = runPreflightLimiterChain({
+      ...csrf,
+      ip: "::1",
+      socket: { remoteAddress: "::1" } as Request["socket"],
+    });
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(limited.response.set).toHaveBeenCalledWith("Retry-After", expect.stringMatching(/^\d+$/));
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "60");
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Remaining", "0");
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Reset", expect.stringMatching(/^\d+$/));
+
+    expect(runPreflightLimiterChain({
+      ...csrf,
+      path: "/api/v1/auth/oidc/providers",
+      originalUrl: "/api/v1/auth/oidc/providers",
+      url: "/api/v1/auth/oidc/providers",
+    }).next).toHaveBeenCalledOnce();
   });
 
   it("resets window after 60 seconds", () => {
@@ -238,6 +368,100 @@ describe("rateLimit — sliding window", () => {
     expect(response.status).toHaveBeenCalledWith(429);
   });
 
+  it("allows the observed safe-read profile plus a 12-read page fanout", () => {
+    const request = makeBrowserRead("10.0.0.20", "session-a");
+    for (let index = 0; index < 29 + 12; index += 1) {
+      expect(runMiddlewareChain(request).next).toHaveBeenCalled();
+    }
+
+    for (let index = 29 + 12; index < dashboardReadMaxRequests; index += 1) {
+      expect(runMiddlewareChain(request).next).toHaveBeenCalled();
+    }
+    const limited = runMiddlewareChain(request);
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(limited.response.set).toHaveBeenCalledWith("Retry-After", expect.any(String));
+  });
+
+  it("isolates authenticated browser read capacity by session behind the per-IP admission ceiling", () => {
+    const first = makeBrowserRead("10.0.0.21", "session-a");
+    for (let index = 0; index < dashboardReadMaxRequests; index += 1) {
+      authenticatedReadRateLimit(first as Request, makeRes() as Response, vi.fn());
+    }
+    const firstLimited = makeRes();
+    const firstNext = vi.fn();
+    authenticatedReadRateLimit(first as Request, firstLimited as Response, firstNext);
+    expect(firstLimited.status).toHaveBeenCalledWith(429);
+
+    const secondNext = vi.fn();
+    authenticatedReadRateLimit(makeBrowserRead("10.0.0.21", "session-b") as Request, makeRes() as Response, secondNext);
+    expect(secondNext).toHaveBeenCalled();
+    expect(runMiddlewareChain(makeBrowserRead("10.0.0.22", "session-a")).next).toHaveBeenCalled();
+  });
+
+  it("bounds aggregate browser reads per IP even when sessions rotate", () => {
+    for (let index = 0; index < dashboardReadMaxRequests; index += 1) {
+      const session = index % 2 === 0 ? "session-a" : "session-b";
+      expect(runMiddlewareChain(makeBrowserRead("10.0.0.27", session)).next).toHaveBeenCalled();
+    }
+
+    const limited = runMiddlewareChain(makeBrowserRead("10.0.0.27", "session-c"));
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(runMiddlewareChain(makeBrowserRead("10.0.0.28", "session-c")).next).toHaveBeenCalled();
+  });
+
+  it("keeps unsafe, auth, provider, streaming, and expensive requests strict", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const strictRequests = [
+      ["POST", "/api/v1/projects"],
+      ["POST", "/api/v1/auth/login"],
+      ["GET", "/api/v1/auth/session"],
+      ["GET", "/api/v1/auth/tokens"],
+      ["GET", "/api/v1/opencode/sessions/session/events"],
+      ["GET", "/api/v1/opencode/providers"],
+      ["GET", "/api/v1/mcp-tools/report"],
+      ["GET", "/api/v1/usage/export"],
+      ["GET", "/api/v1/backups/3f68f539-3a14-42dc-970f-26a40f1c4874/download"],
+      ["GET", "/api/v1/context/search"],
+      ["GET", "/api/v1/unknown"],
+      ["POST", "/api/v1/synthesis/run"],
+      ["POST", "/api/v1/runtimes/gateway/exchange"],
+    ].map(([method, path], index) => ({
+      ip: `10.0.1.${index + 1}`,
+      method,
+      path,
+      originalUrl: path,
+      url: path,
+      socket: { remoteAddress: `10.0.1.${index + 1}` } as Request["socket"],
+    })) as Partial<Request>[];
+
+    for (const request of strictRequests) {
+      for (let index = 0; index < strictLimit; index += 1) expect(runMiddlewareChain(request).next).toHaveBeenCalled();
+      expect(runMiddlewareChain(request).response.status).toHaveBeenCalledWith(429);
+    }
+  });
+
+  it("caps invalid credentials on candidate safe paths before the 101st auth attempt", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const request = makeBrowserRead("10.0.0.26", "missing");
+    delete request.principal;
+    for (let index = 0; index < strictLimit; index += 1) {
+      const admitted = vi.fn();
+      rateLimit(request as Request, makeRes() as Response, admitted);
+      expect(admitted).toHaveBeenCalled();
+      const forwarded = vi.fn();
+      recordCandidateAuthenticationFailure(new Error("invalid credential"), request as Request, makeRes() as Response, forwarded);
+      expect(forwarded).toHaveBeenCalledWith(expect.any(Error));
+    }
+    const response = makeRes();
+    const next = vi.fn();
+    rateLimit(request as Request, response as Response, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.set).toHaveBeenCalledWith("Retry-After", expect.any(String));
+  });
+
   it("uses the socket address, canonicalizes mapped IPv4 and loopback, and ignores forwarding headers", () => {
     const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
     const mapped = makeReq("::ffff:192.0.2.10");
@@ -253,10 +477,7 @@ describe("rateLimit — sliding window", () => {
     expect(mappedResponse.status).toHaveBeenCalledWith(429);
 
     const ipv6 = makeReq("2001:db8::10");
-    const ipv6Response = makeRes();
-    const ipv6Next = vi.fn();
-    rateLimit(ipv6 as Request, ipv6Response as Response, ipv6Next);
-    expect(ipv6Next).toHaveBeenCalledOnce();
+    expect(runMiddlewareChain({ ...ipv6, method: "GET", path: "/api/v1/context/conversations", originalUrl: "/api/v1/context/conversations", url: "/api/v1/context/conversations", principal: makeBrowserRead("2001:db8::10", "ipv6").principal }).next).toHaveBeenCalled();
 
     clearRateLimitEntries();
     for (let index = 0; index < strictLimit; index += 1) rateLimit(makeReq("127.0.0.1") as Request, makeRes() as Response, vi.fn());

@@ -18,12 +18,10 @@ credential is an opaque base64url token of **32–128 ASCII characters** matchin
 `[A-Za-z0-9_-]`; this validation is repeated by the API, boundary proxy, and
 dashboard loader before they serve requests.
 
-```dotenv
-INGENIUM_API_TOKEN=<generated-base64url-token>
-```
-
-The placeholder above is not a usable credential. Never replace it in a
-tracked file with a real value.
+Compose receives only the absolute host file path and mounts it read-only at
+`/run/ingenium-bootstrap/api-token`; token bytes never enter the rendered
+environment. Inline `INGENIUM_API_TOKEN` remains a non-container development
+fallback only.
 
 The API expects `Authorization: Bearer <token>`. Missing, malformed, invalid,
 expired, or revoked bearer credentials return `401`; authenticated credentials
@@ -33,12 +31,15 @@ falling back to unauthenticated development behavior.
 
 ## Local token-file lifecycle and permissions
 
-For host development, run `scripts/bootstrap-local-secrets.sh`. It creates or
-updates only the ignored mode-`0600` `.env` installation credential and never
-projects that broad bearer into `.opencode`. It never prints the secret.
+Run `scripts/bootstrap-local-secrets.sh`. It creates a regular mode-`0600`
+installation-token file under the mode-`0700` host configuration directory and
+writes only its path to ignored `.env`. `--rotate` atomically replaces the file;
+neither operation projects the broad bearer into `.opencode` or prints it.
 
-The token file must be a regular file, owner-readable, inaccessible to group and
-other users, and owned by the running user. The MCP loaders also require the
+The Compose bootstrap token must be a regular non-symlink file owned by the
+mapped application UID/GID with exact mode `0600`. Entrypoint opens it with
+no-follow semantics and validates, reads, and copies the same descriptor; any
+metadata or read uncertainty fails startup without logging content. The MCP loaders also require the
 file to be below the real worktree `.opencode` directory, reject symlinks,
 control characters, whitespace, oversized values, and arbitrary file paths.
 
@@ -105,25 +106,43 @@ human-facing API limit. Non-loopback requests cannot select that bucket.
 
 ### Host and container seeding
 
-- **Host:** `scripts/bootstrap-local-secrets.sh` seeds only the installation
-  credential in `.env`. A recently stepped-up installation administrator issues
+- **Host:** `scripts/bootstrap-local-secrets.sh` seeds only the protected
+  installation-token file and its non-secret `.env` path. A recently stepped-up installation administrator issues
   scoped MCP and repository-sync credentials through `/api/v1/auth/mcp-credentials`.
-- **Container:** the entrypoint accepts either bootstrap source, validates it,
-  copies it atomically to `/run/ingenium-secrets/api-token`, sets the runtime
-  directory to `0700` and the token file to `0600` owned by `appuser`, then
-  unsets the inline token before supervisord starts. It removes only a recognized
-  historical `/workspace/.opencode/.ingenium-api-token`; an unsafe or mismatched
-  legacy path stops startup rather than being consumed.
+- **Container:** Compose mounts the required `INGENIUM_API_TOKEN_FILE` source
+  read-only at `/run/ingenium-bootstrap/api-token`. The entrypoint validates it,
+  copies it atomically to `/run/ingenium-secrets/api/installation-api-token`, sets
+  the consumer directory to `0700` and the token file to `0600` owned by
+  `ingenium-api`, then unsets any inline token before supervisord starts. It
+  removes only a recognized historical `/workspace/.opencode/.ingenium-api-token`;
+  an unsafe or mismatched legacy path stops startup rather than being consumed.
 
-The container's first-start OpenCode config contains only the relative scoped
-MCP credential reference; it does not contain token bytes. The runtime API, boundary,
-and dashboard processes read the protected runtime file instead of inheriting
-the bootstrap secret.
+The container's first-start OpenCode config contains only a relative scoped MCP
+credential-file path; OpenCode performs no config-time file interpolation and the
+config contains no token bytes. Only the private API receives the installation
+bearer. The boundary forwards opaque authorization and strips caller-supplied
+trusted headers; Dashboard receives a distinct bootstrap-only credential.
+
+Supervisor runs as root only to assign identities. API, boundary, Dashboard,
+Nginx, OpenCode, ttyd, VS Code, and restore maintenance run as distinct non-login
+users. Each launcher clears Supervisor's inherited environment. Supervisor uses
+`/run/ingenium-supervisor/supervisor.sock`; the API status routes use fixed status,
+detail, and bounded-log XML-RPC methods. Restore execution remains limited to the
+fixed program exposed through `/run/ingenium-restore-handoff/request.sock`.
+
+### Background synthesis runtime boundary
+
+Per-project background extraction and synthesis may execute only through one
+ready or idle runtime whose capability, service principal, security epoch, and
+project-level execute grant are all active. The API returns an unavailable result
+when that authorized runtime cannot be resolved; it does not probe providers or
+fall back to a global OpenCode target or another user's runtime.
 
 On every container start, the entrypoint projects the container-owned Ingenium
 MCP and plugin entries into the persistent global OpenCode config. This replaces
-the legacy `skill-sync` bootstrap entry with `resource-sync` and configures the
-`auto-observer`, `observer`, and `resource-sync` sources without projecting the
+the legacy `skill-sync` bootstrap entry with the canonical `resource-sync`
+projection and configures the `auto-observer`, `observer`, `resource-sync`,
+`session-coordinator`, and Ponytail adapter entries without projecting the
 installation bearer. The projection removes accidental `INGENIUM_API_TOKEN` and
 `INGENIUM_API_TOKEN_FILE` entries from the Ingenium MCP environment, preserves unrelated
 operator settings, and never logs credential contents.
@@ -161,10 +180,10 @@ immutable success or failure audit event.
 
 The authentication encryption key is separate from API, email, vault, and
 restore keys. Container startup atomically provisions
-`/app/.ingenium/auth-encryption-key` as a persistent appuser-owned mode-`0600`
-base64url 256-bit key. `run-api.sh` clears the inherited environment and passes
-only `INGENIUM_AUTH_ENCRYPTION_KEY_FILE`; API startup validates the file before
-binding.
+`/app/.ingenium/auth-encryption-key` as a persistent root-owned mode-`0600`
+base64url 256-bit key. The entrypoint creates an `ingenium-api`-owned ephemeral
+copy; `run-api.sh` clears the inherited environment and passes only that path.
+API startup validates the file before binding.
 
 ### Extension project initialization preflight
 
@@ -277,20 +296,41 @@ raw unauthenticated Express listener. The boundary rejects missing or malformed
 bearers with `401` and forwards scoped bearers to Express for validation; invalid,
 expired, or revoked bearers also receive `401`, while insufficient scope receives
 `403`. Only the matched installation bearer is replaced and marked as an internal
-request before forwarding to private container port `4096`.
+request before forwarding to private container port `4096`. For `ing_` scoped
+credentials, the boundary forwards only a recognized audience (`mcp`, `runtime`,
+`repository-sync`, or `mcp-report`) so Express can enforce its exact binding.
 Express also enforces the bearer credential. Loopback alone is never a bypass;
 do not publish `4096` or use OpenCode ports `4098`/`4099` as an API workaround.
 
-`/api/v1/health` is a management endpoint and therefore requires the bearer
-token. Docker health checks read the protected runtime file in a clean
-environment and probe the authenticated `4097` boundary; they do not put the
-token in curl arguments, URLs, logs, or browser responses. If token
-configuration is unavailable, the API returns `503 API_AUTH_NOT_CONFIGURED`
-rather than becoming unauthenticated.
+`GET /api/v1/health` is the narrow credential-free liveness endpoint and returns
+only service-health data. Docker health checks probe it through the `4097`
+boundary from a clean environment without receiving the installation bearer.
+Other management routes remain bearer-protected; a missing installation token
+therefore still returns `503 API_AUTH_NOT_CONFIGURED` instead of enabling an
+unauthenticated management path.
 
 The extraction engine reaches `GET /api/v1/opencode/messages` through an
 API-owned internal client. That client loads the same protected runtime token
 only while creating the loopback request, sends it only as the bearer header,
+Authenticated login returns a legacy session CSRF token whose SHA-256 hash
+remains on the session for compatibility. A tab that does not have that
+plaintext token calls `POST /api/v1/auth/session/csrf` with the session cookie,
+exact allowed `Origin`, and dashboard marker. This bootstrap call does not
+require a prior CSRF token and does not rotate or replace the session cookie.
+It returns a fresh random grant whose hash is bound to the exact session, user,
+and user security epoch. Grants expire after at most ten minutes and never past
+the session idle or absolute deadline. Each session retains at most eight active
+grants; issuance transactionally removes expired or invalid rows and keeps the
+newest eight deterministically.
+
+Unsafe cookie-authenticated requests accept either the login token or an active
+grant. A grant cannot validate for another session or user, and session revocation,
+user disablement, security-epoch changes, grant expiry, and session expiry all fail
+closed. Revocation and security changes delete grants through database triggers;
+deleting the parent session cascades. CSRF grants prove browser request authenticity
+only: organization and project authorization still run independently and remain the
+final authority for every resource.
+
 and returns stable failure categories rather than headers, endpoint details, or
 response bodies. The route remains protected; loopback callers do not receive
 an authentication bypass.
@@ -299,8 +339,8 @@ an authentication bypass.
 
 The host `127.0.0.1:1455` reaches the Nginx callback listener, which forwards
 to private Express `4096`. The callback listener is deliberately narrower than
-the API, and the auth middleware contains the sole exact unauthenticated
-allowlist:
+the API, and the auth middleware contains a dedicated exact unauthenticated
+allowlist for this callback path:
 
 - only `GET /auth/callback` is forwarded;
 - other paths return `404`, and non-GET requests return `405`;
@@ -308,8 +348,10 @@ allowlist:
   headers are stripped;
 - OAuth `state` validation and callback rate limiting remain in the API.
 
-This exact callback is the only unauthenticated API exception because the
-provider redirect cannot attach the local bearer token. Port `1455` is
+This exact callback is the only unauthenticated exception on the OAuth callback
+listener because the provider redirect cannot attach the local bearer token.
+The API also has separate credential-free health and local browser-auth
+allowlists. Port `1455` is
 loopback-only in the default Compose deployment and is not a general API
 tunnel.
 
@@ -362,13 +404,24 @@ External identity/provider revocation is not implied by this local invalidation.
 
 Runtime secret changes do not require an image rebuild, but they do require a
 service restart/recreation. Source, proxy, or build-time browser-origin
-changes require `docker compose up --build -d`.
+changes require `docker compose --profile compatibility up --build -d`.
+
+OpenCode proxy and email encryption secrets use separate protected files created
+by `scripts/bootstrap-local-secrets.sh`. Rotate them with
+`--rotate-opencode-password` and `--rotate-email-encryption-key`; Compose mounts
+each file read-only and never stores either value in container configuration.
+Email-key rotation additionally requires the one-shot empty transition gate.
+That gate updates continuity metadata and writes a metadata-only resource audit
+only when every mail account, credential, token, OAuth attempt, legacy setting,
+cache, queue, watcher, and mail-account grant surface is transactionally empty.
+Any row, schema uncertainty, or concurrent insertion refuses startup without
+changing continuity metadata.
 
 ## No-secret-disclosure rule
 
 Never paste token values into tracked config, shell history, issue reports,
 screenshots, health output, or logs. Troubleshooting output should contain only
-status codes and redacted paths/metadata such as `0600:appuser:appuser`; never
+status codes and redacted paths/metadata such as `0600:ingenium-api:ingenium-api`; never
 print file contents or an `Authorization` header. If a secret is exposed,
 rotate it and restart every consumer before continuing.
 

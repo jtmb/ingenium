@@ -15,6 +15,7 @@ services:
         NEXT_PUBLIC_OPENCODE_WEB_URL: "${NEXT_PUBLIC_OPENCODE_WEB_URL:-http://opencode.localhost:3000/}"
         NEXT_PUBLIC_OPENCODE_CLI_URL: "${NEXT_PUBLIC_OPENCODE_CLI_URL:-http://cli.localhost:3000/}"
         NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "${INGENIUM_RUNTIME_ROOT_DOMAIN:-}"
+        NEXT_PUBLIC_RUNTIME_SCHEME: "${INGENIUM_RUNTIME_SCHEME:-http}"
         # Compose cannot evaluate Git commands. The deployment command must
         # supply the checkout SHA explicitly so the image remains traceable.
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
@@ -31,11 +32,10 @@ services:
       # Nginx binds this port and exposes only GET /auth/callback.
       - "127.0.0.1:1455:1455"
     environment:
-      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}
-      # The entrypoint accepts one bootstrap source, copies it to a mode-0600
-      # runtime file, then removes the plaintext variable before supervisor.
-      - INGENIUM_API_TOKEN=${INGENIUM_API_TOKEN:-}
-      - INGENIUM_API_TOKEN_FILE=${INGENIUM_API_TOKEN_FILE:-}
+      - OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password
+      # The host credential is mounted read-only; entrypoint copies it to the
+      # owner-only runtime file consumed by supervised services.
+      - INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       # Forward an optional operator override; blank values fall back safely.
       - INGENIUM_BACKUPS_DIR=${INGENIUM_BACKUPS_DIR:-}
@@ -45,7 +45,7 @@ services:
       # Owner-only restore staging is separate from mutable backup sources.
       - INGENIUM_RESTORE_STAGING_DIR=${INGENIUM_RESTORE_STAGING_DIR:-}
       - INGENIUM_API_PORT=4096
-      - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
+      - INGENIUM_GLOBAL_CONFIG_PATH=/home/ingenium-opencode/.config/opencode
       # Exact browser origins accepted by both the dashboard proxy and API
       # CSRF/CORS layer. Do not add wildcards, paths, or credentials.
       - DASHBOARD_ALLOWED_ORIGINS=${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
@@ -53,21 +53,25 @@ services:
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
       - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
       - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
-      - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:?INGENIUM_EMAIL_ENCRYPTION_KEY (64 hex chars) is required}
+      - INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/run/ingenium-bootstrap/email-encryption-key
+      - INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION=${INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION:-0}
       - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/mail/oauth/callback}
     volumes:
       - ingenium-data:/app/.ingenium
-      - opencode-config:/home/appuser/.config
-      - opencode-data:/home/appuser/.local
+      - opencode-config:/home/ingenium-opencode/.config
+      - opencode-data:/home/ingenium-opencode/.local
       # code-server is an administrator-grade, auth-none local profile with a
       # full terminal. It is unsupported for LAN, remote, shared, or untrusted users.
-      - vscode-data:/home/appuser/vscode-data
+      - vscode-data:/home/ingenium-vscode/vscode-data
+      - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+      - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
+      - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - ./opencode.json:/app/opencode.json:ro
       # Compose must be started from a WSL/Linux shell with HOME set. The
       # complete host repository root is the workspace contract; do not replace
       # it with a checkout-specific path.
       - "${HOME:?HOME must be set for the /workspace bind mount}/repos:/workspace"
-      - ${HOME:-~}/.local/share/opencode:/var/opencode:rw
+      - ${HOME:-~}/.local/share/opencode:/var/opencode:ro
     logging:
       driver: local
       options:
@@ -104,12 +108,11 @@ services:
       - INGENIUM_DEPLOYMENT_MODE=control-plane
       # Loaded from the operator environment or ignored mode-0600 .env file;
       # never bake this server-side credential into source or an image layer.
-      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}
-      - INGENIUM_API_TOKEN=${INGENIUM_API_TOKEN:-}
-      - INGENIUM_API_TOKEN_FILE=${INGENIUM_API_TOKEN_FILE:-}
+      - OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password
+      - INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       - INGENIUM_API_PORT=4096
-      - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
+      - INGENIUM_GLOBAL_CONFIG_PATH=/home/ingenium-opencode/.config/opencode
       - INGENIUM_RUNTIME_MANAGER_URL=http://runtime-manager:4110/
       - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token
       - INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-runtime-gateway/token
@@ -133,12 +136,18 @@ services:
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
       - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
       - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
-      - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:?INGENIUM_EMAIL_ENCRYPTION_KEY (64 hex chars) is required}
+      - INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/run/ingenium-bootstrap/email-encryption-key
+      - INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION=${INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION:-0}
       - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/mail/oauth/callback}
     volumes:
-      - control-plane-data:/app/.ingenium
-      - control-plane-opencode-config:/home/appuser/.config
-      - control-plane-opencode-data:/home/appuser/.local
+      # Production and compatibility are alternate profiles for one installation;
+      # switching profiles must not silently select an empty database or config.
+      - ingenium-data:/app/.ingenium
+      - opencode-config:/home/ingenium-opencode/.config
+      - opencode-data:/home/ingenium-opencode/.local
+      - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+      - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
+      - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - ./opencode.json:/app/opencode.json:ro
       - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
       - "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-gateway/token:ro"
@@ -166,12 +175,12 @@ services:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
     restart: unless-stopped
-    user: "1000:1000"
     group_add:
       - "${DOCKER_GID:-999}"
     environment:
       - INGENIUM_RUNTIME_MANAGER_PORT=4110
-      - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/token
+      - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-secrets/runtime-manager/token
+      - INGENIUM_RUNTIME_MANAGER_BOOTSTRAP_TOKEN_FILE=/run/ingenium-bootstrap/runtime-manager-token
       - INGENIUM_RUNTIME_WORKSPACE_MAP_FILE=/etc/ingenium/runtime-workspaces.json
       - INGENIUM_USER_RUNTIME_IMAGE=ingenium-user-runtime:${IMAGE_REVISION}
       - INGENIUM_RUNTIME_NETWORK_PREFIX=ingenium-runtime-
@@ -180,7 +189,7 @@ services:
       - INGENIUM_RUNTIME_API_URL=http://ingenium-control-plane:4096/api/v1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
+      - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-bootstrap/runtime-manager-token:ro"
       - "${INGENIUM_RUNTIME_WORKSPACE_MAP_FILE:-./config/runtime-workspaces.example.json}:/etc/ingenium/runtime-workspaces.json:ro"
       - "${INGENIUM_RUNTIME_WORKSPACE_VALIDATION_SOURCE:-./config}:${INGENIUM_RUNTIME_WORKSPACE_VALIDATION_TARGET:-/workspace-validation}:ro"
     networks:
@@ -189,6 +198,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     depends_on:
       - control-plane
       - runtime-gateway
@@ -203,7 +218,6 @@ services:
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
     restart: unless-stopped
     container_name: ingenium-runtime-gateway
-    user: "1000:1000"
     labels:
       com.ingenium.runtime-gateway: "true"
     ports:
@@ -215,12 +229,13 @@ services:
       - INGENIUM_RUNTIME_GATEWAY_HOST_PORT=${INGENIUM_RUNTIME_GATEWAY_HOST_PORT:-80}
       - INGENIUM_RUNTIME_GATEWAY_PORT=${INGENIUM_RUNTIME_GATEWAY_PORT:-8080}
       - INGENIUM_RUNTIME_API_URL=http://ingenium-control-plane:4097/api/v1/
-      - INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-runtime-gateway/token
+      - INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE=/run/ingenium-secrets/runtime-gateway/token
+      - INGENIUM_RUNTIME_GATEWAY_BOOTSTRAP_TOKEN_FILE=/run/ingenium-bootstrap/runtime-gateway-token
       - INGENIUM_RUNTIME_TLS_CERT_FILE=/run/ingenium-runtime-tls/tls.crt
       - INGENIUM_RUNTIME_TLS_KEY_FILE=/run/ingenium-runtime-tls/tls.key
       - DASHBOARD_ALLOWED_ORIGINS=${DASHBOARD_ALLOWED_ORIGINS:?DASHBOARD_ALLOWED_ORIGINS is required}
     volumes:
-      - "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-gateway/token:ro"
+      - "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:-/dev/null}:/run/ingenium-bootstrap/runtime-gateway-token:ro"
       - "${INGENIUM_RUNTIME_TLS_CERT_FILE:-/dev/null}:/run/ingenium-runtime-tls/tls.crt:ro"
       - "${INGENIUM_RUNTIME_TLS_KEY_FILE:-/dev/null}:/run/ingenium-runtime-tls/tls.key:ro"
     networks:
@@ -230,6 +245,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD", "setpriv", "--reuid=1110", "--regid=1110", "--clear-groups", "node", "/app/scripts/runtime-gateway-healthcheck.mjs"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   runtime-image:
     profiles: ["runtime-build"]
@@ -247,9 +274,6 @@ volumes:
   opencode-config:
   opencode-data:
   vscode-data:
-  control-plane-data:
-  control-plane-opencode-config:
-  control-plane-opencode-data:
 
 networks:
   runtime-control:

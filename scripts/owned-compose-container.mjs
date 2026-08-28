@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 function runDocker(args) {
@@ -20,7 +20,7 @@ function repositoryIdentity(callerUrl) {
   return {
     repositoryRoot,
     composeFile: realpathSync(join(repositoryRoot, "docker-compose.yml")),
-    project: basename(repositoryRoot),
+    project: "ingenium",
   };
 }
 

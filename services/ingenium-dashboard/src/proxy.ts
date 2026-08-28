@@ -52,6 +52,7 @@ const FORWARDED_ORIGIN_HEADERS = [
  * configuration is broadened accidentally.
  */
 const SERVER_ONLY_HANDOFF_HEADERS = [
+  "x-ingenium-dashboard-service",
   "x-ingenium-child-mcp-runtime",
   "x-ingenium-audience",
   "x-ingenium-private-network",
@@ -97,7 +98,8 @@ export function buildDashboardApiProxyHeaders(
   // treat them as a client identity or proxy-chain assertion.
   for (const header of FORWARDED_ORIGIN_HEADERS) headers.delete(header);
   headers.set(DASHBOARD_MARKER_HEADER, DASHBOARD_MARKER_VALUE);
-  headers.set("x-ingenium-internal-service", "1");
+  headers.delete("x-ingenium-internal-service");
+  if (token) headers.set("x-ingenium-dashboard-service", "bootstrap");
   if (token) headers.set("authorization", `Bearer ${token}`);
   return headers;
 }

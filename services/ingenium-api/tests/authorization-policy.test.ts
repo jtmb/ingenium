@@ -211,4 +211,44 @@ describe("AUTH-102 canonical API policy", () => {
     expect(req.authorizedProjectId).toBe(projectId);
   });
 
+  it("confines report credentials to read-only tool state for their exact project", () => {
+    vi.spyOn(projects, "getProject").mockReturnValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "report-project",
+      organization_id: "22222222-2222-4222-8222-222222222222",
+      archived_at: null,
+    } as ReturnType<typeof projects.getProject>);
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+    const principal = {
+      type: "service",
+      id: "mcp-report:credential-id",
+      tokenId: "credential-id",
+      scopes: ["mcp-report:inspect"],
+      organizationId: null,
+      projectId: "11111111-1111-4111-8111-111111111111",
+      projectIds: ["11111111-1111-4111-8111-111111111111"],
+      audience: "mcp-report",
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      launcherWorktree: "/app",
+      reportToolNames: ["ingenium_health_check"],
+    };
+    const allowed = {
+      method: "GET",
+      path: "/api/v1/mcp-tools",
+      query: { project: "report-project" },
+      params: {},
+      principal,
+    } as unknown as Request;
+    const next = vi.fn();
+
+    authorizationMiddleware(allowed, {} as Response, next);
+    expect(next).toHaveBeenCalledOnce();
+
+    const denied = { ...allowed, method: "PUT" } as Request;
+    expect(() => authorizationMiddleware(denied, {} as Response, vi.fn())).toThrowError(expect.objectContaining({
+      code: "NOT_FOUND",
+      statusCode: 404,
+    }));
+  });
+
 });

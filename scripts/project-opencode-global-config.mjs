@@ -2,14 +2,10 @@
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
+import { CANONICAL_PLUGIN_SPECS } from "../packages/ingenium-extension/plugin-specs.mjs";
 
 const DEFAULT_CONFIG = "opencode.jsonc";
-const REQUIRED_PLUGINS = [
-  "/app/packages/ingenium-extension/plugins/auto-observer.ts",
-  "/app/packages/ingenium-extension/plugins/observer.ts",
-  "/app/packages/ingenium-extension/plugins/resource-sync.ts",
-  "/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
-];
+const REQUIRED_PLUGINS = CANONICAL_PLUGIN_SPECS;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -120,7 +116,7 @@ function readConfig(configPath) {
 
 function isManagedPlugin(value) {
   return typeof value === "string" && (
-    /(?:^|\/)(?:auto-observer|observer|resource-sync)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
+    /(?:^|\/)(?:auto-observer|observer|resource-sync|session-coordinator)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
     || /^@dietrichgebert\/ponytail(?:@[^/]+)?$/.test(value)
     || /(?:^|\/)\.opencode\/plugins\/ponytail\.mjs$/.test(value)
   );
@@ -185,8 +181,8 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   // installation-bearer projection and install only the scoped MCP reference.
   delete environment.INGENIUM_API_TOKEN;
   delete environment.INGENIUM_API_TOKEN_FILE;
+  delete environment.INGENIUM_MCP_CREDENTIAL;
   environment.INGENIUM_API_URL = "http://localhost:4097/api/v1";
-  environment.INGENIUM_MCP_CREDENTIAL = "{file:.opencode/.ingenium-mcp-credential}";
   environment.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
   environment.INGENIUM_MCP_AUDIENCE = "mcp";
   environment.INGENIUM_PROJECT = "global-default";

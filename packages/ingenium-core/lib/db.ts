@@ -2048,6 +2048,34 @@ function inspectAuthenticationMigration(db: Database.Database): AuthenticationFo
   return state;
 }
 
+function inspectSessionCsrfGrantMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const indexes = ["idx_auth_session_csrf_grants_session_newest", "idx_auth_session_csrf_grants_expiry"];
+  const triggers = [
+    "auth_session_csrf_grants_scope_insert",
+    "auth_session_csrf_grants_immutable_update",
+    "auth_session_csrf_grants_bound_insert",
+    "auth_sessions_delete_csrf_grants_on_revoke",
+    "users_delete_csrf_grants_on_security_change",
+  ];
+  const state = inspectMigrationComponents(db, {
+    auth_session_csrf_grants: ["id", "session_id", "user_id", "security_epoch", "token_hash", "expires_at", "created_at"],
+  }, indexes, triggers);
+  if (state.any && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "106_session_csrf_grants.sql",
+      `CREATE TABLE users (id TEXT PRIMARY KEY, status TEXT, security_epoch INTEGER);
+       CREATE TABLE auth_sessions (
+         id TEXT PRIMARY KEY, user_id TEXT, security_epoch INTEGER, revoked_at TEXT,
+         idle_expires_at TEXT, absolute_expires_at TEXT
+       );`,
+      ["auth_session_csrf_grants", ...indexes, ...triggers],
+    ));
+  }
+  state.complete = state.missing.length === 0;
+  return state;
+}
+
 function isAuth100AuthenticationSchema(db: Database.Database): boolean {
   const sessionColumns = new Set((db.prepare("PRAGMA table_info(auth_sessions)").all() as Array<{ name: string }>).map(({ name }) => name));
   const factorColumns = new Set((db.prepare("PRAGMA table_info(auth_totp_factors)").all() as Array<{ name: string }>).map(({ name }) => name));
@@ -5147,6 +5175,22 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("105", ["runtime browser localhost origins or foreign key integrity"]);
     }
     logger.info("db", "Applied migration 105_runtime_localhost_browser_origins.sql");
+  }
+
+  const sessionCsrfGrants = inspectSessionCsrfGrantMigration(db);
+  if (sessionCsrfGrants.any && !sessionCsrfGrants.complete) {
+    throw restoreMigrationPartialStateError("106", sessionCsrfGrants.missing);
+  }
+  if (!sessionCsrfGrants.complete) {
+    if (!inspectAuthenticationMigration(db).complete) {
+      throw restoreMigrationPartialStateError("106", ["migration 094 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "106_session_csrf_grants.sql"), "utf-8"));
+    const applied = inspectSessionCsrfGrantMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("106", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 106_session_csrf_grants.sql");
   }
 
   const coordinationHandoffs = inspectCoordinationHandoffMigration(db);

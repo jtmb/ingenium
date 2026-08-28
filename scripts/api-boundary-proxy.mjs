@@ -8,16 +8,7 @@
  * an internal compatibility request.
  */
 import http from "node:http";
-import {
-  apiTokensEqual,
-  isValidApiToken,
-  loadApiToken,
-} from "/app/services/ingenium-api/dist/lib/middleware/api-token.js";
-import {
-  loadRuntimeGatewayToken,
-  runtimeGatewayIngressHeaders,
-  runtimeGatewayTokensEqual,
-} from "/app/services/ingenium-api/dist/lib/runtime-gateway-auth.js";
+import { isValidApiToken } from "/app/services/ingenium-api/dist/lib/middleware/api-token.js";
 
 const proxyPort = Number(process.env.INGENIUM_API_PROXY_PORT ?? "4097");
 const upstreamPort = Number(process.env.INGENIUM_API_UPSTREAM_PORT ?? "4096");
@@ -27,21 +18,6 @@ function fail(message) {
   process.exit(1);
 }
 
-let token;
-try {
-  token = loadApiToken(process.env);
-} catch {
-  fail("API token file is missing, unsafe, or invalid");
-}
-let runtimeGatewayToken = null;
-if (process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE?.trim()) {
-  try {
-    runtimeGatewayToken = loadRuntimeGatewayToken();
-  } catch {
-    fail("Runtime gateway token file is unsafe or invalid");
-  }
-  if (apiTokensEqual(runtimeGatewayToken, token)) fail("Runtime gateway token must be distinct from the installation token");
-}
 if (!Number.isInteger(proxyPort) || proxyPort < 1 || proxyPort > 65535) {
   fail("INGENIUM_API_PROXY_PORT is invalid");
 }
@@ -62,8 +38,9 @@ const hopByHopHeaders = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+const scopedAudiences = new Set(["mcp", "runtime", "repository-sync", "mcp-report"]);
 
-function upstreamHeaders(headers, providedToken, principal) {
+function upstreamHeaders(headers, providedToken, gatewayRequest) {
   const forwarded = {};
   for (const [name, value] of Object.entries(headers)) {
     const normalizedName = name.toLowerCase();
@@ -71,15 +48,26 @@ function upstreamHeaders(headers, providedToken, principal) {
       || normalizedName === "x-ingenium-internal-service"
       || normalizedName === "x-ingenium-private-network"
       || normalizedName === "x-ingenium-runtime-gateway"
-      || (normalizedName === "x-ingenium-audience" && principal !== "scoped")
+      || normalizedName === "x-ingenium-dashboard-service"
+      || normalizedName === "x-ingenium-audience"
       || value === undefined) continue;
     forwarded[name] = value;
   }
 
   forwarded.host = `127.0.0.1:${upstreamPort}`;
-  forwarded.authorization = `Bearer ${principal === "installation" ? token : providedToken}`;
-  if (principal === "installation") forwarded["x-ingenium-internal-service"] = "1";
-  return principal === "gateway" ? runtimeGatewayIngressHeaders(forwarded) : forwarded;
+  if (providedToken) forwarded.authorization = `Bearer ${providedToken}`;
+  if (gatewayRequest) {
+    forwarded["x-ingenium-audience"] = "runtime-gateway";
+    forwarded["x-ingenium-private-network"] = "runtime-gateway";
+  } else if (providedToken && !providedToken.startsWith("ing_")) {
+    forwarded["x-ingenium-internal-service"] = "1";
+  } else if (providedToken) {
+    const audience = headers["x-ingenium-audience"];
+    if (typeof audience === "string" && scopedAudiences.has(audience)) {
+      forwarded["x-ingenium-audience"] = audience;
+    }
+  }
+  return forwarded;
 }
 
 function incomingBearerToken(headers) {
@@ -108,39 +96,31 @@ function rejectPrivateRoute(response) {
 
 const server = http.createServer(
    { headersTimeout: 30_000, requestTimeout: 120_000, maxHeaderSize: 16 * 1024 },
-   (request, response) => {
+    (request, response) => {
+    const pathname = new URL(request.url ?? "/", "http://api-boundary").pathname;
+    const publicHealth = request.method === "GET" && pathname === "/api/v1/health";
     const providedToken = incomingBearerToken(request.headers);
-    if (!providedToken) {
+    if (!providedToken && !publicHealth) {
       request.resume();
       rejectUnauthorized(response);
       return;
     }
-    const installationRequest = apiTokensEqual(providedToken, token);
-    const pathname = new URL(request.url ?? "/", "http://api-boundary").pathname;
     const gatewayPrefix = pathname.startsWith("/api/v1/runtimes/gateway/");
     const gatewayRequest = request.method === "POST"
       && /^\/api\/v1\/runtimes\/gateway\/(exchange|validate|activity)$/.test(pathname)
       && request.headers["x-ingenium-audience"] === "runtime-gateway"
-      && runtimeGatewayToken !== null
-      && runtimeGatewayTokensEqual(providedToken, runtimeGatewayToken);
+      && providedToken !== null;
     if (gatewayPrefix && !gatewayRequest) {
       request.resume();
       rejectPrivateRoute(response);
       return;
     }
-    if (!gatewayPrefix && runtimeGatewayToken !== null && runtimeGatewayTokensEqual(providedToken, runtimeGatewayToken)) {
-      request.resume();
-      rejectPrivateRoute(response);
-      return;
-    }
-    const principal = gatewayRequest ? "gateway" : installationRequest ? "installation" : "scoped";
-
     const upstream = http.request({
       host: "127.0.0.1",
       port: upstreamPort,
       method: request.method,
       path: request.url,
-      headers: upstreamHeaders(request.headers, providedToken, principal),
+      headers: upstreamHeaders(request.headers, providedToken, gatewayRequest),
     }, (upstreamResponse) => {
       response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
       upstreamResponse.pipe(response);

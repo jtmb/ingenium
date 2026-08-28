@@ -138,7 +138,7 @@ function visibilityFor(
   enabled: boolean | undefined,
   transport: McpToolUsefulnessTransportSnapshot,
 ): McpToolVisibilityEvidence {
-  if (enabled === false) return { toolName: name, status: "unreachable", reason: "TOOL_DISABLED" };
+  if (enabled === false) return { toolName: name, status: "not-applicable", reason: "TOOL_DISABLED" };
   if (enabled === undefined) return { toolName: name, status: "unknown", reason: "TOOL_STATE_UNAVAILABLE" };
   if (boundary === "opencode-extension") return { toolName: name, status: "not-applicable", reason: "not-requested" };
   if (transport.state === "transport-unavailable") return { toolName: name, status: "unknown", reason: "transport-unavailable" };

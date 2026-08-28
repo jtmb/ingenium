@@ -25,10 +25,10 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 const PROFILE_MODE = 0o644;
+const RESERVED_BROKER_PROFILE = "ingenium-llm-broker.md";
 const DIRECTORY_MODE = 0o700;
 const ALLOWLISTED_PROFILES = [
   ["chat", "ingenium-chat.md"],
-  ["execution", "ingenium-llm-broker.md"],
 ];
 
 if (process.platform !== "linux" || typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") {
@@ -169,16 +169,16 @@ function applyProfileSourceOwnership(fd, sourceStat, description) {
   assertExclusiveRegularFile(fstatSync(fd), description);
 }
 
-function assertProfile(fd, sourceStat, expectedContents, description) {
+function assertProfile(fd, expectedOwner, expectedMode, expectedContents, description) {
   const stat = fstatSync(fd);
   assertExclusiveRegularFile(stat, description);
-  assertSameOwner(stat, sourceStat, description);
-  if ((stat.mode & 0o777) !== PROFILE_MODE) fail(`${description} does not have mode 0644`);
+  assertSameOwner(stat, expectedOwner, description);
+  if ((stat.mode & 0o777) !== expectedMode) fail(`${description} does not have mode 0${expectedMode.toString(8)}`);
   const contents = readFileSync(fd);
   if (!contents.equals(expectedContents)) fail(`${description} did not retain the source contents`);
 }
 
-function replaceProfileAtomically(targetDirectoryFd, profileName, sourceStat, contents) {
+function replaceProfileAtomically(targetDirectoryFd, profileName, expectedOwner, expectedMode, contents) {
   let temporaryName;
   let temporaryFd;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -187,7 +187,7 @@ function replaceProfileAtomically(targetDirectoryFd, profileName, sourceStat, co
       temporaryFd = openSync(
         descriptorPath(targetDirectoryFd, temporaryName),
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-        PROFILE_MODE,
+        expectedMode,
       );
       break;
     } catch (error) {
@@ -201,8 +201,8 @@ function replaceProfileAtomically(targetDirectoryFd, profileName, sourceStat, co
     assertExclusiveRegularFile(temporaryStat, "profile temporary file");
     writeAll(temporaryFd, contents);
     assertExclusiveRegularFile(fstatSync(temporaryFd), "profile temporary file");
-    applyProfileSourceOwnership(temporaryFd, sourceStat, "profile temporary file");
-    fchmodSync(temporaryFd, PROFILE_MODE);
+    applyProfileSourceOwnership(temporaryFd, expectedOwner, "profile temporary file");
+    fchmodSync(temporaryFd, expectedMode);
     fsyncSync(temporaryFd);
     assertExclusiveRegularFile(fstatSync(temporaryFd), "profile temporary file");
     closeSync(temporaryFd);
@@ -227,7 +227,7 @@ function replaceProfileAtomically(targetDirectoryFd, profileName, sourceStat, co
   }
 }
 
-function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, group, profileName) {
+function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, targetDirectoryStat, group, profileName) {
   const groupFd = openDirectoryAt(sourceDirectoryFd, group, `source agent group ${group}`);
   let source;
   let target;
@@ -236,26 +236,28 @@ function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectorySta
     source = openRegularFileAt(groupFd, profileName, `server-owned source profile ${group}/${profileName}`);
     assertSameOwner(source.stat, sourceDirectoryStat, `server-owned source profile ${group}/${profileName}`);
     const contents = readStableFile(source);
+    const expectedMode = PROFILE_MODE;
+    const expectedOwner = targetDirectoryStat;
     target = openRegularFileAt(targetDirectoryFd, profileName, `global agent profile ${profileName}`, { optional: true });
     if (target) {
-      assertSameOwner(target.stat, sourceDirectoryStat, `global agent profile ${profileName}`);
       const current = readFileSync(target.fd);
-      if (current.equals(contents)) {
+      if (current.equals(contents)
+        && target.stat.uid === expectedOwner.uid
+        && target.stat.gid === expectedOwner.gid
+        && (target.stat.mode & 0o777) === expectedMode) {
         assertExclusiveRegularFile(fstatSync(target.fd), `global agent profile ${profileName}`);
-        fchmodSync(target.fd, PROFILE_MODE);
-        fsyncSync(target.fd);
       } else {
         closeSync(target.fd);
         target = undefined;
-        replaceProfileAtomically(targetDirectoryFd, profileName, source.stat, contents);
+        replaceProfileAtomically(targetDirectoryFd, profileName, expectedOwner, expectedMode, contents);
       }
     } else {
-      replaceProfileAtomically(targetDirectoryFd, profileName, source.stat, contents);
+      replaceProfileAtomically(targetDirectoryFd, profileName, expectedOwner, expectedMode, contents);
     }
 
     const verified = openRegularFileAt(targetDirectoryFd, profileName, `global agent profile ${profileName}`);
     try {
-      assertProfile(verified.fd, source.stat, contents, `global agent profile ${profileName}`);
+      assertProfile(verified.fd, expectedOwner, expectedMode, contents, `global agent profile ${profileName}`);
     } finally {
       closeSync(verified.fd);
     }
@@ -273,13 +275,10 @@ function projectServerOwnedProfiles(sourcePath, targetPath) {
     const sourceDirectoryStat = assertDirectory(sourceDirectoryFd, "server-owned agent source directory");
     targetDirectoryFd = openDirectoryPath(targetPath, { create: true });
     const targetDirectoryStat = assertDirectory(targetDirectoryFd, "OpenCode global agents directory");
-    if (targetDirectoryStat.uid !== sourceDirectoryStat.uid || targetDirectoryStat.gid !== sourceDirectoryStat.gid) {
-      applySourceOwnership(targetDirectoryFd, sourceDirectoryStat);
-    }
     fchmodSync(targetDirectoryFd, DIRECTORY_MODE);
-    assertSameOwner(fstatSync(targetDirectoryFd), sourceDirectoryStat, "OpenCode global agents directory");
+    assertSameOwner(fstatSync(targetDirectoryFd), targetDirectoryStat, "OpenCode global agents directory");
     for (const [group, profileName] of ALLOWLISTED_PROFILES) {
-      projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, group, profileName);
+      projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, targetDirectoryStat, group, profileName);
     }
     fsyncSync(targetDirectoryFd);
   } finally {
@@ -301,11 +300,14 @@ function normalizeDirectory(directoryFd) {
       continue;
     }
     if (!entry.name.endsWith(".md")) continue;
+    if (entry.name === RESERVED_BROKER_PROFILE) continue;
     const profile = openRegularFileAt(directoryFd, entry.name, `agent profile ${entry.name}`);
     try {
       assertExclusiveRegularFile(fstatSync(profile.fd), `agent profile ${entry.name}`);
-      fchmodSync(profile.fd, PROFILE_MODE);
-      fsyncSync(profile.fd);
+      if ((profile.stat.mode & 0o777) !== PROFILE_MODE) {
+        fchmodSync(profile.fd, PROFILE_MODE);
+        fsyncSync(profile.fd);
+      }
     } finally {
       closeSync(profile.fd);
     }

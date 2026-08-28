@@ -20,6 +20,20 @@ if [ "$HOME" != "/home/appuser" ] || [ "$XDG_CONFIG_HOME" != "/home/appuser/.con
   exit 1
 fi
 
+NODE_ENV=production node --input-type=module -e '
+  let core;
+  try {
+    core = await import("file:///app/packages/ingenium-core/dist/lib/index.js");
+  } catch {
+    throw new Error("Trusted Ingenium Core broker validator is unavailable");
+  }
+  const trustedAgents = core.agents ?? core.default?.agents;
+  if (typeof trustedAgents?.validateProtectedOpenCodeDeployment !== "function") {
+    throw new Error("Trusted Ingenium Core broker validator is unavailable");
+  }
+  trustedAgents.validateProtectedOpenCodeDeployment();
+'
+
 capability="/run/ingenium-runtime/capability"
 capability_tmp="/run/ingenium-runtime/.capability.tmp"
 capability_value=""

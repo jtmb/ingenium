@@ -1,8 +1,8 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Agent } from "../schema.js";
-import { randomUUID } from "node:crypto";
-import { closeSync, constants, existsSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { accessSync, closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, resolve, sep } from "node:path";
 import { logger } from "../logger.js";
 import { getConfigPath } from "./paths.js";
 
@@ -15,6 +15,11 @@ export const LLM_BROKER_MODE = "subagent";
 export const LLM_BROKER_PERMISSIONS = '{"*":"deny"}';
 export const LLM_BROKER_METADATA = '{"hidden":true}';
 export const LLM_BROKER_SKILLS = "[]";
+export const LLM_BROKER_DEPLOYMENT_ROOT = "/usr/local/share/ingenium/opencode-managed";
+export const LLM_BROKER_CONFIG_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/opencode.json`;
+export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker.mjs`;
+const LLM_BROKER_CONFIG_SHA256 = "4dd82cf42295fd9dba7594f101702fb6d356db66d77adc98efc3d70dcc240d47";
+const LLM_BROKER_ENFORCER_SHA256 = "aae2499e9c1fa92e236d7f406df29720d2160447665f8fe792d24251543b84e1";
 export const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
 
 Its wildcard-deny permission boundary intentionally has no exceptions: it has no
@@ -207,6 +212,179 @@ function reservedBrokerFileContent(): string {
   ].join("\n");
 }
 
+function protectedOpenCodeArtifactError(artifact: string, message: string, cause?: unknown): Error {
+  const code = typeof cause === "object" && cause !== null && "code" in cause
+    ? ` (${String(cause.code)})`
+    : "";
+  return new Error(`${artifact} ${message}${code}`, { cause });
+}
+
+interface BrokerProfileChain {
+  descriptors: number[];
+  stats: ReturnType<typeof fstatSync>[];
+}
+
+interface ProtectedArtifactLocation {
+  root: string;
+  components: string[];
+}
+
+function closeBrokerProfileChain(chain: BrokerProfileChain | undefined): void {
+  if (!chain) return;
+  for (const descriptor of chain.descriptors.reverse()) closeSync(descriptor);
+}
+
+function descriptorIsWritable(descriptor: number): boolean {
+  try {
+    accessSync(`/proc/self/fd/${descriptor}`, constants.W_OK);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "EACCES") return false;
+    throw error;
+  }
+}
+
+function deploymentRoot(): string {
+  return process.env.VITEST
+    ? resolve(getAgentsDir(), "..", "..")
+    : LLM_BROKER_DEPLOYMENT_ROOT;
+}
+
+function brokerProfileLocation(): ProtectedArtifactLocation {
+  return process.env.VITEST
+    ? {
+        root: deploymentRoot(),
+        components: [".opencode", "agents", LLM_BROKER_CATEGORY, `${LLM_BROKER_AGENT}.md`],
+      }
+    : {
+        root: deploymentRoot(),
+        components: ["agents", `${LLM_BROKER_AGENT}.md`],
+      };
+}
+
+function protectedArtifactLocation(file: "config" | "enforcer"): ProtectedArtifactLocation {
+  if (process.env.VITEST) {
+    return {
+      root: deploymentRoot(),
+      components: file === "config"
+        ? [".opencode", "protected", "opencode.json"]
+        : [".opencode", "protected", "plugins", "enforce-reserved-broker.mjs"],
+    };
+  }
+  return {
+    root: deploymentRoot(),
+    components: file === "config"
+      ? ["opencode.json"]
+      : ["plugins", "enforce-reserved-broker.mjs"],
+  };
+}
+
+function openProtectedArtifactChain(location: ProtectedArtifactLocation, artifact: string): BrokerProfileChain {
+  if (process.platform !== "linux" || typeof process.getuid !== "function"
+    || typeof constants.O_DIRECTORY !== "number" || typeof constants.O_NOFOLLOW !== "number") {
+    throw protectedOpenCodeArtifactError(artifact, "validation requires Linux descriptor safety");
+  }
+  const descriptors: number[] = [];
+  const stats: ReturnType<typeof fstatSync>[] = [];
+  try {
+    let descriptor = openSync(location.root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    descriptors.push(descriptor);
+    let stat = fstatSync(descriptor);
+    if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o555 || descriptorIsWritable(descriptor)) {
+      throw protectedOpenCodeArtifactError(artifact, "trust root must be deployment-owned mode 0555");
+    }
+    const trustedOwner = { uid: stat.uid, gid: stat.gid };
+    if (trustedOwner.uid === process.getuid!()) {
+      throw protectedOpenCodeArtifactError(artifact, "trust root is owned by the runtime");
+    }
+    stats.push(stat);
+
+    for (const [index, component] of location.components.entries()) {
+      const isProfile = index === location.components.length - 1;
+      descriptor = openSync(
+        `/proc/self/fd/${descriptor}/${component}`,
+        constants.O_RDONLY | constants.O_NOFOLLOW | (isProfile ? 0 : constants.O_DIRECTORY),
+      );
+      descriptors.push(descriptor);
+      stat = fstatSync(descriptor);
+      if (stat.uid !== trustedOwner.uid || stat.gid !== trustedOwner.gid) {
+        throw protectedOpenCodeArtifactError(artifact, "owner does not match the trusted deployment chain");
+      }
+      if (isProfile) {
+        if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o444 || descriptorIsWritable(descriptor)) {
+          throw protectedOpenCodeArtifactError(artifact, "must be an exclusive read-only deployment file");
+        }
+      } else if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o555 || descriptorIsWritable(descriptor)) {
+        throw protectedOpenCodeArtifactError(artifact, "parent chain must be deployment-owned mode 0555");
+      }
+      stats.push(stat);
+    }
+    return { descriptors, stats };
+  } catch (error) {
+    closeBrokerProfileChain({ descriptors, stats });
+    if (error instanceof Error && error.message.startsWith(artifact)) throw error;
+    throw protectedOpenCodeArtifactError(artifact, "could not be opened safely", error);
+  }
+}
+
+function validateProtectedArtifact(
+  location: ProtectedArtifactLocation,
+  artifact: string,
+  isCanonical: (content: string) => boolean,
+): void {
+  let first: BrokerProfileChain | undefined;
+  let second: BrokerProfileChain | undefined;
+  try {
+    first = openProtectedArtifactChain(location, artifact);
+    const profileDescriptor = first.descriptors[first.descriptors.length - 1]!;
+    const before = fstatSync(profileDescriptor);
+    const content = readFileSync(profileDescriptor, "utf-8");
+    const after = fstatSync(profileDescriptor);
+    if (!isCanonical(content)
+      || before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs) {
+      throw protectedOpenCodeArtifactError(artifact, "content or descriptor identity is not canonical");
+    }
+    second = openProtectedArtifactChain(location, artifact);
+    if (first.stats.some((stat, index) => {
+      const current = second!.stats[index]!;
+      return stat.dev !== current.dev || stat.ino !== current.ino;
+    })) {
+      throw protectedOpenCodeArtifactError(artifact, "path identity changed during validation");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(artifact)) throw error;
+    throw protectedOpenCodeArtifactError(artifact, "could not be read safely", error);
+  } finally {
+    closeBrokerProfileChain(second);
+    closeBrokerProfileChain(first);
+  }
+}
+
+export function validateReservedBrokerDeployment(): void {
+  validateProtectedArtifact(
+    brokerProfileLocation(),
+    "Reserved LLM broker profile",
+    (content) => content === reservedBrokerFileContent(),
+  );
+}
+
+export function validateProtectedOpenCodeDeployment(): void {
+  validateReservedBrokerDeployment();
+  validateProtectedArtifact(
+    protectedArtifactLocation("config"),
+    "Protected OpenCode config",
+    (content) => createHash("sha256").update(content).digest("hex") === LLM_BROKER_CONFIG_SHA256,
+  );
+  validateProtectedArtifact(
+    protectedArtifactLocation("enforcer"),
+    "Protected OpenCode broker enforcer",
+    (content) => createHash("sha256").update(content).digest("hex") === LLM_BROKER_ENFORCER_SHA256,
+  );
+}
+
 /** Exact broker row shape permitted by migration 058's connection-independent trigger set. */
 export function isCanonicalBrokerAgent(agent: Agent): boolean {
   return agent.name === LLM_BROKER_AGENT
@@ -397,6 +575,108 @@ function updateAgentRuntimeConfig(
   }
 }
 
+interface ReservedBrokerConfigReconciliation {
+  content: string;
+  storedId?: string;
+}
+
+function writeConfigAtomically(path: string, content: string): void {
+  const parentPath = resolve(path, "..");
+  let parentDescriptor: number | undefined;
+  let temporaryDescriptor: number | undefined;
+  let temporaryName = "";
+  try {
+    parentDescriptor = openSync(parentPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const targetName = basename(path);
+    const existing = lstatIfPresent(path);
+    if (existing && (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1)) {
+      throw new Error("unsafe config target");
+    }
+    const mode = existing ? existing.mode & 0o777 : 0o644;
+    temporaryName = `.${targetName}.${randomUUID()}.tmp`;
+    temporaryDescriptor = openSync(
+      `/proc/self/fd/${parentDescriptor}/${temporaryName}`,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      mode,
+    );
+    writeFileSync(temporaryDescriptor, content, "utf-8");
+    fchmodSync(temporaryDescriptor, mode);
+    fsyncSync(temporaryDescriptor);
+    const temporaryStat = fstatSync(temporaryDescriptor);
+    if (!temporaryStat.isFile() || temporaryStat.nlink !== 1
+      || readFileSync(`/proc/self/fd/${parentDescriptor}/${temporaryName}`, "utf-8") !== content) {
+      throw new Error("config verification failed");
+    }
+    closeSync(temporaryDescriptor);
+    temporaryDescriptor = undefined;
+    renameSync(
+      `/proc/self/fd/${parentDescriptor}/${temporaryName}`,
+      `/proc/self/fd/${parentDescriptor}/${targetName}`,
+    );
+    temporaryName = "";
+    try { fsyncSync(parentDescriptor); } catch { /* rename is already the atomic commit point */ }
+  } catch (error) {
+    if (temporaryDescriptor !== undefined) closeSync(temporaryDescriptor);
+    if (parentDescriptor !== undefined && temporaryName) {
+      try { unlinkSync(`/proc/self/fd/${parentDescriptor}/${temporaryName}`); } catch { /* preserve failure */ }
+    }
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? ` (${String(error.code)})`
+      : "";
+    throw new Error(`Reserved LLM broker runtime config reconciliation failed${code}`, { cause: error });
+  } finally {
+    if (parentDescriptor !== undefined) {
+      try { closeSync(parentDescriptor); } catch { /* no failure remains after the atomic commit point */ }
+    }
+  }
+}
+
+function prepareReservedBrokerRuntimeConfig(projectId: string): ReservedBrokerConfigReconciliation | undefined {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const stored = db.prepare("SELECT id, content FROM configs WHERE project_id = ? AND type = 'project'")
+    .get(projectId) as { id: string; content: string } | undefined;
+  let storedConfig: Record<string, unknown> | undefined;
+  try {
+    storedConfig = stored ? parseConfig(stored.content) : undefined;
+  } catch (error) {
+    throw new Error("Reserved LLM broker runtime config metadata is malformed", { cause: error });
+  }
+
+  const path = getConfigPath(projectId);
+  const diskStat = lstatIfPresent(path);
+  if (diskStat && (diskStat.isSymbolicLink() || !diskStat.isFile() || diskStat.nlink !== 1)) {
+    throw new Error("Reserved LLM broker runtime config path is unsafe");
+  }
+  let diskConfig: Record<string, unknown> | undefined;
+  if (diskStat) {
+    try {
+      diskConfig = parseConfig(readFileSync(path, "utf-8"));
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? ` (${String(error.code)})`
+        : "";
+      throw new Error(`Reserved LLM broker runtime config could not be read${code}`, { cause: error });
+    }
+  }
+
+  const storedAgents = storedConfig?.agent;
+  const diskAgents = diskConfig?.agent;
+  const storedHasOverride = isJsonObject(storedAgents)
+    && Object.prototype.hasOwnProperty.call(storedAgents, LLM_BROKER_AGENT);
+  const diskHasOverride = isJsonObject(diskAgents)
+    && Object.prototype.hasOwnProperty.call(diskAgents, LLM_BROKER_AGENT);
+  if (!storedHasOverride && !diskHasOverride) return undefined;
+
+  const config = structuredClone(storedConfig ?? diskConfig ?? {});
+  if (isJsonObject(config.agent)) {
+    delete config.agent[LLM_BROKER_AGENT];
+    if (Object.keys(config.agent).length === 0) delete config.agent;
+  }
+  const content = JSON.stringify(config, null, 2);
+  writeConfigAtomically(path, content);
+  return { content, storedId: stored?.id };
+}
+
 /**
  * Write an agent definition to `.opencode/agents/<category>/<name>.md` as a YAML-frontmatter markdown file.
  *
@@ -407,21 +687,16 @@ function updateAgentRuntimeConfig(
  * If the file doesn't exist, it creates a full frontmatter block from the DB record, including
  * permissions (read/write/bash/task/mcp/skill), skills list, and content body.
  */
-function writeAgentToDisk(agent: Agent, force = false): void {
+function writeAgentToDisk(agent: Agent): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
-  if (!agent.enabled && !force) return;
+  if (!agent.enabled) return;
+  if (isReservedAgentName(agent.name)) {
+    throw new Error("Reserved LLM broker profile is deployment-owned");
+  }
   const filePath = safeAgentFilePath(agent.category, agent.name, true);
   if (!filePath) throw new Error("Unsafe agent profile path");
   const escapedDesc = agent.description.replace(/"/g, '\\"');
-
-  // The reserved profile is a complete static template, not a serialization
-  // of a database row. This keeps first bootstrap and later repair writes
-  // byte-identical and prevents malformed persisted fields from reaching disk.
-  if (isReservedAgentName(agent.name)) {
-    writePublicAgentProfile(filePath, reservedBrokerFileContent());
-    return;
-  }
 
   if (existsSync(filePath)) {
     const existingContent = readFileSync(filePath, "utf-8");
@@ -516,37 +791,16 @@ function removeAgentFromDisk(agent: Agent): void {
 
 /**
  * The broker definition is never imported from disk. Migration 058 validates
- * the persisted record as the exact canonical template; disk sync only
- * rematerializes that template and never performs a database repair write.
+ * the persisted record as the exact canonical template; disk sync validates
+ * the deployment-owned profile without changing either source of truth.
  */
-function restoreReservedBrokerFromTrustedState(agent: Agent): Agent | undefined {
+function validateReservedBrokerState(agent: Agent): Agent | undefined {
   if (!isCanonicalBrokerAgent(agent)) {
     logger.error("agents", "Reserved broker row failed canonical template validation", { id: agent.id });
     return undefined;
   }
-  writeAgentToDisk(agent, true);
+  validateReservedBrokerDeployment();
   return agent;
-}
-
-/**
- * A broker file without a persisted broker row has no trusted source of truth.
- * Remove only regular files or file symlinks beneath a real category directory;
- * never follow a category-directory symlink while quarantining it.
- */
-function quarantineUntrustedBrokerFiles(): void {
-  for (const category of AGENT_CATEGORIES) {
-    const categoryDir = safeAgentCategoryDirectory(category);
-    if (!categoryDir) continue;
-    try {
-      const filePath = resolve(categoryDir, `${LLM_BROKER_AGENT}.md`);
-      if (!filePath.startsWith(categoryDir + sep) || !lstatIfPresent(filePath)) continue;
-      unlinkSync(filePath);
-      logger.warn("agents", "Removed untrusted reserved broker profile with no persisted record", { category });
-    } catch {
-      // A failed quarantine leaves no DB record to activate. Do not follow or
-      // overwrite an uncertain path merely to make cleanup best-effort.
-    }
-  }
 }
 
 /**
@@ -635,24 +889,47 @@ export function createAgent(
  * API, MCP, and resource-sync callers must never be able to author the broker.
  */
 export function bootstrapReservedBroker(projectId: string): Agent {
-  const broker = execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const existing = db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const persisted = db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
+    .get(projectId, LLM_BROKER_AGENT) as Agent | undefined;
+  if (persisted && !isCanonicalBrokerAgent(persisted)) {
+    throw new Error("Reserved LLM broker failed canonical template validation");
+  }
+  if (!persisted && !db.prepare("SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL").get(projectId)) {
+    throw new Error("Cannot bootstrap reserved LLM broker for a missing or archived project");
+  }
+
+  validateReservedBrokerDeployment();
+  const configReconciliation = prepareReservedBrokerRuntimeConfig(projectId);
+
+  const result = execTransaction(() => {
+    const transactionDb = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = transactionDb.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
       .get(projectId, LLM_BROKER_AGENT) as Agent | undefined;
     if (existing) {
       if (!isCanonicalBrokerAgent(existing)) {
         throw new Error("Reserved LLM broker failed canonical template validation");
       }
-      return existing;
+      if (configReconciliation) {
+        const now = new Date().toISOString();
+        if (configReconciliation.storedId) {
+          transactionDb.prepare("UPDATE configs SET content = ?, updated_at = ? WHERE id = ?")
+            .run(configReconciliation.content, now, configReconciliation.storedId);
+        } else {
+          transactionDb.prepare("INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, 'project', ?, ?, ?)")
+            .run(`config_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, projectId, configReconciliation.content, now, now);
+        }
+      }
+      return { broker: existing, changed: Boolean(configReconciliation) };
     }
 
-    const project = db.prepare("SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL")
+    const project = transactionDb.prepare("SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL")
       .get(projectId);
     if (!project) throw new Error("Cannot bootstrap reserved LLM broker for a missing or archived project");
 
     const now = new Date().toISOString();
     const id = randomUUID();
-    db.prepare(
+    transactionDb.prepare(
       `INSERT INTO agents (id, project_id, name, description, category, mode, model, reasoning_effort, permissions, metadata, skills, content, enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(
@@ -669,11 +946,19 @@ export function bootstrapReservedBroker(projectId: string): Agent {
       now,
       now,
     );
-    return db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Agent;
+    if (configReconciliation) {
+      if (configReconciliation.storedId) {
+        transactionDb.prepare("UPDATE configs SET content = ?, updated_at = ? WHERE id = ?")
+          .run(configReconciliation.content, now, configReconciliation.storedId);
+      } else {
+        transactionDb.prepare("INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, 'project', ?, ?, ?)")
+          .run(`config_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, projectId, configReconciliation.content, now, now);
+      }
+    }
+    return { broker: transactionDb.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Agent, changed: true };
   });
-  writeAgentToDisk(broker, true);
-  checkpointAfterWrite();
-  return broker;
+  if (result.changed) checkpointAfterWrite();
+  return result.broker;
 }
 
 /**
@@ -828,13 +1113,12 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   const dbAgent = db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
     .get(projectId, name) as Agent | undefined;
 
-  // Disk frontmatter is untrusted for the system broker. This must run before
-  // generic missing-frontmatter, name-mismatch, and permission parsing paths:
-  // all of them restore the trusted profile when a row exists, while an orphan
-  // file is safely quarantined rather than imported as a new trusted profile.
+  // Disk frontmatter is untrusted for the system broker. Validate the
+  // deployment-owned profile before returning metadata, and never import or
+  // repair an orphan profile through resource sync.
   if (isReservedAgentName(name)) {
-    if (dbAgent) return restoreReservedBrokerFromTrustedState(dbAgent);
-    quarantineUntrustedBrokerFiles();
+    if (dbAgent) return validateReservedBrokerState(dbAgent);
+    validateReservedBrokerDeployment();
     return undefined;
   }
 
@@ -919,7 +1203,6 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
        .get(projectId, agentName) as Agent | undefined;
    });
     if (agent && !dbAgent) updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined, disabled: true });
-    if (agent && isReservedAgentName(agent.name)) writeAgentToDisk(agent, true);
-    checkpointAfterWrite();
+     checkpointAfterWrite();
    return agent;
 }

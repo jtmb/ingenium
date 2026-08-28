@@ -86,7 +86,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–101)
+### Feature Migrations (045–106)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -107,12 +107,17 @@ another Compose project volume.
 | 059 | `059_repository_docs_onboarding.sql` | Creates repository-authoritative Docs page identity metadata that survives archive and later reappearance. |
 | 060 | `060_repository_resource_sync.sql` | Creates repository-authoritative synchronization state for skills, agents, and plugins, including semantic payload and source hashes. |
 | 061 | `061_global_backup_ownership.sql` | Creates an idempotent migration marker and backfills legacy backup records and restore jobs to the sole active global project. Startup retries the backfill after global-project initialization. |
+| 062 | `062_child_mcp_definitions.sql` | Creates shell-free child MCP server definitions and same-project encrypted-vault environment references. |
 | 063 | `063_immutable_context_conversations.sql` | Creates immutable project-scoped conversations, messages, checkpoints, checkpoint RAG links, the message FTS5 index, scoped foreign keys, indexes, and immutability triggers. |
 | 064 | `064_child_mcp_tool_categories.sql` | Rebuilds child MCP discovery metadata so category values are server-specific. |
 | 065 | `065_context_rag_ingestion.sql` | Creates project-scoped direct/chunked context-upload state and durable provenance rows, freezes checkpoint-linked RAG sources/chunks, and stores immutable checkpoint citation snapshots. |
 | 066 | `066_context_checkpoint_governance.sql` | Creates short-lived, one-time project-scoped maintenance authorizations plus append-only archive/unarchive/restore-as-new audit records. Archive state is derived from events; checkpoints are never deleted. |
 | 067 | `067_context_migration_repair.sql` | Repairs recoverable legacy or partial 063 shapes before 065/066 are evaluated. The runner projects rows into canonical staging tables in one transaction, restores indexes/FTS/triggers/foreign keys, validates integrity, and records only a content-free schema hash plus row counts in `context_migration_repairs`. |
 | 068 | `068_usage_telemetry.sql` | Creates metadata-only provider-neutral usage events, explicit OpenCode-to-Ingenium project mappings (including unmapped quarantine), and per-project composite usage sync state. Events preserve raw provider/model IDs, nullable assistant-agent attribution, and numeric reasoning-token metadata. They have a replay-safe `(source_instance, source_part_id)` key and contain no message text, reasoning content, tool payload, credential, or raw payload columns. |
+| 069 | `069_context_conversation_snapshot_imports.sql` | Creates replay-safe, append-only Context conversation source mappings and imported-message identity records; transcript bodies remain in immutable context messages. |
+| 070 | `070_drop_legacy_rag_embeddings.sql` | Drops the unused `rag_embeddings` table; FTS-backed `rag_sources` and `rag_chunks` remain the active RAG corpus. |
+| 071 | `071_context_rag_session_source_reference.sql` | Adds the opaque upload-session source reference and prevents updates/deletes/inserts that would mutate immutable Context-upload RAG sources or chunks. |
+| 072 | `072_task_source_references.sql` | Creates immutable metadata-only task source references for email, Context, Docs, Chat, and Jobs with project/task foreign-key protection. |
 | 078 | `078_usage_advisory_thresholds.sql` | Creates one restrictive-FK, project-scoped advisory threshold row with nullable request, total-token, provider-reported-cost, and cache-token thresholds plus CAS revision and UTC audit timestamps. SQL checks reject negative, non-numeric, non-finite, and unsafe values. Thresholds contain no provider, currency, price, or time-window data and do not enforce usage routing or execution. There is no public delete operation: setting every threshold to `null` retains the row and its audit/revision history. |
 | 079 | `079_usage_attention_items.sql` | Creates project-scoped, all-history usage attention lifecycle items and immutable transition events. The five fixed condition keys cover request count, total tokens, provider-reported cost, cache-read tokens, and cache-write tokens. Rows retain only bounded advisory metadata, fixed message codes, CAS revisions, UTC lifecycle timestamps, and a fixed `NULL` all-history range; they contain no provider, source, payload, free-text, or JSON fields. |
 | 080 | `080_job_vault_references.sql` | Creates metadata-only job-to-vault authorization references and immutable authorization/revocation audit rows. References are project-scoped composite keys, target only active same-project vault items, are capped at 16 authorized items per job, and remain available as provenance when a job or vault item is soft-deleted. |
@@ -120,6 +125,19 @@ another Compose project volume.
 | 082 | `082_job_vault_revision_audit.sql` | Adds default-zero, strictly monotonic job revisions for CAS updates and immutable, exact project/job/run-linked vault runtime audit rows. The runtime audit records only fixed action/category/ID/version/timestamp metadata; it has no names, detail, plaintext, configuration, or actor-string linkage. |
 | 083 | `083_restore_plans.sql` | Creates RESTORE-100's immutable server-global plan identities, append-only transition revisions, one-time hash-only confirmation authorizations, append-only stage records/events, and bounded idempotency receipts. SQL triggers enforce preview → authorize → confirm → ready plus the stage-integrity failure path; ready requires a consumed authorization and a component-hash-bound verified stage. Restrictive composite foreign keys prevent deleting a planned source bundle. No trigger or table authorizes active-database replacement; execution is RESTORE-101 scope. |
 | 084 | `084_restore_executor.sql` | Adds RESTORE-101's separately authorized 15-minute execution token, queued run/item ledger, hash-only owner/fence evidence, phase-CAS state graph, bounded idempotency receipts, immutable execution audit, and the RESTORE-100 authorization-ID immutability correction. It is all-or-nothing at startup; partial execution inventory fails closed. |
+| 085 | `085_restore_executor_phase_events.sql` | Adds bounded, content-free RESTORE-101 executor phase diagnostics tied to the exact run, plan, and backup; invalid or mismatched events fail closed. |
+| 086 | `086_server_global_project_provenance.sql` | Records content-free `became_global`/`ceased_global` lifecycle evidence used to recover the server-global project without inferring archived status. |
+| 087 | `087_job_timeout_guard.sql` | Normalizes invalid legacy job timeouts and adds a durable generated CHECK guard for the inclusive 1–1,440 minute range. |
+| 088 | `088_email_suggestion_queue_leases.sql` | Adds durable queued/claimed lease state, owner, expiry, and a claimable index to the email suggestion queue. |
+| 089 | `089_synthesis_batch_phases.sql` | Creates crash-resumable synthesis batches with project ownership, four persisted stages, bounded proposal plans/errors, leases, revisions, and observation membership guards. |
+| 090 | `090_backup_deletion_reservations.sql` | Adds durable backup-deletion reservations that prevent restore-preview races and preserve retryable deletion state. |
+| 091 | `091_skill_proposal_retention_pagination.sql` | Adds bounded project/status keyset pagination ordering for skill proposals and rejects deletion so proposal history is retained. |
+| 093 | `093_identity_tenancy.sql` | Creates organizations, users, memberships, project ownership, and deterministic backfill for the identity/tenancy foundation. |
+| 094 | `094_authentication.sql` | Creates AUTH-101 identities, password credentials, browser sessions, one-time states, TOTP factors, and recovery-code storage. |
+| 094 upgrade | `094_authentication_auth101_upgrade.sql` | Rebuilds the AUTH-100 authentication foundation into the exact AUTH-101 session, one-time-state, and factor definitions while preserving valid rows. |
+| 095 | `095_authorization_audit.sql` | Creates installation admins, service principals, scoped API tokens, invitations, project grants, and immutable security-audit records for AUTH-101 authorization. |
+| 095 upgrade | `095_authorization_auth101_upgrade.sql` | Rebuilds AUTH-100 scoped API tokens into the AUTH-101 authorization definition with preserved identity, indexes, and immutability guards. |
+| 095 upgrade | `095_authorization_auth103_upgrade.sql` | Replaces invitation consume-once enforcement so a pending invitation may transition exactly once to accepted or revoked. |
 | 096 | `096_resource_ownership.sql` | Adds resource grants/audit, explicit organization/user ownership for vault folders/items, provider connections/model policies, immutable ownership guards, and an immutable bounded-count/exact-ID manifest. Existing encrypted vault material is not decrypted or re-encrypted. |
 | 097 | `097_mail_tenancy.sql` | Adds owned mail accounts, separately encrypted credential rows, organization-qualified consume-once OAuth attempts and mail cache state, scope/FK triggers, and an immutable bounded-count/exact-account-ID manifest. Existing account IDs, ciphertext, folder names, and cache identity are preserved. |
 | 098 | `098_content_tenancy.sql` | Adds organization-rooted Docs, authorization-scoped RAG visibility, immutable context ownership, private-by-default observations/personality, bounded pipeline scope, normalized content shares, content-free audit, child-scope triggers, and an immutable ID/hash/count manifest. Partial state is refused by startup probes. |
@@ -128,6 +146,19 @@ another Compose project volume.
 | 101 | `101_runtime_isolation.sql` | Adds AUTH-108 authorized-workspace mappings, one runtime per workspace, revisioned runtime lifecycle/leases/limits, runtime capability bindings, hash-only one-time audience launch tickets, append-only activity, exact-schema probes, and verified backfill evidence. |
 | 102 | `102_runtime_browser_sessions.sql` | Adds AUTH-109 runtime browser generations, exact auth-session/workspace/runtime/audience/origin/host hash-only launch tickets, and hash-only revocable browser sessions with one-time consumption and generation invalidation. |
 | 103 | `103_runtime_browser_launcher_origin.sql` | Persists the authenticated dashboard launcher origin on new runtime browser sessions, backfills matching live sessions from consumed launch tickets, and revokes unmatched legacy sessions so gateway CSP and health responses can allow only the originating dashboard. |
+| 105 | `105_runtime_localhost_browser_origins.sql` | Rebuilds runtime browser launch-ticket and session tables so exact HTTPS host origins remain valid and HTTP is accepted only when the exact persisted host ends in the special-use `.localhost` domain. |
+| 106 | `106_session_csrf_grants.sql` | Adds bounded hash-only browser CSRF grants tied to one auth session, user, security epoch, and expiry. Session deletion cascades; revocation and user security changes delete grants through triggers. |
+
+### Coordination and runtime hardening migrations (107–112)
+
+| # | File | Purpose |
+|---|------|---------|
+| 107 | `107_coordination_handoffs.sql` | Adds sanitized ordered peer-write handoff events and durable per-session receiver cursors, with project/worktree/session, task, and Context conversation scope. |
+| 108 | `108_coordination_client_claim_keys.sql` | Binds caller-held claim batches to stored SHA-256 client-claim-key hashes, releases legacy active claims that cannot prove possession, and adds insert/update guards. |
+| 109 | `109_runtime_workspace_supersession.sql` | Allows revoked workspace bindings to remain as audit tombstones while a replacement binding authorizes the same storage path; active storage paths remain unique and mappings immutable. |
+| 110 | `110_coordination_memory_cursors.sql` | Adds durable per-session acknowledgement cursors for bounded operational-memory replay and seeds existing sessions with a bounded message lookback. |
+| 111 | `111_managed_mutation_repository_serialization.sql` | Adds accepted worktree epochs, path baselines, retained managed-operation evidence, and repository-sync manifest generations for managed mutation serialization. |
+| 112 | `112_atomic_epoch_recovery.sql` | Binds coordination claims and quarantine recovery evidence to accepted epochs, requiring immutable epoch ownership and preventing takeover during crash recovery. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

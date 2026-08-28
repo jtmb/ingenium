@@ -6,7 +6,7 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { jobs, projects, resetDbForTest } from "ingenium-core";
-import { recoverInterruptedJobRunsAtStartup, startApiServer as startConfiguredApiServer } from "../scripts/api-server.js";
+import { ensureGlobalProject, recoverInterruptedJobRunsAtStartup, startApiServer as startConfiguredApiServer } from "../scripts/api-server.js";
 
 /**
  * Startup regression tests — verify that the API server does not exit or crash
@@ -134,6 +134,11 @@ describe("API startup — no global project", () => {
 });
 
 describe("API startup — ensureGlobalProject", () => {
+  it("propagates reserved broker trust failures instead of degrading startup", () => {
+    freshDb();
+    expect(() => ensureGlobalProject()).toThrow(/Reserved LLM broker profile/);
+  });
+
   /**
    * Simulate the api-server.ts startup logic: ensure a global project exists
    * using the same function pattern as the real server.

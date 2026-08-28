@@ -13,25 +13,29 @@ const emailMocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getEngineStatus: vi.fn(),
 }));
+const runtimeManagerMocks = vi.hoisted(() => ({ health: vi.fn(async () => true) }));
 
 vi.mock("ingenium-email", () => emailMocks);
+vi.mock("../lib/runtime-manager-client.js", () => ({ runtimeManagerHealth: runtimeManagerMocks.health }));
 
 let tempDir: string;
 let globalProjectId: string;
 let server: Server | null = null;
+let supervisorServer: Server | null = null;
 let baseUrl: string;
-const nativeFetch = globalThis.fetch;
+const originalSupervisorServerUrl = process.env.SUPERVISOR_SERVER_URL;
+const originalDeploymentMode = process.env.INGENIUM_DEPLOYMENT_MODE;
 const defaultSupervisorProcesses = [
   "restore-maintenance",
+  "restore-handoff",
   "ingenium-api",
   "ingenium-api-boundary",
   "ingenium-dashboard",
   "ingenium-gateway",
-  "opencode-web",
-  "ttyd-opencode",
-  "vscode",
 ];
 let supervisorProcesses = [...defaultSupervisorProcesses];
+let supervisorStates = new Map<string, string>();
+let malformedSupervisorResponse = false;
 let supervisorRequests: string[] = [];
 
 function escapeXml(value: string): string {
@@ -45,11 +49,12 @@ function escapeXml(value: string): string {
 }
 
 function processStruct(name: string): string {
-  return `<struct><member><name>name</name><value><string>${escapeXml(name)}</string></value></member><member><name>statename</name><value><string>${name === "restore-maintenance" ? "STOPPED" : "RUNNING"}</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`;
+  const state = supervisorStates.get(name) ?? (name === "restore-maintenance" ? "STOPPED" : "RUNNING");
+  return `<struct><member><name>name</name><value><string>${escapeXml(name)}</string></value></member><member><name>statename</name><value><string>${state}</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>now</name><value><i4>11</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`;
 }
 
 function supervisorResponse(): string {
-  return supervisorProcesses.map(processStruct).join("");
+  return `<methodResponse><params><param><value><array><data>${supervisorProcesses.map((name) => `<value>${processStruct(name)}</value>`).join("")}</data></array></value></param></params></methodResponse>`;
 }
 
 function processInfoResponse(name: string): string {
@@ -66,12 +71,36 @@ function buildApp(): express.Express {
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-services-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
+  process.env.INGENIUM_DEPLOYMENT_MODE = "control-plane";
 
   // getTasksStatus() calls tasks.listTasks("global-default"), but the FK
   // constraint on tasks.project_id REFERENCES projects(id) requires a UUID.
   // We create the project and store its UUID for creating test tasks.
   const project = projects.createProject("global-default");
   globalProjectId = project.id;
+
+  const socketPath = join(tempDir, "supervisor.sock");
+  supervisorServer = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      supervisorRequests.push(body);
+      response.writeHead(200, { "Content-Type": "text/xml" });
+      if (malformedSupervisorResponse) {
+        response.end("malformed");
+        return;
+      }
+      if (body.includes("supervisor.getAllProcessInfo")) {
+        response.end(supervisorResponse());
+        return;
+      }
+      const process = supervisorProcesses.find((name) => body.includes(`<string>${escapeXml(name)}</string>`));
+      response.end(process ? processInfoResponse(process) : "<methodResponse/>");
+    });
+  });
+  await new Promise<void>((resolve) => supervisorServer!.listen(socketPath, resolve));
+  process.env.SUPERVISOR_SERVER_URL = `unix://${socketPath}`;
 
   // Start a local server for fetch-based testing
   const app = buildApp();
@@ -85,22 +114,12 @@ beforeAll(async () => {
     });
   });
 
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input) === "http://127.0.0.1:9001/RPC2") {
-      const request = String(init?.body ?? "");
-      supervisorRequests.push(request);
-      if (request.includes("supervisor.getAllProcessInfo")) {
-        return new Response(supervisorResponse(), { status: 200 });
-      }
-      const process = supervisorProcesses.find((name) => request.includes(`<string>${escapeXml(name)}</string>`));
-      return new Response(process ? processInfoResponse(process) : "<methodResponse/>", { status: 200 });
-    }
-    return nativeFetch(input, init);
-  });
 });
 
 beforeEach(() => {
   supervisorProcesses = [...defaultSupervisorProcesses];
+  supervisorStates = new Map();
+  malformedSupervisorResponse = false;
   supervisorRequests = [];
   emailMocks.getGlobalProjectId.mockReturnValue(globalProjectId);
   emailMocks.listAccounts.mockReturnValue([]);
@@ -112,28 +131,32 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  vi.unstubAllGlobals();
+  if (originalSupervisorServerUrl === undefined) delete process.env.SUPERVISOR_SERVER_URL;
+  else process.env.SUPERVISOR_SERVER_URL = originalSupervisorServerUrl;
+  if (originalDeploymentMode === undefined) delete process.env.INGENIUM_DEPLOYMENT_MODE;
+  else process.env.INGENIUM_DEPLOYMENT_MODE = originalDeploymentMode;
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (supervisorServer) await new Promise<void>((resolve) => supervisorServer!.close(() => resolve()));
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("GET /api/v1/services/status — applications", () => {
-  it("reports seven running processes plus a safe stopped restore-maintenance program", async () => {
+  it("reports five running production processes plus a safe stopped restore-maintenance program", async () => {
     const res = await fetch(`${baseUrl}/api/v1/services/status`);
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    expect(body.data.services).toHaveLength(8);
+    expect(body.data.services).toHaveLength(6);
     expect(body.data.services).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "VS Code", state: "running", port: 4100 }),
-      expect.objectContaining({ name: "restore-maintenance", state: "stopped", port: 0 }),
+      expect.objectContaining({ name: "ingenium-api", state: "running", port: 4096, uptime: 10, required: true }),
+      expect.objectContaining({ name: "restore-maintenance", state: "stopped", port: 0, required: false }),
     ]));
     expect(body.data.overall).toBe("healthy");
   });
 
-  it("returns all 4 applications in the response", async () => {
+  it("returns all control-plane applications in the response", async () => {
     const res = await fetch(`${baseUrl}/api/v1/services/status`);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -141,10 +164,10 @@ describe("GET /api/v1/services/status — applications", () => {
     expect(body).toHaveProperty("data");
     expect(body.data).toHaveProperty("applications");
     expect(Array.isArray(body.data.applications)).toBe(true);
-    expect(body.data.applications).toHaveLength(4);
+    expect(body.data.applications).toHaveLength(5);
 
     const names = body.data.applications.map((a: { name: string }) => a.name).sort();
-    expect(names).toEqual(["docs-workspace", "email-client", "synthesis-engine", "tasks-board"]);
+    expect(names).toEqual(["docs-workspace", "email-client", "runtime-manager", "synthesis-engine", "tasks-board"]);
   });
 
   it("keeps aggregate health healthy when no optional email accounts exist", async () => {
@@ -157,6 +180,36 @@ describe("GET /api/v1/services/status — applications", () => {
     );
     expect(emailApp).toMatchObject({ state: "idle", required: false });
     expect(body.data.overall).toBe("healthy");
+  });
+
+  it("degrades aggregate health when a required Supervisor process stops", async () => {
+    supervisorStates.set("ingenium-dashboard", "STOPPED");
+
+    const res = await fetch(`${baseUrl}/api/v1/services/status`);
+    const body = await res.json();
+
+    expect(body.data.services).toContainEqual(expect.objectContaining({ name: "ingenium-dashboard", state: "stopped", required: true }));
+    expect(body.data.overall).toBe("degraded");
+  });
+
+  it("degrades aggregate health when a required Supervisor process is missing", async () => {
+    supervisorProcesses = supervisorProcesses.filter((name) => name !== "ingenium-dashboard");
+
+    const res = await fetch(`${baseUrl}/api/v1/services/status`);
+    const body = await res.json();
+
+    expect(body.data.services).toContainEqual(expect.objectContaining({ name: "ingenium-dashboard", state: "stopped", required: true }));
+    expect(body.data.overall).toBe("degraded");
+  });
+
+  it("returns a content-free down result for malformed Supervisor responses", async () => {
+    malformedSupervisorResponse = true;
+
+    const res = await fetch(`${baseUrl}/api/v1/services/status`);
+    const body = await res.json();
+
+    expect(body.data).toMatchObject({ services: [], overall: "down", error: "Supervisor status unavailable" });
+    expect(JSON.stringify(body)).not.toContain("malformed");
   });
 
   it("degrades aggregate health for a configured email client with a stale heartbeat", async () => {

@@ -22,6 +22,7 @@ import {
   loadApiToken,
 } from "../lib/middleware/api-token.js";
 import { runtimeGatewayIngressHeaders } from "../lib/runtime-gateway-auth.js";
+import * as mcpReportAuth from "../lib/mcp-report-auth.js";
 
 // We test the middleware in isolation — mock Express req/res/next
 // and the timing-safe crypto primitive.
@@ -30,6 +31,7 @@ describe("authMiddleware — timing-safe comparison", () => {
   const originalEnv = process.env.INGENIUM_API_TOKEN;
   const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
   const originalRuntimeGatewayTokenFile = process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
+  const originalDashboardBootstrapTokenFile = process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
   const validToken = "a".repeat(32);
   const gatewayToken = "g".repeat(43);
   const temporaryDirectories: string[] = [];
@@ -38,6 +40,7 @@ describe("authMiddleware — timing-safe comparison", () => {
     delete process.env.INGENIUM_API_TOKEN;
     delete process.env.INGENIUM_API_TOKEN_FILE;
     delete process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
+    delete process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
   });
 
   afterEach(() => {
@@ -58,6 +61,8 @@ describe("authMiddleware — timing-safe comparison", () => {
     } else {
       delete process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE;
     }
+    if (originalDashboardBootstrapTokenFile !== undefined) process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE = originalDashboardBootstrapTokenFile;
+    else delete process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
   });
 
   function makeReq(
@@ -88,6 +93,16 @@ describe("authMiddleware — timing-safe comparison", () => {
     process.env.INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE = tokenFile;
   }
 
+  function configureDashboardBootstrapToken(): string {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-dashboard-bootstrap-auth-"));
+    temporaryDirectories.push(directory);
+    const tokenFile = join(directory, "token");
+    const token = "d".repeat(48);
+    writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+    process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE = tokenFile;
+    return token;
+  }
+
   it("allows credential-free GET health only", () => {
     const req = makeReq(undefined, "GET", "/api/v1/health");
     const next = vi.fn();
@@ -95,6 +110,23 @@ describe("authMiddleware — timing-safe comparison", () => {
     expect(next).toHaveBeenCalledOnce();
     expect(isPublicHealthRequest(req as Request)).toBe(true);
     expect(isPublicHealthRequest(makeReq(undefined, "POST", "/api/v1/health") as Request)).toBe(false);
+  });
+
+  it("accepts the isolated dashboard credential only for bootstrap status and claim", () => {
+    const token = configureDashboardBootstrapToken();
+    for (const [method, path] of [["GET", "/api/v1/bootstrap/status"], ["POST", "/api/v1/bootstrap/claim"]]) {
+      const req = makeReq(`Bearer ${token}`, method, path);
+      req.headers = { ...req.headers, "x-ingenium-dashboard-service": "bootstrap" };
+      req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+      const next = vi.fn();
+      authMiddleware(req as Request, makeRes() as Response, next);
+      expect(next).toHaveBeenCalledOnce();
+      expect((req as Request).principal?.type).toBe("compatibility");
+    }
+    const denied = makeReq(`Bearer ${token}`, "POST", "/api/v1/bootstrap/recover");
+    denied.headers = { ...denied.headers, "x-ingenium-dashboard-service": "bootstrap" };
+    denied.get = (name: string) => (denied.headers as Record<string, string | undefined>)[name.toLowerCase()];
+    expect(() => authMiddleware(denied as Request, makeRes() as Response, vi.fn())).toThrowError(expect.objectContaining({ statusCode: 503 }));
   });
 
   it("fails closed when INGENIUM_API_TOKEN is not configured", () => {
@@ -301,6 +333,71 @@ describe("authMiddleware — timing-safe comparison", () => {
       workspaceId: "workspace-id",
       storageMappingHash: "a".repeat(64),
     });
+  });
+
+  it("authenticates the API-owned report credential only with its exact project and launcher binding", () => {
+    const reportToken = `ing_${"q".repeat(12)}_${"r".repeat(43)}`;
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const resolveReport = vi.spyOn(mcpReportAuth, "resolveMcpReportCredential").mockImplementation((_token, binding) => (
+      binding.project === "report-project" && binding.projectId === projectId && binding.workspaceId === projectId
+        && binding.launcherWorktree === "/app"
+        ? { id: "report-id", ...binding, toolNames: ["ingenium_health_check"] }
+        : undefined
+    ));
+    const req = makeReq(`Bearer ${reportToken}`);
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "mcp-report",
+      "x-ingenium-mcp-report": "1",
+      "x-ingenium-project": "report-project",
+      "x-ingenium-workspace": projectId,
+      "x-ingenium-launcher-worktree": "/app",
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+    const next = vi.fn();
+
+    authMiddleware(req as Request, makeRes() as Response, next);
+
+    expect(resolveReport).toHaveBeenCalledWith(reportToken, {
+      project: "report-project",
+      projectId,
+      workspaceId: projectId,
+      launcherWorktree: "/app",
+    });
+    expect(next).toHaveBeenCalledOnce();
+    expect((req as Request).principal).toMatchObject({
+      type: "service",
+      audience: "mcp-report",
+      projectId,
+      scopes: ["mcp-report:inspect"],
+      reportToolNames: ["ingenium_health_check"],
+    });
+  });
+
+  it.each([
+    ["missing marker", { "x-ingenium-mcp-report": undefined }],
+    ["wrong workspace", { "x-ingenium-workspace": "22222222-2222-4222-8222-222222222222" }],
+    ["wrong worktree", { "x-ingenium-launcher-worktree": "/workspace" }],
+    ["browser cookie", { cookie: "__Host-ingenium_session=browser-session" }],
+  ])("hides the report credential when its %s binding is invalid", (_name, override) => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    vi.spyOn(mcpReportAuth, "resolveMcpReportCredential").mockReturnValue(undefined);
+    const req = makeReq(`Bearer ing_${"q".repeat(12)}_${"r".repeat(43)}`);
+    req.headers = {
+      ...req.headers,
+      "x-ingenium-audience": "mcp-report",
+      "x-ingenium-mcp-report": "1",
+      "x-ingenium-project": "report-project",
+      "x-ingenium-workspace": projectId,
+      "x-ingenium-launcher-worktree": "/app",
+      ...override,
+    };
+    req.get = (name: string) => (req.headers as Record<string, string | undefined>)[name.toLowerCase()];
+
+    expect(() => authMiddleware(req as Request, makeRes() as Response, vi.fn())).toThrowError(expect.objectContaining({
+      statusCode: 404,
+      code: "NOT_FOUND",
+    }));
   });
 
   it("returns not-found semantics when a scoped credential launcher bound is forged", () => {

@@ -42,6 +42,8 @@
       "types": "./dist/plugins/session-coordinator.d.ts",
       "import": "./dist/plugins/session-coordinator.js"
     },
+    "./plugins/ponytail": "./ponytail/.opencode/plugins/ponytail.mjs",
+    "./plugin-specs": "./plugin-specs.mjs",
     "./onboarding-sync": {
       "types": "./dist/onboarding-sync.d.ts",
       "import": "./dist/onboarding-sync.js"
@@ -58,7 +60,7 @@
     "ingenium-build": "./dist/scripts/build-command.js",
     "ingenium-coordination-reset": "./dist/scripts/coordination-reset.js"
   },
-  "files": ["dist/", "README.md", "ponytail/"],
+  "files": ["dist/", "README.md", "plugin-specs.mjs", "ponytail/"],
   "scripts": {
     "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && test -f dist/scripts/managed-command-wrapper.js && test -f dist/scripts/repository-command.js && test -f dist/scripts/build-command.js && test -f dist/scripts/coordination-reset.js && test -f dist/plugins/auto-observer.js && test -f dist/plugins/observer.js && test -f dist/plugins/resource-sync.js && test -f dist/plugins/session-coordinator.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js dist/scripts/managed-command-wrapper.js dist/scripts/repository-command.js dist/scripts/build-command.js dist/scripts/coordination-reset.js && node scripts/verify-mcp-transport-parity.mjs",
     "test": "vitest run",

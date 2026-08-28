@@ -20,6 +20,8 @@ export const PASSWORD_SCRYPT_P = 1;
 const PASSWORD_MAX_MEMORY = 128 * 1024 * 1024;
 export const SESSION_IDLE_MS = 30 * 60 * 1000;
 export const SESSION_ABSOLUTE_MS = 12 * 60 * 60 * 1000;
+export const SESSION_CSRF_GRANT_MS = 10 * 60 * 1000;
+export const SESSION_CSRF_GRANT_MAX_ACTIVE = 8;
 export const STEP_UP_MS = 10 * 60 * 1000;
 export const PASSWORD_RESET_MS = 30 * 60 * 1000;
 export const EMAIL_VERIFICATION_MS = 24 * 60 * 60 * 1000;
@@ -147,14 +149,83 @@ export function resolveSession(token: string, now = new Date(), touch = false): 
   return { ...session, last_seen_at: now.toISOString(), idle_expires_at: idleExpiry };
 }
 
-export function verifySessionCsrf(session: AuthSession, token: string): boolean {
+export function verifySessionCsrf(session: AuthSession, token: string, now = new Date()): boolean {
+  let tokenHash: string;
   try {
-    const actual = Buffer.from(hashSecurityToken(token), "hex");
+    tokenHash = hashSecurityToken(token);
+    const actual = Buffer.from(tokenHash, "hex");
     const expected = Buffer.from(session.csrf_hash, "hex");
-    return timingSafeEqual(actual, expected);
+    if (actual.length === expected.length && timingSafeEqual(actual, expected)) return true;
   } catch {
     return false;
   }
+  const timestamp = now.toISOString();
+  return Boolean(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    `SELECT 1 FROM auth_session_csrf_grants
+     JOIN auth_sessions ON auth_sessions.id = auth_session_csrf_grants.session_id
+     JOIN users ON users.id = auth_session_csrf_grants.user_id
+     WHERE auth_session_csrf_grants.token_hash = ?
+       AND auth_session_csrf_grants.session_id = ?
+       AND auth_session_csrf_grants.user_id = ?
+       AND auth_session_csrf_grants.security_epoch = ?
+       AND auth_session_csrf_grants.expires_at > ?
+       AND auth_sessions.revoked_at IS NULL
+       AND auth_sessions.idle_expires_at > ?
+       AND auth_sessions.absolute_expires_at > ?
+       AND auth_sessions.user_id = auth_session_csrf_grants.user_id
+       AND auth_sessions.security_epoch = auth_session_csrf_grants.security_epoch
+       AND users.status = 'active'
+       AND users.security_epoch = auth_session_csrf_grants.security_epoch`,
+  ).get(tokenHash, session.id, session.user_id, session.security_epoch, timestamp, timestamp, timestamp));
+}
+
+export function issueSessionCsrfGrant(session: AuthSession, now = new Date()): string | undefined {
+  const token = randomBytes(32).toString("base64url");
+  const issued = execTransaction(() => {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const timestamp = now.toISOString();
+    database.prepare(
+      `DELETE FROM auth_session_csrf_grants
+       WHERE expires_at <= ? OR NOT EXISTS (
+         SELECT 1 FROM auth_sessions
+         JOIN users ON users.id = auth_sessions.user_id
+         WHERE auth_sessions.id = auth_session_csrf_grants.session_id
+           AND auth_sessions.user_id = auth_session_csrf_grants.user_id
+           AND auth_sessions.security_epoch = auth_session_csrf_grants.security_epoch
+           AND auth_sessions.revoked_at IS NULL
+           AND auth_sessions.idle_expires_at > ?
+           AND auth_sessions.absolute_expires_at > ?
+           AND users.status = 'active'
+           AND users.security_epoch = auth_session_csrf_grants.security_epoch
+       )`,
+    ).run(timestamp, timestamp, timestamp);
+    const current = database.prepare(
+      `SELECT auth_sessions.id, auth_sessions.user_id, auth_sessions.security_epoch,
+              auth_sessions.idle_expires_at, auth_sessions.absolute_expires_at
+       FROM auth_sessions JOIN users ON users.id = auth_sessions.user_id
+       WHERE auth_sessions.id = ? AND auth_sessions.user_id = ? AND auth_sessions.security_epoch = ?
+         AND auth_sessions.revoked_at IS NULL
+         AND auth_sessions.idle_expires_at > ? AND auth_sessions.absolute_expires_at > ?
+         AND users.status = 'active' AND users.security_epoch = auth_sessions.security_epoch`,
+    ).get(session.id, session.user_id, session.security_epoch, timestamp, timestamp) as Pick<
+      AuthSession,
+      "id" | "user_id" | "security_epoch" | "idle_expires_at" | "absolute_expires_at"
+    > | undefined;
+    if (!current) return false;
+    const expiresAt = new Date(Math.min(
+      now.getTime() + SESSION_CSRF_GRANT_MS,
+      new Date(current.idle_expires_at).getTime(),
+      new Date(current.absolute_expires_at).getTime(),
+    )).toISOString();
+    database.prepare(
+      `INSERT INTO auth_session_csrf_grants
+       (session_id, user_id, security_epoch, token_hash, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(current.id, current.user_id, current.security_epoch, hashSecurityToken(token), expiresAt, timestamp);
+    return true;
+  });
+  checkpointAfterWrite();
+  return issued ? token : undefined;
 }
 
 export function rotateSession(token: string, now = new Date(), markStepUp = false): ReturnType<typeof createSession> | undefined {
@@ -300,10 +371,18 @@ export async function operatorRecoverPassword(userId: string, password: string):
     const target = database.prepare("SELECT 1 FROM installation_admins WHERE user_id = ?").get(userId);
     if (!target) throw new Error("Operator recovery target is invalid");
     const now = new Date().toISOString();
-    database.prepare("UPDATE password_credentials SET password_hash = ?, salt = ?, updated_at = ? WHERE user_id = ?")
-      .run(credential.hash, credential.salt, now, userId);
+    database.prepare(
+      `UPDATE password_credentials
+       SET password_hash = ?, salt = ?, scrypt_n = ?, scrypt_r = ?, scrypt_p = ?, updated_at = ?
+       WHERE user_id = ?`,
+    ).run(credential.hash, credential.salt, PASSWORD_SCRYPT_N, PASSWORD_SCRYPT_R, PASSWORD_SCRYPT_P, now, userId);
     database.prepare("UPDATE users SET security_epoch = security_epoch + 1, status = 'active', updated_at = ? WHERE id = ?").run(now, userId);
     database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(now, userId);
+    database.prepare("DELETE FROM auth_session_csrf_grants WHERE user_id = ?").run(userId);
+    database.prepare(
+      `UPDATE auth_one_time_states SET consumed_at = ?
+       WHERE user_id = ? AND purpose IN ('password_reset', 'mfa_challenge') AND consumed_at IS NULL`,
+    ).run(now, userId);
   });
   checkpointAfterWrite();
 }

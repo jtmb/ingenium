@@ -183,13 +183,11 @@ authPreflightRouter.get("/session", (req, res) => {
   } });
 });
 authPreflightRouter.post("/session/csrf", (req, res) => {
-  currentUser(req);
-  const token = cookie(req, authentication.SESSION_COOKIE_NAME);
-  const rotated = token ? authentication.rotateSession(token) : undefined;
-  if (!rotated) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
-  setSession(res, rotated);
+  const principal = currentUser(req);
+  const csrfToken = authentication.issueSessionCsrfGrant(principal.session!);
+  if (!csrfToken) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
   res.set("Cache-Control", "no-store");
-  res.json({ data: { csrfToken: rotated.csrfToken } });
+  res.json({ data: { csrfToken } });
 });
 
 authPreflightRouter.post("/session/refresh", (req, res) => {

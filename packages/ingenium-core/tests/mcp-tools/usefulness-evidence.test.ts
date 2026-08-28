@@ -74,7 +74,7 @@ describe("MCP usefulness evidence adapter", () => {
       {
         name: "ingenium_alpha",
         boundary: "mcp-stdio",
-        visibility: { status: "unreachable", reason: "TOOL_DISABLED" },
+        visibility: { status: "not-applicable", reason: "TOOL_DISABLED" },
         invocation: { status: "not-run", reason: "TOOL_DISABLED" },
       },
       {

@@ -4,6 +4,7 @@ set -eu
 
 config_path="${1:-/app/nginx/gateway.conf}"
 config_dir="$(dirname "$config_path")"
+repo_root="$(CDPATH= cd -- "$config_dir/.." && pwd)"
 opencode_proxy_path="${config_dir}/proxy-opencode.conf"
 dashboard_proxy_path="${config_dir}/proxy-dashboard.conf"
 oauth_callback_proxy_path="${config_dir}/proxy-oauth-callback.conf"
@@ -11,6 +12,12 @@ vscode_proxy_path="${config_dir}/proxy-vscode.conf"
 compatibility_aliases_path="${config_dir}/runtime-aliases-compatibility.conf"
 production_aliases_path="${config_dir}/runtime-aliases-production.conf"
 unavailable_alias_path="${config_dir}/runtime-alias-unavailable-location.conf"
+dashboard_safe_read_map_path="${config_dir}/dashboard-safe-reads-map.conf"
+dashboard_safe_read_generator="${repo_root}/scripts/generate-dashboard-safe-read-policy.mjs"
+dashboard_safe_read_policy="${repo_root}/services/ingenium-api/config/dashboard-safe-reads.json"
+if [ ! -f "$dashboard_safe_read_policy" ]; then
+  dashboard_safe_read_policy="${repo_root}/services/ingenium-api/dist/config/dashboard-safe-reads.json"
+fi
 
 require_literal() {
   path="$1"
@@ -50,6 +57,12 @@ if [ ! -f "$vscode_proxy_path" ]; then
   echo "ERROR: VS Code proxy hardening configuration was not found: $vscode_proxy_path"
   exit 1
 fi
+for path in "$dashboard_safe_read_map_path" "$dashboard_safe_read_generator" "$dashboard_safe_read_policy"; do
+  if [ ! -f "$path" ]; then
+    echo "ERROR: Dashboard safe-read policy artifact was not found: $path"
+    exit 1
+  fi
+done
 for path in "$compatibility_aliases_path" "$production_aliases_path" "$unavailable_alias_path"; do
   if [ ! -f "$path" ]; then
     echo "ERROR: runtime alias profile configuration was not found: $path"
@@ -64,6 +77,8 @@ require_literal "$config_path" "error_log /run/ingenium-gateway/nginx-error.log 
 reject_literal "$config_path" "error_log stderr warn;"
 reject_literal "$config_path" "error_log /dev/stderr"
 require_literal "$config_path" "limit_req_zone \$binary_remote_addr zone=dashboard_request:10m rate=30r/s;"
+require_literal "$config_path" "limit_req_zone \$dashboard_api_read_limit_key zone=dashboard_api_read:10m rate=60r/s;"
+require_literal "$config_path" "limit_req_zone \$dashboard_api_strict_limit_key zone=dashboard_api_strict:10m rate=30r/s;"
 require_literal "$config_path" "limit_req_zone \$opencode_request_limit_key zone=opencode_request:10m rate=30r/s;"
 require_literal "$config_path" "limit_req_zone \$vscode_request_limit_key zone=vscode_request:10m rate=30r/s;"
 require_literal "$config_path" "limit_conn_zone \$binary_remote_addr zone=gateway_conn:10m;"
@@ -74,6 +89,13 @@ require_literal "$config_path" "map \$http_upgrade \$opencode_upgrade_rate_limit
 require_literal "$config_path" "map \$uri \$opencode_request_limit_key {"
 require_literal "$config_path" "map \$http_upgrade \$vscode_upgrade_rate_limit_key {"
 require_literal "$config_path" "map \$uri \$vscode_request_limit_key {"
+require_literal "$config_path" "include /app/nginx/dashboard-safe-reads-map.conf;"
+require_literal "$config_path" "map \$dashboard_api_limit_class \$dashboard_api_read_limit_key {"
+require_literal "$config_path" "map \$dashboard_api_limit_class \$dashboard_api_strict_limit_key {"
+require_literal "$dashboard_safe_read_map_path" "map \$request_uri \$dashboard_api_raw_path {"
+require_literal "$dashboard_safe_read_map_path" "map \"\$request_method|\$uri|\$dashboard_api_raw_path\" \$dashboard_api_limit_class {"
+require_literal "$dashboard_safe_read_map_path" "default strict;"
+reject_literal "$dashboard_safe_read_map_path" "GET|HEAD"
 require_literal "$config_path" "map \$http_upgrade \$vscode_upgrade_request {"
 require_literal "$config_path" "map \"\$vscode_upgrade_request:\$http_origin\" \$vscode_reject_upgrade {"
 require_literal "$config_path" "default                              1;"
@@ -88,9 +110,12 @@ require_literal "$config_path" "\"http://localhost:3000\" \"localhost:3000\";"
 require_literal "$config_path" "\"http://127.0.0.1:3000\" \"127.0.0.1:3000\";"
 require_literal "$config_path" "\"http://cli.localhost:3000\" \"cli.localhost:3000\";"
 require_literal "$config_path" "limit_req zone=dashboard_request burst=60 nodelay;"
+require_literal "$config_path" "limit_req zone=dashboard_api_read burst=360 nodelay;"
+require_literal "$config_path" "limit_req zone=dashboard_api_strict burst=60 nodelay;"
 require_literal "$compatibility_aliases_path" "limit_req zone=opencode_request burst=60 nodelay;"
 require_literal "$compatibility_aliases_path" "limit_req zone=vscode_request burst=60 nodelay;"
 require_literal "$config_path" "location ^~ /_next/static/ {"
+require_literal "$config_path" "location ^~ /api/v1/ {"
 reject_literal "$config_path" "location ^~ /_next/ {"
 reject_literal "$config_path" "location ^~ /_next/static {"
 reject_literal "$config_path" "zone=gateway_request"
@@ -121,6 +146,10 @@ require_literal "$compatibility_aliases_path" "return 403;"
 require_literal "$compatibility_aliases_path" "proxy_set_header Host \$ttyd_websocket_upstream_host;"
 require_literal "$compatibility_aliases_path" "proxy_set_header Origin \$http_origin;"
 require_literal "$config_path" "include /app/nginx/proxy-dashboard.conf;"
+require_literal "$config_path" "error_page 429 = @dashboard_rate_limited;"
+require_literal "$config_path" "location @dashboard_rate_limited {"
+require_literal "$config_path" "add_header Retry-After \"1\" always;"
+require_literal "$config_path" "return 429 '{\"error\":{\"code\":\"RATE_LIMITED\""
 require_literal "$config_path" "upstream vscode {"
 require_literal "$config_path" "server 127.0.0.1:4100;"
 require_literal "$compatibility_aliases_path" "server_name vscode.localhost;"
@@ -187,6 +216,8 @@ require_literal "$oauth_callback_proxy_path" "proxy_set_header Connection \"\";"
 require_literal "$oauth_callback_proxy_path" "proxy_set_header Content-Length \"\";"
 require_literal "$oauth_callback_proxy_path" "proxy_pass_request_body off;"
 
+node "$dashboard_safe_read_generator" --check "$dashboard_safe_read_policy" "$dashboard_safe_read_map_path"
+
 # This endpoint is loopback-only and must route only to ttyd.
 health_locations="$(grep -F -c 'location = /_ingenium/health' "$compatibility_aliases_path")"
 if [ "$health_locations" -ne 1 ]; then
@@ -250,11 +281,9 @@ if [ "$vscode_servers" -ne 1 ]; then
   exit 1
 fi
 
-for host in opencode.localhost cli.localhost vscode.localhost; do
-  require_literal "$production_aliases_path" "server_name $host;"
-done
+require_literal "$production_aliases_path" "server_name opencode.localhost cli.localhost vscode.localhost;"
 production_unavailable_includes="$(grep -F -c 'include /app/nginx/runtime-alias-unavailable-location.conf;' "$production_aliases_path")"
-if [ "$production_unavailable_includes" -ne 3 ]; then
+if [ "$production_unavailable_includes" -ne 1 ]; then
   echo "ERROR: production runtime aliases must share one unavailable response"
   exit 1
 fi

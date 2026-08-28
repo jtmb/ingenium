@@ -234,6 +234,18 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
   req.authorizationPolicy = policy;
   if (policy.target === "public") return next();
   if (!req.principal) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
+  if (req.principal.type === "service" && req.principal.audience === "mcp-report") {
+    const target = requestedProject(req);
+    const reportRead = req.method === "GET" && (req.path === "/api/v1/mcp-tools"
+      || /^\/api\/v1\/mcp-tools\/[^/]+\/state$/.test(req.path));
+    if (!reportRead || !target || target.id !== req.principal.projectId) {
+      audit(req.principal, policy, "denied");
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    audit(req.principal, policy, "success", { allowed: true, visible: true, projectId: target.id, organizationId: target.organizationId });
+    next();
+    return;
+  }
   if (policy.browserSessionOnly && (req.principal.type !== "user" || !req.principal.session)) {
     audit(req.principal, policy, "denied");
     throw new AppError("A browser installation administrator is required", "FORBIDDEN", 403);

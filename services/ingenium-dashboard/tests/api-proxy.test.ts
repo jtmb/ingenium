@@ -25,7 +25,7 @@ const BROWSER_ORIGIN = "http://localhost:3000";
 const INTERNAL_NEXT_ORIGIN = "http://localhost:3001";
 const DIRECT_FIXTURE_ORIGIN = "http://127.0.0.1:50664";
 const initialEnvironment = {
-  tokenFile: process.env.INGENIUM_API_TOKEN_FILE,
+  tokenFile: process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE,
   nodeEnv: process.env.NODE_ENV,
   dashboardAllowedOrigins: process.env.DASHBOARD_ALLOWED_ORIGINS,
 };
@@ -36,7 +36,7 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
   }
   for (const [name, value] of Object.entries({
-    INGENIUM_API_TOKEN_FILE: initialEnvironment.tokenFile,
+    INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: initialEnvironment.tokenFile,
     NODE_ENV: initialEnvironment.nodeEnv,
     DASHBOARD_ALLOWED_ORIGINS: initialEnvironment.dashboardAllowedOrigins,
   })) {
@@ -55,7 +55,7 @@ function configureProtectedToken(
   writeFileSync(tokenFile, `${TEST_TOKEN}\n`, { mode: 0o600 });
   chmodSync(tokenFile, 0o600);
   process.env.NODE_ENV = "production";
-  process.env.INGENIUM_API_TOKEN_FILE = tokenFile;
+  process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE = tokenFile;
   process.env.DASHBOARD_ALLOWED_ORIGINS = allowedOrigins;
   delete process.env.INGENIUM_API_TOKEN;
 }
@@ -129,7 +129,7 @@ function directFixtureRequestWithNextDefaults(
 }
 
 describe("dashboard authenticated API proxy", () => {
-  it("injects the dashboard server token and strips browser Authorization", () => {
+  it("injects the scoped bootstrap token and strips browser Authorization", () => {
     const headers = buildDashboardApiProxyHeaders(
       new Headers({
         Authorization: "Bearer browser-controlled-token",
@@ -145,6 +145,8 @@ describe("dashboard authenticated API proxy", () => {
     expect(headers.get("Authorization")).toBe("Bearer server-token");
     expect(headers.get("proxy-authorization")).toBeNull();
     expect(headers.get(DASHBOARD_MARKER_HEADER)).toBe(DASHBOARD_MARKER_VALUE);
+    expect(headers.get("x-ingenium-dashboard-service")).toBe("bootstrap");
+    expect(headers.get("x-ingenium-internal-service")).toBeNull();
     expect(headers.get("x-request-id")).toBe("request-123");
     expect(headers.get("x-forwarded-host")).toBeNull();
     expect(headers.get("x-forwarded-proto")).toBeNull();
@@ -218,7 +220,7 @@ describe("dashboard authenticated API proxy", () => {
 
       expect(getDashboardApiToken({
         NODE_ENV: nodeEnv,
-        INGENIUM_API_TOKEN_FILE: process.env.INGENIUM_API_TOKEN_FILE,
+        INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE,
       })).toBe(TEST_TOKEN);
     },
   );
@@ -240,14 +242,14 @@ describe("dashboard authenticated API proxy", () => {
     writeFileSync(tokenFile, `${TEST_TOKEN}\n`, { mode: 0o644 });
     symlinkSync(tokenFile, linkedTokenFile);
 
-    expect(getDashboardApiToken({ INGENIUM_API_TOKEN_FILE: tokenFile })).toBeNull();
-    expect(getDashboardApiToken({ INGENIUM_API_TOKEN_FILE: `${tokenFile}\u0000secret` })).toBeNull();
-    expect(getDashboardApiToken({ INGENIUM_API_TOKEN_FILE: linkedTokenFile })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: tokenFile })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: `${tokenFile}\u0000secret` })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: linkedTokenFile })).toBeNull();
   });
 
   it("fails closed when the dashboard server token is missing", async () => {
     delete process.env.INGENIUM_API_TOKEN;
-    delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
     process.env.NODE_ENV = "production";
 
     const response = proxy(
@@ -504,7 +506,7 @@ describe("dashboard authenticated API proxy", () => {
 
   it("rejects a production request without a protected token file", () => {
     process.env.NODE_ENV = "production";
-    delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
 
     const response = proxy(
       new NextRequest("http://dashboard.test/api/v1/projects"),

@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { execFile } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -23,6 +24,7 @@ import {
 } from "node:fs";
 import type { Dirent, Stats } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
+import { promisify } from "node:util";
 import {
   backups,
   authorizeRestoreMaintenanceFixture,
@@ -38,7 +40,7 @@ const JOURNAL_FILE = "journal.json";
 const LOCK_FILE = "lock";
 const ARCHIVE_DIR = "archive";
 const CANONICAL_INGENIUM_DB = "/app/.ingenium/data";
-const CANONICAL_OPENCODE_DB = "/home/appuser/.local/share/opencode/opencode.db";
+const CANONICAL_OPENCODE_DB = "/home/ingenium-opencode/.local/share/opencode/opencode.db";
 const CANONICAL_MAINTENANCE_ROOT = "/app/.ingenium/restore-maintenance";
 const CANONICAL_JOURNAL_KEY = "/app/.ingenium/restore-journal-key";
 const CANONICAL_BACKUPS = "/app/.ingenium/backups";
@@ -86,6 +88,7 @@ type LockedTargets = LockedTarget[];
 let loadedJournalKey: Buffer | null = null;
 let trustedCorePathsConfigured = false;
 let validatedFixtureRoot: string | null | undefined;
+const run = promisify(execFile);
 
 function wipeJournalKey(): void {
   loadedJournalKey?.fill(0);
@@ -190,8 +193,10 @@ function configureTrustedCorePaths(paths: TargetPaths): void {
 
 function expectedUid(): number {
   const uid = typeof process.getuid === "function" ? process.getuid() : -1;
-  if (!fixtureRoot() && uid !== 0) throw new MaintenanceError("JOURNAL_INVALID");
-  return fixtureRoot() ? uid : 0;
+  if (fixtureRoot()) return uid;
+  const restoreUid = Number(readFileSync("/usr/local/share/ingenium/restore-uid", "utf8").trim());
+  if (!Number.isSafeInteger(restoreUid) || (uid !== 0 && uid !== restoreUid)) throw new MaintenanceError("JOURNAL_INVALID");
+  return restoreUid;
 }
 
 function maintenanceRoot(): string {
@@ -511,12 +516,6 @@ function lockTargetParents(paths: TargetPaths, metadata: TargetMetadata): Target
         throw new MaintenanceError("SWAP_FAILED");
       }
       parents[component] = { fd, metadata: original };
-      if (!fixtureRoot()) {
-        fchownSync(fd, 0, 0);
-        fchmodSync(fd, 0o700);
-        const locked = fstatSync(fd);
-        if (locked.uid !== 0 || locked.gid !== 0 || (locked.mode & 0o777) !== 0o700) throw new MaintenanceError("SWAP_FAILED");
-      }
     }
     return parents;
   } catch (error) {
@@ -724,15 +723,32 @@ async function supervisor(method: "startProcess" | "stopProcess" | "getProcessIn
   if (![...USER_PROGRAMS, "restore-maintenance"].includes(program)) {
     throw new MaintenanceError("SUPERVISOR_FAILED");
   }
-  const response = await fetch("http://127.0.0.1:9001/RPC2", {
-    method: "POST",
-    headers: { "Content-Type": "text/xml" },
-    body: `<?xml version="1.0"?><methodCall><methodName>supervisor.${method}</methodName><params><param><value><string>${program}</string></value></param>${method === "getProcessInfo" ? "" : "<param><value><boolean>0</boolean></value></param>"}</params></methodCall>`,
-    signal: AbortSignal.timeout(5_000),
-  });
-  const xml = await response.text();
-  if (!response.ok || xml.includes("<fault>")) throw new MaintenanceError("SUPERVISOR_FAILED");
-  return xml;
+  if (fixtureRoot()) {
+    const response = await fetch("http://127.0.0.1:9001/RPC2", {
+      method: "POST",
+      headers: { "Content-Type": "text/xml" },
+      body: `<?xml version="1.0"?><methodCall><methodName>supervisor.${method}</methodName><params><param><value><string>${program}</string></value></param>${method === "getProcessInfo" ? "" : "<param><value><boolean>0</boolean></value></param>"}</params></methodCall>`,
+      signal: AbortSignal.timeout(5_000),
+    });
+    const xml = await response.text();
+    if (!response.ok || xml.includes("<fault>")) throw new MaintenanceError("SUPERVISOR_FAILED");
+    return xml;
+  }
+  const command = method === "getProcessInfo" ? "status" : method === "startProcess" ? "start" : "stop";
+  try {
+    const { stdout } = await run("supervisorctl", ["-c", "/app/supervisord.conf", command, program], { timeout: 5_000 });
+    if (method !== "getProcessInfo") return "";
+    if (stdout.includes("RUNNING")) return "<string>RUNNING</string>";
+    if (stdout.includes("STARTING")) return "<string>STARTING</string>";
+    if (stdout.includes("STOPPED")) return "<string>STOPPED</string>";
+    if (stdout.includes("EXITED")) return "<string>EXITED</string>";
+    throw new MaintenanceError("SUPERVISOR_FAILED");
+  } catch (error) {
+    if (error instanceof MaintenanceError) throw error;
+    const text = `${error instanceof Error ? error.message : ""} ${error && typeof error === "object" && "stderr" in error ? error.stderr : ""}`;
+    if (method === "startProcess" && text.includes("ALREADY_STARTED")) return "";
+    throw new MaintenanceError("SUPERVISOR_FAILED");
+  }
 }
 
 async function waitStopped(program: string): Promise<void> {
@@ -854,11 +870,7 @@ function checkDatabases(paths: ReturnType<typeof targetPaths>, parents: TargetPa
 async function startRestoredUsers(): Promise<void> {
   for (const program of RESTART_PROGRAMS) await supervisor("startProcess", program);
   const port = process.env.INGENIUM_API_PORT ?? "4096";
-  const tokenPath = process.env.INGENIUM_API_TOKEN_FILE;
-  if (!tokenPath) throw new MaintenanceError("HEALTH_FAILED");
-  const token = readFileSync(tokenPath, "utf8").trim();
   const response = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
-    headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new MaintenanceError("HEALTH_FAILED");

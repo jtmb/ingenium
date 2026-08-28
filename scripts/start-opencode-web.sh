@@ -14,9 +14,11 @@ while [ "$attempt" -le "$attempts" ]; do
     echo "Authenticated API readiness passed before OpenCode start after ${attempt} attempt(s)"
     exec env -i \
       PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-      HOME="/home/appuser" \
-      XDG_CONFIG_HOME="/home/appuser/.config" \
-      XDG_DATA_HOME="/home/appuser/.local/share" \
+      PWD="/app" \
+      HOME="/home/ingenium-opencode" \
+      XDG_CONFIG_HOME="/home/ingenium-opencode/.config" \
+      XDG_DATA_HOME="/home/ingenium-opencode/.local/share" \
+      OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime" \
       OPENCODE_SERVER_PASSWORD="" \
       INGENIUM_API_URL="http://localhost:4097/api/v1" \
       INGENIUM_MCP_CREDENTIAL_FILE=".opencode/.ingenium-repository-sync-credential" \

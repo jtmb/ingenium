@@ -3,13 +3,14 @@ import {
   buildMcpUsefulnessReport,
   createFixtureMcpUsefulnessCollector,
   McpUsefulnessCollectionError,
+  serverOwnedLaunchOptions,
   type McpUsefulnessConnection,
 } from "../lib/mcp-usefulness-collector.js";
 
 const CLOCK = { now: () => new Date("2026-07-31T12:00:00.000Z") };
-const PROJECT_A = { project: "mcp104-a", projectId: "00000000-0000-4000-8000-000000000001" };
-const PROJECT_B = { project: "mcp104-b", projectId: "00000000-0000-4000-8000-000000000002" };
-const PROJECT_C = { project: "mcp104-c", projectId: "00000000-0000-4000-8000-000000000003" };
+const PROJECT_A = { project: "mcp104-a", projectId: "00000000-0000-4000-8000-000000000001", toolNames: ["ingenium_health_check"] };
+const PROJECT_B = { project: "mcp104-b", projectId: "00000000-0000-4000-8000-000000000002", toolNames: ["ingenium_health_check"] };
+const PROJECT_C = { project: "mcp104-c", projectId: "00000000-0000-4000-8000-000000000003", toolNames: ["ingenium_health_check"] };
 
 const HEALTH_CATALOG = [{
   name: "ingenium_health_check",
@@ -32,6 +33,30 @@ function connection(overrides: Partial<McpUsefulnessConnection> = {}): McpUseful
 }
 
 describe("MCP usefulness collector", () => {
+  it("uses only the API-owned report credential and exact report binding", () => {
+    const options = serverOwnedLaunchOptions(
+      "/app/packages/ingenium-extension/dist/scripts/mcp-transport.js",
+      "/run/ingenium-secrets/api/mcp-report-11111111-1111-4111-8111-111111111111",
+      PROJECT_A,
+    );
+
+    expect(options.cwd).toBe("/app");
+    expect(options.env).toMatchObject({
+      INGENIUM_MCP_CREDENTIAL_FILE: "/run/ingenium-secrets/api/mcp-report-11111111-1111-4111-8111-111111111111",
+      INGENIUM_MCP_AUDIENCE: "mcp-report",
+      INGENIUM_WORKSPACE_ID: PROJECT_A.projectId,
+      INGENIUM_WORKTREE: "/app",
+      INGENIUM_API_URL: "http://127.0.0.1:4097/api/v1",
+      INGENIUM_MCP_REPORT_MODE: "1",
+      INGENIUM_PROJECT: PROJECT_A.project,
+      HOME: "/home/ingenium-api",
+      XDG_CONFIG_HOME: "/home/ingenium-api/.config",
+    });
+    expect(options.env).not.toHaveProperty("INGENIUM_API_TOKEN_FILE");
+    expect(options.env).not.toHaveProperty("INGENIUM_INTERNAL_SERVICE");
+    expect(JSON.stringify(options)).not.toContain(".opencode/.ingenium-api-token");
+  });
+
   it("single-flights per project and caches only completed listed observations", async () => {
     let launches = 0;
     let releaseConnect!: () => void;
@@ -53,6 +78,19 @@ describe("MCP usefulness collector", () => {
 
     await collector.collect(PROJECT_A);
     expect(launches).toBe(1);
+  });
+
+  it("does not share a cached transport projection across authorization-filtered catalogs", async () => {
+    let launches = 0;
+    const collector = createFixtureMcpUsefulnessCollector({
+      clock: CLOCK,
+      launch: () => { launches += 1; return connection(); },
+    });
+
+    await collector.collect(PROJECT_A);
+    await collector.collect({ ...PROJECT_A, toolNames: ["ingenium_health_check", "ingenium_project_list"] });
+
+    expect(launches).toBe(2);
   });
 
   it("enforces the global two-project collection limit", async () => {
@@ -111,7 +149,7 @@ describe("MCP usefulness collector", () => {
 
     const observation = await collector.collect(PROJECT_A);
     const report = buildMcpUsefulnessReport(observation, HEALTH_CATALOG, collector.provenance, collector.freshnessDurationMs);
-    expect(report.catalog).toEqual({ status: "unknown", issues: [] });
+    expect(report.catalog).toEqual({ status: "conformant", issues: [] });
     expect(report.tools[0]?.invocation).toEqual({ status: "unknown", reason: "invalid-response" });
     expect(JSON.stringify(report)).not.toContain("fixture-secret");
     expect(JSON.stringify(report)).not.toContain("inputSchema");

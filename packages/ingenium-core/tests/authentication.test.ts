@@ -99,6 +99,79 @@ describe("AUTH-101 local authentication", () => {
     ).get(user.id)).toEqual({ count: 1 });
   });
 
+  it("issues bounded session CSRF grants without replacing the login token", async () => {
+    const user = await authentication.authenticateLocal("owner@example.test", "correct horse battery staple");
+    const now = new Date("2026-08-17T12:00:00.000Z");
+    const session = authentication.createSession(user.id, now);
+    const otherSession = authentication.createSession(user.id, now);
+    const otherUserSession = authentication.createSession(
+      identity.createUser("csrf-other@example.test", "CSRF Other").id,
+      now,
+    );
+    const grants = Array.from({ length: authentication.SESSION_CSRF_GRANT_MAX_ACTIVE + 2 }, (_, index) =>
+      authentication.issueSessionCsrfGrant(session.session, new Date(now.getTime() + index))!);
+    const verificationTime = new Date(now.getTime() + grants.length + 1);
+
+    expect(authentication.verifySessionCsrf(session.session, session.csrfToken, verificationTime)).toBe(true);
+    expect(authentication.verifySessionCsrf(session.session, grants[0]!, verificationTime)).toBe(false);
+    expect(authentication.verifySessionCsrf(session.session, grants[1]!, verificationTime)).toBe(false);
+    expect(authentication.verifySessionCsrf(session.session, grants.at(-1)!, verificationTime)).toBe(true);
+    expect(authentication.verifySessionCsrf(otherSession.session, grants.at(-1)!, verificationTime)).toBe(false);
+    expect(authentication.verifySessionCsrf(otherUserSession.session, grants.at(-1)!, verificationTime)).toBe(false);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM auth_session_csrf_grants WHERE session_id = ?",
+    ).get(session.session.id)).toEqual({ count: authentication.SESSION_CSRF_GRANT_MAX_ACTIVE });
+    expect(JSON.stringify(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT token_hash FROM auth_session_csrf_grants WHERE session_id = ?",
+    ).all(session.session.id))).not.toContain(grants.at(-1)!);
+
+    const expiring = authentication.issueSessionCsrfGrant(otherSession.session, now)!;
+    expect(authentication.verifySessionCsrf(
+      otherSession.session,
+      expiring,
+      new Date(now.getTime() + authentication.SESSION_CSRF_GRANT_MS - 1),
+    )).toBe(true);
+    expect(authentication.verifySessionCsrf(
+      otherSession.session,
+      expiring,
+      new Date(now.getTime() + authentication.SESSION_CSRF_GRANT_MS),
+    )).toBe(false);
+    authentication.issueSessionCsrfGrant(
+      otherUserSession.session,
+      new Date(now.getTime() + authentication.SESSION_CSRF_GRANT_MS),
+    );
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM auth_session_csrf_grants WHERE session_id = ?",
+    ).get(otherSession.session.id)).toEqual({ count: 0 });
+  });
+
+  it("removes CSRF grants on session revoke, security changes, and parent deletion", async () => {
+    const user = await authentication.authenticateLocal("owner@example.test", "correct horse battery staple");
+    const first = authentication.createSession(user.id);
+    authentication.issueSessionCsrfGrant(first.session);
+    expect(authentication.revokeSession(user.id, first.session.id)).toBe(true);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM auth_session_csrf_grants WHERE session_id = ?",
+    ).get(first.session.id)).toEqual({ count: 0 });
+
+    const second = authentication.createSession(user.id);
+    authentication.issueSessionCsrfGrant(second.session);
+    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "UPDATE users SET security_epoch = security_epoch + 1 WHERE id = ?",
+    ).run(user.id);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM auth_session_csrf_grants WHERE session_id = ?",
+    ).get(second.session.id)).toEqual({ count: 0 });
+
+    const freshUser = identity.createUser("cascade@example.test", "Cascade");
+    const third = authentication.createSession(freshUser.id);
+    authentication.issueSessionCsrfGrant(third.session);
+    getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("DELETE FROM auth_sessions WHERE id = ?").run(third.session.id);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM auth_session_csrf_grants WHERE session_id = ?",
+    ).get(third.session.id)).toEqual({ count: 0 });
+  });
+
   it("encrypts TOTP, returns recovery codes once, and consumes a recovery code once", async () => {
     const user = await authentication.authenticateLocal("owner@example.test", "correct horse battery staple");
     const enrollment = authentication.beginTotpEnrollment(user.id);
@@ -123,11 +196,17 @@ describe("AUTH-101 local authentication", () => {
     expect(securityTokens.resolveScopedApiToken(created.token)).toBeUndefined();
   });
 
-  it("recovers only an installation operator and revokes prior sessions", async () => {
+  it("recovers only an installation operator and revokes prior authentication state", async () => {
     const user = await authentication.authenticateLocal("owner@example.test", "correct horse battery staple");
     const session = authentication.createSession(user.id);
+    const csrfGrant = authentication.issueSessionCsrfGrant(session.session);
+    const passwordReset = await authentication.issuePasswordReset(user.email_normalized);
+    const mfaChallenge = authentication.issueOneTimeState("mfa_challenge", user.id, authentication.AUTH_CHALLENGE_MS);
     await authentication.operatorRecoverPassword(user.id, "operator recovery password");
     expect(authentication.resolveSession(session.token)).toBeUndefined();
+    expect(authentication.verifySessionCsrf(session.session, csrfGrant!)).toBe(false);
+    expect(() => authentication.consumeOneTimeState(passwordReset!, "password_reset")).toThrow(authentication.OneTimeStateError);
+    expect(() => authentication.consumeOneTimeState(mfaChallenge, "mfa_challenge")).toThrow(authentication.OneTimeStateError);
     await expect(authentication.authenticateLocal(user.email_normalized, "operator recovery password")).resolves.toMatchObject({ id: user.id });
   });
 });

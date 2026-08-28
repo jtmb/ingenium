@@ -72,7 +72,7 @@ export function classifyAuthFailure(status: number, code: string | null): AuthFa
 }
 
 let sessionCsrfToken: string | null = null;
-let csrfBootstrap: Promise<string | null> | null = null;
+let csrfBootstrap: Promise<string> | null = null;
 let expiryRedirectStarted = false;
 const PRE_AUTH_CSRF_PATHS = new Set([
   "/api/v1/auth/login",
@@ -81,6 +81,7 @@ const PRE_AUTH_CSRF_PATHS = new Set([
   "/api/v1/auth/password/reset",
   "/api/v1/auth/email/verify",
   "/api/v1/auth/oidc/start",
+  "/api/v1/bootstrap/claim",
 ]);
 
 function isUnsafeMethod(method = "GET"): boolean {
@@ -93,7 +94,29 @@ function requestPath(input: RequestInfo | URL): string {
   return new URL(input.url).pathname;
 }
 
-async function bootstrapSessionCsrf(): Promise<string | null> {
+async function responseError(response: Response): Promise<ApiError> {
+  const retryAfter = parseRetryAfter(response.headers?.get?.("Retry-After") ?? null);
+  const body = await response.json().catch(() => ({ error: { message: response.statusText } }));
+  const code = typeof body.error?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(body.error.code)
+    ? body.error.code
+    : null;
+  if (classifyAuthFailure(response.status, code) === "session-expired") redirectExpiredSession();
+  const currentRevision = typeof body.error?.currentRevision === "number"
+    && Number.isSafeInteger(body.error.currentRevision)
+    && body.error.currentRevision >= 0
+    ? body.error.currentRevision
+    : null;
+  return new ApiError(
+    response.status,
+    body.error?.message ?? response.statusText,
+    retryAfter.seconds,
+    code,
+    currentRevision,
+    retryAfter.status,
+  );
+}
+
+async function bootstrapSessionCsrf(): Promise<string> {
   if (sessionCsrfToken) return sessionCsrfToken;
   if (!csrfBootstrap) {
     csrfBootstrap = fetch(`${getApiBase()}/auth/session/csrf`, {
@@ -101,11 +124,34 @@ async function bootstrapSessionCsrf(): Promise<string | null> {
       credentials: "same-origin",
       headers: { [DASHBOARD_MARKER_HEADER]: DASHBOARD_MARKER_VALUE },
     })
-      .then(async (response) => response.ok ? (await response.json()).data.csrfToken as string : null)
+      .then(async (response) => {
+        if (!response.ok) throw await responseError(response);
+        return (await response.json()).data.csrfToken as string;
+      })
       .finally(() => { csrfBootstrap = null; });
   }
   sessionCsrfToken = await csrfBootstrap;
   return sessionCsrfToken;
+}
+
+async function retryRateLimitOnce<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!(error instanceof ApiError)
+      || error.status !== 429
+      || error.retryAfterStatus !== "valid"
+      || error.retryAfterSeconds === null) throw error;
+    await new Promise((resolve) => setTimeout(resolve, error.retryAfterSeconds! * 1_000));
+    return operation();
+  }
+}
+
+function loadAuthenticatedSession(): Promise<{ data: AuthSessionState }> {
+  return retryRateLimitOnce(async () => {
+    await bootstrapSessionCsrf();
+    return request<{ data: AuthSessionState }>("/auth/session");
+  });
 }
 
 export function setSessionCsrfToken(value: string | null): void {
@@ -231,27 +277,7 @@ export function dashboardFetch(
  */
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await dashboardFetch(`${getApiBase()}${path}`, options);
-  if (!res.ok) {
-    const retryAfter = parseRetryAfter(res.headers?.get?.("Retry-After") ?? null);
-    const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    const code = typeof err.error?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(err.error.code)
-      ? err.error.code
-      : null;
-    if (classifyAuthFailure(res.status, code) === "session-expired") redirectExpiredSession();
-    const currentRevision = typeof err.error?.currentRevision === "number"
-      && Number.isSafeInteger(err.error.currentRevision)
-      && err.error.currentRevision >= 0
-      ? err.error.currentRevision
-      : null;
-    throw new ApiError(
-      res.status,
-      err.error?.message ?? res.statusText,
-      retryAfter.seconds,
-      code,
-      currentRevision,
-      retryAfter.status,
-    );
-  }
+  if (!res.ok) throw await responseError(res);
   // 204 No Content — returned by DELETE endpoints; no body to parse
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -2089,7 +2115,7 @@ export type {
 export const api = {
   auth: {
     csrf: () => request<{ data: { csrfToken: string } }>("/auth/csrf"),
-    session: () => request<{ data: AuthSessionState }>("/auth/session"),
+    session: loadAuthenticatedSession,
     login: (email: string, password: string, csrfToken: string, deviceLabel?: string) => request<{ data: { user?: AuthUser; csrfToken?: string; mfaRequired?: boolean; challengeToken?: string } }>("/auth/login", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ email, password, deviceLabel }) }),
     mfaChallenge: (challengeToken: string, code: string, csrfToken: string) => request<{ data: { user: AuthUser; csrfToken: string } }>("/auth/mfa/challenge", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ challengeToken, code }) }),
     logout: () => request<void>("/auth/logout", { method: "POST" }),
