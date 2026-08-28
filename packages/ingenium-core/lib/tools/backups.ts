@@ -428,6 +428,15 @@ export function trustedArtifactPolicy(): ArtifactPolicy {
   return { ownerUid: parse(process.env[TRUSTED_ARTIFACT_UID_ENV]), ownerGid: parse(process.env[TRUSTED_ARTIFACT_GID_ENV]) };
 }
 
+function serviceSecretPolicy(): ArtifactPolicy {
+  const ownerUid = process.getuid?.();
+  const ownerGid = process.getgid?.();
+  if (!Number.isSafeInteger(ownerUid) || ownerUid! < 0 || !Number.isSafeInteger(ownerGid) || ownerGid! < 0) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  return { ownerUid: ownerUid!, ownerGid: ownerGid! };
+}
+
 /** Resolve the single absolute directory used for all snapshot components. */
 export function resolveBackupDirectory(dbPath: string): string {
   const configuredDirectory = process.env.INGENIUM_BACKUPS_DIR?.trim();
@@ -491,7 +500,7 @@ function openExactRegular(path: string, maxBytes?: number, policy?: ArtifactPoli
 
 /** Read the owner-only signing key without exposing it to logs, API DTOs, or manifests. */
 export function loadBackupSigningKey(): Buffer {
-  const policy = trustedArtifactPolicy();
+  const policy = serviceSecretPolicy();
   const keyPath = resolveBackupSigningKeyPath();
   const parent = lstatSync(dirname(keyPath));
   if (!parent.isDirectory() || parent.isSymbolicLink()) throw new BackupError("BACKUP_INVALID");

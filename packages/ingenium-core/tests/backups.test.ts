@@ -374,6 +374,14 @@ describe("RESTORE-100 v2 bundles", () => {
 
   it("uses owner-only, non-symlink signing keys", () => {
     expect(loadBackupSigningKey()).toHaveLength(32);
+    const artifactGid = process.env.INGENIUM_TRUSTED_ARTIFACT_GID;
+    try {
+      process.env.INGENIUM_TRUSTED_ARTIFACT_GID = "not-a-service-secret-owner";
+      expect(loadBackupSigningKey()).toHaveLength(32);
+    } finally {
+      if (artifactGid === undefined) delete process.env.INGENIUM_TRUSTED_ARTIFACT_GID;
+      else process.env.INGENIUM_TRUSTED_ARTIFACT_GID = artifactGid;
+    }
     const badKey = join(tempDir, "bad-signing-key");
     symlinkSync(signingKeyPath, badKey);
     const previous = process.env.INGENIUM_BACKUP_SIGNING_KEY_FILE;
