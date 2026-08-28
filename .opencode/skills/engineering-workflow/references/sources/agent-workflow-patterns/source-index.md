@@ -23,8 +23,10 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 
 - **Maximum 6 active subagents per phase** — total simultaneous subagents, including writers and read-only agents
 - **Maximum 3 concurrent writers per wave** — subagents with `edit:` or `write:` allow in their permission block
+- **Dynamic read-only ceiling** — with `W` active writers, at most `6 - W` read-only agents may run in the phase; this is a ceiling, not a work quota
+- **Explicit underfill accounting** — every underfilled phase declares `UNUSED_CAPACITY` for unused active slots (`6 - A`) and writer slots (`3 - W`), with a concrete dependency, territory, or applicability reason; never manufacture work to fill slots
 - **Exclusive write territories** — no two writers may touch the same file/directory path concurrently; serialize overlaps
-- **Mandatory phase declarations** — include active count, writer count, ownership paths, dependencies, verification owner, and targeted checks in the verification plan
+- **Mandatory phase declarations** — include active count, writer count, dynamic read-only ceiling, ownership paths, dependencies, verification owner, targeted checks, and `UNUSED_CAPACITY` in the verification plan
 - **Duplicate writer instances** are valid only for separate, non-overlapping territories
 
 ## 🔴 HARD RULEs — Git and GitHub Workflow
@@ -37,7 +39,7 @@ history, or force-push without explicit authorization.
 
 ## 🔴 HARD RULEs — Bounded Quality Gates
 
-- QA and security each report scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff.
+- After an implementation wave is finalized and its declared verification is complete, independent applicable `@ingenium-qa`, `@ingenium-security-auditor`, and `@ingenium-qa-vision` reviews share one post-wave phase when safe. QA and security each report scope-classified BLOCKING/FOLLOW_UP findings once per wave; visual QA follows its final-UI boundary. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff. If a review is blocked or not applicable, declare its unused active slot and concrete reason rather than manufacturing work.
 - QA runs targeted checks once after an implementation wave. QA and Docs never trigger QA, Docs, remediation, or new tasks.
 - Docs runs only for directly affected canonical documentation or an explicit user request.
 - `@ingenium-qa` is the sole owner of a declared full E2E/container suite; the orchestrator schedules it but does not duplicate it.
@@ -49,6 +51,13 @@ history, or force-push without explicit authorization.
 - Security defaults to current-diff and relevant dependency review.
 - A history scan may run once only for a confirmed secret or a critical explicit trigger.
 - Out-of-scope security findings are FOLLOW_UP unless changed code is immediately exploitable.
+
+## 🔴 HARD RULEs — User-Facing Communication
+
+- Start with a one-to-three-sentence plain-language introduction that explains the goal, importance, and immediate approach.
+- Follow it with the structured task/phase contract: scope, acceptance criteria, stop condition, verification and escalation rules, counts, territories, dependencies, and `UNUSED_CAPACITY`.
+- After each phase, provide an interpreted result covering completed work, changed files, checks and outcomes, finding classifications, and the next dependency. Keep the turn moving while work remains open; do not ask for a reprompt or emit raw agent/tool output.
+- End with a human-readable terminal summary containing status, changed files, verification execution count, findings or remaining work, and Markdown links or repository paths to retained proof. Label source-test, deployed-runtime, and model/session evidence separately.
 
 ## Reference Files
 

@@ -8,8 +8,11 @@
 |-------|-------|-------|
 | **Max active subagents per phase** | 6 | Total subagents spawned simultaneously in a single orchestration phase |
 | **Max concurrent writers** | 3 | Subagents holding `edit: allow` or `write: allow` permission |
-| **Remaining capacity** | 3 | Available to non-writer/research/QA/security agents |
+| **Read-only ceiling with `W` writers** | `6 - W` | Maximum non-writer/research/QA/security agents in the phase; it is dynamic, not a quota |
+| **Unused writer slots** | `3 - W` | Capacity that must be accounted for when fewer than three writers are safe and in scope |
 | **Write territories** | Exclusive | No two writers may touch the same path concurrently |
+
+For a phase with `A` active agents, `W` writers, and `R` read-only agents, `A ≤ 6`, `W ≤ 3`, and `R = A - W ≤ 6 - W`. When `A < 6` or `W < 3`, declare `UNUSED_CAPACITY` with the exact unused active slots (`6 - A`) and writer slots (`3 - W`) plus a concrete dependency, territory, or applicability reason. Capacity is a ceiling, not a target; do not manufacture work.
 
 ## Task Contract Before Every Phase
 
@@ -41,6 +44,7 @@ Every orchestration phase must declare:
 3. **Ownership paths** — each writer's exclusive territory
 4. **Dependencies** — writers that must complete before others start
 5. **Verification owner and plan** — targeted checks, owner, phase number, and declared execution sequence
+6. **`UNUSED_CAPACITY`** — unused active and writer slots with concrete reasons for every underfilled phase
 
 ### Git and GitHub workflow
 
@@ -54,35 +58,58 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 
 ## Safe Parallelism Examples
 
-### ✅ Safe — Full parallel (3 writers, non-overlapping territories)
+### ✅ Safe — Underfilled implementation phase with explicit capacity
 
 ```text
-Phase: "Implement auth + email + dashboard widgets" — Wave 1 (5 active, 3 writers)
+Phase: "Implement auth + email + dashboard widgets" — Wave 1 (5 active, 3 writers; W=3, read-only ceiling=3)
   @ingenium-software-engineer-premium → packages/ingenium-core/auth/     (writer)
   @ingenium-software-engineer-premium → services/ingenium-api/email/    (writer)
   @ingenium-software-engineer-fast    → services/ingenium-dashboard/components/ (writer)
   @ingenium-explore                   → scoped pattern search (non-writer)
   @ingenium-scout                     → scoped context retrieval (non-writer)
+
+UNUSED_CAPACITY:
+  active slots: 1 → QA, security, and applicable visual review wait for the finalized implementation and its declared verification; no third independent read-only stream is in scope
+  writer slots: 0 → all three writer slots have separate, non-overlapping territories
 ```
 
-Active: 5, Writers: 3. Non-overlapping territories. ✅
+Active: 5, Writers: 3, Read-only: 2 of 3. Non-overlapping territories; the remaining slot is intentionally unused. ✅
 
-### ✅ Safe — Docs and Browser are permission-derived writers
+### ✅ Safe — Docs and Browser are permission-derived writers, underfilled by dependency
 
 ```text
-Phase: "Implementation + direct documentation + browser automation" — Wave 1 (5 active, 3 writers)
+Phase: "Implementation + direct documentation + browser automation" — Wave 1 (5 active, 3 writers; W=3, read-only ceiling=3)
   @ingenium-software-engineer-fast → dashboard/       (writer)
   @ingenium-docs                   → docs/            (writer)
   @browser-agent                   → browser-recipes/ (writer)
   @ingenium-explore                → scoped search    (non-writer)
   @ingenium-scout                  → scoped context   (non-writer)
+
+UNUSED_CAPACITY:
+  active slots: 1 → QA and the applicable visual gate are post-wave dependencies; security review is not applicable to this non-security change, and no additional independent read-only territory is declared
+  writer slots: 0 → all three writer slots have separate, non-overlapping territories
 ```
 
-Active: 5, Writers: 3. Docs and Browser count because their permission blocks allow `edit`/`write`; QA and visual gates run after final implementation. ✅
+Active: 5, Writers: 3, Read-only: 2 of 3. Docs and Browser count because their permission blocks allow `edit`/`write`; QA, security, and visual review run in the shared post-wave phase. ✅
+
+### ✅ Safe — Shared post-wave review
+
+```text
+Phase: "Finalized UI and auth review" — Wave 2 (3 active, 0 writers; W=0, read-only ceiling=6)
+  @ingenium-qa               → finalized behavior checks (non-writer)
+  @ingenium-security-auditor → finalized auth diff/dependency review (non-writer)
+  @ingenium-qa-vision        → finalized UI route review (non-writer)
+
+UNUSED_CAPACITY:
+  active slots: 3 → these are the only applicable independent review streams for the finalized change; no speculative reviewer or research work is added
+  writer slots: 3 → implementation territories are complete, and no directly affected Docs or Browser territory is declared for this phase
+```
+
+The shared review phase is valid only after the implementation boundary and final UI change are complete. If a visual review is not applicable, or a reviewer remains blocked, omit it and state that applicability or dependency in `UNUSED_CAPACITY` instead of splitting safe reviewers or manufacturing work.
 
 ## Bounded Gates
 
-- QA and security each report scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff.
+- QA, security, and applicable visual QA share one post-wave phase when their finalized, independent checks are safe to run together. They report scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave, have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff.
 - QA runs targeted checks once after an implementation wave and never schedules QA/Docs work.
 - Docs runs only for directly affected canonical documentation or an explicit user request; Docs never schedules QA/Docs work.
 - `@ingenium-qa` solely owns a declared full E2E/container suite.
@@ -97,6 +124,12 @@ Before spawning a writer, list territories, check conflicts, serialize overlaps,
 
 - **Never exceed 6 active subagents in any single phase**
 - **Never exceed 3 concurrent writers per wave**
+- **Read-only capacity is `6 - W` when `W` writers are active; it is not a quota**
 - **Never overlap write territories** — serialize writers targeting the same file or directory
 - **Always declare the causal task contract and phase before execution**
+- **Declare `UNUSED_CAPACITY` for every underfilled phase with concrete dependency, territory, or applicability reasons**
 - **Never auto-dispatch FOLLOW_UP or INFORMATIONAL findings**
+
+## User-Facing Communication
+
+Start with a plain-language introduction, then show the structured contract. After each phase, give an interpreted result covering the changed files, checks and outcomes, finding classification, and next dependency; continue to the next eligible phase without asking for a reprompt. End with a human-readable status summary, verification execution count, findings or remaining work, and Markdown links or repository paths to retained proof, distinguishing source-test, deployed-runtime, and model/session evidence.

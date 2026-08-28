@@ -13,6 +13,13 @@ Verification plan: targeted checks, deployment/acceptance steps, bounded diagnos
 Escalation rule: evidence for one of the five permitted ESCALATE_USER conditions only
 ```
 
+Each phase also declares its active count `A`, writer count `W`, exclusive
+territories, dependencies, verification owner, and `UNUSED_CAPACITY`. With `W`
+writers, at most `6 - W` read-only agents may run; this is a ceiling rather than
+a quota. Underfilled active slots (`6 - A`) and writer slots (`3 - W`) require
+concrete dependency, territory, or applicability reasons, and work must not be
+manufactured to fill them.
+
 ## Git and GitHub Workflow
 
 Manual and user-created commits are valid and never block continued work. Before
@@ -43,4 +50,18 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and declared deployment autonomously. Compile, test, package, scanner, configuration, and runtime defects with a concrete reproducible root cause are fixed and reverified automatically. Never ask permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work already within scope. Only Plan mode may use interactive decision questions; orchestration never invokes the `question` tool. Return `ESCALATE_USER` in the normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
-QA and security each report scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff.
+After implementation and its declared verification, independent applicable QA,
+security, and visual QA reviews share one post-wave phase when safe. They report
+scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave, have
+no task-delegation authority, cannot spawn the other, and cannot reopen a closed
+task. If a reviewer is blocked or not applicable, declare its unused slot and
+concrete reason. After an in-scope reviewer blocker is fixed, run only the
+minimum targeted regression. Rerun the original reviewer check only when the
+fix changes that reviewer’s declared boundary; never create a recursive
+reviewer handoff.
+
+User-facing communication starts with a plain-language introduction, presents
+the structured contract, interprets each phase result in human terms, and ends
+with a terminal summary containing status, changed files, verification count,
+findings or remaining work, and links or paths to retained proof. Raw agent or
+tool output is not a substitute for that summary.

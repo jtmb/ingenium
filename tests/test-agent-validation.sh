@@ -8,10 +8,18 @@ QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
 EXPECTED_LOGICAL_AGENT_COUNT=12
 MAX_ACTIVE_SUBAGENTS=6
 MAX_CONCURRENT_WRITERS=3
-MAX_NON_WRITERS=3
 ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
 ROADMAP_ARCHIVE_DIR="$REPO_ROOT/docs/reference/archive"
 FAILED=0
+ALLOCATION_FIXTURE_DIR=""
+
+cleanup_allocation_fixtures() {
+  if [[ -n "$ALLOCATION_FIXTURE_DIR" && -d "$ALLOCATION_FIXTURE_DIR" ]]; then
+    rm -rf "$ALLOCATION_FIXTURE_DIR"
+  fi
+}
+
+trap cleanup_allocation_fixtures EXIT
 
 pass() { printf 'PASS: %s\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
@@ -1154,6 +1162,56 @@ check_normalized_policy_pattern() {
   fi
 }
 
+check_normalized_policy_regex_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  local normalized_source
+
+  normalized_source="$(tr -s '[:space:]' ' ' < "$source" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$normalized_source" =~ $pattern ]]; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    policy_errors=1
+  fi
+}
+
+HUMAN_RESPONSE_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/AGENTS.md"
+)
+for policy_source in "${HUMAN_RESPONSE_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  if [[ ! -r "$policy_source" ]]; then
+    fail "$policy_label is missing for human-readable response validation"
+    policy_errors=1
+    continue
+  fi
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'plain-language[[:space:]-]+introduction|one[[:space:]]+to[[:space:]]+three[[:space:]]+plain[[:space:]]+sentences.{0,180}(goal|why).{0,120}immediate[[:space:]]+approach' \
+    "a plain-language introduction"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'plain-language[[:space:]-]+post-phase[[:space:]]+explanation|after every implementation or evidence transition.{0,240}what happened.{0,100}what changed.{0,100}(result|next dependency)' \
+    "interpreted implementation/evidence transition summaries"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'human-readable execution summary.{0,120}headings|terminal responses use.{0,220}status.{0,180}what i did.{0,180}where the proof is' \
+    "terminal human-readable response headings"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'source behavior.{0,180}(not deployed|runtime).{0,180}proof|distinguish evidence.{0,300}source tests prove.{0,300}deployed canaries prove.{0,300}actual model/session artifacts prove' \
+    "the source/runtime/model proof boundary"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'raw[[:space:]]+(subagent|agent)[[:space:]]+json.{0,120}(tool|output)|avoid raw[[:space:]]+agent[[:space:]]+json.{0,80}tool dumps|raw[[:space:]]+subagent[[:space:]]+json.{0,80}tool output' \
+    "the prohibition on raw subagent/tool dumps as final responses"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'pre-dispatch[[:space:]]+task contract|structured task contract.{0,100}mandatory' \
+    "the structured task contract"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'in_scope.{0,300}out_of_scope.{0,300}acceptance criteria.{0,300}stop_condition.{0,300}verification plan.{0,300}escalation rule' \
+    "the structured task contract fields"
+done
+
 # Broad suites are safe only when the task names their acceptance role; these
 # guards keep routine writer verification tied to the changed feature.
 WRITER_VERIFICATION_PROFILES=(
@@ -1272,9 +1330,9 @@ done
 
 for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
   policy_label="${policy_source#"$REPO_ROOT"/}"
-  check_policy_pattern "$policy_source" "$policy_label" \
-    'QA.*security.*once.*implementation wave' \
-    "one-pass QA/security reporting policy"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'qa.{0,320}security.{0,320}(once.{0,160}(implementation|wave|review)|wait.{0,200}(finalized|implementation)|post[-[:space:]]+wave)' \
+    "bounded QA/security post-wave reporting policy"
   check_policy_pattern "$policy_source" "$policy_label" \
     'minimum targeted regression' \
     "reviewer-blocker targeted-regression policy"
@@ -1388,6 +1446,25 @@ capture_example() {
   ' "$source"
 }
 
+allocation_is_valid() {
+  local active_count="$1"
+  local writer_count="$2"
+  local non_writer_count="$3"
+  local available_non_writer_slots
+
+  if ! [[ "$active_count" =~ ^[0-9]+$ &&
+          "$writer_count" =~ ^[0-9]+$ &&
+          "$non_writer_count" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  available_non_writer_slots=$((MAX_ACTIVE_SUBAGENTS - writer_count))
+  (( active_count <= MAX_ACTIVE_SUBAGENTS &&
+     writer_count <= MAX_CONCURRENT_WRITERS &&
+     non_writer_count <= available_non_writer_slots &&
+     writer_count + non_writer_count == active_count ))
+}
+
 validate_wave_block() {
   local label="$1"
   local block="$2"
@@ -1423,13 +1500,11 @@ validate_wave_block() {
     done < <(printf '%s\n' "$agent_line" | grep -Eo '@[[:alnum:]-]+' || true)
   done
 
-  if [[ "$active_count" -le "$MAX_ACTIVE_SUBAGENTS" && \
-        "$writer_count" -le "$MAX_CONCURRENT_WRITERS" && \
-        "$non_writer_count" -le "$MAX_NON_WRITERS" && \
-        $((writer_count + non_writer_count)) -eq "$active_count" ]]; then
-    pass "$label stays within max 6 active agents, max 3 writers, and max 3 non-writers ($active_count/$writer_count/$non_writer_count)"
+  if allocation_is_valid "$active_count" "$writer_count" "$non_writer_count"; then
+    max_non_writer_count=$((MAX_ACTIVE_SUBAGENTS - writer_count))
+    pass "$label stays within max 6 active agents, max 3 writers, and max $max_non_writer_count non-writers for $writer_count writers ($active_count/$writer_count/$non_writer_count)"
   else
-    fail "$label exceeds max 6 active/3 writers/3 non-writers or has an unclassified agent ($active_count/$writer_count/$non_writer_count)"
+    fail "$label exceeds max 6 active agents, max 3 writers, or the dynamic non-writer capacity of 6-writers, or has an unclassified agent ($active_count/$writer_count/$non_writer_count)"
     policy_errors=1
   fi
 
@@ -1496,6 +1571,42 @@ validate_example_block() {
   fi
 }
 
+run_allocation_fixture_tests() {
+  local fixture_file
+  local label expected active_count writer_count non_writer_count actual
+
+  ALLOCATION_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ingenium-agent-validation.XXXXXX")"
+  fixture_file="$ALLOCATION_FIXTURE_DIR/allocations.tsv"
+  printf '%s\n' \
+    'zero-writers-six-read-only|accept|6|0|6' \
+    'one-writer-five-read-only|accept|6|1|5' \
+    'two-writers-four-read-only|accept|6|2|4' \
+    'three-writers-three-read-only|accept|6|3|3' \
+    'three-writers-four-read-only|reject|7|3|4' \
+    'four-writers|reject|4|4|0' \
+    'unclassified-active-agent|reject|6|1|4' \
+    > "$fixture_file"
+
+  while IFS='|' read -r label expected active_count writer_count non_writer_count; do
+    if allocation_is_valid "$active_count" "$writer_count" "$non_writer_count"; then
+      actual='accept'
+    else
+      actual='reject'
+    fi
+
+    if [[ "$actual" == "$expected" ]]; then
+      pass "allocation fixture $label is $actual"
+    else
+      fail "allocation fixture $label expected $expected but was $actual"
+    fi
+  done < "$fixture_file"
+
+  ALLOCATION_FIXTURE_DIR=""
+  cleanup_allocation_fixtures
+}
+
+run_allocation_fixture_tests
+
 if [[ -f "$ORCHESTRATOR" ]]; then
   validate_example_block "$ORCHESTRATOR" \
     "orchestrator bounded dispatch example" \
@@ -1558,6 +1669,22 @@ require_contract_pattern() {
   local pattern="$3"
   local description="$4"
   if grep -Eqi "$pattern" "$source"; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    causal_policy_errors=1
+  fi
+}
+
+require_normalized_contract_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  local normalized_source
+
+  normalized_source="$(tr '\n' ' ' < "$source" | tr -s '[:space:]' ' ' | tr '[:upper:]' '[:lower:]')"
+  if [[ "$normalized_source" =~ $pattern ]]; then
     pass "$label $description"
   else
     fail "$label is missing $description"
@@ -1687,6 +1814,7 @@ validate_roadmap_task_contracts() {
     local phase_counts
     local phase_writers
     local phase_non_writers
+    local max_phase_non_writers
     phase_counts="$(grep -Eio -- '-[[:space:]]+\*\*Phase/counts:\*\*[[:space:]]+.*' <<<"$task_block" | head -n 1 || true)"
     if [[ ! "$phase_counts" =~ ([0-9]+)[[:space:]]+writers?[[:space:]]*/[[:space:]]*([0-9]+)[[:space:]]+non[-[:space:]]*writers? ]]; then
       fail "ROADMAP.md task $task_id has an invalid Phase/counts allocation"
@@ -1695,10 +1823,11 @@ validate_roadmap_task_contracts() {
     else
       phase_writers="${BASH_REMATCH[1]}"
       phase_non_writers="${BASH_REMATCH[2]}"
+      max_phase_non_writers=$((MAX_ACTIVE_SUBAGENTS - phase_writers))
       if [[ "$phase_writers" -gt "$MAX_CONCURRENT_WRITERS" || \
-            "$phase_non_writers" -gt "$MAX_NON_WRITERS" || \
+            "$phase_non_writers" -gt "$max_phase_non_writers" || \
             $((phase_writers + phase_non_writers)) -gt "$MAX_ACTIVE_SUBAGENTS" ]]; then
-        fail "ROADMAP.md task $task_id exceeds the 6-active/3-writer/3-non-writer phase limits"
+        fail "ROADMAP.md task $task_id exceeds the 6-active/3-writer/dynamic non-writer phase limits"
         causal_policy_errors=1
         errors=1
       fi
@@ -1846,8 +1975,8 @@ else
 fi
 
 # The new phase contract is synchronous: a phase is a bounded six-agent
-# barrier, with capacity for three permission-derived writers and three
-# non-writers.  Exclusive territories make the zero-overlap rule observable.
+# barrier, with a dynamic read-only ceiling of six minus permission-derived
+# writers.  Exclusive territories make the zero-overlap rule observable.
 SYNCHRONOUS_PHASE_POLICY_SOURCES=(
   "$ROADMAP_FILE"
 )
@@ -1864,9 +1993,6 @@ for policy_source in "${SYNCHRONOUS_PHASE_POLICY_SOURCES[@]}"; do
   require_contract_pattern "$policy_source" "$policy_label" \
     '3[[:space:]-]+(concurrent[[:space:]-]+)?writers?' \
     'three-writer phase ceiling'
-  require_contract_pattern "$policy_source" "$policy_label" \
-    '3[[:space:]-]*(non[-[:space:]]writers?|non[-[:space:]]*writer)|non[-[:space:]]writers?.{0,80}3|Remaining capacity.{0,80}3' \
-    'three-non-writer phase capacity'
   require_contract_pattern "$policy_source" "$policy_label" \
     'synchron|serialized' \
     'synchronous phase execution'
@@ -1906,7 +2032,9 @@ for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
   require_contract_pattern "$policy_source" "$policy_label" 'BLOCKING' 'BLOCKING finding classification'
   require_contract_pattern "$policy_source" "$policy_label" 'FOLLOW_UP' 'FOLLOW_UP finding classification'
   require_contract_pattern "$policy_source" "$policy_label" 'INFORMATIONAL' 'INFORMATIONAL finding classification'
-  require_contract_pattern "$policy_source" "$policy_label" 'STOP.*CANCELLED.*terminal' 'terminal STOP/CANCELLED handling'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'stop.{0,80}cancelled.{0,180}terminal' \
+    'terminal STOP/CANCELLED handling'
 done
 
 # Autonomous-completion contract regressions: policy text must retain the

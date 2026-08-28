@@ -290,6 +290,30 @@ QA and security each report scope-classified findings once per implementation wa
 
 Manual and user-created commits are valid and never block continued agent work;
 repository history may contain ordinary commits. Before committing, inspect
+### Human-Readable Orchestration Communication
+
+The structured task contract and phase accounting remain mandatory, but the
+orchestrator must make them understandable without requiring the user to decode
+internal workflow terms:
+
+- Before or immediately around the contract, write one to three plain sentences
+  explaining the goal, why it matters, and the immediate approach.
+- After every implementation or evidence transition, explain what happened, what
+  changed, the result, and the next dependency. If work remains, this explanation
+  is followed immediately by the next eligible declared phase; it is not a
+  status-only end to the turn.
+- Expand audience-facing acronyms on first use. Avoid raw agent JSON, tool dumps,
+  and unexplained internal labels; summarize their meaning while retaining exact
+  paths, commands, task IDs, run IDs, and artifact IDs when useful.
+- Distinguish evidence in accessible language: source tests prove checked source
+  behavior, deployed canaries prove the rebuilt and restarted runtime path, and
+  actual model/session artifacts prove what real models and sessions could see
+  and do. No evidence class substitutes for another.
+- Use a calm, direct, non-defensive tone without excessive narration.
+- Terminal responses use, in order: **STATUS**, **What I did**, **What changed**,
+  **How I verified it**, **Where the proof is**, and
+  **Findings / What remains**.
+
 `git status`, `git diff`, and recent `git log`, then stage only the intended
 paths. Use ordinary non-interactive Git for local commits and `gh` for GitHub
 pushes, pull requests, and checks. Never commit unrelated changes, rewrite
@@ -306,12 +330,23 @@ commit an incomplete or unverified coordination rollout as complete.
 |-------|-------|-------|
 | **Active subagents per phase** | 6 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
 | **Concurrent writers per wave** | 3 | Subagents with `edit: allow` or `write: allow` permissions |
-| **Remaining capacity** | 3 | Available to non-writer agents (explore, scout, QA, vision, security) |
+| **Read-only slots with W writers** | 6 − W | Remaining active capacity; there is no universal 3-read-only ceiling |
 | **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
 
-Default to the maximum safe parallelism available within these limits for
-independent, non-overlapping work. Any serialization must name the concrete
-dependency or writer-territory conflict that requires it.
+With **W** writers in a phase, up to **6 − W** read-only agents may run when
+their streams are independent and eligible. Three writers leave up to three
+read-only slots, one writer leaves up to five, and a zero-writer phase may use
+all six active slots for read-only agents. The phase still has a maximum of six
+active subagents and three writers, and every unused active or writer slot must
+remain explicitly justified under `UNUSED_CAPACITY`.
+
+Before every phase, enumerate all currently known independent in-scope work
+streams and their dependencies. Dispatch every stream that is currently safe in
+one parallel call, up to the 6-active/3-writer limits; never serialize
+independent, non-overlapping work. Do not manufacture speculative work merely to
+fill capacity. QA, security, and visual review wait for their relevant
+implementation to be finalized, overlapping writers serialize, and Docs runs
+only when canonical documentation is directly affected or explicitly requested.
 
 ### Writer Tiers and Routing
 
@@ -328,9 +363,11 @@ The non-writer agents are `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`
 
 **Writer accounting is permission-derived, not task-type-derived.** Docs and Browser remain writers even when their work is documentation or browser automation rather than application code, and both count toward the maximum of three writers. Browser is dispatchable through the orchestrator like the other writer agents.
 
-### Valid Phase Example
+### Scheduling Examples
 
-The following implementation phase is within both limits: **5 active, 3 permission-derived writers**. QA and visual gates run later, after their applicable implementation work is final.
+The following implementation phase uses **5 active, 3 permission-derived
+writers**. Slot 6 remains unused because QA must wait for the relevant
+implementation to be finalized.
 
 ```text
 Phase: "Dashboard implementation, direct docs, and browser work"
@@ -338,11 +375,41 @@ Phase: "Dashboard implementation, direct docs, and browser work"
   @ingenium-docs                   → docs/              (writer)
   @browser-agent                   → browser recipes/   (writer)
   @ingenium-explore                → search patterns    (non-writer)
+Independent streams: dashboard implementation; direct docs; browser recipes; pattern search; context retrieval; post-wave QA (dependent)
   @ingenium-scout                  → retrieve context   (non-writer)
 ```
 
 No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
 
+UNUSED_CAPACITY:
+  active slot 6 → reserved for post-wave QA; premature until relevant implementation is finalized
+  writer slots → none
+
+Phase: "Full independent implementation and finalized review" (6 active, 3 writers)
+Independent streams: extension implementation; report API; directly affected report docs; finalized CLI QA; finalized auth security review; finalized dashboard visual review
+  @ingenium-software-engineer-fast    → extension/       (writer)
+  @ingenium-software-engineer-premium → report API/      (writer)
+  @ingenium-docs                      → report docs/     (writer)
+  @ingenium-qa                        → finalized CLI    (non-writer)
+  @ingenium-security-auditor          → finalized auth   (non-writer)
+  @ingenium-qa-vision                 → finalized UI     (non-writer)
+UNUSED_CAPACITY: none
+
+Phase: "Independent finalized reviews and research" (6 active, 0 writers)
+Independent streams: two independent code searches; decision retrieval; finalized QA; finalized security review; finalized visual review
+  @ingenium-explore          → dashboard search   (non-writer)
+  @ingenium-explore          → API search         (non-writer)
+  @ingenium-scout            → decision retrieval (non-writer)
+  @ingenium-qa               → finalized QA       (non-writer)
+  @ingenium-security-auditor → finalized security (non-writer)
+  @ingenium-qa-vision        → finalized visual   (non-writer)
+UNUSED_CAPACITY:
+  active slots → none
+  writer slots 1–3 → read-only phase; no implementation or remediation stream is eligible
+
+BAD:
+  Dispatch one writer and defer safe, non-overlapping Docs or research streams
+  for convenience, or fill an active slot with QA before its implementation is finalized.
 ### Phase Declaration Protocol
 
 Every task and phase MUST declare before dispatch:
@@ -353,11 +420,54 @@ Every task and phase MUST declare before dispatch:
 4. **STOP_CONDITION** — `PASS`, `ESCALATE_USER`, `STOP`, or `CANCELLED`
 5. **Verification plan** — targeted checks, deployment/acceptance steps, bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for each remediation
 6. **Escalation rule** — evidence for one of the five permitted `ESCALATE_USER` conditions only
-7. **Active count** — total subagents to spawn (max 6)
-8. **Writer count** — total writers (max 3)
-9. **Exclusive territories** — file/directory ownership per writer; zero overlap
-10. **Dependencies** — serialization order for writers sharing territories across waves
-11. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
+7. **Independent work streams** — every currently known in-scope stream and its dependencies
+8. **Active count** — total subagents to spawn (max 6)
+9. **Writer count** — total writers (max 3)
+10. **Exclusive territories** — file/directory ownership per writer; zero overlap
+11. **Dependencies** — serialization order for writers sharing territories across waves
+12. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
+13. **UNUSED_CAPACITY** — each unused active slot and writer slot, separately justified by a concrete dependency, territory collision, unavailable matching role, or premature-review reason
+
+`Task is simple`, token pressure, cost, convenience, and waiting for the user are
+invalid `UNUSED_CAPACITY` reasons. While any roadmap or `TodoWrite` item remains
+open, immediately dispatch the next declared wave whenever a dependency clears
+or a slot becomes safe; never wait for a user reprompt.
+
+#### Human-readable contract example
+
+Good introduction: “I’ll correct the isolated validation message and its focused
+test so users receive the intended guidance. One writer will make the change,
+then a targeted quality assurance (QA) review will verify the finalized result.”
+
+```text
+Task: Correct dashboard validation message
+IN_SCOPE: ValidationMessage.tsx and its focused test
+OUT_OF_SCOPE: unrelated dashboard cleanup and dependency upgrades
+Acceptance criteria: focused test passes and the declared message is rendered
+STOP_CONDITION: PASS, STOP/CANCELLED, or ESCALATE_USER only for a permitted condition
+Deployment owner: N/A
+Verification plan: focused test, then one targeted QA review
+Escalation rule: the five permitted conditions only, with retained evidence
+
+Phase: "Validation message" (1 active, 1 writer)
+Independent work streams: implementation; QA depends on finalized implementation
+Active count: 1
+Writer count: 1
+Exclusive territories: writer owns ValidationMessage.tsx and its focused test
+Dependencies: QA follows the finalized writer result
+Verification owner and checks: writer runs the focused test; QA reviews once
+UNUSED_CAPACITY:
+  active slots 2–6 → no other eligible in-scope stream; QA is premature
+  writer slots 2–3 → no independent non-overlapping writer territory exists
+```
+
+Good post-phase explanation: “The component and focused test changed, and the
+focused source check passed. That is source-test evidence, not deployed-runtime
+or model/session proof. The targeted QA review is now the only eligible
+dependency, so it starts next.”
+
+Bad: return only `STATUS: writer_done`, raw subagent JSON, or a tool dump without
+explaining what changed, what the evidence proves, and what dependency is next.
 
 Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. A finding is **BLOCKING** only when it is in the user scope and fails acceptance criteria or is immediately exploitable changed code. Only an in-scope BLOCKING finding may reopen implementation. FOLLOW_UP findings are reported separately and never auto-dispatched. Every remediation must name and address the current reproducible root cause, then run the minimum targeted regression; a second failed check alone is never an escalation condition.
 
@@ -391,7 +501,7 @@ QA runs targeted checks **once** after an implementation wave and does not trigg
 
 UI work receives one changed-route visual gate after the final UI change for the route, and one passive full-site desktop/mobile sweep per user-requested UI batch, at 1440x900 and 390x844. A visual failure with a reproducible in-scope root cause receives causal source remediation and the smallest route recheck that proves it; the recheck alone never returns **ESCALATE_USER**. Docs-only and non-UI changes never open or reopen visual gates. PASS evidence includes screenshot, accessibility, network/console, and browser-cleanup confirmation.
 
-All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). See [mcp-tooling skill](../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
+All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). See [mcp-tooling skill](.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
 
 ### Restart Required for Agent Profile and Configuration Changes
 
