@@ -213,8 +213,12 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
     expect(reopened.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("upgrades the exact legacy post-104 collision gap without changing audit rows", () => {
-    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  it("upgrades the exact markerless legacy post-104 collision gap without changing audit rows", () => {
+    const database = createLegacyDatabaseThrough(103);
+    database.exec(readFileSync(
+      join(import.meta.dirname, "../data/migrations/104_security_audit_project_history.sql"),
+      "utf8",
+    ).replace("  -- 104_project_history\n", ""));
     const auditId = randomUUID();
     const uniqueId = randomUUID();
     const timestamp = new Date().toISOString();
@@ -225,6 +229,7 @@ describe("AUTH-100 migration and bootstrap foundation", () => {
     ).run(auditId, timestamp);
     const before = database.prepare("SELECT * FROM security_audit_events WHERE id = ?").get(auditId);
     database.exec("DROP TRIGGER security_audit_events_primary_key_collision");
+    database.close();
     resetDbForTest();
 
     const upgraded = getDb(process.env.INGENIUM_CORE_DB_PATH);

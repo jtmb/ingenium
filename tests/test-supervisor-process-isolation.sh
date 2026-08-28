@@ -89,6 +89,10 @@ grep -Fq 'ENTRYPOINT ["/app/scripts/runtime-control-entrypoint.sh", "manager"]' 
   || fail "runtime manager does not drop from its trusted root entrypoint"
 grep -Fq 'ENTRYPOINT ["/app/scripts/runtime-control-entrypoint.sh", "gateway"]' "$ROOT/Dockerfile" \
   || fail "runtime gateway does not drop from its trusted root entrypoint"
+grep -Fq 'INGENIUM_RUNTIME_WORKSPACE_BOOTSTRAP_MAP_FILE' "$ROOT/scripts/runtime-control-entrypoint.sh" \
+  || fail "runtime manager does not receive the protected workspace map through its root bootstrap"
+grep -Fq 'install -o "$service_uid" -g "$service_gid" -m 0400 "$workspace_bootstrap_file" "$workspace_file"' "$ROOT/scripts/runtime-control-entrypoint.sh" \
+  || fail "runtime manager does not install a service-owned workspace map before dropping privileges"
 [[ "$(grep -Fc '/var/run/docker.sock:/var/run/docker.sock' "$ROOT/docker-compose.yml")" -eq 1 ]] \
   || fail "Docker socket access is not exclusive to the runtime manager"
 grep -Fq 'runtime-gateway-healthcheck.mjs' "$ROOT/docker-compose.yml" \

@@ -42,6 +42,14 @@ node /app/scripts/read-protected-api-token.mjs \
   "$bootstrap_file" "$bootstrap_uid" "$bootstrap_gid" "$token_file" installation-api 0 0 "$service_uid" "$service_gid"
 
 if [ "$role" = "manager" ]; then
+  workspace_bootstrap_file="${INGENIUM_RUNTIME_WORKSPACE_BOOTSTRAP_MAP_FILE:?INGENIUM_RUNTIME_WORKSPACE_BOOTSTRAP_MAP_FILE is required}"
+  workspace_file="/run/ingenium-secrets/runtime-manager/workspaces.json"
+  if [ "$(stat -c '%F:%u:%g:%a' "$workspace_bootstrap_file")" != "regular file:${bootstrap_uid}:${bootstrap_gid}:600" ]; then
+    echo "ERROR: runtime workspace map metadata is invalid"
+    exit 1
+  fi
+  install -o "$service_uid" -g "$service_gid" -m 0400 "$workspace_bootstrap_file" "$workspace_file"
+  export INGENIUM_RUNTIME_WORKSPACE_MAP_FILE="$workspace_file"
   export INGENIUM_RUNTIME_MANAGER_TOKEN_FILE="$token_file"
   socket_gid="$(stat -c '%g' /var/run/docker.sock)"
   exec setpriv --reuid="$service_uid" --regid="$service_gid" --groups="$socket_gid" \

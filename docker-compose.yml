@@ -181,7 +181,8 @@ services:
       - INGENIUM_RUNTIME_MANAGER_PORT=4110
       - INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-secrets/runtime-manager/token
       - INGENIUM_RUNTIME_MANAGER_BOOTSTRAP_TOKEN_FILE=/run/ingenium-bootstrap/runtime-manager-token
-      - INGENIUM_RUNTIME_WORKSPACE_MAP_FILE=/etc/ingenium/runtime-workspaces.json
+      - INGENIUM_RUNTIME_WORKSPACE_MAP_FILE=/run/ingenium-secrets/runtime-manager/workspaces.json
+      - INGENIUM_RUNTIME_WORKSPACE_BOOTSTRAP_MAP_FILE=/run/ingenium-bootstrap/runtime-workspaces.json
       - INGENIUM_USER_RUNTIME_IMAGE=ingenium-user-runtime:${IMAGE_REVISION}
       - INGENIUM_RUNTIME_NETWORK_PREFIX=ingenium-runtime-
       - INGENIUM_CONTROL_PLANE_CONTAINER=ingenium-control-plane
@@ -190,7 +191,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-bootstrap/runtime-manager-token:ro"
-      - "${INGENIUM_RUNTIME_WORKSPACE_MAP_FILE:-./config/runtime-workspaces.example.json}:/etc/ingenium/runtime-workspaces.json:ro"
+      - "${INGENIUM_RUNTIME_WORKSPACE_MAP_FILE:-./config/runtime-workspaces.example.json}:/run/ingenium-bootstrap/runtime-workspaces.json:ro"
       - "${INGENIUM_RUNTIME_WORKSPACE_VALIDATION_SOURCE:-./config}:${INGENIUM_RUNTIME_WORKSPACE_VALIDATION_TARGET:-/workspace-validation}:ro"
     networks:
       - runtime-control
