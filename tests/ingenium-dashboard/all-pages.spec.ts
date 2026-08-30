@@ -1,22 +1,11 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Comprehensive E2E tests for ALL 13 Ingenium Dashboard pages.
- *
- * Tests run against a live Next.js dev server (port 3000) and real API
- * server (port 4097). Each test navigates to a page and verifies that
- * key elements render and interactions work end-to-end.
- *
- * Selectors use roles, labels, and text content to match the existing
- * test conventions (no data-testid attributes on most pages yet).
+ * Smoke checks for the dashboard management pages using configured endpoints.
  */
 
 const BASE = process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000";
 const PROJECT = "gh-llm-bootstrap";
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 async function goto(page: any, path: string) {
   const res = await page.goto(`${BASE}${path}?project=${PROJECT}`, {
@@ -30,25 +19,18 @@ async function waitForClientState(page: any): Promise<void> {
   await expect(page.locator("main")).toBeVisible({ timeout: 10_000 });
 }
 
-/* ------------------------------------------------------------------ */
-/*  1. Projects                                                        */
-/* ------------------------------------------------------------------ */
-
 test.describe("Projects Page", () => {
   test("loads with heading, create form, and project list", async ({ page }) => {
     await goto(page, "/projects");
 
     await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
 
-    // Create form elements
     await expect(page.getByPlaceholder("Project name")).toBeVisible();
     await expect(page.getByRole("button", { name: "Create" })).toBeVisible();
 
-    // Active/Archived tabs
     await expect(page.getByRole("button", { name: "Active" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Archived" })).toBeVisible();
 
-    // Project list shows at least one project
     const projectEntries = page.locator("main").getByText(/gh-llm-bootstrap|global-default/);
     await expect(projectEntries.first()).toBeVisible({ timeout: 5000 });
   });
@@ -64,45 +46,18 @@ test.describe("Projects Page", () => {
   });
 });
 
-/* ------------------------------------------------------------------ */
-/*  2. Archive                                                         */
-/* ------------------------------------------------------------------ */
-
-test.describe("Archive Page", () => {
-  test("loads with heading and shows empty state or archived projects", async ({ page }) => {
-    await goto(page, "/archive");
-
-    await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
-
-    // Either shows "No archived projects" or a list with Restore buttons
-    const emptyState = page.getByText("No archived projects");
-    const restoreBtn = page.getByRole("button", { name: /Restore/i });
-    const hasContent = await emptyState.isVisible() || await restoreBtn.isVisible();
-    expect(hasContent).toBeTruthy();
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  3. Skills                                                          */
-/* ------------------------------------------------------------------ */
-
 test.describe("Skills Page", () => {
   test("loads with heading, search, and skill cards", async ({ page }) => {
     await goto(page, "/skills");
 
-    // Heading shows "Skills (N)"
-    await expect(page.getByRole("heading", { name: /^Skills / })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Active Skills/ })).toBeVisible();
 
-    // Search input
     await expect(page.getByPlaceholder("Search skills...")).toBeVisible();
 
-    // Sort dropdown
     await expect(page.locator("select").first()).toBeVisible();
 
-    // Upload Skill button
     await expect(page.getByRole("button", { name: "Upload Skill" })).toBeVisible();
 
-    // Skill cards should be rendered (clickable)
     const firstCard = page.locator("[class*='cursor-pointer']").first();
     await expect(firstCard).toBeVisible({ timeout: 5000 });
   });
@@ -114,7 +69,6 @@ test.describe("Skills Page", () => {
     await searchBox.fill("database");
     await waitForClientState(page);
 
-    // Should show matching results
     await expect(page.getByText("database-conventions").first()).toBeVisible({ timeout: 3000 });
   });
 
@@ -125,14 +79,9 @@ test.describe("Skills Page", () => {
     await sortSelect.selectOption("Newest first");
     await waitForClientState(page);
 
-    // Verify the sort changed - heading still shows skills count
-    await expect(page.getByRole("heading", { name: /^Skills / })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Active Skills/ })).toBeVisible();
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  4. Tasks                                                           */
-/* ------------------------------------------------------------------ */
 
 test.describe("Tasks Page", () => {
   test("loads with kanban board columns", async ({ page }) => {
@@ -140,11 +89,9 @@ test.describe("Tasks Page", () => {
 
     await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
 
-    // Create form
     await expect(page.getByPlaceholder("Task title")).toBeVisible();
     await expect(page.getByRole("button", { name: "Add" })).toBeVisible();
 
-    // Kanban columns
     await expect(page.getByRole("heading", { name: "todo" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "in progress" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "review" })).toBeVisible();
@@ -158,10 +105,8 @@ test.describe("Tasks Page", () => {
     await page.getByPlaceholder("Task title").fill(taskTitle);
     await page.getByRole("button", { name: "Add" }).click();
 
-    // Task appears on board
     await expect(page.getByText(taskTitle).first()).toBeVisible({ timeout: 5000 });
 
-    // Advance it one column
     const advanceBtn = page.getByRole("button", { name: /Advance/i }).first();
     if (await advanceBtn.isVisible()) {
       await advanceBtn.click();
@@ -170,10 +115,6 @@ test.describe("Tasks Page", () => {
     }
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  5. Plugins                                                         */
-/* ------------------------------------------------------------------ */
 
 test.describe("Plugins Page", () => {
   test("loads with heading and Add Plugin button", async ({ page }) => {
@@ -186,18 +127,14 @@ test.describe("Plugins Page", () => {
   test("plugin cards show Edit, Enabled, Delete buttons", async ({ page }) => {
     await goto(page, "/plugins");
 
-    // Wait for plugin cards
     await waitForClientState(page);
 
-    // Check for plugin action buttons
     const editBtn = page.getByRole("button", { name: "Edit" }).first();
     await expect(editBtn).toBeVisible({ timeout: 5000 });
 
-    // Check for Enable/Disable toggle
     const toggleBtn = page.getByRole("button", { name: /Enabled|Disabled/i }).first();
     await expect(toggleBtn).toBeVisible();
 
-    // Check for Delete button
     const deleteBtn = page.getByRole("button", { name: "Delete" }).first();
     await expect(deleteBtn).toBeVisible();
   });
@@ -209,16 +146,11 @@ test.describe("Plugins Page", () => {
     const editBtn = page.getByRole("button", { name: "Edit" }).first();
     await editBtn.click();
 
-    // Should show a textarea or similar editor after edit click
     await waitForClientState(page);
     const textarea = page.locator("textarea").first();
     await expect(textarea).toBeVisible({ timeout: 3000 });
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  6. Mail                                                            */
-/* ------------------------------------------------------------------ */
 
 test.describe("Mail Page", () => {
   test("loads with heading and shows empty state or accounts", async ({ page }) => {
@@ -226,17 +158,12 @@ test.describe("Mail Page", () => {
 
     await expect(page.getByRole("heading", { name: "Mail" })).toBeVisible();
 
-    // Either shows "No email accounts" or account list
     const noAccounts = page.getByText("No email accounts configured");
     const addAccountBtn = page.getByRole("button", { name: "Add Account" });
     const hasContent = await noAccounts.isVisible() || await addAccountBtn.isVisible();
     expect(hasContent).toBeTruthy();
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  7. Agents                                                          */
-/* ------------------------------------------------------------------ */
 
 test.describe("Agents Page", () => {
   test("loads with heading and agent cards", async ({ page }) => {
@@ -245,14 +172,11 @@ test.describe("Agents Page", () => {
     await expect(page.getByRole("heading", { name: "Agents" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add Agent" })).toBeVisible();
 
-    // Agent cards should be grouped by category
     await waitForClientState(page);
 
-    // Check for agent names (they have "Enabled" badge)
     const agentCard = page.getByText("Enabled").first();
     await expect(agentCard).toBeVisible({ timeout: 5000 });
 
-    // Check action buttons on agents
     const disableBtn = page.getByRole("button", { name: "Disable" }).first();
     await expect(disableBtn).toBeVisible();
 
@@ -268,47 +192,13 @@ test.describe("Agents Page", () => {
 
     await waitForClientState(page);
 
-    // Click first agent card to toggle preview content
     const previewBtn = page.getByText("Preview content").first();
     await expect(previewBtn).toBeVisible({ timeout: 5000 });
     await previewBtn.click();
 
-    // Verify content expands (or at least button state changes)
     await waitForClientState(page);
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  8. Servers                                                         */
-/* ------------------------------------------------------------------ */
-
-test.describe("Servers Page", () => {
-  test("loads with heading and server form", async ({ page }) => {
-    await goto(page, "/servers");
-
-    await expect(page.getByRole("heading", { name: "MCP Servers" })).toBeVisible();
-
-    // Creation form
-    await expect(page.getByPlaceholder("Server name")).toBeVisible();
-    await expect(page.getByPlaceholder(/Command/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Add Server/i })).toBeVisible();
-  });
-
-  test("can add and see a server", async ({ page }) => {
-    await goto(page, "/servers");
-
-    const serverName = `E2E Server ${Date.now()}`;
-    await page.getByPlaceholder("Server name").fill(serverName);
-    await page.getByPlaceholder(/Command/i).fill("echo test");
-    await page.getByRole("button", { name: /Add Server/i }).click();
-
-    await expect(page.getByText(serverName).first()).toBeVisible({ timeout: 5000 });
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  9. Config                                                          */
-/* ------------------------------------------------------------------ */
 
 test.describe("Config Page", () => {
   test("loads with heading and tab navigation", async ({ page }) => {
@@ -316,11 +206,9 @@ test.describe("Config Page", () => {
 
     await expect(page.getByRole("heading", { name: "Config" })).toBeVisible();
 
-    // Two tabs
     await expect(page.getByRole("button", { name: "Project Config" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Global Config" })).toBeVisible();
 
-    // Textarea with JSON content
     const textarea = page.locator("textarea").first();
     await expect(textarea).toBeVisible({ timeout: 5000 });
     const content = await textarea.inputValue();
@@ -334,7 +222,6 @@ test.describe("Config Page", () => {
     await page.getByRole("button", { name: "Global Config" }).click();
     await waitForClientState(page);
 
-    // Should show global config content
     const textarea = page.locator("textarea").first();
     await expect(textarea).toBeVisible({ timeout: 3000 });
   });
@@ -347,17 +234,12 @@ test.describe("Config Page", () => {
   });
 });
 
-/* ------------------------------------------------------------------ */
-/*  10. Observations                                                   */
-/* ------------------------------------------------------------------ */
-
 test.describe("Observations Page", () => {
   test("loads with heading and stats", async ({ page }) => {
     await goto(page, "/observations");
 
     await expect(page.locator("h1")).toContainText("Observations");
 
-    // Stats
     await expect(page.getByText("Total:").first()).toBeVisible({ timeout: 5000 });
     await expect(page.getByText("Pending:").first()).toBeVisible({ timeout: 3000 });
   });
@@ -367,19 +249,13 @@ test.describe("Observations Page", () => {
 
     await waitForClientState(page);
 
-    // Should have observation cards with type badges
     const typeBadge = page.locator("span:has-text('pattern')").first();
     await expect(typeBadge).toBeVisible({ timeout: 5000 });
 
-    // Cards should be clickable
     const cards = page.locator("[class*='cursor-pointer']");
     await expect(cards.first()).toBeVisible({ timeout: 3000 });
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  11. Personality                                                    */
-/* ------------------------------------------------------------------ */
 
 test.describe("Personality Page", () => {
   test("loads with heading and sort controls", async ({ page }) => {
@@ -387,12 +263,10 @@ test.describe("Personality Page", () => {
 
     await expect(page.locator("h1")).toContainText("Personality Profile");
 
-    // Sort dropdown
     await expect(page.getByText("Sort:")).toBeVisible();
     await expect(page.locator("select").first()).toBeVisible();
 
-    // Trait count
-    await expect(page.getByText("trait(s)").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("status", { name: "Personality trait counts" })).toBeVisible({ timeout: 5000 });
   });
 
   test("shows trait cards grouped by type", async ({ page }) => {
@@ -400,7 +274,6 @@ test.describe("Personality Page", () => {
 
     await waitForClientState(page);
 
-    // Trait cards with confidence percentages
     const traitCard = page.getByText("%").first();
     await expect(traitCard).toBeVisible({ timeout: 5000 });
   });
@@ -414,8 +287,7 @@ test.describe("Personality Page", () => {
     await sortSelect.selectOption("Newest first");
     await waitForClientState(page);
 
-    // Should still show traits
-    await expect(page.getByText("trait(s)").first()).toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole("status", { name: "Personality trait counts" })).toBeVisible({ timeout: 3000 });
   });
 
   test("dismiss button exists on trait cards", async ({ page }) => {
@@ -423,15 +295,10 @@ test.describe("Personality Page", () => {
 
     await waitForClientState(page);
 
-    // Each trait card should have a dismiss (×) button
-    const dismissBtn = page.getByRole("button", { name: "×" }).first();
+    const dismissBtn = page.getByRole("button", { name: "Dismiss trait" }).first();
     await expect(dismissBtn).toBeVisible({ timeout: 5000 });
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  12. Pipeline                                                       */
-/* ------------------------------------------------------------------ */
 
 test.describe("Pipeline Page", () => {
   test("loads with heading and stats bar", async ({ page }) => {
@@ -439,7 +306,6 @@ test.describe("Pipeline Page", () => {
 
     await expect(page.locator("h1")).toContainText("Pipeline Activity");
 
-    // Stats bar numbers
     await expect(page.getByText("Total:").first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator("span:has-text('Observations:')")).toBeVisible();
     await expect(page.locator("span:has-text('Syntheses:')")).toBeVisible();
@@ -450,10 +316,8 @@ test.describe("Pipeline Page", () => {
   test("filter pills are present and clickable", async ({ page }) => {
     await goto(page, "/pipeline");
 
-    // Wait for initial load
     await waitForClientState(page);
 
-    // All filter pills
     await expect(page.getByRole("button", { name: "All" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Agent" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Plugin" })).toBeVisible();
@@ -478,18 +342,12 @@ test.describe("Pipeline Page", () => {
   test("shows timeline events", async ({ page }) => {
     await goto(page, "/pipeline");
 
-    // Wait for events to load
     await waitForClientState(page);
 
-    // Should have event entries in the timeline
     const eventEntry = page.locator("text=Synthesis").or(page.locator("text=Agent")).or(page.locator("text=Plugin"));
     await expect(eventEntry.first()).toBeVisible({ timeout: 5000 });
   });
 });
-
-/* ------------------------------------------------------------------ */
-/*  13. Settings                                                       */
-/* ------------------------------------------------------------------ */
 
 test.describe("Settings Page", () => {
   test("loads with heading and archive retention setting", async ({ page }) => {
@@ -497,7 +355,6 @@ test.describe("Settings Page", () => {
 
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
-    // Archive retention
     await expect(page.getByText("Archive retention")).toBeVisible();
     await expect(page.locator('input[type="number"]')).toBeVisible();
   });

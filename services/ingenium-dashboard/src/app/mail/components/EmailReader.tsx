@@ -38,6 +38,7 @@ export default function EmailReader({
   onForward,
   onDelete,
   onArchive,
+  onCreateTask,
   accounts,
   selectedAccount,
   onComposeSend,
@@ -56,6 +57,7 @@ export default function EmailReader({
   onForward: () => void;
   onDelete: () => void;
   onArchive: () => void;
+  onCreateTask?: () => void;
   accounts?: { id: string; email: string; name?: string }[];
   selectedAccount?: string;
   onComposeSend?: (data: any) => void;
@@ -71,11 +73,9 @@ export default function EmailReader({
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryConfigured, setSummaryConfigured] = useState<boolean | null>(null);
 
-  /** Resize state for the reply panel's draggable handle. */
   const [isReplyResizing, setIsReplyResizing] = useState(false);
   const replyStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 0 });
   const replyContainerRef = useRef<HTMLDivElement>(null);
-  /** Constrain reply panel: body needs at least 400px, reply min 320px. */
   const [maxReplyWidth, setMaxReplyWidth] = useState(window.innerWidth - 400);
 
   useEffect(() => {
@@ -83,10 +83,7 @@ export default function EmailReader({
     if (cw) setMaxReplyWidth(Math.max(320, cw - 400));
   }, [isReplying]);
 
-  // FIX 1 — Reset reply/summary state when switching to a different email
-  // DP#32: dependency is `email?.uid` (primitive, stable per email).
-  // Re-rendering the SAME email (uid unchanged) does NOT trigger reset.
-  // Only genuinely changing the viewed email (uid changes) resets the state.
+  // Key by uid so transient state survives a rerender but not a new message.
   useEffect(() => {
     setIsReplying(false);
     setReplyPrefill({});
@@ -96,7 +93,6 @@ export default function EmailReader({
     setSummaryConfigured(null);
   }, [email?.uid]);
 
-  // Reply resize pointer handlers
   const onReplyPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -107,10 +103,8 @@ export default function EmailReader({
   const onReplyPointerMove = useCallback((e: React.PointerEvent) => {
     if (!isReplyResizing) return;
     const deltaX = e.clientX - replyStartRef.current.startX;
-    // Leftward drag = increase width; rightward drag = decrease
     let newWidth = replyStartRef.current.startWidth - deltaX;
 
-    // Constrain: body needs at least 400px
     const containerWidth = replyContainerRef.current?.getBoundingClientRect().width ?? window.innerWidth;
     const newMax = Math.max(320, containerWidth - 400);
     setMaxReplyWidth(newMax);
@@ -123,20 +117,18 @@ export default function EmailReader({
     setIsReplyResizing(false);
   }, []);
 
-  // No email selected
   if (!email && !loading) {
     return (
-      <div data-testid="email-reader-empty" className="flex-1 min-w-[400px] flex flex-col items-center justify-center gap-3">
+      <div data-testid="email-reader-empty" className="flex-1 min-w-0 md:min-w-[400px] flex flex-col items-center justify-center gap-3">
         <span className="text-3xl">✉️</span>
         <p className="text-[var(--color-text-muted)] text-sm">Select an email to read</p>
       </div>
     );
   }
 
-  // Loading state
   if (loading) {
     return (
-      <div data-testid="email-reader-loading" className="flex-1 min-w-[400px] flex flex-col animate-pulse">
+      <div data-testid="email-reader-loading" className="flex-1 min-w-0 md:min-w-[400px] flex flex-col animate-pulse">
         <div className="bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] px-4 py-3 space-y-2">
           <div className="h-6 bg-[var(--color-surface-muted)] rounded w-2/3" />
           <div className="h-4 bg-[var(--color-surface-muted)] rounded w-1/3" />
@@ -151,10 +143,9 @@ export default function EmailReader({
     );
   }
 
-  // Downloading state (202 pending — body not yet cached)
   if (downloading) {
     return (
-      <div data-testid="email-reader-downloading" className="flex-1 min-w-[400px] flex flex-col items-center justify-center gap-3">
+      <div data-testid="email-reader-downloading" className="flex-1 min-w-0 md:min-w-[400px] flex flex-col items-center justify-center gap-3">
         <svg className="animate-spin w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -164,10 +155,9 @@ export default function EmailReader({
     );
   }
 
-  // Download error state (202 polling timed out)
   if (downloadError) {
     return (
-      <div data-testid="email-reader-error" className="flex-1 min-w-[400px] flex flex-col items-center justify-center gap-3">
+      <div data-testid="email-reader-error" className="flex-1 min-w-0 md:min-w-[400px] flex flex-col items-center justify-center gap-3">
         <p className="text-sm text-[var(--color-error-text)]">{downloadError}</p>
         {onRetry && (
           <button
@@ -181,7 +171,6 @@ export default function EmailReader({
     );
   }
 
-  // --- Local handlers (FIX 2) ---
   const handleReplyClick = () => {
     const toAddr = email.from?.[0]?.address;
     setReplyPrefill({
@@ -200,6 +189,7 @@ export default function EmailReader({
     setSummary(null);
     setSummaryConfigured(null);
     try {
+      // BUG: Missing folders are sent as INBOX, which misroutes non-INBOX emails.
       const url = `${API_BASE}/emails/summarize/${email.uid}?project=${project || "global-default"}&account=${accountId}&folder=${encodeURIComponent(email.folder || "INBOX")}`;
       const res = await fetch(url);
       const data = await res.json().catch(() => ({ data: null }));
@@ -225,7 +215,6 @@ export default function EmailReader({
   const ccList = email.cc?.map((c: any) => c.address).join(", ") || "";
   const bodyOverflowClass = email.body?.html ? "overflow-hidden" : "overflow-y-auto";
 
-  // --- Render helpers for body content, summarize section, and attachments ---
   const renderSummarize = (
     <div className="px-4 py-2 border-b border-[var(--color-border)]">
       {!summariseLoading && summary === null && summaryConfigured === null && !summariseError && (
@@ -359,14 +348,13 @@ export default function EmailReader({
   ) : null;
 
   return (
-    <div data-testid="email-reader-content" className="flex-1 min-h-0 min-w-[400px] flex flex-col">
-      {/* Header panel — always full width */}
+    <div data-testid="email-reader-content" className="flex-1 min-h-0 min-w-0 md:min-w-[400px] flex flex-col">
       <div className="bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] px-4 py-3 space-y-1">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
           {email.subject || "(No subject)"}
         </h2>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+          <span data-testid="email-reader-from" className="text-sm font-semibold text-[var(--color-text-primary)]">
             {fromAddress?.name || fromAddress?.address || "Unknown"}
           </span>
           {fromAddress?.address && fromAddress?.name && (
@@ -385,13 +373,12 @@ export default function EmailReader({
             <span className="font-medium">CC:</span> {ccList}
           </p>
         )}
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <p data-testid="email-reader-date" className="text-xs text-[var(--color-text-muted)]">
           {email.date ? new Date(email.date).toLocaleString() : ""}
         </p>
       </div>
 
-      {/* Action bar — always full width */}
-      <div className="flex gap-1 px-4 py-2 border-b border-[var(--color-border)]">
+      <div data-testid="email-reader-actions" className="flex flex-wrap gap-1 px-4 py-2 border-b border-[var(--color-border)]">
         <button
           onClick={handleReplyClick}
           className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
@@ -410,6 +397,15 @@ export default function EmailReader({
         >
           Archive
         </button>
+        {onCreateTask && typeof selectedAccount === "string" && selectedAccount.length > 0 && email.uid !== undefined && email.uid !== null && typeof email.folder === "string" && email.folder.length > 0 && (
+          <button
+            type="button"
+            onClick={onCreateTask}
+            className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+          >
+            Create task
+          </button>
+        )}
         <button
           onClick={onDelete}
           className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] ml-auto"
@@ -418,24 +414,18 @@ export default function EmailReader({
         </button>
       </div>
 
-      {/* Body + Composer — split when replying, full-width otherwise */}
       {isReplying ? (
         <div className="flex-1 min-w-0 flex flex-col xl:flex-row min-h-0" ref={replyContainerRef}>
-          {/* Body panel (left/top) */}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-            {/* Fixed: summarize panel */}
             <div className="shrink-0">
               {accountId && email?.uid && renderSummarize}
             </div>
-            {/* Scrollable: email body */}
             <div data-testid="email-body-pane" className={`flex-1 min-h-0 px-4 py-4 ${bodyOverflowClass}`}>
               {renderEmailBody}
             </div>
-            {/* Fixed: attachments */}
             {renderAttachments && <div className="shrink-0">{renderAttachments}</div>}
           </div>
 
-          {/* Reply resize handle — LEFT edge of composer (between body and composer) */}
           <div
             role="separator"
             aria-label="Resize reply panel"
@@ -494,15 +484,12 @@ export default function EmailReader({
         </div>
       ) : (
         <>
-          {/* Summarise button + panel (FIX 4) — full width */}
           {accountId && email?.uid && renderSummarize}
 
-          {/* Email body — full width, scrollable */}
           <div data-testid="email-body-pane" className={`flex-1 min-h-0 px-4 py-4 ${bodyOverflowClass}`}>
             {renderEmailBody}
           </div>
 
-          {/* Attachments — full width */}
           {renderAttachments}
         </>
       )}

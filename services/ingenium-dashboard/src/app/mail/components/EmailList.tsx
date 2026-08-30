@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 /**
  * EmailList — search bar + scrollable email rows with pagination (50 per page).
  * Shows sender, subject, snippet, and date. Distinguishes read/unread via \\Seen flag.
@@ -58,7 +60,11 @@ export default function EmailList({
   };
 
   return (
-    <div className="flex-shrink-0 flex flex-col border-r border-[var(--color-border)]" style={{ width: width ?? 350 }}>
+    <div
+      data-testid="email-list"
+      className="w-full md:w-[var(--mail-list-width)] flex-shrink-0 flex flex-col border-r border-[var(--color-border)]"
+      style={{ "--mail-list-width": `${width ?? 350}px` } as CSSProperties}
+    >
       {/* Search bar */}
       <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
         <input
@@ -110,6 +116,7 @@ export default function EmailList({
             return (
               <div
                 key={email.uid}
+                data-testid="email-row"
                 onClick={() => onSelect(email.uid)}
                 className={`px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer ${
                   isSelected ? "bg-[var(--color-surface-selected)]" : ""

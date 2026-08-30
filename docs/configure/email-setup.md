@@ -23,19 +23,20 @@ export GOOGLE_OAUTH_CLIENT_ID=your-google-oauth-client-id
 export GOOGLE_OAUTH_CLIENT_SECRET=your-google-oauth-secret
 export MS_OAUTH_CLIENT_ID=your-azure-ad-app-id  
 export MS_OAUTH_CLIENT_SECRET=your-azure-ad-app-secret
-export INGENIUM_EMAIL_ENCRYPTION_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 export OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
+./scripts/bootstrap-local-secrets.sh
 ```
-These are passed through to `docker compose` via the `${VAR:-}` expansion in `docker-compose.yml`.
+OAuth configuration is passed through Compose. The email encryption key is an
+owner-only file mounted read-only from the path recorded in ignored `.env`.
 
-> 🔴 **Security**: Never commit these values. The encryption key must be 64 hex characters (32 bytes) or a 64-character base64url secret; the latter is deterministically reduced to an AES-256 key. Generate a unique key per project — do not reuse across deployments.
+> 🔴 **Security**: Never commit these values. The encryption key must be 64 hex characters (32 bytes) or a 64-character base64url secret; the latter is deterministically reduced to an AES-256 key. Generate a unique key per deployment and retain it unchanged while that deployment's encrypted mail data is in use.
 
 ## OAuth2 Credential Setup
 
 OAuth application client secrets (`oauth_gmail_client_secret` and
 `oauth_outlook_client_secret`) are protected settings backed by the encrypted
-vault and belong only to the sole active global project. The selected dashboard
-project does not change their storage scope. The Settings API returns only
+vault and belong only to the canonical `global-default` project. The selected
+dashboard project does not change their storage scope. The Settings API returns only
 masked presence metadata (`isSet` and `masked`), never the secret value. Use
 explicit `preserve`, `replace`, or `clear` actions; a blank value from a
 sanitized settings form preserves the existing secret. The dashboard requires
@@ -105,6 +106,13 @@ Once you have obtained OAuth2 credentials:
    - Grant Ingenium permission to access emails
    - Redirects back to callback URL automatically
 
+Choose whether the account is organization-owned or private to the current
+user before starting OAuth or manual setup. OAuth state is stored only as a
+SHA-256 hash in a ten-minute, organization-qualified, consume-once attempt bound
+to that owner and account ID. The callback cannot change the owner/account, and
+replaying or crossing organizations returns a generic not-found/invalid-state
+failure. Tokens remain server-only and are stored under the bound account.
+
 ### Verify Account Setup
 
 After successful authentication, you should see:
@@ -112,19 +120,43 @@ After successful authentication, you should see:
 - Inbox view populated with recent messages
 - Folder navigation showing standard folders (INBOX, Sent, Drafts)
 
+For manual setup, the account is saved before the initial connection test. A
+failed test keeps the account and offers **Retry Connection**, editing, or
+**Remove Saved Account**; retrying updates the existing account instead of
+creating a duplicate.
+
+### Provider endpoint rules
+
+Gmail, Outlook, and Yahoo use fixed provider endpoints. Host and port overrides
+for these providers are rejected; the transport always uses the canonical
+provider configuration:
+
+| Provider | IMAP | SMTP |
+|---|---|---|
+| Gmail | `imap.gmail.com:993` | `smtp.gmail.com:587` |
+| Outlook | `outlook.office365.com:993` | `smtp.office365.com:587` |
+| Yahoo | `imap.mail.yahoo.com:993` | `smtp.mail.yahoo.com:587` |
+
+The **Custom** provider may override IMAP and SMTP hosts and ports. Hosts must
+not contain whitespace, and ports must be integers from **1 through 65,535**.
+When changing an existing account to Custom, provide all four values (IMAP host,
+IMAP port, SMTP host, and SMTP port); invalid endpoint data is rejected before
+credentials are accessed.
+
 ## Troubleshooting
 
 | Problem | Likely Cause | Fix |
 |---------|--------------|-----|
 | OAuth2 redirect fails (404) | Callback URI not registered | Add `http://localhost:3000/mail/oauth/callback` to authorized redirect URIs |
 | "Access denied" error | OAuth scopes too limited | Re-authorize account via dashboard |
-| Account shows in dropdown but no emails | Account not fully authenticated | Remove and re-add via setup flow |
+| Account shows in dropdown but no emails | Initial connection test failed or credentials are invalid | Keep the saved account; edit its settings and retry the connection, or remove it explicitly |
 
 ## Security Notes
 
-- **Credentials encrypted**: All OAuth2 secrets are stored using AES-256-GCM with `INGENIUM_EMAIL_ENCRYPTION_KEY`
+- **Credentials encrypted**: All OAuth2 secrets are stored using AES-256-GCM. Compose requires the owner-only `INGENIUM_EMAIL_ENCRYPTION_KEY_FILE`; the inline `INGENIUM_EMAIL_ENCRYPTION_KEY` is only a local-development fallback.
 - **No plaintext storage**: Never see raw client IDs/secrets — decrypted at runtime only
-- **Project-scoped keys**: Each project should have its own encryption key
+- **Deployment-scoped key continuity**: Each deployment should have its own encryption key, which must remain available to decrypt its stored credentials
+- **Rotation**: Run `scripts/bootstrap-local-secrets.sh --rotate-email-encryption-key` only with the one-shot empty-transition gate; any remaining mail/account/credential/OAuth/cache/queue/watcher reference blocks startup without changing continuity metadata.
 
 ## Account Removal
 
@@ -133,6 +165,9 @@ Removing an email account follows a three-step cleanup flow:
 1. **Worker stop** — The sync engine stops any active IMAP watcher and IDLE connections for the account.
 2. **Settings removal** — The account entry and its encrypted credential bundle are deleted from the database.
 3. **Cache cleanup** — All cached email data (headers, bodies, summaries, smart-reply caches) for the account is purged.
+
+This cleanup occurs only after an explicit **Remove** action; a failed initial
+connection test does not trigger it.
 
 To remove an account, go to **Settings → Mail** and click **Remove** next to the account name. You will be prompted to confirm.
 
@@ -146,7 +181,17 @@ If you want to keep an account configured but remove it from the sidebar, use **
 
 ## Re-Authentication After Key Rotation
 
-If `INGENIUM_EMAIL_ENCRYPTION_KEY` is rotated, all stored credentials become undecryptable — both OAuth2 tokens and app-password credentials. The sync engine parks the affected workers (no infinite retry loop) and the dashboard shows a **Reconnect** button for each affected account.
+If the deployment's email encryption key or protected key file is rotated, all
+stored credentials become undecryptable — both OAuth2 tokens and app-password
+credentials. The sync engine parks the affected workers (no infinite retry loop)
+and the dashboard shows a **Reconnect** button for each affected account.
+
+For an installation with no mail data, the protected-file operator path may use
+`INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION=1` for one restart. The API
+updates continuity metadata only after a transaction proves every mail data and
+reference surface empty and records a content-free audit event. If any row
+exists, the transition fails closed; use a separately reviewed decrypt/re-encrypt
+procedure instead of deleting or overwriting credentials.
 
 Recovery path depends on the account's `authType`:
 

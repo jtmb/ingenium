@@ -2,13 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import React, { Suspense } from "react";
 
-// ── Module-level mock state (reconfigured per test) ─────────────────────────
 const mockSearchParams = new Map<string, string>();
 let mockProject = "global-default";
 const mockReplace = vi.fn();
 const mockPush = vi.fn();
 
-// ── Mocks: must be hoisted above imports ─────────────────────────────────────
+// Register mocks before imports so the page's module dependencies are intercepted.
 
 vi.mock("@/lib/api", () => ({ getApiBase: () => "/api/v1" }));
 
@@ -24,8 +23,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 import EmailDetailPage from "@/app/mail/[id]/page";
-
-// ── Helper ───────────────────────────────────────────────────────────────────
 
 /**
  * Render EmailDetailPage wrapped in Suspense.
@@ -47,8 +44,6 @@ async function renderPage(id = "1") {
   return res!;
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
-
 describe("BUG-001: EmailDetailPage account guard", () => {
   afterEach(() => {
     cleanup();
@@ -69,6 +64,9 @@ describe("BUG-001: EmailDetailPage account guard", () => {
     expect(
       await screen.findByText("account query parameter is required"),
     ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Email" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to Inbox" })).toBeTruthy();
+    expect(screen.queryByText(/loading/i)).toBeNull();
 
     // Verify NO email fetch was issued
     const emailFetches = fetchSpy.mock.calls.filter(([url]) =>
@@ -133,20 +131,4 @@ describe("BUG-001: EmailDetailPage account guard", () => {
     expect(url).toContain("folder=Sent");
   });
 
-  it("renders validation state cleanly without React error", async () => {
-    // Verify the DOM structure for the validation state
-    await renderPage("1");
-
-    const heading = await screen.findByRole("heading", { name: "Email" });
-    expect(heading).toBeTruthy();
-
-    const message = screen.getByText("account query parameter is required");
-    expect(message).toBeTruthy();
-
-    const backBtn = screen.getByRole("button", { name: "Back to Inbox" });
-    expect(backBtn).toBeTruthy();
-
-    // No loading spinner
-    expect(screen.queryByText(/loading/i)).toBeNull();
-  });
 });

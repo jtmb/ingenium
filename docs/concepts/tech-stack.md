@@ -9,13 +9,17 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Language**: TypeScript (strict mode, strictNullChecks)
 - **Package Manager**: npm workspaces (monorepo)
 - **API**: Express.js on private container port 4096 behind the authenticated host-loopback boundary on 4097, JSON body limit 2MB (`express.json({ limit: "2mb" })`), helmet + CORS middleware
-- **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search
-- **MCP**: @modelcontextprotocol/sdk for stdio transport (245 catalog tools across 28 categories; 243 registered by the server and 2 by the extension)
+- **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search; see [Database Migrations Reference](../develop/database.md) for the migration inventory and maintenance procedures
+- **MCP**: @modelcontextprotocol/sdk for stdio transport (283 built-in catalog tools across 30 baseline categories; 281 `ingenium_` catalog entries and 2 extension tools, with project-scoped child tools added dynamically)
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Docs RAG system for cross-session context
-- **Container**: Docker multi-stage build (node:22-alpine), supervisord (4 processes: API + Dashboard + opencode-web + ttyd-opencode)
-- **Packages**: `ingenium-core` (shared lib), `ingenium-extension` (client-side OpenCode — MCP server, observer plugin, skill-sync plugin, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
+- **Container**: Docker multi-stage build (glibc-based `node:22-slim`), supervisord (10 process definitions, 9 active compatibility processes: API, API boundary, Dashboard, gateway, restore handoff, OpenCode internal auth proxy, OpenCode Web, ttyd-opencode, and private code-server; restore maintenance is on-demand)
+- **Packages**: `ingenium-core` (API-internal DB library), `ingenium-extension` (client-side OpenCode — MCP stdio transport, observer/resource-sync plugins, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
+
+External worktree resources follow the Git-authoritative path
+`Git → @ingenium/extension resource-sync → MCP stdio → authenticated API → DB`.
+Runtime consumers cannot import `ingenium-core` or call mutation REST directly.
 - **Testing**: Vitest, Playwright
 - **Linting**: ESLint, TypeScript compiler
 - **CI**: GitHub Actions (push to `ingenium-core`, `ingenium-api`, `ingenium-server`, `ingenium-dashboard`, `ingenium-extension`)
@@ -25,22 +29,32 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Dashboard**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Email Client**: imapflow (IMAP async client), nodemailer (SMTP), mailparser (MIME parsing), google-auth-library (Google OAuth2), @azure/msal-node (Microsoft OAuth2)
 
-## Database Migrations
+## OpenCode runtime and package contract
 
-Ingenium currently has 58 numbered migrations (`001`–`058`):
+The supported OpenCode runtime is **1.18.9**. The Docker image downloads the
+`v1.18.9` Linux archive, verifies SHA-256
+`a0fa4b7b8bdacbd013e79a5f69d4220d36b545cd3ea296ba765f3016fa501b5b`, and then
+requires `opencode --version` to report exactly `1.18.9`. The root package,
+the extension package, and `.opencode/package.json` all pin
+`@opencode-ai/plugin` to `1.18.9`; both root lockfiles pin the plugin and its
+transitive `@opencode-ai/sdk` to `1.18.9` with locked integrity values. The
+extension compatibility test verifies every manifest and lock entry.
 
-- `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
-- `029`–`040`: documentation workspace schema and integrity repair
-- `041`–`045`: skill maintenance locks, immutable versions, lineage, governance proposals, and pipeline event types
-- `046`–`048`: encrypted vault, database backups, and initial Docs RAG schema
-- `049`: workspace project migration — `project_migration_manifests` table for the DB-only `/workspace` → `global-default` migration audit trail
-- `050`–`051`: Phase 3 context/RAG metadata and post-gate retirement of the verified-empty legacy RAG import schema
-- `052`: agent category normalization and CHECK constraint (`primary`, `execution`, `research`, `security`, `chat`)
-- `053`: active-global-project integrity and protected settings storage
-- `054`: persisted agent frontmatter metadata (`hidden`) for lifecycle-safe agent disk sync
-- `055`: reserved LLM broker direct-deletion protection
-- `056`: reserved LLM broker direct-rename protection
-- `057`: reserved LLM broker enabled-state backfill and immutable direct-SQL/REPLACE protection
-- `058`: connection-independent reserved broker canonical-template and REPLACE collision protection
+OpenCode **1.18.3+** introduced the root-relative asset/WebSocket behavior
+that requires dedicated root origins rather than a shared dashboard subpath;
+the current implementation is verified against 1.18.9.
 
-The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.
+Generated `dist/` directories and TypeScript `*.tsbuildinfo` files are build
+products and remain untracked. The core and server packages expose only their
+runtime distribution and README, and `prepack` regenerates `dist/` before a
+package is packed.
+
+## Ponytail OpenCode integration
+
+The extension includes the official Ponytail checkout closure under
+`packages/ingenium-extension/ponytail/`, pinned to upstream commit
+`16f29800fd2681bdf24f3eb4ccffe38be3baec6b` with MIT provenance and recorded
+SHA-256 file hashes. It is deliberately not an npm dependency: published
+`@dietrichgebert/ponytail@4.8.4` has a named export incompatible with OpenCode
+1.18.9. The single adapter registers six commands, the Ponytail skills path,
+and a system-prompt transform; it does not register MCP tools or capabilities.

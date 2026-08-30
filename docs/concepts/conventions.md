@@ -8,19 +8,41 @@ description: Naming, file organization, error handling, git practices, and datab
 ## OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Uses the local root gateway `http://opencode.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_WEB_URL`).
-- **CLI mode** — Uses the local root gateway `http://cli.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_CLI_URL`). OpenCode is not served under a shared dashboard subpath because its root-relative assets and WebSockets require a root origin.
-- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099` remain private upstreams. LAN/remote use requires an operator-managed authenticated TLS profile and both public origins at build time.
+- **Compatibility** — Web/CLI/VS Code use the exact fixed `.localhost:3000` aliases
+  and never call the dynamic runtime manager.
+- **Production** — Always renders the authorization-filtered workspace picker before
+  launching exact runtime audience roots. It never selects a singleton or falls back
+  to compatibility aliases. OpenCode is not served under a shared dashboard subpath.
+- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099`/`4100` remain private upstreams. LAN/remote use requires the isolated profile's operator-managed TLS runtime domain.
 - **Authentication** — The default Windows↔WSL gateway does not use HTTP Basic Auth or browser bearer tokens. It is a local plain-HTTP profile, not a LAN/remote security profile; remote access requires an operator-managed authenticated TLS profile.
-- **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The old floating right-edge `OpenCodeSwitch` component is deprecated in the main page but persists for the standalone pop-out (`/standalone?page=opencode`), which uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
+- **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The standalone pop-out (`/standalone?page=opencode`) uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.
 - **Session sharing**: Web iframe and CLI ttyd sessions share the same backend process state; direct host attachment to the private upstream ports is not part of the browser-facing contract.
+- **Production runtime roots**: Each audience uses exact `<audience>--<runtime-id>.<INGENIUM_RUNTIME_ROOT_DOMAIN>` roots. Special-use `.localhost` roots use browser-trusted HTTP through a loopback-only host binding; remote/custom roots require HTTPS. A browser-generated body-only proof redeems a one-time launch record before iframe/pop-out navigation; the API returns only the launch URL/status, and fixed global health, session tokens, and backend URLs are not exposed.
+- **Audience sessions**: Web, CLI, and VS Code use distinct host-only secure cookies. Host, runtime, workspace, owner, auth session, origin, audience, and revocation generation must match.
 - **Workspace** (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+
+## VS Code workspace
+
+- **Origin** — `/vscode` and `/standalone?page=vscode` use the exact local root `http://vscode.localhost:3000/` on the established port-`3000` virtual-host gateway.
+- **Production origin** — The isolated profile uses `https://vscode--<runtime-id>.<runtime-domain>/`
+  only after explicit start/resume, sharing the runtime container but not Web/CLI
+  audience cookies. The fixed VS Code alias returns static `404` guidance.
+- **Boundary** — code-server listens privately at `127.0.0.1:4100`; no host `3002` or public `4100` endpoint is supported. The default Windows/WSL firewall and localhost-forwarding assumption is for local use only, not LAN, remote, shared, or untrusted access.
+- **Embedding** — The trusted separate-origin iframe is unsandboxed and requests only `allow="clipboard-write"`; the page also offers a standalone/new-tab fallback. code-server provides the `/workspace` terminal and stock Open VSX/user-managed extension flow.
+- **Theme defaults** — Use the code-free built-in `configurationDefaults` contribution to enable system color detection with **Dark Modern** and **Light Modern**. User and workspace settings override these defaults; never mutate User `settings.json` or workspace settings to enforce a theme.
+- **Pinned extension** — `sst-dev.opencode@0.0.13` is baked from the official Open VSX VSIX (`https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`, SHA-256 `e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`) and installed offline/idempotently as `ingenium-vscode` into persistent `vscode-data`. Runtime registry installation is not supported; upgrades revalidate identity, engine, hash, and persistence.
+- **Workspace trust** — The extension is preinstalled, but Restricted Mode disables it until the user explicitly trusts the workspace. Ingenium does not auto-trust. This is an administrator-grade local surface and must not be exposed to LAN, remote, shared, or untrusted users.
 
 ## DB Isolation
 - Only `packages/ingenium-core` and `services/ingenium-api` may import SQL libraries
 - CI enforces: `grep -r "better-sqlite3\|\.db\|sqlite" services/ingenium-server/` must return empty
+- Git-authoritative external-worktree synchronization is exactly Git worktree →
+  `@ingenium/extension` resource-sync → configured MCP stdio → authenticated API
+  → database. Runtime consumers never import core, read/write DB files, or call
+  mutation REST endpoints directly. Administrative skill sync tools are repair/
+  import operations only; use the API boundary for any such repair.
 
 ## API-First Frontend
 - Dashboard imports ZERO core/server code. All data via HTTP to API.
@@ -42,7 +64,7 @@ Observations are primarily created by the server-side extraction engine (Phase 0
 
 The self-learning pipeline uses **observations** instead of the deprecated `ingenium_learning_log` tool.
 
-Observations are **DB-primary** with a **file fallback**: if the API is down, observations append to `.opencode/skills/observations.md`. On the next session start, `importObservationsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
+Observations are **server-recorded** with a file fallback: if the API is down, observations append to `.opencode/skills/observations.md`. On the next session start, `importObservationsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
 
 **Observation types** (Zod schema, `packages/ingenium-core/lib/schema.ts`):
 
@@ -91,8 +113,9 @@ Every skill in the DB has a `file_tree` column (TEXT, JSON map of relative paths
 - **Writing to disk**: `writeSkillToDisk()` always writes SKILL.md (with YAML frontmatter) + metadata.json, then writes every file in the `file_tree` JSON to the skill directory.
 - **Reading from disk**: `syncSkillFromDisk()` reads SKILL.md + metadata.json, walks the directory tree for all auxiliary files (excluding SKILL.md and metadata.json), and stores them as `file_tree` JSON.
 - **Split-skill format on disk**: Each skill is a directory with `SKILL.md` (main content + YAML frontmatter), `metadata.json` (tags, alwaysApply), and optional `references/` directory for auxiliary docs.
-- **Skills live at `.opencode/skills/`** — edit SKILL.md here, then use the dashboard or `ingenium_skill_sync` to persist changes to the DB.
-- **Runtime copy at `.opencode/skills/`** is automatically written from the DB. Do not edit — changes will be overwritten unless synced back.
+- **Skills live at `.opencode/skills/`** — Git worktree files are projected by the
+  resource-sync plugin through MCP and the authenticated API. Do not run
+  `ingenium_skill_sync*` after edits; those tools are admin repair/import paths.
 
 ## SSR Portal Guard — `createPortal` + `mounted` Pattern
 
@@ -186,7 +209,7 @@ export default function DynamicComponent() {
 
 ## 🔴 Skill Data Integrity & Security Rules
 
-These are non-negotiable rules enforced across core (`packages/ingenium-core/lib/tools/skills.ts`) and extension (`packages/ingenium-extension/resource-sync.ts`). Full detail at [skills.md](../reference/skills.md).
+These are non-negotiable rules enforced across core (`packages/ingenium-core/lib/tools/skills.ts`) and extension (`packages/ingenium-extension/resource-sync.ts`). Full detail at [skill-taxonomy.md](../reference/skill-taxonomy.md).
 
 | Rule | Enforcement | Scope |
 |------|-------------|-------|

@@ -11,14 +11,5 @@ description: "Visual design and UI standardization rules for overlays, cards, an
 - Status page cards must distinguish between supervisord services (/services/:name) and in-process applications (/services/applications/:name)
 - INFO-badge CSS variable must be used for overlay styling
 
-## Reference Files
-
-| File | Content |
-|------|--------|
-| [`references/overlay-sizing.md`](references/overlay-sizing.md) | Overlay dimension constraints and sizing rules |
-| [`references/status-page-cards.md`](references/status-page-cards.md) | Status page card type conventions |
-| [`references/css-variables.md`](references/css-variables.md) | INFO-badge and visual standard CSS variables |
-
-
 ## 🔴 Orchestration Visual Validation
 - Visual validation is required during orchestration testing. Follow the canonical `@engineering-workflow` visual-validation protocol for changed UI routes and the final all-primary-routes desktop/mobile sweep.

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, test } from "./external-suite-navigation-governor";
+import type { Page } from "@playwright/test";
 
 const OPENCODE_WEB_URL = process.env.INGENIUM_E2E_OPENCODE_WEB_URL ?? "http://opencode.localhost:3000";
 
@@ -32,16 +33,12 @@ test.describe("OpenCode deterministic browser contract", () => {
 
   test("OpenCode iframe renders in dashboard /opencode page", async ({ page }) => {
     await page.goto("/opencode", { waitUntil: "domcontentloaded" });
-    // The Web iframe should be present (always mounted)
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframe).toBeVisible({ timeout: 10000 });
-    // Local development uses the private direct port; gateway builds use the
-    // dedicated authenticated root, which is covered by static CSP/runtime tests.
+    // The URL is supplied by the selected runtime profile.
     const src = await webIframe.getAttribute("src");
     expect(src).toBe(`${OPENCODE_WEB_URL}/`);
 
-    // The CLI (terminal) iframe is lazy-mounted — may not exist on first load.
-    // Check it's at least capable of rendering (count 0 or 1, never >1).
     const cliIframe = page.locator('iframe[title="OpenCode Terminal"]');
     const cliCount = await cliIframe.count();
     expect(cliCount).toBeLessThanOrEqual(1);
@@ -53,10 +50,8 @@ test.describe("OpenCode deterministic browser contract", () => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
     await page.goto("/opencode", { waitUntil: "domcontentloaded" });
-    // Wait for iframe to appear (proves page loaded)
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframe).toBeVisible({ timeout: 10000 });
-    // Focused assertion: zero hydration errors (React #418 mismatch)
     const hydrationErrors = consoleErrors.filter(e => /hydrat|did not match|418|text content/i.test(e));
     expect(hydrationErrors, "Zero hydration errors — SSR/client DOM must match").toEqual([]);
 
@@ -75,7 +70,6 @@ test.describe("OpenCode deterministic browser contract", () => {
       failedRequests.push(req.url());
     });
     await page.goto("/opencode", { waitUntil: "domcontentloaded" });
-    // Wait for iframe to load
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframe).toBeVisible({ timeout: 10000 });
     expect(failedRequests).toEqual([]);

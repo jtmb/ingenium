@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { Buffer } from "node:buffer";
 import Database from "better-sqlite3";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
@@ -13,8 +14,14 @@ import {
   GovernanceError,
   createLineage, createProposal, getProposal, listLineage, resolveLineage,
   submitProposal, approveProposal, rejectProposal, rollbackProposal,
+  getProposalCounts, listProposalPage, MAX_SKILL_PROPOSAL_SUMMARY_TEXT_BYTES,
 } from "../lib/tools/skill-governance.js";
 import { getSkillsBase } from "../lib/tools/paths.js";
+import {
+  SKILL_PROPOSAL_RETENTION_DELETE_ERROR,
+  SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER,
+  SKILL_PROPOSAL_RETENTION_INDEX,
+} from "../lib/schema.js";
 
 let tempDir: string;
 let projectId: string;
@@ -226,18 +233,26 @@ describe("Item 5 — migration 044 partial detection", () => {
 });
 
 // ============================================================
-// Item 6: Race-time unique candidate constraint → GovernanceError
+// Item 6: Candidate identity remains canonical
 // ============================================================
-describe("Item 6 — race-time candidate constraint mapping", () => {
-  it("duplicate candidate key insertion throws GovernanceError DUPLICATE_PROPOSAL", () => {
-    const key = "race-key-" + Date.now();
-    createProposal(projectId, "create", uname("r1"), JSON.stringify({ description: "D1", content: "# D1" }), { candidateGroupKey: key });
-    try {
-      createProposal(projectId, "create", uname("r2"), JSON.stringify({ description: "D2", content: "# D2" }), { candidateGroupKey: key });
-      expect.fail("Should have thrown");
-    } catch (e) {
-      expect(e).toBeInstanceOf(GovernanceError);
-    }
+describe("Item 6 — canonical candidate identity", () => {
+  it("ignores caller-selected candidate keys for equivalent retries", () => {
+    const targetName = uname("r1");
+    const first = createProposal(
+      projectId,
+      "create",
+      targetName,
+      JSON.stringify({ description: "D1", content: "# D1" }),
+      { candidateGroupKey: "caller-key-one" },
+    );
+    const second = createProposal(
+      projectId,
+      "create",
+      targetName,
+      JSON.stringify({ content: "# D1", description: "D1" }),
+      { candidateGroupKey: "caller-key-two" },
+    );
+    expect(second.id).toBe(first.id);
   });
 });
 
@@ -556,6 +571,21 @@ describe("proposal fileTree validation", () => {
     }));
     expect(p).not.toBeUndefined();
   });
+
+  it("accepts update-only fileTree patches and rejects them for creates", () => {
+    const skill = createSkill(projectId, uname("pft-patch"), "FT", "# Existing");
+    const patch = JSON.stringify({ "references/new.md": "# New" });
+    expect(() => createProposal(projectId, "create", uname("pft-patch-create"), JSON.stringify({
+      description: "x", content: "# x", file_tree_patch: patch,
+    }))).toThrow(GovernanceError);
+
+    const proposal = createProposal(projectId, "update", skill.name, JSON.stringify({
+      description: "FT", content: "# Updated", file_tree_patch: patch,
+    }), { targetSkillId: skill.id, expectedRevision: skill.revision });
+    submitProposal(projectId, proposal.id);
+    expect(approveProposal(projectId, proposal.id, "reviewer")).toMatchObject({ status: "applied" });
+    expect(JSON.parse(getSkill(projectId, skill.name)!.file_tree!)).toMatchObject({ "references/new.md": "# New" });
+  });
 });
 
 // ── Rollback proposal version.name validation (item 3) ──────────────────
@@ -616,5 +646,206 @@ describe("rollback version.name validation", () => {
     const after = getSkill(projectId, normalName)!;
     expect(after.content).toBe("# U"); // from approve, unchanged by failed rollback
     expect(after.revision).toBe(1);
+  });
+});
+
+describe("proposal retention and bounded pagination", () => {
+  function assertMigration091Failure(
+    mutate: (db: Database.Database) => void,
+    expectedComponent: string,
+  ): void {
+    const partialDir = mkdtempSync(join(tmpdir(), "partial-091-"));
+    const partialPath = join(partialDir, "partial.db");
+    try {
+      resetDbForTest();
+      const partial = getDb(partialPath);
+      mutate(partial);
+      resetDbForTest();
+      expect(() => getDb(partialPath)).toThrow(new RegExp(`Migration 091 is in a PARTIAL state.*${expectedComponent}`));
+    } finally {
+      resetDbForTest();
+      rmSync(partialDir, { recursive: true, force: true });
+    }
+  }
+
+  it("fails closed for partial or mismatched retention infrastructure without rewriting rows", () => {
+    const migration = readFileSync(
+      resolve(__dirname, "../data/migrations/091_skill_proposal_retention_pagination.sql"),
+      "utf-8",
+    );
+    expect(migration).not.toMatch(/\b(?:ALTER TABLE|INSERT INTO|UPDATE|DELETE FROM)\b/i);
+
+    assertMigration091Failure(
+      (db) => db.exec(`DROP TRIGGER ${SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER}`),
+      SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER,
+    );
+    assertMigration091Failure(
+      (db) => db.exec(`
+        DROP INDEX ${SKILL_PROPOSAL_RETENTION_INDEX};
+        CREATE INDEX ${SKILL_PROPOSAL_RETENTION_INDEX}
+          ON skill_proposals(project_id, created_at DESC, id DESC);
+      `),
+      `${SKILL_PROPOSAL_RETENTION_INDEX} index definition`,
+    );
+  });
+
+  it("retains proposals and traverses 5,000 tied history rows without gaps", () => {
+    const paginationProjectId = createProject(uname("proposal-page")).id;
+    const foreignProjectId = createProject(uname("proposal-page-foreign")).id;
+    const timestamp = "2026-08-10T12:00:00.000Z";
+    const ids = Array.from({ length: 5_000 }, (_, index) => `page-${String(index).padStart(4, "0")}`);
+    const oversizedLegacyText = "x".repeat(2_048);
+    const oversizedLegacyName = "🧪".repeat(512);
+    const expectedSummaryName = [...oversizedLegacyName].slice(0, 64).join("");
+    const oversizedLegacyPayload = JSON.stringify({ content: oversizedLegacyText });
+    const oversizedLegacyEvidence = JSON.stringify([{ detail: oversizedLegacyText }]);
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const insert = db.prepare(`
+      INSERT INTO skill_proposals (
+        id,project_id,status,proposal_type,target_name,source_name,proposed_state,
+        evidence_json,observation_ids,reviewer,review_reason,created_at,updated_at
+      ) VALUES (?,?,'stale','create',?,?,?,?,'[]',?,?,?,?)
+    `);
+    const insertLegacyProposal = (id: string, project: string) => insert.run(
+      id,
+      project,
+      oversizedLegacyName,
+      oversizedLegacyName,
+      oversizedLegacyPayload,
+      oversizedLegacyEvidence,
+      oversizedLegacyText,
+      oversizedLegacyText,
+      timestamp,
+      timestamp,
+    );
+    db.transaction(() => {
+      for (const id of ids) insertLegacyProposal(id, paginationProjectId);
+      insertLegacyProposal("foreign-page-anchor", foreignProjectId);
+    })();
+
+    expect(getProposalCounts(paginationProjectId)).toEqual({
+      open: 0,
+      history: 5_000,
+      byStatus: { draft: 0, pending: 0, stale: 5_000, rejected: 0, applied: 0, rolledBack: 0 },
+    });
+
+    const firstPage = listProposalPage(paginationProjectId, { view: "history", limit: 97 });
+    expect(firstPage.data).toHaveLength(97);
+    expect(firstPage.pagination).toMatchObject({ hasMore: true });
+    expect(firstPage.pagination.nextCursor).toBeTruthy();
+    for (const proposal of firstPage.data) {
+      expect(Object.keys(proposal).sort()).toEqual([
+        "created_at",
+        "id",
+        "novelty_score",
+        "proposal_type",
+        "quality_score",
+        "source_name",
+        "status",
+        "target_name",
+      ]);
+      expect(proposal.target_name).toBe(expectedSummaryName);
+      expect(proposal.source_name).toBe(expectedSummaryName);
+      expect(Buffer.byteLength(proposal.target_name, "utf8")).toBeLessThanOrEqual(MAX_SKILL_PROPOSAL_SUMMARY_TEXT_BYTES);
+      expect(Buffer.byteLength(proposal.source_name!, "utf8")).toBeLessThanOrEqual(MAX_SKILL_PROPOSAL_SUMMARY_TEXT_BYTES);
+    }
+
+    const seen: string[] = [];
+    let page = firstPage;
+    let pageCount = 0;
+    for (;;) {
+      pageCount++;
+      expect(pageCount).toBeLessThan(100);
+      seen.push(...page.data.map((proposal) => proposal.id));
+      if (!page.pagination.hasMore) break;
+      page = listProposalPage(paginationProjectId, {
+        view: "history",
+        limit: 97,
+        cursor: page.pagination.nextCursor!,
+      });
+    }
+    expect(seen).toEqual([...ids].reverse());
+    expect(new Set(seen).size).toBe(5_000);
+
+    const maxPage = listProposalPage(paginationProjectId, { view: "history", limit: 100 });
+    expect(maxPage.data).toHaveLength(100);
+    expect(Buffer.byteLength(JSON.stringify(maxPage), "utf8")).toBeLessThanOrEqual(100 * 1024);
+    expect(() => listProposalPage(paginationProjectId, { view: "history", limit: 0 })).toThrow(GovernanceError);
+    expect(() => listProposalPage(paginationProjectId, { view: "history", limit: 101 })).toThrow(GovernanceError);
+    expect(() => listProposalPage(paginationProjectId, { view: "history", limit: 1.5 })).toThrow(GovernanceError);
+    expect(() => listProposalPage(paginationProjectId, { view: "history", cursor: "not-a-valid-cursor!" })).toThrow(GovernanceError);
+    expect(() => listProposalPage(paginationProjectId, { view: "history", cursor: "a".repeat(513) })).toThrow(GovernanceError);
+
+    const missingAnchorCursor = Buffer.from(JSON.stringify({
+      v: 1,
+      createdAt: timestamp,
+      id: "missing-page-anchor",
+    })).toString("base64url");
+    expect(() => listProposalPage(paginationProjectId, {
+      view: "history",
+      limit: 1,
+      cursor: missingAnchorCursor,
+    })).not.toThrow();
+    expect(() => listProposalPage(foreignProjectId, {
+      view: "history",
+      limit: 1,
+      cursor: firstPage.pagination.nextCursor!,
+    })).toThrow(GovernanceError);
+
+    const plan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM skill_proposals INDEXED BY ${SKILL_PROPOSAL_RETENTION_INDEX}
+      WHERE project_id=?
+        AND status IN ('stale','rejected','applied','rolled_back')
+        AND (created_at < ? OR (created_at = ? AND id < ?))
+      ORDER BY created_at DESC,id DESC
+      LIMIT ?
+    `).all(paginationProjectId, timestamp, timestamp, ids[2_500], 101) as Array<{ detail: string }>;
+    expect(plan.some((row) => row.detail.includes(SKILL_PROPOSAL_RETENTION_INDEX))).toBe(true);
+
+    expect(() => db.prepare("DELETE FROM skill_proposals WHERE id=? AND project_id=?").run(ids[0], paginationProjectId))
+      .toThrow(SKILL_PROPOSAL_RETENTION_DELETE_ERROR);
+    expect(getProposalCounts(paginationProjectId).byStatus.stale).toBe(5_000);
+
+    const rejected = createProposal(
+      paginationProjectId,
+      "create",
+      uname("retained-reject"),
+      JSON.stringify({ description: "reject", content: "# reject" }),
+    );
+    submitProposal(paginationProjectId, rejected.id);
+    expect(rejectProposal(paginationProjectId, rejected.id, "reviewer").status).toBe("rejected");
+
+    const applied = createProposal(
+      paginationProjectId,
+      "create",
+      uname("retained-rollback"),
+      JSON.stringify({ description: "rollback", content: "# rollback" }),
+    );
+    submitProposal(paginationProjectId, applied.id);
+    expect(approveProposal(paginationProjectId, applied.id, "reviewer").status).toBe("applied");
+    expect(rollbackProposal(paginationProjectId, applied.id, "reviewer").status).toBe("rolled_back");
+
+    const draft = createProposal(
+      paginationProjectId,
+      "create",
+      uname("retained-draft"),
+      JSON.stringify({ description: "draft", content: "# draft" }),
+    );
+    const pending = createProposal(
+      paginationProjectId,
+      "create",
+      uname("retained-pending"),
+      JSON.stringify({ description: "pending", content: "# pending" }),
+    );
+    submitProposal(paginationProjectId, pending.id);
+    expect(listProposalPage(paginationProjectId, { view: "open", limit: 100 }).data.map((proposal) => proposal.status).sort())
+      .toEqual(["draft", "pending"]);
+    expect(getProposalCounts(paginationProjectId)).toEqual({
+      open: 2,
+      history: 5_002,
+      byStatus: { draft: 1, pending: 1, stale: 5_000, rejected: 1, applied: 0, rolledBack: 1 },
+    });
   });
 });

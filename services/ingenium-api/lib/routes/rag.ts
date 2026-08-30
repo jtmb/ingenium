@@ -7,17 +7,17 @@
  *   GET    /sources/:id          — Get source detail with chunk_count
  *   DELETE /sources/:id          — Delete source + cascade chunks
  *   POST   /sources/:id/ingest   — Ingest/re-ingest content
- *   GET    /search               — Hybrid full-text search
+ *   GET    /search               — Full-text search
  *   POST   /ask                  — Natural-language Q&A (context → brokerExecute)
  *   GET    /stats                — RAG statistics
  *   POST   /export               — Export all RAG sources as JSON
  */
 
-import { Router } from "express";
-import { createHash, randomUUID } from "node:crypto";
+import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { getDb, execTransaction, checkpointAfterWrite, logger, projects, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
-import { requireProject } from "../helpers.js";
+import { requestOwnerScope, requireContentAccess, requireProject } from "../helpers.js";
 
 export const ragRouter = Router();
 
@@ -30,6 +30,16 @@ function dbPath(): string {
 }
 
 const SOURCE = "rag-routes";
+
+function requireSource(req: Request, res: Response, projectId: string): any | null {
+  const source = getDb(dbPath()).prepare("SELECT * FROM rag_sources WHERE id = ? AND project_id = ?")
+    .get(req.params.id!, projectId) as any;
+  if (!source) return null;
+  return requireContentAccess(req, res, {
+    resourceType: "rag_source", resourceId: source.id, organizationId: source.organization_id,
+    projectId: source.project_id, visibility: source.visibility, ownerUserId: source.owner_user_id,
+  }) ? source : null;
+}
 
 /** Resolve format string to a valid source_type column value. */
 function normalizeSourceType(format?: string): "text" | "file" | "url" {
@@ -44,8 +54,17 @@ function normalizeSourceType(format?: string): "text" | "file" | "url" {
  * Re-ingest: deletes all existing chunks for a source, re-chunks the content,
  * and re-inserts. Returns the new chunk count.
  */
-function reingestSource(sourceId: string, content: string): number {
-  return rag.replaceSourceContent(sourceId, content);
+function reingestSource(sourceId: string, content: string, sourceType?: "text" | "file" | "url"): number {
+  return rag.replaceSourceContent(sourceId, content, sourceType ? { sourceType } : {});
+}
+
+function sendImmutableSourceError(res: Response): void {
+  res.status(409).json({
+    error: {
+      code: "RAG_SOURCE_IMMUTABLE",
+      message: "Immutable Context sources cannot be changed through generic RAG routes",
+    },
+  });
 }
 
 ragRouter.post("/ingest", (req, res) => {
@@ -88,9 +107,9 @@ ragRouter.post("/sources", (req, res) => {
 
   execTransaction(() => {
     db.prepare(
-      `INSERT INTO rag_sources (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, 0, ?, datetime('now'), datetime('now'))`,
-    ).run(id, projectId, title.trim(), sourceTypeVal, typeof text === "string" ? text.length : 0, metadata);
+      `INSERT INTO rag_sources (id, project_id, organization_id, visibility, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
+       SELECT ?, id, organization_id, 'project', ?, ?, NULL, NULL, NULL, ?, 0, ?, datetime('now'), datetime('now') FROM projects WHERE id = ?`,
+    ).run(id, title.trim(), sourceTypeVal, typeof text === "string" ? text.length : 0, metadata, projectId);
   });
   checkpointAfterWrite();
 
@@ -115,60 +134,6 @@ ragRouter.post("/sources", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /sources/canonical — Idempotent, hash-verified logical source import
-// ---------------------------------------------------------------------------
-
-ragRouter.post("/sources/canonical", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-
-  const { title, text, sourcePath, expectedHash, mimeType, metadata, priority, tags } = req.body ?? {};
-  if (typeof title !== "string" || !title.trim() || typeof text !== "string" || !text.trim()) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "title and text are required" } });
-    return;
-  }
-  if (typeof sourcePath !== "string" || sourcePath.length > 512 || !/^import:[A-Za-z0-9._:/-]+$/.test(sourcePath) || sourcePath.includes("..")) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "sourcePath must be a safe import: logical path" } });
-    return;
-  }
-  if (typeof expectedHash !== "string" || !/^[a-f0-9]{64}$/.test(expectedHash)) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "expectedHash must be a lowercase SHA-256 hash" } });
-    return;
-  }
-  if (mimeType !== undefined && (typeof mimeType !== "string" || mimeType.length > 128 || !/^[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+$/.test(mimeType))) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "mimeType must be a valid media type" } });
-    return;
-  }
-  const actualHash = createHash("sha256").update(text).digest("hex");
-  if (actualHash !== expectedHash) {
-    res.status(422).json({ error: { code: "HASH_MISMATCH", message: "Imported content does not match expectedHash" } });
-    return;
-  }
-  if (metadata !== undefined && (!metadata || typeof metadata !== "object" || Array.isArray(metadata))) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "metadata must be an object" } });
-    return;
-  }
-  if (tags !== undefined && (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string" || tag.length > 64))) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "tags must contain strings up to 64 characters" } });
-    return;
-  }
-
-  try {
-    const source = rag.ingestCanonicalSource(projectId, title.trim(), text, {
-      sourceType: "text",
-      sourcePath,
-      mimeType,
-      metadata: metadata ?? {},
-      priority,
-      tags,
-    });
-    res.json({ data: source });
-  } catch (error) {
-    res.status(422).json({ error: { code: "IMPORT_FAILED", message: error instanceof Error ? error.message : "Canonical import failed" } });
-  }
-});
-
-// ---------------------------------------------------------------------------
 // GET /sources — List sources
 // ---------------------------------------------------------------------------
 
@@ -176,7 +141,7 @@ ragRouter.get("/sources", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0);
+  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0, requestOwnerScope(req));
   res.json({
     data: sources.data.map((s) => ({
       id: s.id,
@@ -201,12 +166,10 @@ ragRouter.get("/sources/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const db = getDb(dbPath());
-  const source = db.prepare(
-    "SELECT * FROM rag_sources WHERE id = ? AND project_id = ?",
-  ).get(req.params.id!, projectId) as any;
+  const source = requireSource(req, res, projectId);
 
   if (!source) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Source not found" } });
     return;
   }
@@ -234,17 +197,28 @@ ragRouter.delete("/sources/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const db = getDb(dbPath());
-  const existing = db.prepare(
-    "SELECT 1 FROM rag_sources WHERE id = ? AND project_id = ?",
-  ).get(req.params.id!, projectId);
+  const existing = requireSource(req, res, projectId);
 
   if (!existing) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Source not found" } });
     return;
   }
 
-  rag.deleteSource(req.params.id!);
+  if (rag.isSourceImmutable(req.params.id!)) {
+    sendImmutableSourceError(res);
+    return;
+  }
+
+  try {
+    rag.deleteSource(req.params.id!);
+  } catch (error) {
+    if (error instanceof rag.RagSourceImmutableError) {
+      sendImmutableSourceError(res);
+      return;
+    }
+    throw error;
+  }
 
   logger.info(SOURCE, `Deleted RAG source ${req.params.id!}`, { projectId });
   res.status(204).send();
@@ -258,13 +232,16 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const db = getDb(dbPath());
-  const source = db.prepare(
-    "SELECT * FROM rag_sources WHERE id = ? AND project_id = ?",
-  ).get(req.params.id!, projectId) as any;
+  const source = requireSource(req, res, projectId);
 
   if (!source) {
+    if (res.headersSent) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Source not found" } });
+    return;
+  }
+
+  if (rag.isSourceImmutable(source.id)) {
+    sendImmutableSourceError(res);
     return;
   }
 
@@ -275,19 +252,16 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
     return;
   }
 
-  // Update source_type if format was provided
-  if (format) {
-    const sourceType = normalizeSourceType(format);
-    db.prepare(
-      "UPDATE rag_sources SET source_type = ?, byte_size = ?, updated_at = datetime('now') WHERE id = ?",
-    ).run(sourceType, text.length, source.id);
-  } else {
-    db.prepare(
-      "UPDATE rag_sources SET byte_size = ?, updated_at = datetime('now') WHERE id = ?",
-    ).run(text.length, source.id);
+  let chunkCount: number;
+  try {
+    chunkCount = reingestSource(source.id, text, format ? normalizeSourceType(format) : undefined);
+  } catch (error) {
+    if (error instanceof rag.RagSourceImmutableError) {
+      sendImmutableSourceError(res);
+      return;
+    }
+    throw error;
   }
-
-  const chunkCount = reingestSource(source.id, text);
 
   logger.info(SOURCE, `Re-ingested source ${source.id}`, { chunkCount, projectId });
 
@@ -306,7 +280,7 @@ ragRouter.post("/sources/:id/ingest", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /search — Hybrid full-text search
+// GET /search — Full-text search
 // ---------------------------------------------------------------------------
 
 ragRouter.get("/search", (req, res) => {
@@ -322,7 +296,7 @@ ragRouter.get("/search", (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit as string ?? "20", 10) || 20, 1), 100);
 
   try {
-    const results = rag.searchChunks(projectId, q, limit, true);
+    const results = rag.searchChunks(projectId, q, limit, true, requestOwnerScope(req));
 
     res.json({
       data: results.map((r, i) => ({
@@ -359,7 +333,7 @@ ragRouter.post("/ask", async (req, res) => {
   }
 
   // Step 1: Search for relevant chunks
-  const results = rag.searchChunks(projectId, question, 10, true);
+  const results = rag.searchChunks(projectId, question, 10, true, requestOwnerScope(req));
 
   if (results.length === 0) {
     res.json({
@@ -449,19 +423,10 @@ ragRouter.get("/stats", (req, res) => {
      WHERE s.project_id = ?`,
   ).get(projectId) as { c: number }).c;
 
-  const embeddingCount = (db.prepare(
-    `SELECT count(*) as c FROM rag_embeddings e
-     JOIN rag_chunks c ON c.id = e.chunk_id
-     JOIN rag_sources s ON s.id = c.source_id
-     WHERE s.project_id = ?`,
-  ).get(projectId) as { c: number }).c;
-
   res.json({
     data: {
       total_sources: sourceCount,
       total_chunks: chunkCount,
-      total_embeddings: embeddingCount,
-      vector_capability: { available: true, provider: "deterministic-n-gram", semantic: false },
     },
   });
 });
@@ -476,9 +441,7 @@ ragRouter.post("/export", (req, res) => {
 
   const db = getDb(dbPath());
 
-  const sources = db.prepare(
-    "SELECT * FROM rag_sources WHERE project_id = ? ORDER BY created_at DESC",
-  ).all(projectId) as any[];
+  const sources = rag.listSources(projectId, 100, 0, requestOwnerScope(req)).data;
 
   const exportData = sources.map((source) => {
     const chunks = db.prepare(

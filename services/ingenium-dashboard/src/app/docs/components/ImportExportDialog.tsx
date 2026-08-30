@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
+import { useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { ImportPreview } from "@/lib/docs-types";
+import Overlay from "../../components/Overlay";
 
 type ImportExportDialogProps = {
   isOpen: boolean;
@@ -17,78 +17,50 @@ type Tab = "import" | "export";
  * ImportExportDialog — modal with Import/Export tabs.
  * Import: drag-drop or file picker for .md (with frontmatter) or .json (bulk export).
  * Export: Download JSON or (coming soon) Markdown archive of a space.
- * Uses createPortal to render outside the editor DOM tree for proper z-index stacking.
+ * Uses the shared Overlay for modal focus and scroll behavior.
  */
 export default function ImportExportDialog({ isOpen, onClose, spaceId }: ImportExportDialogProps) {
   const [activeTab, setActiveTab] = useState<Tab>("import");
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose],
-  );
-
-  useEffect(() => {
-    if (isOpen) {
-      document.addEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "hidden";
-    }
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [isOpen, handleKeyDown]);
-
-  if (!isOpen) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-
-      <div className="relative w-full max-w-lg bg-[var(--color-surface)] rounded-lg shadow-2xl border border-[var(--color-border)] mx-4 max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-border)] shrink-0">
-          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-            Import / Export
-          </h2>
+  return (
+    <Overlay
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Import / Export"
+      panelClassName="mt-[10vh] mb-8 w-11/12 max-w-lg max-h-[80vh]"
+      bodyClassName="min-h-0 overflow-y-auto p-0"
+    >
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 border-b border-[var(--color-border)]" role="tablist" aria-label="Import or export">
           <button
-            className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] rounded-full"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b border-[var(--color-border)] shrink-0">
-          <button
+            type="button"
             className={`flex-1 px-4 py-2.5 text-sm font-medium text-center transition-colors ${
                 activeTab === "import"
                 ? "text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]"
                 : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
             }`}
             onClick={() => setActiveTab("import")}
+            role="tab"
+            aria-selected={activeTab === "import"}
           >
             Import
           </button>
           <button
+            type="button"
             className={`flex-1 px-4 py-2.5 text-sm font-medium text-center transition-colors ${
                 activeTab === "export"
                 ? "text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]"
                 : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
             }`}
             onClick={() => setActiveTab("export")}
+            role="tab"
+            aria-selected={activeTab === "export"}
           >
             Export
           </button>
         </div>
 
-        {/* Tab content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {activeTab === "import" ? (
             <ImportTab spaceId={spaceId} onClose={onClose} />
           ) : (
@@ -96,8 +68,7 @@ export default function ImportExportDialog({ isOpen, onClose, spaceId }: ImportE
           )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </Overlay>
   );
 }
 

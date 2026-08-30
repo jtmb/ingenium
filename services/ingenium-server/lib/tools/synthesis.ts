@@ -4,17 +4,18 @@
  * Supports triggering synthesis runs, checking pipeline status, and cross-project evaluation.
  */
 import { api } from "../client.js";
+import { textResult } from "./result.js";
 
 /** Trigger the synthesis pipeline */
-export async function synthesisRun(project: string) {
-  const res = await api.post("/synthesis/run", {}, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+export async function synthesisRun(project: string, sessionId?: string) {
+  const res = await api.post("/synthesis/run", {}, { project, session_id: sessionId });
+  return textResult(res.data);
 }
 
 /** Get synthesis pipeline status */
 export async function synthesisStatus(project: string) {
   const res = await api.get("/synthesis/status", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Trigger cross-project synthesis — evaluates patterns across all projects. */

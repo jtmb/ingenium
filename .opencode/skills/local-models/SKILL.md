@@ -128,23 +128,23 @@ agent in the current root configuration.
 
 | Agent | Model | Variant |
 |---|---|---|
-| `ingenium-orchestrator` | OpenAI GPT-5.6 Terra | `high` |
-| `ingenium-software-engineer-premium` | OpenAI GPT-5.6 Terra | `xhigh` |
-| `ingenium-docs` | OpenAI GPT-5.6 Luna | `medium` |
-| `ingenium-qa` | OpenAI GPT-5.6 Terra | `xhigh` |
-| `ingenium-qa-vision` | OpenAI GPT-5.6 Luna | `high` |
-| `ingenium-software-engineer-fast` | OpenAI GPT-5.6 Luna | `xhigh` |
+| `ingenium-orchestrator` | OpenAI GPT-5.6 Sol | `high` |
+| `ingenium-software-engineer-premium` | OpenAI GPT-5.6 Sol | `high` |
+| `ingenium-docs` | OpenAI GPT-5.6 Luna | `max` |
+| `ingenium-qa` | OpenAI GPT-5.6 Terra | `high` |
+| `ingenium-qa-vision` | OpenAI GPT-5.6 Luna | `max` |
+| `ingenium-software-engineer-fast` | OpenAI GPT-5.6 Luna | `max` |
 | `ingenium-explore` | OpenAI GPT-5.6 Sol | `medium` |
-| `ingenium-scout` | OpenAI GPT-5.6 Luna | `high` |
-| `ingenium-chat` | DeepSeek V4 Flash | `high` |
+| `ingenium-scout` | OpenAI GPT-5.6 Luna | `max` |
+| `ingenium-chat` | DeepSeek V4 Flash | `max` |
 | `ingenium-security-auditor` | OpenAI GPT-5.6 Sol | `high` |
-| `browser-agent` | DeepSeek V4 Flash | none |
+| `browser-agent` | OpenAI GPT-5.6 Luna | `max` |
 | `ingenium-llm-broker` | unmapped (hidden system agent) | — |
 
 For model-specific subagent safety rules (phase limits, anti-loop constraints), see:
 
 - **[qwen-3.5-9b.md](references/qwen-3.5-9b.md)** — Historical Qwen 3.5 9B protocol; it is not the active runtime protocol for the current agent assignments.
-- **[deep-seek.md](references/deep-seek.md)** — DeepSeek V4 Flash protocol used by the currently assigned `browser-agent` and `ingenium-chat`; it also documents general verification patterns used when auditing orchestration.
+- **[deep-seek.md](references/deep-seek.md)** — DeepSeek V4 Flash protocol used by the currently assigned `ingenium-chat`; it also documents general verification patterns used when auditing orchestration.
 
 ## Cross-References
 

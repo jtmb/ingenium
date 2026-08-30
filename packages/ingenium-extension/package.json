@@ -14,14 +14,36 @@
       "types": "./dist/auto-observer.d.ts",
       "import": "./dist/auto-observer.js"
     },
+    "./plugins/auto-observer": {
+      "types": "./dist/plugins/auto-observer.d.ts",
+      "import": "./dist/plugins/auto-observer.js"
+    },
     "./observer": {
       "types": "./dist/observer.d.ts",
       "import": "./dist/observer.js"
+    },
+    "./plugins/observer": {
+      "types": "./dist/plugins/observer.d.ts",
+      "import": "./dist/plugins/observer.js"
     },
     "./resource-sync": {
       "types": "./dist/resource-sync.d.ts",
       "import": "./dist/resource-sync.js"
     },
+    "./plugins/resource-sync": {
+      "types": "./dist/plugins/resource-sync.d.ts",
+      "import": "./dist/plugins/resource-sync.js"
+    },
+    "./session-coordinator": {
+      "types": "./dist/session-coordinator.d.ts",
+      "import": "./dist/session-coordinator.js"
+    },
+    "./plugins/session-coordinator": {
+      "types": "./dist/plugins/session-coordinator.d.ts",
+      "import": "./dist/plugins/session-coordinator.js"
+    },
+    "./plugins/ponytail": "./ponytail/.opencode/plugins/ponytail.mjs",
+    "./plugin-specs": "./plugin-specs.mjs",
     "./onboarding-sync": {
       "types": "./dist/onboarding-sync.d.ts",
       "import": "./dist/onboarding-sync.js"
@@ -32,11 +54,15 @@
     }
   },
   "bin": {
-    "@ingenium/extension": "dist/scripts/mcp-server.js"
+    "@ingenium/extension": "./dist/scripts/mcp-server.js",
+    "ingenium-init-project": "./dist/scripts/init-project.js",
+    "ingenium-repository": "./dist/scripts/repository-command.js",
+    "ingenium-build": "./dist/scripts/build-command.js",
+    "ingenium-coordination-reset": "./dist/scripts/coordination-reset.js"
   },
-  "files": ["dist/", "README.md"],
+  "files": ["dist/", "README.md", "plugin-specs.mjs", "ponytail/"],
   "scripts": {
-    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp -r ../../services/ingenium-server/dist/scripts dist/scripts && test -f dist/config/index.js",
+    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && test -f dist/scripts/managed-command-wrapper.js && test -f dist/scripts/repository-command.js && test -f dist/scripts/build-command.js && test -f dist/scripts/coordination-reset.js && test -f dist/plugins/auto-observer.js && test -f dist/plugins/observer.js && test -f dist/plugins/resource-sync.js && test -f dist/plugins/session-coordinator.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js dist/scripts/managed-command-wrapper.js dist/scripts/repository-command.js dist/scripts/build-command.js dist/scripts/coordination-reset.js && node scripts/verify-mcp-transport-parity.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -45,6 +71,7 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "*"
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@opencode-ai/plugin": "1.18.9"
   }
 }

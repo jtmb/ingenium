@@ -33,48 +33,47 @@ cd ingenium
 
 ## Step 2 — Start the Services
 
-Set the required secrets before starting. Keep them in your shell or an ignored `.env` file; never commit them:
+Create the required protected secret files before starting:
 
 ```bash
-export OPENCODE_SERVER_PASSWORD='choose-a-server-password'
-export INGENIUM_API_TOKEN='<generate-a-32-to-128-character-base64url-token>'
-export INGENIUM_EMAIL_ENCRYPTION_KEY='64-hex-or-base64url-characters'
-docker compose up --build
+./scripts/bootstrap-local-secrets.sh
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose --profile compatibility up --build
 ```
 
 The deployed database is `/app/.ingenium/data` on the `ingenium-data` named
 volume. Rebuilding the image does not remove this volume. Keep the same Compose
 project name across invocations (for example, always use
-`docker compose -p ingenium ...`) and never use `docker compose down -v` for a
+`docker compose --profile compatibility -p ingenium ...`) and never use `docker compose down -v` for a
 normal restart; otherwise Docker can select or create an empty volume.
 
-For a local host MCP client, seed the ignored fallback file from `.env` before
-starting OpenCode:
+Seed the internal installation credential before starting the deployment:
 
 ```bash
 ./scripts/bootstrap-local-secrets.sh
 ```
 
-This creates `.opencode/.ingenium-api-token` only when absent, uses mode `0600`,
-rejects symlinks/non-files, and refuses a file whose value does not match
-`INGENIUM_API_TOKEN`. In the container, the entrypoint validates the bootstrap
-secret, atomically creates `/run/ingenium-secrets/api-token` and
-`/workspace/.opencode/.ingenium-api-token` as `appuser`-owned mode-`0600` files,
-then removes the inline token from the supervised process environment.
+This creates separate owner-only mode-`0600` installation, OpenCode-proxy, and
+email-encryption files below mode-`0700` directories and writes only their paths
+to ignored `.env`. In the container, the entrypoint validates and atomically
+copies each read-only mount into protected `/run` storage. After browser
+bootstrap and recent step-up, issue separate MCP and repository-sync credentials
+and store them as owner-only `.opencode/.ingenium-mcp-credential` and
+`.opencode/.ingenium-repository-sync-credential` files.
 
-`OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` are required. The
-`NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` settings are
-build-time browser configuration; if you use remote/LAN access, set both to
-operator-managed authenticated root HTTPS origins before building. Do not set
-them only after the container starts.
+The three protected deployment-secret file paths are required. The
+`NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` are retained only
+as legacy build-time CSP allowlist inputs; they do not select an iframe target. The
+isolated production profile obtains exact audience roots only after an authorized
+workspace is explicitly selected and started.
 
-This starts all services in a single container:
+This starts the `compatibility` profile in a single container:
 - **Dashboard root** on http://localhost:3000 (WSL-forwardable local gateway, no Basic Auth)
 - **OpenCode Web root** on http://opencode.localhost:3000 (no Basic Auth)
 - **OpenCode CLI root** on http://cli.localhost:3000 (no Basic Auth)
 - Port `3000` is the browser gateway and is the port Windows reaches through WSL localhost forwarding. The API boundary on `127.0.0.1:4097` is for authenticated MCP clients, while OpenCode/ttyd remain private upstreams on `4098`/`4099`; do not publish, forward, or browse to those ports.
 
-The local dashboard, Web, and CLI roots do not prompt for HTTP Basic Auth and do not receive browser bearer tokens. This plain-HTTP profile is for the local Windows↔WSL path only; use an operator-managed authenticated TLS profile for LAN or remote access.
+The local dashboard, Web, and CLI roots do not prompt for HTTP Basic Auth and do not receive browser bearer tokens. This plain-HTTP compatibility profile is for the local Windows↔WSL path only.
 
 The API server idempotently creates the `global-default` project at startup if none exists — no manual setup needed.
 
@@ -102,20 +101,22 @@ curl --config "${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf" \
 The referenced curl config is provisioned from the secret store and must be a
 regular mode-0600 owner-only file containing the bearer header; do not paste a
 real token into shell history, process arguments, or documentation. OpenCode MCP
-may instead read the ignored `.opencode/.ingenium-api-token` file when it is a
-regular mode-0600 owner-only file; tracked `opencode.json` must remain
-credential-free. The dashboard injects its token server-side and never sends
-it to browser JavaScript. The exact OAuth callback exception is
+reads only its ignored scoped credential file when it is a regular mode-0600
+owner-only file; tracked `opencode.json` must remain
+credential-free. The dashboard uses a protected bootstrap credential only for
+public bootstrap routes and never sends the installation bearer to browser
+JavaScript. The exact OAuth callback exception is
 `GET http://localhost:1455/auth/callback`. Host port `1455` reaches the Nginx
 callback listener, which forwards only that exact path to private Express
 `4096`; other paths are rejected.
 
-A source/config or build-time-origin change requires `docker compose up --build -d`; a secret-only change normally requires `docker compose up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099 as a workaround.
+A source/config or build-time-origin change requires `docker compose --profile compatibility up --build -d`; a secret-only change normally requires `docker compose --profile compatibility up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099/4100/4101 as a workaround. The isolated `production` profile is documented in [Deployment](deployment.md#isolated-production-runtime-profile). Its dashboard always shows the authorized workspace picker—even for one candidate—and its fixed local runtime aliases intentionally return static `404` guidance.
 
 If the API boundary returns `401`, the bearer header is missing or malformed;
 `403` means the token is wrong. If the dashboard proxy returns `503`, its
-server-side token file is unavailable. Health is also authenticated and fails
-closed when token configuration is missing. Port `1455` is not a general API
+server-side bootstrap credential file is unavailable. Health is a credential-free
+liveness check; management routes fail closed when token configuration is
+missing. Port `1455` is not a general API
 tunnel: only `GET /auth/callback` is accepted. Never include token bytes in
 commands, logs, screenshots, or support reports.
 
@@ -132,7 +133,23 @@ commands, logs, screenshots, or support reports.
 
 Once everything is running:
 
-- **Explore the dashboard** — click through all 20 primary routes plus the Settings overlay
+- **Explore the dashboard** — click through all 24 primary navigation routes plus the 19-tab Settings overlay
 - **Read feature guides** — see `usage/` for per-feature instructions
-- **Initialize a project** — use `/init-project` command or `ingenium_project_init` MCP tool
+- **Initialize repository resources (optional)** — from the active worktree, run
+  `ingenium-init-project --dry-run` to preview the repository-authoritative
+  projection. Use `--apply` only when the preview is accepted; append
+  `--docs-only` to limit the operation to `docs/**/*.md`, or
+  `--project <name>` to target a validated explicit project. In the production
+  image, the command is on `PATH` at
+  `/usr/local/bin/ingenium-init-project`. This is a documented procedure, not
+  evidence that onboarding has been run in the current session.
+- The default projection includes `docs/**/*.md`, eligible skills and agents,
+  and configured local plugin sources. It excludes commands, MCP server
+  definitions, project/global config, incomplete agent notes, migrated skill
+  directories, the reserved `ingenium-llm-broker`, symlinks, and secret-like
+  plugin paths or option keys. The production image preserves configured plugin
+  source files at their repository paths so runtime onboarding can submit the
+  same source identities.
+- **Provision an empty project** — use the `ingenium_project_init` MCP tool when
+  you need project creation without the repository projection.
 - **Learn the self-learning pipeline** — read `concepts/self-learning.md`

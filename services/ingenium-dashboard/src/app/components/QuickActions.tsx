@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { dashboardFetch, getApiBase } from "@/lib/api";
 
@@ -7,34 +7,37 @@ import { dashboardFetch, getApiBase } from "@/lib/api";
  * Quick action buttons for the operational cockpit.
  * Compact row of icon buttons for common actions.
  */
-export default function QuickActions() {
+export default function QuickActions({ project }: { project: string }) {
   const [synthesisLoading, setSynthesisLoading] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /**
-   * Trigger the synthesis pipeline and show a short-lived toast on completion.
-   *
-   * Uses a raw fetch (not the `api` client) because the URL construction is
-   * trivial here and we want simple success/failure feedback without error
-   * object parsing. The toast auto-dismisses after 3 seconds.
-   */
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+
+  const showToast = (message: string, tone: "success" | "error") => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, tone });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  };
+
+  /** Trigger synthesis for the validated project selected by the dashboard. */
   const runSynthesis = async () => {
     setSynthesisLoading(true);
     try {
-      const res = await dashboardFetch(`${getApiBase()}/synthesis/run`, {
+      const res = await dashboardFetch(`${getApiBase()}/synthesis/run?project=${encodeURIComponent(project)}`, {
         method: "POST",
-        body: JSON.stringify({ project: "global-default" }),
       });
       if (res.ok) {
-        setToast("Synthesis completed");
+        showToast("Synthesis completed", "success");
       } else {
-        setToast("Synthesis failed");
+        showToast("Synthesis failed", "error");
       }
     } catch {
-      setToast("Synthesis failed");
+      showToast("Synthesis failed", "error");
     } finally {
       setSynthesisLoading(false);
-      setTimeout(() => setToast(null), 3000);
     }
   };
 
@@ -79,20 +82,22 @@ export default function QuickActions() {
         </button>
       </div>
 
-      {/* Success toast */}
+      {/* Operation feedback */}
       {toast && (
-        <div className="absolute top-full left-0 mt-2 px-3 py-1.5 text-sm
-          bg-[var(--color-success-bg)] text-[var(--color-success-text)]
-          border border-[var(--color-success-border)] rounded-lg
-          animate-pulse">
-          {toast}
+        <div
+          className={`absolute top-full left-0 mt-2 rounded-lg border px-3 py-1.5 text-sm animate-pulse ${
+            toast.tone === "success"
+              ? "bg-[var(--color-success-bg)] text-[var(--color-success-text)] border-[var(--color-success-border)]"
+              : "bg-[var(--color-error-bg)] text-[var(--color-error-text)] border-[var(--color-error-border)]"
+          }`}
+          role="status"
+        >
+          {toast.message}
         </div>
       )}
     </div>
   );
 }
-
-// ── Inline SVG icons ──────────────────────────────────────────────────────────
 
 function DocIcon() {
   return (

@@ -11,14 +11,16 @@ const initialNodeEnv = process.env.NODE_ENV;
 
 async function loadNextConfig(): Promise<NextConfigForTest> {
   vi.resetModules();
-  const module = await import("../next.config.js");
-  return module.default as NextConfigForTest;
+  const configModule = await import("../next.config.js");
+  return configModule.default as NextConfigForTest;
 }
 
 afterEach(() => {
   delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
   delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
   delete process.env.INGENIUM_API_PORT;
+  delete process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN;
+  delete process.env.NEXT_PUBLIC_RUNTIME_SCHEME;
   if (initialNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = initialNodeEnv;
 });
@@ -43,6 +45,29 @@ describe("Next.js gateway configuration", () => {
     });
   });
 
+  it("uses the private API listener in production without advertising it to browsers", async () => {
+    process.env.NODE_ENV = "production";
+    const config = await loadNextConfig();
+
+    expect(await config.rewrites()).toEqual({
+      fallback: [
+        {
+          source: "/api/v1/:path*",
+          destination: "http://127.0.0.1:4096/api/v1/:path*",
+        },
+      ],
+    });
+    expect(await contentSecurityPolicy(config)).toContain("connect-src 'self' http://localhost:4097");
+  });
+
+  it("preserves an explicit isolated fixture API port in production", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.INGENIUM_API_PORT = "50664";
+    const config = await loadNextConfig();
+
+    expect((await config.rewrites()).fallback[0]?.destination).toBe("http://127.0.0.1:50664/api/v1/:path*");
+  });
+
   it("allows direct local ports only in an unconfigured development build", async () => {
     process.env.NODE_ENV = "development";
     const csp = await contentSecurityPolicy(await loadNextConfig());
@@ -50,7 +75,7 @@ describe("Next.js gateway configuration", () => {
 
     expect(frameSrc).toBe(
       "frame-src 'self' http://localhost:4098 http://localhost:4099 " +
-      "http://opencode.localhost:3000 http://cli.localhost:3000",
+        "http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(frameSrc).not.toContain("*");
     expect(frameSrc).not.toContain("/opencode-web");
@@ -63,7 +88,7 @@ describe("Next.js gateway configuration", () => {
     const frameSrc = csp.split("; ").find((directive) => directive.startsWith("frame-src "));
 
     expect(frameSrc).toBe(
-      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000",
+      "frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000",
     );
     expect(frameSrc).not.toContain(":4098");
     expect(frameSrc).not.toContain(":4099");
@@ -74,7 +99,7 @@ describe("Next.js gateway configuration", () => {
     process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = "https://cli.example.com";
     const csp = await contentSecurityPolicy(await loadNextConfig());
 
-    expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000");
+    expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000");
     expect(csp).not.toContain("http://localhost:4098");
     expect(csp).not.toContain("http://localhost:4099");
     expect(csp).toContain("https://opencode.example.com https://cli.example.com");
@@ -90,5 +115,17 @@ describe("Next.js gateway configuration", () => {
     expect(csp).not.toContain("opencode.example.com");
     expect(csp).not.toContain("cli.example.com");
     expect(csp).not.toContain("secret");
+  });
+
+  it("adds only a validated runtime wildcard to frame and exchange policies", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
+    process.env.NEXT_PUBLIC_RUNTIME_SCHEME = "https";
+    const csp = await contentSecurityPolicy(await loadNextConfig());
+    expect(csp).toContain("connect-src 'self' http://localhost:4097 https://*.runtime.example.test");
+    expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000 https://*.runtime.example.test");
+
+    process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.example.test/path";
+    expect(await contentSecurityPolicy(await loadNextConfig())).not.toContain("https://*.runtime.example.test/path");
   });
 });

@@ -9,6 +9,55 @@ description: Plugin lifecycle management — create, enable, disable, configure,
 Manages OpenCode plugins. Each plugin is a TypeScript file in `.opencode/plugins/`.
 Plugins can be created (uploaded), edited, enabled/disabled, or deleted from the dashboard.
 
+## Ponytail OpenCode Integration
+
+Ponytail is integrated as an official, checkout-based OpenCode plugin. The
+runtime closure is vendored at
+`packages/ingenium-extension/ponytail/` from upstream commit
+`16f29800fd2681bdf24f3eb4ccffe38be3baec6b`, with MIT provenance recorded in
+`packages/ingenium-extension/ponytail/PROVENANCE.md`. It is not installed from
+npm, and it does not configure or invoke Ponytail MCP. The published
+`@dietrichgebert/ponytail@4.8.4` package is deliberately not used: its named
+export is incompatible with OpenCode 1.18.9's plugin loader.
+
+Register exactly one plugin entry for the environment:
+
+```json
+"plugin": [
+  "./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+]
+```
+
+For the container's global config, use the equivalent absolute entry
+`/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs`.
+Do not register both entries in one config, recursively discover the checkout,
+or add the old npm package. The adapter is intentionally outside the worktree
+`.opencode/plugins/` discovery root.
+
+The adapter exposes six commands: `/ponytail`, `/ponytail-audit`,
+`/ponytail-debt`, `/ponytail-gain`, `/ponytail-help`, and `/ponytail-review`.
+It also adds the checkout's skills path and appends the active Ponytail rules
+to each chat system prompt. This is a prompt-only permission boundary: it does
+not add MCP tools, execute commands, or grant filesystem access.
+
+Modes are `off`, `lite`, `full` (default), and `ultra`; `/ponytail <mode>`
+persists the mode for subsequent turns, while `stop ponytail` and `normal mode`
+disable it. The default resolves in this order: `PONYTAIL_DEFAULT_MODE`, then
+`$XDG_CONFIG_HOME/ponytail/config.json` (or `~/.config/ponytail/config.json`,
+or `%APPDATA%/ponytail/config.json` on Windows), then `full`. OpenCode's active
+mode is stored in `.ponytail-active` beside its config, normally
+`$XDG_CONFIG_HOME/opencode/.ponytail-active`.
+
+OpenCode loads plugins at startup. Restart the OpenCode session after adding,
+removing, or changing this registration. Verify with the extension's focused
+checkout test and by confirming the six commands, the prompt marker
+`PONYTAIL MODE ACTIVE`, and the pinned hashes in `PROVENANCE.md`.
+
+To update, replace the checkout only from a reviewed upstream commit, refresh
+the provenance and hash assertions, and rerun the focused test. To uninstall,
+remove the single registration, delete the checkout, remove any legacy
+`@dietrichgebert/ponytail*` or `mcp.ponytail` entries, and restart OpenCode.
+
 ## How to Use
 1. Navigate to `/plugins` from the dashboard nav bar
 2. Click **Add Plugin** to open the create form

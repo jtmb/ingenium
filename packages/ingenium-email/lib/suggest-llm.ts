@@ -11,9 +11,9 @@
  *    AGENTS.md HARD RULE #10 — reasoning models may return empty content.
  */
 
-import { emailCache, safeLlmFetch } from "ingenium-core";
 import { GmailProvider } from "./providers/gmail.js";
 import type { EmailAccount, OAuthToken } from "./types.js";
+import { getEmailRuntime } from "./runtime.js";
 
 // ── Exported interfaces ─────────────────────────────────────────────────────
 
@@ -32,6 +32,43 @@ export interface LLMConfig {
   endpoint?: string;
   apiKey?: string;
   allowPrivateNetwork?: boolean;
+}
+
+interface ChatMessage {
+  role: "system" | "user";
+  content: string;
+}
+
+async function requestCompletion(
+  llmConfig: LLMConfig,
+  messages: ChatMessage[],
+  temperature: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (llmConfig.apiKey) headers.Authorization = `Bearer ${llmConfig.apiKey}`;
+  const baseEndpoint = llmConfig.endpoint!.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+
+  try {
+    const response = await getEmailRuntime().llm.fetch(`${baseEndpoint}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      signal,
+      body: JSON.stringify({
+        model: llmConfig.model,
+        messages,
+        temperature,
+        max_tokens: 8192,
+      }),
+    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
+    if (!response.ok) return "";
+
+    const json = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    const content = json.choices?.[0]?.message?.content;
+    return typeof content === "string" && content ? content : "";
+  } catch {
+    return "";
+  }
 }
 
 // ── getVoiceSamples ─────────────────────────────────────────────────────────
@@ -58,7 +95,7 @@ export async function getVoiceSamples(
     const samples: Array<{ subject: string; snippet: string }> = [];
     for (const msg of messages) {
       if (samples.length >= limit) break;
-      const body = emailCache.getCachedEmailBody(account.id, sentFolder, msg.id);
+      const body = getEmailRuntime().cache.getCachedEmailBody(account.id, sentFolder, msg.id);
       if (body?.text) {
         samples.push({
           subject: msg.subject ?? "(no subject)",
@@ -95,34 +132,13 @@ export async function generateSmartReplies(
 
   const prompt = buildSmartReplyPrompt(targetEmail, voiceSamples);
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`;
-
-  // Normalize endpoint: strip trailing /v1 if present to avoid double /v1
-  const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+  const content = await requestCompletion(llmConfig, [
+    { role: "system", content: "You are an email reply assistant that outputs only valid JSON arrays." },
+    { role: "user", content: prompt },
+  ], 0.7, signal);
+  if (!content) return [];
 
   try {
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
-      method: "POST",
-      headers,
-      signal,
-      body: JSON.stringify({
-        model: llmConfig.model,
-        messages: [
-          { role: "system", content: "You are an email reply assistant that outputs only valid JSON arrays." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.7,
-        max_tokens: 8192,
-      }),
-    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
-
-    if (!response.ok) return [];
-
-    const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) return [];
-
     const parsed = tryParseJSON(content);
     if (!Array.isArray(parsed)) return [];
 
@@ -218,43 +234,17 @@ Subject: ${subject}
 
 ${emailBody}`;
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`;
+  const content = await requestCompletion(llmConfig, [
+    { role: "system", content: "You are an email summarizer that outputs only the summary text, no preamble, no markdown." },
+    { role: "user", content: prompt },
+  ], 0.3);
+  if (!content) return "";
 
-  // Normalize endpoint: strip trailing /v1 if present to avoid double /v1
-  const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
-
-  try {
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: llmConfig.model,
-        messages: [
-          { role: "system", content: "You are an email summarizer that outputs only the summary text, no preamble, no markdown." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-        max_tokens: 8192,
-      }),
-    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
-
-    if (!response.ok) return "";
-
-    const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) return "";
-
-    // Strip any markdown fences or JSON wrapping from the response
-    let cleaned = content.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/i, "");
-    }
-
-    return cleaned;
-  } catch {
-    return "";
+  let cleaned = content.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/i, "");
   }
+  return cleaned;
 }
 
 // ── reviewDraft ──────────────────────────────────────────────────────────────
@@ -281,43 +271,17 @@ ${text}`
 
 ${text}`;
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`;
+  const content = await requestCompletion(llmConfig, [
+    { role: "system", content: "You are an email writing coach that outputs only improved text, no explanation, no markdown." },
+    { role: "user", content: prompt },
+  ], 0.4);
+  if (!content) return "";
 
-  // Normalize endpoint: strip trailing /v1 if present to avoid double /v1
-  const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
-
-  try {
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: llmConfig.model,
-        messages: [
-          { role: "system", content: "You are an email writing coach that outputs only improved text, no explanation, no markdown." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.4,
-        max_tokens: 8192,
-      }),
-    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
-
-    if (!response.ok) return "";
-
-    const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) return "";
-
-    // Strip any markdown fences from the response
-    let cleaned = content.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:text|markdown)?\s*/i, "").replace(/\s*```$/i, "");
-    }
-
-    return cleaned;
-  } catch {
-    return "";
+  let cleaned = content.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:text|markdown)?\s*/i, "").replace(/\s*```$/i, "");
   }
+  return cleaned;
 }
 
 // ── JSON parse (same multi-strategy as synthesis-llm.ts) ────────────────────

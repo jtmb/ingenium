@@ -17,12 +17,36 @@ export interface McpServerView {
   error?: string;
 }
 
+const MAX_PROJECT_NAME_LENGTH = 64;
+const PROJECT_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
+/** Match the API project-name boundary before putting a project in a link. */
+export function isSafeProjectName(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_PROJECT_NAME_LENGTH
+    && value === value.trim()
+    && value !== "."
+    && value !== ".."
+    && !/[\\/]/.test(value)
+    && !PROJECT_CONTROL_CHARACTER.test(value);
+}
+
+/** Build the project-scoped MCP management link only for a validated name. */
+export function getMcpServersHref(project: unknown): string | null {
+  return isSafeProjectName(project)
+    ? `/mcp-servers?project=${encodeURIComponent(project)}`
+    : null;
+}
+
 const STATUS_ERRORS: Partial<Record<McpStatus, string>> = {
   failed: "MCP server failed to connect.",
-  needs_auth: "MCP server requires authentication.",
-  needs_client_registration: "MCP server requires client registration.",
+  needs_auth: "MCP server requires authentication. Configure its credentials and reconnect.",
+  needs_client_registration: "MCP server requires client registration. Update its configuration and reopen OpenCode.",
   unknown: "MCP server returned an unrecognized status.",
 };
+
+const INGENIUM_LAUNCHER_FAILURE = "Ingenium MCP could not connect. Build the extension launcher, then verify the protected API token and project identity.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,7 +79,9 @@ export function normalizeMcpServer(name: string, value: unknown): McpServerView 
     status,
     connected: status === "connected",
     ...(toolCount === undefined ? {} : { toolCount }),
-    ...(STATUS_ERRORS[status] ? { error: STATUS_ERRORS[status] } : {}),
+    ...(name === "ingenium" && status === "failed"
+      ? { error: INGENIUM_LAUNCHER_FAILURE }
+      : STATUS_ERRORS[status] ? { error: STATUS_ERRORS[status] } : {}),
   };
 }
 

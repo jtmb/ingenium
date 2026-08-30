@@ -1,16 +1,16 @@
 # ingenium-server
 
-MCP stdio server with 243 tools. Calls the API via HTTP. Zero DB access.
+MCP stdio server with 281 catalog tools. Calls the API via HTTP. Zero DB access.
 
 ## Architecture
 
 - **Protocol**: MCP stdio — communicates over stdin/stdout
-- **API dependency**: All data operations proxy through `services/ingenium-api` on :4097
+- **API dependency**: All data operations proxy through the authenticated boundary on :4097 to private Express :4096
 - **DB isolation**: Enforced by CI check — must not import SQLite libraries
 
 ## Tools
 
-243 server tools across 28 categories. The complete system catalog contains 245 entries after adding the two extension tools. All server tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
+281 server tools across the 30 baseline catalog categories. The complete built-in catalog contains 283 entries after adding the two extension tools (`synthesize_observations` and `auto_observe_now`). All server tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
 
 ## Configuration
 
@@ -23,16 +23,16 @@ MCP client config (in `opencode.json`):
 ```jsonc
 {
   "mcp": {
-    "servers": {
-      "ingenium": {
-        "type": "local",
-        "command": ["npx", "-y", "@ingenium/extension"],
-        "disabled": false,
-        "env": {
-          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-          "INGENIUM_API_TIMEOUT": "10000",
-          "LOG_LEVEL": "info"
-        }
+    "ingenium": {
+      "type": "local",
+      "command": ["npx", "-y", "@ingenium/extension"],
+      "enabled": true,
+      "environment": {
+        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
+        "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+        "INGENIUM_API_TIMEOUT": "10000",
+        "LOG_LEVEL": "info"
       }
     }
   }

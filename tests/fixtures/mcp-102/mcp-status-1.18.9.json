@@ -1,0 +1,26 @@
+{
+  "opencodeVersion": "1.18.9",
+  "request": {
+    "method": "GET",
+    "path": "/mcp",
+    "query": {
+      "directory": "__WORKTREE__"
+    }
+  },
+  "response": {
+    "ingenium": {
+      "status": "connected",
+      "tools": [
+        {
+          "name": "skill_list"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "mcpServer": "ingenium",
+    "toolName": "skill_list",
+    "canonicalToolName": "ingenium_skill_list",
+    "toolCount": 1
+  }
+}

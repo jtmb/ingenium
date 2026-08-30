@@ -10,7 +10,6 @@ interface HealthStripProps {
  * Health Strip — compact horizontal indicator for all service health states.
  */
 export default function HealthStrip({ data, loading }: HealthStripProps) {
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-4 hover:shadow-md transition-shadow">
@@ -23,7 +22,6 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
     );
   }
 
-  // ── Missing state ──────────────────────────────────────────────────────────
   if (!data) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-4 hover:shadow-md transition-shadow">
@@ -34,7 +32,6 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
     );
   }
 
-  // ── Status helpers ─────────────────────────────────────────────────────────
   const dot = (status: string) => {
     let bg = "bg-gray-400";
     if (status === "ok" || status === "running" || status === "healthy") bg = "bg-green-500";

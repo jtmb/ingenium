@@ -2,41 +2,24 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { readFileSync, rmSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
+import ts from "typescript";
 import { getDb, verifyAndRebuildSkillsFts, resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 
-// ============================================================
-// Static regression: verify checkpointAfterWrite is NEVER textually
-// inside an execTransaction callback in owned source files.
-// ============================================================
-
-/**
- * Find all line numbers where checkpointAfterWrite appears textually
- * between an execTransaction( call and its matching }); close.
- *
- * Heuristic: for each `checkpointAfterWrite` occurrence, look backward
- * to see whether the most recent `execTransaction(` or the most recent
- * `});` is closer. If `execTransaction(` is more recent (or there is no
- * `});` between them), checkpointAfterWrite is inside a transaction callback.
- */
 function findCheckpointInsideTransaction(filePath: string): number[] {
   const content = readFileSync(filePath, "utf-8");
+  const source = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const violations: number[] = [];
 
-  const cpRegex = /checkpointAfterWrite/g;
-  let match: RegExpExecArray | null;
-  while ((match = cpRegex.exec(content)) !== null) {
-    const pos = match.index;
-    const before = content.slice(0, pos);
-    const lastTx = before.lastIndexOf("execTransaction(");
-    const lastClose = before.lastIndexOf("});");
-
-    // If execTransaction( appears after the last }); (or there is no }); at all),
-    // then we're still inside the execTransaction callback when checkpointAfterWrite appears.
-    if (lastTx > lastClose) {
-      violations.push(content.slice(0, pos).split("\n").length);
+  const visit = (node: ts.Node, insideTransaction = false): void => {
+    const isCall = ts.isCallExpression(node) && ts.isIdentifier(node.expression);
+    const isTransaction = isCall && node.expression.text === "execTransaction";
+    if (insideTransaction && isCall && node.expression.text === "checkpointAfterWrite") {
+      violations.push(source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1);
     }
-  }
+    ts.forEachChild(node, (child) => visit(child, insideTransaction || isTransaction));
+  };
+  visit(source);
 
   return violations;
 }
@@ -105,7 +88,12 @@ describe("Static WAL safety — no checkpointAfterWrite inside execTransaction c
   const OWNED_FILES = [
     "packages/ingenium-core/lib/tools/skills.ts",
     "packages/ingenium-core/lib/tools/context.ts",
+    "packages/ingenium-core/lib/tools/context-snapshot-import.ts",
+    "packages/ingenium-core/lib/tools/email-watcher-markers.ts",
     "packages/ingenium-core/lib/tools/maintenance-locks.ts",
+    "packages/ingenium-core/lib/tools/coordination.ts",
+    "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+    "packages/ingenium-core/lib/tools/job-event-deliveries.ts",
   ];
 
   for (const relativePath of OWNED_FILES) {

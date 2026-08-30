@@ -4,6 +4,7 @@ description: "RAG-aware research agent for Docs RAG context retrieval. Searches 
 mode: subagent
 permission:
   read: allow
+  question: deny
   edit: deny
   write: deny
   bash: deny
@@ -12,6 +13,9 @@ permission:
   ingenium_docs_get_page: allow
   skill:
     "@local-models": allow
+    "@mcp-tooling": allow
+    "@documentation": allow
+    "@ponytail": allow
     "*": deny
 ---
 

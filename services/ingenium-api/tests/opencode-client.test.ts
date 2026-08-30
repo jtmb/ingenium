@@ -12,6 +12,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildAuthHeader,
   redactHeaders,
@@ -19,6 +22,7 @@ import {
   isOpenCodeError,
   opencodeClient,
 } from "../lib/opencode-client.js";
+import { logger } from "ingenium-core";
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -55,8 +59,10 @@ function mockNetworkError(): Error {
 /* ── Tests ───────────────────────────────────────────────────────────────── */
 
 describe("buildAuthHeader", () => {
+  const directories: string[] = [];
   afterEach(() => {
     vi.unstubAllEnvs();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
   it("returns null when OPENCODE_SERVER_PASSWORD is not set", () => {
@@ -84,6 +90,27 @@ describe("buildAuthHeader", () => {
     expect(authA).not.toBeNull();
     expect(authB).not.toBeNull();
     expect(authA).not.toBe(authB);
+  });
+
+  it("prefers a protected file and rejects conflicts or unsafe files", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-opencode-password-"));
+    directories.push(directory);
+    chmodSync(directory, 0o700);
+    const file = join(directory, "password");
+    writeFileSync(file, `${"e".repeat(64)}\n`, { mode: 0o600 });
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", file);
+    expect(buildAuthHeader()).toMatch(/^Basic /);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "conflict");
+    expect(buildAuthHeader()).toBeNull();
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    chmodSync(file, 0o640);
+    expect(buildAuthHeader()).toBeNull();
+    chmodSync(file, 0o600);
+    const link = `${file}.link`;
+    symlinkSync(file, link);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", link);
+    expect(() => buildAuthHeader()).toThrow();
   });
 });
 
@@ -207,6 +234,19 @@ describe("request — URL construction", () => {
     expect(init.headers).toHaveProperty("Content-Type", "application/json");
     expect(init.body).toBe(JSON.stringify({ title: "Test" }));
   });
+
+  it("passes caller cancellation to credential and config HTTP transports", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { ok: true }));
+    const controller = new AbortController();
+    const configController = new AbortController();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.addAuth("openai", { type: "api", key: "transport-canary" }, undefined, controller.signal);
+    await opencodeClient.updateGlobalConfig({ provider: { openai: { models: {} } } }, configController.signal);
+
+    expect((fetchSpy.mock.calls[0]![1] as RequestInit).signal).toBe(controller.signal);
+    expect((fetchSpy.mock.calls[1]![1] as RequestInit).signal).toBe(configController.signal);
+  });
 });
 
 describe("request — error normalization", () => {
@@ -322,7 +362,7 @@ describe("request — error normalization", () => {
     }
   });
 
-  it("extracts error code from name field (OpenCode v1.18.3 errors)", async () => {
+  it("extracts error code from name field (OpenCode v1.18.9 errors)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -358,6 +398,74 @@ describe("request — AbortError", () => {
   });
 });
 
+describe("credential operation error sanitization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not return or log reflected upstream credential error fields", async () => {
+    const canary = "reflected-credential-canary";
+    const submittedCredential = "submitted-credential-canary";
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(mockResponse(502, {
+      name: canary,
+      _tag: canary,
+      code: canary,
+      message: canary,
+      body: canary,
+      data: { name: canary, _tag: canary, code: canary, message: canary, body: canary },
+    }))));
+    const debug = vi.spyOn(logger, "debug");
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+
+    const results = await Promise.all([
+      opencodeClient.connectIntegrationKey("openai", submittedCredential),
+      opencodeClient.addAuth("openai", { type: "api", key: submittedCredential }),
+      opencodeClient.deleteAuth("openai"),
+      opencodeClient.getAuthStatus(),
+    ]);
+
+    const codes = [
+      "PROVIDER_INTEGRATION_CONNECT_FAILED",
+      "PROVIDER_AUTH_APPLY_FAILED",
+      "PROVIDER_AUTH_REMOVE_FAILED",
+      "PROVIDER_AUTH_STATUS_FAILED",
+    ];
+    for (const [index, result] of results.entries()) {
+      expect(isOpenCodeError(result)).toBe(true);
+      if (isOpenCodeError(result)) {
+        expect(result.error.code).toBe(codes[index]);
+        expect(result.error.status).toBe(502);
+      }
+    }
+
+    const output = JSON.stringify([results, debug.mock.calls, warn.mock.calls, error.mock.calls]);
+    expect(output).not.toContain(canary);
+    expect(output).not.toContain(submittedCredential);
+  });
+
+  it("normalizes credential abort errors without exposing abort text", async () => {
+    const canary = "credential-abort-canary";
+    const aborted = new Error(canary) as Error & { name: string };
+    aborted.name = "AbortError";
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(aborted));
+
+    const result = await opencodeClient.addAuth("openai", { type: "api", key: "credential-input" });
+
+    expect(result).toEqual({
+      error: {
+        code: "PROVIDER_AUTH_APPLY_FAILED",
+        message: "Provider authentication update failed",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(canary);
+  });
+});
+
 describe("opencodeClient — method routing", () => {
   beforeEach(() => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
@@ -370,7 +478,7 @@ describe("opencodeClient — method routing", () => {
   it("health() calls GET /global/health", async () => {
     const fetchSpy = vi
       .fn()
-      .mockResolvedValue(mockResponse(200, { healthy: true, version: "1.18.3" }));
+      .mockResolvedValue(mockResponse(200, { healthy: true, version: "1.18.9" }));
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.health();
@@ -378,7 +486,7 @@ describe("opencodeClient — method routing", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const url = fetchSpy.mock.calls[0][0] as string;
     expect(url).toContain("/global/health");
-    expect(result).toEqual({ healthy: true, version: "1.18.3" });
+    expect(result).toEqual({ healthy: true, version: "1.18.9" });
   });
 
   it("updateGlobalConfig() patches the running global configuration", async () => {
@@ -404,6 +512,49 @@ describe("opencodeClient — method routing", () => {
     expect(url).toContain("/session");
     expect(url).toContain("directory=%2Fworkspace");
     expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("encodes dynamic session, message, action, and permission IDs as one path segment", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.getSession("../global/config");
+    await opencodeClient.getSessionMessage("session/a", "message/b");
+    await opencodeClient.abortSession("session/a");
+    await opencodeClient.replyPermission("session/a", "permission/b", { response: "once" });
+
+    const urls = fetchSpy.mock.calls.map(([url]) => url as string);
+    expect(urls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/\/session\/\.\.%2Fglobal%2Fconfig$/),
+      expect.stringMatching(/\/session\/session%2Fa\/message\/message%2Fb$/),
+      expect.stringMatching(/\/session\/session%2Fa\/abort$/),
+      expect.stringMatching(/\/session\/session%2Fa\/permissions\/permission%2Fb$/),
+    ]));
+
+    await opencodeClient.getSessionMessage("session_1", "message_1");
+    expect(fetchSpy.mock.calls.at(-1)![0]).toMatch(/\/session\/session_1\/message\/message_1$/);
+  });
+
+  it("maps empty and dot path segments to one fixed upstream segment", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    for (const segment of ["", ".", ".."]) {
+      await opencodeClient.getSession(segment);
+      await opencodeClient.getSessionMessage("session_1", segment);
+    }
+
+    const paths = fetchSpy.mock.calls.map(([url]) => new URL(url as string).pathname);
+    expect(paths).toHaveLength(6);
+    expect(paths).toEqual(expect.arrayContaining([
+      "/session/__invalid_opencode_path_segment__",
+      "/session/session_1/message/__invalid_opencode_path_segment__",
+    ]));
+    for (const path of paths) {
+      expect(path).not.toBe("/");
+      expect(path).not.toBe("/session/");
+      expect(path).not.toContain("/global/config");
+    }
   });
 
   it("listIntegrations() discovers native authentication methods", async () => {
@@ -437,7 +588,7 @@ describe("opencodeClient — method routing", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.sendPrompt("ses_123", {
-      text: "Hello",
+      messageID: "msg_000000000001abcdefghijklmN",
       parts: [{ type: "text", text: "Hello" }],
     });
 
@@ -445,7 +596,10 @@ describe("opencodeClient — method routing", () => {
     const init = fetchSpy.mock.calls[0][1] as RequestInit;
     expect(url).toContain("/session/ses_123/message");
     expect(init.method).toBe("POST");
-    expect(init.body).toContain("Hello");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      messageID: "msg_000000000001abcdefghijklmN",
+      parts: [{ type: "text", text: "Hello" }],
+    });
   });
 
   it("createSession() calls POST /session", async () => {

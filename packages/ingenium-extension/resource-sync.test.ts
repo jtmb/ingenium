@@ -1,13 +1,119 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { hashContent, syncAgents, syncCommands, syncConfig, syncPlugins, writeAgentToDisk, type SyncManifest } from "./resource-sync.js";
+import {
+  cleanupLegacySkillTombstones,
+  buildRepositoryManifestV2,
+  hashContent,
+  incrementalSync,
+  repositorySync,
+  resetIncrementalSyncThrottle,
+  resetProjectCache,
+  syncAgents,
+  syncSkills,
+  syncCommands,
+  syncConfig,
+  syncPlugins,
+  writeAgentToDisk,
+  type SyncManifest,
+} from "./resource-sync.js";
+import { resetEnsuredProjects } from "./project-resolver.js";
+
+const mockCallMcpTool = vi.hoisted(() => vi.fn());
+const fsFaults = vi.hoisted(() => ({
+  beforeRename: undefined as undefined | ((source: string, destination: string) => void),
+  afterRename: undefined as undefined | ((source: string, destination: string) => void),
+  beforeUnlink: undefined as undefined | ((path: string) => void),
+  beforeRmdir: undefined as undefined | ((path: string) => void),
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    renameSync(source: string, destination: string) {
+      fsFaults.beforeRename?.(source, destination);
+      actual.renameSync(source, destination);
+      fsFaults.afterRename?.(source, destination);
+    },
+    unlinkSync(path: string) {
+      fsFaults.beforeUnlink?.(path);
+      actual.unlinkSync(path);
+    },
+    rmdirSync(path: string) {
+      fsFaults.beforeRmdir?.(path);
+      actual.rmdirSync(path);
+    },
+  };
+});
+
+vi.mock("./mcp-client.js", () => ({
+  callMcpTool: mockCallMcpTool,
+  mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+}));
 
 let worktree = "";
 
+const CANONICAL_SKILLS = [
+  "development-conventions",
+  "devops-conventions",
+  "database-conventions",
+  "engineering-workflow",
+  "mcp-tooling",
+  "local-models",
+  "security-audit",
+  "documentation",
+  "self-learning",
+  "skill-maintenance",
+];
+
+interface CleanupFixtureMapping {
+  source: string;
+  target?: string;
+  sourcePath?: string;
+}
+
+function createCleanupFixture(root: string, fixtures: CleanupFixtureMapping[]): void {
+  const skillsRoot = join(root, ".opencode", "skills");
+  mkdirSync(skillsRoot, { recursive: true });
+  const mappings = fixtures.map((fixture) => {
+    const target = fixture.target ?? "development-conventions";
+    const expectedSourcePath = `.opencode/skills/${target}/references/sources/${fixture.source}/source-index.md`;
+    const sourcePath = fixture.sourcePath ?? expectedSourcePath;
+    const preservedSource = `# ${fixture.source}\n`;
+    const expectedSourceFile = join(root, expectedSourcePath);
+    mkdirSync(join(expectedSourceFile, ".."), { recursive: true });
+    writeFileSync(expectedSourceFile, preservedSource);
+    const targetSkill = join(skillsRoot, target, "SKILL.md");
+    mkdirSync(join(targetSkill, ".."), { recursive: true });
+    writeFileSync(targetSkill, `---\nname: ${target}\ndescription: test\n---\n`);
+    const legacyDir = join(skillsRoot, fixture.source);
+    mkdirSync(legacyDir);
+    writeFileSync(
+      join(legacyDir, "MIGRATED-TO.md"),
+      `**Canonical target**: \`${target}\`\n\n[source-index.md](../${target}/references/sources/${fixture.source}/source-index.md)\n`,
+    );
+    return { source: fixture.source, target, sourcePath, sourceHash: hashContent(preservedSource) };
+  });
+  writeFileSync(
+    join(skillsRoot, "consolidation-map.json"),
+    JSON.stringify({ version: "1.0.0", canonicalSkills: CANONICAL_SKILLS, mappings }),
+  );
+}
+
 afterEach(() => {
+  fsFaults.beforeRename = undefined;
+  fsFaults.afterRename = undefined;
+  fsFaults.beforeUnlink = undefined;
+  fsFaults.beforeRmdir = undefined;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  resetIncrementalSyncThrottle();
+  resetProjectCache();
+  resetEnsuredProjects();
+  mockCallMcpTool.mockReset();
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
 });
@@ -26,6 +132,25 @@ describe("agent resource sync", () => {
 
     const content = readFileSync(join(worktree, ".opencode", "agents", "execution", "sync-agent.md"), "utf8");
     expect(content).not.toMatch(/^model:/m);
+  });
+
+  it("writes public agent profiles as 0644 and never follows a profile symlink", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
+    const profilePath = join(worktree, ".opencode", "agents", "execution", "public-agent.md");
+
+    expect(writeAgentToDisk(worktree, { name: "public-agent", category: "execution", content: "# Public" })).toBe(true);
+    expect(statSync(profilePath).mode & 0o777).toBe(0o644);
+    chmodSync(profilePath, 0o600);
+    expect(writeAgentToDisk(worktree, { name: "public-agent", category: "execution", content: "# Repaired" })).toBe(true);
+    expect(statSync(profilePath).mode & 0o777).toBe(0o644);
+
+    const outsidePath = join(worktree, "outside-agent.md");
+    writeFileSync(outsidePath, "# Outside", "utf8");
+    unlinkSync(profilePath);
+    symlinkSync(outsidePath, profilePath);
+
+    expect(writeAgentToDisk(worktree, { name: "public-agent", category: "execution", content: "# Escape" })).toBe(false);
+    expect(readFileSync(outsidePath, "utf8")).toBe("# Outside");
   });
 
   it("serializes broker wildcard deny and hidden metadata without implicit capabilities", () => {
@@ -188,19 +313,22 @@ describe("agent resource sync", () => {
     expect(manifest.resources.agents["ingenium-llm-broker"]).toBeUndefined();
   });
 
-  it("adds the protected fallback bearer token to resource-sync requests", async () => {
+  it("adds the protected repository-sync credential to resource-sync requests", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
     const opencodeDir = join(worktree, ".opencode");
     mkdirSync(opencodeDir);
-    const tokenPath = join(opencodeDir, ".ingenium-api-token");
-    writeFileSync(tokenPath, "test-resource-sync-token\n", { mode: 0o600 });
+    const tokenPath = join(opencodeDir, ".ingenium-repository-sync-credential");
+    writeFileSync(tokenPath, "test_resource_sync_token_0123456789\n", { mode: 0o600 });
     chmodSync(tokenPath, 0o600);
+    vi.stubEnv("INGENIUM_PROJECT", "project");
+    vi.stubEnv("INGENIUM_WORKSPACE_ID", "repository-workspace");
+    vi.stubEnv("INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     await syncAgents(worktree, "project", { version: 1, project: "project", lastFullSync: "", resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} } }, { isInitialSync: false });
 
-    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("Authorization")).toBe("Bearer test-resource-sync-token");
+    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("Authorization")).toBe("Bearer test_resource_sync_token_0123456789");
   });
 
   it("rejects an API-created arbitrary broker profile instead of trusting or writing it", async () => {
@@ -319,5 +447,397 @@ describe("agent resource sync", () => {
 
     expect(result).toMatchObject({ pushed: 1, conflicts: 0, errors: 0 });
     expect(manifest.resources.config.hash).toBe(hashContent(source));
+  });
+
+  it("preserves the prior command baseline when a disk push fails", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
+    const commandPath = join(worktree, ".opencode", "commands", "local-command.md");
+    mkdirSync(join(commandPath, ".."), { recursive: true });
+    writeFileSync(commandPath, "# Disk changed");
+    const baseline = hashContent("# Baseline");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{
+        name: "local-command",
+        file_path: ".opencode/commands/local-command.md",
+        content: "# Baseline",
+      }] }) })
+      .mockResolvedValueOnce({ ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+    const manifest: SyncManifest = {
+      version: 1,
+      project: "project",
+      lastFullSync: "",
+      resources: { skills: {}, agents: {}, plugins: {}, commands: { "local-command": baseline }, config: {} },
+    };
+
+    const result = await syncCommands(worktree, "project", manifest, { isInitialSync: false });
+
+    expect(result).toMatchObject({ pushed: 0, errors: 1, conflicts: 0 });
+    expect(manifest.resources.commands["local-command"]).toBe(baseline);
+  });
+});
+
+describe("legacy skill tombstone cleanup", () => {
+  it("keeps a racing SKILL.md non-discoverable when directory removal fails after marker unlink", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const legacyPath = join(worktree, ".opencode", "skills", "legacy-skill");
+    fsFaults.beforeRmdir = (path) => {
+      if (basename(path) === "tombstone") {
+        writeFileSync(join(path, "SKILL.md"), "---\nname: legacy-skill\ndescription: raced\n---\n");
+      }
+    };
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.rejected).toEqual([{ path: ".opencode/skills/legacy-skill", reason: "rmdir-failed" }]);
+    expect(existsSync(legacyPath) && !existsSync(join(legacyPath, "MIGRATED-TO.md"))).toBe(false);
+    expect(buildRepositoryManifestV2(worktree).skills.map((skill) => skill.name)).not.toContain("legacy-skill");
+    const quarantine = join(worktree, ".opencode", "skills", ".ingenium-tombstone-cleanup");
+    const staged = join(quarantine, readdirSync(quarantine)[0]!, "tombstone");
+    expect(readFileSync(join(staged, "SKILL.md"), "utf8")).toContain("description: raced");
+  });
+
+  it("leaves the original valid tombstone in place when staging fails", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const legacyPath = join(worktree, ".opencode", "skills", "legacy-skill");
+    fsFaults.beforeRename = (source) => {
+      if (basename(source) === "legacy-skill") throw new Error("injected stage failure");
+    };
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.rejected).toEqual([{ path: ".opencode/skills/legacy-skill", reason: "stage-failed" }]);
+    expect(existsSync(join(legacyPath, "MIGRATED-TO.md"))).toBe(true);
+    expect(existsSync(join(worktree, ".opencode", "skills", "development-conventions", "SKILL.md"))).toBe(true);
+  });
+
+  it("restores the valid tombstone when marker unlink fails", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const legacyPath = join(worktree, ".opencode", "skills", "legacy-skill");
+    fsFaults.beforeUnlink = (path) => {
+      if (basename(path) === "MIGRATED-TO.md") throw new Error("injected unlink failure");
+    };
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.rejected).toEqual([{ path: ".opencode/skills/legacy-skill", reason: "unlink-failed" }]);
+    expect(existsSync(join(legacyPath, "MIGRATED-TO.md"))).toBe(true);
+    expect(existsSync(join(worktree, ".opencode", "skills", ".ingenium-tombstone-cleanup"))).toBe(false);
+  });
+
+  it("retains a staged tombstone when restoration fails and recovers it on restart", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    const legacyPath = join(skillsRoot, "legacy-skill");
+    fsFaults.beforeUnlink = (path) => {
+      if (basename(path) === "MIGRATED-TO.md") throw new Error("injected unlink failure");
+    };
+    fsFaults.beforeRename = (source, destination) => {
+      if (basename(source) === "tombstone" && basename(destination) === "legacy-skill") {
+        throw new Error("injected restore failure");
+      }
+    };
+
+    const failed = cleanupLegacySkillTombstones(worktree);
+
+    expect(failed.rejected).toEqual([{ path: ".opencode/skills/legacy-skill", reason: "restore-failed" }]);
+    expect(existsSync(legacyPath)).toBe(false);
+    const quarantine = join(skillsRoot, ".ingenium-tombstone-cleanup");
+    expect(existsSync(join(quarantine, readdirSync(quarantine)[0]!, "tombstone", "MIGRATED-TO.md"))).toBe(true);
+    expect(buildRepositoryManifestV2(worktree).skills.map((skill) => skill.name)).not.toContain("legacy-skill");
+
+    fsFaults.beforeUnlink = undefined;
+    fsFaults.beforeRename = undefined;
+    expect(cleanupLegacySkillTombstones(worktree)).toMatchObject({
+      removed: [".opencode/skills/legacy-skill"],
+      rejected: [],
+    });
+    expect(existsSync(quarantine)).toBe(false);
+  });
+
+  it("recovers a markerless staged directory after an interrupted rmdir", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    const quarantine = join(skillsRoot, ".ingenium-tombstone-cleanup");
+    fsFaults.beforeRmdir = (path) => {
+      if (basename(path) === "tombstone") throw new Error("injected rmdir failure");
+    };
+
+    const failed = cleanupLegacySkillTombstones(worktree);
+
+    expect(failed.rejected).toEqual([{ path: ".opencode/skills/legacy-skill", reason: "rmdir-failed" }]);
+    const staged = join(quarantine, readdirSync(quarantine)[0]!, "tombstone");
+    expect(readdirSync(staged)).toEqual([]);
+    expect(existsSync(join(skillsRoot, "legacy-skill"))).toBe(false);
+
+    fsFaults.beforeRmdir = undefined;
+    expect(cleanupLegacySkillTombstones(worktree).rejected).toEqual([]);
+    expect(existsSync(quarantine)).toBe(false);
+  });
+
+  it("retains post-stage races and unrelated quarantine entries without recursive deletion", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    const quarantine = join(skillsRoot, ".ingenium-tombstone-cleanup");
+    fsFaults.afterRename = (source, destination) => {
+      if (basename(source) === "legacy-skill" && basename(destination) === "tombstone") {
+        writeFileSync(join(destination, "unexpected.txt"), "retain\n");
+      }
+    };
+
+    expect(cleanupLegacySkillTombstones(worktree).rejected).toEqual([
+      { path: ".opencode/skills/legacy-skill", reason: "post-stage-validation-failed" },
+    ]);
+    const stageName = readdirSync(quarantine)[0]!;
+    const staged = join(quarantine, stageName, "tombstone");
+    expect(readFileSync(join(staged, "unexpected.txt"), "utf8")).toBe("retain\n");
+
+    fsFaults.afterRename = undefined;
+    mkdirSync(join(quarantine, "not-helper-owned"), { mode: 0o700 });
+    writeFileSync(join(quarantine, "not-helper-owned", "keep.txt"), "keep\n");
+    const recovered = cleanupLegacySkillTombstones(worktree);
+    expect(recovered.rejected).toEqual([
+      { path: ".opencode/skills/.ingenium-tombstone-cleanup/not-helper-owned", reason: "unsafe-staging-entry" },
+      { path: `.opencode/skills/.ingenium-tombstone-cleanup/${stageName}`, reason: "unsafe-staging-entry" },
+    ]);
+    expect(readFileSync(join(staged, "unexpected.txt"), "utf8")).toBe("retain\n");
+    expect(readFileSync(join(quarantine, "not-helper-owned", "keep.txt"), "utf8")).toBe("keep\n");
+    expect(existsSync(join(skillsRoot, "development-conventions", "SKILL.md"))).toBe(true);
+  });
+
+  it("recovers only a lineage-mapped helper-owned staged tombstone", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    const quarantine = join(skillsRoot, ".ingenium-tombstone-cleanup");
+    const stage = join(quarantine, "stage-legacy-skill-12345678-1234-4123-8123-123456789abc");
+    mkdirSync(stage, { recursive: true, mode: 0o700 });
+    chmodSync(quarantine, 0o700);
+    chmodSync(stage, 0o700);
+    renameSync(join(skillsRoot, "legacy-skill"), join(stage, "tombstone"));
+    mkdirSync(join(quarantine, "stage-unknown-12345678-1234-4123-8123-123456789abc"), { mode: 0o700 });
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.removed).toEqual([".opencode/skills/legacy-skill"]);
+    expect(result.rejected).toEqual([
+      { path: ".opencode/skills/.ingenium-tombstone-cleanup/stage-unknown-12345678-1234-4123-8123-123456789abc", reason: "unsafe-staging-entry" },
+    ]);
+    expect(existsSync(stage)).toBe(false);
+    expect(existsSync(join(quarantine, "stage-unknown-12345678-1234-4123-8123-123456789abc"))).toBe(true);
+    expect(existsSync(join(skillsRoot, "development-conventions", "SKILL.md"))).toBe(true);
+  });
+
+  it("never accepts a canonical skill name as a cleanup source", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill", target: "devops-conventions" }]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    mkdirSync(join(skillsRoot, "development-conventions"));
+    writeFileSync(join(skillsRoot, "development-conventions", "SKILL.md"), "canonical\n");
+    const mapPath = join(skillsRoot, "consolidation-map.json");
+    const map = JSON.parse(readFileSync(mapPath, "utf8"));
+    map.mappings[0].source = "development-conventions";
+    writeFileSync(mapPath, JSON.stringify(map));
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.rejected).toEqual([
+      { path: ".opencode/skills/consolidation-map.json", reason: "invalid-consolidation-map" },
+    ]);
+    expect(existsSync(join(skillsRoot, "development-conventions", "SKILL.md"))).toBe(true);
+  });
+
+  it("dry-runs, removes a lineage-proven marker directory without network access, and is idempotent", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const legacyPath = join(worktree, ".opencode", "skills", "legacy-skill");
+
+    expect(cleanupLegacySkillTombstones(worktree, { dryRun: true })).toEqual({
+      dryRun: true,
+      removable: [".opencode/skills/legacy-skill"],
+      removed: [],
+      rejected: [],
+    });
+    expect(existsSync(legacyPath)).toBe(true);
+
+    expect(cleanupLegacySkillTombstones(worktree)).toEqual({
+      dryRun: false,
+      removable: [".opencode/skills/legacy-skill"],
+      removed: [".opencode/skills/legacy-skill"],
+      rejected: [],
+    });
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(cleanupLegacySkillTombstones(worktree)).toEqual({
+      dryRun: false,
+      removable: [],
+      removed: [],
+      rejected: [],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
+  });
+
+  it("leaves malformed, nonempty, symlinked, and traversal-mapped candidates untouched", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [
+      { source: "malformed" },
+      { source: "nonempty" },
+      { source: "symlinked" },
+      { source: "traversal", sourcePath: "../outside/source-index.md" },
+    ]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    writeFileSync(join(skillsRoot, "malformed", "MIGRATED-TO.md"), "not a valid marker\n");
+    writeFileSync(join(skillsRoot, "nonempty", "keep.txt"), "keep\n");
+    const symlinkTarget = join(worktree, "symlink-target");
+    rmSync(join(skillsRoot, "symlinked"), { recursive: true });
+    mkdirSync(symlinkTarget);
+    writeFileSync(join(symlinkTarget, "MIGRATED-TO.md"), "outside\n");
+    symlinkSync(symlinkTarget, join(skillsRoot, "symlinked"));
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.removed).toEqual([]);
+    expect(result.rejected).toEqual([
+      { path: ".opencode/skills/malformed", reason: "marker-mismatch" },
+      { path: ".opencode/skills/nonempty", reason: "nonempty-directory" },
+      { path: ".opencode/skills/symlinked", reason: "unsafe-candidate" },
+      { path: ".opencode/skills/traversal", reason: "invalid-source-index" },
+    ]);
+    for (const source of ["malformed", "nonempty", "symlinked", "traversal"]) {
+      expect(existsSync(join(skillsRoot, source))).toBe(true);
+    }
+  });
+
+  it("applies cleanup before repository skill scanning and the MCP call", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const credentialPath = join(worktree, ".opencode", ".ingenium-repository-sync-credential");
+    writeFileSync(credentialPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    chmodSync(credentialPath, 0o600);
+    vi.stubEnv("INGENIUM_PROJECT", "cleanup-project");
+    vi.stubEnv("INGENIUM_WORKSPACE_ID", "cleanup-workspace");
+    vi.stubEnv("INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
+    const legacyPath = join(worktree, ".opencode", "skills", "legacy-skill");
+    mockCallMcpTool.mockImplementation(async (_worktree, _tool, args) => {
+      return { content: [{ type: "text", text: JSON.stringify({
+        docs: { summary: {} },
+        resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+        generation: (args.expectedGeneration as number) + 1,
+        manifestHash: "a".repeat(64),
+      }) }] };
+    });
+    const claim = (manifestGeneration: number) => ({
+      manifestGeneration,
+      proof: () => ({}),
+      renew: vi.fn(async () => undefined),
+      verify: vi.fn(async () => undefined),
+      quarantine: vi.fn(async () => undefined),
+    });
+
+    const docsOnly = await repositorySync(worktree, { scope: "docs", claim: claim(0) });
+    expect(docsOnly.docs.errors).toBe(0);
+    expect(existsSync(legacyPath)).toBe(true);
+    const result = await repositorySync(worktree, { claim: claim(1) });
+
+    expect(result.skills.errors).toBe(0);
+    expect(mockCallMcpTool).toHaveBeenCalledTimes(2);
+    expect(existsSync(legacyPath)).toBe(false);
+  });
+
+  it("performs zero cleanup filesystem mutations when repository ownership verification fails", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-denied-"));
+    createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
+    const credentialPath = join(worktree, ".opencode", ".ingenium-repository-sync-credential");
+    writeFileSync(credentialPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    chmodSync(credentialPath, 0o600);
+    vi.stubEnv("INGENIUM_PROJECT", "cleanup-denied-project");
+    vi.stubEnv("INGENIUM_WORKSPACE_ID", "cleanup-denied-workspace");
+    vi.stubEnv("INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE", ".opencode/.ingenium-repository-sync-credential");
+    const fileSystem = {
+      mkdir: vi.fn(),
+      rename: vi.fn(),
+      unlink: vi.fn(),
+      rmdir: vi.fn(),
+    };
+
+    await expect(repositorySync(worktree, {
+      cleanupFileSystem: fileSystem,
+      claim: {
+        manifestGeneration: 0,
+        proof: () => ({}),
+        renew: vi.fn(async () => undefined),
+        verify: vi.fn(async () => { throw new Error("stale claim"); }),
+        quarantine: vi.fn(async () => undefined),
+      },
+    })).rejects.toThrow("stale claim");
+
+    expect(Object.values(fileSystem).every((operation) => operation.mock.calls.length === 0)).toBe(true);
+    expect(existsSync(join(worktree, ".opencode", "skills", "legacy-skill"))).toBe(true);
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
+  });
+});
+
+describe("incremental resource sync recovery", () => {
+  it("keeps lower-level sync diagnostics off stdio without a lifecycle reporter", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-lifecycle-"));
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")));
+
+    const result = await syncSkills(worktree, "project", {
+      version: 1,
+      project: "project",
+      lastFullSync: "",
+      resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} },
+    }, { isInitialSync: true });
+
+    expect(result.errors).toBe(1);
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("does not consume the idle throttle when an incremental reconciliation fails", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-idle-"));
+    mkdirSync(join(worktree, ".opencode"));
+    writeFileSync(join(worktree, ".opencode", ".ingenium-repository-sync-credential"), `${"r".repeat(32)}\n`, { mode: 0o600 });
+    const originalProject = process.env.INGENIUM_PROJECT;
+    const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
+    process.env.INGENIUM_PROJECT = "idle-recovery-project";
+    process.env.INGENIUM_WORKSPACE_ID = "idle-recovery-workspace";
+    let calls = 0;
+    mockCallMcpTool.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("MCP unavailable");
+      return { content: [{ type: "text", text: JSON.stringify({
+        docs: { summary: {} },
+        resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+        generation: 1,
+        manifestHash: "a".repeat(64),
+      }) }] };
+    });
+
+    try {
+      const failed = await incrementalSync(worktree);
+      const recovered = await incrementalSync(worktree);
+      const throttled = await incrementalSync(worktree);
+
+      expect(failed?.docs?.errors).toBe(1);
+      expect(recovered?.docs?.errors).toBe(0);
+      expect(throttled).toBeNull();
+      expect(calls).toBe(2);
+    } finally {
+      if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
+      else process.env.INGENIUM_PROJECT = originalProject;
+      if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+      else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
+    }
   });
 });

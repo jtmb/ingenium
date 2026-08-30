@@ -26,6 +26,7 @@ function ToolButton({
       type="button"
       onClick={onClick}
       title={title}
+      aria-label={title}
       className="shrink-0 p-1 min-w-[28px] min-h-[28px] flex items-center justify-center rounded text-sm transition-colors
         text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
     >
@@ -33,8 +34,6 @@ function ToolButton({
     </button>
   );
 }
-
-// ── Mode toggle ────────────────────────────────────────────────────────────────
 
 function ModeButton({
   active,
@@ -49,6 +48,7 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`shrink-0 px-2 py-0.5 text-xs rounded transition-colors
         ${active
           ? "bg-[var(--color-selection-bg)] text-[var(--color-accent)] font-medium"
@@ -181,14 +181,13 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
 }) => {
   return (
     <div
-      className="flex items-center gap-0.5 px-2 py-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto"
+      className="flex min-w-0 flex-wrap items-center gap-0.5 px-2 py-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] min-h-9 h-auto lg:flex-nowrap lg:h-9"
       role="toolbar"
       aria-label="Editor toolbar"
-      style={{ height: "36px" }}
     >
       {/* Formatting buttons — only shown in edit/source/split modes */}
       {(mode === "edit" || mode === "source" || mode === "split") && (
-        <>
+        <div className="flex min-w-0 basis-full flex-wrap items-center gap-0.5 lg:basis-auto lg:flex-1">
           {FORMAT_BUTTONS.map((btn) => (
             <ToolButton
               key={btn.label}
@@ -199,15 +198,15 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </ToolButton>
           ))}
           <div className="w-px h-5 bg-[var(--color-border)] mx-1 shrink-0" />
-        </>
+        </div>
       )}
 
       {/* Spacer pushes mode toggles to the right */}
-      <div className="flex-1" />
+      {mode === "view" && <div className="hidden lg:block lg:flex-1" />}
 
       {/* Mode toggles */}
       {showModeToggles && (
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex basis-full items-center justify-end gap-1 shrink-0 lg:basis-auto">
           {MODE_OPTIONS.map((opt) => (
             <ModeButton
               key={opt.mode}

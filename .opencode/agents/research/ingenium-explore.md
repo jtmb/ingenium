@@ -4,6 +4,7 @@ description: "Fast read-only agent for codebase exploration — find files, sear
 mode: subagent
 permission:
   read: allow
+  question: deny
   glob: allow
   grep: allow
   edit: deny
@@ -14,6 +15,7 @@ permission:
   ingenium_docs_get_page: allow
   skill:
     "@local-models": allow
+    "@ponytail": allow
     "*": deny
 ---
 

@@ -1,11 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { loadDashboardApiToken } = vi.hoisted(() => ({
-  loadDashboardApiToken: vi.fn(),
-}));
-
-vi.mock("../src/lib/dashboard-token", () => ({ loadDashboardApiToken }));
-
 import { GET } from "../src/app/api/v1/opencode/sessions/[id]/events/route";
 
 const encoder = new TextEncoder();
@@ -30,7 +24,6 @@ describe("OpenCode session event route", () => {
   });
 
   it("streams the real OpenCode envelope on the persistent session event path", async () => {
-    loadDashboardApiToken.mockReturnValue("a".repeat(32));
     const { stream, controller } = realOpenCodeEnvelopeStream();
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(stream, {
@@ -43,14 +36,14 @@ describe("OpenCode session event route", () => {
     const response = await GET(
       new Request(
         "http://dashboard.test/api/v1/opencode/sessions/ses_live/events?directory=%2Fworkspace",
-        { headers: { "Last-Event-ID": "evt_42" } },
+        { headers: { Cookie: "__Host-ingenium_session=fixture", "Last-Event-ID": "evt_42" } },
       ),
       { params: Promise.resolve({ id: "ses_live" }) },
     );
     const reader = response.body?.getReader();
     expect(reader).toBeDefined();
 
-    // This is the shape emitted by deployed OpenCode 1.18.3: `properties`
+    // This is the shape emitted by deployed OpenCode 1.18.9: `properties`
     // carries sessionID, and semantic part type arrives before text deltas.
     // Intentionally leave the stream open after session.idle: real /event
     // connections are persistent rather than response-per-turn streams.
@@ -105,15 +98,36 @@ describe("OpenCode session event route", () => {
     );
     expect(init.cache).toBe("no-store");
     const upstreamHeaders = init.headers as Headers;
-    expect(upstreamHeaders.get("authorization")).toBe(`Bearer ${"a".repeat(32)}`);
+    expect(upstreamHeaders.get("cookie")).toBe("__Host-ingenium_session=fixture");
+    expect(upstreamHeaders.get("authorization")).toBeNull();
     expect(upstreamHeaders.get("last-event-id")).toBe("evt_42");
 
     controller.close();
     await reader!.cancel();
   });
 
-  it("does not make an upstream request without the server-only API token", async () => {
-    loadDashboardApiToken.mockReturnValue(null);
+  it("defaults to the private Express listener in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(
+      new Request("http://dashboard.test/api/v1/opencode/sessions/ses_live/events", {
+        headers: { Cookie: "__Host-ingenium_session=fixture" },
+      }),
+      { params: Promise.resolve({ id: "ses_live" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:4096/api/v1/opencode/sessions/ses_live/events",
+    );
+  });
+
+  it("does not make an upstream request without a browser session", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -122,7 +136,7 @@ describe("OpenCode session event route", () => {
       { params: Promise.resolve({ id: "ses_live" }) },
     );
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

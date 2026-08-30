@@ -1,0 +1,46 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
+    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs"
+  ],
+  "mcp": {
+    "ingenium": {
+      "type": "local",
+      "command": ["node", "{env:PWD}/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+      "enabled": true,
+      "environment": {
+        "PATH": "{env:PATH}",
+        "INGENIUM_API_URL": "{env:INGENIUM_API_URL}",
+        "INGENIUM_MCP_CREDENTIAL_FILE": "{env:INGENIUM_MCP_CREDENTIAL_FILE}",
+        "INGENIUM_RUNTIME_CREDENTIAL_FILE": "{env:INGENIUM_RUNTIME_CREDENTIAL_FILE}",
+        "INGENIUM_MCP_AUDIENCE": "{env:INGENIUM_MCP_AUDIENCE}",
+        "INGENIUM_PROJECT": "{env:INGENIUM_PROJECT}",
+        "INGENIUM_WORKSPACE_ID": "{env:INGENIUM_WORKSPACE_ID}",
+        "INGENIUM_WORKTREE": "{env:INGENIUM_WORKTREE}"
+      }
+    }
+  },
+  "agent": {
+    "ingenium-llm-broker": {
+      "name": "ingenium-llm-broker",
+      "description": "Internal agent for Ingenium LLM broker — never invoke directly",
+      "mode": "subagent",
+      "hidden": true,
+      "disable": false,
+      "model": "",
+      "prompt": "{file:/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md}",
+      "permission": {
+        "*": "deny",
+        "external_directory": {
+          "/home/appuser/.local/share/opencode/tool-output/*": "deny",
+          "/home/ingenium-opencode/.local/share/opencode/tool-output/*": "deny"
+        }
+      }
+    }
+  }
+}

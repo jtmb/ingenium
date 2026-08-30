@@ -1,14 +1,19 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { Suspense, useEffect, useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ALL_TABS, tabForPathname } from "./tabs";
 import type { SettingsTab, SettingsTabId } from "./tabs";
 import SettingsSidebar from "./SettingsSidebar";
-import { GeneralPanel, MailPanel, PipelinePanel, ConfigPanel } from "./panels";
+import Select from "../Select";
+import GeneralPanel from "./panels/GeneralPanel";
+import MailPanel from "./panels/MailPanel";
+import PipelinePanel from "./panels/PipelinePanel";
+import ConfigPanel from "./panels/ConfigPanel";
 import type { ComponentType } from "react";
 import RouteLinkedPanel from "./RouteLinkedPanel";
+import PanelErrorBoundary from "./PanelErrorBoundary";
 
 /**
  * A settings section rendered in the overlay as a link to its dedicated
@@ -31,6 +36,11 @@ type SettingsPanelDefinition = ComponentType | RouteLinkedPanelDefinition;
  */
 const TAB_PANELS: Record<SettingsTabId, SettingsPanelDefinition> = {
   general: GeneralPanel,
+  account: { destination: "/account", description: "Manage your account profile and password." },
+  security: { destination: "/account#security", description: "Manage authenticator and recovery protection." },
+  sessions: { destination: "/account#sessions", description: "Review and revoke browser sessions and devices." },
+  "api-tokens": { destination: "/account#api-tokens", description: "Create and revoke scoped API tokens." },
+  organizations: { destination: "/organizations", description: "Manage organization members, invitations, roles, and project access." },
   projects: {
     destination: "/projects",
     description: "Create, switch, archive, restore, and purge projects in the Projects workspace.",
@@ -82,6 +92,12 @@ function isRouteLinkedPanel(
   return typeof panel === "object";
 }
 
+function pathWithSearchAndHash(pathname: string, params: URLSearchParams): string {
+  const query = params.toString();
+  const hash = typeof window === "undefined" ? "" : window.location.hash;
+  return `${pathname}${query ? `?${query}` : ""}${hash}`;
+}
+
 /** Resolves every supported tab ID to its concrete or route-linked panel. */
 function TabPanel({ tab }: { tab: SettingsTab }) {
   const panel = TAB_PANELS[tab.id];
@@ -99,6 +115,17 @@ function TabPanel({ tab }: { tab: SettingsTab }) {
     <section aria-label={`${tab.label} settings panel`} data-testid={`settings-panel-${tab.id}`}>
       <Panel />
     </section>
+  );
+}
+
+function PanelLoading({ tab }: { tab: SettingsTab }) {
+  return (
+    <div
+      className="px-6 py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse"
+      data-testid="settings-panel-loading"
+    >
+      Loading {tab.label} settings...
+    </div>
   );
 }
 
@@ -141,13 +168,13 @@ export default function SettingsOverlay() {
   const close = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("settings");
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    router.replace(pathWithSearchAndHash(pathname, params), { scroll: false });
   }, [pathname, router, searchParams]);
 
   const selectTab = useCallback((id: string) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("settings", id);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    router.replace(pathWithSearchAndHash(pathname, params), { scroll: false });
   }, [pathname, router, searchParams]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -216,7 +243,7 @@ export default function SettingsOverlay() {
           onSelect={selectTab}
         />
 
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
             <h2 id="settings-title" className="text-xl font-bold text-[var(--color-text-primary)]">Settings</h2>
             <button
@@ -232,23 +259,26 @@ export default function SettingsOverlay() {
           </div>
 
           {/* Mobile tab selector — visible only below md breakpoint */}
-          <select
+          <Select
+            wrapperClassName="md:hidden mx-6 mt-3"
             value={activeTab.id}
             onChange={(e) => selectTab(e.target.value)}
-            className="md:hidden mx-6 mt-3 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+            className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             aria-label="Settings category"
           >
             {ALL_TABS.map(tab => (
               <option key={tab.id} value={tab.id}>{tab.label}</option>
             ))}
-          </select>
+          </Select>
 
-          <div className="flex-1 overflow-y-auto">
-            {ALL_TABS.map((tab) => (
-              <div key={tab.id} hidden={tab.id !== activeTab.id} inert={tab.id !== activeTab.id || undefined}>
-                <TabPanel tab={tab} />
-              </div>
-            ))}
+          <div data-testid="settings-panel-scroll" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {/* Mount only the active panel. Inactive settings must not start
+                API requests or OpenCode provider discovery in the background. */}
+            <Suspense fallback={<PanelLoading tab={activeTab} />}>
+              <PanelErrorBoundary key={activeTab.id} panelId={activeTab.id}>
+                <TabPanel tab={activeTab} />
+              </PanelErrorBoundary>
+            </Suspense>
           </div>
         </div>
       </div>

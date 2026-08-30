@@ -29,7 +29,7 @@ The dashboard uses CSS custom properties (defined in `globals.css` via `@theme`)
 
 1. **Token definition**: Tokens are declared as `@theme` custom properties in `globals.css` with light-mode defaults
 2. **Dark overrides**: A `.dark` selector block overrides each token with dark-mode values
-3. **Runtime toggle**: The `ThemeToggle` component adds/removes `.dark` on `<html>`; all tokens react instantly
+3. **Runtime theme selection**: `GeneralPanel` updates the theme through `ThemeProvider`, which adds/removes `.dark` on `<html>`; all tokens react instantly
 4. **No `dark:` prefixes**: Components use `var(--color-surface)` and get the correct color in both modes via the cascade
 
 ### Token Mapping
@@ -159,6 +159,24 @@ Selected items in FileTree also use the token:
 | Nav Links | 13-14px | Medium (500) | `text-sm` |
 | Logo | 18px | Bold (700) | `text-lg font-bold` |
 
+## Authentication and Account UX
+
+- Public authentication routes use one centered `max-w-md` token-surface card on
+  `--color-surface-muted`, with visible labels, browser-appropriate autocomplete,
+  an `aria` status/alert region, and no application navigation behind the form.
+- Login, reset, verification, invitation, MFA, and bootstrap cards use
+  `rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6
+  hover:shadow-md transition-shadow`. Primary submit actions remain blue; provider
+  actions are bordered secondary buttons.
+- Account, security, session, API-token, and organization workflows remain full
+  pages. Settings deep links use route-linked panels rather than duplicating
+  sensitive state in the Settings portal.
+- Recent-authentication prompts use a centered modal, restore trigger focus,
+  close on Escape, clear credentials on close/failure, and never render token or
+  recovery material after the one-time acknowledgement state is dismissed.
+- The responsive top-bar control order is Project, Settings, Account. At 390px,
+  controls shrink without hiding their accessible names or overflowing the page.
+
 ## Layout
 
 | Element | Value | Tailwind |
@@ -177,6 +195,26 @@ Selected items in FileTree also use the token:
 | Card Grid (Desktop) | 3 columns | `grid grid-cols-1 md:grid-cols-3` |
 | Card Gap | 16px | `gap-4` |
 
+## Usage Analytics
+
+The `/usage` workspace uses an analytical, provider-neutral presentation: compact
+metric cards, a responsive SVG request trend, and horizontally scrollable data
+tables. It must retain the dashboard token system and not borrow provider branding.
+
+- **Metrics:** Use `rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow` cards. Availability is a subdued token-based pill; unavailable values are text, never synthetic zeroes. Reasoning-token cards use the same known/partial/unavailable treatment as other token counters.
+- **Filters:** Keep UTC explicit in labels and supporting copy. The `From` boundary is inclusive and the `To` boundary is visibly labelled exclusive in both controls and the applied-range label. Native selects use `bg-[var(--color-surface)]`, `hover:bg-[var(--color-surface-hover)]`, and `cursor-pointer`. Agent selection is disabled with an explicit unavailable state until reported attribution is present; status selection uses the API's canonical status values.
+- **Charts:** Use `--color-accent` for analytical lines and `--color-border` / `--color-border-muted` for axes and guides. SVG charts require a visible heading plus programmatic title and description, and must have a semantic data-table alternative.
+- **Tables:** Keep semantic `<table>` markup inside `overflow-x-auto` wrappers so analytical columns remain readable on mobile. Raw provider, model, and reported agent identifiers use a compact monospace treatment without renaming. Daily, breakdown, and event cost cells include the API availability label (`Known`, `Partial`, or `Unavailable`) alongside the amount; a `Partial` event may validly have no amount.
+- **Unknown telemetry:** Cost, cache counters, reasoning counters, and unsupported attribution must read `Unavailable` or `Partial` as supplied by the API. Do not calculate a cache-hit rate, currency conversion, or agent attribution when the API does not report it. Truncated CSV exports expose a continuation action only when the API supplies a continuation cursor.
+
+### Usage advisory panel (`/usage`)
+
+- Keep advisory configuration in the existing `/usage` analytical flow; do not add a navigation item, settings surface, or a second table abstraction. The panel is one token-surface card, with threshold fields in a compact `xl:grid-cols-5` grid and a one-column mobile stack.
+- Threshold inputs retain explicit labels and use blank `Disabled` placeholders. The reported-cost field is always labelled **Reported cost amount** and never adds a currency, estimate, conversion, or enforcement control. Revision and update timestamps are terse UTC metadata.
+- Selected-range results use compact token-surface cards; all-history attention uses semantic lifecycle cards in a `lg:grid-cols-2` grid. Severity is conveyed by token-based info/warning/error tones plus text, never color alone. Cards must retain `hover:shadow-md transition-shadow`.
+- Attention actions are limited to the routine blue **Evaluate attention now** button and a bordered **Acknowledge** button. There are no resolve, reopen, delete, suppress, retry, notification, throttling, sync, or mapping controls. Loading, empty, error, and continuation states keep currently loaded cards visible.
+- At 390px, fields, cards, metadata, and actions must wrap or stack without document overflow. Desktop keeps five threshold fields compact; existing telemetry tables remain semantic tables in their own horizontal wrappers.
+
 ## 🔴 Universal Card Component — Every Card Uses `hover:shadow-md transition-shadow`
 
 Every card on every page of the dashboard MUST use `hover:shadow-md transition-shadow`. This is a universal rule — not optional, not per-page. The only variation is size (`p-4` for list items, `p-6` for feature cards) and border radius (`rounded` for compact, `rounded-lg` for feature).
@@ -192,25 +230,77 @@ Every card on every page of the dashboard MUST use `hover:shadow-md transition-s
 | Hover Effect | Light shadow (ALWAYS) | `hover:shadow-md` |
 | Transition | 150ms (ALWAYS) | `transition-shadow` |
 
-## Nav Bar
+## Application Shell Navigation
+
+The top bar is a compact control strip: the responsive navigation control is
+immediately before the Ingenium logo, and ProjectDropdown then Settings remain
+at the far right. Page links live only in the left desktop rail or the mobile
+drawer; they are not duplicated in the top bar.
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
-| Background | White | `bg-white` |
-| Bottom Border | 1px gray | `border-b border-gray-200` |
-| Link Color (default) | Medium gray | `text-gray-600` |
-| Link Color (hover) | Dark gray | `hover:text-gray-900` |
-| Active Color | Dark | `text-gray-900` |
-| Layout | Logo left, nav links center, gear right | `flex items-center justify-between` |
-| Settings Gear | Sole far-right element | `ml-auto` |
+| Background | Surface token | `bg-[var(--color-surface)]` |
+| Bottom Border | 1px token border | `border-b border-[var(--color-border)]` |
+| Desktop rail | Full `w-56`, compact `w-14`; real flex layout item | `transition-[width] motion-reduce:transition-none` |
+| Compact links | Icon-only, labelled native tooltip | `aria-label` + `title` |
+| Mobile navigation | Modal `w-64 max-w-[85vw]` drawer with exit presence | `md:hidden fixed inset-0` |
+| Settings Gear | Far-right control after ProjectDropdown | `ml-auto` |
+
+### Left navigation scrollbar
+
+The desktop sidebar and shared mobile drawer use the named `.nav-scroll-area`
+class. Keep `overflow-y-auto` on both containers so wheel, touch, PageDown, and
+keyboard scrolling continue to use native behavior. The class reserves a
+stable, narrow scrollbar gutter (`scrollbar-gutter: stable`, `scrollbar-width:
+thin`, and an 8px WebKit scrollbar) so showing the thumb never changes layout
+width.
+
+- Idle Firefox scrollbar colors are `transparent transparent`.
+- Idle WebKit thumb and track are transparent; scrollbar buttons are hidden.
+- On hover-capable devices, only the thumb changes to the theme token
+  `--color-nav-scrollbar-thumb`; the track remains transparent.
+- The `(hover: none)` override prevents touch browsers from keeping desktop
+  scrollbar chrome visible after a tap.
+- Do not apply this class to main-content scroll containers, add JavaScript,
+  or replace the native overflow behavior with `overflow: hidden`.
 
 ### Nav Layout
 
-The nav bar uses a four-zone layout:
-1. **Left**: Logo / branding
-2. **Center**: Page navigation links
-3. **Right (inner)**: ProjectDropdown (folder icon + chevron)
-4. **Right (outer)**: Settings gear icon (⚙️)
+The shell has three responsive zones:
+1. **Left**: one breakpoint-specific navigation control immediately before the logo. On desktop it collapses or expands the rail; on mobile it opens or closes the drawer.
+2. **Body**: the desktop rail is a shrink-proof `w-56`/`w-14` sibling of the `min-w-0` content column. Compact mode preserves link/group order and group state while visually hiding labels and badges.
+3. **Right**: ProjectDropdown followed by the Settings gear.
+
+The mobile drawer is a labelled modal. It traps and redirects focus, closes on Escape or backdrop, restores focus to its trigger for user-initiated closes, and locks body scroll while mounted. Route and desktop-breakpoint closes do not restore focus to the hidden mobile trigger. The top bar and main content use `data-nav-background` and become inert with `aria-hidden="true"` while the drawer is open; their exact prior states are restored on close.
+
+Collapsed navigation groups retain their height/opacity transition but add `inert` and `aria-hidden` immediately, so hidden links never remain keyboard or screen-reader reachable. Rail, group, chevron, and drawer transitions use `motion-reduce:transition-none` and the reduced-motion CSS fallback.
+
+### Edge-drawer motion contract
+
+The dependency-free `EdgeDrawer` primitive is the canonical presence and motion
+mechanism for these actual edge overlays: main mobile Navigation, DocsShell's
+mobile/tablet page-tree and details drawers, ChatShell's mobile session drawer,
+MCPDrawer, and ActivityDrawer. It does **not** cover desktop Docs/Chat/Mail
+inline rails, centered modals, dropdowns, disclosures, or the Settings overlay.
+
+- **Timing:** entry and exit use `240ms` with the decelerating
+  `cubic-bezier(0.22, 1, 0.36, 1)` easing.
+- **Motion:** only the panel's `transform` transitions, using
+  `translate3d`; the backdrop transitions `opacity` with the same timing.
+- **Presence:** close changes the panel to its off-screen state and retains it
+  until its `transform` `transitionend`; reopening during exit reverses the
+  same mounted instance. No fixed exit delay is used.
+- **Reduced motion:** `prefers-reduced-motion: reduce` disables transitions and
+  deterministically mounts open drawers or unmounts closed drawers immediately.
+- **Accessibility:** open drawers retain their existing surface dimensions,
+  z-index, scrolling, focus, Escape, backdrop, and route behavior. A drawer
+  retained only for exit is `aria-hidden` and `inert`, so its controls cannot be
+  reached while it is visually closing.
+- **Desktop rail:** the main Navigation rail reserves layout width and
+  transitions `224px` ↔ `56px` as a flex item. Labels, badges, gaps, and the
+  content offset follow the width transition; the rail itself is never
+  transformed. Prepaint persistence still sets the compact root attribute
+  before hydration.
 
 ### Removed from Nav
 
@@ -218,7 +308,7 @@ The nav bar uses a four-zone layout:
 
 ## ProjectDropdown — Icon-Based Dropdown Pattern
 
-The `ProjectDropdown` component (`components/ProjectDropdown.tsx`) is the canonical pattern for icon-based dropdowns in the nav bar.
+The `ProjectDropdown` component (`components/ProjectDropdown.tsx`) is the canonical pattern for icon-based dropdowns in the nav bar. Its behavior is supplied by the shared `app/components/Dropdown.tsx` menu primitive.
 
 ### Anatomy
 
@@ -226,9 +316,10 @@ The `ProjectDropdown` component (`components/ProjectDropdown.tsx`) is the canoni
 |---------|---------------|-------|
 | Trigger button | Folder SVG icon + chevron SVG | 20x20 folder icon, 12x12 chevron |
 | Active hover | `hover:bg-[var(--color-surface-hover)]` | Only when not disabled |
+| `/chat` trigger | Folder SVG icon + bounded text + chevron | Desktop shows `Context project: {validatedName}`; mobile hides only the descriptive prefix, keeps the validated name visible when it fits, and preserves the full context label in `aria-label` |
 | Disabled state | `opacity-50 cursor-not-allowed` | On `/mail` and `/opencode` pages |
-| Title tooltip | Shows `Active project: {name}` or disabled message | Dynamic per state |
-| Dropdown panel | `absolute right-0 top-full mt-1 w-64` | `z-50`, `shadow-xl`, `rounded-lg` |
+| Title tooltip | Shows `Active project: {name}`, `Context project: {name}`, or disabled message | Dynamic per state |
+| Dropdown panel | `absolute right-0 top-full mt-1 w-64` | `z-50`, `shadow-xl`, `rounded-md` |
 | Dropdown item | `w-full text-left px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)]` | Active item gets `font-semibold` + checkmark |
 
 ### Key Patterns
@@ -237,13 +328,13 @@ The `ProjectDropdown` component (`components/ProjectDropdown.tsx`) is the canoni
    ```tsx
    <Suspense fallback={null}><ProjectDropdown /></Suspense>
    ```
-2. **Outside-click close**: Uses `useRef<HTMLDivElement>` + `mousedown` event listener on `document` — if the click target is outside the ref, closes the dropdown.
-3. **Page-aware disabled state**: Reads `usePathname()` and disables the dropdown when `pathname` starts with `/mail` or `/opencode` — project context doesn't apply to these pages.
-4. **Lazy data fetch**: Projects list is fetched only when the dropdown opens (`useEffect` on `open` state), avoiding an initial API call on every page load.
+2. **Outside-click close**: The shared `Dropdown` layer closes on outside pointer down and Escape, and returns focus to the trigger.
+3. **Page-aware state**: Reads `usePathname()` and disables the dropdown when `pathname` starts with `/mail` or `/opencode` — `/chat` remains switchable so its explicit Context project follows the validated active project.
+4. **Lazy data fetch**: Projects list is fetched only from the open handler, avoiding an initial API call on every page load and retrying cleanly after a failed open.
 
 ### Usage Rules
 
-- Any new icon-based dropdown added to the nav bar MUST follow this pattern (Suspense wrapper, outside-click close, disabled state where applicable).
+- Any new icon-based dropdown added to the nav bar MUST follow this pattern (Suspense wrapper, shared `Dropdown`, outside-click close, disabled state where applicable).
 - Never use a select element or persistent picker for project switching — the icon-dropdown is the standard.
 - The dropdown panel MUST use `z-50` to overlay the nav bar and `shadow-xl` for visual separation.
 
@@ -282,7 +373,7 @@ Each setting row uses the `SettingRow` component:
 ### Controls
 | Type | Styling |
 |------|---------|
-| Select | Same mandated pattern as all dashboard selects (border + px-3 py-1.5 + rounded + hover:bg) |
+| Select | Shared `Select` component with mandated border + padding + rounded + hover treatment |
 | Number input | `border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)]` |
 | Text input | Same as number input |
 | Password input | Same as text input + show/hide toggle button |
@@ -294,6 +385,12 @@ Each setting row uses the `SettingRow` component:
 - **ConfigPanel**: Link to /config editor
 - **Route-linked panels**: Projects → `/projects`, Skills → `/skills`, Tasks → `/tasks`, Jobs → `/jobs`, Plugins → `/plugins`, Agents → `/agents`, MCP → `/mcp-servers`, Observations → `/observations`, Personality → `/personality`, and Logs → `/logs`
 - Route-linked panels use `RouteLinkedPanel`: a concise category description plus an **Open {label} workspace** link. They intentionally reuse the dedicated route's data loading, authorization, mutation flows, and responsive UI rather than rendering placeholder content in the overlay.
+
+### Personality Workspace
+- The header uses separate **Established** and **Emerging** counts; established means confidence `≥ 0.30`.
+- Active sub-threshold traits use the warning surface and border tokens in an **Emerging traits — awaiting confirmation** card.
+- Each emerging trait shows an `Emerging · N% confidence` badge and confidence bar. The card remains present in both grouped and newest sort modes.
+- Dismiss controls are available on every trait row and remove the row from the active view immediately.
 
 ### PipelinePanel — Draft Lifecycle & Native Provider Cards
 
@@ -313,8 +410,8 @@ A `fixed inset-0 z-[80]` modal with `bg-black/60` backdrop and `max-w-lg rounded
 | Element | Styling |
 |---------|---------|
 | Header | Provider name + "Models will be loaded automatically from OpenCode." subtitle |
-| Login method | `<select>` with standard select classes (only shown when multiple methods exist) |
-| Prompt fields | Dynamic form fields per integration method prompts (text inputs or selects) |
+| Login method | Shared `Select` with standard select classes (only shown when multiple methods exist) |
+| Prompt fields | Dynamic form fields per integration method prompts (text inputs or shared `Select` controls) |
 | API key field | Key-based connections: password input with standard input classes |
 | OAuth buttons | "Continue in browser" opens OAuth URL in new tab; auto-mode shows "Waiting for authorization..."; code-mode shows Authorization code input + "Complete connection" |
 | Cancel | `×` button in header, calls `closeConnect()` which cancels pending attempts |
@@ -360,9 +457,9 @@ The PipelinePanel manages a local `providers` state array of `DraftProvider` obj
 
 ## Canonical Markdown Renderer — MarkdownDocument
 
-> 🔴 **Hard rule**: All Markdown rendering must use `MarkdownDocument` from `components/MarkdownDocument.tsx`. Never write inline `marked`/`DOMPurify` calls in page or component code.
+> 🔴 **Hard rule**: Document and skill previews must use `MarkdownDocument` from `components/MarkdownDocument.tsx`. Chat messages use that module's `renderMarkdown` helper directly so they can retain chat-specific classes. Never duplicate `marked`/`DOMPurify` calls.
 
-The `MarkdownDocument` component is the single source of truth for rendering Markdown in the dashboard. It uses:
+The shared Markdown renderer is the source of truth for rendering Markdown in the dashboard. It uses:
 
 - **`marked`** with `gfm: true` for GFM (tables, strikethrough, task lists)
 - **`DOMPurify`** for sanitization (allowed tags and attributes explicitly configured)
@@ -375,18 +472,19 @@ The `MarkdownDocument` component is the single source of truth for rendering Mar
 |-----------|------|-------|
 | `DocsEditor` | View & Split | Replaced inline renderMarkdown |
 | `MarkdownViewer` | Preview | Replaced custom regex-based parser |
+| `ChatMarkdown` | Inline chat messages | Uses `renderMarkdown` with `chat-markdown text-sm` classes |
 | Proposal comparison | N/A | Intentional exception — raw `<pre>` blocks, no Markdown rendering |
 
 ### Dark Mode
 
 Dark-mode typography is handled entirely by Tailwind's `dark:prose-invert` class. No custom CSS variables or theme tokens are needed for Markdown body text. The component uses `text-[var(--color-text-primary)]` as a fallback for any non-prose elements.
 
-### Adding a New Consumer
+### Adding a New Document Consumer
 
 1. Import `MarkdownDocument` from `@/app/components/MarkdownDocument`
 2. Pass `content` (raw Markdown string) and optional `className`
 3. Do NOT add wrapping `bg`, `border`, or `shadow` containers — the prose styling is self-contained
-4. Do NOT use `dangerouslySetInnerHTML` with custom renderers — always use `MarkdownDocument`
+4. If the consumer needs custom wrapper classes, import `renderMarkdown` from the same module and keep the sanitizer centralized
 
 ## Dark Mode Badge / Pill Pattern
 
@@ -439,9 +537,16 @@ Each hue generates: `bg-{hue}-100 text-{hue}-700 dark:bg-{hue}-500/20 dark:text-
 7. **Every card on every page must have `hover:shadow-md transition-shadow`**. This includes settings cards, MCP server rows, MCP category cards, observations, pipeline events, and any other card-based element. If a new page adds cards, they MUST follow this rule.
 8. **Always use explicit border colors for critical borders**. Never use bare `border`/`border-t`/`divide-y` without an explicit border-color utility for visually important separators. The global default covers minor borders.
 9. **Must pair every `ring-offset-{n}` with `ring-offset-[var(--color-surface)]`**. Tailwind's default `--tw-ring-offset-color` is `#fff`, which creates a white halo in dark mode. This was fixed on the logs and pipeline pages and must be followed for any new `ring-offset` usage.
-10. **Icon-based dropdowns must follow the ProjectDropdown pattern**: folder icon button + chevron, `opacity-50 cursor-not-allowed` disabled state, `Suspense` wrapper in layout.tsx, outside-click close via `useRef` + `mousedown` listener, absolute positioned dropdown panel with `z-50` and `shadow-xl`.
+10. **Icon-based dropdowns must follow the ProjectDropdown pattern**: folder icon button + chevron, `opacity-50 cursor-not-allowed` disabled state, `Suspense` wrapper in layout.tsx, shared `Dropdown` outside-click/Escape behavior, and an absolute panel with `z-50` and `shadow-xl`.
 
 11. **Chat agent-output plain flow**: On `/chat`, assistant prose, provider reasoning, stream activity/errors, generated file/image/download renderers, Chat-only Markdown callouts, tool traces, and agent permission/question output must not use cards, borders, rounded containers, or background bubbles. A muted inline dot/text is allowed before provider reasoning arrives and is replaced immediately by live reasoning. User-message bubbles retain `rounded-2xl` plus `bg-[var(--color-surface-selected)]`; Docs Markdown callouts retain their documented styling.
+
+### Chat Workspace (`/chat`)
+
+- Message, error, prompt, and activity content is centered in one full-width `48rem` rail (`mx-auto w-full max-w-3xl space-y-6`) inside the existing padded scroll container. The message scroller and the full-width composer/fallback outer regions share native `[scrollbar-gutter:stable]` reservation so their centerlines stay aligned with classic scrollbars; the rail remains full-width within mobile padding.
+- The composer keeps project context off by default. Its compact `Context project: {validatedName}` action sits beside Attach, uses token-based hover/selected states, exposes `aria-pressed`, hides only the descriptive prefix on mobile, and keeps the selected project visible with a bounded truncation label plus a full accessible name. It resets only after an accepted send or session remount and remains available after a failed request.
+- Provider, model, variant, and agent controls remain native labeled selects rendered through the shared `Select` component. Pass compact `className`/`wrapperClassName` values to preserve the toolbar geometry; `Select` owns the 12px decorative chevron and native keyboard/mobile behavior.
+- On mobile, the session sidebar becomes an overlay drawer and the provider/model/variant/agent selectors remain in a horizontally scrollable compact row; the message rail and composer stay full-width within mobile padding without document or composer overflow.
 
 12. **Standard Overlay Size is `w-11/12 max-w-7xl max-h-[90vh]`** — the `Overlay` component default (when `fullScreen` is not set) is `mt-8 mb-8 w-11/12 max-w-7xl max-h-[90vh]`. This is the canonical size for all overlay panels (skill detail, service detail, pipeline events, logs detail). The `fullScreen` prop (`w-[calc(100%-32px)] h-[calc(100%-32px)]`) is no longer used by any page — the Settings overlay was the last consumer and now also uses the constrained default. Any new overlay MUST NOT set `fullScreen={true}`; use the constrained default. Size customization (e.g., `max-w-2xl` for narrow diagnostic overlays like `ServiceOverlay.tsx` line 240) is acceptable when the overlay is used standalone outside the shared `Overlay` component.
 
@@ -468,13 +573,18 @@ Data-driven operational cards used on the homepage (`page.tsx`). These display l
 
 ```html
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-  <!-- Four DashboardCard components -->
+  <!-- AttentionQueue + ResumeWork -->
 </div>
 ```
 
 Desktop: 2-column grid. Mobile: single-column stack with full-width cards.
 
-#### Card Structure
+The homepage composes `QuickActions`, `AttentionQueue`, `ResumeWork`,
+`ActivityTimeline`, and `HealthStrip` directly; there is no shared
+card wrapper. Each section owns its loading, empty, unavailable, and
+error presentation.
+
+#### Section Structure
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
@@ -487,61 +597,20 @@ Desktop: 2-column grid. Mobile: single-column stack with full-width cards.
 | Header | Title (left) + optional badge (right) | `flex items-center justify-between mb-4` |
 | CTA Link | Bottom separator + text link | `mt-4 pt-3 border-t border-[var(--color-border-muted)]` with `text-sm text-[var(--color-text-link)] hover:underline font-medium` |
 
-#### Component: `DashboardCard` (`components/DashboardCard.tsx`)
-
-Reusable module card with five visual states:
-
-| State | Visual Indicator | When |
-|-------|-----------------|------|
-| **Loading** | `animate-pulse` skeleton placeholder with 3 bars | `loading={true}` prop |
-| **Normal** | Standard card with hover shadow | Data loaded, module available |
-| **Degraded (Unavailable)** | Orange left border (`border-l-4 border-l-orange-400`) + "Unavailable" badge (orange pill, top-right) | Module returned `null` from API; `unavailable` prop |
-| **Empty** | Contextual message with CTA link | Module present but has no data (e.g., 0 tasks, 0 accounts) |
-| **Error (full page)** | Red error panel with message + "Retry" button | API request failed entirely |
-
-#### Props Interface
-
-```typescript
-interface DashboardCardProps {
-  title: string;              // Card heading
-  icon?: React.ReactNode;     // Optional inline icon (text labels preferred)
-  cta?: { label: string; href: string };  // Bottom CTA link
-  loading?: boolean;          // Show skeleton
-  unavailable?: boolean;      // Show orange degraded state
-  degraded?: boolean;         // Alias for unavailable
-  children: React.ReactNode;  // Card body content
-}
-```
-
-#### Usage Example
-
-```tsx
-<DashboardCard
-  title="Self-Learning"
-  unavailable={isUnavailable("learning")}
-  cta={{ label: "Run Synthesis →", href: "/pipeline" }}
->
-  <div className="flex items-baseline gap-2">
-    <span className="text-xl font-bold text-[var(--color-text-primary)]">3</span>
-    <span>pending observations</span>
-    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
-      Needs synthesis
-    </span>
-  </div>
-</DashboardCard>
-```
+The homepage sections share the surface, border, radius, padding, and hover
+tokens above, but each component owns its own loading and unavailable states.
 
 #### Design Rules
 
 1. **No emoji** — Use text labels only. No emoji in card titles, badges, or CTAs.
 2. **CSS tokens only** — All backgrounds, text, and borders use `var(--color-*)` tokens. The only exceptions are badge/pill colors (which use `badgeTones` from `lib/badgeTones.ts`) and the page-level error panel.
-3. **Asymmetric grid** — The Self-Learning card (top-left) is the most prominent. All cards share the same base styling; visual hierarchy comes from content density, badge treatments, and metric prominence.
+3. **Asymmetric grid** — Attention and Resume are paired on desktop; timeline and health span the page below. Visual hierarchy comes from content density, badge treatments, and metric prominence.
 4. **Auto-refresh** — Optional 60-second polling with a pause/resume button in the page header (`text-xs px-3 py-1.5 rounded border`). Paused state shows "Auto-refresh paused" with hover background; active state shows "Auto-refresh on".
-5. **Single fetch** — The homepage calls `api.home.summary(project)` once (not 6 serial fetches). All four cards derive their data from the single response.
+5. **Single fetch** — The homepage calls `api.home.summary(project)` once. All sections derive their data from the single response.
 
 #### Loading Skeleton: `DashboardSkeleton` (`components/DashboardSkeleton.tsx`)
 
-Renders four placeholder cards in the same 2×2 grid. Each card uses `animate-pulse` with three `bg-[var(--color-surface-muted)] rounded` bars of varying widths (1/3, 2/3, 1/2). Skeleton cards have `data-testid="dashboard-skeleton-card"` for Playwright targeting.
+Renders the homepage loading placeholders in the same responsive layout. Each placeholder uses `animate-pulse` with `bg-[var(--color-surface-muted)] rounded` bars and `data-testid="dashboard-skeleton-card"` for Playwright targeting.
 
 ### List Item Card
 
@@ -642,24 +711,97 @@ Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked c
 
 ## Select / Dropdown Styling
 
-All `<select>` elements must use theme-aware token classes — never hardcoded white/light backgrounds that break in dark mode.
+### Canonical native select
+
+`app/components/Select.tsx` is the canonical wrapper for every static native
+select in the dashboard. The 52 static consumers must import and render
+`Select`; consumer files must not contain raw `<select>` elements. `Select`
+provides the theme-aware surface, border, focus state, disabled state, and
+decorative chevron while forwarding native form props, option values, refs,
+keyboard events, and change handlers unchanged.
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
-| Frame | 1px border, surface background, rounded | `border border-[var(--color-border)] rounded bg-[var(--color-surface)]` |
+| Frame | 1px border, surface background, rounded | `border border-[var(--color-border)] bg-[var(--color-surface)] rounded` |
 | Padding | 8px horizontal, 6px vertical | `px-3 py-1.5` or `p-2` |
 | Text | 14px | `text-sm` |
 | Hover Background | Surface hover tone | `hover:bg-[var(--color-surface-hover)]` |
 | Cursor | Pointer | `cursor-pointer` |
 
-> 🔴 **Rule**: Every `<select>` element MUST use `bg-[var(--color-surface)]` (never `bg-white`) and `hover:bg-[var(--color-surface-hover)]` (never `hover:bg-gray-50`). Hardcoded white backgrounds break in dark mode because the `bg-white` stays fixed while text color inherits from the theme-aware body class — producing light text on a white surface. This has been fixed on the tasks page (Status, Priority, Issue-Type selects) — use those as the reference implementation.
+Use `className` for the native control's size and visual overrides and
+`wrapperClassName` for width, shrink, overflow, or compact-toolbar geometry.
+Visible labels use `htmlFor`/`id`; compact toolbar controls use a precise
+`aria-label`. Keep the exact option values, ordering, `name`, `required`,
+`disabled`, and `onChange` casts from the owning form.
 
-**Minimum required classes:**
-```
-border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer
-```
+> 🔴 **Rule**: Do not add a local chevron or a second raw native select. The
+> only raw `<select>` is the implementation inside `Select.tsx`.
 
-**Pages with selects:** Tasks (Status, Priority, Issue-Type), MCP (category filter), Observations (status + type filters), Personality (sort), Skills (sort), Agents (category + mode), Settings (provider + model + interval + backup), Mail (composer + sidebar).
+### Menus and comboboxes are different controls
+
+`Select` is for a finite native option list. It is not the shared pattern for
+custom action menus or searchable comboboxes:
+
+- **Action menus** use a button trigger and a positioned menu of actions. They
+  may contain destructive actions, icons, separators, and menu-specific
+  keyboard/focus behavior; do not replace them with `Select`.
+- **Comboboxes** use an editable/search input plus a filtered listbox and
+  explicit option selection. Use the combobox pattern when users need search,
+  free text, async results, or rich option rows; do not force those behaviors
+  into a native `Select`.
+- Project switching and other icon-triggered navigation remain menus, not
+  selects or persistent pickers.
+
+### Shared menu and combobox primitives
+
+The dashboard uses two small reusable families rather than one generic picker:
+
+- `app/components/Dropdown.tsx` provides `Dropdown`, `DropdownTrigger`,
+  `DropdownPanel`, and `DropdownItem` for action/navigation menus. Triggers
+  expose a stable `aria-label`, `aria-haspopup="menu"`, `aria-expanded`, and
+  `aria-controls`; panels use `role="menu"` and actions use `role="menuitem"`.
+  Arrow Up/Down, Home/End, printable-key typeahead, Escape, outside-pointer
+  dismissal, and trigger focus restoration are shared behavior. Menu panels use
+  the compact token surface, 1px border, `rounded-md`, `shadow-xl`, an 8px
+  minimum item height, and visible focus rings. Disabled actions remain in the
+  menu with `aria-disabled`, reduced opacity, and a not-allowed cursor.
+- `app/components/Combobox.tsx` provides `useListboxNavigation`, `Listbox`,
+  and `ListboxOption` for editable and async searches. Editable inputs expose
+  `role="combobox"`, `aria-autocomplete="list"`, stable `aria-controls`, and
+  `aria-activedescendant`; textareas that retain normal editing semantics use
+  `role="textbox"` with the same listbox relationship. Results use
+  `role="listbox"` and `role="option"`, with active/selected token states.
+  Arrow Up/Down, Home/End, Enter, Escape, async loading, empty, and error
+  states are rendered by the owning control. Search panels are bounded by the
+  viewport (`max-w-[calc(100vw-1rem)]`, scrollable result rows) and truncate
+  long labels instead of overflowing on mobile.
+
+Native **Select**, custom action **Menu**, and searchable **Combobox** are
+deliberately distinct: keep finite non-search form fields on `Select`, use a
+`Dropdown` menu for commands or navigation, and use the combobox/listbox
+family for filtering, async search, autocomplete, and rich result rows.
+
+**Pages with native selects:** Tasks, MCP, Observations, Personality, Skills,
+Agents, Settings, Mail, Chat, Docs, Jobs, and Usage.
+
+### Jobs workspace queue views
+
+`/jobs` keeps Jobs, Event queue, and Trusted events in one accessible tablist.
+Queue and audit filters use the shared `Select`, desktop results remain semantic
+tables inside focusable `overflow-x-auto` regions, and the corresponding mobile
+views use `md:hidden` token-based cards. Keep action rows `flex-wrap` so Run,
+Edit, and Delete do not clip at 390px. Trusted-event cards and tables render
+metadata only; they never render event payloads, lease ownership, or process data.
+
+Job vault references use native labelled checkboxes in the edit overlay (never
+a password/reveal control). The metadata picker is capped at 16 entries and is
+disabled while the vault is sealed or unavailable, while existing reference
+checkboxes remain available for explicit removal. Reference changes open a
+token-surface confirmation view with stacked `sm:grid-cols-3` authorize,
+refresh, and revoke summaries; names are shown only while unsealed. Detail and
+audit cards use wrapping IDs, text-labelled status badges, bounded “Load more”,
+and `hover:shadow-md transition-shadow`; at 390px they remain one-column with
+no document overflow.
 
 ---
 
@@ -735,7 +877,7 @@ highlight.js is loaded globally in `layout.tsx`:
 |-----------|-------------|---------------------|
 | FolderSidebar | FileTree sidebar | `min-w-[200px] max-w-[250px] bg-gray-50 border-r border-gray-200`. Items: `px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded`. Selected: `bg-blue-100 text-blue-800`. |
 | EmailList | List items with borders; resizable via drag handle | Rows: `px-4 py-3 border-b border-gray-200 hover:bg-gray-50`. Unread: `font-semibold text-gray-900`. Read: `text-gray-600`. Selected: `bg-blue-50`. **Resizable**: default 350px, min 240px, max 720px; drag handle (2px, `cursor-col-resize`, `hover:bg-blue-200`/`active:bg-blue-400`); keyboard ArrowLeft/ArrowRight; **touch support** via pointer events (`touch-action: none` on handle); width persisted in `localStorage` key `mail-list-width`. |
-| EmailComposer | Bare form fields inside Overlay; contains SmartSuggest inline chips when replying | `space-y-4 max-w-2xl mx-auto`. Send: `bg-blue-600 text-white py-2 px-4 rounded`. Draft: `text-gray-600 hover:text-gray-900`. **Smart reply props**: `emailUid`, `accountId`, `folder` passed from EmailReader — when present, renders `<SmartSuggest compact>` chips between body textarea and Review with AI button. |
+| EmailComposer | Bare form fields inside Overlay; contains SmartSuggest reply cards when replying | `space-y-4 max-w-2xl mx-auto`. Send: `bg-blue-600 text-white py-2 px-4 rounded`. Draft: `text-gray-600 hover:text-gray-900`. **Smart reply props**: `emailUid`, `accountId`, `folder` passed from EmailReader — when present, renders collapsible cards between body textarea and Review with AI button. |
 | EmailReader | Headers panel + action bar; side-by-side reply layout at xl+ | Headers: `bg-gray-50 border-b border-gray-200 px-4 py-3`. Actions: `px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600 hover:bg-gray-100`. Delete: `text-red-600 hover:bg-red-50`. On widescreen (xl+), clicking Reply opens the composer alongside the email body in a side-by-side layout. On smaller screens the reply panel stacks below the email body. |
 | AccountSetup | Provider grid + form | Provider cards: list item pattern `p-4 rounded border hover:shadow-md`. Form: stacked card `p-6 rounded-lg border space-y-4`. |
 
@@ -755,27 +897,23 @@ The email page (`/mail`) supports two composing contexts, each with a different 
 
 | Context | Where | Pattern | Component Prop |
 |---------|-------|---------|---------------|
-| Reply / Draft (context-anchored) | Inside `EmailReader.tsx` pane, below the email body | **Inline-in-pane**: Compact `EmailComposer` with `inline={true}`. Renders in a `border-t` container at the bottom of the reader, no overlay, no backdrop. Uses compact layout (single-line labels like "From"/"To"/"Subj", smaller textarea at `min-h-[150px]`, tighter button spacing). Includes compact SmartSuggest chips between textarea and Review button. | `inline` |
+| Reply / Draft (context-anchored) | Inside `EmailReader.tsx` pane, below the email body | **Inline-in-pane**: Compact `EmailComposer` with `inline={true}`. Renders in a `border-t` container at the bottom of the reader, no overlay, no backdrop. Uses compact layout (single-line labels like "From"/"To"/"Subj", smaller textarea at `min-h-[150px]`, tighter button spacing). Includes SmartSuggest cards between textarea and Review button. | `inline` |
 | Compose New / Forward (context-free) | Full-screen `Overlay` from `page.tsx` | **Modal-overlay**: Standard `EmailComposer` (no `inline` prop, or `inline={false}`) inside the shared `Overlay` component. Renders as a modal with `bg-white rounded-lg shadow-2xl`, full label-column layout, `min-h-[300px]` textarea. The Overlay provides the container shell — the composer provides `space-y-4 max-w-2xl mx-auto` only. | _omitted_ or `inline={false}` |
 
 **When to use inline vs modal:**
 - **Use inline** when the compose action is anchored to a specific email context (Reply, Draft, Forward-as-reply) and should remain visually attached to that email. The composer appears at the bottom of the reader pane with `border-t` separating it from the email body.
 - **Use modal** when the compose action creates a new message independent of the current context (Compose New, standalone Forward). The composer opens in a centered overlay with backdrop.
 
-**Smart Suggestions integration:** When EmailComposer receives `emailUid`, `accountId`, and `folder` props (passed from EmailReader for reply/draft contexts), it renders `<SmartSuggest compact>` between the body textarea and the Review with AI button. The SmartSuggest component auto-fetches suggestions on mount (when `mode="auto"`, the default for inline replies). Suggestions render as compact pill/chip buttons — clicking a chip fills the composer body and subject immediately:
+**Smart Suggestions integration:** When EmailComposer receives `emailUid`, `accountId`, and `folder` props (passed from EmailReader for reply/draft contexts), it renders SmartSuggest cards between the body textarea and the Review with AI button. The SmartSuggest component auto-fetches suggestions on mount (when `mode="auto"`, the default for inline replies). Suggestions render as collapsible cards — clicking a card fills the composer body and subject immediately:
 
 ```html
-<!-- Compact inline chips inside EmailComposer -->
-<div class="flex flex-wrap gap-1.5 items-center py-0.5">
-  <button class="flex items-center gap-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-full px-2.5 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer text-left">
-    <span class="text-xs font-medium text-blue-700 dark:text-blue-300 shrink-0">concise</span>
-    <span class="text-xs text-[var(--color-text-muted)] truncate max-w-[180px]">Thanks for the update, I'll review…</span>
-  </button>
-  <button class="flex items-center gap-1 ...">
-    <span class="text-xs font-medium ...">warm</span>
-    <span class="text-xs ... truncate max-w-[180px]">Thank you so much for your…</span>
-  </button>
-  <!-- ... copy icon per chip -->
+<!-- Collapsible reply cards inside EmailComposer -->
+<div class="space-y-2 px-3 pb-3">
+  <div class="border border-[var(--color-border)] rounded p-3">
+    <span class="text-xs font-medium">concise</span>
+    <p class="text-xs">Thanks for the update, I'll review…</p>
+  </div>
+  <!-- ... copy and apply controls per card -->
 </div>
 ```
 
@@ -788,7 +926,7 @@ The Smart Replies heading acts as a collapse toggle. The chevron icon rotates on
 Resize handles use `w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0`. Active state adds `bg-blue-400`. Both handles have `role='separator'` with appropriate `aria-*` attributes. Widths persist to `localStorage` under `mail-list-width` and `mail-reply-width` keys.
 
 **Reference implementation:**
-- `services/ingenium-dashboard/src/app/mail/components/SmartSuggest.tsx` (compact variant lines 170–202, full-card variant lines 206–229)
+- `services/ingenium-dashboard/src/app/mail/components/SmartSuggest.tsx` (module-level `CardsVariant`)
 - `services/ingenium-dashboard/src/app/mail/components/EmailComposer.tsx` lines 192–205 (renders `<SmartSuggest>` when `emailUid` and `accountId` are present)
 - `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` lines 393–417 (passes `emailUid`/`accountId`/`folder` to inline composer)
 - `services/ingenium-dashboard/src/app/mail/page.tsx` lines 579–597 (modal usage)
@@ -809,7 +947,7 @@ Resize handles use `w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 t
 
 > 🔴 **SmartSuggest auto-fetch**: When the composer mounts with `emailUid`/`accountId`, SmartSuggest auto-fetches suggestions (unless mode=`manual`). The fetch URL uses `encodeURIComponent(folder)` — the folder value is passed exactly as received from `email.folder` without defaulting to `"INBOX"`. This ensures per-folder cache keys work correctly for Sent, Starred, Archive, etc.
 
-### Module-Level Component Extraction Pattern (CardsVariant)
+### Module-Level Component Pattern (CardsVariant)
 
 The `SmartSuggest.tsx` component extracts a `CardsVariant` component at **module scope** (outside the main component) so its React state (collapse/expand) persists across parent re-renders of the same email (e.g., during fetch completion, retry timers, and draft changes).
 
@@ -861,15 +999,16 @@ The CreateVaultModal (`components/CreateVaultModal.tsx`) is a passphrase creatio
 | State | Visual Indicator | Derivation |
 |-------|-----------------|------------|
 | **Empty** | Both fields empty, placeholder text shown ("At least 12 characters") | `passphrase.length === 0 && confirmation.length === 0` |
-| **Too short** | Passphrase field shows red `(n/12)` counter below input. `aria-invalid` set on input. | `passphrase.length > 0 && passphrase.length < 12` |
+| **Too short** | Passphrase field shows red `(n/12)` counter below input. `aria-invalid` set on input. | Unicode passphrase length is below 12 |
 | **Mismatch** | Confirmation shows red "Passphrases do not match" text. `aria-invalid` set on confirmation input. | `passphrase.length > 0 && confirmation.length > 0 && passphrase !== confirmation` |
 | **Match** | Green checkmark SVG + "Passphrases match" text | `passphrase.length > 0 && confirmation.length > 0 && passphrase === confirmation && passphrase.length >= 12` |
-| **Length OK** | Hint text turns green | `passphrase.length >= 12` |
+| **Length OK** | Hint text turns green | At least 12 Unicode characters and not whitespace-only |
+| **Rate limited** | Error alert shows the server `Retry-After` countdown and submit action is disabled. No automatic retry occurs. | Initialization or unseal receives HTTP 429 |
 
 **Form gating logic**:
 ```typescript
-const passwordsMatch = passphrase === confirmation && passphrase.length >= 12;
-const canSubmit = acknowledged && passwordsMatch && !loading;
+const passwordsMatch = passphrase === confirmation && hasNonWhitespaceContent && passphraseLength >= 12;
+const canSubmit = acknowledged && passwordsMatch && !loading && !isCoolingDown;
 ```
 
 The submit button is disabled until all three conditions are met: acknowledgement checkbox checked, passwords match and valid length, and not currently saving.
@@ -895,7 +1034,7 @@ Simpler than CreateVaultModal — single passphrase field, no confirmation, no c
 |---------|---------|
 | Dialog card | `bg-[var(--color-surface)] p-6 rounded-lg shadow-xl w-96` |
 | Passphrase input | Same styling as CreateVaultModal |
-| Actions | Cancel (ghost) + "Unseal Vault" (blue primary, `disabled:opacity-50` until non-empty) |
+| Actions | Cancel (ghost) + "Unseal Vault" (blue primary, `disabled:opacity-50` until non-empty or a `Retry-After` cooldown expires) |
 
 ### 3-Pane Unsealed Layout
 
@@ -950,17 +1089,17 @@ selectorsDisabled = chatConfigLoading || !!chatConfigError || !hasSelectableMode
 
 | State | Visual | Condition |
 |-------|--------|-----------|
-| **Loading** | `disabled:opacity-40 disabled:cursor-not-allowed` on each `<select>` | `chatConfigLoading === true` |
+| **Loading** | `disabled:opacity-40 disabled:cursor-not-allowed` on each shared `Select` | `chatConfigLoading === true` |
 | **Error** | Same disabled styling + red error banner | `chatConfigError` is truthy |
 | **No providers** | Same disabled styling + blue banner linking to Settings | `hasSelectableModel === false` (availableProviders.length === 0) |
 | **Normal** | Standard select styling | Provider and model available |
 
 Disabled selectors all use the base select styling plus:
 ```html
-<select disabled className="... disabled:opacity-40 disabled:cursor-not-allowed">
+<Select disabled className="... disabled:opacity-40 disabled:cursor-not-allowed">
 ```
 
-When `providers.length === 0`, the select shows a placeholder option:
+When `providers.length === 0`, the shared select shows a placeholder option:
 ```html
 <option value="">No providers available</option>
 ```
@@ -1016,5 +1155,4 @@ Chat uses the same `--color-*` token system as the rest of the dashboard. No spe
 
 | Variant | When Used | Layout | Key Classes |
 |---------|-----------|--------|-------------|
-| **Compact (inline chips)** | Inside inline EmailComposer (reply/draft) | `flex flex-wrap gap-1.5 items-center` with chip buttons | `rounded-full px-2.5 py-1 border`, tone label `text-xs font-medium text-blue-700`, truncated preview `max-w-[180px]`, copy SVG icon |
-| **Full-card (standalone)** | Primary — labeled "Smart Replies" section alongside the inline composer | `space-y-2` container with heading | `border rounded p-3 card`, tone badge `rounded-full`, subject line, `line-clamp-4` body preview, "Use this draft" button. 5 visible states: loading skeletons, error + retry, unconfigured + settings link, noreply info, 3 suggestion cards. |
+| **Reply cards** | Inside inline EmailComposer (reply/draft) | Collapsible `space-y-2` section with stacked cards | Header chevron, `border rounded p-3` cards, tone badge, subject line, `line-clamp-3` body preview, copy icon, card apply action. States: loading skeletons, error + retry, unconfigured + settings link, noreply info, and suggestion cards. |

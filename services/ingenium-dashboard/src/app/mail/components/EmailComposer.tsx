@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 import SmartSuggest from "./SmartSuggest";
 import RichTextEditor, { RichTextEditorHandle } from "./RichTextEditor";
+import Select from "../../components/Select";
 import { dashboardFetch, getApiBase } from "@/lib/api";
 
 const API_BASE = getApiBase();
@@ -88,6 +89,7 @@ export default function EmailComposer({
   const [subject, setSubject] = useState(initialData?.subject || "");
   const [htmlBody, setHtmlBody] = useState(initialData?.body ? plainTextToHtml(initialData.body) : "");
   const [fromAccount, setFromAccount] = useState(initialAccountId || "");
+  const fromAccountId = useId();
 
   // RichTextEditor ref for imperative API access
   const editorRef = useRef<RichTextEditorHandle>(null);
@@ -166,7 +168,7 @@ export default function EmailComposer({
   /**
    * INLINE VARIANT — compact, Gmail-inspired reply box.
    * Used in the EmailReader's side-by-side mode. Shorter fields, no labels above inputs,
-   * RichTextEditor with a smaller min-height. Shows SmartSuggest cards_variant when
+   * RichTextEditor with a smaller min-height. Shows SmartSuggest cards when
    * emailUid/accountId are provided. */
   if (inline) {
     const wrapperClass = sideBySide
@@ -177,8 +179,10 @@ export default function EmailComposer({
       <div className={wrapperClass}>
         {/* From — compact single-line */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--color-text-muted)] w-8 shrink-0">From</span>
-          <select
+          <label htmlFor={fromAccountId} className="text-xs text-[var(--color-text-muted)] w-8 shrink-0">From</label>
+          <Select
+            wrapperClassName="flex-1"
+            id={fromAccountId}
             className="flex-1 border border-[var(--color-border)] rounded px-2 py-1 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             value={fromAccount}
             onChange={(e) => setFromAccount(e.target.value)}
@@ -189,7 +193,7 @@ export default function EmailComposer({
                 {acct.email}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         {/* To — compact single-line */}
@@ -332,7 +336,6 @@ export default function EmailComposer({
             accountId={accountId}
             folder={folder}
             mode={smartRepliesMode}
-            variant="cards"
             onDraft={(draft) => {
               setSubject(draft.subject);
               // Safety: escape plain text before inserting as HTML
@@ -371,8 +374,9 @@ export default function EmailComposer({
     <div className="space-y-4 w-full">
       {/* From */}
       <div>
-        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">From</label>
-        <select
+         <label htmlFor={fromAccountId} className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">From</label>
+        <Select
+          id={fromAccountId}
           className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
           value={fromAccount}
           onChange={(e) => setFromAccount(e.target.value)}
@@ -383,7 +387,7 @@ export default function EmailComposer({
               {acct.email}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       {/* To */}

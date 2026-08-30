@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { parseExtractionResponse, callLLMForExtraction } from "../lib/tools/extraction.js";
+import {
+  parseExtractionResponse,
+  callLLMForExtraction,
+  runExtraction,
+  type OpenCodeMessagesClient,
+} from "../lib/tools/extraction.js";
+import { getObservations } from "../lib/tools/observations.js";
 import { setSetting } from "../lib/tools/settings.js";
 
 let tempDir: string;
@@ -15,6 +21,8 @@ let mockPort: number;
 let mockResponsePayload: any;
 let mockResponseStatus: number;
 let mockRequests: number;
+let mockMessages: Array<{ text: string; time_created: number; hash: string; messageId?: string; sessionId?: string }>;
+let requestedMessageProjects: string[];
 
 function setMockResponse(payload: any, status = 200) {
   mockResponsePayload = payload;
@@ -33,6 +41,16 @@ function makeCandidate(text = "User prefers 2-space indentation"): { text: strin
   return { text, time_created: Date.now(), hash: "abc123" };
 }
 
+const mockMessagesClient: OpenCodeMessagesClient = async ({ since, limit, projectName }) => {
+  const url = new URL("/api/v1/opencode/messages", `http://localhost:${mockPort}`);
+  url.searchParams.set("since", String(since));
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("project", projectName);
+  const response = await fetch(url);
+  const payload = await response.json() as { data?: { messages?: unknown } };
+  return { messages: Array.isArray(payload.data?.messages) ? payload.data.messages as any[] : [] };
+};
+
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-test-extraction-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
@@ -40,8 +58,15 @@ beforeAll(async () => {
   projectId = project.id;
 
   await new Promise<void>((resolve) => {
-    mockServer = createServer((_req, res) => {
+    mockServer = createServer((req, res) => {
       mockRequests++;
+      const requestUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      if (requestUrl.pathname === "/api/v1/opencode/messages") {
+        requestedMessageProjects.push(requestUrl.searchParams.get("project") ?? "");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ data: { messages: mockMessages } }));
+        return;
+      }
       const body = typeof mockResponsePayload === "string"
         ? mockResponsePayload
         : JSON.stringify(mockResponsePayload);
@@ -62,6 +87,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   mockRequests = 0;
+  mockMessages = [];
+  requestedMessageProjects = [];
   setMockResponse(mockContent("{}"));
 });
 
@@ -243,5 +270,114 @@ describe("callLLMForExtraction", () => {
 
     expect(result.failed).toBe(false);
     expect(result.rules).toEqual([]);
+  });
+});
+
+describe("partial extraction retry safety", () => {
+  it("persists successful batch hashes when a later batch fails", async () => {
+    const startedAt = Date.now();
+    mockMessages = Array.from({ length: 16 }, (_, index) => ({
+      text: `I prefer structured deployment reports with explicit evidence item ${index + 1}.`,
+      time_created: startedAt + index + 1,
+      hash: `partial-batch-${index + 1}`,
+    }));
+
+    let firstRunCalls = 0;
+    const firstRun = await runExtraction(projectId, "test-project", {
+      limit: 20,
+      messagesClient: mockMessagesClient,
+      llmExecutor: async () => {
+        firstRunCalls += 1;
+        if (firstRunCalls === 1) {
+          return {
+            ok: true,
+            content: JSON.stringify({
+              rules: [{
+                content: "User prefers structured deployment reports with explicit evidence",
+                type: "preference",
+                importance: 7,
+              }],
+            }),
+          };
+        }
+        return { ok: false, content: "", error: "temporary provider failure" };
+      },
+    });
+
+    expect(firstRun).toMatchObject({ candidates: 16, created: 1, failedBatches: 1 });
+
+    const retriedPrompts: string[] = [];
+    const retryRun = await runExtraction(projectId, "test-project", {
+      limit: 20,
+      messagesClient: mockMessagesClient,
+      llmExecutor: async ({ user }) => {
+        retriedPrompts.push(user);
+        return {
+          ok: true,
+          content: JSON.stringify({
+            rules: [{
+              content: "User prefers deployment reports to include actionable follow-up",
+              type: "workflow",
+              importance: 7,
+            }],
+          }),
+        };
+      },
+    });
+
+    expect(retryRun).toMatchObject({ candidates: 1, created: 1, failedBatches: 0 });
+    expect(retriedPrompts).toHaveLength(1);
+    expect(retriedPrompts[0]).toContain("item 16");
+    expect(retriedPrompts[0]).not.toMatch(/item (?:[1-9]|1[0-5])\./);
+    expect(getObservations(projectId).filter((observation) =>
+      observation.content.startsWith("User prefers structured deployment reports")
+      || observation.content.startsWith("User prefers deployment reports to include actionable"),
+    )).toHaveLength(2);
+  });
+});
+
+describe("external project extraction", () => {
+  it("writes a fresh extracted observation only to the requested external project", async () => {
+    const globalProject = createProject("global-default", true);
+    const externalProject = createProject("external-worktree");
+    const startedAt = Date.now();
+
+    setSetting(globalProject.id, "synthesis_model", "test-model");
+    setSetting(globalProject.id, "synthesis_endpoint", endpoint());
+    setSetting(globalProject.id, "synthesis_allow_private_network", "true");
+    mockMessages = [{
+      text: "I prefer external project review summaries to be concise and actionable.",
+      time_created: startedAt + 1,
+      hash: "external-message",
+      messageId: "message-external-1",
+      sessionId: "session-external-1",
+    }];
+    setMockResponse(mockContent(JSON.stringify({
+      rules: [{
+        content: "User prefers concise, actionable review summaries",
+        type: "preference",
+        importance: 8,
+      }],
+    })));
+
+    const result = await runExtraction(externalProject.id, externalProject.name, {
+      limit: 10,
+      messagesClient: mockMessagesClient,
+    });
+    const externalObservations = getObservations(externalProject.id);
+    const extracted = externalObservations.find(
+      (observation) => observation.content === "User prefers concise, actionable review summaries",
+    );
+
+    expect(result).toMatchObject({ scanned: 1, candidates: 1, created: 1, failedBatches: 0 });
+    expect(requestedMessageProjects).toEqual([externalProject.name]);
+    expect(extracted).toMatchObject({
+      project_id: externalProject.id,
+      source: "auto-observer",
+    });
+    expect(new Date(extracted!.created_at).getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(getObservations(globalProject.id).some(
+      (observation) => observation.content === extracted!.content,
+    )).toBe(false);
   });
 });

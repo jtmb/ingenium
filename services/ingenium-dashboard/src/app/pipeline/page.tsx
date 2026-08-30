@@ -2,12 +2,12 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useProject } from "../../lib/ProjectContext";
+import { useGlobalProject, useProject } from "../../lib/ProjectContext";
 import { api, type PipelineEvent } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import { formatRelativeTime } from "@/lib/time";
 
-// ── Color maps ───────────────────────────────────────────────────────────
 const SOURCE_DOT: Record<string, string> = {
   agent: "bg-amber-500",
   plugin: "bg-[var(--color-accent)]",
@@ -66,22 +66,10 @@ const EVENT_TYPE_LABEL: Record<string, string> = {
   plugin_error: "Plugin error",
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────
 // 60-second window for collapsing consecutive observation_created events
 // into a single timeline entry with a "+N" badge. Prevents the timeline
 // from being dominated by rapid-fire observations during busy sessions.
 const WINDOW_MS = 60_000;
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const sec = Math.abs(Math.floor(diff / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hrs = Math.floor(min / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 function fmtAbs(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -95,7 +83,6 @@ function parseData(raw: any): any {
   return raw;
 }
 
-// ── Display item types ───────────────────────────────────────────────────
 interface CollapsedGroup {
   events: PipelineEvent[];
   windowKey: string;
@@ -107,10 +94,9 @@ type DisplayItem =
   | { kind: "single"; event: PipelineEvent }
   | { kind: "collapsed"; group: CollapsedGroup };
 
-// ── Filter mode ──────────────────────────────────────────────────────────
 type FilterMode = "all" | "agent" | "plugin" | "synthesis" | "trait";
-
-// ── Page ─────────────────────────────────────────────────────────────────
+type LoadState = "loading" | "success" | "error";
+type PipelineRequest = { project: string; filterMode: FilterMode; requestId: number };
 
 /**
  * PipelinePage — Git-workflow-style timeline of pipeline events.
@@ -130,25 +116,66 @@ type FilterMode = "all" | "agent" | "plugin" | "synthesis" | "trait";
  */
 export default function PipelinePage() {
   const project = useProject();
+  const { project: globalProject, loading: globalProjectLoading, error: globalProjectError } = useGlobalProject();
   const [events, setEvents] = useState<PipelineEvent[]>([]);
+  const [eventsState, setEventsState] = useState<LoadState>("loading");
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [selected, setSelected] = useState<any>(null);
   const [paused, setPaused] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [nextRun, setNextRun] = useState("");
-  const [intervalMs, setIntervalMs] = useState(900000);
+  const [intervalMs, setIntervalMs] = useState<number | null>(null);
+  const [scheduleState, setScheduleState] = useState<LoadState>("loading");
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const eventsInFlightRef = useRef(false);
+  const queuedRequestRef = useRef<PipelineRequest | null>(null);
+  const latestRequestIdRef = useRef(0);
 
-  // Fetch synthesis interval for countdown
   useEffect(() => {
-    api.settings.get("synthesis_interval_ms", "global-default").then((r) => {
-      const ms = parseInt(r.data?.value, 10);
-      if (!isNaN(ms) && ms > 0) setIntervalMs(ms);
-    }).catch(() => {});
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
   }, []);
 
-  // Countdown to next synthesis run
   useEffect(() => {
+    let cancelled = false;
+    setIntervalMs(null);
+    setScheduleError(null);
+
+    if (globalProjectLoading) {
+      setScheduleState("loading");
+      return () => { cancelled = true; };
+    }
+    if (!globalProject) {
+      setScheduleError(globalProjectError?.message ?? "No active global project is configured");
+      setScheduleState("error");
+      return () => { cancelled = true; };
+    }
+
+    setScheduleState("loading");
+    api.settings.get("synthesis_interval_ms", globalProject)
+      .then((response) => {
+        const value = Number(response.data?.value);
+        if (!Number.isFinite(value) || value < 0) throw new Error("Invalid synthesis schedule response");
+        if (cancelled) return;
+        setIntervalMs(value);
+        setScheduleState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setScheduleError(error instanceof Error ? error.message : "Unable to load synthesis schedule");
+        setScheduleState("error");
+      });
+
+    return () => { cancelled = true; };
+  }, [globalProject, globalProjectError, globalProjectLoading]);
+
+  useEffect(() => {
+    if (scheduleState !== "success" || intervalMs === null) {
+      setNextRun("");
+      return;
+    }
     if (intervalMs <= 0) { setNextRun("disabled"); return; }
     const tick = () => {
       // Estimate next run from last synthesis_completed event
@@ -163,49 +190,66 @@ export default function PipelinePage() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [events, intervalMs]);
+  }, [events, intervalMs, scheduleState]);
 
-  // ── Fetch ────────────────────────────────────────────────────────────
-  const fetchEvents = useCallback(() => {
-    const sourceParam =
-      filterMode === "agent" || filterMode === "plugin" || filterMode === "synthesis"
-        ? filterMode
-        : undefined;
+  const queueEvents = useCallback((request: PipelineRequest) => {
+    queuedRequestRef.current = request;
+    if (eventsInFlightRef.current) return;
+    eventsInFlightRef.current = true;
 
-    api.pipeline
-      .events(project, { limit: 500, ...(sourceParam ? { source: sourceParam } : {}) })
-      .then((r: any) => {
-        let data: PipelineEvent[] = (r.data || []);
-        if (filterMode === "trait") {
-          data = data.filter(
-            (e) => e.event_type === "trait_created" || e.event_type === "trait_updated",
-          );
+    void (async () => {
+      while (queuedRequestRef.current) {
+        const currentRequest = queuedRequestRef.current;
+        queuedRequestRef.current = null;
+        const source = currentRequest.filterMode === "agent" || currentRequest.filterMode === "plugin" || currentRequest.filterMode === "synthesis"
+          ? currentRequest.filterMode
+          : undefined;
+
+        try {
+          const response = await api.pipeline.events(currentRequest.project, {
+            limit: 500,
+            ...(source ? { source } : {}),
+          });
+          if (!mountedRef.current || latestRequestIdRef.current !== currentRequest.requestId) continue;
+          let data = Array.isArray(response.data) ? response.data as PipelineEvent[] : [];
+          if (currentRequest.filterMode === "trait") {
+            data = data.filter((event) => event.event_type === "trait_created" || event.event_type === "trait_updated");
+          }
+          setEvents(data);
+          setEventsError(null);
+          setEventsState("success");
+        } catch (error: unknown) {
+          if (!mountedRef.current || latestRequestIdRef.current !== currentRequest.requestId) continue;
+          setEvents([]);
+          setEventsError(error instanceof Error ? error.message : "Unable to load pipeline events");
+          setEventsState("error");
         }
-        setEvents(data);
-      })
-      .catch(() => {});
-  }, [project, filterMode]);
-
-  useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
-
-  // ── Polling ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (paused) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
       }
-    } else {
-      intervalRef.current = setInterval(fetchEvents, 3_000);
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [paused, fetchEvents]);
+      eventsInFlightRef.current = false;
+    })();
+  }, []);
 
-  // ── Derived state ────────────────────────────────────────────────────
+  useEffect(() => {
+    const request = {
+      project,
+      filterMode,
+      requestId: latestRequestIdRef.current + 1,
+    };
+    latestRequestIdRef.current = request.requestId;
+    setEvents([]);
+    setEventsError(null);
+    setEventsState("loading");
+    queueEvents(request);
+  }, [filterMode, project, queueEvents]);
+
+  useEffect(() => {
+    if (paused) return;
+    const interval = setInterval(() => {
+      queueEvents({ project, filterMode, requestId: latestRequestIdRef.current });
+    }, 3_000);
+    return () => clearInterval(interval);
+  }, [filterMode, paused, project, queueEvents]);
+
   const stats = useMemo(
     () => ({
       total: events.length,
@@ -214,8 +258,8 @@ export default function PipelinePage() {
       traits: events.filter((e) => e.event_type.startsWith("trait_")).length,
       skills: events.filter((e) => {
         if (e.event_type === "trait_created" || e.event_type === "trait_updated") {
-          const d = typeof e.data === "string" ? JSON.parse(e.data || "{}") : (e.data || {});
-          return d.skill_name || d.via_llm;
+          const data = parseData(e.data);
+          return Boolean(data && typeof data === "object" && ("skill_name" in data || "via_llm" in data));
         }
         return false;
       }).length,
@@ -223,7 +267,6 @@ export default function PipelinePage() {
     [events],
   );
 
-  // Build parent → children map for nested rendering
   const childMap = useMemo(() => {
     const map = new Map<number, PipelineEvent[]>();
     for (const e of events) {
@@ -236,7 +279,6 @@ export default function PipelinePage() {
     return map;
   }, [events]);
 
-  // Collapse observation_created events in 60‑second windows
   const displayItems: DisplayItem[] = useMemo(() => {
     const items: DisplayItem[] = [];
     let i = 0;
@@ -275,7 +317,6 @@ export default function PipelinePage() {
     return items;
   }, [events]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -288,7 +329,6 @@ export default function PipelinePage() {
   const dotColor = (source: string): string => SOURCE_DOT[source] ?? "bg-gray-400";
   const lineColor = (source: string): string => SOURCE_LINE[source] ?? "bg-gray-300";
 
-  // ── Filter pills ─────────────────────────────────────────────────────
   const FILTERS: { label: string; mode: FilterMode }[] = [
     { label: "All", mode: "all" },
     { label: "Agent", mode: "agent" },
@@ -297,39 +337,30 @@ export default function PipelinePage() {
     { label: "Trait", mode: "trait" },
   ];
 
-  // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* ── Header + stats ──────────────────────────────────────────── */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Pipeline Activity</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">{nextRun}</p>
+          {scheduleState === "loading" && <p className="mt-1 text-sm text-[var(--color-text-muted)]" aria-busy="true">Loading synthesis schedule...</p>}
+          {scheduleState === "error" && <p className="mt-1 text-sm text-[var(--color-error-text)]" role="alert">Synthesis schedule unavailable: {scheduleError}</p>}
+          {scheduleState === "success" && <p className="mt-1 text-sm text-[var(--color-text-muted)]">{nextRun}</p>}
         </div>
         <div className="text-sm text-[var(--color-text-muted)] space-x-4">
-          <span>
-            Total: <strong>{stats.total}</strong>
-          </span>
-          <span>
-            Observations:{" "}
-            <strong className="text-[var(--color-warning-text)]">{stats.observations}</strong>
-          </span>
-          <span>
-            Syntheses:{" "}
-            <strong className="text-emerald-600">{stats.syntheses}</strong>
-          </span>
-          <span>
-            Traits:{" "}
-            <strong className="text-[var(--color-text-link)]">{stats.traits}</strong>
-          </span>
-          <span>
-            Skills:{" "}
-            <strong className="text-purple-600">{stats.skills}</strong>
-          </span>
+          {eventsState === "loading" && <span aria-busy="true">Loading events...</span>}
+          {eventsState === "error" && <span>Events unavailable: {eventsError}</span>}
+          {eventsState === "success" && (
+            <>
+              <span>Total: <strong>{stats.total}</strong></span>
+              <span>Observations: <strong className="text-[var(--color-warning-text)]">{stats.observations}</strong></span>
+              <span>Syntheses: <strong className="text-emerald-600">{stats.syntheses}</strong></span>
+              <span>Traits: <strong className="text-[var(--color-text-link)]">{stats.traits}</strong></span>
+              <span>Skills: <strong className="text-purple-600">{stats.skills}</strong></span>
+            </>
+          )}
         </div>
       </div>
 
-      {/* ── Filter pills + pause ────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         {FILTERS.map((f) => (
           <button
@@ -357,16 +388,26 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      {/* ── Timeline ─────────────────────────────────────────────────── */}
-      {events.length === 0 && (
+      {eventsState === "loading" && (
+        <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-8 text-center text-[var(--color-text-muted)]" aria-busy="true">
+          Loading pipeline events...
+        </div>
+      )}
+
+      {eventsState === "error" && (
+        <div className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-8 text-center text-[var(--color-error-text)]" role="alert">
+          Pipeline events are unavailable: {eventsError}
+        </div>
+      )}
+
+      {eventsState === "success" && events.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No pipeline events yet. Events are logged automatically during agent interactions.
         </div>
       )}
 
-      {events.length > 0 && (
+      {eventsState === "success" && events.length > 0 && (
         <div className="relative">
-          {/* Continuous vertical timeline line */}
           <div className="absolute left-[36px] top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
 
           <div className="space-y-0">
@@ -397,35 +438,33 @@ export default function PipelinePage() {
                         setSelected({ kind: "batch", events: group.events, label: `${group.events.length} observations` })
                       }
                     >
-                      {/* Expanded sub-list */}
                       {isExpanded && (
                         <div className="mt-2 border-l-2 border-dashed border-gray-300 dark:border-gray-600 ml-5 pl-4 space-y-2">
                           {group.events.map((obs) => (
-                            <div
+                            <button
+                              type="button"
                               key={obs.id}
-                              className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
+                              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-left hover:shadow-md transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
                               onClick={() => setSelected(obs)}
+                              aria-label={`View event ${obs.id}`}
                             >
-                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="mb-1 flex flex-wrap items-center gap-2">
                                 <span className={`${BADGE_BASE} border ${SOURCE_BADGE[obs.event_source] ?? badgeTones("muted")}`}>
                                   {SOURCE_LABEL[obs.event_source] ?? obs.event_source}
                                 </span>
-                                <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(obs.created_at)}</span>
+                                <span className="text-xs text-[var(--color-text-muted)]">{formatRelativeTime(obs.created_at)}</span>
                                 {obs.importance != null && (
                                   <span className="text-xs text-[var(--color-text-muted)]">imp: {obs.importance}</span>
                                 )}
-                              </div>
-                              <p className="text-sm text-[var(--color-text-primary)]">{obs.title}</p>
-                              {obs.description && (
-                                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{obs.description}</p>
-                              )}
-                            </div>
+                              </span>
+                              <span className="block text-sm text-[var(--color-text-primary)]">{obs.title}</span>
+                              {obs.description && <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{obs.description}</span>}
+                            </button>
                           ))}
                         </div>
                       )}
                     </EventRow>
 
-                    {/* Render children of each observation in the group when expanded */}
                     {isExpanded &&
                       group.events.map((obs) => {
                         const children = childMap.get(obs.id);
@@ -455,7 +494,6 @@ export default function PipelinePage() {
                 );
               }
 
-              // ── Single event ─────────────────────────────────────
               const evt = item.event;
               const children = childMap.get(evt.id);
 
@@ -475,7 +513,6 @@ export default function PipelinePage() {
                     onClickDetail={() => setSelected(evt)}
                   />
 
-                  {/* Children (e.g. trait_created under synthesis_completed) */}
                   {children && (
                     <div className="ml-10 pl-6 border-l-2 border-dashed border-gray-300 dark:border-gray-600 space-y-0">
                       {children.map((child) => (
@@ -503,7 +540,6 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {/* ── Detail Overlay ──────────────────────────────────────────── */}
       <Overlay
         isOpen={selected !== null}
         onClose={() => setSelected(null)}
@@ -602,7 +638,6 @@ export default function PipelinePage() {
             )}
             {selected.data != null && (
               <div>
-                {/* synthesis_completed — rich structured view */}
                 {selected.event_type === "synthesis_completed" && (
                   <div className="space-y-3">
                     {(() => {
@@ -652,7 +687,6 @@ export default function PipelinePage() {
                   </div>
                 )}
 
-                {/* trait_created with skill_name */}
                 {selected.event_type === "trait_created" && (() => {
                   const d = parseData(selected.data);
                   return d?.skill_name ? (
@@ -672,7 +706,6 @@ export default function PipelinePage() {
                   ) : null;
                 })()}
 
-                {/* trait_created with trait_type (not skill) */}
                 {selected.event_type === "trait_created" && (() => {
                   const d = parseData(selected.data);
                   return d?.trait_type && !d?.skill_name ? (
@@ -695,7 +728,6 @@ export default function PipelinePage() {
                   ) : null;
                 })()}
 
-                {/* trait_updated — same structured view as trait_created */}
                 {selected.event_type === "trait_updated" && (() => {
                   const d = parseData(selected.data);
                   return d?.trait_type ? (
@@ -718,7 +750,6 @@ export default function PipelinePage() {
                   ) : null;
                 })()}
 
-                {/* Fallback — raw JSON for unknown or empty data shapes */}
                 {selected.event_type !== "synthesis_completed" &&
                   selected.event_type !== "trait_created" &&
                   selected.event_type !== "trait_updated" &&
@@ -742,7 +773,6 @@ export default function PipelinePage() {
   );
 }
 
-// ── EventRow sub‑component ──────────────────────────────────────────────
 function EventRow({
   source,
   icon,
@@ -780,46 +810,45 @@ function EventRow({
   onClickDetail?: () => void;
   children?: React.ReactNode;
 }) {
+  const dotClassName = `shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-[var(--color-border)] ${
+    isChild ? "w-2 h-2" : "w-3 h-3"
+  } ${dotColor} ${countBadge ? "hover:ring-2 hover:ring-offset-1 hover:ring-offset-[var(--color-surface)] hover:ring-gray-300 dark:ring-gray-600 dark:hover:ring-offset-[var(--color-surface)]" : ""}`;
+  const dotContent = countBadge ? (
+    <span className="text-[8px] font-bold leading-none text-white">+{countBadge}</span>
+  ) : (
+    <span className={`${isChild ? "text-[6px]" : "text-[10px]"} select-none leading-none text-white`}>{icon}</span>
+  );
+
   return (
     <div>
       <div className="flex">
-        {/* ── Timeline gutter ────────────────────────────────────── */}
         <div className="w-[72px] shrink-0 flex flex-col items-center relative">
-          {/* Upper connector line segment */}
           <div className={`w-0.5 flex-1 ${lineColor}`} />
-          {/* Dot / icon */}
-          <div
-             className={`shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-[var(--color-border)] ${
-              isChild ? "w-2 h-2" : "w-3 h-3"
-            } ${dotColor} ${countBadge ? "cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-offset-[var(--color-surface)] hover:ring-gray-300 dark:ring-gray-600 dark:hover:ring-offset-[var(--color-surface)]" : ""}`}
-            onClick={onToggle}
-            title={iconLabel}
-          >
-            {countBadge ? (
-              <span className="text-[8px] font-bold text-white leading-none">
-                +{countBadge}
-              </span>
-            ) : (
-              <span className={`${isChild ? "text-[6px]" : "text-[10px]"} text-white leading-none select-none`}>
-                {icon}
-              </span>
-            )}
-          </div>
-          {/* Lower connector line segment */}
+          {onToggle ? (
+            <button
+              type="button"
+              className={dotClassName}
+              onClick={onToggle}
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? `Collapse ${title}` : `Expand ${title}`}
+              title={iconLabel}
+            >
+              {dotContent}
+            </button>
+          ) : (
+            <span className={dotClassName} title={iconLabel} aria-hidden="true">
+              {dotContent}
+            </span>
+          )}
           <div className={`w-0.5 flex-1 ${isLast ? "bg-transparent" : lineColor}`} />
         </div>
 
-        {/* ── Event card ─────────────────────────────────────────── */}
-        <div
-          className={`flex-1 pb-3 ${isChild ? "pb-2" : ""} min-w-0`}
-        >
+        <div className={`min-w-0 flex-1 pb-3 ${isChild ? "pb-2" : ""}`}>
           <div
             className={`bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-3 ${
               isChild ? "p-2" : "p-3"
-            } ${onClickDetail ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
-            onClick={onClickDetail}
+            } ${onClickDetail ? "hover:shadow-md transition-shadow" : ""}`}
           >
-            {/* Badge row */}
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
                 className={`${BADGE_BASE} border ${SOURCE_BADGE[source] ?? badgeTones("muted")}`}
@@ -828,14 +857,16 @@ function EventRow({
               </span>
               {isExpanded !== undefined && (
                 <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
                   className="text-xs text-[var(--color-text-link)] hover:text-blue-800 font-medium"
+                  aria-expanded={isExpanded}
                 >
                   {isExpanded ? "Collapse" : `+${countBadge ?? 0} observations`}
                 </button>
               )}
               <span className="text-xs text-[var(--color-text-muted)] flex-1 text-right" title={fmtAbs(timestamp)}>
-                {formatRelative(timestamp)}
+                {formatRelativeTime(timestamp)}
               </span>
               {sessionId && !countBadge && (
                 <span className="text-xs text-[var(--color-text-muted)] font-mono">
@@ -843,19 +874,31 @@ function EventRow({
                 </span>
               )}
             </div>
-            {/* Title + description */}
-            <p className={`font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>
-              {title}
-            </p>
-            {description && (
-              <p className={`text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>
-                {description}
-              </p>
+            {onClickDetail ? (
+              <button
+                type="button"
+                onClick={onClickDetail}
+                className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                aria-label={`View event ${title}`}
+              >
+                <span className={`block font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>
+                  {title}
+                </span>
+                {description && (
+                  <span className={`block text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>
+                    {description}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <>
+                <p className={`font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>{title}</p>
+                {description && <p className={`text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>{description}</p>}
+              </>
             )}
           </div>
         </div>
       </div>
-      {/* Render children of this row (e.g. expanded observations) */}
       {children}
     </div>
   );

@@ -1,8 +1,7 @@
 import { Router } from "express";
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { basename } from "node:path";
 import { backups, logger, settings } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requireGlobalProject } from "../helpers.js";
+import { startRestoreMaintenance } from "../restore-supervisor.js";
 
 type BackupSchedule = {
   hourly: { enabled: boolean; retention: number };
@@ -16,12 +15,19 @@ const DEFAULT_SCHEDULE: BackupSchedule = {
   manual_retention: 10,
 };
 
+const RESTORE_MIGRATION_ERROR = {
+  error: {
+    code: "RESTORE_MIGRATION_REQUIRED",
+    message: "Use the restore preview, authorize, and confirm plan workflow.",
+  },
+};
+
 function coreDbPath(): string {
-  return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
+  return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data";
 }
 
 function opencodeDbPath(): string {
-  return process.env.OPENCODE_DB_PATH ?? "/home/appuser/.local/share/opencode/opencode.db";
+  return process.env.OPENCODE_DB_PATH ?? "/home/ingenium-opencode/.local/share/opencode/opencode.db";
 }
 
 function getSchedule(projectId: string): BackupSchedule {
@@ -51,6 +57,7 @@ function publicBackup(record: any) {
     : record.backup_type === "scheduled_daily" ? "daily" : "manual";
   return {
     id: record.id,
+    // This is a display/download name only, never an absolute filesystem path.
     filename: record.filename,
     type,
     size: record.size_bytes,
@@ -60,38 +67,119 @@ function publicBackup(record: any) {
   };
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function restoreError(res: any, error: unknown): boolean {
+  if (!(error instanceof backups.BackupError)) return false;
+  const statusByCode: Record<backups.BackupErrorCode, number> = {
+    BACKUP_NOT_FOUND: 404,
+    RESTORE_PLAN_NOT_FOUND: 404,
+    BACKUP_INVALID: 422,
+    BACKUP_LEGACY_UNSUPPORTED: 422,
+    RESTORE_AUTHORIZATION_INVALID: 422,
+    RESTORE_AUTHORIZATION_EXPIRED: 422,
+    BACKUP_REFERENCED: 409,
+    RESTORE_REVISION_CONFLICT: 409,
+    RESTORE_STATE_CONFLICT: 409,
+    RESTORE_IDEMPOTENCY_CONFLICT: 409,
+    RESTORE_EXECUTION_AUTHORIZATION_INVALID: 422,
+    RESTORE_EXECUTION_AUTHORIZATION_EXPIRED: 422,
+    RESTORE_EXECUTION_NOT_FOUND: 404,
+    RESTORE_EXECUTION_DEADLINE_EXCEEDED: 409,
+    RESTORE_EXECUTION_CONFLICT: 409,
+    RESTORE_PROJECT_SCOPE: 409,
+    RESTORE_MIGRATION_REQUIRED: 410,
+  };
+  const response: Record<string, unknown> = { code: error.code, message: "Restore request rejected." };
+  if (error.currentRevision !== undefined) response.currentRevision = error.currentRevision;
+  res.status(statusByCode[error.code]).json({ error: response });
+  return true;
+}
+
+function parsePreview(body: unknown): { backupId: string; dryRun: true; idempotencyKey: string } | null {
+  if (!isObject(body) || Object.keys(body).sort().join("\0") !== "backupId\0dryRun\0idempotencyKey") return null;
+  return typeof body.backupId === "string" && body.backupId.length > 0
+    && body.dryRun === true && typeof body.idempotencyKey === "string"
+    ? { backupId: body.backupId, dryRun: true, idempotencyKey: body.idempotencyKey }
+    : null;
+}
+
+function parseAuthorize(body: unknown): { expectedRevision: number } | null {
+  if (!isObject(body) || Object.keys(body).join("\0") !== "expectedRevision") return null;
+  return Number.isSafeInteger(body.expectedRevision) && (body.expectedRevision as number) >= 0
+    ? { expectedRevision: body.expectedRevision as number }
+    : null;
+}
+
+function parseConfirm(body: unknown): { confirmationToken: string; expectedRevision: number; idempotencyKey: string } | null {
+  if (!isObject(body) || Object.keys(body).sort().join("\0") !== "confirmationToken\0expectedRevision\0idempotencyKey") return null;
+  return typeof body.confirmationToken === "string" && body.confirmationToken.length >= 32
+    && typeof body.idempotencyKey === "string"
+    && Number.isSafeInteger(body.expectedRevision) && (body.expectedRevision as number) >= 0
+    ? {
+      confirmationToken: body.confirmationToken,
+      expectedRevision: body.expectedRevision as number,
+      idempotencyKey: body.idempotencyKey,
+    }
+    : null;
+}
+
+function parseExecution(body: unknown): { executionToken: string; expectedRevision: number; idempotencyKey: string } | null {
+  if (!isObject(body) || Object.keys(body).sort().join("\0") !== "executionToken\0expectedRevision\0idempotencyKey") return null;
+  return typeof body.executionToken === "string" && body.executionToken.length >= 32
+    && typeof body.idempotencyKey === "string"
+    && Number.isSafeInteger(body.expectedRevision) && (body.expectedRevision as number) >= 0
+    ? {
+      executionToken: body.executionToken,
+      expectedRevision: body.expectedRevision as number,
+      idempotencyKey: body.idempotencyKey,
+    }
+    : null;
+}
+
+function parseLimit(value: unknown): number | null {
+  if (value === undefined) return 50;
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,2}$/.test(value)) return null;
+  const limit = Number(value);
+  return limit <= 100 ? limit : null;
+}
+
 export const backupsRouter = Router();
 
 backupsRouter.post("/", async (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   try {
     const snapshot = await backups.createSnapshot(projectId, "manual", coreDbPath(), opencodeDbPath());
     const record = backups.getBackup(projectId, snapshot.backupId);
+    if (!record) throw new backups.BackupError("BACKUP_INVALID");
     res.status(201).json({ data: publicBackup(record) });
   } catch (error) {
     logger.error("backups", "Manual backup failed", {
-      error: error instanceof Error ? error.message : String(error),
+      code: error instanceof backups.BackupError ? error.code : "BACKUP_FAILED",
     });
+    if (restoreError(res, error)) return;
     res.status(500).json({ error: { code: "BACKUP_FAILED", message: "Failed to create backup" } });
   }
 });
 
 backupsRouter.get("/", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const records = backups.listBackups(projectId).map(publicBackup);
   res.json({ data: records, total: records.length });
 });
 
 backupsRouter.get("/schedule", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   res.json({ data: getSchedule(projectId) });
 });
 
 backupsRouter.put("/schedule", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const current = getSchedule(projectId);
   const { hourly, daily, manual_retention } = req.body ?? {};
@@ -114,68 +202,132 @@ backupsRouter.put("/schedule", (req, res) => {
 });
 
 backupsRouter.post("/restore/preview", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
-  const backupId = req.body?.backupId;
-  if (typeof backupId !== "string" || !backupId) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "backupId is required" } });
+  const input = parsePreview(req.body);
+  if (!input) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "backupId, dryRun=true, and idempotencyKey are required" } });
     return;
   }
-  const record = backups.getBackup(projectId, backupId);
-  if (!record) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Backup not found" } });
-    return;
+  try {
+    res.status(201).json({ data: backups.previewRestore(projectId, input) });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "RESTORE_PREVIEW_FAILED", message: "Restore preview failed." } });
   }
-  const validation = backups.validateRestorePreflight(backupId);
-  res.json({
-    data: {
-      backup: publicBackup(record),
-      valid: validation.valid,
-      errors: validation.errors,
-      warnings: [
-        "Restore replaces the active Ingenium and OpenCode databases.",
-        "Create a current backup before proceeding.",
-      ],
-      estimatedSize: record.size_bytes,
-    },
-  });
 });
 
-backupsRouter.post("/restore", (req, res) => {
-  const projectId = requireProject(req, res);
+backupsRouter.post("/restore/:planId/authorize", (req, res) => {
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
-  const { backupId, confirm } = req.body ?? {};
-  if (typeof backupId !== "string" || !backupId || confirm !== true) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "backupId and confirm=true are required" } });
+  const input = parseAuthorize(req.body);
+  if (!input) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "expectedRevision is required" } });
     return;
   }
-  if (!backups.getBackup(projectId, backupId)) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Backup not found" } });
-    return;
+  try {
+    // This is the only REST response that contains an opaque confirmation token.
+    res.json({ data: backups.authorizeRestore(projectId, req.params.planId!, input.expectedRevision) });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "RESTORE_AUTHORIZE_FAILED", message: "Restore authorization failed." } });
   }
-  const validation = backups.validateRestorePreflight(backupId);
-  if (!validation.valid) {
-    res.status(422).json({ error: { code: "INVALID_BACKUP", message: validation.errors.join("; ") } });
-    return;
-  }
-  const jobId = backups.startRestore(projectId, backupId);
-  backups.updateRestoreStatus(jobId, "confirmed");
-  res.status(202).json({ data: { jobId, status: "confirmed", restartRequired: true } });
 });
 
-backupsRouter.get("/restore/:jobId", (req, res) => {
-  const projectId = requireProject(req, res);
+backupsRouter.post("/restore/:planId/confirm", (req, res) => {
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
-  const job = backups.getRestoreStatus(req.params.jobId!);
-  if (!job || job.project_id !== projectId) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Restore job not found" } });
+  const input = parseConfirm(req.body);
+  if (!input) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "confirmationToken, expectedRevision, and idempotencyKey are required" } });
     return;
   }
-  res.json({ data: job });
+  try {
+    res.json({ data: backups.confirmRestore(projectId, req.params.planId!, input) });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "RESTORE_CONFIRM_FAILED", message: "Restore confirmation failed." } });
+  }
+});
+
+backupsRouter.post("/restore/:planId/execution/authorize", (req, res) => {
+  const projectId = requireGlobalProject(req, res);
+  if (!projectId) return;
+  const input = parseAuthorize(req.body);
+  if (!input) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "expectedRevision is required" } });
+    return;
+  }
+  try {
+    // The only execution token response. It is never logged or included in status/audit DTOs.
+    res.json({ data: backups.authorizeRestoreExecution(projectId, req.params.planId!, input.expectedRevision) });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "RESTORE_EXECUTION_AUTHORIZE_FAILED", message: "Restore execution authorization failed." } });
+  }
+});
+
+backupsRouter.post("/restore/:planId/execute", async (req, res) => {
+  const projectId = requireGlobalProject(req, res);
+  if (!projectId) return;
+  const input = parseExecution(req.body);
+  if (!input) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "executionToken, expectedRevision, and idempotencyKey are required" } });
+    return;
+  }
+  try {
+    const queued = backups.executeRestore(projectId, req.params.planId!, input);
+    try {
+      await startRestoreMaintenance();
+    } catch {
+      // A queue acknowledgement is never allowed to strand an unstartable run.
+      // This is CAS-protected, so an independently-started executor wins safely.
+      backups.failRestoreExecutionStart(projectId, queued.run.id, queued.run.revision);
+      logger.warn("backups", "Restore maintenance supervisor start failed", { code: "SUPERVISOR_FAILED", runId: queued.run.id });
+      res.status(503).json({ error: { code: "SUPERVISOR_FAILED", message: "Restore executor could not be started." } });
+      return;
+    }
+    res.status(202).json({ data: queued });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "RESTORE_EXECUTE_FAILED", message: "Restore execution request failed." } });
+  }
+});
+
+backupsRouter.get("/restore/:planId/audit", (req, res) => {
+  const projectId = requireGlobalProject(req, res);
+  if (!projectId) return;
+  const limit = parseLimit(req.query.limit);
+  if (limit === null) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "limit must be between 1 and 100" } });
+    return;
+  }
+  try {
+    res.json({ data: backups.listRestoreAudit(projectId, req.params.planId!, limit) });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "RESTORE_AUDIT_FAILED", message: "Restore audit lookup failed." } });
+  }
+});
+
+backupsRouter.get("/restore/:planId", (req, res) => {
+  const projectId = requireGlobalProject(req, res);
+  if (!projectId) return;
+  const plan = backups.getRestorePlan(projectId, req.params.planId!);
+  if (!plan) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Restore plan not found" } });
+    return;
+  }
+  res.json({ data: plan });
+});
+
+// The legacy boolean-confirm route is retained only as a fixed no-bypass error.
+backupsRouter.post("/restore", (_req, res) => {
+  res.status(410).json(RESTORE_MIGRATION_ERROR);
 });
 
 backupsRouter.get("/:id", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const record = backups.getBackup(projectId, req.params.id!);
   if (!record) {
@@ -186,31 +338,47 @@ backupsRouter.get("/:id", (req, res) => {
 });
 
 backupsRouter.get("/:id/download", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
-  const filePath = backups.getBackupComponentPath(projectId, req.params.id!);
-  if (!filePath || !existsSync(filePath)) {
+  try {
+    const download = backups.readVerifiedBackupComponent(projectId, req.params.id!);
+    res.setHeader("Content-Type", "application/vnd.sqlite3");
+    res.setHeader("Content-Disposition", `attachment; filename="${download.filename}"`);
+    res.setHeader("Content-Length", download.size);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    let wiped = false;
+    const wipe = () => {
+      if (wiped) return;
+      wiped = true;
+      backups.wipeBackupDownloadBuffer(download.bytes);
+    };
+    res.once("finish", wipe);
+    res.once("close", wipe);
+    res.once("error", wipe);
+    try {
+      res.end(download.bytes);
+    } catch (error) {
+      wipe();
+      throw error;
+    }
+  } catch (error) {
+    if (restoreError(res, error)) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Backup file not found" } });
-    return;
   }
-  res.setHeader("Content-Type", "application/vnd.sqlite3");
-  res.setHeader("Content-Disposition", `attachment; filename="${basename(filePath)}"`);
-  res.setHeader("Content-Length", statSync(filePath).size);
-  createReadStream(filePath).on("error", (error) => {
-    logger.error("backups", "Backup stream failed", { error: error.message });
-    if (!res.headersSent) res.status(500).end();
-    else res.destroy(error);
-  }).pipe(res);
 });
 
 backupsRouter.delete("/:id", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
-  const record = backups.getBackup(projectId, req.params.id!);
-  if (!record) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Backup not found" } });
-    return;
+  try {
+    if (!backups.getBackup(projectId, req.params.id!)) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Backup not found" } });
+      return;
+    }
+    backups.deleteBackup(projectId, req.params.id!);
+    res.json({ data: { deleted: true, id: req.params.id } });
+  } catch (error) {
+    if (restoreError(res, error)) return;
+    res.status(500).json({ error: { code: "BACKUP_DELETE_FAILED", message: "Backup deletion failed" } });
   }
-  backups.deleteBackup(projectId, record.id);
-  res.json({ data: { deleted: true, id: record.id } });
 });

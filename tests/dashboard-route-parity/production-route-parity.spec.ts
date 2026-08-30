@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page, type Request } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page, type Request } from "./fixture";
 import {
   buildPageSpecificQueryVariants,
   discoverRouteInventory,
@@ -9,15 +9,15 @@ import {
   type RouteInventory,
   type SettingsDeepLink,
 } from "./route-inventory";
-import { productionDashboardRoute } from "./runtime";
+import { productionDashboardRoute, productionDashboardUrl } from "./runtime";
+import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
 
-const inventory: RouteInventory = discoverRouteInventory();
+const project = getDefaultSuiteRuntime().project;
+const inventory: RouteInventory = discoverRouteInventory(project);
 const retiredRouteExpectation = inventory.canonicalNavigationRoutes.filter(isRetiredDashboardRoute);
-const RATE_LIMIT_RETRY_INTERVALS = [250, 500, 1_000, 2_000];
 const NO_ACCOUNT_SENTINEL = "route-parity-no-account";
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const DOCS_SPACES_LIST_URL = /\/api\/v1\/docs\/spaces\/?(?:\?.*)?$/;
-const NEXT_STATIC_ASSET_URL = /\/_next\/static\//;
 const SETTINGS_VIEWPORTS = [
   { name: "desktop", width: 1_440, height: 900 },
   { name: "mobile", width: 390, height: 844 },
@@ -92,32 +92,10 @@ async function installReadOnlyBrowserGuards(
 async function installDocumentOnlyRoute(page: Page): Promise<void> {
   await page.route("**/*", async (route) => {
     if (route.request().resourceType() === "document") {
-      await route.continue();
+      await route.fallback();
       return;
     }
     await route.abort("blockedbyclient");
-  });
-}
-
-/** Retry only observed gateway 429s for static assets needed by UI checks. */
-async function installRateLimitAssetRetry(page: Page): Promise<void> {
-  await page.route(NEXT_STATIC_ASSET_URL, async (route) => {
-    let response: Awaited<ReturnType<typeof route.fetch>> | undefined;
-    await expect
-      .poll(
-        async () => {
-          response = await route.fetch();
-          return response.status();
-        },
-        {
-          intervals: RATE_LIMIT_RETRY_INTERVALS,
-          timeout: 15_000,
-          message: `Static asset ${route.request().url()} stayed rate limited`,
-        },
-      )
-      .not.toBe(429);
-    if (!response) throw new Error(`Static asset ${route.request().url()} did not produce a response`);
-    await route.fulfill({ response });
   });
 }
 
@@ -138,10 +116,9 @@ async function runReadOnlyBrowserCheck<T>(
   context: BrowserContext,
   label: string,
   operation: () => Promise<T>,
-  options: { documentOnly?: boolean; retryRateLimitedAssets?: boolean } = {},
+  options: { documentOnly?: boolean } = {},
 ): Promise<T> {
   const guards = await installReadOnlyBrowserGuards(page, context);
-  if (options.retryRateLimitedAssets) await installRateLimitAssetRetry(page);
   if (options.documentOnly) await installDocumentOnlyRoute(page);
   let result: T | undefined;
   let operationError: unknown;
@@ -180,26 +157,11 @@ async function gotoProductionRoute(
   page: Page,
   path: string,
 ): Promise<Awaited<ReturnType<Page["goto"]>>> {
-  let response: Awaited<ReturnType<Page["goto"]>>;
-  await expect
-    .poll(
-      async () => {
-        response = await page.goto(path, { waitUntil: "domcontentloaded" });
-        if (response?.status() !== 200) return false;
-        return true;
-      },
-      {
-        intervals: RATE_LIMIT_RETRY_INTERVALS,
-        timeout: 15_000,
-        message: `${path} did not reach a successful document response`,
-      },
-    )
-    .toBe(true);
-  return response!;
+  return page.goto(path, { waitUntil: "domcontentloaded" });
 }
 
 async function openSettingsDeepLink(page: Page, tab: string): Promise<void> {
-  const path = routeWithQuery("/", { project: "global-default", settings: tab });
+  const path = routeWithQuery("/", { project, settings: tab });
   const dialog = page.getByRole("dialog");
   await gotoProductionRoute(page, path);
   await expect(dialog, `settings=${tab} did not open the overlay`).toBeVisible();
@@ -219,11 +181,21 @@ async function assertSettingsSelection(
 ): Promise<void> {
   const activePanel = page.getByTestId(deepLink.panelTestId);
   await expect(activePanel, `${deepLink.id} did not render its expected panel`).toBeVisible();
+  expect(
+    await activePanel.evaluate((panel) => !panel.closest("[hidden], [inert]")),
+    `${deepLink.id} selected a hidden or inert panel`,
+  ).toBe(true);
+
+  const visibleRegisteredPanels = page.locator(
+    inventory.settingsDeepLinks
+      .map(({ panelTestId }) => `[data-testid="${panelTestId}"]:visible`)
+      .join(", "),
+  );
   await expect(
-    page.locator('[data-testid^="settings-panel-"]:visible'),
+    visibleRegisteredPanels,
     `${deepLink.id} did not select exactly one visible panel`,
   ).toHaveCount(1);
-  await expect(page.locator('[data-testid^="settings-panel-"]:visible')).toHaveAttribute(
+  await expect(visibleRegisteredPanels).toHaveAttribute(
     "data-testid",
     deepLink.panelTestId,
   );
@@ -259,14 +231,13 @@ async function assertSettingsSelection(
 }
 
 async function openSettingsCompatibilityRoute(page: Page): Promise<void> {
-  const path = routeWithQuery("/settings", { project: "global-default" });
+  const path = routeWithQuery("/settings", { project });
   const dialog = page.getByRole("dialog");
   await gotoProductionRoute(page, path);
   await expect
     .poll(
       () => new URL(page.url()).searchParams.get("settings"),
       {
-        intervals: RATE_LIMIT_RETRY_INTERVALS,
         timeout: 15_000,
         message: "settings compatibility redirect did not reach settings=general",
       },
@@ -276,15 +247,14 @@ async function openSettingsCompatibilityRoute(page: Page): Promise<void> {
 }
 
 test.describe("Production dashboard route parity", () => {
-  test("derives the complete primary navigation and rejects retired page routes", () => {
+  test("derives the complete navigation and settings inventories without retired routes", () => {
     expect(inventory.canonicalNavigationRoutes).toContain("/");
     expect(inventory.canonicalNavigationRoutes).toContain("/secrets");
     expect(inventory.canonicalNavigationRoutes).toContain("/mcp-servers");
+    expect(inventory.canonicalNavigationRoutes).toContain("/usage");
+    expect(inventory.canonicalNavigationRoutes).toContain("/vscode");
     expect(retiredRouteExpectation).toEqual([]);
-    expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(20);
-  });
-
-  test("uses the explicit 14-ID settings deep-link inventory", () => {
+    expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(24);
     expect(inventory.settingsDeepLinks.map(({ id }) => id)).toEqual([
       "general",
       "projects",
@@ -316,9 +286,36 @@ test.describe("Production dashboard route parity", () => {
     expect([...artifact.routes].filter(isRetiredDashboardRoute), "Production artifact contains retired page routes").toEqual([]);
   });
 
+  test("direct config authenticates navigation and settings for its isolated run project", async ({ page, context }) => {
+    await runReadOnlyBrowserCheck(page, context, "direct route-parity authentication", async () => {
+      await gotoProductionRoute(page, routeWithQuery("/", { project }));
+      await expect(page.locator("#nav-sidebar")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+
+      const sessionCookie = (await context.cookies(productionDashboardUrl()))
+        .find((cookie) => cookie.name === "__Host-ingenium_session");
+      expect(sessionCookie).toMatchObject({
+        domain: "localhost",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+      });
+      expect(sessionCookie?.value).toBeTruthy();
+      expect(await page.evaluate(() => localStorage.getItem("ingenium_global_project"))).toBe(project);
+
+      const authorizedProjects = await page.evaluate(async () => {
+        const response = await fetch("/api/v1/projects", { credentials: "same-origin" });
+        return { status: response.status, body: await response.json() as { data?: Array<{ name?: string }> } };
+      });
+      expect(authorizedProjects.status).toBe(200);
+      expect(authorizedProjects.body.data?.map(({ name }) => name)).toContain(project);
+      expect(authorizedProjects.body.data?.map(({ name }) => name)).not.toContain("global-default");
+    });
+  });
+
   test("the rendered navigation has no missing or stale page targets", async ({ page, context }) => {
     await runReadOnlyBrowserCheck(page, context, "navigation and route inspection", async () => {
-      await gotoProductionRoute(page, routeWithQuery("/", { project: "global-default" }));
+      await gotoProductionRoute(page, routeWithQuery("/", { project }));
       await expect(page.locator("#nav-sidebar")).toBeVisible();
 
       const hrefs = await page.locator("#nav-sidebar a[href]").evaluateAll((links) =>
@@ -338,7 +335,7 @@ test.describe("Production dashboard route parity", () => {
       await installDocumentOnlyRoute(page);
       for (const route of inventory.canonicalNavigationRoutes) {
         expect(artifact.routes.has(route), `${route} is absent from the production artifact`).toBe(true);
-        await assertGatewayRoute(page, route, { project: "global-default" });
+        await assertGatewayRoute(page, route, { project });
       }
     });
   });
@@ -346,7 +343,7 @@ test.describe("Production dashboard route parity", () => {
   for (const route of inventory.canonicalNavigationRoutes) {
     test(`smoke renders canonical route ${route}`, async ({ page, context }) => {
       await runReadOnlyBrowserCheck(page, context, `canonical route ${route}`, async () => {
-        await assertGatewayRoute(page, route, { project: "global-default" });
+        await assertGatewayRoute(page, route, { project });
       }, { documentOnly: true });
     });
   }
@@ -367,7 +364,7 @@ test.describe("Production dashboard route parity", () => {
       docsSpaceId: "0",
       docsPageId: "0",
       mailAccount: NO_ACCOUNT_SENTINEL,
-    });
+    }, project);
     expect(variants, "page-specific query inventory must not be empty").not.toEqual([]);
 
     await runReadOnlyBrowserCheck(page, context, "page-specific and standalone query variants", async () => {
@@ -385,9 +382,11 @@ test.describe("Production dashboard route parity", () => {
         await runReadOnlyBrowserCheck(page, context, `settings=${deepLink.id} at ${viewport.name}`, async () => {
           await openSettingsDeepLink(page, deepLink.id);
           await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-          expect(new URL(page.url()).searchParams.get("settings")).toBe(deepLink.id);
+          const url = new URL(page.url());
+          expect(url.searchParams.get("settings")).toBe(deepLink.id);
+          expect(url.searchParams.get("project")).toBe(project);
           await assertSettingsSelection(page, deepLink, viewport.name);
-        }, { retryRateLimitedAssets: true });
+        });
       });
     }
   }
@@ -405,14 +404,14 @@ test.describe("Production dashboard route parity", () => {
         // Invalid IDs open the overlay but are not rewritten by the client;
         // retaining the request also keeps this assertion non-mutating.
         expect(new URL(page.url()).searchParams.get("settings")).toBe(UNSUPPORTED_SETTINGS_ID);
-      }, { retryRateLimitedAssets: true });
+      });
     });
   }
 
   test("keeps the direct settings compatibility route on the supported redirect path", async ({ page, context }) => {
     await runReadOnlyBrowserCheck(page, context, "settings compatibility redirect", async () => {
       await openSettingsCompatibilityRoute(page);
-    }, { retryRateLimitedAssets: true });
+    });
   });
 
   test("does not introduce stale dashboard route expectations into this suite", () => {
@@ -424,7 +423,7 @@ test.describe("Production dashboard route parity", () => {
         docsSpaceId: "0",
         docsPageId: "0",
         mailAccount: NO_ACCOUNT_SENTINEL,
-      }).map((variant) => variant.path),
+      }, project).map((variant) => variant.path),
     ];
     expect(suiteRoutes.filter(isRetiredDashboardRoute)).toEqual([]);
   });

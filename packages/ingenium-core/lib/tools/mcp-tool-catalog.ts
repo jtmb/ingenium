@@ -4,8 +4,8 @@
  * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls
  * plus extension-registered tools (synthesize_observations, auto_observe_now).
  *
- * Every tool known to the system MUST be listed here. The ALL_TOOLS array and
- * CATEGORY_PREFIX map in mcp-tool-states.ts derive from this catalog.
+ * Every tool known to the system MUST be listed here. The mcp-tool-states
+ * category projection derives from this catalog.
  */
 
 export interface McpToolCatalogEntry {
@@ -15,6 +15,7 @@ export interface McpToolCatalogEntry {
   projectScope: "per-project" | "global";
   defaultEnabled: boolean;
   apiEndpoints: string[]; // e.g. ["GET /api/v1/skills"]
+  authorization?: import("./mcp-authorization-policy.js").McpAuthorizationPolicy;
 }
 
 // ── Category-level endpoint maps (shared by all tools in that category) ──
@@ -50,6 +51,8 @@ const SKILLS_ENDPOINTS = [
   // Proposals
   "POST /api/v1/skills/proposals",
   "GET /api/v1/skills/proposals",
+  "GET /api/v1/skills/proposals/page",
+  "GET /api/v1/skills/proposals/counts",
   "GET /api/v1/skills/proposals/:id",
   "POST /api/v1/skills/proposals/:id/submit",
   "POST /api/v1/skills/proposals/:id/approve",
@@ -92,10 +95,17 @@ const EXTRACTION_ENDPOINTS = [
   "POST /api/v1/extraction/run",
 ];
 
+const REPOSITORY_SYNC_ENDPOINTS = [
+  "POST /api/v1/docs/repository/sync",
+  "POST /api/v1/repository/resources/sync",
+];
+
 const TASKS_ENDPOINTS = [
   "GET /api/v1/tasks",
   "POST /api/v1/tasks",
   "PATCH /api/v1/tasks/:id",
+  "POST /api/v1/tasks/:id/reserve",
+  "POST /api/v1/tasks/:id/release",
   "GET /api/v1/tasks/next",
   "POST /api/v1/tasks/search",
   "POST /api/v1/tasks/:id/comments",
@@ -122,7 +132,26 @@ const PLANS_ENDPOINTS = [
   "GET /api/v1/context/search",
 ];
 const CONTEXT_ENDPOINTS = [...PLANS_ENDPOINTS, "GET /api/v1/context/:id", "PATCH /api/v1/context/:id", "DELETE /api/v1/context/:id", "POST /api/v1/context/batch"];
-
+const CONTEXT_CONVERSATION_ENDPOINTS = [
+  "POST /api/v1/context/conversations/import",
+  "POST /api/v1/context/conversations",
+  "GET /api/v1/context/conversations",
+  "GET /api/v1/context/conversations/:conversationId",
+  "POST /api/v1/context/conversations/:conversationId/messages",
+  "GET /api/v1/context/conversations/:conversationId/messages",
+  "GET /api/v1/context/conversations/:conversationId/messages/search",
+  "GET /api/v1/context/conversations/:conversationId/messages/:messageId",
+  "POST /api/v1/context/conversations/:conversationId/messages/batch",
+  "POST /api/v1/context/conversations/:conversationId/checkpoints",
+  "GET /api/v1/context/conversations/:conversationId/checkpoints",
+  "GET /api/v1/context/conversations/:conversationId/checkpoints/:checkpointId",
+  "POST /api/v1/context/conversations/:conversationId/checkpoints/:checkpointId/restore",
+  "POST /api/v1/context/conversations/maintenance/preview",
+  "POST /api/v1/context/conversations/:conversationId/maintenance/authorize",
+  "GET /api/v1/context/conversations/:conversationId/maintenance/audit",
+  "POST /api/v1/context/conversations/:conversationId/archive",
+  "POST /api/v1/context/conversations/:conversationId/unarchive",
+];
 const PROJECTS_ENDPOINTS = [
   "GET /api/v1/projects",
   "POST /api/v1/projects",
@@ -147,10 +176,10 @@ const PLUGINS_ENDPOINTS = [
 ];
 
 const PROVIDERS_ENDPOINTS = [
-  "GET /opencode/providers",
-  "POST /opencode/auth/:providerID",
-  "DELETE /opencode/auth/:providerID",
-  "GET /opencode/auth/status",
+  "GET /api/v1/opencode/providers",
+  "POST /api/v1/opencode/auth/:providerID",
+  "DELETE /api/v1/opencode/auth/:providerID",
+  "GET /api/v1/opencode/auth/status",
 ];
 
 const SERVERS_ENDPOINTS = [
@@ -159,6 +188,10 @@ const SERVERS_ENDPOINTS = [
   "DELETE /api/v1/servers/:name",
   "PATCH /api/v1/servers/:name",
   "POST /api/v1/servers/sync-all",
+];
+
+const MCP_REPORT_ENDPOINTS = [
+  "GET /api/v1/mcp-tools/report",
 ];
 
 const AGENTS_ENDPOINTS = [
@@ -221,13 +254,14 @@ const LOGS_ENDPOINTS = [
 const JOBS_ENDPOINTS = [
   "GET /api/v1/jobs",
   "POST /api/v1/jobs",
-  "PUT /api/v1/jobs/:id",
+  "PATCH /api/v1/jobs/:id",
   "DELETE /api/v1/jobs/:id",
   "POST /api/v1/jobs/:id/run",
   "GET /api/v1/jobs/:id/runs",
   "GET /api/v1/jobs/runs/:id/logs",
   "POST /api/v1/jobs/runs/:id/cancel",
   "GET /api/v1/jobs/:id",
+  "GET /api/v1/jobs/:id/vault-audit",
   "POST /api/v1/jobs/suggest",
 ];
 
@@ -276,8 +310,12 @@ const BACKUPS_ENDPOINTS = [
   "GET /api/v1/backups/:id/download",
   "DELETE /api/v1/backups/:id",
   "POST /api/v1/backups/restore/preview",
-  "POST /api/v1/backups/restore",
-  "GET /api/v1/backups/restore/:jobId",
+  "POST /api/v1/backups/restore/:planId/authorize",
+  "POST /api/v1/backups/restore/:planId/confirm",
+  "POST /api/v1/backups/restore/:planId/execution/authorize",
+  "POST /api/v1/backups/restore/:planId/execute",
+  "GET /api/v1/backups/restore/:planId",
+  "GET /api/v1/backups/restore/:planId/audit",
   "GET /api/v1/backups/schedule",
   "PUT /api/v1/backups/schedule",
 ];
@@ -348,6 +386,15 @@ const DOCS_ENDPOINTS = [
 // ── Canonical Catalog ────────────────────────────────────
 
 export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
+  {
+    name: "ingenium_repository_sync",
+    category: "Repository Sync",
+    description: "Synchronize a repository-authoritative docs and resource manifest through the API.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: REPOSITORY_SYNC_ENDPOINTS,
+  },
+
   // ── Settings (3) ─────────────────────────────────────
   {
     name: "ingenium_setting_get",
@@ -541,7 +588,23 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_skill_proposal_list",
     category: "Skills",
-    description: "List all skill proposals for a project, optionally filtered by status.",
+    description: "Deprecated compatibility tool. It returns SKILL_PROPOSAL_LIST_RETIRED; use skill_proposal_page and skill_proposal_counts.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_proposal_page",
+    category: "Skills",
+    description: "Read one bounded page of open or history skill proposals.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_proposal_counts",
+    category: "Skills",
+    description: "Get scoped counts for skill proposals.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: SKILLS_ENDPOINTS,
@@ -740,7 +803,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_synthesis_cross_project",
     category: "Synthesis",
     description: "Trigger cross-project synthesis — evaluates patterns across all projects and promotes shared patterns to the global-default project.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: SYNTHESIS_ENDPOINTS,
   },
@@ -771,7 +834,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: EXTRACTION_ENDPOINTS,
   },
 
-  // ── Tasks (24) ───────────────────────────────────────
+  // ── Tasks (26) ───────────────────────────────────────
   {
     name: "ingenium_task_create",
     category: "Tasks",
@@ -792,6 +855,22 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_task_move",
     category: "Tasks",
     description: "Move a task to a different column.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_reserve",
+    category: "Tasks",
+    description: "Reserve a task for a cooperative owner and worktree.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_release",
+    category: "Tasks",
+    description: "Release a task reservation for its cooperative owner and worktree.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: TASKS_ENDPOINTS,
@@ -965,12 +1044,19 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: TASKS_ENDPOINTS,
   },
 
+  // ── Task Coordination (5) ─────────────────────────────
+  { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["GET /api/v1/coordination/snapshot"] },
+  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot or renew its attested runtime activity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/runtimes/activity", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
+  { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/batch"] },
+  { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/release"] },
+  { name: "ingenium_coordination_handoff", category: "Tasks", description: "Publish, read, and acknowledge sanitized same-worktree peer-write handoffs.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/handoffs/publish", "POST /api/v1/coordination/handoffs/read", "POST /api/v1/coordination/handoffs/ack"] },
+
   // ── Plans (3) ────────────────────────────────────────
   {
     name: "ingenium_plan_save",
     category: "Plans",
     description: "Save a context entry with optional tags and priority.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
@@ -978,7 +1064,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_plan_search",
     category: "Plans",
     description: "Full-text search across context entries.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
@@ -986,7 +1072,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_plan_list",
     category: "Plans",
     description: "List plan/context entries.",
-    projectScope: "per-project",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
@@ -994,6 +1080,24 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   { name: "ingenium_context_update", category: "Context", description: "Update a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
   { name: "ingenium_context_delete", category: "Context", description: "Delete a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
   { name: "ingenium_context_batch_get", category: "Context", description: "Retrieve canonical agent memory entries by ID.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
+  { name: "ingenium_context_upload_file", category: "Context", description: "Import one protected local file as a bounded immutable Context snapshot.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_create", category: "Context", description: "Create an immutable project-scoped context conversation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_get", category: "Context", description: "Get immutable conversation metadata and current revision.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_list", category: "Context", description: "Keyset-paginate immutable context conversations.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_append", category: "Context", description: "Append an immutable message using optimistic revision control.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_list", category: "Context", description: "Keyset-paginate message summaries without content.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_search", category: "Context", description: "Run bounded relevance search without returning message content.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_retrieve", category: "Context", description: "Explicitly retrieve one immutable context message with content.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_batch_retrieve", category: "Context", description: "Retrieve messages in requested-ID order and report missing IDs.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_create", category: "Context", description: "Create a hash-addressed immutable checkpoint.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_list", category: "Context", description: "Keyset-paginate immutable checkpoint history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_get", category: "Context", description: "Get a checkpoint and its RAG-source provenance identifiers.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_restore", category: "Context", description: "Restore a checkpoint as a new immutable conversation after one-time confirmation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_maintenance_preview", category: "Context", description: "Preview bounded content-free context maintenance candidates.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_maintenance_authorize", category: "Context", description: "Issue a one-time confirmation token for context maintenance.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_archive", category: "Context", description: "Append a reversible archive event without deleting immutable history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_unarchive", category: "Context", description: "Append a reversible unarchive event without changing immutable history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_audit_list", category: "Context", description: "List bounded content-free archive and restore audit evidence.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
 
   // ── Projects (10) ────────────────────────────────────
   {
@@ -1047,9 +1151,9 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_project_set_global",
     category: "Projects",
-    description: "Mark a project as global (or unmark).",
+    description: "Forward an API-enforced global lifecycle request.",
     projectScope: "per-project",
-    defaultEnabled: true,
+    defaultEnabled: false,
     apiEndpoints: PROJECTS_ENDPOINTS,
   },
   {
@@ -1177,7 +1281,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: PROVIDERS_ENDPOINTS,
   },
 
-  // ── Servers (5) ──────────────────────────────────────
+  // ── Servers (6) ──────────────────────────────────────
   {
     name: "ingenium_server_list",
     category: "Servers",
@@ -1217,6 +1321,14 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: SERVERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_mcp_report_get",
+    category: "Servers",
+    description: "Get the bounded MCP usefulness report for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: MCP_REPORT_ENDPOINTS,
   },
 
   // ── Agents (8) ───────────────────────────────────────
@@ -1601,7 +1713,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_job_create",
     category: "Jobs",
-    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    description: "Create a new job with optional schedule, trigger event, timeout, and metadata-only vault_item_ids authorization.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: JOBS_ENDPOINTS,
@@ -1609,7 +1721,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_job_update",
     category: "Jobs",
-    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    description: "CAS-update job fields with required expected_revision. Omit vault_item_ids to preserve references; [] revokes all.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: JOBS_ENDPOINTS,
@@ -1843,7 +1955,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: VAULT_ENDPOINTS,
   },
 
-  // ── Backups (10) ───────────────────────────────────────
+  // ── Backups (12) ───────────────────────────────────────
   {
     name: "ingenium_backup_create",
     category: "Backups",
@@ -1887,24 +1999,56 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_backup_restore_preview",
     category: "Backups",
-    description: "Preview what a restore would do without executing it.",
-    projectScope: "per-project",
+    description: "Create or replay a durable dry-run restore plan without executing it.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_authorize",
+    category: "Backups",
+    description: "Issue a one-time confirmation token for a previewed restore plan.",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: BACKUPS_ENDPOINTS,
   },
   {
     name: "ingenium_backup_restore_start",
     category: "Backups",
-    description: "Start a restore operation. Requires confirm=true to proceed.",
-    projectScope: "per-project",
+    description: "Confirm a restore plan, stage verified tamper-evident copies, and make it executor-ready without applying source data.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_execution_authorize",
+    category: "Backups",
+    description: "Issue a one-time execution token for a ready restore plan.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_execute",
+    category: "Backups",
+    description: "Queue the fixed restore maintenance executor.",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: BACKUPS_ENDPOINTS,
   },
   {
     name: "ingenium_backup_restore_status",
     category: "Backups",
-    description: "Get the status of a restore operation by job ID.",
-    projectScope: "per-project",
+    description: "Get the content-free current state of a restore plan.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_audit_list",
+    category: "Backups",
+    description: "List bounded immutable evidence for a restore plan.",
+    projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: BACKUPS_ENDPOINTS,
   },
@@ -2377,6 +2521,9 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: DOCS_ENDPOINTS,
   },
 ];
+
+import { explicitMcpAuthorizationPolicy } from "./mcp-authorization-policy.js";
+for (const entry of MCP_TOOL_CATALOG) entry.authorization = explicitMcpAuthorizationPolicy(entry.name, entry.category);
 
 // ── Derived helpers ────────────────────────────────────
 

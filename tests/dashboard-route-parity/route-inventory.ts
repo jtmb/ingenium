@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { getTestRunDashboardWorkspace, readTestRunManifest, TEST_RUN_MANIFEST_ENV } from "../test-run-context";
 
 /**
  * Route inventory for the production dashboard smoke suite.
@@ -259,8 +260,8 @@ export function routeWithQuery(path: string, query: Readonly<Record<string, stri
  */
 export function buildPageSpecificQueryVariants(
   data: PageSpecificQueryVariantData,
+  project = "global-default",
 ): readonly QueryVariant[] {
-  const project = "global-default";
   const mailState = { account: data.mailAccount, folder: "INBOX" };
 
   return [
@@ -305,6 +306,11 @@ export function buildPageSpecificQueryVariants(
       query: { page: "opencode", standalone: "1" },
     },
     {
+      name: "standalone VS Code page",
+      path: "/standalone",
+      query: { page: "vscode", standalone: "1" },
+    },
+    {
       name: "standalone chat page",
       path: "/standalone",
       query: { page: "chat", standalone: "1" },
@@ -327,7 +333,7 @@ export function buildPageSpecificQueryVariants(
   ];
 }
 
-export function discoverRouteInventory(): RouteInventory {
+export function discoverRouteInventory(project = "global-default"): RouteInventory {
   const canonicalNavigationRoutes = discoverCanonicalNavigationRoutes();
   const settingsDeepLinks = discoverSettingsDeepLinks();
   const supportedSettingsTabs = settingsDeepLinks.map(({ id }) => id);
@@ -337,7 +343,7 @@ export function discoverRouteInventory(): RouteInventory {
     queryVariants.push({
       name: `${path} with the active project query`,
       path,
-      query: { project: "global-default" },
+      query: { project },
     });
   }
 
@@ -350,7 +356,7 @@ export function discoverRouteInventory(): RouteInventory {
     queryVariants.push({
       name: `home settings deep link (${tab}) with the active project query`,
       path: "/",
-      query: { project: "global-default", settings: tab },
+      query: { project, settings: tab },
     });
   }
 
@@ -367,7 +373,7 @@ export function discoverRouteInventory(): RouteInventory {
   queryVariants.push({
     name: "settings redirect route with the active project query",
     path: "/settings",
-    query: { project: "global-default" },
+    query: { project },
   });
 
   return {
@@ -408,9 +414,13 @@ function appPathManifestRoutes(manifest: unknown): string[] {
 /** Load and validate the production build's route manifests without writing. */
 export function loadProductionArtifactRoutes(): ProductionArtifactRoutes {
   const configuredDirectory = process.env.INGENIUM_DASHBOARD_ARTIFACT_DIR?.trim();
+  const manifestPath = process.env[TEST_RUN_MANIFEST_ENV];
+  const fixtureDirectory = manifestPath
+    ? join(getTestRunDashboardWorkspace(readTestRunManifest(manifestPath)), ".next")
+    : join(REPOSITORY_ROOT, "services", "ingenium-dashboard", ".next");
   const directory = configuredDirectory
     ? resolve(REPOSITORY_ROOT, configuredDirectory)
-    : join(REPOSITORY_ROOT, "services", "ingenium-dashboard", ".next");
+    : fixtureDirectory;
   const buildId = readText(join(directory, "BUILD_ID")).trim();
   if (!buildId) throw new Error(`Production dashboard artifact has no BUILD_ID: ${directory}`);
 

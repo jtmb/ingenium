@@ -6,6 +6,7 @@
 .gitmodules
 .github/
 .vscode/
+.tmp/
 .idea/
 
 # Secrets and credentials
@@ -13,6 +14,12 @@
 .env.*
 !.env.example
 .opencode/.ingenium-api-token
+.opencode/.ingenium-mcp-credential
+.opencode/.ingenium-coordination-owner-provider.json
+.opencode/.ingenium-learning-credential
+.opencode/.ingenium-repository-sync-credential
+.opencode/.ingenium-runtime-credential
+**/.opencode/.ingenium-learning-credential
 *.key
 **/*.key
 *.pem

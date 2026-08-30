@@ -101,31 +101,45 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const expected = Array.from({ length: 58 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const latestMigration = "112_atomic_epoch_recovery.sql";
+    const expected = Array.from({ length: 112 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
-        const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
+        const files = readdirSync(migrationDir).filter((file) =>
+          file.startsWith(`${number}_`) && file.endsWith(".sql") && !file.endsWith("_upgrade.sql"),
+        );
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
         return files[0]!;
       });
     const actual = readdirSync(migrationDir)
       .filter((file) => /^\d{3}_.*\.sql$/.test(file))
       .sort();
+    const canonical = actual.filter((file) => !file.endsWith("_upgrade.sql"));
 
-    expect(actual).toEqual(expected);
-    expect(expected).toContain("049_workspace_project_migration.sql");
-    expect(expected).toContain("050_context_rag_phase3.sql");
-    expect(expected).toContain("051_thread_retirement.sql");
-    expect(expected).toContain("052_agent_category_integrity.sql");
-    expect(expected).toContain("053_global_project_integrity_and_protected_settings.sql");
-    expect(expected).toContain("054_agent_frontmatter_metadata.sql");
-    expect(expected).toContain("055_reserved_broker_delete_protection.sql");
-    expect(expected).toContain("056_reserved_broker_rename_protection.sql");
-    expect(expected).toContain("057_reserved_broker_immutable.sql");
-    expect(expected).toContain("058_reserved_broker_connection_independent.sql");
+    expect(canonical).toEqual(expected);
+    expect(actual.filter((file) => file.endsWith("_upgrade.sql"))).toEqual([
+      "094_authentication_auth101_upgrade.sql",
+      "095_authorization_auth101_upgrade.sql",
+      "095_authorization_auth103_upgrade.sql",
+      "104_security_audit_project_history_collision_upgrade.sql",
+    ]);
+    expect(expected.at(-1)).toBe(latestMigration);
+
+    const coordinationMigration = readFileSync(
+      join(migrationDir, "075_coordination_registry.sql"),
+      "utf8",
+    );
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_worktrees");
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_sessions");
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_claims");
+    expect(coordinationMigration).toContain("CREATE TABLE coordination_mutation_receipts");
+    expect(coordinationMigration).toContain("coordination_mutation_receipts_immutable_update");
+    expect(coordinationMigration).toContain("FOREIGN KEY(project_id, worktree_id)");
 
     const dbSource = readFileSync(resolve(__dirname, "../lib/db.ts"), "utf8");
-    for (const migration of expected) {
-      expect(dbSource, `fresh-database runner must list ${migration}`).toContain(`"${migration}"`);
-    }
+    for (const migration of actual) expect(dbSource).toContain(`"${migration}"`);
+
+    expect(dbSource).toContain(
+      `readFileSync(resolve(migrationsDir, "${latestMigration}"), "utf-8")`,
+    );
   });
 });

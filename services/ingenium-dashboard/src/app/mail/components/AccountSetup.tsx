@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { dashboardFetch, getApiBase } from "@/lib/api";
+import Select from "../../components/Select";
 
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
@@ -29,6 +30,7 @@ export default function AccountSetup({
   reconnectAccount?: { id: string; email: string; provider: string; authType?: string; imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number };
 }) {
   const [mode, setMode] = useState<"select" | "manual">("select");
+  const [ownerKind, setOwnerKind] = useState<"user" | "organization">("organization");
 
   const [email, setEmail] = useState("");
   const [imapHost, setImapHost] = useState("");
@@ -38,6 +40,9 @@ export default function AccountSetup({
   const [password, setPassword] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [savedAccountId, setSavedAccountId] = useState<string | null>(null);
+  const [connectionFailed, setConnectionFailed] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = getApiBase();
@@ -70,7 +75,9 @@ export default function AccountSetup({
   const handleOAuthRedirect = async (provider: string) => {
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/emails/accounts/oauth/url?project=${encodeURIComponent(project)}&provider=${provider}`);
+      const params = new URLSearchParams({ project, provider, owner_kind: ownerKind });
+      if (reconnectAccount) params.set("account_id", reconnectAccount.id);
+      const res = await dashboardFetch(`${apiBase}/emails/accounts/oauth/url?${params}`);
       const json = await res.json();
       if (!res.ok || !json.data?.url) {
         setError(json.error?.message || "Failed to get OAuth URL — check credentials in Settings");
@@ -78,7 +85,7 @@ export default function AccountSetup({
       }
       localStorage.setItem("oauth_provider", provider);
       localStorage.setItem("oauth_project", project);
-      if (reconnectAccount) localStorage.setItem("oauth_account_id", reconnectAccount.id);
+      if (json.data.accountId) localStorage.setItem("oauth_account_id", json.data.accountId);
       else localStorage.removeItem("oauth_account_id");
       window.location.href = json.data.url;
     } catch (err: any) {
@@ -86,55 +93,93 @@ export default function AccountSetup({
     }
   };
 
+  const accountId = reconnectAccount?.id ?? savedAccountId;
+
+  const persistManualAccount = async (): Promise<string | null> => {
+    const payload = {
+      email,
+      name: email.split("@")[0],
+      provider: "custom",
+      authType: "app_password",
+      imapHost: imapHost || undefined,
+      imapPort: imapPort ? parseInt(imapPort, 10) : undefined,
+      smtpHost: smtpHost || undefined,
+      smtpPort: smtpPort ? parseInt(smtpPort, 10) : undefined,
+      appPassword: password,
+      owner_kind: ownerKind,
+    };
+    let persistedId = accountId;
+
+    if (!persistedId) {
+      const response = await dashboardFetch(`${apiBase}/emails/accounts?project=${project}`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setTestResult(data.error?.message || "Failed to save account");
+        return null;
+      }
+      persistedId = data.data?.id;
+      if (!persistedId) {
+        setTestResult("Account was saved without an ID");
+        return null;
+      }
+      setSavedAccountId(persistedId);
+      return persistedId;
+    }
+
+    const metadataResponse = await dashboardFetch(`${apiBase}/emails/accounts/${persistedId}?project=${project}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        email,
+        name: payload.name,
+        imapHost,
+        imapPort: payload.imapPort,
+        smtpHost,
+        smtpPort: payload.smtpPort,
+      }),
+    });
+    const metadata = await metadataResponse.json();
+    if (!metadataResponse.ok) {
+      setTestResult(metadata.error?.message || "Failed to update account settings");
+      return null;
+    }
+
+    const credentialsResponse = await dashboardFetch(`${apiBase}/emails/accounts/${persistedId}/credentials?project=${project}`, {
+      method: "PATCH",
+      body: JSON.stringify({ appPassword: password }),
+    });
+    const credentials = await credentialsResponse.json();
+    if (!credentialsResponse.ok) {
+      setTestResult(credentials.error?.message || "Failed to update account credentials");
+      return null;
+    }
+    return persistedId;
+  };
+
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult(null);
+    setConnectionFailed(false);
     try {
-      const payload = {
-        email,
-        name: email.split("@")[0],
-        provider: "custom",
-        authType: "app_password",
-        imapHost: imapHost || undefined,
-        imapPort: imapPort ? parseInt(imapPort, 10) : undefined,
-        smtpHost: smtpHost || undefined,
-        smtpPort: smtpPort ? parseInt(smtpPort, 10) : undefined,
-        appPassword: password,
-      };
-      const credentialUrl = reconnectAccount
-        ? `${apiBase}/emails/accounts/${reconnectAccount.id}/credentials?project=${project}`
-        : `${apiBase}/emails/accounts?project=${project}`;
-      const createRes = await dashboardFetch(credentialUrl, {
-        method: reconnectAccount ? "PATCH" : "POST",
-        body: JSON.stringify(reconnectAccount ? { appPassword: password } : payload),
-      });
-      const createData = await createRes.json();
-      if (!createRes.ok) {
-        setTestResult(createData.error?.message || "Failed to create account");
-        setTesting(false);
-        return;
-      }
+      const persistedId = await persistManualAccount();
+      if (!persistedId) return;
 
-      const accountId = reconnectAccount?.id ?? createData.data?.id;
-      if (!accountId) {
-        setTestResult("Account created but no ID returned");
-        setTesting(false);
-        return;
-      }
-
-      const testRes = await dashboardFetch(`${apiBase}/emails/accounts/${accountId}/test?project=${project}`, {
+      const testRes = await dashboardFetch(`${apiBase}/emails/accounts/${persistedId}/test?project=${project}`, {
         method: "POST",
       });
       const testData = await testRes.json();
       if (testRes.ok && testData.data?.success) {
         setTestResult("Connection successful");
-      } else if (!reconnectAccount) {
-        setTestResult(testData.data?.error || testData.error?.message || "Connection failed");
-        await dashboardFetch(`${apiBase}/emails/accounts/${accountId}?project=${project}`, {
-          method: "DELETE",
-        });
+        setSavedAccountId(persistedId);
+        return;
       }
+      setSavedAccountId(persistedId);
+      setConnectionFailed(true);
+      setTestResult(testData.data?.error || testData.error?.message || "Connection failed");
     } catch (err: any) {
+      setConnectionFailed(Boolean(accountId));
       setTestResult(err.message || "Connection error");
     } finally {
       setTesting(false);
@@ -143,31 +188,33 @@ export default function AccountSetup({
 
   const handleAddAccount = async () => {
     try {
-      const url = reconnectAccount
-        ? `${apiBase}/emails/accounts/${reconnectAccount.id}/credentials?project=${project}`
-        : `${apiBase}/emails/accounts?project=${project}`;
-      const res = await dashboardFetch(url, {
-        method: reconnectAccount ? "PATCH" : "POST",
-        body: JSON.stringify(reconnectAccount ? { appPassword: password } : {
-          email,
-          name: email.split("@")[0],
-          provider: "custom",
-          authType: "app_password",
-          imapHost: imapHost || undefined,
-          imapPort: imapPort ? parseInt(imapPort, 10) : undefined,
-          smtpHost: smtpHost || undefined,
-          smtpPort: smtpPort ? parseInt(smtpPort, 10) : undefined,
-          appPassword: password,
-        }),
-      });
-      if (res.ok) {
-        onComplete();
-      } else {
-        const data = await res.json();
-        alert(data.error?.message || "Failed to add account");
-      }
+      const persistedId = await persistManualAccount();
+      if (persistedId) onComplete();
     } catch (err: any) {
-      alert(err.message || "Failed to add account");
+      setTestResult(err.message || "Failed to save account");
+    }
+  };
+
+  const handleRemoveSavedAccount = async () => {
+    if (!savedAccountId) return;
+    setRemoving(true);
+    try {
+      const response = await dashboardFetch(`${apiBase}/emails/accounts/${savedAccountId}?project=${project}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        setTestResult(data.error?.message || "Failed to remove saved account");
+        return;
+      }
+      setSavedAccountId(null);
+      setConnectionFailed(false);
+      setTestResult("Saved account removed");
+      onComplete();
+    } catch (err: unknown) {
+      setTestResult(err instanceof Error ? err.message : "Failed to remove saved account");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -281,6 +328,16 @@ export default function AccountSetup({
     <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-4 max-w-xl mx-auto">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{reconnectAccount ? "Update Email Credentials" : "Manual Setup"}</h2>
 
+      {!reconnectAccount && (
+        <label htmlFor="mail-account-owner" className="block text-sm font-medium text-[var(--color-text-primary)]">
+          Owner
+          <Select id="mail-account-owner" value={ownerKind} onChange={(event) => setOwnerKind(event.target.value as "user" | "organization")} wrapperClassName="mt-1 w-full" className="w-full text-sm">
+            <option value="organization">Organization</option>
+            <option value="user">Private to me</option>
+          </Select>
+        </label>
+      )}
+
       <div>
         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">Email</label>
         <input
@@ -351,9 +408,19 @@ export default function AccountSetup({
       </div>
 
       {testResult && (
-        <div className="text-sm px-3 py-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]">
+        <div
+          role={connectionFailed ? "alert" : "status"}
+          aria-live="polite"
+          className="text-sm px-3 py-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+        >
           {testResult}
         </div>
+      )}
+
+      {savedAccountId && connectionFailed && (
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          The account was saved. Edit the connection settings, then retry or remove it.
+        </p>
       )}
 
       <div className="flex gap-2 pt-2">
@@ -362,15 +429,25 @@ export default function AccountSetup({
           disabled={testing || !email || !password}
           className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {testing ? "Testing..." : reconnectAccount ? "Test Updated Credentials" : "Test Connection"}
+          {testing ? "Testing..." : accountId ? "Retry Connection" : "Test Connection"}
         </button>
         <button
           onClick={handleAddAccount}
           disabled={!email || !password}
           className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {reconnectAccount ? "Update Credentials" : "Add Account"}
+          {accountId ? "Save Changes" : "Add Account"}
         </button>
+        {savedAccountId && (
+          <button
+            type="button"
+            onClick={handleRemoveSavedAccount}
+            disabled={removing}
+            className="text-red-700 hover:text-red-900 py-2 px-4 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {removing ? "Removing..." : "Remove Saved Account"}
+          </button>
+        )}
         <button
           onClick={() => setMode("select")}
           className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-2 px-4 rounded text-sm font-medium ml-auto"

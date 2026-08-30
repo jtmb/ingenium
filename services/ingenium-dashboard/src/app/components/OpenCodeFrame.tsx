@@ -1,20 +1,14 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import {
-  getOpenCodeWebUrl,
-  getOpenCodeCliUrl,
-  getOpenCodeAvailability,
-  getOpenCodeAuthUrl,
-  type OpenCodeAvailability,
-} from "@/lib/runtime-urls";
-import { useOpenCodeHealth } from "@/lib/use-opencode-health";
+import { useRuntimeLaunch } from "@/lib/use-runtime-launch";
+import { useRuntime } from "@/lib/RuntimeContext";
+import RuntimeWorkspacePicker from "./RuntimeWorkspacePicker";
 
 interface OpenCodeFrameProps {
   mode: "web" | "cli";
   cliMounted: boolean;
-  onWebLoaded?: () => void;
-  onCliLoaded?: () => void;
+  onConnectionStatusChange?: (status: "pending" | "connected" | "error") => void;
 }
 
 /**
@@ -28,50 +22,36 @@ interface OpenCodeFrameProps {
  * (--iframe-width / --iframe-height) so ttyd/OpenCode always receives
  * stable, non-zero dimensions even during layout transitions.
  *
- * Health gating via useOpenCodeHealth prevents embedding before OpenCode
- * is ready. Availability gating via getOpenCodeAvailability prevents
- * embedding on unsupported LAN/HTTPS connections. No iframe is mounted until
- * both checks have completed and the active mode has a validated URL.
+ * Audience launch gating redeems a one-time ticket before either runtime root
+ * is mounted. The browser receives no backend address or API capability.
  */
 export default function OpenCodeFrame({
   mode,
   cliMounted,
-  onWebLoaded,
-  onCliLoaded,
+  onConnectionStatusChange,
 }: OpenCodeFrameProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const [runtime, setRuntime] = useState<{
-    web: string | null;
-    cli: string | null;
-    availability: { web: OpenCodeAvailability; cli: OpenCodeAvailability };
-  } | null>(null);
   const [frameError, setFrameError] = useState<{ mode: "web" | "cli"; message: string } | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
-  const {
-    status: healthStatus,
-    error: healthError,
-    authScope,
-    retry: retryHealth,
-  } = useOpenCodeHealth();
-
-  const activeUrl = runtime === null ? null : mode === "web" ? runtime.web : runtime.cli;
+  const { workspace } = useRuntime();
+  const webLaunch = useRuntimeLaunch("web", workspace);
+  const cliLaunch = useRuntimeLaunch("cli", workspace, cliMounted);
+  const activeLaunch = mode === "web" ? webLaunch : cliLaunch;
+  const activeUrl = activeLaunch.url;
   const activeFrameError = frameError?.mode === mode ? frameError.message : null;
-  const canRenderFrame = healthStatus === "ready" && runtime !== null && activeUrl !== null && activeFrameError === null;
+  const canRenderFrame = activeLaunch.status === "ready" && activeUrl !== null && activeFrameError === null;
 
-  // Resolve runtime URLs and availability after hydration — never during render.
   useEffect(() => {
-    setRuntime({
-      web: getOpenCodeWebUrl(),
-      cli: getOpenCodeCliUrl(),
-      availability: {
-        web: getOpenCodeAvailability("web"),
-        cli: getOpenCodeAvailability("cli"),
-      },
-    });
-  }, []);
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    const failed = workspace.status === "error" || workspace.status === "unavailable" || workspace.status === "empty"
+      || activeLaunch.status === "unavailable" || activeLaunch.status === "expired" || activeFrameError !== null;
+    onConnectionStatusChange?.(failed ? "error" : canRenderFrame ? "connected" : "pending");
+  }, [activeFrameError, activeLaunch.status, canRenderFrame, onConnectionStatusChange, workspace.status]);
 
   // Observe container size changes to provide stable dimensions to ttyd / OpenCode
   useEffect(() => {
@@ -112,7 +92,7 @@ export default function OpenCodeFrame({
         loadTimeoutRef.current = null;
       }
     };
-  }, [activeUrl, canRenderFrame, retryNonce]);
+  }, [activeUrl, canRenderFrame, mode, retryNonce]);
 
   const clearLoadTimeout = () => {
     if (loadTimeoutRef.current !== null) {
@@ -121,16 +101,14 @@ export default function OpenCodeFrame({
     }
   };
 
-  const handleFrameLoad = (frameMode: "web" | "cli", onLoaded?: () => void) => {
+  const handleFrameLoad = (frameMode: "web" | "cli") => {
     // An inactive frame can finish loading after the active frame has failed.
     // It must never clear the active frame's error surface or its timeout.
     if (frameMode !== modeRef.current) {
-      onLoaded?.();
       return;
     }
     clearLoadTimeout();
     setFrameError((current) => current?.mode === frameMode ? null : current);
-    onLoaded?.();
   };
 
   const handleFrameError = (frameMode: "web" | "cli") => {
@@ -142,128 +120,35 @@ export default function OpenCodeFrame({
   const handleRetry = () => {
     clearLoadTimeout();
     setFrameError(null);
-    setRuntime(null);
     setRetryNonce((value) => value + 1);
-    retryHealth();
+    activeLaunch.retry();
   };
 
-  // Health is checked first so the SSR tree and first client tree both contain
-  // a status surface, never an iframe with an empty src.
-  if (healthStatus === "starting") {
+  if (workspace.status !== "ready") {
+    return <RuntimeWorkspacePicker controller={workspace} product={mode === "web" ? "OpenCode Web" : "OpenCode CLI"} />;
+  }
+
+  if (activeLaunch.status === "loading" || activeLaunch.status === "starting") {
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-black">
         <div className="max-w-md text-center px-6" role="status" aria-live="polite">
           <div className="animate-spin h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-3" />
-          <p className="text-gray-400 text-sm">OpenCode is starting up…</p>
-          <p className="text-gray-500 text-xs mt-2">The dashboard will retry a limited number of times.</p>
+          <p className="text-gray-400 text-sm">Preparing your isolated {mode === "web" ? "OpenCode" : "terminal"} workspace…</p>
+          <p className="text-gray-500 text-xs mt-2">{activeLaunch.error ?? "Allocating the audience-specific runtime session."}</p>
         </div>
       </div>
     );
   }
 
-  if (healthStatus === "auth-required") {
-    const authUrl = getOpenCodeAuthUrl(mode);
-    const dashboardAuth = authScope === "dashboard";
+  if (activeLaunch.status === "unavailable" || activeLaunch.status === "expired") {
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-black">
         <div className="max-w-md text-center px-6" role="alert">
           <h2 className="text-white text-lg font-semibold mb-2">
-            {dashboardAuth ? "Dashboard authentication required" : "OpenCode authentication required"}
+            {activeLaunch.status === "expired" ? "Workspace launch expired" : "Workspace is unavailable"}
           </h2>
-          <p className="text-gray-400 text-sm mb-4">
-            {dashboardAuth
-              ? "Authenticate with the dashboard gateway, then retry this view."
-              : healthError ?? "Authenticate with the protected OpenCode gateway, then retry this view."}
-          </p>
+          <p className="text-gray-400 text-sm mb-4">{activeLaunch.error}</p>
           <div className="flex items-center justify-center gap-4 text-sm">
-            <a
-              href={authUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              {dashboardAuth ? "Open gateway sign-in" : "Open OpenCode sign-in"}
-            </a>
-            <button
-              type="button"
-              onClick={handleRetry}
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              Retry connection
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (healthStatus === "unavailable") {
-    const authUrl = getOpenCodeAuthUrl(mode);
-    return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
-        <div className="max-w-md text-center px-6" role="alert">
-          <h2 className="text-white text-lg font-semibold mb-2">OpenCode is unavailable</h2>
-          <p className="text-gray-400 text-sm mb-4">{healthError ?? "OpenCode could not be reached."}</p>
-          <div className="flex items-center justify-center gap-4 text-sm">
-            <a
-              href={authUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              Open gateway sign-in
-            </a>
-            <button
-              type="button"
-              onClick={handleRetry}
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              Retry connection
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (runtime === null) {
-    return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
-        <div className="text-center" role="status" aria-live="polite">
-          <p className="text-gray-400 text-sm">Preparing OpenCode…</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Availability guard ──────────────────────────────────────────────
-  const activeAvailability = runtime.availability[mode];
-  if (activeAvailability === "unavailable" || activeUrl === null) {
-    const authUrl = getOpenCodeAuthUrl(mode);
-    return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
-        <div className="max-w-md text-center px-6" role="alert">
-          <h2 className="text-white text-lg font-semibold mb-2">OpenCode cannot be embedded on this connection</h2>
-          <p className="text-gray-400 text-sm mb-4">
-            OpenCode serves root-relative assets and cannot be proxied under a shared origin.
-            Configure the validated host gateway roots or a dedicated HTTPS origin, or access the dashboard
-            from http://localhost:3000.
-          </p>
-          <div className="flex items-center justify-center gap-4 text-sm">
-            <a
-              role="button"
-              aria-label="Open OpenCode in a new tab"
-              href={authUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(event) => {
-                event.preventDefault();
-                window.open(authUrl, "_blank", "noopener,noreferrer");
-              }}
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              Open authenticated OpenCode gateway
-            </a>
             <button
               type="button"
               onClick={handleRetry}
@@ -278,21 +163,12 @@ export default function OpenCodeFrame({
   }
 
   if (activeFrameError !== null) {
-    const authUrl = getOpenCodeAuthUrl(mode);
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-black">
         <div className="max-w-md text-center px-6" role="alert">
           <h2 className="text-white text-lg font-semibold mb-2">OpenCode could not be loaded</h2>
           <p className="text-gray-400 text-sm mb-4">{activeFrameError}</p>
           <div className="flex items-center justify-center gap-4 text-sm">
-            <a
-              href={authUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              Open gateway sign-in
-            </a>
             <button
               type="button"
               onClick={handleRetry}
@@ -309,10 +185,10 @@ export default function OpenCodeFrame({
   return (
     <div ref={containerRef} className="absolute inset-0">
       {/* Web iframe — mounted only after its validated URL is available. */}
-      {runtime.web !== null && (
+      {webLaunch.url !== null && (
         <iframe
           key={`web-${retryNonce}`}
-          src={runtime.web}
+          src={webLaunch.url}
           className="absolute inset-0 w-full h-full border-0"
           style={{
             opacity: mode === "web" ? 1 : 0,
@@ -323,16 +199,16 @@ export default function OpenCodeFrame({
           tabIndex={mode === "web" ? 0 : -1}
           title="OpenCode Web"
           allow="clipboard-write"
-          onLoad={() => handleFrameLoad("web", onWebLoaded)}
+          onLoad={() => handleFrameLoad("web")}
           onError={() => handleFrameError("web")}
         />
       )}
 
       {/* CLI iframe — lazy-mounted on first CLI activation. */}
-      {cliMounted && runtime.cli !== null && (
+      {cliMounted && cliLaunch.url !== null && (
         <iframe
           key={`cli-${retryNonce}`}
-          src={runtime.cli}
+          src={cliLaunch.url}
           className="absolute inset-0 w-full h-full border-0"
           style={{
             opacity: mode === "cli" ? 1 : 0,
@@ -343,7 +219,7 @@ export default function OpenCodeFrame({
           tabIndex={mode === "cli" ? 0 : -1}
           title="OpenCode Terminal"
           allow="clipboard-write"
-          onLoad={() => handleFrameLoad("cli", onCliLoaded)}
+          onLoad={() => handleFrameLoad("cli")}
           onError={() => handleFrameError("cli")}
         />
       )}

@@ -1,6 +1,6 @@
 {
   "name": "development-conventions",
-  "description": "Unified development conventions — README creation, API design, Next.js 16 App Router, Python conventions, and useful comments.",
-  "tags": ["development", "conventions", "readme", "api", "nextjs", "python", "comments"],
+  "description": "Action-oriented conventions for writing, reviewing, and testing source code and documentation across README/docs, APIs, Next.js 16 App Router, Python, Go/Rust, regex, Mermaid, gitignore, web/UI, mail, and Ingenium-specific work.",
+  "tags": ["development", "conventions", "source-editing", "code-review", "testing", "readme", "documentation", "api", "nextjs", "python", "go", "rust", "regex", "mermaid", "gitignore", "web-ui", "mail", "ingenium"],
   "alwaysApply": true
 }

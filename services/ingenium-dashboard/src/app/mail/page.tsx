@@ -1,38 +1,40 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
-import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
 import SyncProgress from "./components/SyncProgress";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
-import { dashboardFetch, getApiBase } from "@/lib/api";
+import TaskCaptureModal from "../tasks/components/TaskCaptureModal";
+import { dashboardFetch, getApiBase, type EmailTaskCaptureSource, type TaskCaptureResult } from "@/lib/api";
+import { useGlobalProject } from "../../lib/ProjectContext";
 
 const API_BASE = getApiBase();
 
-/**
- * 🔴 Mail is always global — resolve the global project for all API calls.
- * The dashboard's active project selector does NOT affect mail.
- * This hook fetches the `is_global` project from the API on mount and
- * falls back to "global-default" if the API is unreachable.
- */
-function useMailProject(): string {
-  const [project, setProject] = useState("global-default");
+type MailContext = {
+  project: string | null;
+  account: string;
+  folder: string;
+  uid: string | null;
+  generation: number;
+};
 
-  useEffect(() => {
-    fetch(`${getApiBase()}/projects`)
-      .then(r => r.json())
-      .then(data => {
-        const global = data?.data?.find((p: any) => p.is_global);
-        if (global?.name) setProject(global.name);
-      })
-      .catch(() => { /* fallback to global-default */ });
-  }, []);
+type MailRequestKey = MailContext;
 
-  return project;
+function matchesMailContext(key: MailRequestKey, current: MailContext): boolean {
+  return key.generation === current.generation
+    && key.project === current.project
+    && key.account === current.account
+    && key.folder === current.folder
+    && key.uid === current.uid;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 interface EngineFolderState {
@@ -66,7 +68,11 @@ interface SyncStatus {
  * Polls sync-status every 2s to show cache-warming progress.
  */
 export default function MailPage() {
-  const project = useMailProject();
+  const {
+    project,
+    loading: projectLoading,
+    error: projectError,
+  } = useGlobalProject();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [selectedFolder, setSelectedFolder] = useState("INBOX");
@@ -92,7 +98,63 @@ export default function MailPage() {
   const [emailPending, setEmailPending] = useState(false);
   const [emailDownloadError, setEmailDownloadError] = useState<string | null>(null);
   const [pendingEmailUid, setPendingEmailUid] = useState<string | null>(null);
+  const [taskCaptureSource, setTaskCaptureSource] = useState<EmailTaskCaptureSource | null>(null);
+  const [taskCaptureNotice, setTaskCaptureNotice] = useState<{ title: string } | null>(null);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [accountsProject, setAccountsProject] = useState<string | null>(null);
+  const [accountsRetryKey, setAccountsRetryKey] = useState(0);
+  const [messageRequestKey, setMessageRequestKey] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestControllersRef = useRef(new Set<AbortController>());
+  const contextRef = useRef<MailContext>({
+    project: null,
+    account: "",
+    folder: "INBOX",
+    uid: null,
+    generation: 0,
+  });
+
+  const renderedSelectedUid = pendingEmailUid
+    ?? (selectedEmail?.uid !== undefined && selectedEmail?.uid !== null ? String(selectedEmail.uid) : null);
+  if (contextRef.current.project !== project) {
+    contextRef.current = {
+      ...contextRef.current,
+      project,
+      account: "",
+      folder: "INBOX",
+      uid: null,
+    };
+  } else {
+    contextRef.current.account = selectedAccount;
+    contextRef.current.folder = selectedFolder;
+    contextRef.current.uid = renderedSelectedUid;
+  }
+
+  const invalidateMailRequests = useCallback(() => {
+    contextRef.current.generation += 1;
+    for (const controller of requestControllersRef.current) controller.abort();
+    requestControllersRef.current.clear();
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (syncPollRef.current) {
+      clearInterval(syncPollRef.current);
+      syncPollRef.current = null;
+    }
+  }, []);
+
+  const changeMailContext = useCallback((patch: Partial<Omit<MailContext, "generation">>) => {
+    contextRef.current = { ...contextRef.current, ...patch };
+    invalidateMailRequests();
+  }, [invalidateMailRequests]);
+
+  const captureRequestKey = useCallback((): MailRequestKey => ({ ...contextRef.current }), []);
+  const isCurrentRequest = useCallback(
+    (key: MailRequestKey) => matchesMailContext(key, contextRef.current),
+    [],
+  );
 
   // Resizable EmailList panel state
   const [listWidth, setListWidth] = useState(350);
@@ -138,83 +200,167 @@ export default function MailPage() {
     });
   }, []);
 
-  // Fetch accounts on mount
   useEffect(() => {
+    invalidateMailRequests();
+  }, [project, selectedAccount, selectedFolder, renderedSelectedUid, invalidateMailRequests]);
+
+  useEffect(() => () => invalidateMailRequests(), [invalidateMailRequests]);
+
+  // Fetch accounts only after the canonical global project has resolved.
+  useEffect(() => {
+    if (projectLoading || !project) return;
+
+    if (accountsProject !== project) {
+      setAccountsProject(null);
+      setSelectedAccount("");
+      setSelectedFolder("INBOX");
+      setSelectedEmail(null);
+      setSelectedEmailLoading(false);
+      setEmailPending(false);
+      setEmailDownloadError(null);
+      setPendingEmailUid(null);
+      setEmails([]);
+      setTotal(0);
+      setEmailSource("");
+      setFolders([]);
+      setSyncStatus(null);
+    }
+
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     const fetchAccounts = async () => {
       setAccountsLoading(true);
+      setAccountsError(null);
       try {
-        const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
-        if (res.ok) {
-          const data = await res.json();
-          const accts = data.data || [];
-          setAccounts(accts);
-          if (accts.length > 0 && !selectedAccount) {
-            // Auto-select first visible (non-hidden) account
-            const firstVisible = accts.find((a: any) => !a.hidden);
-            if (firstVisible) {
-              setSelectedAccount(firstVisible.id);
-            }
-          }
+        const res = await fetch(
+          `${API_BASE}/emails/accounts?project=${project}&include_hidden=true`,
+          { signal: controller.signal },
+        );
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: { message: "Failed to load email accounts" } }));
+          throw new Error(errData.error?.message || "Failed to load email accounts");
         }
-      } catch {
-        // API not available — show empty state
-      } finally {
+        const data = await res.json();
+        if (!isCurrentRequest(requestKey)) return;
+        const accts = Array.isArray(data.data) ? data.data : [];
+        setAccounts(accts);
+        setAccountsProject(project);
+        setAccountsError(null);
         setAccountsLoading(false);
+
+        const firstVisible = accts.find((a: any) => !a.hidden);
+        if (firstVisible && !contextRef.current.account) {
+          changeMailContext({ account: firstVisible.id, folder: "INBOX", uid: null });
+          setSelectedAccount(firstVisible.id);
+          setSelectedFolder("INBOX");
+        }
+      } catch (error: unknown) {
+        if (!isCurrentRequest(requestKey) || isAbortError(error)) return;
+        setAccountsProject(project);
+        setAccountsError(error instanceof Error ? error.message : "Failed to load email accounts");
+      } finally {
+        requestControllersRef.current.delete(controller);
+        if (isCurrentRequest(requestKey)) setAccountsLoading(false);
       }
     };
-    if (project) fetchAccounts();
-  }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
+    void fetchAccounts();
 
-  // Fetch folder list when account changes
-  useEffect(() => {
-    if (!selectedAccount || !project) return;
-    fetch(`${API_BASE}/emails/folders?project=${project}&account=${selectedAccount}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data) setFolders(d.data.filter((f: any) => !f.flags?.some((fl: string) => /noselect/i.test(fl)) && f.name !== "[Gmail]")); })
-      .catch(() => setFolders([]));
-  }, [selectedAccount, project]);
+    return () => {
+      controller.abort();
+      requestControllersRef.current.delete(controller);
+    };
+  // The account selection is intentionally not a dependency: changing it does
+  // not require reloading the account catalog.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, projectLoading, accountsRetryKey, captureRequestKey, changeMailContext, isCurrentRequest]);
 
-  // Poll sync status every 2 seconds
+  // Fetch folder list when account changes.
   useEffect(() => {
-    if (!selectedAccount) {
+    if (projectLoading || !project || !selectedAccount || accountsProject !== project) return;
+
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
+    fetch(
+      `${API_BASE}/emails/folders?project=${project}&account=${selectedAccount}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Failed to load email folders");
+        return response.json();
+      })
+      .then((data) => {
+        if (!isCurrentRequest(requestKey) || !data?.data) return;
+        setFolders(data.data.filter((f: any) => !f.flags?.some((fl: string) => /noselect/i.test(fl)) && f.name !== "[Gmail]"));
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentRequest(requestKey) || isAbortError(error)) return;
+        setFolders([]);
+      })
+      .finally(() => {
+        requestControllersRef.current.delete(controller);
+      });
+
+    return () => {
+      controller.abort();
+      requestControllersRef.current.delete(controller);
+    };
+  }, [selectedAccount, selectedFolder, project, projectLoading, accountsProject, captureRequestKey, isCurrentRequest]);
+
+  // Poll sync status every 2 seconds.
+  useEffect(() => {
+    if (projectLoading || !project || !selectedAccount || accountsProject !== project) {
       setSyncStatus(null);
       return;
     }
 
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     const pollSync = async () => {
+      if (!isCurrentRequest(requestKey)) return;
       try {
         const res = await fetch(
           `${API_BASE}/emails/sync-status?project=${project}&account=${selectedAccount}`,
+          { signal: controller.signal },
         );
         if (res.ok) {
           const data = await res.json();
-          setSyncStatus(data.data);
+          if (isCurrentRequest(requestKey)) setSyncStatus(data.data);
         }
-      } catch {
-        // Silently fail — sync status is non-critical
+      } catch (error: unknown) {
+        if (!isAbortError(error) && isCurrentRequest(requestKey)) {
+          // Sync status is non-critical; keep the last successful snapshot.
+        }
       }
     };
 
-    pollSync(); // Immediate first poll
-    const interval = setInterval(pollSync, 2000);
-    return () => clearInterval(interval);
-  }, [selectedAccount, project]);
-
-  // Cleanup polling interval on unmount
-  useEffect(() => {
+    void pollSync();
+    const interval = setInterval(() => { void pollSync(); }, 2000);
+    syncPollRef.current = interval;
     return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+      clearInterval(interval);
+      if (syncPollRef.current === interval) syncPollRef.current = null;
+      controller.abort();
+      requestControllersRef.current.delete(controller);
     };
-  }, []);
+  }, [selectedAccount, project, selectedFolder, renderedSelectedUid, projectLoading, accountsProject, captureRequestKey, isCurrentRequest]);
+
+  useEffect(() => {
+    if (!taskCaptureNotice) return;
+    const timeout = window.setTimeout(() => setTaskCaptureNotice(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [taskCaptureNotice]);
 
   // Fetch emails when account/folder/page/search changes
   // Server-side DB cache serves sub-2ms — no need for in-memory cache
   useEffect(() => {
-    if (!selectedAccount) return;
+    if (projectLoading || !project || !selectedAccount || accountsProject !== project) return;
 
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     const fetchEmails = async () => {
       setLoading(true);
       try {
@@ -224,31 +370,40 @@ export default function MailPage() {
         } else {
           url = `${API_BASE}/emails?project=${project}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50`;
         }
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: controller.signal });
         if (res.ok) {
           const data = await res.json();
+          if (!isCurrentRequest(requestKey)) return;
           setEmails(data.data || []);
           setTotal(data.total || 0);
           setEmailSource(data.source || "");
           setEmailError(null);
         } else {
           const errData = await res.json().catch(() => ({ error: { message: "Failed to load emails" } }));
+          if (!isCurrentRequest(requestKey)) return;
           setEmails([]);
           setTotal(0);
           setEmailSource("");
           setEmailError(errData.error?.message || "Failed to load emails");
         }
-      } catch {
+      } catch (error: unknown) {
+        if (!isCurrentRequest(requestKey) || isAbortError(error)) return;
         setEmails([]);
         setTotal(0);
         setEmailSource("");
         setEmailError("Failed to load emails");
       } finally {
-        setLoading(false);
+        requestControllersRef.current.delete(controller);
+        if (isCurrentRequest(requestKey)) setLoading(false);
       }
     };
-    fetchEmails();
-  }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
+    void fetchEmails();
+
+    return () => {
+      controller.abort();
+      requestControllersRef.current.delete(controller);
+    };
+  }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project, projectLoading, accountsProject, renderedSelectedUid, captureRequestKey, isCurrentRequest]);
 
   // Re-fetch emails when sync status shows selected folder transitioned from syncing → done/error
   useEffect(() => {
@@ -259,84 +414,121 @@ export default function MailPage() {
     }
   }, [syncStatus, selectedFolder, emailSource]);
 
-  const handleSelectEmail = useCallback(async (uid: string) => {
-    // Guard: re-clicking the already-open email must not reset state
-    // Prevents a flash when the user clicks the same email again.
-    if (selectedEmail?.uid === uid) return;
+  // Load the selected body and keep the existing 202 cache-warming poll.
+  useEffect(() => {
+    if (projectLoading || !project || !selectedAccount || accountsProject !== project || !pendingEmailUid) return;
 
-    // Cancel any existing poll
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
+    const uid = pendingEmailUid;
+    const url = `${API_BASE}/emails/${uid}?project=${project}&account=${selectedAccount}&folder=${encodeURIComponent(selectedFolder)}`;
+    const MAX_POLL_MS = 20000;
+    let pollStart = 0;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
+    const clearOwnPoll = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        if (pollRef.current === pollInterval) pollRef.current = null;
+        pollInterval = null;
+      }
+    };
+
+    const pollBody = async () => {
+      if (!isCurrentRequest(requestKey)) {
+        clearOwnPoll();
+        return;
+      }
+      try {
+        const pollRes = await fetch(url, { signal: controller.signal });
+        if (!isCurrentRequest(requestKey)) {
+          clearOwnPoll();
+          return;
+        }
+        if (pollRes.ok) {
+          const pollData = await pollRes.json();
+          if (!isCurrentRequest(requestKey)) {
+            clearOwnPoll();
+            return;
+          }
+          clearOwnPoll();
+          setSelectedEmail(pollData.data);
+          setEmailPending(false);
+          setPendingEmailUid(null);
+          return;
+        }
+      } catch (error: unknown) {
+        if (isAbortError(error)) return;
+        if (!isCurrentRequest(requestKey)) {
+          clearOwnPoll();
+          return;
+        }
+      }
+
+      if (!isCurrentRequest(requestKey)) {
+        clearOwnPoll();
+        return;
+      }
+      if (Date.now() - pollStart >= MAX_POLL_MS) {
+        clearOwnPoll();
+        setEmailPending(false);
+        setEmailDownloadError("Could not load this email — try again later");
+      }
+    };
+
+    const loadBody = async () => {
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!isCurrentRequest(requestKey)) return;
+
+        if (res.status === 202) {
+          setSelectedEmailLoading(false);
+          setEmailPending(true);
+          pollStart = Date.now();
+          pollInterval = setInterval(() => { void pollBody(); }, 1500);
+          pollRef.current = pollInterval;
+          return;
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          if (!isCurrentRequest(requestKey)) return;
+          setSelectedEmail(data.data);
+          setPendingEmailUid(null);
+        }
+      } catch (error: unknown) {
+        if (!isCurrentRequest(requestKey) || isAbortError(error)) return;
+        setEmailDownloadError("Could not load this email — try again later");
+      } finally {
+        if (isCurrentRequest(requestKey)) setSelectedEmailLoading(false);
+      }
+    };
+
+    void loadBody();
+    return () => {
+      clearOwnPoll();
+      controller.abort();
+      requestControllersRef.current.delete(controller);
+    };
+  }, [pendingEmailUid, messageRequestKey, project, projectLoading, selectedAccount, selectedFolder, accountsProject, captureRequestKey, isCurrentRequest]);
+
+  const handleSelectEmail = useCallback((uid: string) => {
+    // Re-clicking the already-open email must not reset state or flash the reader.
+    if (selectedEmail?.uid !== undefined && String(selectedEmail.uid) === uid && !pendingEmailUid) return;
+
+    changeMailContext({ uid });
     setSelectedEmailLoading(true);
     setEmailPending(false);
     setEmailDownloadError(null);
     setSelectedEmail(null);
     setPendingEmailUid(uid);
-
-    try {
-      const url = `${API_BASE}/emails/${uid}?project=${project}&account=${selectedAccount}&folder=${encodeURIComponent(selectedFolder)}`;
-      const res = await fetch(url);
-
-      if (res.status === 202) {
-        // Email body not cached yet — poll until it is
-        setSelectedEmailLoading(false);
-        setEmailPending(true);
-
-        const pollStart = Date.now();
-        const MAX_POLL_MS = 20000;
-
-        pollRef.current = setInterval(async () => {
-          try {
-            const pollRes = await fetch(url);
-            if (pollRes.ok) {
-              const pollData = await pollRes.json();
-              setSelectedEmail(pollData.data);
-              setEmailPending(false);
-              setPendingEmailUid(null);
-              if (pollRef.current) {
-                clearInterval(pollRef.current);
-                pollRef.current = null;
-              }
-              return;
-            }
-          } catch {
-            // Retry on next tick
-          }
-
-          if (Date.now() - pollStart >= MAX_POLL_MS) {
-            setEmailPending(false);
-            setEmailDownloadError("Could not load this email — try again later");
-            if (pollRef.current) {
-              clearInterval(pollRef.current);
-              pollRef.current = null;
-            }
-          }
-        }, 1500);
-
-        return;
-      }
-
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedEmail(data.data);
-        setPendingEmailUid(null);
-      }
-    } catch {
-      setEmailDownloadError("Could not load this email — try again later");
-    } finally {
-      setSelectedEmailLoading(false);
-    }
-  }, [selectedAccount, selectedFolder, project]);
+    setMessageRequestKey((key) => key + 1);
+  }, [selectedEmail, pendingEmailUid, changeMailContext]);
 
   const handleCompose = useCallback(() => {
     setShowCompose(true);
   }, []);
-
-  // handleReply and handleDraft removed — EmailReader now handles reply/draft inline (FIX 2)
-  // composeInitialData stays undefined (always; kept for modal JXS identity but unused)
 
   const handleComposeSend = useCallback(async (data: any) => {
     setSending(true);
@@ -395,34 +587,90 @@ export default function MailPage() {
     setShowCompose(false);
   }, []);
 
+  const handleBackToMessages = useCallback(() => {
+    changeMailContext({ uid: null });
+    setSelectedEmail(null);
+    setSelectedEmailLoading(false);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setPendingEmailUid(null);
+  }, [changeMailContext]);
+
+  const handleCreateTask = useCallback(() => {
+    if (
+      !selectedAccount
+      || !selectedEmail
+      || selectedEmail.uid === undefined
+      || selectedEmail.uid === null
+      || typeof selectedEmail.folder !== "string"
+      || selectedEmail.folder.length === 0
+    ) {
+      return;
+    }
+
+    setTaskCaptureSource({
+      source_type: "email",
+      account_id: selectedAccount,
+      folder: selectedEmail.folder,
+      uid: String(selectedEmail.uid),
+    });
+  }, [selectedAccount, selectedEmail]);
+
+  const handleTaskCaptureClose = useCallback(() => {
+    setTaskCaptureSource(null);
+  }, []);
+
+  const handleTaskCaptured = useCallback((result: TaskCaptureResult) => {
+    setTaskCaptureSource(null);
+    setTaskCaptureNotice({ title: result.task.title });
+  }, []);
+
   const handleDelete = useCallback(async () => {
     if (!selectedEmail) return;
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     try {
       await dashboardFetch(`${API_BASE}/emails/${selectedEmail.uid}?project=${project}`, {
         method: "DELETE",
         body: JSON.stringify({ account: selectedAccount }),
+        signal: controller.signal,
       });
+      if (!isCurrentRequest(requestKey)) return;
+      changeMailContext({ uid: null });
       setSelectedEmail(null);
       setRefreshKey(k => k + 1);
       setPage(1);
-    } catch {
+    } catch (error: unknown) {
+      if (isAbortError(error)) return;
       // Silently fail
+    } finally {
+      requestControllersRef.current.delete(controller);
     }
-  }, [selectedEmail, selectedAccount, project]);
+  }, [selectedEmail, selectedAccount, project, captureRequestKey, isCurrentRequest, changeMailContext]);
 
   const handleArchive = useCallback(async () => {
     if (!selectedEmail) return;
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     try {
       await dashboardFetch(`${API_BASE}/emails/${selectedEmail.uid}/move?project=${project}`, {
         method: "PATCH",
         body: JSON.stringify({ account: selectedAccount, fromFolder: selectedFolder, toFolder: "Archive" }),
+        signal: controller.signal,
       });
+      if (!isCurrentRequest(requestKey)) return;
+      changeMailContext({ uid: null });
       setSelectedEmail(null);
       setRefreshKey(k => k + 1);
-    } catch {
+    } catch (error: unknown) {
+      if (isAbortError(error)) return;
       // Silently fail
+    } finally {
+      requestControllersRef.current.delete(controller);
     }
-  }, [selectedEmail, selectedAccount, project]);
+  }, [selectedEmail, selectedAccount, selectedFolder, project, captureRequestKey, isCurrentRequest, changeMailContext]);
 
   const handleSearch = useCallback((q: string) => {
     setSearchQuery(q);
@@ -430,134 +678,201 @@ export default function MailPage() {
   }, []);
 
   const handleSelectAccount = useCallback((accountId: string) => {
+    changeMailContext({ account: accountId, folder: "INBOX", uid: null });
     setSelectedAccount(accountId);
     setSelectedFolder("INBOX");
     setSelectedEmail(null);
+    setSelectedEmailLoading(false);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setPendingEmailUid(null);
     setPage(1);
     setSearchQuery("");
     setEmailError(null);
-  }, []);
+    setEmails([]);
+    setTotal(0);
+    setEmailSource("");
+  }, [changeMailContext]);
 
   const handleDeleteAccount = useCallback(async (accountId: string) => {
     setDeleteAccountId(accountId);
   }, []);
 
+  const refreshAccountList = useCallback(async (): Promise<any[] | null> => {
+    if (!project) return null;
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
+    try {
+      const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error("Failed to load email accounts");
+      const data = await res.json();
+      if (!isCurrentRequest(requestKey)) return null;
+      const accts = Array.isArray(data.data) ? data.data : [];
+      setAccounts(accts);
+      setAccountsProject(project);
+      setAccountsError(null);
+      return accts;
+    } catch (error: unknown) {
+      if (!isAbortError(error) && isCurrentRequest(requestKey)) {
+        setAccountsError(error instanceof Error ? error.message : "Failed to load email accounts");
+      }
+      return null;
+    } finally {
+      requestControllersRef.current.delete(controller);
+    }
+  }, [project, captureRequestKey, isCurrentRequest]);
+
   const handleHideAccount = useCallback(async (accountId: string) => {
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     try {
       await dashboardFetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
         method: "PATCH",
         body: JSON.stringify({ hidden: true }),
+        signal: controller.signal,
       });
-      // Refresh account list
-      const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
-      if (res.ok) {
-        const data = await res.json();
-        const accts = data.data || [];
-        setAccounts(accts);
-        // If the hidden account was selected, auto-select the next visible account
-        if (selectedAccount === accountId) {
-          const nextVisible = accts.find((a: any) => !a.hidden);
-          if (nextVisible) {
-            setSelectedAccount(nextVisible.id);
-          } else {
-            setSelectedAccount("");
-          }
-          setSelectedEmail(null);
-          setEmails([]);
-        }
-      }
+      if (!isCurrentRequest(requestKey)) return;
+      const accts = await refreshAccountList();
+      if (!accts || !isCurrentRequest(requestKey) || selectedAccount !== accountId) return;
+      const nextVisible = accts.find((a: any) => !a.hidden);
+      changeMailContext({ account: nextVisible?.id ?? "", folder: "INBOX", uid: null });
+      setSelectedAccount(nextVisible?.id ?? "");
+      setSelectedFolder("INBOX");
+      setSelectedEmail(null);
+      setEmails([]);
+      setTotal(0);
+      setEmailSource("");
     } catch { /* non-fatal */ }
-  }, [selectedAccount, project]);
+    finally {
+      requestControllersRef.current.delete(controller);
+    }
+  }, [selectedAccount, project, refreshAccountList, changeMailContext, captureRequestKey, isCurrentRequest]);
 
   const handleShowAccount = useCallback(async (accountId: string) => {
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     try {
       await dashboardFetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
         method: "PATCH",
         body: JSON.stringify({ hidden: false }),
+        signal: controller.signal,
       });
-      // Refresh account list
-      const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
-      if (res.ok) {
-        const data = await res.json();
-        setAccounts(data.data || []);
-        // Select the newly-shown account
-        setSelectedAccount(accountId);
-        setSelectedFolder("INBOX");
-        setSelectedEmail(null);
-        setPage(1);
-        setSearchQuery("");
-        setEmailError(null);
-      }
+      if (!isCurrentRequest(requestKey)) return;
+      const accts = await refreshAccountList();
+      if (!accts || !isCurrentRequest(requestKey)) return;
+      changeMailContext({ account: accountId, folder: "INBOX", uid: null });
+      setSelectedAccount(accountId);
+      setSelectedFolder("INBOX");
+      setSelectedEmail(null);
+      setEmails([]);
+      setTotal(0);
+      setEmailSource("");
+      setPage(1);
+      setSearchQuery("");
+      setEmailError(null);
     } catch { /* non-fatal */ }
-  }, [project]);
+    finally {
+      requestControllersRef.current.delete(controller);
+    }
+  }, [project, refreshAccountList, changeMailContext, captureRequestKey, isCurrentRequest]);
 
   const confirmDeleteAccount = useCallback(async () => {
     if (!deleteAccountId) return;
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     setDeletingAccount(true);
     try {
       await dashboardFetch(`${API_BASE}/emails/accounts/${deleteAccountId}?project=${project}`, {
         method: "DELETE",
+        signal: controller.signal,
       });
-      // Refresh account list with hidden included
-      const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
-      if (accountsRes.ok) {
-        const data = await accountsRes.json();
-        const accts = data.data || [];
-        setAccounts(accts);
-        if (selectedAccount === deleteAccountId) {
-          // Auto-select next visible account
-          const nextVisible = accts.find((a: any) => !a.hidden);
-          setSelectedAccount(nextVisible ? nextVisible.id : "");
-          setSelectedEmail(null);
-          setEmails([]);
-        }
+      if (!isCurrentRequest(requestKey)) return;
+      const accts = await refreshAccountList();
+      if (accts && isCurrentRequest(requestKey) && selectedAccount === deleteAccountId) {
+        const nextVisible = accts.find((a: any) => !a.hidden);
+        changeMailContext({ account: nextVisible?.id ?? "", folder: "INBOX", uid: null });
+        setSelectedAccount(nextVisible?.id ?? "");
+        setSelectedFolder("INBOX");
+        setSelectedEmail(null);
+        setEmails([]);
+        setTotal(0);
+        setEmailSource("");
       }
       // Also refresh health status — trigger a service status re-fetch
       fetch(`${API_BASE}/services/status?project=${project}`).catch(() => {});
     } catch { /* non-fatal */ }
-    setDeletingAccount(false);
-    setDeleteAccountId(null);
-  }, [deleteAccountId, selectedAccount, project]);
+    finally {
+      requestControllersRef.current.delete(controller);
+      if (isCurrentRequest(requestKey)) {
+        setDeletingAccount(false);
+        setDeleteAccountId(null);
+      }
+    }
+  }, [deleteAccountId, selectedAccount, project, refreshAccountList, changeMailContext, captureRequestKey, isCurrentRequest]);
 
   const handleSelectFolder = useCallback((folder: string) => {
+    changeMailContext({ folder, uid: null });
     setSelectedFolder(folder);
     setSelectedEmail(null);
+    setSelectedEmailLoading(false);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setPendingEmailUid(null);
     setPage(1);
     setSearchQuery("");
     setEmailError(null);
+    setEmails([]);
+    setTotal(0);
+    setEmailSource("");
 
     // Fire-and-forget cache boost hint — the /sync route calls boostFolder internally
     dashboardFetch(`${API_BASE}/emails/sync?project=${project}`, {
       method: "POST",
       body: JSON.stringify({ account: selectedAccount, folder }),
     }).catch(() => {});
-  }, [selectedAccount, project]);
+  }, [selectedAccount, project, changeMailContext]);
 
   const handleRefresh = useCallback(async () => {
     if (!selectedAccount) return;
+    invalidateMailRequests();
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const requestKey = captureRequestKey();
     setLoading(true);
     try {
       const url = searchQuery
         ? `${API_BASE}/emails/search?project=${project}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}&refresh=true`
         : `${API_BASE}/emails?project=${project}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50&refresh=true`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       if (res.ok) {
         const data = await res.json();
+        if (!isCurrentRequest(requestKey)) return;
         setEmails(data.data || []);
         setTotal(data.total || 0);
         setEmailSource(data.source || "");
         setEmailError(null);
       } else {
         const errData = await res.json().catch(() => ({ error: { message: "Refresh failed" } }));
+        if (!isCurrentRequest(requestKey)) return;
         setEmailError(errData.error?.message || "Refresh failed");
       }
-    } catch {
+    } catch (error: unknown) {
+      if (!isCurrentRequest(requestKey) || isAbortError(error)) return;
       setEmailError("Refresh failed");
     } finally {
-      setLoading(false);
-      setRefreshKey(prev => prev + 1);
+      requestControllersRef.current.delete(controller);
+      if (isCurrentRequest(requestKey)) {
+        setLoading(false);
+        setRefreshKey(prev => prev + 1);
+      }
     }
-  }, [selectedAccount, selectedFolder, page, searchQuery, project, setRefreshKey]);
+  }, [selectedAccount, selectedFolder, page, searchQuery, project, invalidateMailRequests, captureRequestKey, isCurrentRequest]);
 
   // Derived computed values for cold-state gating and folder sync indicators
   const syncingFolders = syncStatus?.folders?.filter((f: any) => f.syncing).map((f: any) => f.folder) ?? [];
@@ -565,6 +880,9 @@ export default function MailPage() {
   const isInboxCold = syncStatus !== null && syncStatus.overall === "syncing" && inboxFolderStatus?.cachedCount === 0;
   const selectedFolderStatus = syncStatus?.folders?.find((f: any) => f.folder === selectedFolder);
   const isColdFolder = !loading && emails.length === 0 && selectedFolderStatus?.cachedCount === 0 && selectedFolderStatus?.syncing === true;
+  const hasMobileEmailSelection = Boolean(
+    selectedEmail || selectedEmailLoading || emailPending || pendingEmailUid || emailDownloadError,
+  );
 
   // Detect auth errors from the selected account's raw engine status.
   const selectedEngineAccount = syncStatus?.engine?.accounts?.find(
@@ -593,8 +911,72 @@ export default function MailPage() {
     setShowAccountSetup(true);
   }, []);
 
+  const handleRetryProject = useCallback(() => {
+    window.location.reload();
+  }, []);
+
+  const handleRetryAccounts = useCallback(() => {
+    invalidateMailRequests();
+    setAccountsError(null);
+    setAccountsLoading(true);
+    setAccountsRetryKey((key) => key + 1);
+  }, [invalidateMailRequests]);
+
+  const handleAccountSetupComplete = useCallback(async () => {
+    const requestKey = captureRequestKey();
+    setShowAccountSetup(false);
+    const accts = await refreshAccountList();
+    if (!accts || !isCurrentRequest(requestKey)) return;
+    const firstVisible = accts.find((a: any) => !a.hidden);
+    if (!firstVisible) return;
+    changeMailContext({ account: firstVisible.id, folder: "INBOX", uid: null });
+    setSelectedAccount(firstVisible.id);
+    setSelectedFolder("INBOX");
+  }, [captureRequestKey, refreshAccountList, isCurrentRequest, changeMailContext]);
+
+  const accountsResolving = Boolean(project) && accountsProject !== project;
+
+  if (projectLoading) {
+    return (
+      <div className="space-y-4" aria-busy="true">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+        <div className="flex items-center gap-3 text-[var(--color-text-muted)]">
+          <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span>Resolving mail project…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+        <div
+          data-testid="mail-project-resolution-error"
+          role="alert"
+          className="rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center"
+        >
+          <p className="text-sm font-medium text-[var(--color-error-text)]">
+            {projectError?.message ?? "The active global project could not be resolved."}
+          </p>
+          <button
+            type="button"
+            onClick={handleRetryProject}
+            className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Retry project resolution
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Loading — accounts are still being fetched
-  if (accountsLoading) {
+  if (accountsLoading || accountsResolving) {
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
@@ -609,15 +991,43 @@ export default function MailPage() {
     );
   }
 
+  if (accountsError && !showAccountSetup) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+        <div
+          data-testid="mail-accounts-error"
+          role="alert"
+          className="rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center"
+        >
+          <p className="text-sm text-[var(--color-error-text)]">{accountsError}</p>
+          <button
+            type="button"
+            onClick={handleRetryAccounts}
+            className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Retry loading accounts
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // No accounts — show empty / setup state
   if (accounts.length === 0 && !showAccountSetup && !accountsLoading) {
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
-        <EmptyState
-          message="No email accounts configured"
-          action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
-        />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-4">No email accounts configured</p>
+          <button
+            type="button"
+            onClick={() => setShowAccountSetup(true)}
+            className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium"
+          >
+            Add Account
+          </button>
+        </div>
       </div>
     );
   }
@@ -629,21 +1039,7 @@ export default function MailPage() {
         <AccountSetup
           project={project}
           reconnectAccount={hasAuthError ? selectedAccountDetails : undefined}
-          onComplete={async () => {
-            setShowAccountSetup(false);
-            try {
-              const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
-              if (res.ok) {
-                const data = await res.json();
-                setAccounts(data.data || []);
-                if (data.data?.length > 0) {
-                  // Auto-select first visible account
-                  const firstVisible = data.data.find((a: any) => !a.hidden);
-                  if (firstVisible) setSelectedAccount(firstVisible.id);
-                }
-              }
-            } catch {}
-          }}
+          onComplete={handleAccountSetupComplete}
           onCancel={() => setShowAccountSetup(false)}
         />
       </div>
@@ -704,41 +1100,49 @@ export default function MailPage() {
           )}
           <div className="flex h-[calc(100dvh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
           {/* Folder sidebar */}
-          <FolderSidebar
-            accounts={accounts}
-            selectedAccount={selectedAccount}
-            selectedFolder={selectedFolder}
-            onSelectFolder={handleSelectFolder}
-            onSelectAccount={handleSelectAccount}
-            onCompose={handleCompose}
-            onAddAccount={() => setShowAccountSetup(true)}
-            onDeleteAccount={handleDeleteAccount}
-            onHideAccount={handleHideAccount}
-            onShowAccount={handleShowAccount}
-            folders={folders}
-            syncingFolders={syncingFolders}
-            folderSyncStatuses={syncStatus?.folders ?? []}
-          />
+          <div data-testid="mail-folder-sidebar" className="hidden md:flex">
+            <FolderSidebar
+              accounts={accounts}
+              selectedAccount={selectedAccount}
+              selectedFolder={selectedFolder}
+              onSelectFolder={handleSelectFolder}
+              onSelectAccount={handleSelectAccount}
+              onCompose={handleCompose}
+              onAddAccount={() => setShowAccountSetup(true)}
+              onDeleteAccount={handleDeleteAccount}
+              onHideAccount={handleHideAccount}
+              onShowAccount={handleShowAccount}
+              folders={folders}
+              syncingFolders={syncingFolders}
+              folderSyncStatuses={syncStatus?.folders ?? []}
+            />
+          </div>
 
             {/* Email list + reader — resizable split */}
             <div className="flex items-stretch relative flex-1 min-w-0">
-              <EmailList
-                emails={emails}
-                selectedUid={selectedEmail?.uid}
-                onSelect={handleSelectEmail}
-                onPageChange={setPage}
-                total={total}
-                page={page}
-                loading={loading}
-                onSearch={handleSearch}
-                error={emailError}
-                onRefresh={handleRefresh}
-                source={emailSource}
-                width={listWidth}
-              />
+              <div
+                data-testid="mail-email-list-pane"
+                className={`min-w-0 shrink-0 ${hasMobileEmailSelection ? "hidden md:flex" : "flex flex-1 md:flex-none"}`}
+              >
+                <EmailList
+                  emails={emails}
+                  selectedUid={selectedEmail?.uid}
+                  onSelect={handleSelectEmail}
+                  onPageChange={setPage}
+                  total={total}
+                  page={page}
+                  loading={loading}
+                  onSearch={handleSearch}
+                  error={emailError}
+                  onRefresh={handleRefresh}
+                  source={emailSource}
+                  width={listWidth}
+                />
+              </div>
 
               {/* Resize handle */}
               <div
+                data-testid="mail-email-list-resizer"
                 ref={handleRef}
                 role="separator"
                 aria-valuenow={listWidth}
@@ -757,35 +1161,73 @@ export default function MailPage() {
                     setListWidth(w => { const nw = Math.max(240, w - 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
                   }
                 }}
-                className={`w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0 ${isResizing ? "bg-blue-400" : "bg-transparent"}`}
+                className={`hidden md:block w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0 ${isResizing ? "bg-blue-400" : "bg-transparent"}`}
               />
 
-              {/* Email reader — inline reply/draft + summarise (FIX 2/3/4) */}
-              <EmailReader
-                email={selectedEmail}
-                loading={selectedEmailLoading}
-                downloading={emailPending}
-                downloadError={emailDownloadError}
-                onRetry={() => {
-                  if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
-                }}
-                accountId={selectedAccount}
-                project={project}
-                onForward={handleCompose}
-                onDelete={handleDelete}
-                onArchive={handleArchive}
-                accounts={accounts}
-                selectedAccount={selectedAccount}
-                onComposeSend={handleComposeSend}
-                onComposeSave={handleComposeSave}
-                replyWidth={replyWidth}
-                onReplyWidthChange={(w) => {
-                  setReplyWidth(w);
-                  localStorage.setItem("mail-reply-width", String(w));
-                }}
-              />
+              <div
+                data-testid="mail-email-reader-pane"
+                className={hasMobileEmailSelection ? "flex min-w-0 flex-1 flex-col" : "hidden min-w-0 flex-1 flex-col md:flex"}
+              >
+                {hasMobileEmailSelection && (
+                  <button
+                    type="button"
+                    onClick={handleBackToMessages}
+                    className="inline-flex items-center gap-1 border-b border-[var(--color-border)] px-4 py-2 text-left text-sm text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] md:hidden"
+                  >
+                    <span aria-hidden="true">←</span>
+                    Back to messages
+                  </button>
+                )}
+                <EmailReader
+                  email={selectedEmail}
+                  loading={selectedEmailLoading}
+                  downloading={emailPending}
+                  downloadError={emailDownloadError}
+                  onRetry={() => {
+                    if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
+                  }}
+                  accountId={selectedAccount}
+                  project={project}
+                  onForward={handleCompose}
+                  onDelete={handleDelete}
+                  onArchive={handleArchive}
+                  onCreateTask={handleCreateTask}
+                  accounts={accounts}
+                  selectedAccount={selectedAccount}
+                  onComposeSend={handleComposeSend}
+                  onComposeSave={handleComposeSave}
+                  replyWidth={replyWidth}
+                  onReplyWidthChange={(w) => {
+                    setReplyWidth(w);
+                    localStorage.setItem("mail-reply-width", String(w));
+                  }}
+                />
+              </div>
             </div>
           </div>
+
+          {taskCaptureNotice && (
+            <div
+              data-testid="mail-task-capture-status"
+              role="status"
+              aria-live="polite"
+              className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded border border-[var(--color-success-border)] bg-[var(--color-success-bg)] px-4 py-2 text-sm text-[var(--color-success-text)] shadow-lg"
+            >
+              Task created: {" "}
+              <Link href="/tasks" className="font-medium underline">
+                {taskCaptureNotice.title}
+              </Link>
+            </div>
+          )}
+
+          {taskCaptureSource && (
+            <TaskCaptureModal
+              isOpen
+              source={taskCaptureSource}
+              onClose={handleTaskCaptureClose}
+              onCaptured={handleTaskCaptured}
+            />
+          )}
 
           {/* Compose overlay — for New/Forward ONLY (Reply/Draft now inline in EmailReader) */}
           <Overlay

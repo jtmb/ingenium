@@ -2,7 +2,6 @@ import { logger } from "ingenium-core";
 import {
   establishEmailEncryptionKeyContinuity,
   getEmailEncryptionDiagnostics,
-  getGlobalProjectId,
   startEngine,
 } from "ingenium-email";
 import type { ApiLifecycle } from "./lifecycle.js";
@@ -25,9 +24,8 @@ interface EncryptionDiagnostics {
 export interface MailMaintenanceDependencies {
   establishContinuity: () => EncryptionContinuity;
   getDiagnostics: () => EncryptionDiagnostics;
-  getGlobalProjectId: () => string;
   migrateEmailAccounts: () => Promise<MailAccountMigrationResult>;
-  startEngine: (projectId: string) => void;
+  startEngine: () => void;
   info: (message: string, data?: Record<string, unknown>) => void;
   warn: (message: string, data?: Record<string, unknown>) => void;
 }
@@ -35,7 +33,6 @@ export interface MailMaintenanceDependencies {
 const defaultDependencies: MailMaintenanceDependencies = {
   establishContinuity: establishEmailEncryptionKeyContinuity,
   getDiagnostics: getEmailEncryptionDiagnostics,
-  getGlobalProjectId,
   migrateEmailAccounts: migrateEmailAccountsToGlobal,
   startEngine,
   info: (message, data) => logger.info("api", message, data),
@@ -119,7 +116,7 @@ export function startMailMaintenance(
 
       // Start the sync engine instead of prefetch (engine owns all IMAP I/O).
       if (stopped) return;
-      dependencies.startEngine(dependencies.getGlobalProjectId());
+      dependencies.startEngine();
       dependencies.info("Email sync engine started for configured accounts");
     }).catch(() => {
       // Migration owns transactional rollback. Keep the startup diagnostic

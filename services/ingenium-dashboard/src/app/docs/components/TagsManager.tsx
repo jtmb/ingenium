@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 import type { DocTag } from "@/lib/docs-types";
+import { Listbox, ListboxOption, useListboxNavigation } from "@/app/components/Combobox";
+import { useDismissableLayer } from "@/app/components/Dropdown";
 
 type TagsManagerProps = {
   pageId: number;
@@ -33,6 +35,7 @@ export default function TagsManager({ pageId }: TagsManagerProps) {
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const fetchTags = useCallback(async () => {
     try {
@@ -92,32 +95,31 @@ export default function TagsManager({ pageId }: TagsManagerProps) {
     }
   };
 
+  const listNavigation = useListboxNavigation({
+    id: `tags-${pageId}`,
+    items: suggestions,
+    activeIndex: activeSuggestion,
+    onActiveIndexChange: setActiveSuggestion,
+    onSelect: (index) => handleAddTag(suggestions[index] ?? inputValue),
+    onClose: () => {
+      setSuggestions([]);
+      inputRef.current?.blur();
+    },
+  });
+
+  useDismissableLayer({
+    open: suggestions.length > 0,
+    onClose: () => setSuggestions([]),
+    containerRef,
+    restoreFocusRef: inputRef,
+  });
+
   const handleRemoveTag = async (tagId: number) => {
     try {
       await api.docs.tags.remove(pageId, tagId);
       setTags((prev) => prev.filter((t) => t.id !== tagId));
     } catch (e: any) {
       setError(e?.message ?? "Failed to remove tag");
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (suggestions.length > 0 && activeSuggestion >= 0) {
-        handleAddTag(suggestions[activeSuggestion]!);
-      } else {
-        handleAddTag(inputValue);
-      }
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveSuggestion((i) => Math.min(i + 1, suggestions.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveSuggestion((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Escape") {
-      setSuggestions([]);
-      inputRef.current?.blur();
     }
   };
 
@@ -160,7 +162,7 @@ export default function TagsManager({ pageId }: TagsManagerProps) {
       </div>
 
       {/* Add tag input with autocomplete */}
-      <div className="relative">
+      <div className="relative" ref={containerRef}>
         <input
           ref={inputRef}
           type="text"
@@ -168,26 +170,34 @@ export default function TagsManager({ pageId }: TagsManagerProps) {
           placeholder="Add tag..."
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleKeyDown}
+          {...listNavigation.inputProps}
+          role="combobox"
+          aria-controls={listNavigation.listboxId}
+          aria-expanded={suggestions.length > 0}
+          aria-activedescendant={listNavigation.activeDescendant}
+          onKeyDown={(event) => {
+            listNavigation.inputProps.onKeyDown(event);
+            if (!event.defaultPrevented && event.key === "Enter") {
+              event.preventDefault();
+              void handleAddTag(inputValue);
+            }
+          }}
         />
 
         {suggestions.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg z-10 max-h-36 overflow-y-auto">
+          <Listbox id={listNavigation.listboxId} aria-label="Tag suggestions" className="absolute left-0 right-0 top-full z-10 mt-1 max-h-36 overflow-x-hidden">
             {suggestions.map((s, idx) => (
-              <button
+              <ListboxOption
                 key={s}
-                className={`w-full text-left px-3 py-1.5 text-sm ${
-                  idx === activeSuggestion
-                    ? "bg-[var(--color-surface-selected)] text-[var(--color-text-link)]"
-                    : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-                }`}
+                {...listNavigation.getOptionProps(idx)}
+                active={idx === activeSuggestion}
                 onMouseEnter={() => setActiveSuggestion(idx)}
                 onClick={() => handleAddTag(s)}
               >
-                {s}
-              </button>
+                <span className="min-w-0 truncate" title={s}>{s}</span>
+              </ListboxOption>
             ))}
-          </div>
+          </Listbox>
         )}
       </div>
 

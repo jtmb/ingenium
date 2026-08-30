@@ -12,8 +12,12 @@ Step-by-step guides for using the Ingenium dashboard features.
 | Guide | Description |
 |-------|-------------|
 | [Dashboard](dashboard.md) | Full dashboard user guide with all features |
+| [Chat](chat.md) | Standalone Ingenium Chat interface |
+| [Usage Telemetry](usage.md) | Project-scoped usage totals, freshness, mappings, and export |
 | [OpenCode](opencode.md) | OpenCode Web/CLI dual-mode interface |
+| [Multi-session OpenCode](multi-session.md) | External A/B and internal C coordination workflow |
 | [Mail](mail.md) | Email client usage — reading, composing, searching |
+| [Secrets](secrets.md) | Encrypted secrets vault usage and recovery |
 | [Tasks](tasks.md) | Kanban task board workflow |
 | [Docs Workspace](docs-workspace.md) | Documentation workspace — creating, editing, managing docs |
 

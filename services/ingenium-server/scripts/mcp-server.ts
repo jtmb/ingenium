@@ -7,18 +7,41 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { apiRequestHeaders, config } from "../config/index.js";
+import { config } from "../config/index.js";
+import { api, ApiHttpError, ApiUnavailableError } from "../lib/client.js";
 import { logger } from "../lib/logger.js";
-import { stopAll } from "../lib/proxy.js";
+import {
+  installToolVisibilityProjection,
+  McpToolVisibilityController,
+  type ToolVisibilityApi,
+} from "../lib/tool-visibility.js";
+import {
+  getProjectStateAttestation,
+  getToolAuthorizationPolicy,
+  launcherBoundStateGatedHandler,
+  ProjectStateAttestor,
+  policyStateGatedHandler,
+  type LauncherAuthorizationBinding,
+  type ToolAuthorizationState,
+} from "../lib/tool-state-gate.js";
+import {
+  ChildMcpGateway,
+  childMcpGatewayApi,
+  resolveChildMcpProjectIdentity,
+  type ChildMcpToolHost,
+} from "../lib/child-mcp-gateway.js";
 
-// Import MCP tool handlers
 import * as skillTools from "../lib/tools/skills.js";
 import * as taskTools from "../lib/tools/tasks.js";
+import * as coordinationTools from "../lib/tools/coordination.js";
 import * as contextTools from "../lib/tools/context.js";
+import { uploadContextFile } from "../lib/tools/context-upload.js";
 import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
+import { mcpReportGet } from "../lib/tools/mcp-report.js";
 import { settingGet, settingSet, settingTestLlm } from "../lib/tools/settings.js";
 import * as commandTools from "../lib/tools/commands.js";
 import * as agentTools from "../lib/tools/agents.js";
@@ -39,45 +62,84 @@ import * as ragTools from "../lib/tools/rag.js";
 import * as providerTools from "../lib/tools/providers.js";
 import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
+import { repositorySync } from "../lib/tools/repository.js";
 
-// ── Tool State Check Wrapper ──────────────────────────────
+const projectStateAttestor = new ProjectStateAttestor();
+const observationSourceSchema = z.enum([
+  "agent",
+  "email",
+  "chat",
+  "document",
+  "calendar",
+  "synthesis",
+  "import",
+  "manual",
+  "auto-observer",
+]);
+
 /**
- * Checks whether a tool is enabled for the given project via the API.
- * Fail-open on error (network blip, API down) — a disabled tool is a nuisance,
- * but a false-negative blocks the user's workflow entirely.
+ * Checks whether a tool is enabled for the given project via the API. A state
+ * lookup failure is not authorization to execute: this boundary must fail
+ * closed so a disabled project tool cannot run during an API outage.
  */
-async function checkToolEnabled(toolName: string, project: string): Promise<boolean> {
+async function checkToolEnabled(
+  toolName: string,
+  project: string,
+): Promise<"enabled" | "disabled" | "unavailable"> {
   try {
-    const res = await fetch(`${config.apiUrl}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`, {
-      headers: apiRequestHeaders(),
-    });
-    if (!res.ok) return true;
-    const data = await res.json();
-    return data.data?.enabled !== false;
+    const res = await api.settled.getToolState(toolName, project);
+    if (!res.ok) return "unavailable";
+    if (!projectStateAttestor.attest(project, res.payload)
+      || typeof res.data?.enabled !== "boolean") return "unavailable";
+    return res.data.enabled ? "enabled" : "disabled";
   } catch {
-    return true;
+    return "unavailable";
+  }
+}
+
+async function checkToolAuthorization(toolName: string, project: string): Promise<ToolAuthorizationState> {
+  try {
+    const res = await api.settled.getToolState(toolName, project);
+    const policy = getToolAuthorizationPolicy(res.data?.authorization);
+    if (!res.ok || !projectStateAttestor.attest(project, res.payload)
+      || typeof res.data?.enabled !== "boolean" || !policy) {
+      return { state: "unavailable" };
+    }
+    return { state: res.data.enabled ? "enabled" : "disabled", policy };
+  } catch {
+    return { state: "unavailable" };
   }
 }
 
 /**
  * Wraps a tool handler to check if the tool is enabled for the project before executing.
- * For tools without a project parameter, defaults to "global-default" for state checking.
- * This is the gateway through which ALL tool invocations flow — the enable/disable toggle
- * in the dashboard is enforced here, not in individual tool handlers.
+ * This is the gateway through which ALL tool invocations flow — the
+ * enable/disable toggle and explicit project identity are enforced here, not
+ * in individual tool handlers.
  */
-function wrapHandler(toolName: string, handler: (args: any) => Promise<any>) {
-  return async (args: any) => {
-    const project = args?.project || "global-default";
-    const enabled = await checkToolEnabled(toolName, project);
-    if (!enabled) {
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({
-          error: { code: "TOOL_DISABLED", message: `Tool '${toolName}' is disabled for this project` }
-        }) }]
-      };
-    }
-    return handler(args);
-  };
+function wrapHandler(
+  toolName: string,
+  handler: (args: any) => Promise<any>,
+) {
+  return policyStateGatedHandler(toolName, launcherProject, checkToolAuthorization, handler);
+}
+
+/** Catalog-global tools are toggled by the launcher project without exposing it in their schema. */
+function wrapLauncherScopedHandler(
+  toolName: string,
+  launcherProject: string | null,
+  handler: (args: any) => Promise<any>,
+) {
+  return policyStateGatedHandler(toolName, launcherProject, checkToolAuthorization, handler);
+}
+
+/** A filesystem-backed import may only act in the launcher-bound project. */
+function wrapLauncherBoundHandler(
+  toolName: string,
+  launcherProject: string | null,
+  handler: (args: any) => Promise<any>,
+) {
+  return launcherBoundStateGatedHandler(toolName, launcherProject, checkToolEnabled, handler);
 }
 
 /**
@@ -87,20 +149,139 @@ function wrapHandler(toolName: string, handler: (args: any) => Promise<any>) {
  */
 const C = (name: string) => `ingenium_${name}`;
 
+interface CategorizedToolState {
+  category?: string;
+  tools?: Array<{ tool_name?: unknown; enabled?: unknown }>;
+}
+
+const toolVisibilityApi: ToolVisibilityApi = {
+  async listToolStates(project) {
+    const response = await api.settled.get("/mcp-tools", {
+      project,
+      include_categories: "true",
+    });
+    if (response.status === 429) throw new Error("MCP_TOOL_STATE_RATE_LIMITED");
+    if (!response.ok) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
+    const data = response.data;
+    const attestation = getProjectStateAttestation(response.payload, project);
+    if (!attestation
+      || !Array.isArray(data)) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
+    const states = new Map<string, boolean>();
+    for (const category of data as CategorizedToolState[]) {
+      for (const tool of category.tools ?? []) {
+        if (typeof tool.tool_name === "string" && typeof tool.enabled === "boolean") {
+          states.set(tool.tool_name, tool.enabled);
+        }
+      }
+    }
+    return { states, attestation };
+  },
+};
+
 /**
  * Shared required project parameter for all project-scoped tools.
  * Projects are NOT auto-created on first use — they must be created explicitly
  * via ingenium_project_init or the dashboard. "global-default" is the singleton
  * global project created at container startup (see docker-entrypoint.sh).
  */
-const projectParam = z.string();
+const projectParam = z.string().min(1).max(64).refine(
+  (value) => resolveChildMcpProjectIdentity(value) !== null,
+  "A valid project identity is required",
+);
+const repositoryDocEntryParam = z.object({
+  path: z.string().min(1).max(512),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  content: z.string().max(512 * 1024),
+  fileType: z.literal("regular"),
+  isSymlink: z.literal(false),
+}).strict();
+const repositoryDocsManifestParam = z.object({
+  files: z.array(repositoryDocEntryParam).max(256),
+}).strict();
+const repositoryResourcesManifestParam = z.object({
+  version: z.literal(2),
+  skills: z.array(z.record(z.unknown())).max(512),
+  agents: z.array(z.record(z.unknown())).max(512),
+  plugins: z.array(z.record(z.unknown())).max(512),
+}).strict().superRefine((manifest, context) => {
+  if (manifest.skills.length + manifest.agents.length + manifest.plugins.length > 512) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
+  }
+});
+const repositoryClaimProofParam = z.object({
+  worktree_id: z.string().min(1).max(512),
+  session_id: z.string().min(1).max(512),
+  incarnation: z.number().int().positive(),
+  expected_revision: z.number().int().nonnegative(),
+  fence: z.number().int().positive(),
+  ownership_token: z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/),
+  client_claim_key: z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/),
+  accepted_epoch: z.number().int().positive(),
+}).strict();
+const jobVaultItemIdsParam = z.array(z.string().uuid()).max(16).refine(
+  (itemIds) => new Set(itemIds).size === itemIds.length,
+  "vault_item_ids must be unique",
+);
+const projectRetentionDaysParam = z.number().finite().int().min(0).max(3_650);
+const jobTimeoutMinutesParam = z.number().finite().int().min(1).max(1_440);
+const jobUpdateFieldsParam = z.record(z.unknown()).superRefine((fields, context) => {
+  if ("vault_item_ids" in fields) {
+    const result = jobVaultItemIdsParam.safeParse(fields.vault_item_ids);
+    if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "vault_item_ids must be an array of up to 16 unique UUIDs" });
+  }
+  if ("timeout_minutes" in fields) {
+    const result = jobTimeoutMinutesParam.safeParse(fields.timeout_minutes);
+    if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "timeout_minutes must be an integer between 1 and 1440" });
+  }
+});
+const launcherProject = resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT);
+const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";
 
 const server = new McpServer(
   { name: config.mcpName, version: config.mcpVersion },
-  { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: { listChanged: true }, resources: {} } },
 );
 
-// ── Settings ─────────────────────────────────────────────
+const toolVisibility = new McpToolVisibilityController(
+  server,
+  launcherProject,
+  toolVisibilityApi,
+  undefined,
+  projectStateAttestor,
+);
+const originalRegisterTool = server.registerTool.bind(server);
+server.registerTool = ((name: string, toolConfig: Parameters<typeof server.registerTool>[1], handler: Parameters<typeof server.registerTool>[2]) => {
+  const registration = originalRegisterTool(name, toolConfig, handler);
+  toolVisibility.track(C(name), registration);
+  return registration;
+}) as typeof server.registerTool;
+
+function registerProjectTool(
+  name: string,
+  toolConfig: any,
+  handler: (args: any) => Promise<any>,
+) {
+  server.registerTool(name, toolConfig, wrapHandler(C(name), handler));
+}
+
+const childToolHost = server as unknown as ChildMcpToolHost;
+let childGateway: ChildMcpGateway | null = null;
+
+function launcherAuthorizationBinding(value: unknown): LauncherAuthorizationBinding | null {
+  if (!value || typeof value !== "object") return null;
+  const binding = value as Record<string, unknown>;
+  if (!launcherProject || typeof binding.projectId !== "string" || typeof binding.organizationId !== "string"
+    || typeof binding.workspaceId !== "string" || typeof binding.launcherWorktree !== "string"
+    || !Array.isArray(binding.scopes) || !binding.scopes.every((scope) => typeof scope === "string")) return null;
+  return {
+    project: launcherProject,
+    projectId: binding.projectId,
+    organizationId: binding.organizationId,
+    workspaceId: binding.workspaceId,
+    launcherWorktree: binding.launcherWorktree,
+    scopes: binding.scopes as string[],
+  };
+}
 
 server.registerTool(
   "setting_get",
@@ -120,7 +301,22 @@ server.registerTool(
   wrapHandler(C("setting_test_llm"), async ({ project }) => settingTestLlm(project)),
 );
 
-// ── Skills ──────────────────────────────────────────────
+server.registerTool(
+  "repository_sync",
+  {
+    description: "Synchronize a repository-authoritative docs and resource manifest through the API.",
+    inputSchema: {
+      project: projectParam,
+      docsManifest: repositoryDocsManifestParam,
+      resourcesManifest: repositoryResourcesManifestParam.optional(),
+      expectedGeneration: z.number().int().nonnegative(),
+      claim: repositoryClaimProofParam,
+      dryRun: z.boolean().optional(),
+    },
+  },
+  wrapLauncherBoundHandler(C("repository_sync"), launcherProject, async ({ project, docsManifest, resourcesManifest, expectedGeneration, claim, dryRun }) =>
+    repositorySync(project, docsManifest, resourcesManifest, expectedGeneration, claim, dryRun)),
+);
 
 server.registerTool(
   "skill_list",
@@ -220,8 +416,6 @@ server.registerTool(
   },
   wrapHandler(C("skill_sync_all_preview"), async ({ project }) => skillTools.skillSyncAllPreview(project)),
 );
-
-// ── Skills Governance (14) ─────────────────────────────────
 
 server.registerTool(
   "skill_archive",
@@ -340,10 +534,34 @@ server.registerTool(
 server.registerTool(
   "skill_proposal_list",
   {
-    description: "List all skill proposals for a project, optionally filtered by status (draft/pending/rejected/applied/rolled_back/stale).",
+    description: "Deprecated compatibility tool. It returns SKILL_PROPOSAL_LIST_RETIRED; use skill_proposal_page and skill_proposal_counts.",
     inputSchema: { project: projectParam, status: z.enum(["draft", "pending", "rejected", "applied", "rolled_back", "stale"]).optional() },
   },
   wrapHandler(C("skill_proposal_list"), async ({ project, status }) => skillTools.skillProposalList(project, status)),
+);
+
+server.registerTool(
+  "skill_proposal_page",
+  {
+    description: "Read one bounded page of open or history skill proposals.",
+    inputSchema: {
+      project: projectParam,
+      view: skillTools.skillProposalPageViewSchema,
+      limit: skillTools.skillProposalPageLimitSchema.optional(),
+      cursor: skillTools.skillProposalPageCursorSchema.optional(),
+    },
+  },
+  wrapHandler(C("skill_proposal_page"), async ({ project, view, limit, cursor }) =>
+    skillTools.skillProposalPage(project, view, limit, cursor)),
+);
+
+server.registerTool(
+  "skill_proposal_counts",
+  {
+    description: "Get scoped counts for skill proposals.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("skill_proposal_counts"), async ({ project }) => skillTools.skillProposalCounts(project)),
 );
 
 server.registerTool(
@@ -394,8 +612,6 @@ server.registerTool(
     skillTools.skillProposalRollback(project, proposalId, reviewer, reason)),
 );
 
-// ── Observations ──────────────────────────────────────────
-
 server.registerTool(
   "observe",
   {
@@ -405,7 +621,7 @@ server.registerTool(
       observation_type: z.string(),
       content: z.string(),
       importance: z.number().optional(),
-      source: z.string().optional(),
+      source: observationSourceSchema.optional(),
       context: z.string().optional(),
     },
   },
@@ -479,8 +695,6 @@ server.registerTool(
   wrapHandler(C("observation_delete_by_source"), async ({ project, source, confirm }) => observationTools.observationDeleteBySource(project, source, confirm)),
 );
 
-// ── Personality ───────────────────────────────────────────
-
 server.registerTool(
   "personality",
   {
@@ -542,15 +756,16 @@ server.registerTool(
   wrapHandler(C("personality_traits_delete_all"), async ({ project, confirm }) => personalityTools.personalityTraitsDeleteAll(project, confirm)),
 );
 
-// ── Synthesis ─────────────────────────────────────────────
-
 server.registerTool(
   "synthesis_run",
   {
     description: "Trigger the background synthesis pipeline — processes pending observations into personality traits and skill updates.",
-    inputSchema: { project: projectParam },
+    inputSchema: {
+      project: projectParam,
+      sessionId: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
+    },
   },
-  wrapHandler(C("synthesis_run"), async ({ project }) => synthesisRun(project)),
+  wrapHandler(C("synthesis_run"), async ({ project, sessionId }) => synthesisRun(project, sessionId)),
 );
 
 server.registerTool(
@@ -571,8 +786,6 @@ server.registerTool(
   wrapHandler(C("synthesis_cross_project"), async ({ project }) => synthesisCrossProject(project)),
 );
 
-// ── Extraction ──────────────────────────────────────────
-
 server.registerTool(
   "extraction_run",
   {
@@ -582,7 +795,90 @@ server.registerTool(
   wrapHandler(C("extraction_run"), async ({ project }) => extractionRun(project)),
 );
 
-// ── Tasks ───────────────────────────────────────────────
+const taskRevisionParam = z.number().int().nonnegative();
+const taskIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const taskOwnerParam = z.string().min(1).max(256).refine(
+  (value) => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value),
+  "Owner must be a bounded nonempty string without control characters",
+);
+const taskWorktreeParam = z.string().min(1).max(512).refine(
+  (value) => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value),
+  "Worktree must be a bounded nonempty string without control characters",
+);
+const taskReservationTokenParam = z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/);
+const taskExpectedRevisionsParam = z.record(z.string().min(1).max(128), taskRevisionParam).refine(
+  (value) => Object.keys(value).length <= 128,
+  "At most 128 expected revisions may be supplied",
+);
+
+const coordinationOpaqueIdParam = z.string().min(1).max(512).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const coordinationRevisionParam = z.number().int().nonnegative();
+const coordinationPositiveParam = z.number().int().positive();
+const coordinationTokenParam = z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/);
+const coordinationTtlParam = z.number().int().min(1_000).max(300_000);
+const coordinationKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const coordinationPathParam = z.string().min(1).max(1_024).refine(
+  (value) => value === value.trim()
+    && !value.startsWith("/")
+    && !value.startsWith("~")
+    && !/^[A-Za-z]:\//.test(value)
+    && !value.includes("\\")
+    && !/[\u0000-\u001f\u007f*?[\]{}!]/.test(value)
+    && value.split("/").every((segment) => segment.length > 0
+      && segment !== "."
+      && segment !== ".."
+      && segment !== ".git"
+      && !segment.startsWith("@")),
+  "A safe relative coordination path is required",
+);
+const coordinationClaimParam = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("path"), path: coordinationPathParam }).strict(),
+  z.object({ kind: z.literal("tree"), path: coordinationPathParam }).strict(),
+  z.object({ kind: z.literal("reserved"), name: z.enum(["@build", "@repository"]) }).strict(),
+]);
+const coordinationClaimInputParam = z.object({
+  claim: coordinationClaimParam,
+  baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  current_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  repository_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+}).strict();
+const coordinationClaimBatchParam = z.array(coordinationClaimInputParam).min(1).max(128);
+const coordinationSnapshotParam = z.record(z.unknown());
+const coordinationEncodedPathParam = z.array(z.string().min(1).max(342).regex(/^[A-Za-z0-9_-]+$/)).min(1).max(128);
+const coordinationMemoryEntryParam = z.object({
+  status: z.enum(["active", "working", "idle", "completed", "error"]),
+  actions: z.array(z.object({
+    kind: z.enum(["read", "search", "write", "edit", "execute"]),
+    result: z.literal("succeeded"),
+    pathSegments: coordinationEncodedPathParam.nullable(),
+    targetHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  }).strict()).max(64),
+  checks: z.array(z.object({
+    kind: z.enum(["test", "typecheck", "lint", "build", "format", "security", "other"]),
+    result: z.enum(["passed", "failed"]),
+    targetHash: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict()).max(32),
+  todos: z.object({
+    total: coordinationRevisionParam,
+    pending: coordinationRevisionParam,
+    inProgress: coordinationRevisionParam,
+    completed: coordinationRevisionParam,
+    cancelled: coordinationRevisionParam,
+    state: z.enum(["none", "pending", "in_progress", "complete", "cancelled", "mixed"]),
+  }).strict(),
+  currentTaskId: z.string().regex(/^task-[0-9a-f]{64}$/).nullable(),
+  changedPaths: z.array(z.object({
+    pathSegments: coordinationEncodedPathParam,
+    operation: z.enum(["write", "edit"]),
+    additions: coordinationRevisionParam,
+    deletions: coordinationRevisionParam,
+    changeRevision: coordinationPositiveParam,
+  }).strict()).max(32),
+  nextWork: z.object({
+    kind: z.enum(["none", "continue_task", "review_changes", "run_checks", "address_failure"]),
+    referenceHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  }).strict(),
+}).strict();
 
 server.registerTool(
   "task_create",
@@ -593,10 +889,11 @@ server.registerTool(
       title: z.string(),
       description: z.string().optional(),
       assigned_to: z.string().optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
     },
   },
-    wrapHandler(C("task_create"), async ({ project, title, description, assigned_to }) =>
-    taskTools.taskCreate(project, title, description, assigned_to)),
+    wrapHandler(C("task_create"), async ({ project, title, description, assigned_to, idempotency_key }) =>
+    taskTools.taskCreate(project, title, description, assigned_to, idempotency_key)),
 );
 
 server.registerTool(
@@ -612,15 +909,31 @@ server.registerTool(
   "task_move",
   {
     description: "Move a task to a different column.",
-    inputSchema: { project: projectParam, task_id: z.string(), column_id: z.string() },
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      column_id: z.string(),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
+    },
   },
-  wrapHandler(C("task_move"), async ({ project, task_id, column_id }) => taskTools.taskMove(project, task_id, column_id)),
+  wrapHandler(C("task_move"), async ({ project, task_id, column_id, expected_revision, idempotency_key }) =>
+    taskTools.taskMove(project, task_id, column_id, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
   "task_complete",
-  { description: "Mark a task as completed.", inputSchema: { project: projectParam, task_id: z.string() } },
-  wrapHandler(C("task_complete"), async ({ project, task_id }) => taskTools.taskComplete(project, task_id)),
+  {
+    description: "Mark a task as completed.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("task_complete"), async ({ project, task_id, expected_revision, idempotency_key }) =>
+    taskTools.taskComplete(project, task_id, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
@@ -637,16 +950,63 @@ server.registerTool(
       project: projectParam,
       task_id: z.string(),
       fields: z.record(z.unknown()),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
     },
   },
-  wrapHandler(C("task_update"), async ({ project, task_id, fields }) =>
-    taskTools.taskUpdate(project, task_id, fields)),
+  wrapHandler(C("task_update"), async ({ project, task_id, fields, expected_revision, idempotency_key }) =>
+    taskTools.taskUpdate(project, task_id, fields, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
   "task_delete",
-  { description: "Delete a task by ID.", inputSchema: { project: projectParam, task_id: z.string() } },
-  wrapHandler(C("task_delete"), async ({ project, task_id }) => taskTools.taskDelete(project, task_id)),
+  {
+    description: "Delete a task by ID.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      expected_revision: taskRevisionParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("task_delete"), async ({ project, task_id, expected_revision, idempotency_key }) =>
+    taskTools.taskDelete(project, task_id, expected_revision, idempotency_key)),
+);
+
+server.registerTool(
+  "task_reserve",
+  {
+    description: "Reserve a task for a cooperative owner and worktree.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      owner: taskOwnerParam,
+      worktree: taskWorktreeParam,
+      reservation_token: taskReservationTokenParam,
+      expected_revision: taskRevisionParam,
+      idempotency_key: taskIdempotencyKeyParam,
+    },
+  },
+  wrapHandler(C("task_reserve"), async ({ project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key }) =>
+    taskTools.taskReserve(project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key)),
+);
+
+server.registerTool(
+  "task_release",
+  {
+    description: "Release a task reservation for its cooperative owner and worktree.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      owner: taskOwnerParam,
+      worktree: taskWorktreeParam,
+      reservation_token: taskReservationTokenParam,
+      expected_revision: taskRevisionParam,
+      idempotency_key: taskIdempotencyKeyParam,
+    },
+  },
+  wrapHandler(C("task_release"), async ({ project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key }) =>
+    taskTools.taskRelease(project, task_id, owner, worktree, reservation_token, expected_revision, idempotency_key)),
 );
 
 server.registerTool(
@@ -830,12 +1190,147 @@ server.registerTool(
       project: projectParam,
       task_ids: z.array(z.string()),
       fields: z.record(z.unknown()),
+      expected_revision: taskRevisionParam.optional(),
+      expected_revisions: taskExpectedRevisionsParam.optional(),
+      idempotency_key: taskIdempotencyKeyParam.optional(),
     },
   },
-  wrapHandler(C("task_bulk_update"), async ({ project, task_ids, fields }) => taskTools.taskBulkUpdate(project, task_ids, fields)),
+  wrapHandler(C("task_bulk_update"), async ({ project, task_ids, fields, expected_revision, expected_revisions, idempotency_key }) =>
+    taskTools.taskBulkUpdate(project, task_ids, fields, expected_revision, expected_revisions, idempotency_key)),
 );
 
-// ── Plans ─────────────────────────────────────────────
+server.registerTool(
+  "coordination_status",
+  {
+    description: "Read the durable coordination status for an exact session identity.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+    },
+  },
+  wrapHandler(C("coordination_status"), async ({ project, worktree_id, session_id, incarnation, ownership_token }) =>
+    coordinationTools.coordinationStatus(project, worktree_id, session_id, incarnation, ownership_token)),
+);
+
+server.registerTool(
+  "coordination_update",
+  {
+    description: "Update a coordination session with an exact registry operation.",
+    inputSchema: {
+      project: projectParam,
+      operation: z.enum(["register", "recover", "recovery_state", "reconcile_epoch", "recover_epoch", "update", "heartbeat", "runtime_activity", "close", "takeover"]),
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam.optional(),
+      fence: coordinationPositiveParam.optional(),
+      ownership_token: coordinationTokenParam.optional(),
+      next_ownership_token: coordinationTokenParam.optional(),
+      ttl_ms: coordinationTtlParam.optional(),
+      idempotency_key: coordinationKeyParam,
+      snapshot: coordinationSnapshotParam.optional(),
+      snapshot_revision: coordinationRevisionParam.optional(),
+      current_task_id: coordinationOpaqueIdParam.nullable().optional(),
+      current_task_revision: coordinationRevisionParam.nullable().optional(),
+      quarantined_session_id: coordinationOpaqueIdParam.optional(),
+      quarantined_incarnation: coordinationPositiveParam.optional(),
+      quarantined_fence: coordinationPositiveParam.optional(),
+      quarantined_actor_id: z.string().regex(/^actor-[0-9a-f]{64}$/).optional(),
+      accepted_epoch: coordinationPositiveParam.optional(),
+      recovery_footprint_hash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+      runtime_id: z.string().uuid().optional(),
+      observed_at: z.string().datetime({ offset: true }).optional(),
+    },
+  },
+  wrapHandler(C("coordination_update"), async ({ project, operation, ...input }) =>
+    coordinationTools.coordinationUpdate(project, operation, input)),
+);
+
+server.registerTool(
+  "coordination_claim",
+  {
+    description: "Claim non-overlapping coordination paths for an active session.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      client_claim_key: coordinationTokenParam,
+      action: z.enum(["acquire", "verify", "renew", "mark", "quarantine", "complete"]).optional(),
+      claims: coordinationClaimBatchParam.optional(),
+      operation: z.enum(["write", "edit", "create", "delete", "rename", "apply_patch", "repository", "build"]).optional(),
+      accepted_epoch: coordinationPositiveParam.optional(),
+      ttl_ms: coordinationTtlParam.optional(),
+      state: z.enum(["dirty", "quarantined", "collision"]).optional(),
+      code: z.enum(["uncertain_apply", "dirty_baseline"]).optional(),
+      operation_id: z.string().uuid().optional(),
+      footprint: z.array(z.object({
+        path: coordinationPathParam.optional(),
+        path_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        before_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+        after_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+      }).strict()).max(256).optional(),
+      idempotency_key: coordinationKeyParam,
+    },
+  },
+  wrapHandler(C("coordination_claim"), async ({ project, action = "acquire", ...input }) =>
+    action === "acquire"
+      ? coordinationTools.coordinationClaim(project, input as coordinationTools.CoordinationClaimBatchInput)
+      : coordinationTools.coordinationClaimAction(project, action, input as coordinationTools.CoordinationClaimProofInput)),
+);
+
+server.registerTool(
+  "coordination_release",
+  {
+    description: "Release owned coordination claims for an active session.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      client_claim_key: coordinationTokenParam,
+      idempotency_key: coordinationKeyParam,
+    },
+  },
+  wrapHandler(C("coordination_release"), async ({ project, ...input }) =>
+    coordinationTools.coordinationRelease(project, input)),
+);
+
+server.registerTool(
+  "coordination_handoff",
+  {
+    description: "Publish or consume sanitized same-worktree peer-write handoffs.",
+    inputSchema: {
+      project: projectParam,
+      operation: z.enum(["publish", "read", "ack", "consume", "memory", "memory_read", "memory_ack"]),
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      idempotency_key: coordinationKeyParam,
+      operation_kind: z.enum(["write", "edit"]).optional(),
+      path: z.string().max(1024).optional(),
+      baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+      limit: z.number().int().min(1).max(32).optional(),
+      through_sequence: coordinationRevisionParam.optional(),
+      through_revision: coordinationRevisionParam.optional(),
+      memory_entry: coordinationMemoryEntryParam.optional(),
+    },
+  },
+  wrapHandler(C("coordination_handoff"), async ({ project, operation, ...input }) =>
+    coordinationTools.coordinationHandoff(project, operation, input)),
+);
 
 server.registerTool(
   "plan_save",
@@ -864,72 +1359,277 @@ server.registerTool("context_update", { description: "Update a canonical context
 server.registerTool("context_delete", { description: "Delete a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_delete"), async ({ project, id }) => contextTools.contextDelete(project, id)));
 server.registerTool("context_batch_get", { description: "Retrieve a batch of canonical context entries.", inputSchema: { project: projectParam, ids: z.array(z.number().int().positive()).max(100) } }, wrapHandler(C("context_batch_get"), async ({ project, ids }) => contextTools.contextBatch(project, ids)));
 
-// ── Projects ────────────────────────────────────────────
+// Immutable conversation context. List/search tools return summaries only;
+// content is exposed only by the deliberate message-retrieve operations.
+const contextMetadataParam = z.record(z.unknown());
+const contextTagsParam = z.array(z.string().trim().min(1).max(64)).max(64);
+const contextIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const contextRevisionParam = z.number().int().nonnegative();
+const contextIdParam = z.string().uuid();
+const contextConfirmationTokenParam = z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/);
+const contextUploadSessionParam = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const contextUploadFilePathParam = z.string().min(1).max(4_096).refine(
+  (value) => isAbsolute(value)
+    && !/[\u0000-\u001f\u007f]/.test(value)
+    && !value.includes("\\"),
+  "An absolute safe file path is required",
+);
+
+server.registerTool(
+  "context_upload_file",
+  {
+    description: "Import one protected local file as a bounded immutable Context snapshot.",
+    inputSchema: {
+      project: projectParam,
+      session: contextUploadSessionParam,
+      file_path: contextUploadFilePathParam,
+      conversation_id: contextIdParam.optional(),
+      tags: contextTagsParam.optional(),
+      priority: z.number().int().min(0).max(10).optional(),
+    },
+  },
+  wrapLauncherBoundHandler(C("context_upload_file"), launcherProject, async (args) => uploadContextFile(
+    args.project,
+    args.session,
+    args.file_path,
+    { conversationId: args.conversation_id, tags: args.tags, priority: args.priority },
+    launcherProject,
+  )),
+);
+server.registerTool(
+  "context_conversation_create",
+  {
+    description: "Create an immutable, project-scoped context conversation.",
+    inputSchema: {
+      project: projectParam,
+      title: z.string().trim().min(1).max(256),
+      tags: contextTagsParam.optional(),
+      priority: z.number().int().min(0).max(10).optional(),
+      metadata: contextMetadataParam.optional(),
+      idempotencyKey: contextIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("context_conversation_create"), async (args) => contextTools.contextConversationCreate(
+    args.project, args.title, args.tags, args.priority, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_conversation_get",
+  { description: "Get immutable conversation metadata and its current revision.", inputSchema: { project: projectParam, conversationId: contextIdParam } },
+  wrapHandler(C("context_conversation_get"), async ({ project, conversationId }) => contextTools.contextConversationGet(project, conversationId)),
+);
+server.registerTool(
+  "context_conversation_list",
+  { description: "Keyset-paginate immutable context conversations.", inputSchema: { project: projectParam, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(512).optional() } },
+  wrapHandler(C("context_conversation_list"), async ({ project, limit, cursor }) => contextTools.contextConversationList(project, limit, cursor)),
+);
+server.registerTool(
+  "context_message_append",
+  {
+    description: "Append an immutable message when expectedRevision matches the conversation.",
+    inputSchema: {
+      project: projectParam,
+      conversationId: contextIdParam,
+      role: z.enum(["system", "user", "assistant", "tool"]),
+      content: z.string().min(1).max(262_144),
+      expectedRevision: contextRevisionParam,
+      tags: contextTagsParam.optional(),
+      priority: z.number().int().min(0).max(10).optional(),
+      metadata: contextMetadataParam.optional(),
+      idempotencyKey: contextIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("context_message_append"), async (args) => contextTools.contextMessageAppend(
+    args.project, args.conversationId, args.role, args.content, args.expectedRevision,
+    args.tags, args.priority, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_message_list",
+  { description: "Keyset-paginate message summaries without exposing content.", inputSchema: { project: projectParam, conversationId: contextIdParam, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(512).optional() } },
+  wrapHandler(C("context_message_list"), async ({ project, conversationId, limit, cursor }) => contextTools.contextMessageList(project, conversationId, limit, cursor)),
+);
+server.registerTool(
+  "context_message_search",
+  { description: "Run bounded relevance search across one conversation without returning content.", inputSchema: { project: projectParam, conversationId: contextIdParam, query: z.string().trim().min(1).max(512), limit: z.number().int().min(1).max(100).optional() } },
+  wrapHandler(C("context_message_search"), async ({ project, conversationId, query, limit }) => contextTools.contextMessageSearch(project, conversationId, query, limit)),
+);
+server.registerTool(
+  "context_message_retrieve",
+  { description: "Explicitly retrieve one immutable context message, including content.", inputSchema: { project: projectParam, conversationId: contextIdParam, messageId: contextIdParam } },
+  wrapHandler(C("context_message_retrieve"), async ({ project, conversationId, messageId }) => contextTools.contextMessageRetrieve(project, conversationId, messageId)),
+);
+server.registerTool(
+  "context_message_batch_retrieve",
+  { description: "Explicitly retrieve up to 100 messages in requested-ID order and report missing IDs.", inputSchema: { project: projectParam, conversationId: contextIdParam, messageIds: z.array(contextIdParam).min(1).max(100) } },
+  wrapHandler(C("context_message_batch_retrieve"), async ({ project, conversationId, messageIds }) => contextTools.contextMessageBatchRetrieve(project, conversationId, messageIds)),
+);
+server.registerTool(
+  "context_checkpoint_create",
+  {
+    description: "Create a hash-addressed immutable checkpoint at expectedRevision.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, expectedRevision: contextRevisionParam, ragSourceIds: z.array(contextIdParam).max(64).optional(), metadata: contextMetadataParam.optional(), idempotencyKey: contextIdempotencyKeyParam.optional() },
+  },
+  wrapHandler(C("context_checkpoint_create"), async (args) => contextTools.contextCheckpointCreate(
+    args.project, args.conversationId, args.expectedRevision, args.ragSourceIds, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_checkpoint_list",
+  { description: "Keyset-paginate immutable checkpoint history.", inputSchema: { project: projectParam, conversationId: contextIdParam, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(512).optional() } },
+  wrapHandler(C("context_checkpoint_list"), async ({ project, conversationId, limit, cursor }) => contextTools.contextCheckpointList(project, conversationId, limit, cursor)),
+);
+server.registerTool(
+  "context_checkpoint_get",
+  { description: "Get one immutable checkpoint and its project-owned RAG-source identifiers.", inputSchema: { project: projectParam, conversationId: contextIdParam, checkpointId: contextIdParam } },
+  wrapHandler(C("context_checkpoint_get"), async ({ project, conversationId, checkpointId }) => contextTools.contextCheckpointGet(project, conversationId, checkpointId)),
+);
+server.registerTool(
+  "context_checkpoint_restore",
+  {
+    description: "Restore a checkpoint as a new immutable conversation after one-time confirmation; the source is never changed.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, checkpointId: contextIdParam, expectedRevision: contextRevisionParam, confirmationToken: contextConfirmationTokenParam, title: z.string().trim().min(1).max(256).optional(), metadata: contextMetadataParam.optional(), idempotencyKey: contextIdempotencyKeyParam.optional() },
+  },
+  wrapHandler(C("context_checkpoint_restore"), async (args) => contextTools.contextCheckpointRestore(
+    args.project, args.conversationId, args.checkpointId, args.expectedRevision,
+    args.confirmationToken, args.title, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_checkpoint_maintenance_preview",
+  {
+    description: "Preview up to 100 content-free stale, divergent, invalid, or branch-conflict context candidates without changing them.",
+    inputSchema: {
+      project: projectParam,
+      conversationIds: z.array(contextIdParam).max(100).optional(),
+      staleBefore: z.string().datetime().optional(),
+      includeConflicts: z.boolean().optional(),
+      includeInvalid: z.boolean().optional(),
+      includeArchived: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+  },
+  wrapHandler(C("context_checkpoint_maintenance_preview"), async (args) => contextTools.contextCheckpointMaintenancePreview(
+    args.project,
+    {
+      conversationIds: args.conversationIds,
+      staleBefore: args.staleBefore,
+      includeConflicts: args.includeConflicts,
+      includeInvalid: args.includeInvalid,
+      includeArchived: args.includeArchived,
+      limit: args.limit,
+    },
+  )),
+);
+server.registerTool(
+  "context_checkpoint_maintenance_authorize",
+  {
+    description: "Issue a short-lived one-time confirmation token for a project-owned context archive, unarchive, or restore-as-new action.",
+    inputSchema: {
+      project: projectParam,
+      conversationId: contextIdParam,
+      operation: z.enum(["archive_conversation", "unarchive_conversation", "restore_checkpoint"]),
+      checkpointId: contextIdParam.optional(),
+      expectedRevision: contextRevisionParam,
+    },
+  },
+  wrapHandler(C("context_checkpoint_maintenance_authorize"), async (args) => contextTools.contextCheckpointMaintenanceAuthorize(
+    args.project, args.conversationId, args.operation, args.expectedRevision, args.checkpointId,
+  )),
+);
+server.registerTool(
+  "context_conversation_archive",
+  {
+    description: "Append a reversible archive event after explicit confirmation; messages and checkpoints are never deleted.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, expectedRevision: contextRevisionParam, confirmationToken: contextConfirmationTokenParam },
+  },
+  wrapHandler(C("context_conversation_archive"), async ({ project, conversationId, expectedRevision, confirmationToken }) => contextTools.contextConversationArchive(
+    project, conversationId, expectedRevision, confirmationToken,
+  )),
+);
+server.registerTool(
+  "context_conversation_unarchive",
+  {
+    description: "Append a reversible unarchive event after explicit confirmation; immutable history remains unchanged.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, expectedRevision: contextRevisionParam, confirmationToken: contextConfirmationTokenParam },
+  },
+  wrapHandler(C("context_conversation_unarchive"), async ({ project, conversationId, expectedRevision, confirmationToken }) => contextTools.contextConversationUnarchive(
+    project, conversationId, expectedRevision, confirmationToken,
+  )),
+);
+server.registerTool(
+  "context_checkpoint_audit_list",
+  {
+    description: "List bounded, content-free archive and restore-as-new audit evidence for one project-owned conversation.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, limit: z.number().int().min(1).max(100).optional() },
+  },
+  wrapHandler(C("context_checkpoint_audit_list"), async ({ project, conversationId, limit }) => contextTools.contextCheckpointAuditList(
+    project, conversationId, limit,
+  )),
+);
 
 server.registerTool(
   "project_list",
   { description: "List all projects known to the Ingenium API.", inputSchema: {} },
-  wrapHandler(C("project_list"), async () => projectTools.projectList()),
+  wrapLauncherScopedHandler(C("project_list"), launcherProject, async () => projectTools.projectList()),
 );
 
 server.registerTool(
   "project_init",
   { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string(), isGlobal: z.boolean().optional() } },
-  wrapHandler(C("project_init"), async ({ name, isGlobal }) => projectTools.projectInit(name, isGlobal)),
+  wrapLauncherScopedHandler(C("project_init"), launcherProject, async ({ name, isGlobal }) => projectTools.projectInit(name, isGlobal)),
 );
 
 server.registerTool(
   "project_delete",
   { description: "Delete a project by name.", inputSchema: { name: z.string() } },
-  wrapHandler(C("project_delete"), async ({ name }) => projectTools.projectDelete(name)),
+  wrapLauncherScopedHandler(C("project_delete"), launcherProject, async ({ name }) => projectTools.projectDelete(name)),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_restore",
   { description: "Restore an archived project.", inputSchema: { project: projectParam, name: z.string() } },
-  wrapHandler(C("project_restore"), async ({ project, name }) => projectTools.projectRestore(project, name)),
+  async ({ project, name }) => projectTools.projectRestore(project, name),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_list_archived",
   { description: "List archived projects.", inputSchema: { project: projectParam } },
-  wrapHandler(C("project_list_archived"), async ({ project }) => projectTools.projectListArchived(project)),
+  async ({ project }) => projectTools.projectListArchived(project),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_purge",
-  { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: z.number().optional() } },
-  wrapHandler(C("project_purge"), async ({ project, retentionDays }) => projectTools.projectPurge(project, retentionDays)),
+  { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: projectRetentionDaysParam.optional() } },
+  async ({ project, retentionDays }) => projectTools.projectPurge(project, retentionDays),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_set_global",
-  { description: "Mark a project as global (or unmark).", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } },
-  wrapHandler(C("project_set_global"), async ({ project, name, isGlobal }) => projectTools.projectSetGlobal(project, name, isGlobal)),
+  { description: "Forward an API-enforced global lifecycle request.", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } },
+  async ({ project, name, isGlobal }) => projectTools.projectSetGlobal(project, name, isGlobal),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_rename",
   {
     description: "Rename an existing project.",
     inputSchema: { project: projectParam, name: z.string(), newName: z.string() },
   },
-  wrapHandler(C("project_rename"), async ({ project, name, newName }) => projectTools.projectRename(project, name, newName)),
+  async ({ project, name, newName }) => projectTools.projectRename(project, name, newName),
 );
 
 server.registerTool(
   "project_detail",
   { description: "Get detailed info about a project by name.", inputSchema: { name: z.string() } },
-  wrapHandler(C("project_detail"), async ({ name }) => projectTools.projectDetail(name)),
+  wrapLauncherScopedHandler(C("project_detail"), launcherProject, async ({ name }) => projectTools.projectDetail(name)),
 );
 
 server.registerTool(
   "project_migrate_workspace",
   { description: "DB-only migration of the historical invalid /workspace project into global-default. Use dryRun first; never accesses filesystem /workspace.", inputSchema: { dryRun: z.boolean().optional() } },
-  wrapHandler(C("project_migrate_workspace"), async ({ dryRun }) => projectTools.projectMigrateWorkspace(dryRun)),
+  wrapLauncherScopedHandler(C("project_migrate_workspace"), launcherProject, async ({ dryRun }) => projectTools.projectMigrateWorkspace(dryRun)),
 );
-
-// ── Plugins ─────────────────────────────────────────────
 
 server.registerTool(
   "plugin_list",
@@ -985,8 +1685,6 @@ server.registerTool(
   wrapHandler(C("plugin_source"), async ({ project, name }) => pluginTools.pluginSource(project, name)),
 );
 
-// ── Commands ─────────────────────────────────────────────
-
 server.registerTool(
   "command_list",
   { description: "List all commands for a project.", inputSchema: { project: projectParam } },
@@ -1023,8 +1721,6 @@ server.registerTool(
   wrapHandler(C("command_delete"), async ({ project, name }) => commandTools.commandDelete(project, name)),
 );
 
-// ── Config ───────────────────────────────────────────────
-
 server.registerTool(
   "config_get",
   {
@@ -1051,8 +1747,6 @@ server.registerTool(
   },
   wrapHandler(C("config_sync"), async ({ project, type }: { project: string; type: string }) => configTools.configSync(project, type)),
 );
-
-// ── Servers ─────────────────────────────────────────────
 
 server.registerTool(
   "server_list",
@@ -1104,7 +1798,23 @@ server.registerTool(
   wrapHandler(C("server_sync_all"), async ({ project, servers }) => serverTools.serverSyncAll(project, servers)),
 );
 
-// ── Agents ──────────────────────────────────────────────
+const mcpReportFilters = {
+  q: z.string().regex(/^[\x20-\x7e]{1,128}$/).optional(),
+  category: z.string().regex(/^[\x20-\x7e]{1,128}$/).optional(),
+  enabled: z.boolean().optional(),
+  boundary: z.enum(["mcp-stdio", "opencode-extension"]).optional(),
+  visibility: z.enum(["reachable", "unreachable", "unknown", "not-applicable"]).optional(),
+  invocation: z.enum(["success", "failed", "not-run", "unknown"]).optional(),
+};
+
+server.registerTool(
+  "mcp_report_get",
+  {
+    description: "Get the bounded MCP usefulness report for a project.",
+    inputSchema: { project: projectParam, ...mcpReportFilters },
+  },
+  wrapHandler(C("mcp_report_get"), async ({ project, ...filters }) => mcpReportGet(project, filters)),
+);
 
 server.registerTool(
   "agent_list",
@@ -1160,8 +1870,6 @@ server.registerTool(
   wrapHandler(C("agent_sync"), async ({ project, name }) => agentTools.agentSync(project, name)),
 );
 
-// ── Logs ──────────────────────────────────────────────
-
 server.registerTool(
   "logs_list",
   {
@@ -1187,8 +1895,6 @@ server.registerTool(
   wrapHandler(C("logs_sources"), async ({ project }) =>
     logTools.logsSources(project)),
 );
-
-// ── Email ──────────────────────────────────────────────
 
 server.registerTool(
   "email_list",
@@ -1447,14 +2153,12 @@ server.registerTool(
       uid: z.number(),
       attachmentId: z.string(),
       folder: z.string().optional(),
-      outputPath: z.string().optional(),
+      outputPath: z.string().min(1),
     },
   },
   wrapHandler(C("email_attachment_get"), async ({ project, account, uid, attachmentId, folder, outputPath }) =>
     emailTools.emailAttachmentGet(project, account, uid, attachmentId, folder, outputPath)),
 );
-
-// ── Jobs ──────────────────────────────────────────────
 
 server.registerTool(
   "job_list",
@@ -1465,7 +2169,7 @@ server.registerTool(
 server.registerTool(
   "job_create",
   {
-    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    description: "Create a new job with optional schedule, trigger event, timeout, and metadata-only vault_item_ids authorization.",
     inputSchema: {
       project: projectParam,
       name: z.string(),
@@ -1474,31 +2178,33 @@ server.registerTool(
       prompt_template: z.string(),
       schedule_cron: z.string().optional(),
       trigger_event: z.string().optional(),
-      timeout_minutes: z.number().optional(),
+      timeout_minutes: jobTimeoutMinutesParam.optional(),
+      vault_item_ids: jobVaultItemIdsParam.optional(),
     },
   },
-    wrapHandler(C("job_create"), async ({ project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes }) =>
-    jobTools.jobCreate(project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes)),
+    wrapHandler(C("job_create"), async ({ project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes, vault_item_ids }) =>
+    jobTools.jobCreate(project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes, vault_item_ids)),
 );
 
 server.registerTool(
   "job_update",
   {
-    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    description: "CAS-update job fields with required expected_revision. Omit vault_item_ids to preserve references; [] revokes all.",
     inputSchema: {
       project: projectParam,
       job_id: z.string(),
-      fields: z.record(z.unknown()),
+      fields: jobUpdateFieldsParam,
+      expected_revision: z.number().int().nonnegative(),
     },
   },
-  wrapHandler(C("job_update"), async ({ project, job_id, fields }) =>
-    jobTools.jobUpdate(project, job_id, fields)),
+  wrapHandler(C("job_update"), async ({ project, job_id, fields, expected_revision }) =>
+    jobTools.jobUpdate(project, job_id, fields, expected_revision)),
 );
 
 server.registerTool(
   "job_delete",
-  { description: "Delete a job by ID.", inputSchema: { project: projectParam, job_id: z.string() } },
-  wrapHandler(C("job_delete"), async ({ project, job_id }) => jobTools.jobDelete(project, job_id)),
+  { description: "Soft-delete a job by ID with required expected_revision.", inputSchema: { project: projectParam, job_id: z.string(), expected_revision: z.number().int().nonnegative() } },
+  wrapHandler(C("job_delete"), async ({ project, job_id, expected_revision }) => jobTools.jobDelete(project, job_id, expected_revision)),
 );
 
 server.registerTool(
@@ -1542,8 +2248,6 @@ server.registerTool(
   },
   wrapHandler(C("job_suggest"), async ({ project, description }) => jobTools.jobSuggest(project, description)),
 );
-
-// ── Pipeline ───────────────────────────────────────────
 
 server.registerTool(
   "pipeline_events",
@@ -1596,8 +2300,6 @@ server.registerTool(
     pipelineTools.pipelineEventLog(args.project, args.eventType, args.eventSource, args.title, args.description, args.data as object | undefined, args.parentEventId, args.sessionId, args.importance)),
 );
 
-// ── Status ─────────────────────────────────────────────
-
 server.registerTool(
   "service_status",
   { description: "Get overall service health — supervisord process states + application health.", inputSchema: { project: projectParam } },
@@ -1634,15 +2336,13 @@ server.registerTool(
     statusTools.serviceProcessLogs(project, name, offset, limit)),
 );
 
-// ── Health ─────────────────────────────────────────────
-
 server.registerTool(
   "health_check",
   { description: "API health check — returns status and uptime. No project param needed.", inputSchema: {} },
-  wrapHandler(C("health_check"), async () => healthCheck()),
+  mcpReportMode
+    ? async () => healthCheck()
+    : wrapLauncherScopedHandler(C("health_check"), launcherProject, async () => healthCheck()),
 );
-
-// ── OpenCode ───────────────────────────────────────────
 
 server.registerTool(
   "opencode_messages",
@@ -1653,29 +2353,26 @@ server.registerTool(
   wrapHandler(C("opencode_messages"), async ({ project, limit, offset }) => opencodeMessages(project, limit, offset)),
 );
 
-// ── Dashboard ──────────────────────────────────────────
-
 server.registerTool(
   "dashboard_summary",
   {
     description: "Get aggregated dashboard summary — learning stats, task counts, job counts, and mail status.",
     inputSchema: { project: projectParam },
   },
-  // NOTE: Uses bare fetch instead of the retrying `api` client because the summary
-  // endpoint aggregates from multiple sources and may be slower — the standard
-  // 10s timeout + 3 retries could cascade under load. A single quick failure is
-  // preferred over delaying the dashboard render.
+  // The aggregate remains a single no-retry request so a partial outage cannot
+  // hold the MCP call open across the normal safe-request retry window.
   wrapHandler(C("dashboard_summary"), async ({ project }) => {
-    const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
-    const url = new URL("dashboard/summary", apiBase);
-    url.searchParams.set("project", project);
-    const res = await fetch(url.toString(), { headers: apiRequestHeaders() });
-    const data = await res.json();
+    const res = await api.settled.getRaw("/dashboard/summary", { project });
+    if (!res.ok) throw new ApiHttpError(res.status, "API_REQUEST_FAILED", "The API request failed.");
+    let data: unknown;
+    try {
+      data = await res.response.json();
+    } catch {
+      throw new ApiUnavailableError();
+    }
     return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
   }),
 );
-
-// ── Documentation ───────────────────────────────────────
 
 server.registerTool(
   "docs_list_spaces",
@@ -2031,8 +2728,6 @@ server.registerTool(
   wrapHandler(C("docs_get_stats"), async ({ project }) => docsTools.docsGetStats(project)),
 );
 
-// ── RAG (Retrieval-Augmented Generation) ─────────────────
-
 server.registerTool(
   "docs_search_semantic",
   {
@@ -2105,8 +2800,6 @@ server.registerTool(
   wrapHandler(C("docs_rag_stats"), async ({ project }) => ragTools.ragStats(project)),
 );
 
-// ── Providers ──────────────────────────────────────────
-
 server.registerTool(
   "provider_list",
   { description: "List all available LLM providers from OpenCode", inputSchema: { project: projectParam } },
@@ -2139,8 +2832,6 @@ server.registerTool(
   { description: "Get provider connection status (keys redacted)", inputSchema: { project: projectParam } },
   wrapHandler(C("provider_status"), async ({ project }) => providerTools.providerStatus(project)),
 );
-
-// ── Vault ──────────────────────────────────────────────
 
 server.registerTool(
   "vault_status",
@@ -2236,8 +2927,6 @@ server.registerTool(
   wrapHandler(C("vault_audit_list"), async ({ project }) => vaultTools.vaultAuditList(project)),
 );
 
-// ── Backups (10) ────────────────────────────────────────
-
 server.registerTool(
   "backup_create",
   {
@@ -2287,31 +2976,83 @@ server.registerTool(
 server.registerTool(
   "backup_restore_preview",
   {
-    description: "Preview what a restore would do without executing it.",
-    inputSchema: { project: projectParam, backupId: z.string() },
+    description: "Create or replay a durable dry-run restore plan without executing it.",
+    inputSchema: { project: projectParam, backupId: z.string().uuid(), dryRun: z.literal(true), idempotencyKey: z.string().min(1).max(128) },
   },
-  wrapHandler(C("backup_restore_preview"), async ({ project, backupId }) =>
-    backupTools.backupRestorePreview(project, backupId)),
+  wrapHandler(C("backup_restore_preview"), async ({ project, backupId, dryRun, idempotencyKey }) =>
+    backupTools.backupRestorePreview(project, backupId, dryRun, idempotencyKey)),
+);
+
+server.registerTool(
+  "backup_restore_authorize",
+  {
+    description: "Issue a one-time confirmation token for a previewed restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid(), expectedRevision: z.number().int().nonnegative() },
+  },
+  wrapHandler(C("backup_restore_authorize"), async ({ project, planId, expectedRevision }) =>
+    backupTools.backupRestoreAuthorize(project, planId, expectedRevision)),
 );
 
 server.registerTool(
   "backup_restore_start",
   {
-    description: "Start a restore operation. Requires confirm=true to proceed.",
-    inputSchema: { project: projectParam, backupId: z.string() },
+    description: "Confirm a restore plan, stage verified tamper-evident copies, and make it ready for an external executor without applying data.",
+    inputSchema: {
+      project: projectParam,
+      planId: z.string().uuid(),
+      expectedRevision: z.number().int().nonnegative(),
+      confirmationToken: z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/),
+      idempotencyKey: z.string().min(1).max(128),
+    },
   },
-  wrapHandler(C("backup_restore_start"), async ({ project, backupId }) =>
-    backupTools.backupRestoreStart(project, backupId)),
+  wrapHandler(C("backup_restore_start"), async ({ project, planId, expectedRevision, confirmationToken, idempotencyKey }) =>
+    backupTools.backupRestoreStart(project, planId, expectedRevision, confirmationToken, idempotencyKey)),
+);
+
+server.registerTool(
+  "backup_restore_execution_authorize",
+  {
+    description: "Issue a one-time 15 minute execution token for a ready restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid(), expectedRevision: z.number().int().nonnegative() },
+  },
+  wrapHandler(C("backup_restore_execution_authorize"), async ({ project, planId, expectedRevision }) =>
+    backupTools.backupRestoreExecutionAuthorize(project, planId, expectedRevision)),
+);
+
+server.registerTool(
+  "backup_restore_execute",
+  {
+    description: "Consume an execution token and queue the fixed restore maintenance program.",
+    inputSchema: {
+      project: projectParam,
+      planId: z.string().uuid(),
+      expectedRevision: z.number().int().nonnegative(),
+      executionToken: z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/),
+      idempotencyKey: z.string().min(1).max(128),
+    },
+  },
+  wrapHandler(C("backup_restore_execute"), async ({ project, planId, expectedRevision, executionToken, idempotencyKey }) =>
+    backupTools.backupRestoreExecute(project, planId, expectedRevision, executionToken, idempotencyKey)),
 );
 
 server.registerTool(
   "backup_restore_status",
   {
-    description: "Get the status of a restore operation by job ID.",
-    inputSchema: { project: projectParam, jobId: z.string() },
+    description: "Get the content-free current state of a restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid() },
   },
-  wrapHandler(C("backup_restore_status"), async ({ project, jobId }) =>
-    backupTools.backupRestoreStatus(project, jobId)),
+  wrapHandler(C("backup_restore_status"), async ({ project, planId }) =>
+    backupTools.backupRestoreStatus(project, planId)),
+);
+
+server.registerTool(
+  "backup_restore_audit_list",
+  {
+    description: "List bounded immutable, content-free audit evidence for a restore plan.",
+    inputSchema: { project: projectParam, planId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional() },
+  },
+  wrapHandler(C("backup_restore_audit_list"), async ({ project, planId, limit }) =>
+    backupTools.backupRestoreAuditList(project, planId, limit)),
 );
 
 server.registerTool(
@@ -2333,7 +3074,10 @@ server.registerTool(
     backupTools.backupScheduleSet(project, config)),
 );
 
-// ── Start ───────────────────────────────────────────────
+// Child tools have their own registration/reconciliation path. Do not route
+// those dynamic registrations through the built-in visibility controller.
+server.registerTool = originalRegisterTool;
+if (!mcpReportMode) installToolVisibilityProjection(server, toolVisibility);
 
 /**
  * Connects the MCP server via stdio transport.
@@ -2344,28 +3088,62 @@ server.registerTool(
  */
 async function main() {
   const transport = new StdioServerTransport();
+  if (!mcpReportMode) {
+    await toolVisibility.prepare();
+    const preflight = await api.settled.get("/auth/preflight");
+    if (preflight.status === 429) throw new Error("MCP_AUTH_PREFLIGHT_RATE_LIMITED");
+    if (!preflight.ok) throw new Error("MCP_AUTH_PREFLIGHT_UNAVAILABLE");
+    const binding = launcherAuthorizationBinding(preflight.data);
+    if (!binding) throw new Error("MCP_LAUNCHER_BINDING_UNAVAILABLE");
+    childGateway = new ChildMcpGateway(
+      childToolHost,
+      launcherProject,
+      childMcpGatewayApi,
+      undefined,
+      undefined,
+      projectStateAttestor,
+      binding,
+    );
+  }
   await server.connect(transport);
+  if (!mcpReportMode) await toolVisibility.start();
+  if (childGateway) await childGateway.start();
   logger.info("ingenium-server MCP transport started on stdio");
 }
 
-main().catch((err) => {
-  logger.fatal({ err }, "Fatal error in MCP server");
-  stopAll();
-  process.exit(1);
+let shuttingDown = false;
+
+async function shutdown(exitCode: number, reason: "SIGTERM" | "SIGINT" | "fatal" | "unhandled-rejection"): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ reason }, "MCP server shutting down");
+  await toolVisibility.stop();
+  if (childGateway) await childGateway.shutdown();
+  process.exit(exitCode);
+}
+
+main().catch((error) => {
+  // Do not serialize the error: its message can include dependency payloads.
+  const reason = error instanceof Error
+    && (error.message === "MCP_TOOL_STATE_RATE_LIMITED" || error.message === "MCP_AUTH_PREFLIGHT_RATE_LIMITED")
+    ? "rate_limited"
+    : "startup_failed";
+  logger.fatal({ boundary: "parent-mcp-transport", reason }, "Fatal error in MCP server");
+  void shutdown(1, "fatal");
 });
 
-// Graceful shutdown: SIGTERM is sent by the parent process (or Docker) during
-// container stop. We must stop child MCP servers before
-// exiting to avoid orphaned processes.
-process.on("SIGTERM", () => {
-  logger.info("SIGTERM received, shutting down");
-  stopAll();
-  process.exit(0);
+// Graceful shutdown must await child transport close so the parent never
+// leaves a live direct child process behind.
+process.once("SIGTERM", () => {
+  void shutdown(0, "SIGTERM");
 });
 
-// Hard exit on unhandled rejections — the MCP protocol has no error-recovery
-// mechanism for a corrupted runtime. Better to restart cleanly via the host.
-process.on("unhandledRejection", (reason) => {
-  logger.fatal({ reason }, "Unhandled rejection");
-  process.exit(1);
+process.once("SIGINT", () => {
+  void shutdown(0, "SIGINT");
+});
+
+// The MCP protocol has no safe recovery path after an unhandled rejection.
+process.on("unhandledRejection", () => {
+  logger.fatal({ boundary: "parent-mcp-runtime" }, "Unhandled rejection");
+  void shutdown(1, "unhandled-rejection");
 });

@@ -3,15 +3,30 @@ import * as personality from "./personality.js";
 import * as skills from "./skills.js";
 import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
-import type { SynthesisLLMResult } from "./synthesis-llm.js";
+import type { LLMTextExecutor } from "./synthesis-llm.js";
 import * as skillGovernance from "./skill-governance.js";
 import { getSetting, setSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
 import { logger } from "../logger.js";
+import {
+  getIncompleteSynthesisBatchStatus,
+  runDurableSynthesis,
+  type DurableSynthesisOptions,
+} from "./synthesis-batches.js";
+import type { SynthesisStatus } from "../schema.js";
+
+export type { DurableSynthesisOptions as SynthesisRunOptions, SynthesisFaultPoint } from "./synthesis-batches.js";
 
 /** Safely parse a JSON string, returning `{}` on failure instead of throwing. */
 function safeParseJson(str: string): Record<string, any> {
   try { return JSON.parse(str); } catch { return {}; }
+}
+
+function submitNewProposalCandidate(projectId: string, candidate: skillGovernance.ProposalCandidateResult): boolean {
+  if (candidate.proposal.status === "draft") {
+    skillGovernance.submitProposal(projectId, candidate.proposal.id);
+  }
+  return candidate.disposition !== "reused";
 }
 
 export interface SynthesisResult {
@@ -24,483 +39,19 @@ export interface SynthesisResult {
   summary: string;
 }
 
-/**
- * Run the synthesis pipeline: process pending observations into personality traits.
- *
- * The pipeline has two phases:
- *   1. **Trait consolidation** (LLM-driven) — the LLM decides CREATE/CONFIRM/IGNORE
- *      for each observation against existing traits.
- *   2. **Skill synthesis** (LLM-driven, optional) — if an LLM is configured,
- *      the same batch of observations is analyzed to create/update skills.
- *
- * Observations that the LLM acted on (CREATE or CONFIRM) are marked "processed".
- * Observations the LLM explicitly ignored are ALSO marked "processed" so they
- * don't waste tokens in every cycle.
- *
- * Trait decay: traits untouched for 7+ days lose 0.05 confidence per cycle.
- *
- * WARNING: The old heuristic classification described below has been replaced
- *          by LLM-based `consolidateTraits()`. The heuristics are retained here
- *          as documentation only and should be removed when Phase 1 migration
- *          to LLM-only is complete.
- *
- * Legacy heuristics (replaced):
- *   - "correction" → feedback_style, "preference" → code_preference, etc.
- *   - New traits started at 0.05-0.15 confidence (below display threshold 0.3)
- */
-export async function runSynthesis(projectId: string, sessionId?: string): Promise<SynthesisResult> {
-  const result: SynthesisResult = {
-    observations_processed: 0,
-    traits_created: 0,
-    traits_updated: 0,
-    skills_created: 0,
-    observations_skipped: 0,
-    errors: [],
-    summary: "",
-  };
-
-  // Read synthesis config once for event enrichment
-  const gid = projects.getGlobalProject()?.id;
-  const synthModel = gid ? getSetting(gid, "synthesis_model") : undefined;
-  const synthEndpoint = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
-  const synthProvider = gid ? getSetting(gid, "synthesis_provider") : undefined;
-  const projectName = projects.getProject(projectId)?.name || "unknown";
-
-  const batch = observations.getUnprocessedBatch(projectId, 50);
-
-  // Apply trait decay — traits untouched for 7+ days lose confidence
-  const allTraits = personality.getTraits(projectId);
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  for (const trait of allTraits) {
-    if (trait.updated_at < sevenDaysAgo && trait.confidence > 0.05) {
-      try {
-        personality.updateConfidence(projectId, trait.trait_type, trait.trait_value, -0.05);
-      } catch (_) { /* non-fatal — skip on missing trait */ }
-    }
-  }
-
-  if (batch.length === 0) {
-    result.summary = "No pending observations to process.";
-    // Log completion event so the pipeline timeline shows activity
-    try {
-      logEvent(projectId, "synthesis_completed", "synthesis", "No pending observations.", result.summary, { observations_processed: 0, model: synthModel, endpoint: synthEndpoint, provider: synthProvider }, undefined, sessionId);
-    } catch (_) { /* non-fatal */ }
-    return result;
-  }
-
-  // Log synthesis start
-  let synthesisEventId: number | undefined;
-  try {
-    const evt = logEvent(
-      projectId,
-      "synthesis_started",
-      "synthesis",
-      `Synthesis started — ${batch.length} observation(s) to process`,
-      `${batch.length} pending observations across ${new Set(batch.map(o => o.observation_type)).size} type(s)`,
-      { batch_size: batch.length, types: [...new Set(batch.map(o => o.observation_type))], observation_ids: batch.map(o => o.id), model: synthModel, endpoint: synthEndpoint },
-      undefined,
-      sessionId,
-    );
-    synthesisEventId = evt.id;
-  } catch (_) { /* non-fatal */ }
-
-  // ── Phase 1: Trait Consolidation via LLM ──
-  // Load existing active traits for the consolidation prompt
-  const existingActiveTraits = personality.getTraits(projectId);
-
-  const consolidation = await synthesisLlm.consolidateTraits(
-    projectId,
-    batch.map(o => ({ id: o.id, observation_type: o.observation_type, content: o.content })),
-    existingActiveTraits.map(t => ({ id: t.id, trait_type: t.trait_type, trait_value: t.trait_value, confidence: t.confidence })),
-  );
-
-  if (!consolidation) {
-    // LLM not configured or unavailable — leave observations PENDING for a future cycle
-    const reason = synthesisLlm.isLLMSynthesisConfigured(projectId)
-      ? "LLM consolidation API unreachable — leaving observations pending for retry"
-      : "LLM synthesis not configured — leaving observations pending until configured";
-    result.summary = reason;
-    result.errors.push(reason);
-    try {
-      logEvent(
-        projectId, "synthesis_completed", "synthesis",
-        "Synthesis skipped — LLM unavailable",
-        reason,
-        { ...result, model: synthModel, endpoint: synthEndpoint, provider: synthProvider },
-        synthesisEventId,
-        sessionId,
-      );
-    } catch (_) { /* non-fatal */ }
-    return result;
-  }
-
-  // Collect all observation IDs referenced by the LLM
-  const involvedObsIds = new Set<number>();
-  for (const c of consolidation.create) {
-    for (const oid of c.observation_ids) involvedObsIds.add(oid);
-  }
-  for (const c of consolidation.confirm) {
-    involvedObsIds.add(c.observation_id);
-  }
-
-  // Execute CREATE operations
-  for (const toCreate of consolidation.create) {
-    try {
-      const clampedConfidence = Math.min(0.15, Math.max(0.10, toCreate.confidence_hint));
-      // Use the first observation_id as the exemplar
-      const exemplarObsId = toCreate.observation_ids[0];
-      const exemplarObs = exemplarObsId ? batch.find(o => o.id === exemplarObsId) : undefined;
-
-      personality.upsertTrait(
-        projectId,
-        toCreate.trait_type,
-        toCreate.trait_value,
-        undefined, // label
-        clampedConfidence,
-        exemplarObsId,
-        exemplarObs?.content, // USE observation content as exemplar text (not trait_value — that's normalized)
-      );
-      result.traits_created++;
-
-      // Log trait_created event with normalized value
-      try {
-        logEvent(
-          projectId, "trait_created", "synthesis",
-          `Trait created: ${toCreate.trait_type} → ${toCreate.trait_value.substring(0, 60)}`,
-          `Normalized from ${toCreate.observation_ids.length} observation(s), confidence: ${clampedConfidence.toFixed(2)}`,
-          {
-            trait_type: toCreate.trait_type,
-            trait_value: toCreate.trait_value,
-            confidence: clampedConfidence,
-            observation_ids: toCreate.observation_ids,
-            project_name: projectName,
-            model: synthModel,
-          },
-          synthesisEventId,
-          sessionId,
-        );
-      } catch (_) { /* non-fatal */ }
-    } catch (err: any) {
-      logger.error("synthesis", `Trait create failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-      result.errors.push(`Trait create "${toCreate.trait_value?.substring(0, 30)}": ${err.message}`);
-    }
-  }
-
-  // Execute CONFIRM operations
-  for (const toConfirm of consolidation.confirm) {
-    try {
-      const trait = existingActiveTraits.find(t => t.id === toConfirm.trait_id);
-      if (trait) {
-        personality.updateConfidence(
-          projectId,
-          trait.trait_type,
-          trait.trait_value,
-          0.15,
-        );
-        result.traits_updated++;
-
-        try {
-          logEvent(
-            projectId, "trait_updated", "synthesis",
-            `Trait confirmed: ${trait.trait_type} → ${trait.trait_value.substring(0, 60)}`,
-            `Boosted by observation #${toConfirm.observation_id}`,
-            {
-              trait_type: trait.trait_type,
-              trait_value: trait.trait_value,
-              observation_id: toConfirm.observation_id,
-              project_name: projectName,
-              model: synthModel,
-            },
-            synthesisEventId,
-            sessionId,
-          );
-        } catch (_) { /* non-fatal */ }
-      }
-    } catch (err: any) {
-      logger.error("synthesis", `Trait confirm failed for trait_id=${toConfirm.trait_id}: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-      result.errors.push(`Trait confirm trait_id=${toConfirm.trait_id}: ${err.message}`);
-    }
-  }
-
-  // Mark observations as processed if the LLM acted on them (CREATE or CONFIRM).
-  // Observations the LLM explicitly ignored are also marked processed — the LLM
-  // evaluated them and decided they're noise/unactionable. Leaving them pending
-  // would re-submit them every cycle, wasting LLM tokens.
-  for (const obs of batch) {
-    try {
-      if (involvedObsIds.has(obs.id)) {
-        observations.updateObservation(obs.id, { status: "processed" });
-        result.observations_processed++;
-      } else {
-        // Mark as processed — the LLM evaluated and chose to ignore them
-        observations.updateObservation(obs.id, { status: "processed" });
-        result.observations_skipped++;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const errName = err instanceof Error ? err.name : "Unknown";
-      const stack = err instanceof Error ? err.stack : undefined;
-      logger.error("synthesis", `Observation ${obs.id} processing failed: ${msg}`, { error: msg, name: errName, stack: stack?.split("\n").slice(0, 5).join("\n") });
-      result.errors.push(`Observation ${obs.id}: ${msg}`);
-      try {
-        observations.updateObservation(obs.id, { status: "failed" });
-      } catch {
-        result.errors.push(`Observation ${obs.id}: also failed to mark as failed`);
-      }
-    }
-  }
-
-  result.summary = `Processed ${result.observations_processed} observations: ${result.traits_created} traits created, ${result.traits_updated} traits updated.`;
-  if (result.errors.length > 0) {
-    result.summary += ` ${result.errors.length} error(s) encountered.`;
-  }
-
-  // ── Phase 2: LLM Skill Synthesis ────────────────────────
-  // If user has configured an LLM for skill synthesis, use it
-  // to analyze observations and create/update skills.
-  let llmInsights: string[] = [];
-  if (synthesisLlm.isLLMSynthesisConfigured(projectId)) {
-    try {
-      const config = synthesisLlm.getLLMSynthesisConfig(projectId);
-      const gid = projects.getGlobalProject()?.id;
-      const endpointSetting = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
-      if (config && endpointSetting) {
-        const existingTraits = personality.getTraits(projectId);
-        const existingSkillsList = skills.listSkills(projectId);
-
-        let llmResult: SynthesisLLMResult;
-        try {
-          llmResult = await synthesisLlm.callSynthesisLLM(
-            batch, // the observations that were just processed
-            existingSkillsList.map(s => ({ name: s.name, description: s.description })),
-            existingTraits.map(t => ({
-              trait_type: t.trait_type,
-              trait_value: t.trait_value,
-              confidence: t.confidence
-            })),
-            endpointSetting,
-            config.model,
-            config.apiKey,
-            undefined,
-            gid ? getSetting(gid, "synthesis_allow_private_network") === "true" : false,
-          );
-          llmInsights = llmResult.insights || [];
-        } catch (primaryErr: any) {
-          // Try backup provider if primary fails
-          // NOTE: This backup fallback is duplicated in consolidateSkills().
-          //       Future work should extract to a shared helper.
-          const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
-          const backupEndpoint = gid ? getSetting(gid, "synthesis_backup_endpoint") : undefined;
-          const backupApiKey = gid ? getSetting(gid, "synthesis_backup_api_key") : undefined;
-
-          if (backupModel && backupEndpoint) {
-            try {
-              llmResult = await synthesisLlm.callSynthesisLLM(
-                batch,
-                existingSkillsList.map(s => ({ name: s.name, description: s.description })),
-                existingTraits.map(t => ({
-                  trait_type: t.trait_type,
-                  trait_value: t.trait_value,
-                  confidence: t.confidence
-                })),
-                backupEndpoint,
-                backupModel,
-                backupApiKey || undefined,
-                undefined,
-                gid ? getSetting(gid, "synthesis_backup_allow_private_network") === "true" : false,
-              );
-              llmInsights = llmResult.insights || [];
-            } catch (backupErr: any) {
-              // Both primary and backup failed
-              throw new Error(`Synthesis LLM failed (primary: ${primaryErr.message}, backup: ${backupErr.message})`);
-            }
-          } else {
-            // No backup configured — re-throw primary error
-            throw primaryErr;
-          }
-        }
-
-        // Execute skill create proposals (governance-gated)
-        for (const skillToCreate of llmResult.skills_to_create) {
-          try {
-            const fileTree = skillToCreate.reference_files && skillToCreate.reference_files.length > 0
-              ? JSON.stringify(Object.fromEntries(skillToCreate.reference_files.map(rf => [rf.path, rf.content])))
-              : undefined;
-            const proposedState = JSON.stringify({
-              content: skillToCreate.content,
-              description: skillToCreate.description,
-              category: "learning",
-              tags: skillToCreate.tags || "auto-generated",
-              always_apply: 0,
-              file_tree: fileTree || null,
-            });
-            const batchSessionIds = [...new Set(batch.map(o => o.session_id).filter(Boolean))];
-            const evidenceJson = JSON.stringify([
-              { trigger: "LLM synthesis", observation_ids: batch.map(o => o.id), session_ids: batchSessionIds, model: synthModel },
-            ]);
-            const proposal = skillGovernance.createProposal(
-              projectId,
-              "create",
-              skillToCreate.name,
-              proposedState,
-              {
-                evidenceJson,
-                qualityScore: 0.5,
-                noveltyScore: 0.3,
-                alwaysApply: 0,
-              },
-            );
-            skillGovernance.submitProposal(projectId, proposal.id);
-            result.skills_created++;
-
-            logEvent(
-              projectId, "proposal_created", "synthesis",
-              `Proposal created (create): ${skillToCreate.name}`,
-              skillToCreate.description.substring(0, 200),
-              { proposal_id: proposal.id, skill_name: skillToCreate.name, proposal_type: "create", via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
-              synthesisEventId,
-              sessionId,
-            );
-          } catch (err: any) {
-            logger.error("synthesis", `Skill create proposal "${skillToCreate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-            result.errors.push(`Skill create proposal "${skillToCreate.name}": ${err.message}`);
-          }
-        }
-
-        // Execute skill update proposals (governance-gated)
-        for (const skillToUpdate of llmResult.skills_to_update) {
-          try {
-            const existing = skills.getSkill(projectId, skillToUpdate.name);
-            if (existing) {
-              const updatedContent = existing.content + `\n\n${skillToUpdate.patch}`;
-              // Merge reference_files into existing file_tree if the update provides them
-              let mergedFileTree: string | undefined;
-              if (skillToUpdate.reference_files && skillToUpdate.reference_files.length > 0) {
-                const existingTree = (existing as any).file_tree
-                  ? JSON.parse((existing as any).file_tree)
-                  : {};
-                for (const rf of skillToUpdate.reference_files) {
-                  existingTree[rf.path] = rf.content;
-                }
-                mergedFileTree = JSON.stringify(existingTree);
-              }
-              const proposedState = JSON.stringify({
-                content: updatedContent,
-                description: existing.description,
-                category: (existing as any).category || null,
-                tags: existing.tags || null,
-                always_apply: (existing as any).always_apply ?? 0,
-                file_tree: mergedFileTree || (existing as any).file_tree || null,
-              });
-              const batchSessionIds = [...new Set(batch.map(o => o.session_id).filter(Boolean))];
-              const evidenceJson = JSON.stringify([
-                { trigger: "LLM synthesis update", observation_ids: batch.map(o => o.id), session_ids: batchSessionIds, model: synthModel, patch_type: skillToUpdate.patch_type },
-              ]);
-              const proposal = skillGovernance.createProposal(
-                projectId,
-                "update",
-                skillToUpdate.name,
-                proposedState,
-                {
-                  evidenceJson,
-                  qualityScore: 0.5,
-                  noveltyScore: 0.3,
-                  alwaysApply: (existing as any).always_apply ?? 0,
-                },
-              );
-              skillGovernance.submitProposal(projectId, proposal.id);
-              logEvent(
-                projectId, "proposal_created", "synthesis",
-                `Proposal created (update): ${skillToUpdate.name}`,
-                `Patch type: ${skillToUpdate.patch_type}`,
-                { proposal_id: proposal.id, skill_name: skillToUpdate.name, proposal_type: "update", patch_type: skillToUpdate.patch_type, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
-                synthesisEventId,
-                sessionId,
-              );
-            } else {
-              result.errors.push(`Skill update "${skillToUpdate.name}": not found`);
-            }
-          } catch (err: any) {
-            logger.error("synthesis", `Skill update proposal "${skillToUpdate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-            result.errors.push(`Skill update proposal "${skillToUpdate.name}": ${err.message}`);
-          }
-        }
-
-        // Execute LLM personality_traits — these were silently dropped before
-        if (llmResult.personality_traits && llmResult.personality_traits.length > 0) {
-          for (const pt of llmResult.personality_traits) {
-            try {
-              const clampedConf = Math.min(0.95, Math.max(0.05, pt.confidence));
-              personality.upsertTrait(
-                projectId,
-                pt.trait_type,
-                pt.trait_value,
-                undefined,
-                clampedConf,
-              );
-              try {
-                logEvent(
-                  projectId, "trait_created", "synthesis",
-                  `Trait (LLM): ${pt.trait_type} → ${pt.trait_value.substring(0, 60)}`,
-                  `LLM-synthesized trait, confidence: ${clampedConf.toFixed(2)}`,
-                  {
-                    trait_type: pt.trait_type,
-                    trait_value: pt.trait_value,
-                    confidence: clampedConf,
-                    via_llm: true,
-                    model: synthModel,
-                    project_name: projectName,
-                  },
-                  synthesisEventId,
-                  sessionId,
-                );
-              } catch (_) { /* non-fatal */ }
-            } catch (err: any) {
-              logger.error("synthesis", `LLM trait "${pt.trait_value?.substring(0, 30)}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-              result.errors.push(`LLM trait "${pt.trait_value?.substring(0, 30)}": ${err.message}`);
-            }
-          }
-        }
-
-        // Update summary to include proposal info
-        const totalProposals = result.skills_created + llmResult.skills_to_update.filter(s => s.name).length;
-        if (totalProposals > 0) {
-          result.summary += ` LLM created ${totalProposals} governance proposal(s).`;
-        }
-      }
-    } catch (err: any) {
-      logger.error("synthesis", `LLM synthesis phase failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-      result.errors.push(`LLM synthesis phase failed: ${err.message}`);
-    }
-  }
-
-  // Log synthesis completion
-  try {
-    logEvent(
-      projectId,
-      "synthesis_completed",
-      "synthesis",
-      `Synthesis completed — ${result.observations_processed} processed`,
-      result.summary,
-      { ...result, model: synthModel, endpoint: synthEndpoint, provider: synthProvider, insights: llmInsights },
-      synthesisEventId,
-      sessionId,
-    );
-  } catch (_) { /* non-fatal */ }
-
-  return result;
+/** Advance one durable synthesis batch through trait, proposal, and acknowledgment phases. */
+export async function runSynthesis(
+  projectId: string,
+  sessionId?: string,
+  opts?: DurableSynthesisOptions,
+): Promise<SynthesisResult> {
+  return runDurableSynthesis(projectId, sessionId, opts);
 }
 
 /**
  * Get synthesis pipeline status and statistics for a project.
  */
-export function getSynthesisStatus(projectId: string): {
-  total_observations: number;
-  pending_count: number;
-  processed_count: number;
-  trait_count: number;
-  last_synthesis_at: string | null;
-} {
+export function getSynthesisStatus(projectId: string): SynthesisStatus {
   const pendingCount = observations.countUnprocessed(projectId);
 
   // Count total observations for this project
@@ -520,6 +71,7 @@ export function getSynthesisStatus(projectId: string): {
     processed_count: processedCount,
     trait_count: traits.length,
     last_synthesis_at: processedObservations.length > 0 ? processedObservations[0]!.updated_at : null,
+    incompleteBatch: getIncompleteSynthesisBatchStatus(projectId),
   };
 }
 
@@ -611,7 +163,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
         const evidenceJson = JSON.stringify([
           { trigger: "cross-project synthesis", project_count: projectIds.length, source_projects: projectIds },
         ]);
-        const proposal = skillGovernance.createProposal(
+        const candidate = skillGovernance.ensureProposalCandidate(
           globalProject.id,
           "create",
           sampleSkill.name,
@@ -623,7 +175,8 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
             alwaysApply: 0,
           },
         );
-        skillGovernance.submitProposal(globalProject.id, proposal.id);
+        if (!submitNewProposalCandidate(globalProject.id, candidate)) continue;
+        const proposal = candidate.proposal;
         result.skills_created++;
 
         try {
@@ -652,7 +205,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
         const evidenceJson = JSON.stringify([
           { trigger: "cross-project synthesis update", project_count: projectIds.length, source_projects: projectIds },
         ]);
-        const proposal = skillGovernance.createProposal(
+        const candidate = skillGovernance.ensureProposalCandidate(
           globalProject.id,
           "update",
           skillName,
@@ -664,7 +217,8 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
             alwaysApply: (existing as any).always_apply ?? 0,
           },
         );
-        skillGovernance.submitProposal(globalProject.id, proposal.id);
+        if (!submitNewProposalCandidate(globalProject.id, candidate)) continue;
+        const proposal = candidate.proposal;
         try {
           logEvent(
             globalProject.id,
@@ -764,10 +318,14 @@ export interface ConsolidationResult {
  *          the middle of the merged document. If either skill lacks frontmatter,
  *          the merge still proceeds (the function returns the body unchanged).
  */
-export async function consolidateSkills(projectId: string): Promise<ConsolidationResult> {
-  // Skip if LLM not configured
+export async function consolidateSkills(
+  projectId: string,
+  opts?: { llmExecutor?: LLMTextExecutor },
+): Promise<ConsolidationResult> {
+  // Prefer direct configuration; use the API-owned broker only when none exists.
   const gid = projects.getGlobalProject()?.id;
-  if (!gid || !synthesisLlm.isLLMSynthesisConfigured(gid)) {
+  const directConfig = synthesisLlm.getFullLLMSynthesisConfig(projectId);
+  if (!directConfig && !opts?.llmExecutor) {
     return { merged: 0, deleted: 0, summary: "LLM not configured — skipping consolidation" };
   }
 
@@ -790,7 +348,14 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
   // Try primary LLM; fall back to backup provider on failure
   let result: synthesisLlm.ConsolidationSkillResult;
   try {
-    result = await synthesisLlm.callConsolidationLLM(projectId, prompt);
+    result = await synthesisLlm.callConsolidationLLM(
+      projectId,
+      prompt,
+      undefined,
+      undefined,
+      undefined,
+      opts?.llmExecutor,
+    );
   } catch (primaryErr: any) {
     logger.warn("synthesis", `Consolidation primary LLM failed: ${primaryErr.message} — trying backup`);
     result = { merges: [], delete: [] };
@@ -798,9 +363,9 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
 
   // If primary returned empty (or threw), try backup provider
   if (result.merges.length === 0 && result.delete.length === 0) {
-    const backupModel = getSetting(gid, "synthesis_backup_model");
-    const backupEndpoint = getSetting(gid, "synthesis_backup_endpoint");
-    const backupApiKey = getSetting(gid, "synthesis_backup_api_key");
+    const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
+    const backupEndpoint = gid ? getSetting(gid, "synthesis_backup_endpoint") : undefined;
+    const backupApiKey = gid ? getSetting(gid, "synthesis_backup_api_key") : undefined;
 
     if (backupModel && backupEndpoint) {
       logger.info("synthesis", "Consolidation primary returned empty — falling back to backup provider");
@@ -868,7 +433,7 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
         always_apply: (target as any).always_apply ?? 0,
         file_tree: JSON.stringify(targetTree),
       });
-      const proposal = skillGovernance.createProposal(
+      const candidate = skillGovernance.ensureProposalCandidate(
         projectId,
         "merge",
         merge.target,
@@ -881,7 +446,7 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
           alwaysApply: (target as any).always_apply ?? 0,
         },
       );
-      skillGovernance.submitProposal(projectId, proposal.id);
+      if (!submitNewProposalCandidate(projectId, candidate)) continue;
       merged++;
     } catch (e: any) {
       logger.warn("synthesis", `Merge proposal failed: ${merge.source} → ${merge.target}: ${e.message}`);
@@ -903,7 +468,7 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
         always_apply: (skillToArchive as any).always_apply ?? 0,
         file_tree: (skillToArchive as any).file_tree || null,
       });
-      const proposal = skillGovernance.createProposal(
+      const candidate = skillGovernance.ensureProposalCandidate(
         projectId,
         "archive",
         name,
@@ -914,7 +479,7 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
           alwaysApply: (skillToArchive as any).always_apply ?? 0,
         },
       );
-      skillGovernance.submitProposal(projectId, proposal.id);
+      if (!submitNewProposalCandidate(projectId, candidate)) continue;
       deleted++;
     } catch (e: any) {
       logger.warn("synthesis", `Archive proposal failed for ${name}: ${e.message}`);

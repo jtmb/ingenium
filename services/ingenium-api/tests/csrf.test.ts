@@ -78,7 +78,7 @@ describe("csrfMiddleware", () => {
   });
 
   it("rejects browser mutations without the dashboard marker", () => {
-    const { next, error } = invoke(makeRequest("DELETE", { origin: config.corsOrigin }));
+    const { next, error } = invoke(makeRequest("DELETE", { origin: config.dashboardOrigins[0]! }));
 
     expect(error).toMatchObject({ statusCode: 403, code: "CSRF_REJECTED" });
     expect(next).not.toHaveBeenCalled();

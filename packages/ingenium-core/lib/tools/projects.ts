@@ -13,23 +13,33 @@ import { logger } from "../logger.js";
 import { Project } from "../schema.js";
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import * as skills from "./skills.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "./organizations.js";
 
-/** List all projects, newest first. */
+/** List active projects, newest first. */
 export function listProjects(): Project[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  return db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all() as Project[];
+  return db.prepare("SELECT * FROM projects WHERE archived_at IS NULL ORDER BY created_at DESC").all() as Project[];
 }
 
 export const MAX_PROJECT_NAME_LENGTH = 64;
+export const MAX_PROJECT_RETENTION_DAYS = 3_650;
 
 /** Raised instead of arbitrarily selecting a global project from corrupt legacy data. */
 export class GlobalProjectResolutionError extends Error {
   constructor() {
     super("Multiple active global projects exist; resolve the global designation before continuing");
     this.name = "GlobalProjectResolutionError";
+  }
+}
+
+/** Raised when a server-owned resource would resolve outside global-default. */
+export class CanonicalGlobalProjectResolutionError extends Error {
+  constructor() {
+    super("The active global project must be global-default before server-owned resources can be used");
+    this.name = "CanonicalGlobalProjectResolutionError";
   }
 }
 
@@ -40,8 +50,56 @@ export function isValidProjectName(value: unknown): value is string {
     !/[\\/\u0000-\u001f\u007f]/.test(value);
 }
 
+export function isValidProjectRetentionDays(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    && value <= MAX_PROJECT_RETENTION_DAYS;
+}
+
 function assertProjectName(name: string): void {
   if (!isValidProjectName(name)) throw new Error("Invalid project name");
+}
+
+type GlobalProjectProvenanceEvent = "became_global" | "ceased_global";
+
+function recordGlobalProjectTransition(
+  db: ReturnType<typeof getDb>,
+  projectId: string,
+  eventType: GlobalProjectProvenanceEvent,
+  occurredAt: string,
+): void {
+  db.prepare(
+    `INSERT INTO server_global_project_provenance
+     (source_project_id, event_type, occurred_at)
+     VALUES (?, ?, ?)`,
+  ).run(projectId, eventType, occurredAt);
+}
+
+function demoteActiveGlobalProjects(
+  db: ReturnType<typeof getDb>,
+  occurredAt: string,
+  exceptProjectId?: string,
+): void {
+  const activeGlobals = db.prepare(
+    exceptProjectId
+      ? "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?"
+      : "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL",
+  ).all(...(exceptProjectId ? [exceptProjectId] : [])) as Array<{ id: string }>;
+  if (activeGlobals.length === 0) return;
+
+  if (exceptProjectId) {
+    db.prepare(
+      "UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
+    ).run(occurredAt, exceptProjectId);
+  } else {
+    db.prepare(
+      "UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL",
+    ).run(occurredAt);
+  }
+  for (const global of activeGlobals) {
+    recordGlobalProjectTransition(db, global.id, "ceased_global", occurredAt);
+  }
 }
 
 function projectDirectory(name: string): string {
@@ -52,7 +110,7 @@ function projectDirectory(name: string): string {
   return candidate;
 }
 
-export function createProject(name: string, isGlobal = false): Project {
+export function createProject(name: string, isGlobal = false, organizationId = BOOTSTRAP_ORGANIZATION_ID): Project {
   assertProjectName(name);
   // Idempotent: return existing project on container restart
   const existing = getProject(name);
@@ -68,18 +126,17 @@ export function createProject(name: string, isGlobal = false): Project {
     const now = new Date().toISOString();
     const id = randomUUID();
     const projectPath = projectDirectory(name);
-    if (!existsSync(projectPath)) {
-      mkdirSync(projectPath, { recursive: true });
-    }
-    if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL").run(now);
+    mkdirSync(projectPath, { recursive: true });
+    if (isGlobal) demoteActiveGlobalProjects(db, now);
     db.prepare(
-      `INSERT INTO projects (id, name, path, is_global, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now);
+      `INSERT INTO projects (id, name, path, is_global, created_at, updated_at, organization_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now, organizationId);
+    if (isGlobal) recordGlobalProjectTransition(db, id, "became_global", now);
     // Auto-load global skills into new project
     const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL").get() as Project | undefined;
     if (globalProject && globalProject.id !== id) {
-      const count = skills.copySkills(globalProject.id, id);
+      const count = skills.copySkillsInCurrentTransaction(globalProject.id, id);
       if (count > 0) {
         logger.info("projects", `Auto-loaded ${count} global skill(s) into project "${name}"`);
       }
@@ -100,10 +157,10 @@ export function archiveProject(name: string): boolean {
   assertProjectName(name);
   const changed = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NULL").get(name);
-    if (!existing) return false;
+    const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NULL").get(name) as Project | undefined;
+    if (!existing || existing.is_global) return false;
     const now = new Date().toISOString();
-    db.prepare("UPDATE projects SET archived_at = ? WHERE name = ?").run(now, name);
+    db.prepare("UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL").run(now, now, existing.id);
     return true;
   });
   if (changed) checkpointAfterWrite();
@@ -121,8 +178,30 @@ export function unarchiveProject(name: string): boolean {
       "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
     ).get((existing as Project).id) as { id: string } | undefined;
     const restoreAsGlobal = Boolean((existing as Project).is_global) && !activeGlobal;
+    const now = new Date().toISOString();
     db.prepare("UPDATE projects SET archived_at = NULL, is_global = ? WHERE name = ?")
       .run(restoreAsGlobal ? 1 : 0, name);
+    if (restoreAsGlobal) recordGlobalProjectTransition(db, (existing as Project).id, "became_global", now);
+    return true;
+  });
+  if (changed) checkpointAfterWrite();
+  return changed;
+}
+
+/** Restore one archived immutable project identity without re-resolving a caller-supplied name. */
+export function unarchiveProjectById(projectId: string): boolean {
+  const changed = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = db.prepare("SELECT * FROM projects WHERE id = ? AND archived_at IS NOT NULL").get(projectId) as Project | undefined;
+    if (!existing) return false;
+    const activeGlobal = db.prepare(
+      "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
+    ).get(existing.id) as { id: string } | undefined;
+    const restoreAsGlobal = Boolean(existing.is_global) && !activeGlobal;
+    const now = new Date().toISOString();
+    db.prepare("UPDATE projects SET archived_at = NULL, is_global = ?, updated_at = ? WHERE id = ? AND archived_at IS NOT NULL")
+      .run(restoreAsGlobal ? 1 : 0, now, projectId);
+    if (restoreAsGlobal) recordGlobalProjectTransition(db, existing.id, "became_global", now);
     return true;
   });
   if (changed) checkpointAfterWrite();
@@ -141,13 +220,17 @@ export function listArchivedProjects(): Project[] {
  * Returns the number of projects deleted.
  */
 export function purgeExpiredProjects(retentionDays: number): number {
+  if (!isValidProjectRetentionDays(retentionDays)) {
+    throw new RangeError(`retentionDays must be an integer between 0 and ${MAX_PROJECT_RETENTION_DAYS}`);
+  }
   const deleted = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-    const candidates = db.prepare("SELECT id FROM projects WHERE archived_at IS NOT NULL AND archived_at < ?").all(cutoff) as Array<{ id: string }>;
+    const candidates = db.prepare("SELECT id, is_global FROM projects WHERE archived_at IS NOT NULL AND archived_at < ?").all(cutoff) as Array<{ id: string; is_global: number }>;
     let deletedCount = 0;
     for (const candidate of candidates) {
       if (projectChildTables(db, candidate.id).length > 0) continue;
+      if (candidate.is_global) recordGlobalProjectTransition(db, candidate.id, "ceased_global", new Date().toISOString());
       deletedCount += db.prepare("DELETE FROM projects WHERE id = ?").run(candidate.id).changes;
     }
     return deletedCount;
@@ -167,7 +250,7 @@ export type ProjectDeletionResult =
   | { status: "has_children"; childTables: string[] };
 
 function projectChildTables(db: ReturnType<typeof getDb>, projectId: string): string[] {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'projects'").all() as Array<{ name: string }>;
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('projects', 'security_audit_events')").all() as Array<{ name: string }>;
   return tables.flatMap(({ name }) => {
     const columns = db.prepare(`PRAGMA table_info(${quoteIdentifier(name)})`).all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "project_id")) return [];
@@ -180,10 +263,11 @@ export function deleteProject(name: string): ProjectDeletionResult {
   assertProjectName(name);
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const project = db.prepare("SELECT id FROM projects WHERE name = ?").get(name) as { id: string } | undefined;
+    const project = db.prepare("SELECT id, is_global FROM projects WHERE name = ?").get(name) as { id: string; is_global: number } | undefined;
     if (!project) return { status: "not_found" } as ProjectDeletionResult;
     const childTables = projectChildTables(db, project.id);
     if (childTables.length > 0) return { status: "has_children", childTables } as ProjectDeletionResult;
+    if (project.is_global) recordGlobalProjectTransition(db, project.id, "ceased_global", new Date().toISOString());
     db.prepare("DELETE FROM projects WHERE id = ?").run(project.id);
     return { status: "deleted" } as ProjectDeletionResult;
   });
@@ -229,8 +313,10 @@ export function setProjectGlobal(name: string, isGlobal: boolean): boolean {
     const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(name) as Project | undefined;
     if (!existing || existing.archived_at) return false;
     const now = new Date().toISOString();
-    if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL").run(now);
+    if (isGlobal) demoteActiveGlobalProjects(db, now, existing.id);
     db.prepare("UPDATE projects SET is_global = ?, updated_at = ? WHERE name = ?").run(isGlobal ? 1 : 0, now, name);
+    if (isGlobal && !existing.is_global) recordGlobalProjectTransition(db, existing.id, "became_global", now);
+    if (!isGlobal && existing.is_global) recordGlobalProjectTransition(db, existing.id, "ceased_global", now);
     return true;
   });
   if (changed) checkpointAfterWrite();
@@ -249,10 +335,50 @@ export function getGlobalProject(): Project | undefined {
   return globals[0];
 }
 
+/** Return only projects whose departure from the global role was durably recorded. */
+export function getFormerGlobalProjectIds(canonicalGlobalProjectId: string): string[] {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  return (db.prepare(
+    `SELECT DISTINCT source_project_id
+     FROM server_global_project_provenance
+     WHERE event_type = 'ceased_global'
+       AND source_project_id IS NOT NULL
+       AND source_project_id <> ?
+     ORDER BY source_project_id`,
+  ).all(canonicalGlobalProjectId) as Array<{ source_project_id: string }>)
+    .map(({ source_project_id }) => source_project_id);
+}
+
+/**
+ * Resolve the sole server-owned namespace. A different active global project
+ * may be valid for ordinary project operations, but cannot silently take over
+ * mail or provider credentials that belong to global-default.
+ */
+export function getCanonicalGlobalProject(): Project | undefined {
+  const global = getGlobalProject();
+  if (!global) return undefined;
+  const isolatedFixtureGlobal = process.env.INGENIUM_API_TEST_MODE === "1"
+    && global.name === process.env.INGENIUM_PROJECT
+    && global.name.startsWith("playwright-test-");
+  if (global.name !== "global-default" && !isolatedFixtureGlobal) throw new CanonicalGlobalProjectResolutionError();
+  return global;
+}
+
 /** Resolve or create the canonical runtime global project without a name-based fallback. */
 export function ensureGlobalProject(): Project {
   const active = getGlobalProject();
   if (active) return active;
+  return createProject("global-default", true);
+}
+
+/**
+ * Ensure global-default exists only when no other active project owns the
+ * global role. Reassigning an arbitrary active project here could strand its
+ * server-global credentials, so callers must repair that state explicitly.
+ */
+export function ensureCanonicalGlobalProject(): Project {
+  const active = getGlobalProject();
+  if (active) return getCanonicalGlobalProject()!;
   return createProject("global-default", true);
 }
 
@@ -294,9 +420,12 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
 
   let global = db.prepare("SELECT * FROM projects WHERE name = 'global-default'").get() as Project | undefined;
   if (!global && dryRun) {
-    global = { ...source, id: "dry-run-global-default", name: "global-default", is_global: true };
+    global = { ...source, id: "dry-run-global-default", name: "global-default", is_global: true, organization_id: BOOTSTRAP_ORGANIZATION_ID };
   }
   if (!global) global = createProject("global-default", true);
+  if (source.organization_id !== global.organization_id) {
+    throw new Error("Refusing /workspace migration across organization boundaries");
+  }
 
   const childTables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>)
     .map(({ name }) => name)
@@ -325,6 +454,16 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
   checkpointAfterWrite();
 
   execTransaction(() => {
+    const transferTriggers = db.prepare(
+      `SELECT name, sql FROM sqlite_master
+       WHERE type = 'trigger' AND sql IS NOT NULL
+         AND lower(sql) LIKE '%project_id%' AND lower(sql) LIKE '%immutable%'`,
+    ).all() as Array<{ name: string; sql: string }>;
+    // Ownership guards must remain exact outside this audited, same-organization transfer.
+    // SQLite rolls every dropped trigger back if any migration verification below fails.
+    for (const trigger of transferTriggers) {
+      db.exec(`DROP TRIGGER ${quoteIdentifier(trigger.name)}`);
+    }
     for (const collision of collisions) {
       db.prepare("UPDATE skills SET name = ? WHERE project_id = ? AND name = ?").run(collision.destinationName, source.id, collision.name);
     }
@@ -346,6 +485,7 @@ export function migrateWorkspaceProject(dryRun = false): WorkspaceMigrationResul
     if (remaining !== 0) throw new Error("Refusing /workspace project deletion: child rows remain");
     const fkViolations = db.prepare("PRAGMA foreign_key_check").all();
     if (fkViolations.length !== 0) throw new Error("Refusing /workspace project deletion: foreign-key check failed");
+    for (const trigger of transferTriggers) db.exec(trigger.sql);
     db.prepare("DELETE FROM projects WHERE id = ?").run(source.id);
     db.prepare("UPDATE project_migration_manifests SET status = 'completed', updated_at = ? WHERE id = ?").run(new Date().toISOString(), manifestId);
   });

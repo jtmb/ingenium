@@ -1,6 +1,6 @@
 # ingenium-api
 
-Express REST API for the Ingenium MCP Server. Listens on port **4097**.
+Express REST API for the Ingenium MCP Server. Listens privately on **4096** in the Compose deployment, behind the authenticated host-loopback boundary on **4097**. Standalone development defaults to **4097**.
 
 **Authority:** Sole database authority. All CRUD operations flow through this service.
 

@@ -1,6 +1,8 @@
 import { logger } from "../logger.js";
-import type { LLMConfig } from "./synthesis-llm.js";
+import type { LLMConfig, LLMTextExecutor } from "./synthesis-llm.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
+import { isTrustedJobTriggerEvent } from "./jobs.js";
+import { tryParseJSON } from "./llm-json.js";
 
 /** The result shape returned by generateJobConfig. All fields nullable on any error. */
 export interface JobSuggestResult {
@@ -16,7 +18,9 @@ const MAX_PROMPT_TEMPLATE = 4000;
 const MAX_CRON = 100;
 const MAX_TRIGGER_EVENT = 100;
 
-function buildPrompt(description: string): string {
+export const JOB_SUGGEST_SYSTEM_PROMPT = "You are a job configuration assistant that outputs only valid JSON.";
+
+export function buildJobSuggestPrompt(description: string): string {
   return `You are a job configuration assistant. Given a user's description of a recurring or event-driven
 task, derive the following JSON fields for an agent job:
 
@@ -28,7 +32,9 @@ task, derive the following JSON fields for an agent job:
 2. "schedule_cron": A 5-field cron expression for how often the job should run.
    Set to null if the job is event-triggered only or has no recurring schedule.
 
-3. "trigger_event": A short string identifying what event should trigger the job.
+3. "trigger_event": One exact trusted event value when applicable:
+   "context.conversation.archived", "context.conversation.unarchived", or
+   "context.checkpoint.restored_as_new".
    Set to null if the job is schedule-only with no event trigger.
    Set to null if the description doesn't imply an event trigger.
 
@@ -36,31 +42,6 @@ User description: "${description}"
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 { "prompt_template": "string or null", "schedule_cron": "string or null", "trigger_event": "string or null" }`;
-}
-
-/**
- * Lenient JSON parser that handles common LLM output quirks:
- * - Code-fence wrapped JSON (```json ... ```)
- * - Response with trailing/garbage text (falls back to extracting the first `{...}` block)
- * - Returns `null` on any parse failure instead of throwing
- */
-function tryParseJSON(text: string): any {
-  try {
-    let cleaned = text.trim();
-    if (cleaned.startsWith("```")) {
-      // Strip markdown code fences — LLMs frequently wrap raw JSON in ```json ... ```
-      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-    }
-    return JSON.parse(cleaned);
-  } catch {
-    // Greedy fallback: extract the first braced block `{...}`
-    // This handles cases where the model wraps the JSON in explanatory text.
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return null;
-  }
 }
 
 function validateResult(raw: any): JobSuggestResult {
@@ -81,10 +62,53 @@ function validateResult(raw: any): JobSuggestResult {
   }
 
   if (typeof raw.trigger_event === "string" && raw.trigger_event.trim().length > 0) {
-    result.trigger_event = raw.trigger_event.trim().slice(0, MAX_TRIGGER_EVENT);
+    const triggerEvent = raw.trigger_event.trim().slice(0, MAX_TRIGGER_EVENT);
+    result.trigger_event = isTrustedJobTriggerEvent(triggerEvent) ? triggerEvent : null;
   }
 
   return result;
+}
+
+/** Parse broker or direct-model content with the same defensive contract. */
+export function parseJobSuggestContent(content: string): JobSuggestResult {
+  if (!content || !content.trim()) {
+    return { prompt_template: null, schedule_cron: null, trigger_event: null };
+  }
+  return validateResult(tryParseJSON(content));
+}
+
+/**
+ * Run a job suggestion through a text-only executor. The API supplies this
+ * only after resolving a server-owned broker choice; callers cannot select a
+ * provider, model, agent, or tool via the job request body.
+ */
+export async function generateJobConfigWithExecutor(
+  executor: LLMTextExecutor,
+  description: string,
+): Promise<JobSuggestResult> {
+  if (!description?.trim()) {
+    return { prompt_template: null, schedule_cron: null, trigger_event: null };
+  }
+
+  try {
+    const result = await executor({
+      system: JOB_SUGGEST_SYSTEM_PROMPT,
+      user: buildJobSuggestPrompt(description.slice(0, MAX_DESCRIPTION)),
+      timeoutMs: 30_000,
+    });
+    if (!result.ok || !result.content.trim()) {
+      logger.warn("job-suggest-llm", "Broker job suggestion did not return usable content", {
+        outcome: result.ok ? "empty" : "failed",
+      });
+      return { prompt_template: null, schedule_cron: null, trigger_event: null };
+    }
+    return parseJobSuggestContent(result.content);
+  } catch (error) {
+    logger.warn("job-suggest-llm", "Broker job suggestion failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return { prompt_template: null, schedule_cron: null, trigger_event: null };
+  }
 }
 
 /**
@@ -113,7 +137,7 @@ export async function generateJobConfig(
   }
 
   const truncated = description.slice(0, MAX_DESCRIPTION);
-  const prompt = buildPrompt(truncated);
+  const prompt = buildJobSuggestPrompt(truncated);
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
@@ -127,7 +151,7 @@ export async function generateJobConfig(
       body: JSON.stringify({
         model: config.model,
         messages: [
-          { role: "system", content: "You are a job configuration assistant that outputs only valid JSON." },
+          { role: "system", content: JOB_SUGGEST_SYSTEM_PROMPT },
           { role: "user", content: prompt },
         ],
         temperature: 0.3, // Low temperature for deterministic JSON output — we want structure, not creativity

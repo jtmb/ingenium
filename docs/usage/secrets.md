@@ -47,7 +47,7 @@ This dialog collects a new vault passphrase. It includes:
 | Lock icon | Centered above the title |
 | Title | "Create Your Vault Passphrase" |
 | Warning | Amber banner: "**No recovery key exists.** There is no way to reset or recover a lost passphrase." |
-| Passphrase field | Password input with show/hide toggle. Minimum 12 characters. |
+| Passphrase field | Password input with show/hide toggle. Minimum 12 non-blank Unicode characters. |
 | Passphrase hint | Shows `(n/12)` in red when too short; turns green when valid |
 | Confirmation field | Re-enter the passphrase |
 | Match/mismatch hint | Red "Passphrases do not match" or green checkmark "Passphrases match" |
@@ -66,7 +66,7 @@ This dialog collects a new vault passphrase. It includes:
 | **All valid + checked** | Submit button enabled ("Create & Unseal Vault") |
 
 The submit button is gated on all three conditions:
-1. Passphrase ≥ 12 characters AND matches confirmation
+1. Passphrase ≥ 12 non-blank Unicode characters AND matches confirmation
 2. Acknowledgement checkbox checked
 3. Not currently saving
 
@@ -83,6 +83,45 @@ On subsequent visits, the vault is sealed but initialized. The page shows an "Un
 | Actions | Cancel + "Unseal Vault" (disabled when empty) |
 
 The submit button is enabled only when the passphrase field is non-empty. Pressing Enter also submits.
+
+### Recent step-up and empty-vault reset
+
+Vault lifecycle actions—initialize, unseal, and seal—and empty-vault reset are
+installation-admin operations. Mutations require an authenticated browser session
+and a recent step-up; compatibility principals, API tokens, and stale sessions are
+rejected. The empty-reset eligibility read requires the browser administrator but
+not a recent step-up and returns only eligibility and a reason. A sealed vault's
+ordinary status check remains safe and does not unseal it.
+
+The sealed-vault dialog checks eligibility when it opens and shows **Forgot
+passphrase / Reset empty vault** without requiring a failed unseal attempt, but
+only after the server verifies that an
+initialized, sealed vault has zero dependent rows. Eligibility includes no
+encrypted items, provider credential references, protected settings, child-MCP or
+job references/audit rows, runtime use rows, or resource grants. Reset accepts no
+passphrase or replacement credential; it removes only the vault initialization so
+the user can create an unrelated new vault. The server rechecks eligibility in
+the same transaction. A concurrent change blocks with no mutation, and an
+eligibility-check failure returns an unavailable error with no changes made.
+When protected provider or vault dependencies block reset, the dialog directs the
+user to enter the current passphrase or remove/reconfigure those dependencies; it
+does not expose dependency names or counts.
+
+After an explicitly authorized reset succeeds, the sealed-safe status is
+`initialized: false`, `sealed: true`, and `nextAction: "initialize"`. Reset does
+not create or accept a replacement passphrase; the user must choose a new one
+locally through the first-run initialization flow. Reset removes only the vault
+initialization record and does not delete provider, mail, or project data. The
+reset is recorded in a metadata-only audit sequence; never place a secret or
+password in documentation, audit details, or retained evidence.
+
+### Attempt throttling
+
+Vault creation and unseal attempts are limited to five per client IP per
+minute. When the API responds with `429`, the dialog disables its submit action
+and displays the exact `Retry-After` countdown. It does not retry automatically;
+after the countdown ends, submit again deliberately. Status, folder, and item
+metadata reads are not affected by this passphrase-attempt limiter.
 
 ### Error Handling
 
@@ -139,14 +178,22 @@ The page header has a "Lock Vault" button that re-seals the vault and clears all
 
 The "New item" button opens a CreateItemModal with fields for name, credential value, folder, and notes.
 
+Items and folders may be organization-owned or private to the current user.
+Private item metadata and plaintext are visible only to the owner or an explicit
+resource grant; an organization administrator does not gain reveal access by
+role alone. A folder and its items must have the same owner, and ownership cannot
+be changed through ordinary metadata updates.
+
 ## API Reference
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/v1/vault/status` | GET | Check if vault is sealed and initialized |
+| `/api/v1/vault/status` | GET | Sealed-safe check of vault state and next action; never unseals |
 | `/api/v1/vault/initialize` | POST | Create a new vault (passphrase + confirmation) |
 | `/api/v1/vault/unseal` | POST | Unseal vault with passphrase |
 | `/api/v1/vault/seal` | POST | Re-seal the vault |
+| `/api/v1/vault/empty-reset` | GET | Inspect strict empty-vault reset eligibility (browser installation administrator only; no recent step-up required) |
+| `/api/v1/vault/empty-reset` | POST | Reset an eligible empty sealed vault; requires recent step-up and exact body `{ "confirmation": "RESET EMPTY VAULT" }` |
 | `/api/v1/vault/folders` | GET | List all folders |
 | `/api/v1/vault/folders` | POST | Create a new folder |
 | `/api/v1/vault/folders/:id` | DELETE | Delete a folder |
@@ -154,6 +201,13 @@ The "New item" button opens a CreateItemModal with fields for name, credential v
 | `/api/v1/vault/items` | POST | Create a new item |
 | `/api/v1/vault/items/:id` | PATCH | Update an item |
 | `/api/v1/vault/items/:id` | DELETE | Delete an item |
+| `/api/v1/jobs/:id/vault-audit` | GET | Bounded, job-scoped metadata-only authorization/runtime audit |
+
+`GET /status` includes `nextAction: "initialize"` on first run and
+`nextAction: "unseal"` when an existing vault is sealed. For Dashboard calls,
+an uninitialized vault must use `/initialize` with a matching confirmation.
+MCP's `ingenium_vault_unseal` retains its first-use auto-initialization behavior,
+but its passphrase is subject to the same policy and rate limit.
 
 ## Fail-Closed Behavior
 
@@ -189,10 +243,32 @@ conflicting protected value.
 
 ## Security Notes
 
-- The passphrase is **never stored** on the server. It is used client-side for scrypt key derivation to produce the AES-256-GCM encryption key.
+- The passphrase is **never stored**. It is sent only to the authenticated API
+  to derive the in-memory scrypt key and is never written to the database,
+  returned by an API response, or included in an audit event.
 - There is **no passphrase recovery**. If the passphrase is lost, all secrets are permanently inaccessible.
 - On "Lock Vault", the client clears all decrypted data from memory.
 - On page load, the vault status is checked and the appropriate modal is shown automatically.
+- The master-key configuration is service-wide, while vault items, folders, and
+  audit records remain project-scoped. Protected OAuth client secrets use the
+  unique active global project regardless of the selected dashboard project.
 - Losing `INGENIUM_EMAIL_ENCRYPTION_KEY` continuity makes encrypted mail
   credentials unreadable; the system reports reconnect/decryption failure and
   does not guess, re-encrypt, or overwrite the source data.
+
+## Job references (VAULT-100)
+
+Jobs may opt in to up to 16 active vault item IDs from the same project. This is
+authorization metadata only: job views expose the stable item ID,
+`status`, authorization timestamp, and captured `authorized_item_version`, including
+when the vault is sealed. They never expose item names, values, ciphertext, or
+other vault metadata.
+
+For job create, omit `vault_item_ids` for no references. For job updates, omit it
+to preserve references, provide a list to replace them, or provide `[]` to
+revoke all. Invalid, duplicate, over-limit, foreign, deleted, or missing IDs
+fail closed with bounded generic errors. Authorization and revocation are
+immutable `authorized`/`revoked` audit events attributed to `authenticated_api`.
+The job audit also records metadata-only `secret_read` and `access_denied`
+actions under the job-run actor category. This feature does not
+decrypt or unseal the vault and does not provide runner or log injection.

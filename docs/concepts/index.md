@@ -17,6 +17,7 @@ Architecture and conceptual documentation for the Ingenium system.
 | [Tech Stack](tech-stack.md) | Languages, frameworks, packages, and tools used |
 | [Conventions](conventions.md) | Naming, file organization, error handling, git practices |
 | [Skill System](skill-system.md) | Canonical taxonomy, three-layer lifecycle, sync, security, and tool catalog |
+| [Skill System Architecture](skill-system-architecture.md) | Moved compatibility page for the skill-system architecture guide |
 | [Self-Learning Pipeline](self-learning.md) | Complete reference for the self-learning pipeline: extraction, traits, skills, observability |
 
 ---

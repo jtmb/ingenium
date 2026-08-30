@@ -1,5 +1,15 @@
-import { basename } from "node:path";
-import { apiRequestHeaders } from "./api-auth.js";
+import { basename, resolve } from "node:path";
+import {
+  apiRequestHeaders,
+  waitForAuthenticatedApiReadiness,
+  type ApiAuthenticationFailureKind,
+  type ApiAuthenticationReadinessOptions,
+} from "./api-auth.js";
+import {
+  isValidExtensionProjectName,
+  resolveExtensionBinding,
+  type ExtensionCredentialPurpose,
+} from "./extension-binding.js";
 
 const MAX_PROJECT_NAME_LENGTH = 64;
 const ensuredProjects = new Map<string, Promise<string>>();
@@ -9,10 +19,29 @@ function apiTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 10000;
 }
 
+export type ExtensionProjectFailureKind = ApiAuthenticationFailureKind | "rejected";
+
+/** A caller-safe startup failure. Never place transport diagnostics in this error. */
+export class ExtensionProjectStartupError extends Error {
+  constructor(readonly failure: ExtensionProjectFailureKind) {
+    super("Unable to establish an extension project connection");
+    this.name = "ExtensionProjectStartupError";
+  }
+}
+
+export interface EnsureExtensionProjectOptions {
+  request?: typeof fetch;
+  readiness?: Omit<ApiAuthenticationReadinessOptions, "request">;
+  credentialPurpose?: ExtensionCredentialPurpose;
+}
+
+/** Extract only a stable, non-sensitive category for lifecycle diagnostics. */
+export function classifyExtensionProjectFailure(error: unknown): ExtensionProjectFailureKind {
+  return error instanceof ExtensionProjectStartupError ? error.failure : "unavailable";
+}
+
 export function isValidProjectName(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= MAX_PROJECT_NAME_LENGTH &&
-    value.trim().length > 0 && value === value.trim() && value !== "." && value !== ".." &&
-    !/[\\/\u0000-\u001f\u007f]/.test(value);
+  return isValidExtensionProjectName(value) && value.length <= MAX_PROJECT_NAME_LENGTH;
 }
 
 function rejectProjectResolution(reason: string): never {
@@ -21,37 +50,81 @@ function rejectProjectResolution(reason: string): never {
   throw new Error(reason);
 }
 
-/** Resolve an extension session without ever silently sharing the global namespace. */
-export function resolveExtensionProject(worktree: string): string {
+/**
+ * Resolve an extension session without ever silently sharing the global namespace.
+ *
+ * An explicit CLI project takes precedence over the environment so operators can
+ * target a validated project without mutating the process environment.
+ */
+export function resolveExtensionProject(worktree: string, requestedProject?: string): string {
+  if (requestedProject !== undefined) {
+    if (!isValidProjectName(requestedProject)) return rejectProjectResolution("--project is not a safe project name");
+    return requestedProject;
+  }
   const explicit = process.env.INGENIUM_PROJECT;
   if (explicit !== undefined) {
     if (!isValidProjectName(explicit)) return rejectProjectResolution("INGENIUM_PROJECT is not a safe project name");
     return explicit;
   }
   const derived = basename(worktree);
-  // /workspace is the container mount, not an external worktree identity.
-  if (derived === "workspace") return rejectProjectResolution("Cannot derive a project from /workspace; set INGENIUM_PROJECT explicitly");
-  if (!isValidProjectName(derived)) return rejectProjectResolution("Could not derive a safe project name from the worktree");
+  if (resolve(worktree) === "/workspace" || !isValidProjectName(derived)) {
+    return rejectProjectResolution("Worktree does not resolve to a safe project name");
+  }
   return derived;
 }
 
 /** Idempotently provision the resolved project before an extension writes resources. */
-export async function ensureExtensionProject(worktree: string, apiBase: string): Promise<string> {
-  const project = resolveExtensionProject(worktree);
-  const normalizedApiBase = apiBase.replace(/\/+$/, "");
-  const cacheKey = `${normalizedApiBase}\u0000${project}`;
+export async function ensureExtensionProject(
+  worktree: string,
+  apiBase: string,
+  requestedProject?: string,
+  options: EnsureExtensionProjectOptions = {},
+): Promise<string> {
+  const expectedBinding = resolveExtensionBinding(worktree, {
+    purpose: options.credentialPurpose,
+    apiUrl: apiBase,
+    project: requestedProject,
+  });
+  const project = resolveExtensionProject(worktree, requestedProject ?? expectedBinding.project);
+  const normalizedApiBase = expectedBinding.apiUrl;
+  // The protected bearer may be worktree-local. Keep two worktrees with the
+  // same explicit project from sharing a cached request made with another
+  // worktree's credential source.
+  const cacheKey = `${normalizedApiBase}\u0000${resolve(worktree)}\u0000${project}\u0000${expectedBinding.purpose}\u0000${expectedBinding.credentialFile}`;
   const existing = ensuredProjects.get(cacheKey);
   if (existing) return existing;
 
   const pending = (async () => {
-    const response = await fetch(`${normalizedApiBase}/projects`, {
-      method: "POST",
-      headers: apiRequestHeaders(worktree, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ name: project, is_global: project === "global-default" }),
-      signal: AbortSignal.timeout(apiTimeoutMs()),
+    const request = options.request ?? fetch;
+    const readiness = await waitForAuthenticatedApiReadiness(normalizedApiBase, worktree, {
+      ...options.readiness,
+      credentialPurpose: options.credentialPurpose,
+      request,
     });
-    if (!response.ok && response.status !== 409) throw new Error(`Unable to ensure project '${project}' (HTTP ${response.status})`);
-    return project;
+    if (!readiness.authenticated) {
+      throw new ExtensionProjectStartupError(readiness.failure ?? "unavailable");
+    }
+
+    const binding = readiness.binding!;
+    if (binding.launcherWorktree !== resolve(worktree)
+      || binding.workspaceId !== expectedBinding.workspaceId
+      || binding.audience !== expectedBinding.audience
+      || !binding.projectIds.includes(binding.projectId)) {
+      throw new ExtensionProjectStartupError("not_found");
+    }
+
+    const metadata = await request(`${normalizedApiBase}/projects/${encodeURIComponent(project)}/detail`, {
+      headers: apiRequestHeaders(worktree, undefined, { binding: expectedBinding }),
+      signal: AbortSignal.timeout(apiTimeoutMs()),
+    }).catch(() => null);
+    if (metadata?.ok) {
+      const payload = await metadata.json().catch(() => null) as { data?: { project?: { id?: unknown } } } | null;
+      if (payload?.data?.project?.id !== binding.projectId) throw new ExtensionProjectStartupError("not_found");
+      return project;
+    }
+    if (metadata?.status === 403) throw new ExtensionProjectStartupError("scope");
+    if (metadata?.status === 404) throw new ExtensionProjectStartupError("not_found");
+    throw new ExtensionProjectStartupError(metadata ? "rejected" : "unavailable");
   })();
   ensuredProjects.set(cacheKey, pending);
   try {

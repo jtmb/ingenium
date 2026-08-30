@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 
 const navigationMock = vi.hoisted(() => ({
@@ -7,22 +7,38 @@ const navigationMock = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 
+const panelMockState = vi.hoisted(() => ({ throwGeneral: false }));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/status",
   useRouter: () => ({ replace: navigationMock.replace }),
   useSearchParams: () => navigationMock.searchParams,
 }));
 
-vi.mock("../src/app/components/settings/panels", () => ({
-  GeneralPanel: () => <div>General panel</div>,
-  MailPanel: () => <div>Mail panel</div>,
-  PipelinePanel: () => <div>Providers panel</div>,
-  ConfigPanel: () => <div>Config panel</div>,
+vi.mock("../src/app/components/settings/panels/GeneralPanel", () => ({
+  default: () => {
+    if (panelMockState.throwGeneral) throw new Error("test panel failure");
+    return <div>General panel</div>;
+  },
+}));
+vi.mock("../src/app/components/settings/panels/MailPanel", () => ({
+  default: () => <div>Mail panel</div>,
+}));
+vi.mock("../src/app/components/settings/panels/PipelinePanel", () => ({
+  default: () => <div>Providers panel</div>,
+}));
+vi.mock("../src/app/components/settings/panels/ConfigPanel", () => ({
+  default: () => <div>Config panel</div>,
 }));
 
 import SettingsOverlay from "../src/app/components/settings/SettingsOverlay";
 
 const ROUTE_LINKS: Record<string, string> = {
+  account: "/account",
+  security: "/account#security",
+  sessions: "/account#sessions",
+  "api-tokens": "/account#api-tokens",
+  organizations: "/organizations",
   projects: "/projects",
   skills: "/skills",
   tasks: "/tasks",
@@ -37,6 +53,11 @@ const ROUTE_LINKS: Record<string, string> = {
 
 const SETTINGS_TABS = [
   ["general", "General"],
+  ["account", "Account"],
+  ["security", "Security"],
+  ["sessions", "Sessions"],
+  ["api-tokens", "API tokens"],
+  ["organizations", "Organizations"],
   ["projects", "Projects"],
   ["skills", "Skills"],
   ["tasks", "Tasks"],
@@ -56,12 +77,15 @@ describe("SettingsOverlay deep links", () => {
   beforeEach(() => {
     navigationMock.searchParams = new URLSearchParams();
     navigationMock.replace.mockReset();
+    panelMockState.throwGeneral = false;
+    window.history.replaceState({}, "", "/status");
   });
 
   afterEach(() => {
     cleanup();
     document.body.innerHTML = "";
     document.body.style.overflow = "";
+    window.history.replaceState({}, "", "/");
   });
 
   it.each(SETTINGS_TABS)("activates the %s panel for its documented deep link", async (id, label) => {
@@ -79,5 +103,42 @@ describe("SettingsOverlay deep links", () => {
       expect(screen.getByTestId(`settings-route-panel-${id}`).closest("[hidden]")).toBeNull();
       expect(screen.getByTestId(`settings-route-link-${id}`).getAttribute("href")).toBe(destination);
     }
+  });
+
+  it("contains a panel render failure without taking down the overlay", async () => {
+    panelMockState.throwGeneral = true;
+    navigationMock.searchParams = new URLSearchParams("settings=general");
+
+    render(<SettingsOverlay />);
+
+    expect(await screen.findByTestId("settings-panel-error-general")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("This settings panel couldn't load.");
+    expect(screen.getByRole("button", { name: "Retry panel" })).toBeTruthy();
+  });
+
+  it("preserves project and hash context when closing the overlay", async () => {
+    navigationMock.searchParams = new URLSearchParams("settings=mail&project=external-worktree");
+    window.history.replaceState({}, "", "/status?settings=mail&project=external-worktree#oauth");
+
+    render(<SettingsOverlay />);
+    await screen.findByTestId("settings-panel-mail");
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+
+    expect(navigationMock.replace).toHaveBeenCalledWith(
+      "/status?project=external-worktree#oauth",
+      { scroll: false },
+    );
+  });
+
+  it("keeps the Mail panel in a shrinkable scroll region", async () => {
+    navigationMock.searchParams = new URLSearchParams("settings=mail");
+
+    render(<SettingsOverlay />);
+
+    await screen.findByTestId("settings-panel-mail");
+    const scrollRegion = screen.getByTestId("settings-panel-scroll");
+    expect(scrollRegion.className).toContain("min-h-0");
+    expect(scrollRegion.className).toContain("overflow-y-auto");
+    expect(scrollRegion.className).toContain("overscroll-contain");
   });
 });

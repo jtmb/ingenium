@@ -8,15 +8,11 @@ import {
 } from "ingenium-core";
 import { resolve } from "node:path";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 interface BackupSchedule {
   hourly: { enabled: boolean; retention: number };
   daily: { enabled: boolean; retention: number };
   manual_retention: number;
 }
-
-// ─── Constants ──────────────────────────────────────────────────────────────
 
 /** How often the scheduler checks whether it should run (30s). */
 const SCHEDULER_TICK_MS = 30_000;
@@ -31,17 +27,13 @@ const DEFAULT_SCHEDULE: BackupSchedule = {
   manual_retention: 10,
 };
 
-// ─── Path helpers ───────────────────────────────────────────────────────────
-
 function resolveCoreDbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? resolve(process.cwd(), ".ingenium", "data.db");
 }
 
 function resolveOpencodeDbPath(): string {
-  return process.env.OPENCODE_DB_PATH ?? "/home/appuser/.local/share/opencode/opencode.db";
+  return process.env.OPENCODE_DB_PATH ?? "/home/ingenium-opencode/.local/share/opencode/opencode.db";
 }
-
-// ─── Schedule helpers ───────────────────────────────────────────────────────
 
 function getSchedule(): BackupSchedule {
   try {
@@ -70,12 +62,17 @@ function getSchedule(): BackupSchedule {
   return { ...DEFAULT_SCHEDULE };
 }
 
-// ─── Core backup logic ──────────────────────────────────────────────────────
+/** Match deleteBackup's v2-only boundary so retention never attempts legacy records. */
+function isDeletableBackupRecord(record: { id: string; filename: string; components: string }): boolean {
+  try {
+    return JSON.parse(record.components)?.format === backups.BACKUP_BUNDLE_FORMAT
+      && record.filename === record.id;
+  } catch {
+    return false;
+  }
+}
 
-/**
- * Create a backup snapshot of the core database (and optionally the OpenCode DB).
- * Returns the backup metadata or null on failure.
- */
+/** Reports whether the snapshot completed successfully. */
 async function createBackup(
   projectId: string,
   type: "hourly" | "daily" | "manual",
@@ -118,7 +115,7 @@ function applyRetention(projectId: string): void {
 
   for (const type of ["scheduled_hourly", "scheduled_daily", "manual"] as const) {
     const typed = records
-      .filter((record) => record.backup_type === type)
+      .filter((record) => record.backup_type === type && isDeletableBackupRecord(record))
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()); // oldest first
 
     const max = retentionMap[type] ?? 0;
@@ -142,8 +139,6 @@ function applyRetention(projectId: string): void {
     logger.info("backup-scheduler", `Retention cleanup: deleted ${deleted} old backup(s)`);
   }
 }
-
-// ─── Scheduling state ───────────────────────────────────────────────────────
 
 /** Track the last hourly backup timestamp. */
 let lastHourlyAt = 0;
@@ -169,22 +164,17 @@ function scheduleTimeout(generation: number, delayMs: number, callback: () => vo
   }, delayMs);
 }
 
-/** Check whether we should run an hourly backup. */
 function shouldRunHourly(): boolean {
   const now = Date.now();
-  // Hourly: run if at least 55 minutes have passed since last hourly backup
+  // Leave room for scheduler cadence and delayed ticks without missing the intended period.
   return now - lastHourlyAt >= 55 * 60 * 1000;
 }
 
-/** Check whether we should run a daily backup. */
 function shouldRunDaily(): boolean {
   const now = Date.now();
   const ONE_DAY = 24 * 60 * 60 * 1000;
-  // Daily: run if at least 23 hours have passed since last daily backup
   return now - lastDailyAt >= 23 * ONE_DAY / 24;
 }
-
-// ─── Scheduler tick ─────────────────────────────────────────────────────────
 
 function getGlobalProjectId(): string | null {
   const global = projects.getGlobalProject();
@@ -246,7 +236,7 @@ async function schedulerTick(generation: number): Promise<void> {
   if (isBackupSchedulerActive(generation)) scheduleNext(generation);
 }
 
-/** Chain the next timeout — same pattern as the main scheduler. */
+/** Chaining re-reads settings before scheduling the next decision. */
 function scheduleNext(generation: number): void {
   if (!isBackupSchedulerActive(generation)) return;
   const schedule = getSchedule();
@@ -256,7 +246,7 @@ function scheduleNext(generation: number): void {
     logger.debug("backup-scheduler", `Next backup check in ${SCHEDULER_TICK_MS / 1000}s`);
     scheduleTimeout(generation, SCHEDULER_TICK_MS, () => runTick(generation));
   } else {
-    // No scheduling enabled — check again in 60s in case settings changed
+    // Recheck disabled schedules so settings changes take effect without a restart.
     logger.debug("backup-scheduler", "Backup scheduling disabled — recheck in 60s");
     scheduleTimeout(generation, 60_000, () => scheduleNext(generation));
   }
@@ -276,17 +266,7 @@ function runTick(generation: number): void {
   });
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
-
-/**
- * Start the backup scheduler.
- *
- * Uses a room-style chained setTimeout pattern (same as main scheduler.ts)
- * so scheduling intervals can change between ticks without restarting.
- * Reads schedule config from the global project's settings on every tick.
- *
- * Called from the API server's listen callback.
- */
+/** Chained timeouts let changed schedule settings take effect without a restart. */
 export function startBackupScheduler(): void {
   if (backupSchedulerRunning) {
     logger.warn("backup-scheduler", "Backup scheduler start ignored because it is already running");

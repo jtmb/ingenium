@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   mcpStatus: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
+  chatScope: vi.fn(),
+  globalProject: "global-default",
 }));
 
 vi.mock("../src/lib/api", async (importOriginal) => {
@@ -25,10 +27,21 @@ vi.mock("../src/lib/api", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/lib/opencode", () => ({
-  opencode: {
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useOpenCodeClient: () => ({
+    chat: {
+      config: async () => (await mocks.chatConfig()).data,
+      saveSelection: mocks.saveChatSelection,
+    },
     mcp: { status: mocks.mcpStatus, connect: mocks.connect, disconnect: mocks.disconnect },
-  },
+    sessions: { compact: vi.fn() },
+  }),
+  useRuntime: () => ({ runtimeId: "11111111-1111-4111-8111-111111111111", projectName: "runtime-project" }),
+}));
+
+vi.mock("../src/lib/ProjectContext", () => ({
+  useGlobalProject: () => ({ project: mocks.globalProject, loading: false, error: null }),
+  useProject: () => "selected-project",
 }));
 
 vi.mock("../src/lib/use-opencode-sessions", () => ({
@@ -41,15 +54,19 @@ vi.mock("../src/lib/use-opencode-sessions", () => ({
 }));
 
 vi.mock("../src/lib/use-opencode-chat", () => ({
-  useOpenCodeChat: () => ({
-    messages: [], isStreaming: false, isLoading: false, error: null, streamActivity: "idle",
-    permissions: [], questions: [], replyPermission: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), revert: vi.fn(),
-  }),
+  useOpenCodeChat: (_sessionId: string | null, scope: unknown) => {
+    mocks.chatScope(scope);
+    return {
+      messages: [], isStreaming: false, isLoading: false, error: null, streamActivity: "idle",
+      permissions: [], questions: [], replyPermission: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), revert: vi.fn(),
+    };
+  },
 }));
 
 import ChatShell from "../src/app/chat/components/ChatShell";
 
 const config = {
+  project: "global-default",
   configured: true,
   primary: { providerId: "provider", modelId: "model", label: "Provider", isCustom: false },
   backup: null,
@@ -104,10 +121,21 @@ describe("ChatShell MCP refresh and action errors", () => {
   beforeEach(() => {
     restoreMatchMedia = setupMatchMedia();
     localStorage.clear();
+    mocks.globalProject = "global-default";
     mocks.chatConfig.mockResolvedValue({ data: config });
     mocks.saveChatSelection.mockResolvedValue({ data: { providerId: "provider", modelId: "model" } });
     mocks.connect.mockResolvedValue({});
     mocks.disconnect.mockResolvedValue({});
+  });
+
+  it("persists chat checkpoints in the confirmed runtime project", async () => {
+    mocks.mcpStatus.mockResolvedValue({});
+    render(<ChatShell />);
+
+    await waitFor(() => expect(mocks.chatScope).toHaveBeenCalledWith(expect.objectContaining({
+      project: "runtime-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+    })));
   });
 
   afterEach(() => {
@@ -125,6 +153,47 @@ describe("ChatShell MCP refresh and action errors", () => {
     expect(await screen.findByText("Connected")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
     expect(mocks.saveChatSelection).not.toHaveBeenCalled();
+  });
+
+  it("refreshes status each time the drawer is reopened and offers a normal Refresh action", async () => {
+    mocks.mcpStatus.mockResolvedValue({ alpha: { status: "connected" } });
+    render(<ChatShell />);
+
+    await openDrawer();
+    await waitFor(() => expect(mocks.mcpStatus).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Close MCP drawer" }));
+    fireEvent.click(screen.getByRole("button", { name: "MCP servers" }));
+    await waitFor(() => expect(mocks.mcpStatus).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(mocks.mcpStatus).toHaveBeenCalledTimes(3));
+    expect(screen.getByTestId("mcp-last-refresh").textContent).toContain("Last refreshed:");
+  });
+
+  it("loads Chat configuration and shows tools use the authoritative global project", async () => {
+    mocks.mcpStatus.mockRejectedValue(new Error("unavailable"));
+    mocks.globalProject = "browser-selected-project";
+    mocks.chatConfig.mockResolvedValue({ data: { ...config, project: "server-shared" } });
+    render(<ChatShell />);
+
+    expect((await screen.findByTestId("chat-global-project")).textContent).toContain(
+      "Chat tools run through global project:server-shared",
+    );
+    await openDrawer();
+    expect(screen.getByRole("link", { name: "MCP Servers" }).getAttribute("href"))
+      .toBe("/mcp-servers?project=server-shared");
+    await waitFor(() => expect(mocks.chatConfig).toHaveBeenCalledWith());
+  });
+
+  it("does not substitute the browser global project when server attestation is absent", async () => {
+    mocks.globalProject = "browser-selected-project";
+    mocks.mcpStatus.mockRejectedValue(new Error("unavailable"));
+    mocks.chatConfig.mockResolvedValue({ data: { ...config, project: null } });
+    render(<ChatShell />);
+
+    await openDrawer();
+    expect(screen.queryByTestId("chat-global-project")).toBeNull();
+    expect(screen.queryByRole("link", { name: "MCP Servers" })).toBeNull();
   });
 
   it("persists the exact catalog-selected provider and model through the server endpoint", async () => {
@@ -148,7 +217,7 @@ describe("ChatShell MCP refresh and action errors", () => {
     render(<ChatShell />);
 
     await openDrawer();
-    expect((await screen.findByRole("alert")).textContent).toContain("Unable to refresh MCP server status. Try again.");
+    expect((await screen.findByRole("alert")).textContent).toContain("MCP status is unavailable. Verify OpenCode is running, then retry.");
     expect(screen.queryByText("private upstream diagnostic")).toBeNull();
   });
 
@@ -164,6 +233,15 @@ describe("ChatShell MCP refresh and action errors", () => {
 
     await waitFor(() => expect(mocks.connect).toHaveBeenCalledWith("alpha"));
     await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+  });
+
+  it("shows the actionable packaged-launcher diagnostic for a failed Ingenium connection", async () => {
+    mocks.mcpStatus.mockResolvedValue({ ingenium: { status: "failed" } });
+    render(<ChatShell />);
+
+    await openDrawer();
+    expect(await screen.findByText("Ingenium MCP could not connect. Build the extension launcher, then verify the protected API token and project identity.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
   });
 
   it("reports a connect failure and still refreshes the remote state", async () => {

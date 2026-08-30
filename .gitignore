@@ -1,4 +1,4 @@
-# ── Environment / Secrets ─────────────────────────────────
+# Environment and secrets
 .env
 .env.*
 !.env.example
@@ -8,82 +8,98 @@ credentials.json
 *.cred
 *.credential
 
-# ── AI-generated files ────────────────────────────────────
+# Local AI state
 .agents/skills/*/SKILL.md.bak
 .agents.old/
 .ingenium/
 
-# ── Dependencies ──────────────────────────────────────────
+# Dependencies
 node_modules/
 __pycache__/
 *.pyc
 
-# ── OS Files ──────────────────────────────────────────────
+# Operating-system files
 .DS_Store
 Thumbs.db
 
-# ── Kaban board (local state) ─────────────────────────────
+# Local Kaban board state
 .kaban/
 
-# ── Playwright test artifacts ────────────────────────────
+# Playwright cache and reports
 playwright-report/
 playwright/.cache/
 
-# ── Build outputs ─────────────────────────────────────────
+# Build output
 .next/
+.ingenium-dashboard-fixtures/
 dist/
 build/
 *.tsbuildinfo
 
-# ── Learnings — DB-managed only, not on disk ──────────────
+# Local learning fallback files
 .agents/skills/learnings.md
 .opencode/skills/learnings.md
 
-# ── Resource sync state — local manifest, not for sharing ─
+# Local resource-sync state
 .opencode/.ingenium-sync-state.json
 .opencode/.ingenium-api-token
+.opencode/.ingenium-mcp-credential
+.opencode/.ingenium-coordination-owner-provider.json
+.opencode/.ingenium-learning-credential
+.opencode/.ingenium-repository-sync-credential
+.opencode/.ingenium-runtime-credential
+.opencode/.ingenium-sync-recovery/
+.opencode/protected-runtime-index/
+.opencode/skills/mcp-tooling/references/site-recipes/
+**/.opencode/.ingenium-learning-credential
 
-# ── Existing entries ──────────────────────────────────────
+# Editor and temporary files
 .agents/.lm-studio-env
 .vscode
 temp
 
-# ── SQLite runtime files ──────────────────────────────────
+# SQLite runtime data
 /data*
 *.db
 *.db-shm
 *.db-wal
 
-# ── Migration files are tracked — counteracts /data* ─────
+# Keep database migrations tracked
 !/packages/ingenium-core/data/migrations/
 
-# ── Personal backup files ─────────────────────────────────
+# Local backups
 personal-space-backup.json
 
-# ── OpenCode session logs ─────────────────────────────────
+# OpenCode session logs
 session-*.md
 session_*.md
 
-# ── Playwright MCP artifacts ──────────────────────────────
+# Playwright MCP artifacts
 .playwright-mcp/
 
-# YAML page snapshots (Playwright output)
+# YAML page snapshots
 *.snapshot.yml
 
-# ── Plans and scratch notes ───────────────────────────────
+# Plans and scratch notes
 next-steps-plan/
 email-plan.md
 *.plan.md
 plan.md
 servers-page.yml
-# QA screenshots at repo root (legacy, being migrated to tests/artifacts/)
+# Repository-root screenshots
 /*.png
 
-# QA visual-sweep snapshot and accessibility outputs
+# QA snapshots and accessibility outputs
 *-snapshot.md
 *-accessibility.md
 
 # Generated test artifacts
+/test-results/
 tests/artifacts/
+/tests/artifacts/test-runs/.retention-control/
+/tests/artifacts/test-runs/.retention-control/plans/
+/tests/artifacts/test-runs/.retention-control/reports/
+/tests/artifacts/test-runs/.retention-control/receipts/
+/tests/artifacts/test-runs/.retention-control/quarantine/
 tests/qa-screenshots/
 tests/test-results/

@@ -12,7 +12,9 @@ import {
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { getTestRunApiTokenPath, type TestRunContext, type TestRunManifest } from "../test-run-context";
 
-export const DASHBOARD_API_TOKEN_FILE_ENV = "INGENIUM_API_TOKEN_FILE";
+export const DASHBOARD_API_TOKEN_FILE_ENV = "INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE";
+export const DASHBOARD_STORAGE_STATE_FILENAME = "browser-storage-state.json";
+export const DASHBOARD_GLOBAL_PROJECT_STORAGE_KEY = "ingenium_global_project";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const TOKEN_MODE = 0o600;
 
@@ -135,4 +137,58 @@ export function getDashboardFixtureEnvironment(
 ): Record<string, string> {
   const tokenFile = ensureDashboardApiTokenFile(context, token);
   return { [DASHBOARD_API_TOKEN_FILE_ENV]: tokenFile };
+}
+
+export function getDashboardStorageStatePath(context: Pick<TestRunManifest, "runDir" | "homeDir">): string {
+  const storageStatePath = resolve(context.homeDir, DASHBOARD_STORAGE_STATE_FILENAME);
+  if (!pathIsInside(context.runDir, storageStatePath)) {
+    throw new Error("Refusing to use a dashboard storage state outside the test-run directory");
+  }
+  return storageStatePath;
+}
+
+interface DashboardStorageState {
+  cookies: unknown[];
+  origins?: unknown[];
+}
+
+export function normalizeDashboardStorageState(
+  context: Pick<TestRunContext, "ports" | "project">,
+  storageState: DashboardStorageState,
+): DashboardStorageState {
+  const localStorage = [{ name: DASHBOARD_GLOBAL_PROJECT_STORAGE_KEY, value: context.project }];
+  return {
+    cookies: storageState.cookies,
+    origins: ["127.0.0.1", "localhost"].map((host) => ({
+      origin: `http://${host}:${context.ports.dashboard}`,
+      localStorage,
+    })),
+  };
+}
+
+export function writeDashboardStorageState(
+  context: TestRunContext,
+  storageState: DashboardStorageState,
+): string {
+  const storageStatePath = getDashboardStorageStatePath(context);
+  if (realpathSync(context.homeDir) !== resolve(context.homeDir)) {
+    throw new Error("Refusing to use a symlinked test-run home for browser storage");
+  }
+  if (lstatSync(storageStatePath, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new Error("Refusing to use a symlinked dashboard storage state");
+  }
+
+  const descriptor = openSync(
+    storageStatePath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+    TOKEN_MODE,
+  );
+  try {
+    writeSync(descriptor, `${JSON.stringify(storageState)}\n`, undefined, "utf8");
+    fchmodSync(descriptor, TOKEN_MODE);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  return storageStatePath;
 }

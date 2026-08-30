@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, TaskNotification } from "../../../lib/api";
+import { formatRelativeTime } from "../../../lib/time";
+import { Dropdown, DropdownItem, DropdownPanel, DropdownTrigger } from "../../components/Dropdown";
 
 type NotificationBellProps = {
   project: string;
@@ -14,16 +16,6 @@ function notificationIcon(type: string): string {
   if (type === "assigned") return "👤";
   if (type === "due") return "📅";
   return "🔔";
-}
-
-function relativeTime(dateStr: string): string {
-  const diff = Math.max(0, Date.now() - new Date(dateStr).getTime());
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 /**
@@ -40,11 +32,14 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
   const [notifications, setNotifications] = useState<TaskNotification[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [toast, setToast] = useState<TaskNotification | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const prevIdsRef = useRef<Set<string>>(new Set());
-  const panelRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = useCallback(async () => {
     try {
+      setLoading(true);
+      setError(null);
       const r = await api.tasks.notifications("orchestrator", true, project);
       const fresh = r.data ?? [];
       const prevIds = prevIdsRef.current;
@@ -58,7 +53,9 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
       prevIdsRef.current = new Set(fresh.map((n) => n.id));
       setNotifications(fresh);
     } catch {
-      // ignore
+      setError("Unable to load notifications");
+    } finally {
+      setLoading(false);
     }
   }, [project, panelOpen]);
 
@@ -67,18 +64,6 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
     const interval = setInterval(fetchNotifications, 30_000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
-
-  // Close dropdown on click outside the panel.
-  useEffect(() => {
-    if (!panelOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setPanelOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [panelOpen]);
 
   const markRead = useCallback(async (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
@@ -94,10 +79,12 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
   return (
     <>
       {/* Bell button */}
-      <div className="relative" ref={panelRef}>
-        <button onClick={() => setPanelOpen(!panelOpen)}
-          className="relative p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] rounded-full"
-          title="Notifications">
+      <Dropdown open={panelOpen} onOpenChange={setPanelOpen}>
+        <DropdownTrigger
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          title="Notifications"
+          className="relative rounded-full p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -107,41 +94,56 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
               {unreadCount}
             </span>
           )}
-        </button>
+        </DropdownTrigger>
 
         {/* Dropdown panel */}
         {panelOpen && (
-          <div className="absolute right-0 top-full mt-1 w-80 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl z-50 max-h-96 overflow-y-auto">
+          <DropdownPanel aria-label="Notifications" className="right-0 top-full mt-1 w-80 max-h-96 p-0">
             <div className="px-3 py-2 border-b border-[var(--color-border-muted)] flex items-center justify-between">
               <span className="text-sm font-semibold text-[var(--color-text-primary)]">Notifications</span>
               {unreadCount > 0 && (
-                <button onClick={() => notifications.forEach((n) => !n.read && markRead(n.id))}
+                <button type="button" onClick={() => notifications.forEach((n) => !n.read && markRead(n.id))}
+                  role="menuitem"
                   className="text-xs text-[var(--color-text-link)] hover:underline">Mark all read</button>
               )}
             </div>
-            {notifications.length === 0 ? (
+            {loading ? (
+              <div className="px-3 py-4 text-center text-sm text-[var(--color-text-muted)]" role="status">Loading notifications…</div>
+            ) : error ? (
+              <div className="px-3 py-4 text-center text-sm text-[var(--color-error-text)]" role="alert">{error}</div>
+            ) : notifications.length === 0 ? (
               <div className="px-3 py-4 text-sm text-[var(--color-text-muted)] text-center">No notifications</div>
             ) : (
               notifications.map((n) => (
-                <div key={n.id} className={`px-3 py-2 border-b border-[var(--color-border-muted)] flex items-start gap-2 hover:bg-[var(--color-surface-hover)] text-sm ${!n.read ? "bg-[var(--color-surface-selected)]" : ""}`}>
-                  <span className="shrink-0 mt-0.5">{notificationIcon(n.type)}</span>
-                  <div className="min-w-0 flex-1">
-                    <button onClick={() => onTaskClick?.(n.task_id)}
-                      className="text-[var(--color-text-primary)] font-medium hover:text-[var(--color-text-link)] text-left break-words">{n.message}</button>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-[var(--color-text-muted)]">{relativeTime(n.created_at)}</span>
-                      {!n.read && (
-                        <button onClick={() => markRead(n.id)}
-                          className="text-xs text-blue-500 hover:underline">Mark read</button>
-                      )}
-                    </div>
-                  </div>
+                <div key={n.id} className="flex items-start gap-1 border-b border-[var(--color-border-muted)]">
+                  <DropdownItem
+                    closeOnSelect={false}
+                    selected={!n.read}
+                    onClick={() => onTaskClick?.(n.task_id)}
+                    className="min-w-0 flex-1 items-start rounded-none px-3 py-2 text-sm"
+                  >
+                    <span className="mt-0.5 shrink-0">{notificationIcon(n.type)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block break-words font-medium text-[var(--color-text-primary)]">{n.message}</span>
+                      <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{formatRelativeTime(n.created_at)}</span>
+                    </span>
+                  </DropdownItem>
+                  {!n.read && (
+                    <DropdownItem
+                      closeOnSelect={false}
+                      aria-label={`Mark notification read: ${n.message}`}
+                      onClick={() => markRead(n.id)}
+                      className="w-auto shrink-0 rounded-none px-2 py-2 text-xs text-[var(--color-text-link)]"
+                    >
+                      Mark read
+                    </DropdownItem>
+                  )}
                 </div>
               ))
             )}
-          </div>
+          </DropdownPanel>
         )}
-      </div>
+      </Dropdown>
 
       {/* Toast popup */}
       {toast && (
@@ -150,7 +152,7 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
             <span>{notificationIcon(toast.type)}</span>
             <div>
               <p className="font-medium">{toast.message}</p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{relativeTime(toast.created_at)}</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{formatRelativeTime(toast.created_at)}</p>
             </div>
           </div>
         </div>

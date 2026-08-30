@@ -1,0 +1,664 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseInitProjectArgs } from "./scripts/init-project.js";
+import { resolveExtensionProject } from "./project-resolver.js";
+
+const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
+const repositoryRoot = resolve(extensionRoot, "../..");
+const serverRoot = join(repositoryRoot, "services", "ingenium-server");
+const dockerfilePath = join(repositoryRoot, "Dockerfile");
+const tscPath = createRequire(import.meta.url).resolve("typescript/bin/tsc");
+const temporaryDirectories: string[] = [];
+const originalProject = process.env.INGENIUM_PROJECT;
+const originalToken = process.env.INGENIUM_MCP_CREDENTIAL;
+const originalTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+const originalAudience = process.env.INGENIUM_MCP_AUDIENCE;
+const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
+const storageMappingHash = "a".repeat(64);
+const extensionPluginPaths = [
+  "packages/ingenium-extension/plugins/auto-observer.ts",
+  "packages/ingenium-extension/plugins/observer.ts",
+  "packages/ingenium-extension/plugins/resource-sync.ts",
+  "packages/ingenium-extension/plugins/session-coordinator.ts",
+];
+const ponytailPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
+const configuredPluginPaths = [...extensionPluginPaths, ponytailPluginPath];
+const manifestHash = "b".repeat(64);
+
+interface RuntimeCoordinationState {
+  revision: number;
+  claimFailure?: "outage" | "stale";
+}
+
+function temporaryDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+function buildCliDistribution(): string {
+  const outputDirectory = temporaryDirectory("ingenium-init-project-dist-");
+  const build = spawnSync(
+    process.execPath,
+    [tscPath, "--project", "tsconfig.json", "--outDir", outputDirectory],
+    { cwd: extensionRoot, encoding: "utf8", timeout: 60_000 },
+  );
+  const output = `${build.stdout}\n${build.stderr}`;
+  expect(build.error, output).toBeUndefined();
+  expect(build.status, output).toBe(0);
+  const transportDirectory = temporaryDirectory("ingenium-init-project-transport-");
+  const transportBuild = spawnSync(
+    process.execPath,
+    [tscPath, "--project", "tsconfig.json", "--outDir", transportDirectory],
+    { cwd: serverRoot, encoding: "utf8", timeout: 60_000 },
+  );
+  const transportOutput = `${transportBuild.stdout}\n${transportBuild.stderr}`;
+  expect(transportBuild.error, transportOutput).toBeUndefined();
+  expect(transportBuild.status, transportOutput).toBe(0);
+  cpSync(join(transportDirectory, "config"), join(outputDirectory, "config"), { recursive: true });
+  cpSync(join(transportDirectory, "lib"), join(outputDirectory, "lib"), { recursive: true });
+  copyFileSync(join(transportDirectory, "scripts", "mcp-server.js"), join(outputDirectory, "scripts", "mcp-transport.js"));
+  symlinkSync(join(repositoryRoot, "node_modules"), join(outputDirectory, "node_modules"), "dir");
+  return outputDirectory;
+}
+
+function coordinationSession(revision: number) {
+  return {
+    actorId: `actor-${"a".repeat(64)}`,
+    revision,
+    fence: 1,
+    state: "active",
+    heartbeatAt: "2026-08-26T00:00:00.000Z",
+    expiresAt: "2026-08-26T00:05:00.000Z",
+    snapshotRevision: 0,
+    currentTaskId: null,
+    currentTaskRevision: null,
+    contextConversationId: "00000000-0000-4000-8000-000000000001",
+    contextRevision: 0,
+    updatedAt: "2026-08-26T00:00:00.000Z",
+  };
+}
+
+function handlesMcpControlRequest(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  coordination: RuntimeCoordinationState,
+): boolean {
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const project = url.searchParams.get("project") ?? "runtime-project";
+  if (url.pathname === "/api/v1/mcp-tools") {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ project, project_id: "runtime-project-id", data: [{
+      category: "Repository",
+      tools: ["repository_sync", "coordination_update", "coordination_claim", "coordination_release"].map((name) => ({
+        tool_name: `ingenium_${name}`,
+        enabled: true,
+      })),
+    }] }));
+    return true;
+  }
+  const toolState = /^\/api\/v1\/mcp-tools\/(ingenium_(?:repository_sync|coordination_(?:update|claim|release)))\/state$/.exec(url.pathname);
+  if (toolState) {
+    const toolName = toolState[1]!;
+    const coordinationTool = toolName.startsWith("ingenium_coordination_");
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ project, project_id: "runtime-project-id", data: {
+      tool_name: toolName,
+      enabled: true,
+      authorization: coordinationTool ? {
+        action: "coordination.write",
+        resource: "coordination",
+        permission: "write",
+        target: "project",
+        scopes: ["coordination:write", "repository:sync"],
+        launcherBinding: "required",
+      } : {
+        action: "repository.execute",
+        resource: "repository",
+        permission: "execute",
+        target: "project",
+        scopes: ["repository:sync"],
+        launcherBinding: "required",
+      },
+    } }));
+    return true;
+  }
+  if (url.pathname === "/api/v1/coordination/claims/batch" && coordination.claimFailure) {
+    const stale = coordination.claimFailure === "stale";
+    response.writeHead(stale ? 409 : 503, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: {
+      code: stale ? "FENCE_CONFLICT" : "COORDINATION_UNAVAILABLE",
+      message: "The coordination claim was rejected.",
+    } }));
+    return true;
+  }
+  if (url.pathname === "/api/v1/coordination/register") {
+    const session = coordinationSession(++coordination.revision);
+    response.writeHead(201, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ data: { session, memory: {
+      conversationId: session.contextConversationId,
+      revision: 0,
+      entries: [],
+      throughRevision: 0,
+      acknowledgementRequired: false,
+    } } }));
+    return true;
+  }
+  if (url.pathname === "/api/v1/coordination/claims/batch") {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ data: {
+      session: coordinationSession(++coordination.revision),
+      acceptedEpoch: 1,
+      manifestGeneration: 0,
+      operationId: "00000000-0000-4000-8000-000000000002",
+    } }));
+    return true;
+  }
+  if (/^\/api\/v1\/coordination\/claims\/(?:verify|renew|quarantine|complete|release)$/.test(url.pathname)) {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ data: {
+      session: coordinationSession(++coordination.revision),
+      acceptedEpoch: 1,
+      manifestGeneration: url.pathname.endsWith("/complete") ? 1 : 0,
+    } }));
+    return true;
+  }
+  if (/^\/api\/v1\/coordination\/(?:heartbeat|close)$/.test(url.pathname)) {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ data: { session: coordinationSession(++coordination.revision) } }));
+    return true;
+  }
+  return false;
+}
+
+function initializeGitWorktree(worktree: string): void {
+  const initialized = spawnSync("git", ["init", "--quiet"], { cwd: worktree, encoding: "utf8", timeout: 10_000 });
+  expect(initialized.error, initialized.stderr).toBeUndefined();
+  expect(initialized.status, initialized.stderr).toBe(0);
+}
+
+function repositoryResponse(resources = true) {
+  return { data: {
+    dryRun: true,
+    generation: 0,
+    manifestHash,
+    docs: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 1 } },
+    ...(resources ? { resources: { summary: {
+      skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+      agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+      plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+    } } } : {}),
+  } };
+}
+
+function createRuntimeSymlink(entrypoint: string): string {
+  chmodSync(entrypoint, 0o555);
+  const command = join(temporaryDirectory("ingenium-init-project-bin-"), "ingenium-init-project");
+  symlinkSync(entrypoint, command);
+  return command;
+}
+
+/** Recreate the repository-owned inputs available beside the packaged CLI. */
+function createRuntimeWorktree(): string {
+  const worktree = temporaryDirectory("ingenium-init-project-runtime-worktree-");
+  copyFileSync(join(repositoryRoot, "opencode.json"), join(worktree, "opencode.json"));
+  cpSync(join(repositoryRoot, ".opencode", "skills"), join(worktree, ".opencode", "skills"), { recursive: true });
+  cpSync(join(repositoryRoot, ".opencode", "agents"), join(worktree, ".opencode", "agents"), { recursive: true });
+  for (const pluginPath of extensionPluginPaths) {
+    const target = join(worktree, pluginPath);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(repositoryRoot, pluginPath), target);
+    expect(readFileSync(target, "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath), "utf8"));
+  }
+  cpSync(join(repositoryRoot, "packages", "ingenium-extension", "ponytail"), join(worktree, "packages", "ingenium-extension", "ponytail"), { recursive: true });
+  initializeGitWorktree(worktree);
+  return worktree;
+}
+
+function writeProtectedFallbackToken(worktree: string, token: string): void {
+  const directory = join(worktree, ".opencode");
+  mkdirSync(directory, { recursive: true });
+  const tokenPath = join(directory, ".ingenium-repository-sync-credential");
+  writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
+  chmodSync(tokenPath, 0o600);
+}
+
+function executeCli(
+  entrypoint: string,
+  args: string[],
+  environment: NodeJS.ProcessEnv,
+  executeDirectly = false,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolveResult, rejectResult) => {
+    const child = spawn(executeDirectly ? entrypoint : process.execPath, executeDirectly ? args : [entrypoint, ...args], {
+      cwd: extensionRoot,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.once("error", rejectResult);
+    child.once("close", (code) => resolveResult({ code, stdout, stderr }));
+  });
+}
+
+afterEach(() => {
+  if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
+  else process.env.INGENIUM_PROJECT = originalProject;
+  if (originalToken === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL;
+  else process.env.INGENIUM_MCP_CREDENTIAL = originalToken;
+  if (originalTokenFile === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+  else process.env.INGENIUM_MCP_CREDENTIAL_FILE = originalTokenFile;
+  if (originalAudience === undefined) delete process.env.INGENIUM_MCP_AUDIENCE;
+  else process.env.INGENIUM_MCP_AUDIENCE = originalAudience;
+  if (originalWorkspace === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+  else process.env.INGENIUM_WORKSPACE_ID = originalWorkspace;
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("ingenium-init-project production runtime contract", () => {
+  it("publishes the package bin and installs a stable runtime command without node_modules/.bin", () => {
+    const packageJson = JSON.parse(readFileSync(join(extensionRoot, "package.json"), "utf8")) as {
+      bin?: Record<string, string>;
+    };
+    const dockerfile = readFileSync(dockerfilePath, "utf8");
+
+    expect(packageJson.bin?.["ingenium-init-project"]).toBe("./dist/scripts/init-project.js");
+    expect(dockerfile).toContain("/app/packages/ingenium-extension/dist ./packages/ingenium-extension/dist");
+    expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project");
+    expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project --help");
+    expect(dockerfile).not.toContain("/app/node_modules/.bin/ingenium-init-project");
+    for (const pluginPath of extensionPluginPaths) {
+      expect(dockerfile).toContain(`/app/${pluginPath} ./${pluginPath}`);
+    }
+    expect(dockerfile).toContain("/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
+    expect(dockerfile).toContain("/app/packages/ingenium-extension/plugin-specs.mjs ./packages/ingenium-extension/plugin-specs.mjs");
+    expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(`file://{env:PWD}/${pluginPath}`)).join(",")}]`);
+    expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");
+  });
+
+  it("builds the CLI distribution and executes --help through a runtime symlink", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+
+    expect(existsSync(entrypoint)).toBe(true);
+    const result = await executeCli(command, ["--help"], { ...process.env }, true);
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Usage:");
+    expect(result.stdout).toContain("--project <name>");
+  });
+
+  it("uses --project before INGENIUM_PROJECT and attests it through the packaged MCP launcher", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+    const worktree = temporaryDirectory("ingenium-init-project-worktree-");
+    mkdirSync(join(worktree, "docs"), { recursive: true });
+    writeFileSync(join(worktree, "docs", "index.md"), "# Runtime CLI fixture\n", "utf8");
+    writeProtectedFallbackToken(worktree, "d".repeat(32));
+    initializeGitWorktree(worktree);
+    const requests: Array<{ url: string; method: string }> = [];
+    const coordination = { revision: 0 };
+    const server = createServer((request, response) => {
+      requests.push({ url: request.url ?? "", method: request.method ?? "" });
+      if (handlesMcpControlRequest(request, response, coordination)) return;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url === "/api/v1/auth/preflight") {
+        response.end(JSON.stringify({ data: {
+          authenticated: true, scopes: ["projects:read", "repository:sync"], organizationId: "runtime-org-id",
+          projectId: "runtime-project-id", projectIds: ["runtime-project-id"], audience: "repository-sync",
+           workspaceId: "runtime-workspace", launcherWorktree: worktree, storageMappingHash, restartRequiredOnCredentialChange: true,
+        } }));
+        return;
+      }
+      if (request.url === "/api/v1/projects/ingenium/detail") {
+        response.end(JSON.stringify({ data: { project: { id: "runtime-project-id" } } }));
+        return;
+      }
+      if (request.url?.startsWith("/api/v1/repository/sync")) {
+        response.end(JSON.stringify(repositoryResponse()));
+        return;
+      }
+      response.end(JSON.stringify({ data: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 1 } } }));
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Unable to start init-project test API");
+      const result = await executeCli(
+        command,
+        ["--dry-run", "--project", "ingenium"],
+        {
+          ...process.env,
+          INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+          INGENIUM_TRUSTED_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+          INGENIUM_PROJECT: "environment-project",
+          INGENIUM_WORKTREE: worktree,
+          INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-repository-sync-credential",
+          INGENIUM_MCP_AUDIENCE: "repository-sync",
+          INGENIUM_WORKSPACE_ID: "runtime-workspace",
+        },
+        true,
+      );
+
+      expect(result.code, `${result.stderr}\n${result.stdout}\n${JSON.stringify(requests)}`).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
+      expect(requests.map(({ url }) => url)).toEqual(expect.arrayContaining([
+        "/api/v1/coordination/register?project=ingenium",
+        "/api/v1/coordination/claims/batch?project=ingenium",
+        "/api/v1/coordination/claims/renew?project=ingenium",
+        "/api/v1/coordination/claims/verify?project=ingenium",
+        "/api/v1/repository/sync?project=ingenium",
+        "/api/v1/coordination/claims/complete?project=ingenium",
+        "/api/v1/coordination/close?project=ingenium",
+      ]));
+      expect(requests.some(({ url }) => url.startsWith("/api/v1/docs/repository/sync"))).toBe(false);
+      expect(requests.some(({ url }) => url.startsWith("/api/v1/repository/resources/sync"))).toBe(false);
+      expect(existsSync(join(worktree, ".opencode", ".ingenium-sync-state.json"))).toBe(false);
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+    }
+  });
+
+  it("fails closed for authentication, coordination outage, and stale repository claims", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+    const worktree = temporaryDirectory("ingenium-init-project-auth-failure-");
+    mkdirSync(join(worktree, "docs"), { recursive: true });
+    writeFileSync(join(worktree, "docs", "index.md"), "# Auth fixture\n", "utf8");
+    const requests: Array<{ url: string; method: string; sentBearer: boolean }> = [];
+    const server = createServer((request, response) => {
+      requests.push({
+        url: request.url ?? "",
+        method: request.method ?? "",
+        sentBearer: request.headers.authorization !== undefined,
+      });
+      response.writeHead(401, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "UNAUTHORIZED", detail: "internal diagnostic" } }));
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Unable to start denied init-project test API");
+      const environment: NodeJS.ProcessEnv = {
+        ...process.env,
+        INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+        INGENIUM_TRUSTED_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+        INGENIUM_WORKTREE: worktree,
+      };
+      delete environment.INGENIUM_MCP_CREDENTIAL;
+      delete environment.INGENIUM_MCP_CREDENTIAL_FILE;
+      delete environment.INGENIUM_WORKSPACE_ID;
+      const result = await executeCli(command, ["--apply", "--project", "denied-project"], environment, true);
+
+      expect(result.code).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("Unable to authenticate with Ingenium API\n");
+      expect(result.stderr).not.toContain("http://");
+      expect(requests).toEqual([]);
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+    }
+
+    for (const claimFailure of ["outage", "stale"] as const) {
+      const deniedWorktree = temporaryDirectory(`ingenium-init-project-${claimFailure}-`);
+      mkdirSync(join(deniedWorktree, "docs"), { recursive: true });
+      writeFileSync(join(deniedWorktree, "docs", "index.md"), `# ${claimFailure}\n`, "utf8");
+      writeProtectedFallbackToken(deniedWorktree, "q".repeat(32));
+      initializeGitWorktree(deniedWorktree);
+      const coordination: RuntimeCoordinationState = { revision: 0, claimFailure };
+      const deniedRequests: string[] = [];
+      const deniedServer = createServer((request, response) => {
+        deniedRequests.push(request.url ?? "");
+        if (handlesMcpControlRequest(request, response, coordination)) return;
+        response.writeHead(200, { "Content-Type": "application/json" });
+        if (request.url === "/api/v1/auth/preflight") {
+          response.end(JSON.stringify({ data: {
+            authenticated: true,
+            scopes: ["projects:read", "repository:sync"],
+            organizationId: "runtime-org-id",
+            projectId: "runtime-project-id",
+            projectIds: ["runtime-project-id"],
+            audience: "repository-sync",
+            workspaceId: "runtime-workspace",
+            launcherWorktree: deniedWorktree,
+            storageMappingHash,
+            restartRequiredOnCredentialChange: true,
+          } }));
+          return;
+        }
+        if (request.url === "/api/v1/projects/denied-project/detail") {
+          response.end(JSON.stringify({ data: { project: { id: "runtime-project-id" } } }));
+          return;
+        }
+        response.end(JSON.stringify({ data: {} }));
+      });
+      await new Promise<void>((resolveListen) => deniedServer.listen(0, "127.0.0.1", resolveListen));
+      try {
+        const address = deniedServer.address();
+        if (!address || typeof address === "string") throw new Error("Unable to start claim denial API");
+        const denied = await executeCli(command, ["--dry-run", "--project", "denied-project"], {
+          ...process.env,
+          INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+          INGENIUM_TRUSTED_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+          INGENIUM_WORKTREE: deniedWorktree,
+          INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-repository-sync-credential",
+          INGENIUM_MCP_AUDIENCE: "repository-sync",
+          INGENIUM_WORKSPACE_ID: "runtime-workspace",
+        }, true);
+        expect(denied).toMatchObject({ code: 2, stdout: "", stderr: "Repository coordination unavailable\n" });
+        expect(deniedRequests.some((url) => url.startsWith("/api/v1/repository/sync"))).toBe(false);
+      } finally {
+        await new Promise<void>((resolveClose, rejectClose) => {
+          deniedServer.close((error) => error ? rejectClose(error) : resolveClose());
+        });
+      }
+    }
+  }, 30_000);
+
+  it("runs the built runtime CLI against packaged canonical scanner artifacts", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+    const worktree = createRuntimeWorktree();
+    writeProtectedFallbackToken(worktree, "c".repeat(32));
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    const coordination = { revision: 0 };
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        requests.push({ url: request.url ?? "", method: request.method ?? "", body: Buffer.concat(chunks).toString("utf8") });
+        if (handlesMcpControlRequest(request, response, coordination)) return;
+        response.writeHead(200, { "Content-Type": "application/json" });
+        if (request.url === "/api/v1/auth/preflight") {
+          response.end(JSON.stringify({ data: {
+            authenticated: true, scopes: ["projects:read", "repository:sync"], organizationId: "runtime-org-id",
+            projectId: "runtime-project-id", projectIds: ["runtime-project-id"], audience: "repository-sync",
+             workspaceId: "runtime-workspace", launcherWorktree: worktree, storageMappingHash, restartRequiredOnCredentialChange: true,
+          } }));
+          return;
+        }
+        if (request.url === "/api/v1/projects/ingenium/detail") {
+          response.end(JSON.stringify({ data: { project: { id: "runtime-project-id" } } }));
+          return;
+        }
+        if (request.url?.startsWith("/api/v1/repository/sync")) {
+          response.end(JSON.stringify({ data: {
+            dryRun: true,
+            generation: 0,
+            manifestHash,
+            docs: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } },
+            resources: { summary: {
+            skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
+            agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
+            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
+          } } } }));
+          return;
+        }
+        response.end(JSON.stringify({ data: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } } }));
+      });
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Unable to start init-project test API");
+      const result = await executeCli(
+        command,
+        ["--dry-run", "--project", "ingenium"],
+        {
+          ...process.env,
+          INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+          INGENIUM_TRUSTED_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+          INGENIUM_WORKTREE: worktree,
+          INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-repository-sync-credential",
+          INGENIUM_MCP_AUDIENCE: "repository-sync",
+          INGENIUM_WORKSPACE_ID: "runtime-workspace",
+        },
+        true,
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
+      expect(requests.map(({ url }) => url)).toContain("/api/v1/repository/sync?project=ingenium");
+      expect(requests.map(({ url }) => url)).toContain("/api/v1/coordination/claims/complete?project=ingenium");
+
+      const resourceRequest = requests.find((request) => request.url === "/api/v1/repository/sync?project=ingenium");
+      expect(resourceRequest).toBeDefined();
+      const payload = JSON.parse(resourceRequest!.body) as { resourcesManifest: {
+        skills: Array<{ path: string }>;
+        agents: Array<{ path: string; name: string }>;
+        plugins: Array<{ path: string; source: string }>;
+      } };
+      expect(payload.resourcesManifest.skills).toHaveLength(10);
+      expect(payload.resourcesManifest.skills.every((entry) => /\.opencode\/skills\/[^/]+\/SKILL\.md$/.test(entry.path))).toBe(true);
+      expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/browser-agent-errors.md");
+      expect(payload.resourcesManifest.plugins.map((entry) => entry.path)).toEqual(configuredPluginPaths);
+      for (const plugin of payload.resourcesManifest.plugins) {
+        expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
+      }
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+    }
+  });
+
+  it("runs the packaged CLI preflight and project initialization through the protected fallback bearer", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+    const worktree = createRuntimeWorktree();
+    const token = "p".repeat(32);
+    writeProtectedFallbackToken(worktree, token);
+    const requests: Array<{ url: string; method: string; authenticated: boolean }> = [];
+    const coordination = { revision: 0 };
+    const server = createServer((request, response) => {
+      const authenticated = request.headers.authorization === `Bearer ${token}`;
+      requests.push({
+        url: request.url ?? "",
+        method: request.method ?? "",
+        authenticated,
+      });
+      if (!authenticated) {
+        response.writeHead(401, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "UNAUTHORIZED" } }));
+        return;
+      }
+      if (handlesMcpControlRequest(request, response, coordination)) return;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url === "/api/v1/auth/preflight") {
+        response.end(JSON.stringify({ data: {
+          authenticated: true, scopes: ["projects:read", "repository:sync"], organizationId: "runtime-org-id",
+          projectId: "runtime-project-id", projectIds: ["runtime-project-id"], audience: "repository-sync",
+           workspaceId: "runtime-workspace", launcherWorktree: worktree, storageMappingHash, restartRequiredOnCredentialChange: true,
+        } }));
+        return;
+      }
+      if (request.url === "/api/v1/projects/packaged-plugin-project/detail") {
+        response.end(JSON.stringify({ data: { project: { id: "runtime-project-id" } } }));
+        return;
+      }
+      if (request.url?.startsWith("/api/v1/repository/sync")) {
+        response.end(JSON.stringify({ data: {
+          dryRun: false,
+          generation: 1,
+          manifestHash,
+          docs: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } },
+          resources: { summary: {
+          skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
+          agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
+            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
+        } } } }));
+        return;
+      }
+      response.end(JSON.stringify({ data: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } } }));
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Unable to start protected init-project test API");
+      const environment: NodeJS.ProcessEnv = {
+        ...process.env,
+        INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+        INGENIUM_TRUSTED_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+        INGENIUM_WORKTREE: worktree,
+        INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-repository-sync-credential",
+        INGENIUM_MCP_AUDIENCE: "repository-sync",
+        INGENIUM_WORKSPACE_ID: "runtime-workspace",
+      };
+      delete environment.INGENIUM_MCP_CREDENTIAL;
+      const result = await executeCli(command, ["--apply", "--project", "packaged-plugin-project"], environment, true);
+
+      expect(result.code, `${result.stderr}\n${result.stdout}\n${JSON.stringify(requests)}`).toBe(0);
+      expect(result.stdout).not.toContain(token);
+      expect(result.stderr).not.toContain(token);
+      expect(requests.filter(({ url }) => url !== "/_ingenium/child-mcp-runtime?project=packaged-plugin-project")
+        .every(({ authenticated }) => authenticated)).toBe(true);
+      expect(requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({ method: "POST", url: "/api/v1/coordination/claims/batch?project=packaged-plugin-project", authenticated: true }),
+        expect.objectContaining({ method: "POST", url: "/api/v1/repository/sync?project=packaged-plugin-project", authenticated: true }),
+        expect.objectContaining({ method: "POST", url: "/api/v1/coordination/claims/complete?project=packaged-plugin-project", authenticated: true }),
+      ]));
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+    }
+  });
+
+  it("parses and validates the explicit project before falling back to environment or worktree identity", () => {
+    process.env.INGENIUM_PROJECT = "environment-project";
+
+    expect(parseInitProjectArgs(["--dry-run", "--project", "cli-project"])).toEqual({
+      dryRun: true,
+      scope: "all",
+      project: "cli-project",
+    });
+    expect(resolveExtensionProject("/workspace", "cli-project")).toBe("cli-project");
+    expect(() => parseInitProjectArgs(["--dry-run", "--project", "../unsafe"])).toThrow(/safe project name/);
+    expect(() => parseInitProjectArgs(["--dry-run", "--project"])).toThrow(/requires a project name/);
+  });
+});

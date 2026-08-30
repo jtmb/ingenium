@@ -5,6 +5,7 @@
  * Enforces a hard cap of 1000 on log entries to prevent oversized MCP responses.
  */
 import { api } from "../client.js";
+import { textResult } from "./result.js";
 
 const DEFAULT_LOG_LIMIT = 100;
 const MAX_LOG_LIMIT = 1000;
@@ -26,7 +27,7 @@ export async function logsList(
   params.limit = String(effectiveLimit);
 
   const res = await api.get("/logs", params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List active log sources */

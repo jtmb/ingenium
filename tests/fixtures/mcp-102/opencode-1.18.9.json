@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ingenium": {
+      "type": "local",
+      "command": [
+        "__ENV_EXECUTABLE__",
+        "node",
+        "__MCP_TRANSPORT__"
+      ],
+      "enabled": true,
+      "environment": {
+        "INGENIUM_API_URL": "__INGENIUM_API_URL__",
+        "INGENIUM_API_TOKEN": "__INGENIUM_API_TOKEN__",
+        "INGENIUM_PROJECT": "__INGENIUM_PROJECT__",
+        "INGENIUM_API_TIMEOUT": "3000",
+        "LOG_LEVEL": "error"
+      }
+    }
+  }
+}

@@ -1,92 +1,89 @@
 ---
-description: "Initialize the Ingenium project — register all skills (with full file tree), agents, and plugins in the DB via MCP tools"
+description: "Repository-authoritative Ingenium initialization (dry-run or apply)"
 agent: ingenium-orchestrator
 ---
 
-Initialize this project for Ingenium. Everything is done via MCP tools — no shell, no container access.
+# `/init-project` — deterministic repository sync
 
-> **Note:** Use `*_create` tools, not `*_sync`. The API runs in a remote container where host files aren't accessible. Always read files from the client filesystem with Read/Glob tools, then push content via MCP.
+Run the packaged `ingenium-init-project` entry point. It performs the bounded
+local repository scan and submits one verified manifest through the dedicated
+authenticated MCP `repository_sync` operation. It never synchronizes the
+database directly. Do **not** enumerate files into MCP `*_create` calls, call a
+mutation REST endpoint, or hardcode a project name.
 
-## Step 1 — Create the project
+## Arguments
 
-```
-ingenium_project_init(name="gh-llm-bootstrap")
-```
-If project already exists, note it and continue.
+Exactly one mode is required:
 
-## Step 2 — Register skills with full file tree
+- `--dry-run` — resolve the validated project identity and preview remote changes;
+  it does not provision a project, mutate remote state, or write the local
+  manifest.
+- `--apply` — resolve/provision the validated project then apply the repository
+  projection. The v2 baseline is persisted only after the corresponding API
+  confirmation.
 
-For each skill directory discovered via `Glob("opencode/skills/*/SKILL.md")`:
+Optional scope:
 
-### 2a. Read the core files
-- **SKILL.md** — full content (includes YAML frontmatter + body)
-- **metadata.json** — parse `tags` array and `alwaysApply` boolean
+- `--docs-only` — synchronize only `docs/**/*.md`, including repository path,
+  hierarchy, hash, managed tags, and RAG contract.
+- `--project <name>` — use a validated project name for this invocation. It
+  takes precedence over `INGENIUM_PROJECT` and the validated worktree basename.
 
-### 2b. Parse frontmatter from SKILL.md
-Extract `name:` and `description:` from the YAML frontmatter block (between the `---` delimiters).
+The packaged entry point exposes the complete non-interactive contract; do not
+substitute resource-specific mutation loops or direct API calls.
 
-### 2c. Build the file_tree JSON
-Recursively discover ALL files in the skill directory using `Glob("opencode/skills/<name>/**/*")`. For each file EXCEPT `SKILL.md` and `metadata.json`:
-1. Read its content
-2. Compute the relative path from the skill directory root (e.g., `references/playwright/setup.md`)
-3. Add to a JSON object: `{ "relative/path.md": "file content here" }`
+## Execution contract
 
-Important: encode the JSON as a string for the MCP parameter.
+1. From the active worktree, run `ingenium-init-project` in dry-run or apply mode;
+   append `--docs-only` and `--project <name>` when needed. The entry point
+   preflights the protected repository-sync credential and uses the configured
+   MCP stdio transport for projection.
+2. The entry point resolves the project with validated `--project` first, then
+   validated `INGENIUM_PROJECT`, otherwise a validated worktree basename; it
+   never defaults to `global-default`.
+3. For `all` scope, lineage-proven legacy tombstone cleanup runs before the full
+   skill scan and MCP call. Dry-run reports cleanup candidates without deleting
+   them. Apply revalidates and removes only an exact `MIGRATED-TO.md` from an
+   otherwise empty mapped legacy directory, then removes that directory. The
+   consolidation map and canonical source indexes remain untouched. `--docs-only`
+   does not run tombstone cleanup.
+4. Report the JSON result. Surface errors without retrying with resource-specific
+   create/update loops. Rebuild/restart the extension and restart OpenCode when
+   the transport or plugin source changes; a repository content change alone is
+   consumed by the next sync lifecycle event.
 
-### 2d. Create the skill
+The `all` scope is repository-authoritative for exactly:
 
-```
-ingenium_skill_create(
-  project="gh-llm-bootstrap",
-  name="<name>",
-  description="<description>",
-  content="<full SKILL.md content>",
-  tags="<comma-separated from metadata.json>",
-  always_apply=<0 or 1 from metadata.json>,
-  files="<JSON string of file_tree>"
-)
-```
-Skip if the skill already exists (error is fine).
+- `docs/**/*.md`
+- `.opencode/skills/**`
+- `.opencode/agents/**` (including linked compatibility mirrors; never the
+  immutable broker)
+- configured local plugin sources and `.opencode/plugins/**`
 
-## Step 3 — Register agents
+Commands, MCP server definitions, project/global config, and any manual or
+unmanaged remote resource are not initialization inputs in this workflow.
 
-1. `Glob("opencode/agents/**/*.md")` to discover active agent files (exclude `.opencode/archive/`)
-2. For each:
-   a. Read full content
-   b. Extract `category` from directory name (primary/, execution/, research/, security/)
-   c. Call:
-      ```
-      ingenium_agent_create(
-        project="gh-llm-bootstrap",
-        name="<filename-without-.md>",
-        content="<full content>",
-        category="<category>"
-      )
-      ```
-   d. Skip on error (already exists)
+### Scanner boundaries
 
-## Step 4 — Register plugins
+- **Skills** include only direct child directories of `.opencode/skills/` that
+  contain a regular `SKILL.md` whose frontmatter `name` matches the directory.
+  Symlinks, support files/directories without that entry point, and directories
+  containing `MIGRATED-TO.md` are excluded.
+  Before an `all`-scope scan, cleanup accepts only candidates proven by the exact
+  consolidation mapping, marker text, canonical target, regular source index,
+  containment, and marker-only directory shape. Every rejected candidate remains
+  untouched with a bounded reason.
+- **Agents** include complete profiles in an agent category directory or a
+  root-level compatibility mirror. Incomplete notes/diagnostics, symlinks, and
+  the reserved `ingenium-llm-broker` profile are excluded. A canonical profile
+  and its compatibility mirrors must have matching semantic content.
+- **Plugins** include only regular `.ts`, `.js`, `.mjs`, or `.cjs` sources from
+  `.opencode/plugins/` or paths explicitly listed in the local `opencode.json`
+  plugin array. Secret-like paths and secret-like option keys are rejected;
+  commands and configuration are not scanned as resources.
 
-1. Read each `.ts` file from `.opencode/plugins/`
-2. For each:
-   ```
-   ingenium_plugin_create(
-     project="gh-llm-bootstrap",
-     name="<filename-without-.ts>",
-     filePath=".opencode/plugins/<filename>.ts",
-     sourceContent="<full content>"
-   )
-   ```
-3. Skip on error (already exists)
-
-## Step 5 — Report
-
-Compare expected vs registered counts:
-
-| Resource | On Disk | In DB | Status |
-|----------|---------|-------|--------|
-| Skills | N | N | ✅ / ⚠️ |
-| Agents | N | N | ✅ / ⚠️ |
-| Plugins | N | N | ✅ / ⚠️ |
-
-List any failures with name + error message.
+The production image must retain the configured plugin source files at their
+repository paths. The runtime image therefore packages the extension
+distribution plus its configured `auto-observer.ts`, `observer.ts`, and
+`resource-sync.ts` sources; replacing those paths with `dist/` paths would
+break repository-source identity during onboarding.

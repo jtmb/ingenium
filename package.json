@@ -11,17 +11,14 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:context-export": "node --test scripts/export-context-upload.test.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.17.18",
+    "@opencode-ai/plugin": "1.18.9",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@types/react-dom": "^19.2.3"
-  },
-  "dependencies": {
-    "multer": "^2.2.0",
-    "pino-pretty": "^13.1.3"
   }
 }

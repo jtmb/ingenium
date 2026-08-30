@@ -20,6 +20,23 @@ tags: ["database", "sql", "postgresql", "sqlite", "migrations", "wal"]
 
 ## 🔴 HARD RULEs
 
+### 🔴 Git Is the Sole External-Worktree Authority
+
+Automatic external-worktree synchronization follows exactly:
+
+```text
+Git worktree files → @ingenium/extension resource-sync plugin → configured
+Ingenium MCP stdio transport → authenticated Ingenium API → database
+```
+
+Git is authoritative. Extension plugins, CLIs, and agents never read or write
+the database and never call mutation REST endpoints directly. Agents never run
+the deleted legacy skill-sync command or `ingenium_skill_sync*` after edits. Administrative skill CRUD
+and sync tools are repair/import operations only, not automatic worktree sync.
+`ingenium-core` is the API's internal DB implementation and cannot be imported
+by runtime consumers. Any work that crosses this boundary must use the API/MCP
+boundary; do not add a direct DB or REST path.
+
 ### 🔴 Always Use Parameterized Queries
 
 Never interpolate values into SQL strings. Use `?` placeholders or `$1` named parameters.

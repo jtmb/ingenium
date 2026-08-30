@@ -4,7 +4,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, resetDbForTest } from "../lib/db.js";
-import { createProject, deleteProject, isValidProjectName, migrateWorkspaceProject, setProjectGlobal, updateProject } from "../lib/tools/projects.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
+import { appendSecurityAuditEvent } from "../lib/tools/security-audit.js";
+import {
+  archiveProject,
+  createProject,
+  deleteProject,
+  getProject,
+  isValidProjectName,
+  listArchivedProjects,
+  listProjects,
+  MAX_PROJECT_RETENTION_DAYS,
+  migrateWorkspaceProject,
+  purgeExpiredProjects,
+  setProjectGlobal,
+  updateProject,
+  unarchiveProject,
+} from "../lib/tools/projects.js";
 
 let tempDir = "";
 afterEach(() => {
@@ -31,6 +47,17 @@ function seedWorkspaceProject(skillCount = 10): { db: ReturnType<typeof getDb>; 
   return { db, sourceId };
 }
 
+function insertOrganizationTask(db: ReturnType<typeof getDb>, projectId: string, title: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO tasks
+       (id, project_id, organization_id, owner_kind, owner_user_id, visibility,
+        created_by_actor_type, created_by_actor_id, title, created_at, updated_at)
+     SELECT ?, id, organization_id, 'organization', NULL, 'organization',
+       'compatibility', NULL, ?, ?, ? FROM projects WHERE id = ?`,
+  ).run(randomUUID(), title, now, now, projectId);
+}
+
 describe("project identity", () => {
   it("rejects unsafe project names", () => {
     for (const name of ["", " ", "/workspace", "a/b", "a\\b", ".", "..", " name", "name ", "a\u0000b", "x".repeat(65)]) {
@@ -49,14 +76,78 @@ describe("project identity", () => {
     expect(getDb(process.env.INGENIUM_CORE_DB_PATH!).prepare("SELECT name FROM projects WHERE is_global = 1").all()).toEqual([{ name: "first" }]);
   });
 
+  it("lists active and archived projects separately while direct lookup retains archived detail", () => {
+    const db = database();
+    createProject("active-project");
+    const archived = createProject("archived-project");
+    insertOrganizationTask(db, archived.id, "preserved child");
+    expect(archiveProject("archived-project")).toBe(true);
+
+    expect(listProjects().map((project) => project.name)).toEqual(["active-project"]);
+    expect(listArchivedProjects().map((project) => project.name)).toEqual(["archived-project"]);
+    expect(getProject("archived-project")?.archived_at).not.toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?").get(archived.id)).toEqual({ count: 1 });
+
+    expect(unarchiveProject("archived-project")).toBe(true);
+    expect(listProjects().map((project) => project.name).sort()).toEqual(["active-project", "archived-project"]);
+    expect(listArchivedProjects()).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?").get(archived.id)).toEqual({ count: 1 });
+  });
+
+  it("refuses to archive the protected global organization home project", () => {
+    database();
+    const global = createProject("global-default", true);
+
+    expect(archiveProject(global.name)).toBe(false);
+    expect(getProject(global.name)?.archived_at).toBeNull();
+  });
+
+  it("rejects invalid retention periods before inspecting projects for deletion", () => {
+    const db = database();
+    const project = createProject("retention-project");
+    expect(archiveProject(project.name)).toBe(true);
+
+    for (const retentionDays of [-1, 0.5, MAX_PROJECT_RETENTION_DAYS + 1, Infinity]) {
+      expect(() => purgeExpiredProjects(retentionDays)).toThrow(RangeError);
+      expect(db.prepare("SELECT name FROM projects WHERE id = ?").get(project.id)).toEqual({ name: project.name });
+    }
+  });
+
   it("returns a typed child-reference result without deleting a project", () => {
     const db = database();
     const project = createProject("referenced-project");
-    const now = new Date().toISOString();
-    db.prepare("INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), project.id, "child", now, now);
+    insertOrganizationTask(db, project.id, "child");
 
     expect(deleteProject(project.name)).toEqual({ status: "has_children", childTables: ["tasks"] });
     expect(db.prepare("SELECT name FROM projects WHERE id = ?").get(project.id)).toEqual({ name: "referenced-project" });
+  });
+
+  it("purges a project while retaining its immutable security audit history", () => {
+    const db = database();
+    const project = createProject("audited-project");
+    const auditId = appendSecurityAuditEvent({
+      actorType: "compatibility",
+      action: "project.lifecycle",
+      organizationId: project.organization_id,
+      projectId: project.id,
+      outcome: "success",
+    });
+
+    expect(deleteProject(project.name)).toEqual({ status: "deleted" });
+    expect(db.prepare("SELECT organization_id, project_id, metadata_json FROM security_audit_events WHERE id = ?").get(auditId)).toEqual({
+      organization_id: project.organization_id,
+      project_id: project.id,
+      metadata_json: "{}",
+    });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(() => db.prepare("DELETE FROM security_audit_events WHERE id = ?").run(auditId)).toThrow(/immutable/);
+    expect(() => appendSecurityAuditEvent({
+      actorType: "compatibility",
+      action: "project.lifecycle.after-purge",
+      organizationId: project.organization_id,
+      projectId: project.id,
+      outcome: "success",
+    })).toThrow(/project must belong to organization/);
   });
 
   it("renames only the database project path and does not create the new directory", () => {
@@ -70,8 +161,7 @@ describe("project identity", () => {
 
   it("dry-runs then migrates exactly ten DB-only workspace skills with a durable manifest", () => {
     const { db, sourceId } = seedWorkspaceProject();
-    const now = new Date().toISOString();
-    db.prepare("INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), sourceId, "kept child", now, now);
+    insertOrganizationTask(db, sourceId, "kept child");
 
     const dryRun = migrateWorkspaceProject(true);
     expect(dryRun.dryRun).toBe(true);
@@ -85,6 +175,7 @@ describe("project identity", () => {
     expect(db.prepare("SELECT 1 FROM projects WHERE name = '/workspace'").get()).toBeUndefined();
     expect(db.prepare("SELECT COUNT(*) AS count FROM skills WHERE project_id = (SELECT id FROM projects WHERE name = 'global-default')").get()).toEqual({ count: 10 });
     expect(db.prepare("SELECT status, source_skill_count FROM project_migration_manifests WHERE id = ?").get(migrated.manifestId)).toEqual({ status: "completed", source_skill_count: 10 });
+    expect(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'tasks_automation_scope_immutable'").get()).toEqual({ 1: 1 });
   });
 
   it("refuses a workspace migration unless the source has exactly ten skills", () => {
@@ -121,8 +212,13 @@ describe("project identity", () => {
   it("rolls back when foreign-key verification fails", () => {
     const { db } = seedWorkspaceProject();
     db.pragma("foreign_keys = OFF");
-    db.prepare("INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
-      .run(randomUUID(), randomUUID(), "orphaned task", new Date().toISOString(), new Date().toISOString());
+    db.exec("DROP TRIGGER tasks_automation_scope_insert");
+    db.prepare(
+      `INSERT INTO tasks
+         (id, project_id, organization_id, owner_kind, owner_user_id, visibility,
+          created_by_actor_type, created_by_actor_id, title, created_at, updated_at)
+       VALUES (?, ?, ?, 'organization', NULL, 'organization', 'compatibility', NULL, ?, ?, ?)`,
+    ).run(randomUUID(), randomUUID(), BOOTSTRAP_ORGANIZATION_ID, "orphaned task", new Date().toISOString(), new Date().toISOString());
     db.pragma("foreign_keys = ON");
 
     expect(() => migrateWorkspaceProject()).toThrow(/foreign-key check failed/);

@@ -8,6 +8,11 @@ description: Managing OpenCode configuration via the dashboard and MCP tools —
 ## What It Does
 OpenCode configuration editor with Project and Global tabs. Allows editing `opencode.json` (project-level) and `opencode.jsonc` (global) content with round-trip sync between disk and database.
 
+The disk/DB controls here are explicit API-host/admin repair or import
+operations. They do not replace the Git-authoritative external-worktree path:
+Git → `@ingenium/extension` resource-sync → configured MCP stdio → authenticated
+API → database.
+
 ## How to Use
 1. Navigate to `/config` from the dashboard nav bar
 2. **Project tab** — Edit `opencode.json` for the active project

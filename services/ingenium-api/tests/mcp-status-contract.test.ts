@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { logger } from "ingenium-core";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   getMCPStatus: vi.fn(),
@@ -28,17 +28,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/opencode", opencodeRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const address = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${address.port}/api/v1/opencode`;
-      resolve();
-    });
-  });
+  baseUrl = `${await listenOnLoopback(server)}/api/v1/opencode`;
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
 });
 
 beforeEach(() => {
@@ -60,7 +54,7 @@ describe("OpenCode MCP status proxy contract", () => {
     "failed",
     "needs_auth",
     "needs_client_registration",
-  ] as const)("normalizes the v1.18.3 %s status", async (status) => {
+  ] as const)("normalizes the v1.18.9 %s status", async (status) => {
     mocks.getMCPStatus.mockResolvedValue({ alpha: { status, tools: 2, error: "upstream diagnostic" } });
 
     const response = await fetch(`${baseUrl}/mcp`);
@@ -97,6 +91,19 @@ describe("OpenCode MCP status proxy contract", () => {
     });
     expect(body.data.invalidCount).toEqual({ status: "connected", connected: true });
     expect(JSON.stringify(body)).not.toContain("secret diagnostic");
+  });
+
+  it("returns an actionable but non-secret diagnostic for a failed Ingenium launcher", async () => {
+    mocks.getMCPStatus.mockResolvedValue({ ingenium: { status: "failed", error: "token=do-not-leak" } });
+
+    const body = await (await fetch(`${baseUrl}/mcp`)).json();
+
+    expect(body.data.ingenium).toEqual({
+      status: "failed",
+      connected: false,
+      error: "Ingenium MCP could not connect. Build the extension launcher, then verify the protected API token and project identity.",
+    });
+    expect(JSON.stringify(body)).not.toContain("token=do-not-leak");
   });
 
   it("projects unknown and malformed server states into a safe distinct state", async () => {

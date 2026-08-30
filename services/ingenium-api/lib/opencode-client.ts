@@ -1,8 +1,11 @@
-import { logger, settings } from "ingenium-core";
+import { logger, runtimes } from "ingenium-core";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { config } from "../config/index.js";
+import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
 
 /**
- * Server-side typed HTTP client for the OpenCode v1.18.3 REST API.
+ * Server-side typed HTTP client for the OpenCode v1.18.9 REST API.
  *
  * Routes all requests through `fetch` with HTTP Basic auth, normalizing errors
  * into a consistent `{ error: { message, code } }` shape. The SSE streaming
@@ -13,7 +16,7 @@ import { config } from "../config/index.js";
  * - The Authorization header value is never serialized to error messages.
  * - Runtime checks prevent `undefined` passwords from reaching the wire.
  *
- * 🔴 Verified against: OpenCode v1.18.3 contract (see /tmp/opencode-contract.md)
+ * 🔴 Verified against: OpenCode v1.18.9 contract (see /tmp/opencode-contract.md)
  */
 
 /* ── Types ── */
@@ -22,6 +25,8 @@ export interface OpenCodeErrorShape {
   error: {
     message: string;
     code: string;
+    /** Upstream HTTP status for server-side recovery decisions; never serialized. */
+    status?: number;
   };
 }
 
@@ -62,8 +67,9 @@ export interface FilePartInput {
   filename?: string;
 }
 
-/** Shape for prompt send request body (v1.18.3 contract) */
+/** Shape for prompt send request body (v1.18.9 contract) */
 export interface SendPromptBody {
+  messageID?: string;
   parts: Array<TextPartInput | FilePartInput>;
   model?: { providerID: string; modelID: string };
   agent?: string;
@@ -78,6 +84,58 @@ export interface SendPromptBody {
  * selections can never grant it a default or future tool capability.
  */
 export const LLM_BROKER_AGENT = "ingenium-llm-broker";
+
+/**
+ * Interactive broker consumers normally receive at most 30 seconds. Docs AI
+ * is explicitly allowed a longer bounded window for document transformations.
+ * Background self-learning work has its own finite upper bound so it cannot
+ * inherit an interactive timeout or run without a deadline.
+ */
+export const DEFAULT_BROKER_TIMEOUT_MS = 30_000;
+export const DOCS_AI_BROKER_TIMEOUT_MS = 60_000;
+/** Background callers preserve the core pipeline's established 60-second request. */
+export const BACKGROUND_BROKER_TIMEOUT_MS = 60_000;
+/** A background caller may explicitly request more time, but never indefinitely. */
+export const MAX_BACKGROUND_BROKER_TIMEOUT_MS = 180_000;
+/** Maximum for interactive broker policies (default and Docs AI). */
+export const MAX_BROKER_TIMEOUT_MS = DOCS_AI_BROKER_TIMEOUT_MS;
+
+export type BrokerTimeoutPolicy = "default" | "docs-ai" | "background";
+
+export interface BrokerTimeoutResolution {
+  policy: BrokerTimeoutPolicy;
+  requestedTimeoutMs: number;
+  effectiveTimeoutMs: number;
+}
+
+/** @internal — exported for bounded-timeout contract tests. */
+export function resolveBrokerTimeout(
+  timeoutMs: number | undefined,
+  policy: BrokerTimeoutPolicy = "default",
+): BrokerTimeoutResolution {
+  const policyDefaultTimeoutMs = policy === "default"
+    ? DEFAULT_BROKER_TIMEOUT_MS
+    : policy === "docs-ai"
+      ? DOCS_AI_BROKER_TIMEOUT_MS
+      : BACKGROUND_BROKER_TIMEOUT_MS;
+  const policyMaximumTimeoutMs = policy === "default"
+    ? DEFAULT_BROKER_TIMEOUT_MS
+    : policy === "docs-ai"
+      ? DOCS_AI_BROKER_TIMEOUT_MS
+      : MAX_BACKGROUND_BROKER_TIMEOUT_MS;
+  const requestedTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
+    ? timeoutMs
+    : policyDefaultTimeoutMs;
+
+  return {
+    policy,
+    requestedTimeoutMs,
+    effectiveTimeoutMs: Math.min(
+      Math.max(requestedTimeoutMs, 0),
+      policyMaximumTimeoutMs,
+    ),
+  };
+}
 
 /** Shape for summarization request body */
 export interface SummarizeBody {
@@ -108,7 +166,7 @@ export interface CommandBody {
   arguments?: string[];
 }
 
-/* ── Message shape (v1.18.3 contract) ── */
+/* ── Message shape (v1.18.9 contract) ── */
 
 export interface MessageInfo {
   id: string;
@@ -155,7 +213,7 @@ export interface MessageEnvelope {
   parts: MessagePart[];
 }
 
-/* ── Session shape (v1.18.3 contract) ── */
+/* ── Session shape (v1.18.9 contract) ── */
 
 export interface SessionTime {
   created: number;
@@ -210,7 +268,7 @@ export interface SessionInfo {
   revert?: SessionRevert;
 }
 
-/* ── Provider shape (v1.18.3 contract) ── */
+/* ── Provider shape (v1.18.9 contract) ── */
 
 export interface ProviderModel {
   id: string;
@@ -295,7 +353,7 @@ interface V2Response<T> {
   data: T;
 }
 
-/* ── Agent shape (v1.18.3 contract) ── */
+/* ── Agent shape (v1.18.9 contract) ── */
 
 export interface AgentInfo {
   name: string;
@@ -310,7 +368,7 @@ export interface AgentInfo {
   options: Record<string, unknown>;
 }
 
-/* ── Skill shape (v1.18.3 contract) ── */
+/* ── Skill shape (v1.18.9 contract) ── */
 
 export interface SkillInfo {
   name: string;
@@ -323,9 +381,9 @@ export interface SkillInfo {
 
 export interface McpServerInfo {
   name: string;
-  /** OpenCode v1.18.3 connection state. */
+  /** OpenCode v1.18.9 connection state. */
   status?: "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
-  /** Legacy compatibility for pre-v1.18.3 servers. */
+  /** Legacy compatibility for pre-v1.18.9 servers. */
   connected?: boolean;
   toolCount?: number;
   tools?: number | unknown[];
@@ -360,20 +418,65 @@ const PROVIDER_CATALOG_ERROR: OpenCodeErrorShape["error"] = {
   code: "PROVIDER_CATALOG_FAILED",
   message: "OpenCode provider catalog is unavailable",
 };
+const PROVIDER_CONFIG_RELOAD_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_CONFIG_RELOAD_FAILED",
+  message: "OpenCode provider configuration reload failed",
+};
+const INTEGRATION_KEY_CONNECT_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_INTEGRATION_CONNECT_FAILED",
+  message: "Provider connection failed",
+};
+const PROVIDER_AUTH_APPLY_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_AUTH_APPLY_FAILED",
+  message: "Provider authentication update failed",
+};
+const PROVIDER_AUTH_REMOVE_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_AUTH_REMOVE_FAILED",
+  message: "Provider authentication removal failed",
+};
+const PROVIDER_AUTH_STATUS_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_AUTH_STATUS_FAILED",
+  message: "Provider authentication status is unavailable",
+};
+
+type SafeProviderOperation =
+  | "provider_config_reload"
+  | "integration_key_connect"
+  | "provider_auth_apply"
+  | "provider_auth_remove"
+  | "provider_auth_status";
 
 /* ── Helpers ── */
 
 /**
  * Build a Basic auth header value from the configured password.
- * Uses "opencode" as the username per the v1.18.3 contract:
+ * Uses "opencode" as the username per the v1.18.9 contract:
  *   Authorization: Basic base64("opencode:<PASSWORD>")
  *
  * Returns `null` if OPENCODE_SERVER_PASSWORD is not set — callers
  * should validate this before issuing requests.
  */
 /** @internal — exported for testing */
+function readProtectedOpenCodePassword(path: string): string {
+  const parent = lstatSync(dirname(path));
+  if (!parent.isDirectory() || parent.uid !== process.getuid?.() || parent.gid !== process.getgid?.() || (parent.mode & 0o777) !== 0o700) return "";
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = fstatSync(descriptor);
+    if (!metadata.isFile() || metadata.uid !== process.getuid?.() || metadata.gid !== process.getgid?.() || (metadata.mode & 0o777) !== 0o600 || metadata.size > 65) return "";
+    const contents = readFileSync(descriptor, "utf8");
+    const password = contents.endsWith("\n") ? contents.slice(0, -1) : contents;
+    return /^[A-Za-z0-9_-]{64}$/.test(password) ? password : "";
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function buildAuthHeader(): string | null {
-  const password = process.env.OPENCODE_SERVER_PASSWORD;
+  const file = process.env.OPENCODE_SERVER_PASSWORD_FILE?.trim();
+  const inline = process.env.OPENCODE_SERVER_PASSWORD;
+  if (file && inline) return null;
+  const password = file ? readProtectedOpenCodePassword(file) : inline;
   if (!password) return null;
   const encoded = Buffer.from(`opencode:${password}`).toString("base64");
   return `Basic ${encoded}`;
@@ -392,6 +495,16 @@ export function redactHeaders(headers: Record<string, string>): Record<string, s
   return out;
 }
 
+const INVALID_PATH_SEGMENT = "__invalid_opencode_path_segment__";
+
+/** Encode an upstream dynamic path component without changing query encoding. */
+function pathSegment(value: string): string {
+  if (value === "" || value === "." || value === "..") {
+    return INVALID_PATH_SEGMENT;
+  }
+  return encodeURIComponent(value);
+}
+
 /**
  * Central request dispatcher. Builds the full URL, injects auth, handles
  * error normalization, and returns a typed result.
@@ -403,12 +516,17 @@ export async function request<T>(
     method?: string;
     body?: unknown;
     query?: Record<string, string | number | undefined>;
+    /** Optional caller-owned cancellation propagated to the HTTP transport. */
+    signal?: AbortSignal;
     /** Route-owned failures must not log or return opaque upstream codes. */
     sanitizedUpstreamError?: OpenCodeErrorShape["error"];
+    /** Fixed local label for logs around a sensitive provider operation. */
+    safeProviderOperation?: SafeProviderOperation;
   } = {},
 ): Promise<OpenCodeResult<T>> {
-  const auth = buildAuthHeader();
-  if (!auth) {
+  const target = currentOpenCodeRuntimeTarget();
+  const auth = target ? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null) : buildAuthHeader();
+  if (!target && !auth) {
     return {
       error: {
         message: "OPENCODE_SERVER_PASSWORD is not configured",
@@ -417,10 +535,17 @@ export async function request<T>(
     };
   }
 
-  const { method = "GET", body, query, sanitizedUpstreamError } = opts;
+  const {
+    method = "GET",
+    body,
+    query,
+    signal,
+    sanitizedUpstreamError,
+    safeProviderOperation,
+  } = opts;
 
   // Build URL with query params
-  let url = `${config.opencodeUrl}${path}`;
+  let url = `${target?.baseUrl ?? config.opencodeUrl}${path}`;
   if (query) {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query)) {
@@ -432,29 +557,52 @@ export async function request<T>(
     if (qs) url += `?${qs}`;
   }
 
-  const headers: Record<string, string> = {
-    Authorization: auth,
-    Accept: "application/json",
-  };
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (auth) headers.Authorization = auth;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
 
   try {
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = { method, headers, signal };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
 
-    logger.debug(SOURCE, `${method} ${url}`, {
-      headers: redactHeaders(headers),
-      bodyLen: body ? JSON.stringify(body).length : 0,
-    });
+    if (safeProviderOperation) {
+      logger.debug(SOURCE, "OpenCode provider operation requested", {
+        operation: safeProviderOperation,
+      });
+    } else {
+      logger.debug(SOURCE, `${method} ${url}`, {
+        headers: redactHeaders(headers),
+        bodyLen: body ? JSON.stringify(body).length : 0,
+      });
+    }
 
     const response = await fetch(url, init);
     const contentType = response.headers.get("content-type") ?? "";
 
     if (!response.ok) {
+      if (sanitizedUpstreamError) {
+        // Do not parse credential-bearing error bodies; canceling releases the response stream.
+        await response.body?.cancel().catch(() => undefined);
+        logger.warn(
+          SOURCE,
+          safeProviderOperation ? "OpenCode provider operation failed" : `OpenCode ${response.status} for ${method} ${path}`,
+          safeProviderOperation
+            ? {
+              operation: safeProviderOperation,
+              code: sanitizedUpstreamError.code,
+              status: response.status,
+            }
+            : { status: response.status },
+        );
+        const error: OpenCodeErrorShape["error"] = { ...sanitizedUpstreamError };
+        Object.defineProperty(error, "status", { value: response.status, enumerable: false });
+        return { error };
+      }
+
       // Attempt to parse the error body
       let errMsg = `HTTP ${response.status}`;
       let errCode = `HTTP_${response.status}`;
@@ -474,14 +622,12 @@ export async function request<T>(
       logger.warn(
         SOURCE,
         `OpenCode ${response.status} for ${method} ${path}`,
-        sanitizedUpstreamError ? { status: response.status } : { status: response.status, code: errCode },
+        { status: response.status, code: errCode },
       );
 
-      return {
-        error: sanitizedUpstreamError
-          ? sanitizedUpstreamError
-          : { message: errMsg, code: errCode },
-      };
+      const error: OpenCodeErrorShape["error"] = { message: errMsg, code: errCode };
+      Object.defineProperty(error, "status", { value: response.status, enumerable: false });
+      return { error };
     }
 
     // Non-JSON responses (shouldn't happen except maybe for 204/205)
@@ -495,14 +641,23 @@ export async function request<T>(
   } catch (err: unknown) {
     const e = err as Error & { name?: string };
 
-    // AbortError is thrown when we cancel a streaming request — re-throw
-    // so the caller can distinguish cancellation from a real error.
+    // Provider credential operations must not expose an abort implementation's
+    // message or name; generic requests retain their cancellation contract.
     if (e.name === "AbortError") {
+      if (safeProviderOperation && sanitizedUpstreamError) {
+        return { error: { ...sanitizedUpstreamError } };
+      }
       throw err;
     }
 
     if (sanitizedUpstreamError) {
-      logger.error(SOURCE, `Fetch failed for ${method} ${path}`, { name: e.name });
+      logger.error(
+        SOURCE,
+        safeProviderOperation ? "OpenCode provider operation failed" : `Fetch failed for ${method} ${path}`,
+        safeProviderOperation
+          ? { operation: safeProviderOperation, code: sanitizedUpstreamError.code }
+          : { name: e.name },
+      );
     } else {
       logger.error(SOURCE, `Fetch failed for ${method} ${path}: ${e.message}`, {
         name: e.name,
@@ -528,8 +683,9 @@ async function streamRequest(
   query?: Record<string, string | number | undefined>,
   extraHeaders?: Record<string, string>,
 ): Promise<ReadableStream<Uint8Array> | OpenCodeErrorShape> {
-  const auth = buildAuthHeader();
-  if (!auth) {
+  const target = currentOpenCodeRuntimeTarget();
+  const auth = target ? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null) : buildAuthHeader();
+  if (!target && !auth) {
     return {
       error: {
         message: "OPENCODE_SERVER_PASSWORD is not configured",
@@ -538,7 +694,7 @@ async function streamRequest(
     };
   }
 
-  let url = `${config.opencodeUrl}${path}`;
+  let url = `${target?.baseUrl ?? config.opencodeUrl}${path}`;
   if (query) {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query)) {
@@ -549,11 +705,8 @@ async function streamRequest(
   }
 
   try {
-    const headers: Record<string, string> = {
-      Authorization: auth,
-      Accept: "text/event-stream",
-      ...extraHeaders,
-    };
+    const headers: Record<string, string> = { Accept: "text/event-stream", ...extraHeaders };
+    if (auth) headers.Authorization = auth;
     const response = await fetch(url, {
       method: "GET",
       headers,
@@ -590,12 +743,12 @@ export function isOpenCodeError<T>(result: OpenCodeResult<T>): result is OpenCod
 /* ── Client ── */
 
 /**
- * Singleton OpenCode API client for v1.18.3.
+ * Singleton OpenCode API client for v1.18.9.
  *
  * Every method returns a `OpenCodeResult<T>` — callers should check
  * `isOpenCodeError(result)` before accessing the payload.
  *
- * Endpoints verified against the v1.18.3 contract at /tmp/opencode-contract.md.
+ * Endpoints verified against the v1.18.9 contract at /tmp/opencode-contract.md.
  */
 export const opencodeClient = {
   /* ── Health ── */
@@ -604,10 +757,16 @@ export const opencodeClient = {
     request<OpenCodeHealth>("/global/health"),
 
   /** Apply a partial global config without interrupting active sessions. */
-  updateGlobalConfig: (config: Record<string, unknown>): Promise<OpenCodeResult<Record<string, unknown>>> =>
+  updateGlobalConfig: (
+    config: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<Record<string, unknown>>> =>
     request<Record<string, unknown>>("/global/config", {
       method: "PATCH",
       body: { config },
+      signal,
+      sanitizedUpstreamError: PROVIDER_CONFIG_RELOAD_ERROR,
+      safeProviderOperation: "provider_config_reload",
     }),
 
   /* ── Sessions ── */
@@ -629,14 +788,14 @@ export const opencodeClient = {
     id: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${id}`, { query: { directory } }),
+    request<SessionInfo>(`/session/${pathSegment(id)}`, { query: { directory } }),
 
   updateSession: (
     id: string,
     body: UpdateSessionBody,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${id}`, {
+    request<SessionInfo>(`/session/${pathSegment(id)}`, {
       method: "PATCH",
       body,
       query: { directory },
@@ -646,7 +805,7 @@ export const opencodeClient = {
     id: string,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${id}`, {
+    request<boolean>(`/session/${pathSegment(id)}`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -664,7 +823,7 @@ export const opencodeClient = {
     before?: string,
     directory?: string,
   ): Promise<OpenCodeResult<MessageEnvelope[]>> =>
-    request<MessageEnvelope[]>(`/session/${sessionId}/message`, {
+    request<MessageEnvelope[]>(`/session/${pathSegment(sessionId)}/message`, {
       query: { limit, before, directory },
     }),
 
@@ -673,7 +832,7 @@ export const opencodeClient = {
     messageId: string,
     directory?: string,
   ): Promise<OpenCodeResult<MessageEnvelope>> =>
-    request<MessageEnvelope>(`/session/${sessionId}/message/${messageId}`, {
+    request<MessageEnvelope>(`/session/${pathSegment(sessionId)}/message/${pathSegment(messageId)}`, {
       query: { directory },
     }),
 
@@ -682,7 +841,7 @@ export const opencodeClient = {
     body: SendPromptBody,
     directory?: string,
   ): Promise<OpenCodeResult<MessageEnvelope>> =>
-    request<MessageEnvelope>(`/session/${sessionId}/message`, {
+    request<MessageEnvelope>(`/session/${pathSegment(sessionId)}/message`, {
       method: "POST",
       body,
       query: { directory },
@@ -693,7 +852,7 @@ export const opencodeClient = {
     messageId: string,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${sessionId}/message/${messageId}`, {
+    request<boolean>(`/session/${pathSegment(sessionId)}/message/${pathSegment(messageId)}`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -704,7 +863,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${sessionId}/abort`, {
+    request<boolean>(`/session/${pathSegment(sessionId)}/abort`, {
       method: "POST",
       query: { directory },
     }),
@@ -714,7 +873,7 @@ export const opencodeClient = {
     messageId?: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/fork`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/fork`, {
       method: "POST",
       body: messageId ? ({ messageID: messageId } satisfies ForkBody) : undefined,
       query: { directory },
@@ -724,7 +883,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/share`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/share`, {
       method: "POST",
       query: { directory },
     }),
@@ -733,7 +892,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/share`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/share`, {
       method: "DELETE",
       query: { directory },
     }),
@@ -743,7 +902,7 @@ export const opencodeClient = {
     body?: SummarizeBody,
     directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${sessionId}/summarize`, {
+    request<boolean>(`/session/${pathSegment(sessionId)}/summarize`, {
       method: "POST",
       body,
       query: { directory },
@@ -754,7 +913,7 @@ export const opencodeClient = {
     body: RevertBody,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/revert`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/revert`, {
       method: "POST",
       body,
       query: { directory },
@@ -764,7 +923,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/unrevert`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/unrevert`, {
       method: "POST",
       body: {},
       query: { directory },
@@ -774,7 +933,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo[]>> =>
-    request<SessionInfo[]>(`/session/${sessionId}/children`, {
+    request<SessionInfo[]>(`/session/${pathSegment(sessionId)}/children`, {
       query: { directory },
     }),
 
@@ -783,7 +942,7 @@ export const opencodeClient = {
     messageId?: string,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${sessionId}/diff`, {
+    request<unknown>(`/session/${pathSegment(sessionId)}/diff`, {
       query: { messageID: messageId, directory },
     }),
 
@@ -792,7 +951,7 @@ export const opencodeClient = {
     body: CommandBody,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${sessionId}/command`, {
+    request<unknown>(`/session/${pathSegment(sessionId)}/command`, {
       method: "POST",
       body,
       query: { directory },
@@ -802,7 +961,7 @@ export const opencodeClient = {
     sessionId: string,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${sessionId}/init`, {
+    request<SessionInfo>(`/session/${pathSegment(sessionId)}/init`, {
       method: "POST",
       body: {},
       query: { directory },
@@ -823,10 +982,17 @@ export const opencodeClient = {
       query: { "location.directory": directory },
     }),
 
-  connectIntegrationKey: (integrationID: string, key: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/${encodeURIComponent(integrationID)}/connect/key`, {
+  connectIntegrationKey: (
+    integrationID: string,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<string>> =>
+    request<string>(`/api/integration/${pathSegment(integrationID)}/connect/key`, {
       method: "POST",
       body: { key },
+      signal,
+      sanitizedUpstreamError: INTEGRATION_KEY_CONNECT_ERROR,
+      safeProviderOperation: "integration_key_connect",
     }),
 
   beginIntegrationOAuth: (
@@ -834,22 +1000,22 @@ export const opencodeClient = {
     methodID: string,
     inputs: Record<string, string>,
   ): Promise<OpenCodeResult<V2Response<IntegrationAttempt>>> =>
-    request<V2Response<IntegrationAttempt>>(`/api/integration/${encodeURIComponent(integrationID)}/connect/oauth`, {
+    request<V2Response<IntegrationAttempt>>(`/api/integration/${pathSegment(integrationID)}/connect/oauth`, {
       method: "POST",
       body: { methodID, inputs },
     }),
 
   getIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<V2Response<{ status: string; message?: string }>>> =>
-    request<V2Response<{ status: string; message?: string }>>(`/api/integration/attempt/${encodeURIComponent(attemptID)}`),
+    request<V2Response<{ status: string; message?: string }>>(`/api/integration/attempt/${pathSegment(attemptID)}`),
 
   completeIntegrationAttempt: (attemptID: string, code?: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/attempt/${encodeURIComponent(attemptID)}/complete`, {
+    request<string>(`/api/integration/attempt/${pathSegment(attemptID)}/complete`, {
       method: "POST",
       body: code ? { code } : {},
     }),
 
   cancelIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/attempt/${encodeURIComponent(attemptID)}`, { method: "DELETE" }),
+    request<string>(`/api/integration/attempt/${pathSegment(attemptID)}`, { method: "DELETE" }),
 
   /* ── Auth ── */
 
@@ -857,25 +1023,39 @@ export const opencodeClient = {
     providerID: string,
     body: AuthRequestBody,
     directory?: string,
+    signal?: AbortSignal,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/auth/${providerID}`, {
+    request<unknown>(`/auth/${pathSegment(providerID)}`, {
       method: "POST",
       body,
       query: { directory },
+      signal,
+      sanitizedUpstreamError: PROVIDER_AUTH_APPLY_ERROR,
+      safeProviderOperation: "provider_auth_apply",
     }),
 
   deleteAuth: (
     providerID: string,
     directory?: string,
+    signal?: AbortSignal,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/auth/${providerID}`, {
+    request<unknown>(`/auth/${pathSegment(providerID)}`, {
       method: "DELETE",
       query: { directory },
+      signal,
+      sanitizedUpstreamError: PROVIDER_AUTH_REMOVE_ERROR,
+      safeProviderOperation: "provider_auth_remove",
     }),
 
-  getAuthStatus: async (directory?: string): Promise<OpenCodeResult<AuthStatusResponse>> => {
+  getAuthStatus: async (
+    directory?: string,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<AuthStatusResponse>> => {
     const result = await request<V2Response<IntegrationInfo[]>>("/api/integration", {
       query: { "location.directory": directory },
+      signal,
+      sanitizedUpstreamError: PROVIDER_AUTH_STATUS_ERROR,
+      safeProviderOperation: "provider_auth_status",
     });
     if (isOpenCodeError(result)) return result;
     return {
@@ -893,7 +1073,7 @@ export const opencodeClient = {
   listAgents: (): Promise<OpenCodeResult<AgentInfo[]>> =>
     request<AgentInfo[]>("/agent"),
 
-  /* ── Skills (v1.18.3: GET /skill works, but we DO NOT proxy it — skills are
+  /* ── Skills (v1.18.9: GET /skill works, but we DO NOT proxy it — skills are
          managed by the Ingenium skill system, not OpenCode) ── */
 
   listSkills: (): Promise<OpenCodeResult<SkillInfo[]>> =>
@@ -908,13 +1088,13 @@ export const opencodeClient = {
     }),
 
   connectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/mcp/${encodeURIComponent(name)}/connect`, {
+    request<unknown>(`/mcp/${pathSegment(name)}/connect`, {
       method: "POST",
       sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
 
   disconnectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/mcp/${encodeURIComponent(name)}/disconnect`, {
+    request<unknown>(`/mcp/${pathSegment(name)}/disconnect`, {
       method: "POST",
       sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
@@ -923,14 +1103,14 @@ export const opencodeClient = {
 
   /**
    * Get pending permission requests (global).
-   * v1.18.3 contract: GET /permission returns array of PermissionRequest objects.
+   * v1.18.9 contract: GET /permission returns array of PermissionRequest objects.
    */
   getPermissions: (directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> =>
     request<PermissionRequest[]>("/permission", { query: { directory } }),
 
   /**
    * Reply to a session-scoped permission request.
-   * v1.18.3 contract: POST /session/{sessionId}/permissions/{permissionId}
+   * v1.18.9 contract: POST /session/{sessionId}/permissions/{permissionId}
    *   body: { "response": "once" | "always" | "reject" }
    */
   replyPermission: (
@@ -939,7 +1119,7 @@ export const opencodeClient = {
     body: PermissionReplyBody,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${sessionId}/permissions/${permissionId}`, {
+    request<unknown>(`/session/${pathSegment(sessionId)}/permissions/${pathSegment(permissionId)}`, {
       method: "POST",
       body,
       query: { directory },
@@ -949,7 +1129,7 @@ export const opencodeClient = {
 
   /**
    * Get pending questions (global).
-   * v1.18.3 contract: GET /question returns array of QuestionInfo objects.
+   * v1.18.9 contract: GET /question returns array of QuestionInfo objects.
    * Note: Questions also arrive via SSE events and message parts.
    */
   getQuestions: (directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> =>
@@ -959,7 +1139,7 @@ export const opencodeClient = {
 
   /**
    * Returns a ReadableStream piping SSE events from the OpenCode /event endpoint.
-   * v1.18.3 contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
+   * v1.18.9 contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
    * When `sessionId` is provided, events are filtered to that session.
    * When `directory` is provided, events are filtered to that directory.
    */
@@ -991,9 +1171,12 @@ export async function brokerExecute(params: {
   system: string;
   user: string;
   timeoutMs?: number;
+  /** Server-owned policy; browser input can never select this. */
+  timeoutPolicy?: BrokerTimeoutPolicy;
 }): Promise<{ ok: boolean; content: string; error?: string }> {
   const source = "opencode-broker";
-  const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 30_000, 0), 30_000);
+  const timeout = resolveBrokerTimeout(params.timeoutMs, params.timeoutPolicy);
+  const timeoutMs = timeout.effectiveTimeoutMs;
   const created = await opencodeClient.createSession({ title: "ingenium-llm-broker" });
 
   if (isOpenCodeError(created)) {
@@ -1055,7 +1238,7 @@ export async function brokerExecute(params: {
       delayMs = Math.min(delayMs * 2, 30_000);
     }
 
-    logger.warn(source, `Broker session ${sessionId} timed out`, { timeoutMs });
+    logger.warn(source, `Broker session ${sessionId} timed out`, timeout);
     return { ok: false, content: "", error: "timeout" };
   } catch (err: unknown) {
     const error = err instanceof Error ? err.name : "BrokerError";
@@ -1082,13 +1265,41 @@ export type SynthesisBrokerExecutor = (params: {
   system: string;
   user: string;
   timeoutMs?: number;
+  timeoutPolicy?: BrokerTimeoutPolicy;
 }) => Promise<{ ok: boolean; content: string; error?: string }>;
+
+/**
+ * Narrow, text-only bridge passed into core background work. Core owns prompts
+ * and response parsing; the API retains provider resolution and the only path
+ * that can select the tool-denied OpenCode broker agent.
+ */
+export function createBackgroundSynthesisBrokerExecutor(projectId: string): (params: {
+  system: string;
+  user: string;
+  timeoutMs: number;
+}) => Promise<{ ok: boolean; content: string; error?: string }> {
+  return async ({ system, user, timeoutMs }) => {
+    const runtime = runtimes.getReadyRuntimeForProject(projectId);
+    if (runtime) {
+      return withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098` }, () => executeSynthesisBroker({
+        projectId,
+        system,
+        user,
+        timeoutMs,
+        timeoutPolicy: "background",
+      }));
+    }
+    return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+  };
+}
 
 export async function executeSynthesisBroker(params: {
   projectId: string;
   system: string;
   user: string;
   timeoutMs?: number;
+  /** Route-owned policy. Defaults preserve the 30-second broker contract. */
+  timeoutPolicy?: BrokerTimeoutPolicy;
   /** A route-validated selection. When present, do not silently switch models. */
   selection?: { providerID: string; modelID: string };
   /** Test-only/integration seam; production uses the tool-denied broker session. */
@@ -1100,24 +1311,32 @@ export async function executeSynthesisBroker(params: {
       system: params.system,
       user: params.user,
       timeoutMs: params.timeoutMs,
+      timeoutPolicy: params.timeoutPolicy,
     });
   }
-  const primary = {
-    providerID: settings.getSetting(params.projectId, "synthesis_provider") || "",
-    modelID: settings.getSetting(params.projectId, "synthesis_model") || "",
-  };
-  const secondary = {
-    providerID: settings.getSetting(params.projectId, "synthesis_backup_provider") || "",
-    modelID: settings.getSetting(params.projectId, "synthesis_backup_model") || "",
-  };
-  const choices = [primary, secondary].filter((choice, index, all) =>
-    choice.providerID && choice.modelID && all.findIndex((other) =>
-      other.providerID === choice.providerID && other.modelID === choice.modelID) === index,
-  );
+  // This dynamic import avoids a static cycle: the Chat catalog itself gets
+  // OpenCode's runtime provider list through this client. Resolution runs only
+  // after this module has initialized and never accepts browser input.
+  let choices: Array<{ providerID: string; modelID: string }>;
+  try {
+    const { resolveSynthesisProviderSelections } = await import("./synthesis-provider-resolution.js");
+    choices = (await resolveSynthesisProviderSelections(params.projectId)).selections;
+  } catch (error) {
+    logger.warn("opencode-broker", "Unable to resolve synthesis provider choices", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    choices = [];
+  }
   if (choices.length === 0) return { ok: false, content: "", error: "no synthesis provider configured" };
 
   for (const choice of choices) {
-    const result = await (params.executor ?? brokerExecute)({ ...choice, system: params.system, user: params.user, timeoutMs: params.timeoutMs });
+    const result = await (params.executor ?? brokerExecute)({
+      ...choice,
+      system: params.system,
+      user: params.user,
+      timeoutMs: params.timeoutMs,
+      timeoutPolicy: params.timeoutPolicy,
+    });
     if (result.ok) return result;
   }
   return { ok: false, content: "", error: "all configured synthesis providers failed" };

@@ -1,0 +1,370 @@
+{
+  "schemaVersion": 1,
+  "evidence": {
+    "runId": "run-20260817T134326Z-324949",
+    "networkStates": 86,
+    "observedGetRequests": 329,
+    "safeGetRequests": 26,
+    "strictGetRequests": 303,
+    "observedStrictNonGetRequests": 51,
+    "maxSinglePageFanout": 12,
+    "maxSinglePageApiRequests": 13,
+    "humanPacedTransitionIntervalMs": 10000
+  },
+  "safeRoutes": [
+    {
+      "template": "/api/v1/projects/{segment}/detail",
+      "pattern": "/api/v1/projects/[^/|]+/detail",
+      "observedCount": 10,
+      "source": "lib/routes/projects.ts",
+      "mount": "/api/v1/projects",
+      "registration": "projectsRouter.get(\"/:name/detail\","
+    },
+    {
+      "template": "/api/v1/context/sources/summary",
+      "pattern": "/api/v1/context/sources/summary",
+      "observedCount": 2,
+      "source": "lib/routes/context.ts",
+      "mount": "/api/v1/context",
+      "registration": "contextRouter.get(\"/sources/summary\","
+    },
+    {
+      "template": "/api/v1/context/conversations",
+      "pattern": "/api/v1/context/conversations",
+      "observedCount": 2,
+      "source": "lib/routes/context.ts",
+      "mount": "/api/v1/context",
+      "registration": "contextRouter.get(\"/conversations\","
+    },
+    {
+      "template": "/api/v1/tasks/{uuid}",
+      "pattern": "/api/v1/tasks/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
+      "observedCount": 2,
+      "source": "lib/routes/tasks.ts",
+      "mount": "/api/v1/tasks",
+      "registration": "tasksRouter.get(\"/:id\","
+    },
+    {
+      "template": "/api/v1/usage/thresholds",
+      "pattern": "/api/v1/usage/thresholds",
+      "observedCount": 2,
+      "source": "lib/routes/usage.ts",
+      "mount": "/api/v1/usage",
+      "registration": "usageRouter.get(\"/thresholds\","
+    },
+    {
+      "template": "/api/v1/usage/thresholds/evaluate",
+      "pattern": "/api/v1/usage/thresholds/evaluate",
+      "observedCount": 2,
+      "source": "lib/routes/usage.ts",
+      "mount": "/api/v1/usage",
+      "registration": "usageRouter.get(\"/thresholds/evaluate\","
+    },
+    {
+      "template": "/api/v1/usage/attention",
+      "pattern": "/api/v1/usage/attention",
+      "observedCount": 2,
+      "source": "lib/routes/usage.ts",
+      "mount": "/api/v1/usage",
+      "registration": "usageRouter.get(\"/attention\","
+    },
+    {
+      "template": "/api/v1/usage/summary",
+      "pattern": "/api/v1/usage/summary",
+      "observedCount": 2,
+      "source": "lib/routes/usage.ts",
+      "mount": "/api/v1/usage",
+      "registration": "usageRouter.get(\"/summary\","
+    },
+    {
+      "template": "/api/v1/usage/events",
+      "pattern": "/api/v1/usage/events",
+      "observedCount": 2,
+      "source": "lib/routes/usage.ts",
+      "mount": "/api/v1/usage",
+      "registration": "usageRouter.get(\"/events\","
+    }
+  ],
+  "observedStrictRoutes": [
+    {
+      "template": "/api/v1/projects",
+      "observedCount": 46,
+      "reason": "unbounded authorized-project listing",
+      "source": "lib/routes/projects.ts",
+      "mount": "/api/v1/projects",
+      "registration": "projectsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/organizations",
+      "observedCount": 42,
+      "reason": "unbounded organization listing",
+      "source": "lib/routes/organizations.ts",
+      "mount": "/api/v1/organizations",
+      "registration": "organizationsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/runtimes/browser/status",
+      "observedCount": 42,
+      "reason": "unbounded runtime workspace status aggregation",
+      "source": "lib/routes/runtimes.ts",
+      "mount": "/api/v1/runtimes",
+      "registration": "runtimesRouter.get(\"/browser/status\","
+    },
+    {
+      "template": "/api/v1/runtimes/browser/workspaces",
+      "observedCount": 41,
+      "reason": "unbounded runtime workspace listing",
+      "source": "lib/routes/runtimes.ts",
+      "mount": "/api/v1/runtimes",
+      "registration": "runtimesRouter.get(\"/browser/workspaces\","
+    },
+    {
+      "template": "/api/v1/docs/spaces",
+      "observedCount": 4,
+      "reason": "unbounded documentation-space listing",
+      "source": "lib/routes/docs.ts",
+      "mount": "/api/v1/docs",
+      "registration": "router.get(\"/spaces\","
+    },
+    {
+      "template": "/api/v1/mcp-servers",
+      "observedCount": 1,
+      "reason": "unbounded MCP server listing",
+      "source": "lib/routes/mcp-servers.ts",
+      "mount": "/api/v1/mcp-servers",
+      "registration": "mcpServersRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/mcp-servers/tools",
+      "observedCount": 1,
+      "reason": "unbounded MCP discovered-tool listing",
+      "source": "lib/routes/mcp-servers.ts",
+      "mount": "/api/v1/mcp-servers",
+      "registration": "mcpServersRouter.get(\"/tools\","
+    },
+    {
+      "template": "/api/v1/mcp-tools",
+      "observedCount": 1,
+      "reason": "unbounded authorized MCP tool catalog",
+      "source": "lib/routes/mcp-tools.ts",
+      "mount": "/api/v1/mcp-tools",
+      "registration": "router.get(\"/\","
+    },
+    {
+      "template": "/api/v1/personality",
+      "observedCount": 2,
+      "reason": "unbounded private-trait listing",
+      "source": "lib/routes/personality.ts",
+      "mount": "/api/v1/personality",
+      "registration": "personalityRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/auth/session",
+      "observedCount": 43,
+      "reason": "authentication session state",
+      "source": "lib/routes/auth-preflight.ts",
+      "mount": "/api/v1/auth",
+      "registration": "authPreflightRouter.get(\"/session\","
+    },
+    {
+      "template": "/api/v1/settings",
+      "observedCount": 34,
+      "reason": "secret metadata and legacy migration-on-read",
+      "source": "lib/routes/settings.ts",
+      "mount": "/api/v1/settings",
+      "registration": "settingsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/organizations/{uuid}/members",
+      "observedCount": 4,
+      "reason": "security membership listing",
+      "source": "lib/routes/organizations.ts",
+      "mount": "/api/v1/organizations",
+      "registration": "organizationsRouter.get(\"/:organizationId/members\","
+    },
+    {
+      "template": "/api/v1/organizations/{uuid}/invitations",
+      "observedCount": 2,
+      "reason": "security invitation listing",
+      "source": "lib/routes/organizations.ts",
+      "mount": "/api/v1/organizations",
+      "registration": "organizationsRouter.get(\"/:organizationId/invitations\","
+    },
+    {
+      "template": "/api/v1/agents",
+      "observedCount": 3,
+      "reason": "unbounded profile-content listing",
+      "source": "lib/routes/agents.ts",
+      "mount": "/api/v1/agents",
+      "registration": "agentsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/logs",
+      "observedCount": 3,
+      "reason": "caller-controlled log scan",
+      "source": "lib/routes/logs.ts",
+      "mount": "/api/v1/logs",
+      "registration": "logsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/backups",
+      "observedCount": 1,
+      "reason": "backup metadata",
+      "source": "lib/routes/backups.ts",
+      "mount": "/api/v1/backups",
+      "registration": "backupsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/backups/{uuid}",
+      "observedCount": 1,
+      "reason": "backup metadata",
+      "source": "lib/routes/backups.ts",
+      "mount": "/api/v1/backups",
+      "registration": "backupsRouter.get(\"/:id\","
+    },
+    {
+      "template": "/api/v1/config",
+      "observedCount": 1,
+      "reason": "configuration content",
+      "source": "lib/routes/configs.ts",
+      "mount": "/api/v1/config",
+      "registration": "configRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/dashboard/summary",
+      "observedCount": 2,
+      "reason": "multi-service aggregate",
+      "source": "lib/routes/dashboard.ts",
+      "mount": "/api/v1/dashboard",
+      "registration": "dashboardRouter.get(\"/summary\","
+    },
+    {
+      "template": "/api/v1/docs/spaces/{integer}/tree",
+      "observedCount": 2,
+      "reason": "unbounded document tree",
+      "source": "lib/routes/docs.ts",
+      "mount": "/api/v1/docs",
+      "registration": "router.get(\"/spaces/:spaceId/tree\","
+    },
+    {
+      "template": "/api/v1/emails/accounts",
+      "observedCount": 2,
+      "reason": "credential-adjacent account metadata",
+      "source": "lib/routes/emails.ts",
+      "mount": "/api/v1/emails",
+      "registration": "emailsRouter.get(\"/accounts\","
+    },
+    {
+      "template": "/api/v1/jobs",
+      "observedCount": 1,
+      "reason": "unbounded automation listing",
+      "source": "lib/routes/jobs.ts",
+      "mount": "/api/v1/jobs",
+      "registration": "jobsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/observations",
+      "observedCount": 2,
+      "reason": "caller-controlled private-content listing",
+      "source": "lib/routes/observations.ts",
+      "mount": "/api/v1/observations",
+      "registration": "observationsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/observations/{integer}",
+      "observedCount": 2,
+      "reason": "private observation content",
+      "source": "lib/routes/observations.ts",
+      "mount": "/api/v1/observations",
+      "registration": "observationsRouter.get(\"/:id\","
+    },
+    {
+      "template": "/api/v1/pipeline/events",
+      "observedCount": 2,
+      "reason": "caller-controlled event scan",
+      "source": "lib/routes/pipeline.ts",
+      "mount": "/api/v1/pipeline",
+      "registration": "pipelineRouter.get(\"/events\","
+    },
+    {
+      "template": "/api/v1/plugins",
+      "observedCount": 2,
+      "reason": "unbounded plugin-content listing",
+      "source": "lib/routes/plugins.ts",
+      "mount": "/api/v1/plugins",
+      "registration": "pluginsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/projects/archive",
+      "observedCount": 2,
+      "reason": "unbounded archive listing",
+      "source": "lib/routes/projects.ts",
+      "mount": "/api/v1/projects",
+      "registration": "projectsRouter.get(\"/archive\","
+    },
+    {
+      "template": "/api/v1/settings/provider-configs",
+      "observedCount": 2,
+      "reason": "provider and synthesis configuration",
+      "source": "lib/routes/settings.ts",
+      "mount": "/api/v1/settings",
+      "registration": "settingsRouter.get(\"/provider-configs\","
+    },
+    {
+      "template": "/api/v1/skills",
+      "observedCount": 2,
+      "reason": "unbounded skill-content listing",
+      "source": "lib/routes/skills.ts",
+      "mount": "/api/v1/skills",
+      "registration": "skillsRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/services/status",
+      "observedCount": 2,
+      "reason": "supervisor and application probes",
+      "source": "lib/routes/services.ts",
+      "mount": "/api/v1/services",
+      "registration": "servicesRouter.get(\"/status\","
+    },
+    {
+      "template": "/api/v1/tasks",
+      "observedCount": 2,
+      "reason": "unbounded task listing",
+      "source": "lib/routes/tasks.ts",
+      "mount": "/api/v1/tasks",
+      "registration": "tasksRouter.get(\"/\","
+    },
+    {
+      "template": "/api/v1/tasks/notifications",
+      "observedCount": 2,
+      "reason": "unbounded notification listing",
+      "source": "lib/routes/tasks.ts",
+      "mount": "/api/v1/tasks",
+      "registration": "tasksRouter.get(\"/notifications\","
+    },
+    {
+      "template": "/api/v1/usage/breakdown",
+      "observedCount": 2,
+      "reason": "multi-dimensional usage aggregation without result pagination",
+      "source": "lib/routes/usage.ts",
+      "mount": "/api/v1/usage",
+      "registration": "usageRouter.get(\"/breakdown\","
+    },
+    {
+      "template": "/api/v1/vault/status",
+      "observedCount": 1,
+      "reason": "security state and vault-wide counts",
+      "source": "lib/routes/vault.ts",
+      "mount": "/api/v1/vault",
+      "registration": "vaultRouter.get(\"/status\","
+    },
+    {
+      "template": "/api/v1/vault/empty-reset",
+      "observedCount": 1,
+      "reason": "destructive-reset eligibility",
+      "source": "lib/routes/vault.ts",
+      "mount": "/api/v1/vault",
+      "registration": "vaultRouter.get(\"/empty-reset\","
+    }
+  ]
+}

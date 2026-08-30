@@ -27,6 +27,7 @@ export default function ConfigPage() {
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const editorLabel = tab === "project" ? "Project config editor" : "Global config editor";
 
   useEffect(() => {
     setTab(requestedTab === "global" || requestedTab === "providers" ? requestedTab : "project");
@@ -113,8 +114,12 @@ export default function ConfigPage() {
       ) : (
         /* Editor (project/global config) */
         <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4 space-y-3">
-          <div className="text-sm text-[var(--color-text-muted)]">{tab === "project" ? "opencode.json" : "opencode.jsonc"}</div>
+          <div className="flex items-baseline gap-2 text-sm text-[var(--color-text-muted)]">
+            <label htmlFor="config-editor">{editorLabel}</label>
+            <span>{tab === "project" ? "opencode.json" : "opencode.jsonc"}</span>
+          </div>
           <textarea
+            id="config-editor"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="w-full border border-[var(--color-border)] rounded p-3 font-mono text-sm leading-relaxed"

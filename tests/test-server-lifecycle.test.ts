@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -22,6 +23,9 @@ import {
   createTestRunContext,
   getTestRunArtifactRoot,
   getTestRunApiTokenPath,
+  getTestRunDashboardWorkspace,
+  readTestRunManifest,
+  readTestRunTelemetry,
   resetTestRunContextForTests,
   releaseTestRunPortReservations,
   type TestRunProcess,
@@ -30,11 +34,20 @@ import {
 import globalTeardown from "./playwright-global-teardown";
 import {
   TEST_API_TOKEN,
+  FIXTURE_INTERNAL_SERVICE_HEADER,
+  FIXTURE_API_RATE_LIMIT,
+  FIXTURE_OWNER_EMAIL,
+  FIXTURE_OWNER_PASSWORD,
+  FIXTURE_SESSION_COOKIE_NAME,
+  createTestRunBrowserStorageState,
   buildProductionArtifacts,
   captureSpawnedChildPgid,
   getServerSpecs,
   installRunSignalHandlers,
   inspectProcessIdentity,
+  provisionTestRunProject,
+  provisionTestRunBrowserSession,
+  provisionTestRunOwner,
   recoverStoppingTestRun,
   startTestServers,
   stopRunFromManifest,
@@ -43,7 +56,12 @@ import {
   waitForPortClosed,
   waitForReady,
 } from "./test-server-lifecycle";
-import { getDashboardFixtureEnvironment } from "./ingenium-dashboard/fixture-credentials";
+import {
+  FIXTURE_PROJECT_HEADER,
+  FIXTURE_RUN_NONCE_HEADER,
+  directApiAuthHeaders,
+} from "./fixture-api-auth";
+import { getDashboardFixtureEnvironment, getDashboardStorageStatePath } from "./ingenium-dashboard/fixture-credentials";
 
 const manifests: string[] = [];
 const telemetryRoots: string[] = [];
@@ -74,6 +92,7 @@ async function waitForProcessGoneOrZombie(pid: number, timeoutMs = 1_000): Promi
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const manifest of manifests.splice(0)) cleanupTestRun(manifest);
   for (const root of telemetryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
   for (const directory of runDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -81,6 +100,131 @@ afterEach(() => {
 });
 
 describe("test server lifecycle contracts", () => {
+  it("provisions the manifest-owned project idempotently through the fixture API", async () => {
+    const context = createTestRunContext({ ports: { api: 45190, dashboard: 45191, fixture: 45192 } });
+    track(context);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { name: context.project } }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { name: context.project } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await provisionTestRunProject(context);
+    const firstManifest = JSON.parse(readFileSync(context.manifestPath, "utf8")) as typeof context;
+    expect(firstManifest.project).toBe(context.project);
+    expect(firstManifest.projectProvisionedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    await provisionTestRunProject(context);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, request] of fetchMock.mock.calls) {
+      expect(url).toBe(`http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-bootstrap`);
+      expect(request).toMatchObject({
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_TOKEN}`,
+          [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+          [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
+          [FIXTURE_PROJECT_HEADER]: context.project,
+        },
+      });
+      expect(request.body).toBeUndefined();
+    }
+  });
+
+  it("does not mark a fixture project as provisioned when the API rejects it", async () => {
+    const context = createTestRunContext({ ports: { api: 45193, dashboard: 45194, fixture: 45195 } });
+    track(context);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("failure", { status: 500 })));
+
+    await expect(provisionTestRunProject(context)).rejects.toThrow(/API returned 500/);
+
+    const manifest = JSON.parse(readFileSync(context.manifestPath, "utf8")) as typeof context;
+    expect(manifest.projectProvisionedAt).toBeUndefined();
+  });
+
+  it("claims an isolated owner and creates a fresh browser session", async () => {
+    const context = createTestRunContext({ ports: { api: 45196, dashboard: 45197, fixture: 45198 } });
+    track(context);
+    const sessionToken = "s".repeat(43);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }))
+      .mockResolvedValueOnce(new Response("{}", {
+        status: 200,
+        headers: { "Set-Cookie": `${FIXTURE_SESSION_COOKIE_NAME}=${sessionToken}; Path=/; Secure; HttpOnly` },
+      }))
+      .mockResolvedValueOnce(new Response("{}", {
+        status: 200,
+        headers: { "Set-Cookie": `${FIXTURE_SESSION_COOKIE_NAME}=${"t".repeat(43)}; Path=/; Secure; HttpOnly` },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await provisionTestRunOwner(context);
+    const storageState = await createTestRunBrowserStorageState(context);
+    const renewedStorageState = await createTestRunBrowserStorageState(context);
+
+    expect(storageState.cookies).toEqual([expect.objectContaining({
+      name: FIXTURE_SESSION_COOKIE_NAME,
+      value: sessionToken,
+      domain: "127.0.0.1",
+      secure: true,
+      httpOnly: true,
+    })]);
+    expect(storageState.origins).toEqual([
+      {
+        origin: `http://127.0.0.1:${context.ports.dashboard}`,
+        localStorage: [{ name: "ingenium_global_project", value: context.project }],
+      },
+      {
+        origin: `http://localhost:${context.ports.dashboard}`,
+        localStorage: [{ name: "ingenium_global_project", value: context.project }],
+      },
+    ]);
+    expect(renewedStorageState.cookies).toEqual([
+      expect.objectContaining({ value: "t".repeat(43) }),
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TEST_API_TOKEN}`,
+        [FIXTURE_INTERNAL_SERVICE_HEADER]: "1",
+        [FIXTURE_RUN_NONCE_HEADER]: context.runNonce,
+        [FIXTURE_PROJECT_HEADER]: context.project,
+      },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      email: FIXTURE_OWNER_EMAIL,
+      displayName: "Playwright Owner",
+      password: FIXTURE_OWNER_PASSWORD,
+    });
+  });
+
+  it("persists a localhost-bound synthetic session inside the run directory", async () => {
+    const context = createTestRunContext({ ports: { api: 45199, dashboard: 45200, fixture: 45210 } });
+    track(context);
+    const sessionToken = "s".repeat(43);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("{}", {
+      status: 200,
+      headers: { "Set-Cookie": `${FIXTURE_SESSION_COOKIE_NAME}=${sessionToken}; Path=/; Secure; HttpOnly` },
+    })));
+
+    expect(await provisionTestRunBrowserSession(context, "localhost"))
+      .toBe(getDashboardStorageStatePath(context));
+    expect(statSync(getDashboardStorageStatePath(context)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(getDashboardStorageStatePath(context), "utf8"))).toMatchObject({
+      cookies: [{
+        name: FIXTURE_SESSION_COOKIE_NAME,
+        value: sessionToken,
+        domain: "localhost",
+      }],
+      origins: expect.arrayContaining([expect.objectContaining({
+        origin: `http://localhost:${context.ports.dashboard}`,
+        localStorage: [{ name: "ingenium_global_project", value: context.project }],
+      })]),
+    });
+    expect(() => getDashboardStorageStatePath({ runDir: context.runDir, homeDir: tmpdir() }))
+      .toThrow(/outside the test-run directory/);
+  });
+
   it("uses production dashboard startup and explicitly isolates all services", () => {
     const context = createTestRunContext({ ports: { api: 45201, dashboard: 45202, fixture: 45203 } });
     track(context);
@@ -89,22 +233,97 @@ describe("test server lifecycle contracts", () => {
 
     expect(specs.map((spec) => spec.port)).toEqual([45201, 45202, 45203]);
     expect(specs[1]!.args[0]).toBe("start");
+    expect(specs[1]!.cwd).toBe(getTestRunDashboardWorkspace(context));
     expect(specs[1]!.args).not.toContain("dev");
     expect(specs[2]!.env.CHAT_FIXTURE_PORT).toBe("45203");
     expect(specs[0]!.env.INGENIUM_API_TOKEN).toBe(TEST_API_TOKEN);
+    expect(specs[0]!.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE)
+      .toBe(join(context.homeDir, "auth-encryption-key"));
     expect(specs[1]!.env.INGENIUM_API_TOKEN).toBeUndefined();
+    expect(specs[1]!.env.INGENIUM_API_TEST_MODE).toBe("1");
     expect(specs[1]!.env.INGENIUM_API_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
     expect(specs[0]!.env.INGENIUM_API_TEST_MODE).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_BACKGROUND_SCHEDULERS).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_SCHEDULERS).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_MAIL_MAINTENANCE).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_MAIL).toBe("1");
+    expect(specs[0]!.env.INGENIUM_API_RATE_LIMIT).toBe(String(FIXTURE_API_RATE_LIMIT));
+    expect(specs[0]!.env.DASHBOARD_ALLOWED_ORIGINS).toBe(
+      "http://127.0.0.1:45202,http://localhost:45202",
+    );
     expect(specs[0]!.env.INGENIUM_TEST_RUN_NONCE).toBe(context.runNonce);
+    for (const spec of specs) {
+      expect(spec.env.INGENIUM_PROJECT).toBe(context.project);
+      expect(spec.env.INGENIUM_PROJECT).not.toBe("global-default");
+    }
     expect(specs[1]!.readinessHeaders).toBeUndefined();
     expect(specs[2]!.readinessHeaders).toBeUndefined();
     expect(specs[0]!.readinessHeaders?.Authorization).toBe(`Bearer ${TEST_API_TOKEN}`);
+    expect(specs[0]!.readinessHeaders?.[FIXTURE_INTERNAL_SERVICE_HEADER]).toBe("1");
+    expect(specs[0]!.readinessHeaders?.[FIXTURE_RUN_NONCE_HEADER]).toBe(context.runNonce);
+    expect(specs[0]!.readinessHeaders?.[FIXTURE_PROJECT_HEADER]).toBe(context.project);
     expect(specs[1]!.env.SOME_SECRET).toBeUndefined();
     expect(specs[2]!.env.INGENIUM_API_TOKEN).toBeUndefined();
+    expect(specs[1]!.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE).toBeUndefined();
+    expect(specs[2]!.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE).toBeUndefined();
+  });
+
+  it("provisions an owner-only auth encryption key before the API starts", async () => {
+    const context = createTestRunContext({ ports: { api: 45214, dashboard: 45215, fixture: 45216 } });
+    track(context);
+
+    try {
+      await expect(startTestServers(context, {
+        production: false,
+        build: false,
+        spawnServer: (spec) => {
+          const keyPath = spec.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
+          expect(keyPath).toBe(join(context.homeDir, "auth-encryption-key"));
+          expect(statSync(keyPath!).mode & 0o777).toBe(0o600);
+          expect(readFileSync(keyPath!, "utf8")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+          throw new Error("auth encryption key probe");
+        },
+      })).rejects.toThrow("auth encryption key probe");
+    } finally {
+      updateTestRunManifest(context.manifestPath, { status: "created", processes: [] });
+      cleanupTestRun(context.manifestPath);
+    }
+  });
+
+  it("adds the internal marker only to explicitly bound fixture API calls", () => {
+    expect(directApiAuthHeaders(TEST_API_TOKEN)).toEqual({
+      Authorization: `Bearer ${TEST_API_TOKEN}`,
+    });
+    expect(directApiAuthHeaders(TEST_API_TOKEN)).not.toHaveProperty(FIXTURE_INTERNAL_SERVICE_HEADER);
+    expect(() => directApiAuthHeaders(TEST_API_TOKEN, {
+      mode: "fixture",
+      runNonce: "not-a-run-nonce",
+      project: "global-default",
+    })).toThrow(/run-owned nonce and project/);
+  });
+
+  it("captures the pre-existing process baseline before a fixture child can launch", async () => {
+    const context = createTestRunContext({ ports: { api: 45204, dashboard: 45205, fixture: 45206 } });
+    track(context);
+    let baselineAtSpawn: ReturnType<typeof readTestRunManifest>["preexistingProcessBaseline"];
+
+    try {
+      await expect(startTestServers(context, {
+        production: false,
+        build: false,
+        spawnServer: () => {
+          baselineAtSpawn = readTestRunManifest(context.manifestPath).preexistingProcessBaseline;
+          throw new Error("baseline capture probe");
+        },
+      })).rejects.toThrow("baseline capture probe");
+
+      expect(baselineAtSpawn).toBeDefined();
+      expect(readTestRunManifest(context.manifestPath).preexistingProcessBaseline).toEqual(baselineAtSpawn);
+      expect(readTestRunTelemetry(context.telemetryPath!).preexistingProcessBaseline).toEqual(baselineAtSpawn);
+    } finally {
+      updateTestRunManifest(context.manifestPath, { status: "created", processes: [] });
+      cleanupTestRun(context.manifestPath);
+    }
   });
 
   it("never forwards parent secrets to child environments", () => {
@@ -163,6 +382,19 @@ describe("test server lifecycle contracts", () => {
       if (previousManifest === undefined) delete process.env[TEST_RUN_MANIFEST_ENV];
       else process.env[TEST_RUN_MANIFEST_ENV] = previousManifest;
     }
+  });
+
+  it("retains the original manifest between setup cleanup and global teardown", async () => {
+    const context = createTestRunContext({ ports: { api: 45217, dashboard: 45218, fixture: 45219 } });
+    track(context);
+    updateTestRunManifest(context.manifestPath, { status: "running", processes: [] });
+
+    await stopRunFromManifest(context.manifestPath, { cleanup: false, stopTimeoutMs: 25 });
+
+    expect(existsSync(context.manifestPath)).toBe(true);
+    expect(readTestRunManifest(context.manifestPath).status).toBe("complete");
+    await globalTeardown();
+    expect(existsSync(context.manifestPath)).toBe(false);
   });
 
   it("fails global teardown and retains telemetry when the original manifest is missing", async () => {

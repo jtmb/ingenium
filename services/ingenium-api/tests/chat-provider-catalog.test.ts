@@ -144,6 +144,148 @@ describe("Chat provider catalog runtime guards", () => {
     });
   });
 
+  it("uses the Zen runtime default when it is the only available Chat catalog entry", async () => {
+    vi.spyOn(settings, "getSetting").mockReturnValue(undefined);
+    vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      all: [{
+        id: "opencode",
+        name: "OpenCode Zen",
+        models: {
+          zen: {
+            id: "opencode/zen-free",
+            name: "Zen Free",
+            status: "active",
+            cost: { input: 0, output: 0 },
+          },
+        },
+      }],
+      default: { opencode: "opencode/zen-free" },
+    });
+
+    const catalog = await getChatProviderCatalog("project-id");
+
+    expect(catalog).toEqual({
+      providers: [{
+        providerId: "opencode",
+        label: "OpenCode Zen",
+        models: [{ id: "opencode/zen-free", label: "Zen Free" }],
+        defaultModel: "opencode/zen-free",
+        source: "builtin",
+      }],
+      unavailable: null,
+    });
+    expect(getStoredOrDefaultChatSelection("project-id", catalog.providers)).toEqual({
+      providerId: "opencode",
+      modelId: "opencode/zen-free",
+    });
+  });
+
+  it("prefers a managed primary over a valid legacy primary and the Zen default", async () => {
+    vi.spyOn(settings, "getSetting").mockImplementation((_projectId, key) => ({
+      llm_provider_configs: JSON.stringify([{
+        id: "managed-primary",
+        name: "Managed primary",
+        models: ["managed-default"],
+        defaultModel: "managed-default",
+        roles: ["available", "primary"],
+        enabled: true,
+      }]),
+      synthesis_provider: "openai",
+      synthesis_model: "legacy-model",
+    })[key]);
+    vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      all: [{
+        id: "opencode",
+        models: {
+          zen: {
+            id: "opencode/zen-free",
+            status: "active",
+            cost: { input: 0, output: 0 },
+          },
+        },
+      }],
+      default: { opencode: "opencode/zen-free" },
+    });
+
+    const catalog = await getChatProviderCatalog("project-id");
+
+    expect(catalog.providers.map((provider) => provider.providerId)).toEqual([
+      "managed-primary",
+      "openai",
+      "opencode",
+    ]);
+    expect(getStoredOrDefaultChatSelection("project-id", catalog.providers)).toEqual({
+      providerId: "managed-primary",
+      modelId: "managed-default",
+    });
+  });
+
+  it("prefers a valid legacy primary over Zen when managed providers have no primary", async () => {
+    vi.spyOn(settings, "getSetting").mockImplementation((_projectId, key) => ({
+      llm_provider_configs: JSON.stringify([{
+        id: "managed-available",
+        name: "Managed available",
+        models: ["available-model"],
+        defaultModel: "available-model",
+        roles: ["available"],
+        enabled: true,
+      }]),
+      synthesis_provider: "openai",
+      synthesis_model: "legacy-model",
+    })[key]);
+    vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      all: [{
+        id: "opencode",
+        models: {
+          zen: {
+            id: "opencode/zen-free",
+            status: "active",
+            cost: { input: 0, output: 0 },
+          },
+        },
+      }],
+      default: { opencode: "opencode/zen-free" },
+    });
+
+    const catalog = await getChatProviderCatalog("project-id");
+
+    expect(getStoredOrDefaultChatSelection("project-id", catalog.providers)).toEqual({
+      providerId: "openai",
+      modelId: "legacy-model",
+    });
+  });
+
+  it("prefers a valid stored selection over managed, legacy, and Zen defaults", () => {
+    const providers = [
+      {
+        providerId: "managed-primary",
+        label: "Managed primary",
+        models: [{ id: "managed-default", label: "Managed default" }],
+        defaultModel: "managed-default",
+        source: "managed" as const,
+      },
+      {
+        providerId: "opencode",
+        label: "OpenCode Zen",
+        models: [{ id: "opencode/zen-free", label: "Zen Free" }],
+        defaultModel: "opencode/zen-free",
+        source: "builtin" as const,
+      },
+    ];
+    vi.spyOn(settings, "getSetting").mockImplementation((_projectId, key) =>
+      key === "chat_selection"
+        ? JSON.stringify({ providerId: "opencode", modelId: "opencode/zen-free" })
+        : key === "llm_provider_configs"
+          ? JSON.stringify([{ id: "managed-primary", roles: ["available", "primary"] }])
+          : undefined,
+    );
+
+    expect(getStoredOrDefaultChatSelection("project-id", providers)).toEqual({
+      providerId: "opencode",
+      modelId: "opencode/zen-free",
+    });
+  });
+
   it("rejects a stale persisted pair and falls back to the current catalog default", () => {
     const providers = [{
       providerId: "opencode",

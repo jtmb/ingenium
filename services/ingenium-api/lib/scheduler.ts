@@ -1,5 +1,6 @@
-import { settings, projects, logger, extraction, synthesis, jobs, maintenanceLocks, checkpointAfterWrite } from "ingenium-core";
-import { executeJobRun } from "./job-runner.js";
+import { settings, projects, logger, extraction, synthesis, jobs, jobEventDeliveries, maintenanceLocks, checkpointAfterWrite, usage } from "ingenium-core";
+import { executeJobRun, recoverExpiredEventAttempt, recoverVaultSecretRunDirectories } from "./job-runner.js";
+import { getUsageSyncInterval, syncUsageFromOpenCode } from "./usage-sync.js";
 import {
   getEmailEncryptionDiagnostics,
   listAccounts,
@@ -9,6 +10,8 @@ import {
   providerErrorDiagnostic,
 } from "ingenium-email";
 import { loadApiToken } from "./middleware/api-token.js";
+import { createBackgroundSynthesisBrokerExecutor } from "./opencode-client.js";
+import { createOpenCodeMessagesClient } from "./opencode-messages-client.js";
 
 /**
  * Default synthesis interval: 15 minutes (900,000ms).
@@ -53,6 +56,8 @@ const LOCK_CLEANUP_INTERVAL_MS = 300_000;
 const CROSS_PROJECT_TIMEOUT_MS = 120_000;
 /** Resource name for skills lock. */
 const LOCK_RESOURCE = "skills";
+const EVENT_JOB_CLAIMS_PER_CYCLE = 4;
+const EVENT_JOB_TICK_MS = 10_000;
 
 let schedulerRunning = false;
 let schedulerGeneration = 0;
@@ -86,6 +91,7 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
   if (!isSchedulerActive(generation)) return;
   const allProjects = projects.listProjects();
   const activeProjects = allProjects.filter(p => !p.archived_at);
+  const messagesClient = createOpenCodeMessagesClient();
 
   for (const p of activeProjects) {
     if (!isSchedulerActive(generation)) break;
@@ -115,7 +121,10 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
 
       // 1. Extraction — LLM-based observation extraction from OpenCode messages.
       try {
-        const extractResult = await extraction.runExtraction(p.id, p.name);
+        const extractResult = await extraction.runExtraction(p.id, p.name, {
+          llmExecutor: createBackgroundSynthesisBrokerExecutor(p.id),
+          messagesClient,
+        });
         logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
       } catch (err: any) {
         logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
@@ -123,7 +132,10 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
 
       // 2. Synthesis — processes pending observations into traits + skills
       try {
-        const result = await synthesis.runSynthesis(p.id);
+        const result = await synthesis.runSynthesis(p.id, undefined, {
+          llmExecutor: createBackgroundSynthesisBrokerExecutor(p.id),
+          ownerToken,
+        });
         logger.info(
           "scheduler",
           `Synthesis for "${p.name}": ${result.summary}`,
@@ -132,7 +144,7 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
         logger.warn("scheduler", `Synthesis for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       }
 
-      // Force WAL checkpoint after synthesis (no readers active)
+      // Bound WAL growth after the synthesis writes commit.
       checkpointAfterWrite();
     } finally {
       // Always clear heartbeat and release lock
@@ -156,18 +168,14 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
       logger.error("scheduler", "Cross-project synthesis skipped because API authentication is not configured");
       return;
     }
-    const controller = new AbortController();
-    activeAbortControllers.add(controller);
-    const timeoutId = setTimeout(() => {
-      scheduledTimeouts.delete(timeoutId);
-      controller.abort();
-    }, CROSS_PROJECT_TIMEOUT_MS);
-    scheduledTimeouts.add(timeoutId);
+    const shutdownController = new AbortController();
+    const timeoutSignal = AbortSignal.timeout(CROSS_PROJECT_TIMEOUT_MS);
+    activeAbortControllers.add(shutdownController);
     try {
       const res = await fetch(`http://localhost:${port}/api/v1/synthesis/cross-project`, {
         method: "POST",
-        signal: controller.signal,
-        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.any([shutdownController.signal, timeoutSignal]),
+        headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Internal-Service": "1" },
       });
       if (!res.ok && res.status !== 423) {
         const body = await res.json().catch(() => ({})) as any;
@@ -177,15 +185,15 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
       const msg = e instanceof Error ? e.message : String(e);
       const name = e instanceof Error ? e.name : "Unknown";
       const stack = e instanceof Error ? e.stack : undefined;
-      if ((e as any)?.name === "AbortError") {
+      if (timeoutSignal.aborted) {
         logger.warn("scheduler", "Cross-project synthesis client timed out after 120s — server-side work continues with route-held lock");
+      } else if (shutdownController.signal.aborted) {
+        logger.debug("scheduler", "Cross-project synthesis client cancelled during scheduler shutdown");
       } else {
         logger.debug("scheduler", `Cross-project synthesis client error: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
       }
     } finally {
-      clearTimeout(timeoutId);
-      scheduledTimeouts.delete(timeoutId);
-      activeAbortControllers.delete(controller);
+      activeAbortControllers.delete(shutdownController);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -193,9 +201,71 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
   }
 }
 
-// ============================================================================
-// Mail sync scheduler — independent timer, reads "mail_sync_interval_ms"
-// ============================================================================
+// OpenCode usage is collected from metadata-only step-finish parts. Unlike
+// mail, collection has no global-project ownership: explicit source mappings
+// determine each destination project and unmapped sessions are quarantined.
+async function reconcileUsageAttentionForMappedProjects(generation: number): Promise<void> {
+  if (!isSchedulerActive(generation)) return;
+  const syncIntervalMs = getUsageSyncInterval();
+  if (syncIntervalMs === 0) return;
+  let projectIds: string[];
+  try {
+    projectIds = usage.listUsageAttentionMappedProjectIds();
+  } catch (error) {
+    logger.warn("usage-attention", "Usage attention project discovery failed", {
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    return;
+  }
+  for (const projectId of projectIds) {
+    if (!isSchedulerActive(generation)) return;
+    try {
+      const reconciliation = usage.reconcileUsageAttention(projectId, { syncIntervalMs });
+      logger.debug("usage-attention", "Usage attention reconciled", {
+        items: reconciliation.items.length,
+        transitions: reconciliation.transitions.length,
+      });
+    } catch (error) {
+      logger.warn("usage-attention", "Usage attention reconciliation failed", {
+        name: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+}
+
+async function triggerUsageSync(generation: number): Promise<void> {
+  if (!isSchedulerActive(generation)) return;
+  if (getUsageSyncInterval() === 0) return;
+  const result = await syncUsageFromOpenCode();
+  if (!result.alreadyRunning) await reconcileUsageAttentionForMappedProjects(generation);
+  if (result.alreadyRunning) {
+    logger.debug("usage-sync", "Scheduled usage sync skipped because another sync is already running");
+    return;
+  }
+  if (result.unavailable) {
+    logger.warn("usage-sync", "Scheduled usage sync is unavailable", { code: result.errorCode });
+    return;
+  }
+  logger.info("usage-sync", "Scheduled usage sync completed", {
+    projects: result.projects.length,
+    events: result.projects.reduce((total, project) => total + project.eventsUpserted, 0),
+    quarantinedSessions: result.sessionsQuarantined,
+  });
+}
+
+function scheduleUsageSync(generation: number): void {
+  if (!isSchedulerActive(generation)) return;
+  const interval = getUsageSyncInterval();
+  if (interval <= 0) {
+    logger.info("usage-sync", "Usage sync disabled (USAGE_SYNC_INTERVAL_MS = 0)");
+    return;
+  }
+  scheduleTimeout(generation, interval, () => {
+    void trackTask(triggerUsageSync(generation)).finally(() => {
+      if (isSchedulerActive(generation)) scheduleUsageSync(generation);
+    }).catch(() => undefined);
+  });
+}
 
 const MAIL_SYNC_DEFAULT_MS = 300_000;
 
@@ -221,16 +291,15 @@ async function triggerMailSyncForAllProjects(generation: number): Promise<void> 
     // Guard: skip mail sync entirely if no global project exists.
     // The engine requires a global project for account storage — without it,
     // every call to getGlobalProjectId() would throw.
-    let globalId: string;
     try {
-      globalId = getGlobalProjectId();
+      getGlobalProjectId();
     } catch {
       logger.debug("mail-sync", "Skipping mail sync — no global project configured");
       return;
     }
 
     const engineStatus = getEngineStatus();
-    const accounts = listAccounts(globalId);
+    const accounts = listAccounts();
     const encryption = getEmailEncryptionDiagnostics();
     if (encryption.status !== "ready") {
       logger.debug("mail-sync", `Skipping mail sync — encryption continuity is ${encryption.status}`);
@@ -240,18 +309,20 @@ async function triggerMailSyncForAllProjects(generation: number): Promise<void> 
     // Reconcile on every scheduler tick so a global-project reassignment does
     // not leave workers bound to account snapshots from the former global.
     if (!isSchedulerActive(generation)) return;
-    startEngine(globalId);
+    startEngine();
+
+    if (accounts.length === 0) return;
 
     if (!engineStatus.running || !engineStatus.heartbeatAt) {
       logger.warn("mail-sync", `Engine not running (running=${engineStatus.running}, heartbeat=${engineStatus.heartbeatAt}), restarting`);
-      startEngine(globalId);
+      startEngine();
       return;
     }
 
     const msSince = Date.now() - new Date(engineStatus.heartbeatAt).getTime();
     if (msSince > 120_000) {
       logger.warn("mail-sync", `Engine heartbeat stale (${Math.round(msSince / 1000)}s since last tick), restarting`);
-      startEngine(globalId);
+      startEngine();
       return;
     }
 
@@ -294,10 +365,7 @@ function scheduleNext(port: number, generation: number): void {
   }
 }
 
-// ============================================================================
-// Job cron scheduler — runs every 60 seconds on a separate cycle
-// ============================================================================
-
+// Reject cron forms this scheduler cannot interpret rather than running them at the wrong time.
 function matchesCron(cron: string, date: Date): boolean {
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return false;
@@ -334,54 +402,102 @@ function matchField(pattern: string, value: number, _min: number, _max: number):
 
 function runJobScheduler(generation: number): void {
   if (!isSchedulerActive(generation)) return;
+  void recoverVaultSecretRunDirectories().catch(() => {
+    logger.warn("job-scheduler", "Vault job recovery retained unresolved evidence");
+  });
   try {
     const allProjects = projects.listProjects();
     const activeProjects = allProjects.filter(p => !p.archived_at);
     const now = new Date();
 
+    const dueJobs: ReturnType<typeof jobs.listJobs> = [];
     for (const p of activeProjects) {
       if (!isSchedulerActive(generation)) break;
       const projectJobs = jobs.listJobs(p.id);
 
       for (const job of projectJobs) {
-        if (!isSchedulerActive(generation)) break;
         if (!job.enabled) continue;
         if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
         if (!matchesCron(job.schedule_cron, now)) continue;
-
-        const result = jobs.startJobRun(p.id, job.id, "cron");
+        dueJobs.push(job);
+      }
+    }
+    for (const job of jobs.orderJobsForFairDispatch(dueJobs, "cron")) {
+        if (!isSchedulerActive(generation)) break;
+        const scheduledFor = new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
+        const result = jobs.startJobRun(job.project_id, job.id, "cron", {
+          scheduledFor,
+          expectedScheduleRevision: job.schedule_revision,
+        });
 
         if ("reason" in result) {
-          logger.debug("job-scheduler", `Job "${job.name}" skipped: ${result.reason}`);
+          logger.debug("job-scheduler", `Job "${jobEventDeliveries.sanitizeJobEventText(job.name, 128)}" skipped: ${result.reason}`);
           continue;
         }
 
-        logger.info("job-scheduler", `Triggered cron run ${result.id} for job "${job.name}"`);
+        logger.info("job-scheduler", `Triggered cron run ${result.id} for job "${jobEventDeliveries.sanitizeJobEventText(job.name, 128)}"`);
 
         if (!isSchedulerActive(generation)) {
-          jobs.cancelJobRun(result.id);
+          jobs.cancelJobRun(job.project_id, result.id);
           break;
         }
 
         executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
-          logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+          const message = jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.message : "unknown", 256);
+          logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${message}`, { error: message, name: jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.name : "unknown", 64) });
         });
-      }
     }
   } catch (err: any) {
-    logger.warn("job-scheduler", `Job scheduler tick failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+    const message = jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.message : "unknown", 256);
+    logger.warn("job-scheduler", `Job scheduler tick failed: ${message}`, { error: message, name: jobEventDeliveries.sanitizeJobEventText(err instanceof Error ? err.name : "unknown", 64) });
   }
 
   if (isSchedulerActive(generation)) scheduleJobTick(generation);
 }
 
+async function runEventJobScheduler(generation: number): Promise<void> {
+  if (!isSchedulerActive(generation)) return;
+  try {
+    const activeProjects = projects.listProjects().filter((project) => !project.archived_at);
+    for (const project of activeProjects) {
+      if (!isSchedulerActive(generation)) break;
+      jobEventDeliveries.snapshotTrustedJobEvents(project.id);
+      const expired = jobEventDeliveries.listExpiredJobEventLeases(project.id, EVENT_JOB_CLAIMS_PER_CYCLE);
+      for (const lease of expired) {
+        if (!isSchedulerActive(generation)) return;
+        await recoverExpiredEventAttempt(lease);
+      }
+    }
+    for (let claimCount = 0; claimCount < EVENT_JOB_CLAIMS_PER_CYCLE && isSchedulerActive(generation); claimCount += 1) {
+      const claim = jobEventDeliveries.claimNextJobEventDelivery();
+      if (!claim) break;
+      executeJobRun(claim.run.id, claim.job, claim.job.prompt_template, {
+        deliveryId: claim.delivery.id,
+        attemptNumber: claim.attemptNumber,
+        leaseToken: claim.leaseToken,
+        leaseRevision: claim.leaseRevision,
+      }).catch((error: Error) => {
+        logger.error("job-event-scheduler", "Event job runner failed", { name: error.name });
+      });
+    }
+  } catch (error) {
+    logger.warn("job-event-scheduler", "Trusted event dispatch cycle failed", {
+      name: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
+function scheduleEventJobTick(generation: number): void {
+  scheduleTimeout(generation, EVENT_JOB_TICK_MS, () => {
+    void trackTask(runEventJobScheduler(generation)).finally(() => {
+      if (isSchedulerActive(generation)) scheduleEventJobTick(generation);
+    }).catch(() => undefined);
+  });
+}
+
 function scheduleJobTick(generation: number): void {
   scheduleTimeout(generation, 60_000, () => runJobScheduler(generation));
 }
-
-// ============================================================================
-// Lock cleanup scheduler
-// ============================================================================
 
 function scheduleLockCleanup(generation: number): void {
   scheduleTimeout(generation, LOCK_CLEANUP_INTERVAL_MS, () => {
@@ -396,10 +512,6 @@ function scheduleLockCleanup(generation: number): void {
     if (isSchedulerActive(generation)) scheduleLockCleanup(generation);
   });
 }
-
-// ============================================================================
-// Main scheduler entry point
-// ============================================================================
 
 export function startScheduler(port: number): void {
   if (schedulerRunning) {
@@ -434,12 +546,27 @@ export function startScheduler(port: number): void {
   logger.info("scheduler", "Job cron scheduler started (60s cycle)");
   scheduleTimeout(generation, 10_000, () => scheduleJobTick(generation));
 
+  logger.info("scheduler", `Trusted event job scheduler started (${EVENT_JOB_TICK_MS / 1000}s cycle)`);
+  scheduleTimeout(generation, 5_000, () => {
+    void trackTask(runEventJobScheduler(generation)).finally(() => {
+      if (isSchedulerActive(generation)) scheduleEventJobTick(generation);
+    }).catch(() => undefined);
+  });
+
   const mailInterval = getMailSyncInterval();
   if (mailInterval > 0) {
     logger.info("mail-sync", `Mail sync scheduler started (${mailInterval / 1000}s cycle)`);
     scheduleTimeout(generation, 15_000, () => scheduleMailSync(generation));
   } else {
     logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0)");
+  }
+
+  const usageInterval = getUsageSyncInterval();
+  if (usageInterval > 0) {
+    logger.info("usage-sync", `Usage sync scheduler started (${usageInterval / 1000}s cycle)`);
+    scheduleTimeout(generation, 20_000, () => scheduleUsageSync(generation));
+  } else {
+    logger.info("usage-sync", "Usage sync disabled (USAGE_SYNC_INTERVAL_MS = 0)");
   }
 }
 

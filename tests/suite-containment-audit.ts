@@ -1,35 +1,62 @@
 import { connect } from "node:net";
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   realpathSync,
-  readFileSync,
-  readlinkSync,
+  rmSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   TEST_RUN_MANIFEST_ENV,
   TEST_RUN_TELEMETRY_ENV,
   getCanonicalRepoRoot,
+  getContainmentAuditTempRoots,
   getTestRunArtifactRoot,
   getTestRunTelemetryPath,
-  readTestRunManifest,
-  readTestRunTelemetry,
+  readTestRunManifestForContainmentAudit,
+  readTestRunTelemetryForContainmentAudit,
   type TestRunManifest,
   type TestRunProcess,
+  type TestRunPreexistingProcessBaseline,
   type TestRunTelemetry,
 } from "./test-run-context";
-import { inspectProcessIdentity, type ProcessIdentity } from "./test-server-lifecycle";
+import {
+  discoverRepositoryProcessCandidates,
+  inspectProcessIdentity,
+  type ProcessIdentity,
+  type RepositoryProcessCandidate,
+} from "./test-run-process-discovery";
+import {
+  COMPOSE_OWNED_HOST_PORTS,
+  inspectComposeOwnership,
+  type ComposeOwnershipReport,
+} from "./compose-ownership";
+import {
+  inspectTestRunArtifactLock,
+  listTestRunRetentionLockEntries,
+  retentionRunIdFromLockEntry,
+} from "./test-run-retention-lock";
+import {
+  inspectValidatedArtifactRetentionTransition,
+  type ArtifactRetentionTransitionInspection,
+} from "./test-artifact-retention";
 
-const DEFAULT_PORTS = [3000, 4097, 4098, 4099, 4999];
+const DEFAULT_PORTS = [3000, 4097, 1455, 4098, 4099, 4999];
 const DEFAULT_TEMP_PREFIX = "ingenium-playwright-";
 const DEFAULT_RSS_LIMIT = 512 * 1024 * 1024;
+// A missing manifest can only be treated as retained historical evidence after
+// a full stale-run interval. Fresh evidence remains a strict recovery failure.
+const HISTORICAL_INERT_EVIDENCE_AFTER_MS = 60 * 60 * 1_000;
 
-interface PortState {
+export type PortOwnership = "fixture-owned" | "compose-owned" | "pre-existing-unowned" | "unverified" | "unowned";
+
+export interface PortState {
   port: number;
   listening: boolean;
+  /** Legacy manifest association; not sufficient to authorize an open port. */
   owned: boolean;
+  ownership: PortOwnership;
 }
 
 export interface ManagedProcessState {
@@ -53,6 +80,10 @@ export interface DiscoveredProcessState {
   reason: "manifestless-candidate";
 }
 
+export interface PreexistingUnownedProcessState extends Omit<DiscoveredProcessState, "reason"> {
+  reason: "pre-existing-unowned";
+}
+
 export type ArtifactClassification =
   | "legacy-visual-qa-manual"
   | "legacy-visual-qa"
@@ -67,18 +98,43 @@ export interface ArtifactEvidenceClassification {
   disposition: "informational" | "failure";
 }
 
+export type TelemetryEvidenceDisposition = "current" | "historical-inert";
+
+export interface TelemetryAuditEntry {
+  path: string;
+  manifestPath: string;
+  runId: string;
+  status: TestRunTelemetry["status"];
+  updatedAt: string;
+  failures: string[];
+  resolution?: TestRunTelemetry["resolution"];
+  activeProcessCount: number;
+  manifestState: TelemetryManifestState;
+  manifestError?: string;
+  /** Current evidence fails strictly; authenticated inert history is retained. */
+  evidenceDisposition: TelemetryEvidenceDisposition;
+}
+
 export interface ContainmentAuditReport {
   repoRoot: string;
   manifestPath?: string;
   manifestStatus?: TestRunManifest["status"];
   ports: PortState[];
+  composeOwnership: ComposeOwnershipReport;
   managedPorts: number[];
   expectedPorts: number[];
+  /** Manifest-backed temporary runs requiring recovery. */
   tempEntries: string[];
+  /** Manifestless temp evidence is retained and reported, never deleted. */
+  unownedTempEntries: string[];
   managedProcesses: ManagedProcessState[];
   discoveredProcesses: DiscoveredProcessState[];
+  preexistingUnownedProcesses: PreexistingUnownedProcessState[];
   holds: string[];
   telemetryErrors: string[];
+  /** Active valid transitions are retried once; malformed/expired markers fail. */
+  retentionTransitions: string[];
+  retentionErrors: string[];
   /** Retained evidence from pre-runner/legacy suites; never a runnable run. */
   legacyEvidence: string[];
   /** Human-readable audit information that is intentionally not a failure. */
@@ -89,13 +145,7 @@ export interface ContainmentAuditReport {
   artifactResiduals: string[];
   /** True when the repository-wide artifact scan is enabled for strict audit. */
   repositoryArtifactScan: boolean;
-  telemetry: Array<Pick<TestRunTelemetry, "runId" | "status" | "updatedAt" | "failures" | "resolution"> & {
-    path: string;
-    manifestPath: string;
-    activeProcessCount: number;
-    manifestState: "valid" | "missing" | "invalid";
-    manifestError?: string;
-  }>;
+  telemetry: TelemetryAuditEntry[];
   process: { activeHandles: number; rssBytes: number };
   rssLimitBytes: number;
 }
@@ -108,6 +158,10 @@ export interface ContainmentAuditOptions {
   /** Repository-wide discovery is reserved for the explicit strict audit. */
   includeRepositoryTelemetry?: boolean;
   manifestPath?: string;
+  /** Test seam for Docker-free ownership classification tests. */
+  composeOwnership?: ComposeOwnershipReport;
+  /** Test seam for port classification without opening real listeners. */
+  portProbe?: (port: number) => Promise<boolean>;
 }
 
 interface TelemetryManifestCheck {
@@ -115,17 +169,25 @@ interface TelemetryManifestCheck {
   error?: string;
 }
 
+function preexistingProcessBaselinesMatch(
+  left: TestRunPreexistingProcessBaseline | undefined,
+  right: TestRunPreexistingProcessBaseline | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function checkTelemetryManifest(entry: TestRunTelemetry, repoRoot: string): TelemetryManifestCheck {
   if (!existsSync(entry.manifestPath)) return { state: "missing", error: "manifest is missing" };
   try {
-    const manifest = readTestRunManifest(entry.manifestPath);
+    const manifest = readTestRunManifestForContainmentAudit(entry.manifestPath);
     const identityMatches = manifest.runId === entry.runId
       && manifest.runNonce === entry.runNonce
       && manifest.repoRoot === repoRoot
       && resolve(manifest.manifestPath) === resolve(entry.manifestPath)
       && manifest.ports.api === entry.ports.api
       && manifest.ports.dashboard === entry.ports.dashboard
-      && manifest.ports.fixture === entry.ports.fixture;
+      && manifest.ports.fixture === entry.ports.fixture
+      && preexistingProcessBaselinesMatch(manifest.preexistingProcessBaseline, entry.preexistingProcessBaseline);
     if (!identityMatches) {
       return { state: "invalid", error: "manifest identity does not match telemetry" };
     }
@@ -180,20 +242,71 @@ function isListening(port: number): Promise<boolean> {
   });
 }
 
-async function auditPorts(ports: number[], ownedPorts: Set<number>): Promise<PortState[]> {
-  return Promise.all(ports.map(async (port) => ({
-    port,
-    listening: await isListening(port),
-    owned: ownedPorts.has(port),
-  })));
+export function classifyPortOwnership(input: {
+  port: number;
+  listening: boolean;
+  managedPorts: ReadonlySet<number>;
+  fixtureOwnedPorts: ReadonlySet<number>;
+  preexistingUnownedPorts: ReadonlySet<number>;
+  composeOwnership: ComposeOwnershipReport;
+}): PortOwnership {
+  if (!input.listening) return "unowned";
+  if (input.fixtureOwnedPorts.has(input.port)) return "fixture-owned";
+  if (input.preexistingUnownedPorts.has(input.port)) return "pre-existing-unowned";
+  if (input.composeOwnership.classification === "compose-owned"
+    && input.composeOwnership.hostPorts.includes(input.port)) {
+    return "compose-owned";
+  }
+  if (input.managedPorts.has(input.port) || (COMPOSE_OWNED_HOST_PORTS as readonly number[]).includes(input.port)) {
+    return "unverified";
+  }
+  return "unowned";
 }
 
-function auditTemp(resolvedManifestPaths: Set<string> = new Set()): string[] {
-  const entries = readdirSync(tmpdir(), { withFileTypes: true });
+async function auditPorts(
+  ports: number[],
+  managedPorts: Set<number>,
+  fixtureOwnedPorts: Set<number>,
+  preexistingUnownedPorts: Set<number>,
+  composeOwnership: ComposeOwnershipReport,
+  portProbe: (port: number) => Promise<boolean> = isListening,
+): Promise<PortState[]> {
+  return Promise.all(ports.map(async (port) => {
+    const listening = await portProbe(port);
+    return {
+      port,
+      listening,
+      owned: managedPorts.has(port),
+      ownership: classifyPortOwnership({
+        port,
+        listening,
+        managedPorts,
+        fixtureOwnedPorts,
+        preexistingUnownedPorts,
+        composeOwnership,
+      }),
+    };
+  }));
+}
+
+function auditTemp(resolvedManifestPaths: Set<string> = new Set()): {
+  manifestBacked: string[];
+  manifestless: string[];
+} {
   const prefix = process.env.INGENIUM_AUDIT_TEMP_PREFIX ?? DEFAULT_TEMP_PREFIX;
-  return entries.filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
-    .map((entry) => join(tmpdir(), entry.name))
-    .filter((path) => !resolvedManifestPaths.has(join(path, "run-manifest.json")));
+  const manifestBacked: string[] = [];
+  const manifestless: string[] = [];
+  for (const root of getContainmentAuditTempRoots()) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+      const path = join(root, entry.name);
+      const manifestPath = join(path, "run-manifest.json");
+      if (resolvedManifestPaths.has(manifestPath)) continue;
+      if (optionalLstat(manifestPath)) manifestBacked.push(path);
+      else manifestless.push(path);
+    }
+  }
+  return { manifestBacked: [...new Set(manifestBacked)], manifestless: [...new Set(manifestless)] };
 }
 
 function auditProcesses(): { activeHandles: number; rssBytes: number } {
@@ -276,6 +389,105 @@ function legacyEvidenceDirectories(repoRoot: string): string[] {
   const playwrightMcp = join(repoRoot, ".playwright-mcp");
   const mcpEvidence = existsSync(playwrightMcp) ? [playwrightMcp] : [];
   return [...testRunEvidence, ...visualEvidence, ...mcpEvidence].sort();
+}
+
+export interface OwnedArtifactInventoryEntry {
+  relativePath: string;
+  type: "directory" | "file";
+}
+
+export interface OwnedMisplacedTestResults {
+  path: string;
+  inventory: OwnedArtifactInventoryEntry[];
+}
+
+function optionalLstat(path: string): ReturnType<typeof lstatSync> | undefined {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function assertCanonicalDirectory(path: string, containmentRoot: string, name: string): void {
+  const metadata = optionalLstat(path);
+  if (!metadata) throw new Error(`${name} does not exist: ${path}`);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()
+    || realpathSync(path) !== path || !pathIsInside(containmentRoot, path)) {
+    throw new Error(`${name} is not a canonical owned directory: ${path}`);
+  }
+}
+
+function inventoryOwnedDirectory(root: string, current = root): OwnedArtifactInventoryEntry[] {
+  const entries: OwnedArtifactInventoryEntry[] = [];
+  for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const path = join(current, entry.name);
+    const metadata = lstatSync(path);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`Refusing to remove misplaced test results with a symlink: ${path}`);
+    }
+    const relativePath = relative(root, path);
+    if (!pathIsInside(root, path)) {
+      throw new Error(`Refusing to inventory an escaped misplaced test-results path: ${path}`);
+    }
+    if (metadata.isDirectory()) {
+      entries.push({ relativePath, type: "directory" });
+      entries.push(...inventoryOwnedDirectory(root, path));
+    } else if (metadata.isFile()) {
+      entries.push({ relativePath, type: "file" });
+    } else {
+      throw new Error(`Refusing to remove misplaced test results with a non-file entry: ${path}`);
+    }
+  }
+  return entries;
+}
+
+/**
+ * Inspect only the known bad Playwright residual. It is never discovered by a
+ * glob: the lexical path, canonical parents, and every inventory entry must
+ * be proven before removal is possible.
+ */
+export function inspectOwnedMisplacedTestResults(repoRootCandidate: string): OwnedMisplacedTestResults | undefined {
+  const repoRoot = getCanonicalRepoRoot(repoRootCandidate);
+  const testsRoot = join(repoRoot, "tests");
+  const nestedTestsRoot = join(testsRoot, "tests");
+  const misplacedRoot = join(nestedTestsRoot, "test-results");
+  const candidate = optionalLstat(misplacedRoot);
+  if (!candidate) return undefined;
+
+  assertCanonicalDirectory(testsRoot, repoRoot, "tests root");
+  assertCanonicalDirectory(nestedTestsRoot, testsRoot, "nested tests root");
+  assertCanonicalDirectory(misplacedRoot, nestedTestsRoot, "misplaced test-results root");
+  const nestedEntries = readdirSync(nestedTestsRoot).sort();
+  if (nestedEntries.length !== 1 || nestedEntries[0] !== "test-results") {
+    throw new Error("Refusing to remove misplaced test results alongside unowned nested-test entries");
+  }
+
+  return { path: misplacedRoot, inventory: inventoryOwnedDirectory(misplacedRoot) };
+}
+
+/**
+ * Delete only the exact known residual after a stable canonical-path and
+ * symlink-free inventory proof. Any changed path or inventory fails closed;
+ * no other evidence root is considered or deleted.
+ */
+export function removeOwnedMisplacedTestResults(repoRootCandidate: string): OwnedMisplacedTestResults | undefined {
+  const first = inspectOwnedMisplacedTestResults(repoRootCandidate);
+  if (!first) return undefined;
+  const before = lstatSync(first.path);
+  const second = inspectOwnedMisplacedTestResults(repoRootCandidate);
+  if (!second
+    || before.dev !== lstatSync(second.path).dev
+    || before.ino !== lstatSync(second.path).ino
+    || JSON.stringify(first.inventory) !== JSON.stringify(second.inventory)) {
+    throw new Error("Refusing to remove misplaced test results because ownership evidence changed during reinspection");
+  }
+  rmSync(second.path, { recursive: true, force: false, maxRetries: 2 });
+  if (optionalLstat(second.path)) {
+    throw new Error(`Owned misplaced test-results residual was not removed: ${second.path}`);
+  }
+  return second;
 }
 
 function artifactEvidenceClassifications(repoRoot: string): ArtifactEvidenceClassification[] {
@@ -377,12 +589,26 @@ function telemetryCandidates(
   return [...candidates];
 }
 
+function scopedTelemetryPaths(
+  manifest: TestRunManifest | undefined,
+  options: ContainmentAuditOptions,
+): Set<string> {
+  const configured = options.telemetryPaths ?? (
+    process.env[TEST_RUN_TELEMETRY_ENV] !== undefined
+      ? [process.env[TEST_RUN_TELEMETRY_ENV] as string]
+      : []
+  );
+  const paths = new Set(configured.map((path) => resolve(path)));
+  if (manifest) paths.add(getTestRunTelemetryPath(manifest));
+  return paths;
+}
+
 function loadManifest(repoRoot: string, configuredManifestPath = process.env[TEST_RUN_MANIFEST_ENV]): { manifest?: TestRunManifest; error?: string } {
   const manifestPath = configuredManifestPath;
   if (!manifestPath) return {};
   if (!existsSync(manifestPath)) return { error: `manifest is missing: ${manifestPath}` };
   try {
-    const manifest = readTestRunManifest(manifestPath);
+    const manifest = readTestRunManifestForContainmentAudit(manifestPath);
     if (manifest.repoRoot !== repoRoot) return { error: "manifest repository root does not match the canonical artifact root" };
     return { manifest };
   } catch (error) {
@@ -420,97 +646,16 @@ function pathIsInside(parent: string, child: string): boolean {
   return fromParent === "" || (!fromParent.startsWith("..") && !isAbsolute(fromParent));
 }
 
-function readProcNonce(pid: number): string | undefined {
-  try {
-    const environ = readFileSync(`/proc/${pid}/environ`, "utf8");
-    return environ.split("\u0000")
-      .find((entry) => entry.startsWith("INGENIUM_TEST_RUN_NONCE="))
-      ?.slice("INGENIUM_TEST_RUN_NONCE=".length);
-  } catch {
-    return undefined;
-  }
-}
-
-function readListeningInodes(): Map<string, number[]> {
-  const inodes = new Map<string, number[]>();
-  if (process.platform === "win32") return inodes;
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
-    try {
-      const lines = readFileSync(file, "utf8").trim().split("\n").slice(1);
-      for (const line of lines) {
-        const fields = line.trim().split(/\s+/);
-        if (fields.length < 10 || fields[3] !== "0A") continue;
-        const portText = fields[1]?.split(":")[1];
-        const port = portText ? Number.parseInt(portText, 16) : Number.NaN;
-        const inode = fields[9];
-        if (!Number.isInteger(port) || port < 1 || port > 65535 || !inode || !/^\d+$/.test(inode)) continue;
-        const ports = inodes.get(inode) ?? [];
-        if (!ports.includes(port)) ports.push(port);
-        inodes.set(inode, ports);
-      }
-    } catch {
-      // /proc/net may be unavailable in a restricted audit environment. The
-      // process identity scan remains read-only and still reports nonce-bound
-      // candidates.
-    }
-  }
-  return inodes;
-}
-
-function listeningPortsForPid(pid: number, inodes: Map<string, number[]>): number[] {
-  const ports = new Set<number>();
-  try {
-    for (const fd of readdirSync(`/proc/${pid}/fd`)) {
-      let target: string;
-      try {
-        target = readlinkSync(`/proc/${pid}/fd/${fd}`);
-      } catch {
-        continue;
-      }
-      const match = /^socket:\[(\d+)\]$/.exec(target);
-      if (!match) continue;
-      for (const port of inodes.get(match[1]!) ?? []) ports.add(port);
-    }
-  } catch {
-    // A disappearing process or a protected fd directory is not a reason to
-    // signal anything. The candidate is simply omitted unless its nonce is
-    // independently visible.
-  }
-  return [...ports].sort((left, right) => left - right);
-}
-
-function repositoryProcessCandidate(
-  repoRoot: string,
-  pid: number,
-  listeningInodes: Map<string, number[]>,
-): DiscoveredProcessState | undefined {
-  if (pid <= 1 || pid === process.pid) return undefined;
-  const identity = inspectProcessIdentity(pid);
-  if (!identity) return undefined;
-  let cwd: string;
-  let executable: string;
-  let commandLine: string[] = [];
-  try {
-    cwd = realpathSync(`/proc/${pid}/cwd`);
-    executable = realpathSync(`/proc/${pid}/exe`);
-    commandLine = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\u0000").filter(Boolean);
-  } catch {
-    return undefined;
-  }
-  const commandPathCandidate = commandLine.some((argument) => isAbsolute(argument) && pathIsInside(repoRoot, argument));
-  if (!pathIsInside(repoRoot, cwd) && !pathIsInside(repoRoot, executable) && !commandPathCandidate) return undefined;
-  const listeningPorts = listeningPortsForPid(pid, listeningInodes);
-  const runNonce = identity.runNonce ?? readProcNonce(pid);
-  if (listeningPorts.length === 0 && !runNonce) return undefined;
+function discoveredProcessState(candidate: RepositoryProcessCandidate): DiscoveredProcessState {
   return {
-    pid,
-    pidStartTime: identity.pidStartTime,
-    pgid: identity.pgid,
-    groupIdentity: identity.groupIdentity,
-    cwd,
-    executable,
-    ...(runNonce ? { runNonce } : {}),
-    listeningPorts,
+    pid: candidate.pid,
+    pidStartTime: candidate.pidStartTime,
+    pgid: candidate.pgid,
+    groupIdentity: candidate.groupIdentity,
+    cwd: candidate.cwd,
+    executable: candidate.executable,
+    ...(candidate.runNonce ? { runNonce: candidate.runNonce } : {}),
+    listeningPorts: candidate.listeningPorts,
     reason: "manifestless-candidate",
   };
 }
@@ -521,29 +666,95 @@ function repositoryProcessCandidate(
  * or a run nonce. Manifest ownership is intentionally resolved by the caller.
  */
 export function discoverRepositoryProcesses(repoRoot: string): DiscoveredProcessState[] {
-  if (process.platform === "win32") return [];
-  const listeningInodes = readListeningInodes();
-  const discovered: DiscoveredProcessState[] = [];
-  try {
-    for (const entry of readdirSync("/proc", { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
-      const candidate = repositoryProcessCandidate(repoRoot, Number(entry.name), listeningInodes);
-      if (candidate) discovered.push(candidate);
-    }
-  } catch {
-    return discovered;
-  }
-  return discovered;
+  return discoverRepositoryProcessCandidates(repoRoot).map(discoveredProcessState);
 }
 
 export const discoverManifestlessProcesses = discoverRepositoryProcesses;
+
+function isHistoricalInertTelemetry(
+  entry: TestRunTelemetry,
+  telemetryPath: string,
+  manifestCheck: TelemetryManifestCheck,
+  ports: PortState[],
+  scopedTelemetry: Set<string>,
+  selectedManifestPath: string | undefined,
+  repositoryArtifactScan: boolean,
+): boolean {
+  if (!repositoryArtifactScan || scopedTelemetry.has(telemetryPath) || manifestCheck.state !== "missing") return false;
+  if (selectedManifestPath !== undefined && resolve(entry.manifestPath) === resolve(selectedManifestPath)) return false;
+  if (Date.now() - Date.parse(entry.updatedAt) < HISTORICAL_INERT_EVIDENCE_AFTER_MS) return false;
+  if (entry.activeProcesses.some((record) => inspectManagedProcess(record, entry.runNonce).state !== "exited")) return false;
+  return Object.values(entry.ports).every((port) => !ports.some((state) => state.port === port && state.listening));
+}
+
+function isTerminallyResolved(entry: TestRunTelemetry): boolean {
+  return entry.status === "complete"
+    && entry.activeProcesses.length === 0
+    && entry.resolution?.status === "resolved";
+}
+
+export function historicalOnlyListenerPorts(
+  historicalPorts: readonly number[],
+  currentPorts: readonly number[],
+  repositoryCandidatePorts: readonly number[],
+): Set<number> {
+  const current = new Set(currentPorts);
+  const repository = new Set(repositoryCandidatePorts);
+  return new Set(historicalPorts.filter((port) => !current.has(port) && !repository.has(port)));
+}
+
+function baselineMatchesCandidate(
+  baseline: TestRunPreexistingProcessBaseline,
+  candidate: RepositoryProcessCandidate,
+  managedPorts: ReadonlySet<number>,
+): boolean {
+  if (candidate.runNonce !== undefined || candidate.listeningPorts.some((port) => managedPorts.has(port))) {
+    return false;
+  }
+  return baseline.candidates.some((record) => record.pid === candidate.pid
+    && record.pidStartTime === candidate.pidStartTime
+    && record.pgid === candidate.pgid
+    && record.groupIdentity === candidate.groupIdentity
+    && record.executableHash === candidate.executableHash
+    && record.commandHash === candidate.commandHash
+    && JSON.stringify(record.listeningPorts) === JSON.stringify(candidate.listeningPorts));
+}
+
+function preexistingUnownedProcessState(candidate: RepositoryProcessCandidate): PreexistingUnownedProcessState {
+  return { ...discoveredProcessState(candidate), reason: "pre-existing-unowned" };
+}
 
 export async function auditSuiteContainment(options: ContainmentAuditOptions = {}): Promise<ContainmentAuditReport> {
   const repoRoot = getCanonicalRepoRoot(process.env.INGENIUM_PLAYWRIGHT_REPO_ROOT ?? process.cwd());
   const loadedManifest = loadManifest(repoRoot, options.manifestPath);
   const telemetryPaths = telemetryCandidates(repoRoot, loadedManifest.manifest, options);
+  const scopedTelemetry = scopedTelemetryPaths(loadedManifest.manifest, options);
   const telemetry: TestRunTelemetry[] = [];
   const telemetryErrors: string[] = [];
+  const retentionTransitions: string[] = [];
+  const retentionErrors: string[] = [];
+  const activeRetentionRuns = new Map<string, Extract<ArtifactRetentionTransitionInspection, { state: "valid" }>>();
+  const artifactRoot = getTestRunArtifactRoot(repoRoot);
+  for (const entry of listTestRunRetentionLockEntries(artifactRoot)) {
+    const runId = retentionRunIdFromLockEntry(entry);
+    if (!runId) {
+      retentionErrors.push(`retention marker malformed: ${entry}`);
+      continue;
+    }
+    const rawLock = inspectTestRunArtifactLock(artifactRoot, runId);
+    if (rawLock.state === "active" && rawLock.owner.mode === "writer") continue;
+    const inspection = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+    if (inspection.state === "valid" && inspection.phase === "prepared") {
+      continue;
+    }
+    if (inspection.state === "valid") {
+      activeRetentionRuns.set(runId, inspection);
+      retentionTransitions.push(`active retention transition: ${runId}`);
+      if (!telemetryPaths.includes(inspection.telemetryPath)) telemetryPaths.push(inspection.telemetryPath);
+    } else if (inspection.state === "invalid") {
+      retentionErrors.push(`retention marker invalid: ${runId} (${inspection.code})`);
+    }
+  }
   const legacyEvidence = legacyEvidenceDirectories(repoRoot);
   const artifactClassifications = artifactEvidenceClassifications(repoRoot);
   const artifactResiduals = artifactClassifications
@@ -552,9 +763,47 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   for (const path of telemetryPaths) {
     if (isLegacyEvidencePath(path, repoRoot)) continue;
     try {
-      telemetry.push(readTestRunTelemetry(path, repoRoot));
+      telemetry.push(readTestRunTelemetryForContainmentAudit(path, repoRoot));
     } catch (error) {
-      telemetryErrors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+      const runId = basename(dirname(path));
+      const telemetryError = error instanceof Error ? error.message : String(error);
+      let initialTransition = activeRetentionRuns.get(runId);
+      if (!initialTransition) {
+        const observed = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+        if (observed.state === "valid" && observed.phase === "quarantined") {
+          initialTransition = observed;
+          activeRetentionRuns.set(runId, observed);
+          retentionTransitions.push(`active retention transition: ${runId}`);
+        }
+      }
+      if (initialTransition) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+        try {
+          const retried = readTestRunTelemetryForContainmentAudit(path, repoRoot);
+          const afterSuccess = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+          if (afterSuccess.state === "valid") {
+            telemetryErrors.push(`${path}: telemetry was recreated during an active retention transition`);
+          } else {
+            telemetryErrors.push(`${path}: retention marker changed during telemetry retry`);
+          }
+          telemetry.push(retried);
+          continue;
+        } catch (retryError) {
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+          const finalTransition = inspectValidatedArtifactRetentionTransition({ repoRoot, runId });
+          const sameTransition = finalTransition.state === "valid"
+            && finalTransition.markerToken === initialTransition.markerToken
+            && finalTransition.markerHash === initialTransition.markerHash
+            && finalTransition.quarantinePath === initialTransition.quarantinePath;
+          if (sameTransition && /does not exist|ENOENT/i.test(retryMessage)) continue;
+          telemetryErrors.push(`${path}: retry failed: ${retryMessage}`);
+          if (finalTransition.state !== "valid") {
+            retentionErrors.push(`retention marker invalid after retry: ${runId}`);
+          }
+          continue;
+        }
+      }
+      telemetryErrors.push(`${path}: ${telemetryError}`);
     }
   }
   const managedPorts = new Set<number>();
@@ -564,8 +813,32 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   for (const entry of telemetry) {
     for (const port of Object.values(entry.ports)) managedPorts.add(port);
   }
+  const telemetryManifestChecks = new Map(
+    telemetry.map((entry) => [entry, checkTelemetryManifest(entry, repoRoot)]),
+  );
+  const newestTelemetry = telemetry.reduce<TestRunTelemetry | undefined>((latest, entry) => {
+    if (!latest) return entry;
+    const latestTime = Date.parse(latest.updatedAt);
+    const entryTime = Date.parse(entry.updatedAt);
+    if (entryTime > latestTime) return entry;
+    if (entryTime < latestTime) return latest;
+    return getTestRunTelemetryPath(entry).localeCompare(getTestRunTelemetryPath(latest)) > 0 ? entry : latest;
+  }, undefined);
+  const newestManifestCheck = newestTelemetry === undefined
+    ? undefined
+    : telemetryManifestChecks.get(newestTelemetry);
+  const trustedPreexistingBaselines = newestTelemetry?.preexistingProcessBaseline !== undefined
+    && newestManifestCheck?.state === "missing"
+    && isTerminallyResolved(newestTelemetry)
+    ? [newestTelemetry.preexistingProcessBaseline]
+    : [];
   const managedRecords = collectManagedRecords(loadedManifest.manifest, telemetry);
   const managedProcesses = managedRecords.map(({ record, runNonce }) => inspectManagedProcess(record, runNonce));
+  const fixtureOwnedPorts = new Set(
+    managedProcesses
+      .filter((process) => process.state === "running")
+      .map((process) => process.port),
+  );
   const managedIdentityKeys = new Set(managedRecords.map(({ record, runNonce }) =>
     `${runNonce}:${record.pid}:${record.pidStartTime}:${record.groupIdentity}`));
   const managedProvisionalSpawns = new Set(
@@ -573,52 +846,128 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
       .filter(({ record }) => record.identityState === "provisional")
       .map(({ record, runNonce }) => `${runNonce}:${record.pid}`),
   );
-  const discoveredProcesses = discoverRepositoryProcesses(repoRoot).filter((candidate) =>
+  const unmanagedCandidates = discoverRepositoryProcessCandidates(repoRoot).filter((candidate) =>
     !managedIdentityKeys.has(`${candidate.runNonce ?? ""}:${candidate.pid}:${candidate.pidStartTime}:${candidate.groupIdentity}`)
     && !managedProvisionalSpawns.has(`${candidate.runNonce ?? ""}:${candidate.pid}`));
+  const preexistingUnownedCandidates = unmanagedCandidates.filter((candidate) =>
+    trustedPreexistingBaselines.some((baseline) => baselineMatchesCandidate(baseline, candidate, managedPorts)));
+  const preexistingUnownedPids = new Set(preexistingUnownedCandidates.map((candidate) => candidate.pid));
+  const discoveredProcesses = unmanagedCandidates
+    .filter((candidate) => !preexistingUnownedPids.has(candidate.pid))
+    .map(discoveredProcessState);
+  const preexistingUnownedProcesses = preexistingUnownedCandidates.map(preexistingUnownedProcessState);
   const holds = discoveredProcesses.map((candidate) =>
     `manifestless candidate ${candidate.pid} listening on ${candidate.listeningPorts.join(",") || "no recorded port"}`);
-  const discoveredPorts = discoveredProcesses.flatMap((candidate) => candidate.listeningPorts);
-  const ports = await auditPorts([...new Set([...parsePorts(), ...managedPorts, ...discoveredPorts])], managedPorts);
+  const discoveredPorts = unmanagedCandidates.flatMap((candidate) => candidate.listeningPorts);
+  const historicalPorts: number[] = [];
+  const currentPorts: number[] = [];
+  for (const entry of telemetry) {
+    const check = telemetryManifestChecks.get(entry)!;
+    const telemetryPath = getTestRunTelemetryPath(entry);
+    const historical = check.state === "missing"
+      && !scopedTelemetry.has(telemetryPath)
+      && Date.now() - Date.parse(entry.updatedAt) >= HISTORICAL_INERT_EVIDENCE_AFTER_MS
+      && isTerminallyResolved(entry);
+    (historical ? historicalPorts : currentPorts).push(...Object.values(entry.ports));
+  }
+  const historicalCollisions = historicalOnlyListenerPorts(historicalPorts, currentPorts, discoveredPorts);
+  const preexistingUnownedPorts = new Set([
+    ...preexistingUnownedCandidates.flatMap((candidate) => candidate.listeningPorts),
+    ...historicalCollisions,
+  ]);
+  const expectedOciRevision = process.env.INGENIUM_AUDIT_OCI_REVISION?.trim() || undefined;
+  const composeOwnership = options.composeOwnership ?? inspectComposeOwnership({
+    repoRoot,
+    ...(expectedOciRevision ? { expectedOciRevision } : {}),
+  });
+  const ports = await auditPorts(
+    [...new Set([...parsePorts(), ...managedPorts, ...discoveredPorts, ...composeOwnership.hostPorts])],
+    managedPorts,
+    fixtureOwnedPorts,
+    preexistingUnownedPorts,
+    composeOwnership,
+    options.portProbe,
+  );
   const resolvedManifestPaths = new Set(
     telemetry
       .filter((entry) => entry.resolution?.status === "resolved")
       .map((entry) => resolve(entry.manifestPath)),
   );
+  const discoveredTempAudit = auditTemp(resolvedManifestPaths);
+  const selectedTempDirectories = new Set([
+    ...(loadedManifest.manifest ? [loadedManifest.manifest.runDir] : []),
+    ...telemetry.map((entry) => dirname(entry.manifestPath)),
+  ].map((path) => resolve(path)));
+  const scopedTempAudit = scopedTelemetry.size > 0 || loadedManifest.manifest !== undefined;
+  const tempAudit = scopedTempAudit
+    ? {
+      manifestBacked: [...discoveredTempAudit.manifestBacked, ...discoveredTempAudit.manifestless]
+        .filter((path) => selectedTempDirectories.has(resolve(path))),
+      manifestless: [...discoveredTempAudit.manifestBacked, ...discoveredTempAudit.manifestless]
+        .filter((path) => !selectedTempDirectories.has(resolve(path))),
+    }
+    : discoveredTempAudit;
   const rssLimit = Number(process.env.INGENIUM_AUDIT_RSS_LIMIT ?? DEFAULT_RSS_LIMIT);
   const selectedManifestPath = options.manifestPath ?? process.env[TEST_RUN_MANIFEST_ENV];
+  const telemetryReport = telemetry.map((entry) => {
+    const manifestCheck = telemetryManifestChecks.get(entry)!;
+    const path = getTestRunTelemetryPath(entry);
+    const evidenceDisposition: TelemetryEvidenceDisposition = isHistoricalInertTelemetry(
+      entry,
+      path,
+      manifestCheck,
+      ports,
+      scopedTelemetry,
+      selectedManifestPath,
+      options.includeRepositoryTelemetry === true,
+    ) ? "historical-inert" : "current";
+    return {
+      manifestState: manifestCheck.state,
+      ...(manifestCheck.error ? { manifestError: manifestCheck.error } : {}),
+      path,
+      manifestPath: entry.manifestPath,
+      runId: entry.runId,
+      status: entry.status,
+      updatedAt: entry.updatedAt,
+      failures: entry.failures,
+      ...(entry.resolution ? { resolution: entry.resolution } : {}),
+      activeProcessCount: entry.activeProcesses.length,
+      evidenceDisposition,
+    };
+  });
+  const inertHistoricalEvidence = telemetryReport
+    .filter((entry) => entry.evidenceDisposition === "historical-inert")
+    .map((entry) => `validated inert historical telemetry retained (non-runnable): ${entry.path}`);
   return {
     repoRoot,
     ...(selectedManifestPath ? { manifestPath: selectedManifestPath } : {}),
     ...(loadedManifest.manifest ? { manifestStatus: loadedManifest.manifest.status } : {}),
     ports,
+    composeOwnership,
     managedPorts: [...managedPorts],
     expectedPorts: [...parseExpectedPorts()],
-    tempEntries: auditTemp(resolvedManifestPaths),
+    tempEntries: tempAudit.manifestBacked,
+    unownedTempEntries: tempAudit.manifestless,
     managedProcesses,
     discoveredProcesses,
+    preexistingUnownedProcesses,
     holds,
     telemetryErrors,
+    retentionTransitions,
+    retentionErrors,
     legacyEvidence,
-    informational: legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
+    informational: [
+      ...legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
+      ...inertHistoricalEvidence,
+      ...preexistingUnownedProcesses.map((candidate) =>
+        `pre-existing unowned candidate retained: ${candidate.pid} listening on ${candidate.listeningPorts.join(",")}`),
+      ...tempAudit.manifestless.map((path) => `manifestless temp evidence retained (unowned, not deleted): ${path}`),
+      ...retentionTransitions,
+    ],
     artifactClassifications,
     artifactResiduals,
     repositoryArtifactScan: options.includeRepositoryTelemetry === true,
-    telemetry: telemetry.map((entry) => {
-      const manifestCheck = checkTelemetryManifest(entry, repoRoot);
-      return {
-        manifestState: manifestCheck.state,
-        ...(manifestCheck.error ? { manifestError: manifestCheck.error } : {}),
-        path: getTestRunTelemetryPath(entry),
-        manifestPath: entry.manifestPath,
-        runId: entry.runId,
-        status: entry.status,
-        updatedAt: entry.updatedAt,
-        failures: entry.failures,
-        ...(entry.resolution ? { resolution: entry.resolution } : {}),
-        activeProcessCount: entry.activeProcesses.length,
-      };
-    }),
+    telemetry: telemetryReport,
     process: auditProcesses(),
     rssLimitBytes: rssLimit,
   };
@@ -639,9 +988,15 @@ export function strictFailures(report: ContainmentAuditReport, manifestError?: s
       && entry.resolution?.status === "resolved");
   if (manifestError && !missingManifestWithResolvedTelemetry) failures.push(`manifest: ${manifestError}`);
   if (report.telemetryErrors.length > 0) failures.push(`telemetry: ${report.telemetryErrors.join("; ")}`);
-  const expectedPorts = new Set(report.expectedPorts);
+  if (report.retentionErrors.length > 0) failures.push(`retention: ${report.retentionErrors.join("; ")}`);
   const openPorts = report.ports
-    .filter((state) => state.listening && (state.owned || !expectedPorts.has(state.port)))
+    // A raw expected-port setting is not ownership proof. A listener is
+    // accepted only after fixture/Compose ownership or a stable baseline
+    // identity has bound the exact process and its current listener set.
+    .filter((state) => state.listening
+      && state.ownership !== "fixture-owned"
+      && state.ownership !== "compose-owned"
+      && state.ownership !== "pre-existing-unowned")
     .map((state) => state.port);
   if (openPorts.length > 0) failures.push(`listening ports: ${openPorts.join(", ")}`);
   if (report.tempEntries.length > 0) failures.push(`temp entries: ${report.tempEntries.join(", ")}`);
@@ -652,6 +1007,7 @@ export function strictFailures(report: ContainmentAuditReport, manifestError?: s
   if (report.holds.length > 0) failures.push(`containment holds: ${report.holds.join("; ")}`);
   if (report.manifestStatus === "stopping") failures.push("manifest remains in stopping recovery state");
   for (const telemetry of report.telemetry) {
+    if (telemetry.evidenceDisposition === "historical-inert") continue;
     const terminallyResolved = telemetry.status === "complete"
       && telemetry.activeProcessCount === 0
       && telemetry.resolution?.status === "resolved";
@@ -684,6 +1040,12 @@ async function main(): Promise<void> {
   let manifestError: string | undefined;
   try {
     const repoRoot = getCanonicalRepoRoot(process.env.INGENIUM_PLAYWRIGHT_REPO_ROOT ?? process.cwd());
+    if (process.argv.includes("--remove-owned-misplaced-test-results")) {
+      const removed = removeOwnedMisplacedTestResults(repoRoot);
+      process.stdout.write(removed
+        ? `Removed exact owned misplaced test-results residual after inventory proof: ${removed.path} (${removed.inventory.length} entries)\n`
+        : "No misplaced test-results residual was present\n");
+    }
     const loaded = loadManifest(repoRoot);
     manifestError = loaded.error;
     report = await auditSuiteContainment({ includeRepositoryTelemetry: true });

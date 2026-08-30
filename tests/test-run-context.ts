@@ -15,9 +15,16 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  acquireTestRunArtifactWriterLock,
+  releaseTestRunArtifactLock,
+} from "./test-run-retention-lock";
 
 export const TEST_RUN_MANIFEST_VERSION = 2;
 export const TEST_RUN_TELEMETRY_VERSION = 1;
+export const TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION = 1;
+export const TEST_RUN_PREEXISTING_PROCESS_BASELINE_LIMIT = 64;
+export const TEST_RUN_PREEXISTING_PROCESS_PORT_LIMIT = 32;
 export const TEST_RUN_TEMP_PREFIX = "ingenium-playwright-run-";
 export const TEST_RUN_STALE_PREFIX = "ingenium-playwright-";
 export const TEST_RUN_MANIFEST_ENV = "INGENIUM_TEST_RUN_MANIFEST";
@@ -32,6 +39,45 @@ const TEST_RUN_PORT_LOCK_VERSION = 1;
 export const TEST_RUN_CREATION_FAILURE_FILENAME = "creation-failure.json";
 const DEVELOPMENT_PORTS = new Set([3000, 4097, 4098, 4099, 4999]);
 export const TEST_RUN_API_TOKEN_FILENAME = "api-token";
+const TEST_RUN_DASHBOARD_WORKSPACE_ROOT = ".ingenium-dashboard-fixtures";
+
+/**
+ * Derive the only project identity that the default Playwright fixture may
+ * use. Keeping it a deterministic manifest property prevents the fixture
+ * from ever falling back to a shared project namespace.
+ */
+export function getTestRunProjectName(runId: string): string {
+  return `playwright-test-${runId.slice(0, 8)}`;
+}
+
+export function getTestRunDashboardWorkspace(
+  context: Pick<TestRunManifest, "repoRoot" | "runNonce">,
+): string {
+  return join(
+    context.repoRoot,
+    "services",
+    TEST_RUN_DASHBOARD_WORKSPACE_ROOT,
+    context.runNonce,
+  );
+}
+
+/**
+ * Build a same-origin dashboard URL that always carries this fixture run's
+ * manifest-owned project. An explicit route project is deliberately replaced
+ * so browser coverage cannot silently fall back to the dashboard global.
+ */
+export function getTestRunDashboardUrl(
+  context: Pick<TestRunContext, "ports" | "project">,
+  route = "/",
+): string {
+  const origin = `http://127.0.0.1:${context.ports.dashboard}`;
+  const url = new URL(route, origin);
+  if (url.origin !== origin) {
+    throw new Error("Test-run dashboard URL must remain on the fixture origin");
+  }
+  url.searchParams.set("project", context.project);
+  return url.toString();
+}
 
 export interface TestRunPorts {
   api: number;
@@ -58,6 +104,22 @@ export interface TestRunProcess {
   identityState?: "provisional" | "bound";
 }
 
+export interface TestRunPreexistingProcess {
+  pid: number;
+  pidStartTime: string;
+  pgid: number;
+  groupIdentity: string;
+  executableHash: string;
+  commandHash: string;
+  listeningPorts: number[];
+}
+
+export interface TestRunPreexistingProcessBaseline {
+  version: typeof TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION;
+  capturedAt: string;
+  candidates: TestRunPreexistingProcess[];
+}
+
 export interface TestRunManifest {
   version: typeof TEST_RUN_MANIFEST_VERSION;
   runId: string;
@@ -73,8 +135,11 @@ export interface TestRunManifest {
   manifestPath: string;
   telemetryPath?: string;
   project: string;
+  /** Set only after the isolated project is accepted by the fixture API. */
+  projectProvisionedAt?: string;
   ports: TestRunPorts;
   portReservations?: TestRunPortReservation[];
+  preexistingProcessBaseline?: TestRunPreexistingProcessBaseline;
   processes: TestRunProcess[];
 }
 
@@ -121,6 +186,7 @@ export interface TestRunTelemetry {
   status: TestRunManifest["status"];
   updatedAt: string;
   ports: TestRunPorts;
+  preexistingProcessBaseline?: TestRunPreexistingProcessBaseline;
   activeProcesses: TestRunProcess[];
   processes: TestRunTelemetryProcess[];
   failures: string[];
@@ -313,6 +379,29 @@ export function getTestRunArtifactRoot(repoRoot = getCanonicalRepoRoot()): strin
   return artifactRoot;
 }
 
+/**
+ * Resolve the only Playwright output root accepted by this repository.
+ *
+ * Config files pass their source-derived repository root rather than relying
+ * on Playwright's current working directory. This prevents a config loaded
+ * from `tests/` from silently writing into `tests/tests/test-results`.
+ */
+export function getPlaywrightOutputDirectory(scope: string, repoRoot: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(scope) || scope === "." || scope === "..") {
+    throw new Error("Playwright output scope must be a single safe path component");
+  }
+  const canonicalRepoRoot = getCanonicalRepoRoot(repoRoot);
+  const outputRoot = join(canonicalRepoRoot, "tests", "artifacts", "playwright");
+  assertCanonicalPathForWrite(outputRoot, canonicalRepoRoot, "Playwright output root");
+  const outputDirectory = join(outputRoot, scope);
+  assertCanonicalPathForWrite(outputDirectory, outputRoot, "Playwright output directory");
+  if (!pathIsInside(outputRoot, outputDirectory)
+    || outputDirectory.includes(`${join("tests", "tests")}${process.platform === "win32" ? "\\" : "/"}`)) {
+    throw new Error("Playwright output directory escaped the canonical artifact root");
+  }
+  return outputDirectory;
+}
+
 function telemetryPathFor(manifest: Pick<TestRunManifest, "repoRoot" | "runId">): string {
   return join(getTestRunArtifactRoot(manifest.repoRoot), manifest.runId, TEST_RUN_TELEMETRY_FILENAME);
 }
@@ -351,6 +440,22 @@ export function getTestRunApiTokenPath(
  */
 export function getApprovedTempRoot(): string {
   return realpathSync(tmpdir());
+}
+
+/** Read-only containment inspection also recognizes canonical OS temp roots used by older runs. */
+export function getContainmentAuditTempRoots(): string[] {
+  const candidates = [getApprovedTempRoot(), ...(process.platform === "win32" ? [] : ["/tmp", "/var/tmp"])];
+  const roots = new Set<string>();
+  for (const candidate of candidates) {
+    try {
+      const resolved = resolve(candidate);
+      const metadata = lstatSync(resolved);
+      if (metadata.isDirectory() && !metadata.isSymbolicLink() && realpathSync(resolved) === resolved) roots.add(resolved);
+    } catch {
+      // A platform temp root is approved only when it exists canonically.
+    }
+  }
+  return [...roots];
 }
 
 /**
@@ -578,20 +683,30 @@ function assertApprovedTempRoot(tempRoot: string): string {
   return canonicalTempRoot;
 }
 
-function assertManifestCandidatePath(manifestPath: string): string {
+function approvedRootForPath(path: string, approvedRoots: readonly string[]): string | undefined {
+  return [...approvedRoots]
+    .sort((left, right) => right.length - left.length)
+    .find((root) => pathIsInside(root, path));
+}
+
+function assertManifestCandidatePath(
+  manifestPath: string,
+  approvedRoots: readonly string[] = [getApprovedTempRoot()],
+): { path: string; approvedRoot: string } {
   if (typeof manifestPath !== "string" || !isAbsolute(manifestPath) || /[\u0000-\u001f\u007f]/.test(manifestPath)) {
     throw new Error("Test-run manifest path must be an absolute, control-character-free path");
   }
   const resolvedPath = resolve(manifestPath);
-  if (basename(resolvedPath) !== "run-manifest.json" || !pathIsInside(getApprovedTempRoot(), resolvedPath)) {
+  const approvedRoot = approvedRootForPath(resolvedPath, approvedRoots);
+  if (basename(resolvedPath) !== "run-manifest.json" || !approvedRoot) {
     throw new Error(`Refusing to read a manifest outside the approved temp root: ${manifestPath}`);
   }
-  assertNoSymlinkedAncestors(dirname(resolvedPath), getApprovedTempRoot(), "test-run manifest");
+  assertNoSymlinkedAncestors(dirname(resolvedPath), approvedRoot, "test-run manifest");
   const canonicalPath = realpathSync(resolvedPath);
-  if (canonicalPath !== resolvedPath || !pathIsInside(getApprovedTempRoot(), canonicalPath)) {
+  if (canonicalPath !== resolvedPath || !pathIsInside(approvedRoot, canonicalPath)) {
     throw new Error("Refusing to read a symlinked or relocated test-run manifest");
   }
-  return resolvedPath;
+  return { path: resolvedPath, approvedRoot };
 }
 
 function assertAbsolutePath(value: unknown, name: string): asserts value is string {
@@ -600,8 +715,7 @@ function assertAbsolutePath(value: unknown, name: string): asserts value is stri
   }
 }
 
-function assertSafeRunDirectory(manifest: TestRunManifest): void {
-  const approvedRoot = getApprovedTempRoot();
+function assertSafeRunDirectory(manifest: TestRunManifest, approvedRoot = getApprovedTempRoot()): void {
   const canonicalRepoRoot = getCanonicalRepoRoot(manifest.repoRoot);
   assertAbsolutePath(manifest.tempRoot, "tempRoot");
   assertAbsolutePath(manifest.runDir, "runDir");
@@ -671,7 +785,7 @@ function assertSafeRunDirectory(manifest: TestRunManifest): void {
   }
 }
 
-function writeManifest(manifest: TestRunManifest): void {
+function writeManifestUnlocked(manifest: TestRunManifest): void {
   const runDir = assertCanonicalExistingPath(manifest.runDir, getApprovedTempRoot(), "test-run directory");
   const manifestPath = join(runDir, "run-manifest.json");
   if (manifest.manifestPath !== manifestPath) throw new Error("Test-run manifest path is not run-owned");
@@ -694,6 +808,95 @@ function isTimestamp(value: unknown): value is string {
   return typeof value === "string"
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
     && !Number.isNaN(Date.parse(value));
+}
+
+function isGroupIdentity(value: unknown, pgid: unknown): value is string {
+  return typeof value === "string"
+    && typeof pgid === "number"
+    && /^\d+:\d+$/.test(value)
+    && value.split(":")[0] === String(pgid);
+}
+
+function validatePreexistingProcessBaseline(
+  value: unknown,
+  ports: TestRunPorts,
+): TestRunPreexistingProcessBaseline {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid pre-existing process baseline");
+  }
+  const baseline = value as Partial<TestRunPreexistingProcessBaseline> & Record<string, unknown>;
+  if (Object.keys(baseline).some((key) => !["version", "capturedAt", "candidates"].includes(key))
+    || baseline.version !== TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION
+    || !isTimestamp(baseline.capturedAt)
+    || !Array.isArray(baseline.candidates)
+    || baseline.candidates.length > TEST_RUN_PREEXISTING_PROCESS_BASELINE_LIMIT) {
+    throw new Error("Invalid pre-existing process baseline");
+  }
+
+  const runPorts = new Set(Object.values(ports));
+  const candidates: TestRunPreexistingProcess[] = [];
+  let previousPid = 1;
+  for (const value of baseline.candidates) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid pre-existing process baseline candidate");
+    }
+    const candidate = value as Partial<TestRunPreexistingProcess> & Record<string, unknown>;
+    if (Object.keys(candidate).some((key) => ![
+      "pid",
+      "pidStartTime",
+      "pgid",
+      "groupIdentity",
+      "executableHash",
+      "commandHash",
+      "listeningPorts",
+    ].includes(key))
+      || typeof candidate.pid !== "number"
+      || !Number.isSafeInteger(candidate.pid)
+      || candidate.pid <= previousPid
+      || typeof candidate.pidStartTime !== "string"
+      || !/^\d+$/.test(candidate.pidStartTime)
+      || typeof candidate.pgid !== "number"
+      || !Number.isSafeInteger(candidate.pgid)
+      || candidate.pgid <= 1
+      || !isGroupIdentity(candidate.groupIdentity, candidate.pgid)
+      || typeof candidate.executableHash !== "string"
+      || !/^[a-f0-9]{64}$/.test(candidate.executableHash)
+      || typeof candidate.commandHash !== "string"
+      || !/^[a-f0-9]{64}$/.test(candidate.commandHash)
+      || !Array.isArray(candidate.listeningPorts)
+      || candidate.listeningPorts.length === 0
+      || candidate.listeningPorts.length > TEST_RUN_PREEXISTING_PROCESS_PORT_LIMIT) {
+      throw new Error("Invalid pre-existing process baseline candidate");
+    }
+
+    let previousPort = 0;
+    for (const port of candidate.listeningPorts) {
+      if (typeof port !== "number"
+        || !Number.isInteger(port)
+        || port <= previousPort
+        || port < 1
+        || port > 65535
+        || runPorts.has(port)) {
+        throw new Error("Invalid pre-existing process baseline candidate");
+      }
+      previousPort = port;
+    }
+    previousPid = candidate.pid;
+    candidates.push({
+      pid: candidate.pid,
+      pidStartTime: candidate.pidStartTime,
+      pgid: candidate.pgid,
+      groupIdentity: candidate.groupIdentity,
+      executableHash: candidate.executableHash,
+      commandHash: candidate.commandHash,
+      listeningPorts: [...candidate.listeningPorts],
+    });
+  }
+  return {
+    version: TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION,
+    capturedAt: baseline.capturedAt,
+    candidates,
+  };
 }
 
 function validateProcessRecord(
@@ -777,6 +980,7 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
     "status",
     "updatedAt",
     "ports",
+    "preexistingProcessBaseline",
     "activeProcesses",
     "processes",
     "failures",
@@ -813,6 +1017,9 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
     dashboard: telemetryPorts.dashboard,
     fixture: telemetryPorts.fixture,
   });
+  const preexistingProcessBaseline = parsed.preexistingProcessBaseline === undefined
+    ? undefined
+    : validatePreexistingProcessBaseline(parsed.preexistingProcessBaseline, ports);
 
   const processKeys = new Set<string>();
   const processes: TestRunTelemetryProcess[] = [];
@@ -874,11 +1081,16 @@ function validateTelemetryShape(value: unknown): TestRunTelemetry {
     status: parsed.status as TestRunManifest["status"],
     updatedAt: parsed.updatedAt,
     ports,
+    ...(preexistingProcessBaseline !== undefined ? { preexistingProcessBaseline } : {}),
     activeProcesses,
     processes,
     failures: parsed.failures,
     ...(parsed.resolution !== undefined ? { resolution: parsed.resolution as TestRunTelemetryResolution } : {}),
   };
+}
+
+export function parseTestRunTelemetryPayload(value: unknown): TestRunTelemetry {
+  return validateTelemetryShape(value);
 }
 
 function readTelemetryIfPresent(path: string): TestRunTelemetry | undefined {
@@ -919,7 +1131,7 @@ function writeOwnedJson(path: string, value: unknown, containmentRoot: string, n
   }
 }
 
-function writeRunnerTelemetry(manifest: TestRunManifest, now = new Date().toISOString()): void {
+function writeRunnerTelemetryUnlocked(manifest: TestRunManifest, now = new Date().toISOString()): void {
   const telemetryPath = getTestRunTelemetryPath(manifest);
   const artifactDirectory = dirname(telemetryPath);
   const artifactRoot = getTestRunArtifactRoot(manifest.repoRoot);
@@ -968,6 +1180,9 @@ function writeRunnerTelemetry(manifest: TestRunManifest, now = new Date().toISOS
     status: manifest.status,
     updatedAt: now,
     ports: manifest.ports,
+    ...(manifest.preexistingProcessBaseline !== undefined
+      ? { preexistingProcessBaseline: manifest.preexistingProcessBaseline }
+      : {}),
     activeProcesses,
     processes: history,
     failures: previous?.failures ?? [],
@@ -1059,7 +1274,11 @@ function writeCreationFailureDiagnostic(input: {
   writeOwnedJson(diagnosticPath, diagnostic, input.artifactRoot, "test-run creation failure diagnostic");
 }
 
-export function readTestRunTelemetry(telemetryPath: string, expectedRepoRoot = getCanonicalRepoRoot()): TestRunTelemetry {
+function readTestRunTelemetryFromRoots(
+  telemetryPath: string,
+  expectedRepoRoot: string,
+  approvedTempRoots: readonly string[],
+): TestRunTelemetry {
   assertAbsolutePath(telemetryPath, "telemetryPath");
   const resolvedPath = resolve(telemetryPath);
   const repoRoot = getCanonicalRepoRoot(expectedRepoRoot);
@@ -1081,16 +1300,56 @@ export function readTestRunTelemetry(telemetryPath: string, expectedRepoRoot = g
   }
   assertNoSymlinkedAncestors(dirname(resolvedPath), artifactRoot, "runner telemetry");
   const telemetryManifestPath = resolve(telemetry.manifestPath);
+  const approvedTempRoot = approvedRootForPath(telemetryManifestPath, approvedTempRoots);
   if (basename(telemetryManifestPath) !== "run-manifest.json"
     || !basename(dirname(telemetryManifestPath)).startsWith(TEST_RUN_TEMP_PREFIX)
-    || !pathIsInside(getApprovedTempRoot(), telemetryManifestPath)) {
+    || !approvedTempRoot) {
     throw new Error("Runner telemetry manifest path is outside the approved temp root");
   }
-  assertNoSymlinkedAncestors(dirname(telemetryManifestPath), getApprovedTempRoot(), "runner telemetry manifest");
+  assertNoSymlinkedAncestors(dirname(telemetryManifestPath), approvedTempRoot, "runner telemetry manifest");
   if (existsSync(telemetryManifestPath) && realpathSync(telemetryManifestPath) !== telemetryManifestPath) {
     throw new Error("Runner telemetry manifest path is symlinked");
   }
   return telemetry;
+}
+
+export function readTestRunTelemetry(telemetryPath: string, expectedRepoRoot = getCanonicalRepoRoot()): TestRunTelemetry {
+  return readTestRunTelemetryFromRoots(telemetryPath, expectedRepoRoot, [getApprovedTempRoot()]);
+}
+
+export function readTestRunTelemetryForContainmentAudit(
+  telemetryPath: string,
+  expectedRepoRoot = getCanonicalRepoRoot(),
+): TestRunTelemetry {
+  const repoRoot = getCanonicalRepoRoot(expectedRepoRoot);
+  return readTestRunTelemetryFromRoots(
+    telemetryPath,
+    repoRoot,
+    [...getContainmentAuditTempRoots(), join(repoRoot, ".tmp")],
+  );
+}
+
+function withTestRunArtifactWriterLock<T>(
+  manifestPath: string,
+  action: (manifest: TestRunContext) => T,
+): T {
+  const initial = readTestRunManifest(manifestPath);
+  const lock = acquireTestRunArtifactWriterLock({
+    artifactRoot: getTestRunArtifactRoot(initial.repoRoot),
+    repoRoot: initial.repoRoot,
+    runId: initial.runId,
+    runNonce: initial.runNonce,
+  });
+  try {
+    const manifest = readTestRunManifest(manifestPath);
+    if (manifest.repoRoot !== initial.repoRoot || manifest.runId !== initial.runId
+      || manifest.runNonce !== initial.runNonce) {
+      throw new Error("RUN_ARTIFACT_IDENTITY_CHANGED");
+    }
+    return action(manifest);
+  } finally {
+    releaseTestRunArtifactLock(lock);
+  }
 }
 
 export function markTestRunProcessCleared(
@@ -1098,20 +1357,21 @@ export function markTestRunProcessCleared(
   record: TestRunProcess,
   now = new Date().toISOString(),
 ): void {
-  const manifest = readTestRunManifest(manifestPath);
-  const telemetryPath = getTestRunTelemetryPath(manifest);
-  const telemetry = readTelemetryIfPresent(telemetryPath);
-  if (!telemetry) throw new Error("Cannot clear a process without runner telemetry");
-  const entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
-  if (entry) {
-    entry.state = "cleared";
-    entry.updatedAt = now;
-  }
-  telemetry.updatedAt = now;
-  telemetry.activeProcesses = telemetry.processes
-    .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
-    .map((candidate) => candidate.record);
-  writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const telemetryPath = getTestRunTelemetryPath(manifest);
+    const telemetry = readTelemetryIfPresent(telemetryPath);
+    if (!telemetry) throw new Error("Cannot clear a process without runner telemetry");
+    const entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
+    if (entry) {
+      entry.state = "cleared";
+      entry.updatedAt = now;
+    }
+    telemetry.updatedAt = now;
+    telemetry.activeProcesses = telemetry.processes
+      .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
+      .map((candidate) => candidate.record);
+    writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  });
 }
 
 export function recordTestRunTelemetryFailure(
@@ -1120,30 +1380,31 @@ export function recordTestRunTelemetryFailure(
   record?: TestRunProcess,
   now = new Date().toISOString(),
 ): void {
-  const manifest = readTestRunManifest(manifestPath);
-  const telemetryPath = getTestRunTelemetryPath(manifest);
-  const telemetry = readTelemetryIfPresent(telemetryPath);
-  if (!telemetry) return;
-  telemetry.status = "stopping";
-  delete telemetry.resolution;
-  telemetry.updatedAt = now;
-  const safeReason = telemetryReason(reason);
-  telemetry.failures.push(safeReason);
-  if (record) {
-    let entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
-    if (!entry) {
-      entry = { record, state: "retained", updatedAt: now, reason: safeReason };
-      telemetry.processes.push(entry);
-    } else {
-      entry.state = "retained";
-      entry.reason = safeReason;
-      entry.updatedAt = now;
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const telemetryPath = getTestRunTelemetryPath(manifest);
+    const telemetry = readTelemetryIfPresent(telemetryPath);
+    if (!telemetry) return;
+    telemetry.status = "stopping";
+    delete telemetry.resolution;
+    telemetry.updatedAt = now;
+    const safeReason = telemetryReason(reason);
+    telemetry.failures.push(safeReason);
+    if (record) {
+      let entry = telemetry.processes.find((candidate) => sameProcessRecord(candidate.record, record));
+      if (!entry) {
+        entry = { record, state: "retained", updatedAt: now, reason: safeReason };
+        telemetry.processes.push(entry);
+      } else {
+        entry.state = "retained";
+        entry.reason = safeReason;
+        entry.updatedAt = now;
+      }
     }
-  }
-  telemetry.activeProcesses = telemetry.processes
-    .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
-    .map((candidate) => candidate.record);
-  writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+    telemetry.activeProcesses = telemetry.processes
+      .filter((candidate) => candidate.state === "active" || candidate.state === "retained")
+      .map((candidate) => candidate.record);
+    writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  });
 }
 
 /**
@@ -1156,25 +1417,26 @@ export function markTestRunRecovered(
   manifestPath: string,
   now = new Date().toISOString(),
 ): void {
-  const manifest = readTestRunManifest(manifestPath);
-  const telemetryPath = getTestRunTelemetryPath(manifest);
-  const telemetry = readTelemetryIfPresent(telemetryPath);
-  if (!telemetry) throw new Error("Cannot resolve a run without runner telemetry");
-  for (const entry of telemetry.processes) {
-    if (entry.state === "active" || entry.state === "retained") {
-      entry.state = "cleared";
-      entry.updatedAt = now;
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const telemetryPath = getTestRunTelemetryPath(manifest);
+    const telemetry = readTelemetryIfPresent(telemetryPath);
+    if (!telemetry) throw new Error("Cannot resolve a run without runner telemetry");
+    for (const entry of telemetry.processes) {
+      if (entry.state === "active" || entry.state === "retained") {
+        entry.state = "cleared";
+        entry.updatedAt = now;
+      }
     }
-  }
-  telemetry.status = "complete";
-  telemetry.updatedAt = now;
-  telemetry.activeProcesses = [];
-  telemetry.resolution = {
-    status: "resolved",
-    resolvedAt: now,
-    method: "explicit-recovery",
-  };
-  writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+    telemetry.status = "complete";
+    telemetry.updatedAt = now;
+    telemetry.activeProcesses = [];
+    telemetry.resolution = {
+      status: "resolved",
+      resolvedAt: now,
+      method: "explicit-recovery",
+    };
+    writeOwnedJson(telemetryPath, telemetry, getTestRunArtifactRoot(manifest.repoRoot), "runner telemetry");
+  });
 }
 
 export function createTestRunContext(options: CreateTestRunContextOptions = {}): TestRunContext {
@@ -1238,14 +1500,22 @@ export function createTestRunContext(options: CreateTestRunContextOptions = {}):
       apiTokenFile: join(homeDir, TEST_RUN_API_TOKEN_FILENAME),
       manifestPath: join(runDir, "run-manifest.json"),
       telemetryPath,
-      project: `playwright-test-${runId.slice(0, 8)}`,
+      project: getTestRunProjectName(runId),
       ports,
       portReservations,
       processes: [],
     };
 
-    writeManifest(manifest);
-    writeRunnerTelemetry(manifest, manifest.createdAt);
+    mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
+    const lock = acquireTestRunArtifactWriterLock({
+      artifactRoot, repoRoot, runId, runNonce,
+    });
+    try {
+      writeManifestUnlocked(manifest);
+      writeRunnerTelemetryUnlocked(manifest, manifest.createdAt);
+    } finally {
+      releaseTestRunArtifactLock(lock);
+    }
     if (options.applyEnvironment ?? true) applyTestRunEnvironment(manifest);
     return manifest;
   } catch (error) {
@@ -1311,7 +1581,7 @@ function isUuid(value: unknown): value is string {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function parseManifest(value: string): TestRunContext {
+function parseManifest(value: string, approvedRoot = getApprovedTempRoot()): TestRunContext {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -1335,8 +1605,10 @@ function parseManifest(value: string): TestRunContext {
     "manifestPath",
     "telemetryPath",
     "project",
+    "projectProvisionedAt",
     "ports",
     "portReservations",
+    "preexistingProcessBaseline",
     "processes",
   ]);
   if (Object.keys(parsed).some((key) => !allowedManifestKeys.has(key))) {
@@ -1377,6 +1649,12 @@ function parseManifest(value: string): TestRunContext {
   if (!manifest.project.trim() || /[\u0000-\u001f\u007f]/.test(manifest.project)) {
     throw new Error("Invalid test-run project identity");
   }
+  if (manifest.project !== getTestRunProjectName(manifest.runId)) {
+    throw new Error("Test-run project identity is not run-owned");
+  }
+  if (manifest.projectProvisionedAt !== undefined && !isTimestamp(manifest.projectProvisionedAt)) {
+    throw new Error("Invalid test-run project provisioning timestamp");
+  }
   const ports = manifest.ports as Partial<TestRunPorts>;
   if (Object.keys(ports).some((key) => key !== "api" && key !== "dashboard" && key !== "fixture")) {
     throw new Error("Test-run port manifest contains unexpected fields");
@@ -1389,6 +1667,12 @@ function parseManifest(value: string): TestRunContext {
     dashboard: ports.dashboard as number,
     fixture: ports.fixture as number,
   });
+  if (manifest.preexistingProcessBaseline !== undefined) {
+    manifest.preexistingProcessBaseline = validatePreexistingProcessBaseline(
+      manifest.preexistingProcessBaseline,
+      validatedPorts,
+    );
+  }
 
   if (manifest.portReservations !== undefined) {
     if (!Array.isArray(manifest.portReservations)) throw new Error("Invalid test-run port reservations");
@@ -1404,7 +1688,7 @@ function parseManifest(value: string): TestRunContext {
         || !isAbsolute(reservation.path)
         || /[\u0000-\u001f\u007f]/.test(reservation.path)
         || (reservation.state !== "reserved" && reservation.state !== "transferred")
-        || reservation.path !== getTestRunPortLockPath(reservation.port)) {
+        || reservation.path !== join(approvedRoot, TEST_RUN_PORT_LOCK_ROOT, `port-${reservation.port}.lock`)) {
         throw new Error("Invalid test-run port reservation");
       }
       reservationPorts.add(reservation.port);
@@ -1422,12 +1706,22 @@ function parseManifest(value: string): TestRunContext {
 }
 
 export function readTestRunManifest(manifestPath: string): TestRunContext {
-  const resolvedPath = assertManifestCandidatePath(manifestPath);
-  const manifest = parseManifest(readFileSync(resolvedPath, "utf8"));
-  if (resolve(manifest.manifestPath) !== resolvedPath) {
+  const candidate = assertManifestCandidatePath(manifestPath);
+  const manifest = parseManifest(readFileSync(candidate.path, "utf8"), candidate.approvedRoot);
+  if (resolve(manifest.manifestPath) !== candidate.path) {
     throw new Error("Test-run manifest path does not match its contents");
   }
-  assertSafeRunDirectory(manifest);
+  assertSafeRunDirectory(manifest, candidate.approvedRoot);
+  return manifest;
+}
+
+export function readTestRunManifestForContainmentAudit(manifestPath: string): TestRunContext {
+  const candidate = assertManifestCandidatePath(manifestPath, getContainmentAuditTempRoots());
+  const manifest = parseManifest(readFileSync(candidate.path, "utf8"), candidate.approvedRoot);
+  if (resolve(manifest.manifestPath) !== candidate.path) {
+    throw new Error("Test-run manifest path does not match its contents");
+  }
+  assertSafeRunDirectory(manifest, candidate.approvedRoot);
   return manifest;
 }
 
@@ -1443,17 +1737,20 @@ export function getTestRunContext(): TestRunContext {
 
 export function updateTestRunManifest(
   manifestPath: string,
-  update: Partial<Pick<TestRunManifest, "status" | "portReservations" | "processes">>,
+  update: Partial<Pick<TestRunManifest,
+    "status" | "projectProvisionedAt" | "portReservations" | "preexistingProcessBaseline" | "processes"
+  >>,
 ): TestRunContext {
-  const manifest = readTestRunManifest(manifestPath);
-  const updated: TestRunContext = { ...manifest, ...update };
-  // Telemetry is the recovery side of the hand-off. Persist it first so a
-  // failure between the two files cannot leave a `complete` manifest with
-  // unresolved telemetry. A later recovery pass can safely reconcile a
-  // stopping manifest whose telemetry is already ahead.
-  writeRunnerTelemetry(updated);
-  writeManifest(updated);
-  return updated;
+  return withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    const updated: TestRunContext = { ...manifest, ...update };
+    // Telemetry is the recovery side of the hand-off. Persist it first so a
+    // failure between the two files cannot leave a `complete` manifest with
+    // unresolved telemetry. A later recovery pass can safely reconcile a
+    // stopping manifest whose telemetry is already ahead.
+    writeRunnerTelemetryUnlocked(updated);
+    writeManifestUnlocked(updated);
+    return updated;
+  });
 }
 
 /**
@@ -1464,69 +1761,78 @@ export function updateTestRunManifest(
  */
 export function cleanupTestRun(manifestPath: string): void {
   if (!existsSync(manifestPath)) return;
-  const manifest = readTestRunManifest(manifestPath);
-  if (manifest.status === "stopping") {
-    throw new Error("Refusing to remove recovery evidence for a stopping test run");
-  }
-  if (manifest.processes.length > 0) {
-    throw new Error("Refusing to remove a test run with retained process records");
-  }
-  if (manifest.status === "created") {
-    const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
-    if (!telemetry
-      || telemetry.runId !== manifest.runId
-      || telemetry.runNonce !== manifest.runNonce
-      || telemetry.repoRoot !== manifest.repoRoot
-      || resolve(telemetry.manifestPath) !== resolve(manifest.manifestPath)
-      || telemetry.activeProcesses.length > 0
-      || telemetry.processes.some((entry) => entry.state === "active" || entry.state === "retained")) {
-      throw new Error("Refusing to remove a created run with unresolved telemetry");
+  withTestRunArtifactWriterLock(manifestPath, (manifest) => {
+    if (manifest.status === "stopping") {
+      throw new Error("Refusing to remove recovery evidence for a stopping test run");
     }
-    // A config/bootstrap failure can delete a created manifest before the
-    // normal stopping → complete transition. Resolve its already-empty
-    // telemetry first so the retained artifact is never an orphan record.
-    telemetry.status = "complete";
-    telemetry.updatedAt = new Date().toISOString();
-    telemetry.resolution = {
-      status: "resolved",
-      resolvedAt: telemetry.updatedAt,
-      method: "explicit-recovery",
+    if (manifest.processes.length > 0) {
+      throw new Error("Refusing to remove a test run with retained process records");
+    }
+    if (manifest.status === "created") {
+      const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
+      if (!telemetry
+        || telemetry.runId !== manifest.runId
+        || telemetry.runNonce !== manifest.runNonce
+        || telemetry.repoRoot !== manifest.repoRoot
+        || resolve(telemetry.manifestPath) !== resolve(manifest.manifestPath)
+        || telemetry.activeProcesses.length > 0
+        || telemetry.processes.some((entry) => entry.state === "active" || entry.state === "retained")) {
+        throw new Error("Refusing to remove a created run with unresolved telemetry");
+      }
+      // A config/bootstrap failure can delete a created manifest before the
+      // normal stopping → complete transition. Resolve its already-empty
+      // telemetry first so the retained artifact is never an orphan record.
+      telemetry.status = "complete";
+      telemetry.updatedAt = new Date().toISOString();
+      telemetry.resolution = {
+        status: "resolved",
+        resolvedAt: telemetry.updatedAt,
+        method: "explicit-recovery",
+      };
+      writeOwnedJson(
+        getTestRunTelemetryPath(manifest),
+        telemetry,
+        getTestRunArtifactRoot(manifest.repoRoot),
+        "runner telemetry",
+      );
+    } else if (manifest.status !== "complete") {
+      throw new Error(`Refusing to remove a test run in ${manifest.status} state`);
+    } else {
+      const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
+      if (!telemetry || telemetry.status !== "complete"
+        || telemetry.activeProcesses.length > 0
+        || telemetry.resolution?.status !== "resolved") {
+        throw new Error("Refusing to remove a complete run without resolved telemetry");
+      }
+    }
+    const apiTokenFile = getTestRunApiTokenPath(manifest);
+    const dashboardWorkspace = getTestRunDashboardWorkspace(manifest);
+    if (existsSync(dashboardWorkspace)) {
+      assertNoSymlinkedAncestors(dashboardWorkspace, manifest.repoRoot, "test-run dashboard workspace");
+      if (!lstatSync(dashboardWorkspace).isDirectory()) {
+        throw new Error("Test-run dashboard workspace is not a directory");
+      }
+      rmSync(dashboardWorkspace, { recursive: true, force: true });
+    }
+    releaseTestRunPortReservations(manifest, { allowMissing: true });
+    rmSync(manifest.runDir, { recursive: true, force: true });
+    const environment = {
+      [TEST_RUN_MANIFEST_ENV]: manifest.manifestPath,
+      [TEST_RUN_NONCE_ENV]: manifest.runNonce,
+      [TEST_RUN_TELEMETRY_ENV]: getTestRunTelemetryPath(manifest),
+      INGENIUM_CORE_DB_PATH: manifest.dbPath,
+      INGENIUM_HOME: manifest.homeDir,
+      INGENIUM_PROJECT: manifest.project,
+      INGENIUM_API_TOKEN_FILE: apiTokenFile,
+      INGENIUM_E2E_API_PORT: String(manifest.ports.api),
+      INGENIUM_E2E_DASH_PORT: String(manifest.ports.dashboard),
+      INGENIUM_E2E_FIXTURE_PORT: String(manifest.ports.fixture),
     };
-    writeOwnedJson(
-      getTestRunTelemetryPath(manifest),
-      telemetry,
-      getTestRunArtifactRoot(manifest.repoRoot),
-      "runner telemetry",
-    );
-  } else if (manifest.status !== "complete") {
-    throw new Error(`Refusing to remove a test run in ${manifest.status} state`);
-  } else {
-    const telemetry = readTelemetryIfPresent(getTestRunTelemetryPath(manifest));
-    if (!telemetry || telemetry.status !== "complete"
-      || telemetry.activeProcesses.length > 0
-      || telemetry.resolution?.status !== "resolved") {
-      throw new Error("Refusing to remove a complete run without resolved telemetry");
+    for (const [name, value] of Object.entries(environment)) {
+      if (process.env[name] === value) delete process.env[name];
     }
-  }
-  const apiTokenFile = getTestRunApiTokenPath(manifest);
-  releaseTestRunPortReservations(manifest, { allowMissing: true });
-  rmSync(manifest.runDir, { recursive: true, force: true });
-  const environment = {
-    [TEST_RUN_MANIFEST_ENV]: manifest.manifestPath,
-    [TEST_RUN_NONCE_ENV]: manifest.runNonce,
-    [TEST_RUN_TELEMETRY_ENV]: getTestRunTelemetryPath(manifest),
-    INGENIUM_CORE_DB_PATH: manifest.dbPath,
-    INGENIUM_HOME: manifest.homeDir,
-    INGENIUM_PROJECT: manifest.project,
-    INGENIUM_API_TOKEN_FILE: apiTokenFile,
-    INGENIUM_E2E_API_PORT: String(manifest.ports.api),
-    INGENIUM_E2E_DASH_PORT: String(manifest.ports.dashboard),
-    INGENIUM_E2E_FIXTURE_PORT: String(manifest.ports.fixture),
-  };
-  for (const [name, value] of Object.entries(environment)) {
-    if (process.env[name] === value) delete process.env[name];
-  }
-  cachedContext = undefined;
+    cachedContext = undefined;
+  });
 }
 
 export interface StaleRunCleanupResult {

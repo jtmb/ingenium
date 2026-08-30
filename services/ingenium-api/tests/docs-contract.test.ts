@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 // ── Mock ingenium-core docs module ────────────────────────────────────────────
 
@@ -37,6 +37,7 @@ const MOCK_STATS = { spaces: 1, pages: 1, drafts: 0, versions: 1, tags: 1, comme
 let forceConflict = false;
 let forceSlugExists = false;
 let forceNotFound = false;
+let forceNoDraft = false;
 let forceCycle = false;
 
 // Fake in-memory DB for routes that use getDb directly (comment update, alias lookups)
@@ -157,7 +158,7 @@ vi.mock("ingenium-core", async (importOriginal) => {
       purgeArchivedPages: (_spaceId: number) => 1,
 
       // Drafts
-      getDraft: (_pageId: number) => forceNotFound ? undefined : MOCK_DRAFT,
+      getDraft: (_pageId: number) => forceNotFound || forceNoDraft ? undefined : MOCK_DRAFT,
       saveDraft: (_pageId: number, content: string, _title?: string, _slug?: string, _baseRevision?: number) => ({ ...MOCK_DRAFT, content }),
       deleteDraft: (_pageId: number) => !forceNotFound,
 
@@ -248,17 +249,11 @@ beforeAll(async () => {
   const app = await buildApp();
   server = createServer(app);
 
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -266,6 +261,7 @@ beforeEach(() => {
   forceConflict = false;
   forceSlugExists = false;
   forceNotFound = false;
+  forceNoDraft = false;
   forceCycle = false;
   seedMockData();
 });
@@ -681,6 +677,13 @@ describe("Drafts", () => {
     expect(data.data).toHaveProperty("pageId");
     expect(data.data).toHaveProperty("baseRevision");
     expect(data.data).toHaveProperty("savedAt");
+  });
+
+  it("GET /pages/1/draft returns a successful nullable result when no draft exists", async () => {
+    forceNoDraft = true;
+    const { status, data } = await req("GET", "/pages/1/draft");
+    expect(status).toBe(200);
+    expect(data).toEqual({ data: null });
   });
 
   it("GET /pages/999/draft returns 404", async () => {

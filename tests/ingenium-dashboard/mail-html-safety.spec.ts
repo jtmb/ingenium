@@ -1,39 +1,14 @@
 import { test, expect, Page } from "@playwright/test";
 
 /**
- * E2E tests verifying that the email reader safely renders potentially
- * dangerous or malformed HTML email content.
- *
- * 🔴 These tests run against the REAL API — no page.route() mocks for
- * email content. Each test:
- *   1. Sends a real crash email via SMTP (POST /emails)
- *   2. Syncs INBOX via IMAP (POST /emails/sync)
- *   3. Opens the email through the live UI
- *   4. Asserts safety (no page crash, no style leak, graceful rendering)
- *   5. Cleans up by deleting the test email (DELETE /emails/:uid)
- *
- * The Gmail account (james.branco@gmail.com, id 68a96f5b-faaf-41d3-967e-5981564ec080)
- * must be connected and authenticated. The mail config preflight is opt-in;
- * missing account/provider state is a hard failure, never a skip.
- *
- * Each uses a unique timestamped subject so test emails are independently
- * identifiable and non-interfering.
- *
- * 🔴 KNOWN ISSUE: page.waitForLoadState("load") is used, never
- * "networkidle", because the mail page polls /sync-status every 2s.
- * 🔴 KNOWN ISSUE: URL patterns matching GET /emails/** must exclude
- * /sync-status to avoid false matches.
- * 🔴 KNOWN ISSUE: After sending, Gmail may take 1-3s to deliver even
- *    self-sent email. A small delay between send and sync is included.
+ * Safety checks for dangerous and malformed HTML email content. The suite
+ * sends through the configured mail service and removes each uniquely named
+ * message after inspection.
  */
 
 const API_BASE = "http://localhost:4097/api/v1";
 const ACCOUNT_ID = "68a96f5b-faaf-41d3-967e-5981564ec080";
 const GMAIL_EMAIL = "james.branco@gmail.com";
-
-// =========================================================================
-//  Helpers
-// =========================================================================
 
 /**
  * Collect pageerror events into an array for zero-error assertions.
@@ -89,7 +64,7 @@ async function waitForFolderCache(
         if (folderStatus && folderStatus.cachedCount > 0) return;
       }
     } catch {
-      // Ignore transient errors
+      // Sync can briefly fail while the mailbox reconnects; keep polling until the deadline.
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
@@ -143,28 +118,18 @@ async function findEmailBySubject(
       const uids: number[] = data?.data ?? [];
       if (uids.length > 0) return uids[0];
     } catch {
-      // Transient failure — retry
+      // Delivery and IMAP indexing are eventually consistent, so the next attempt may succeed.
     }
   }
   return null;
 }
 
-// =========================================================================
-//  Tests
-// =========================================================================
-
 test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
-  /* ================================================================== */
-  /*  1. HTML email with style tags renders in iframe, does not break    */
-  /*     page layout                                                     */
-  /* ================================================================== */
-
   test("1 - HTML email with style tags renders in iframe, does not break page", async ({ page }) => {
     const pageErrors = collectPageErrors(page);
     const TEST_TS = Date.now();
     const SUBJECT = `HTML-SAFETY-REAL-${TEST_TS}-style-inject`;
 
-    // ── 1. Send crash email via SMTP ──────────────────────────────────
     const htmlContent =
       '<html><head><style>body{display:none!important;background:#ff0000!important}*{color:red!important}.overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:red;z-index:99999}</style></head><body><div class="overlay">PWNED</div><table><tr><td>hello</tr></table></body></html>';
 
@@ -186,8 +151,7 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
       `SMTP send failed (${sendResp.status()}): HTML safety requires a real sent message`,
     ).toBeTruthy();
 
-    // ── 2. Sync INBOX to bring the sent email into cache ──────────────
-    // Wait briefly for SMTP→Gmail delivery (self-sends are typically instant)
+    // Allow provider delivery to settle before the folder sync.
     await new Promise((r) => setTimeout(r, 2000));
 
     const syncResp = await page.request.post(
@@ -195,16 +159,13 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     );
     expect(syncResp.ok()).toBeTruthy();
 
-    // Wait for INBOX folder to have cached data
     await waitForFolderCache(page, "INBOX");
 
-    // ── 3. Find the email UID via API search ──────────────────────────
     const uid = await findEmailBySubject(page, SUBJECT, "INBOX", 5);
     if (uid === null) {
       throw new Error(`Could not find test email "${SUBJECT}" in INBOX after sync`);
     }
 
-    // ── 4. Pre-cache the email body (fetch via API so cache is warm) ──
     const bodyResp = await page.request.get(
       `${API_BASE}/emails/${uid}?project=global-default&account=${ACCOUNT_ID}&folder=INBOX`,
     );
@@ -212,11 +173,9 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     const bodyData = await bodyResp.json();
     expect(bodyData.source).toBe("imap"); // First fetch comes from IMAP
 
-    // ── 5. Navigate to /mail ──────────────────────────────────────────
     await page.goto("/mail", { waitUntil: "load" });
     await waitForWarmCache(page);
 
-    // Click INBOX folder
     const inboxBtn = page
       .locator("button")
       .filter({ hasText: "INBOX" })
@@ -224,45 +183,34 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     await expect(inboxBtn).toBeVisible({ timeout: 10_000 });
     await inboxBtn.click();
 
-    // Wait for email list to populate
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15_000 });
 
-    // ── 6. Find and click the crash email by subject ──────────────────
-    // The email was just sent so it should be among the first results.
-    // Use text matching to find the row with our unique subject.
     const crashEmailRow = emailRows.filter({ hasText: SUBJECT }).first();
     await expect(crashEmailRow, `Could not find email row with subject "${SUBJECT}" in the UI`).toBeVisible({ timeout: 10_000 });
 
     await crashEmailRow.click();
 
-    // ── 7. Assert safety ──────────────────────────────────────────────
-
-    // ✅ The HTML body should render in an iframe with sandbox attribute
     const iframe = page.locator('[data-testid="email-html-iframe"]');
     await expect(iframe).toBeVisible({ timeout: 10_000 });
 
-    // ✅ Iframe must have a sandbox attribute (security policy enforcement)
+    // Sandboxing prevents message CSS and scripts from reaching the parent.
     const sandboxAttr = await iframe.getAttribute("sandbox");
     expect(sandboxAttr).not.toBeNull();
     expect(sandboxAttr).toContain("allow-same-origin");
 
-    // ✅ Zero page-level crash errors
     expect(pageErrors).toHaveLength(0);
 
-    // ✅ Page heading "Mail" must still be visible (page didn't crash)
     const mailHeading = page.locator("h1").filter({ hasText: "Mail" });
     await expect(mailHeading).toBeVisible({ timeout: 3000 });
 
-    // ✅ Main document body background must NOT be red — the crash email's
-    // CSS is sandboxed inside the iframe and must not leak to the parent.
+    // Parent styling must remain unchanged by message CSS.
     const bodyBgColor = await page.evaluate(() => {
       return window.getComputedStyle(document.body).backgroundColor;
     });
     expect(bodyBgColor).not.toBe("rgb(255, 0, 0)");
     expect(bodyBgColor).not.toBe("red");
 
-    // ── 8. Cleanup: delete the test email ─────────────────────────────
     const deleted = await deleteTestEmail(page, uid!);
     test.info().annotations.push({
       type: "cleanup",
@@ -270,17 +218,12 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     });
   });
 
-  /* ================================================================== */
-  /*  2. Malformed HTML email does not crash the page                     */
-  /* ================================================================== */
-
   test("2 - malformed HTML email does not crash the page", async ({ page }) => {
     const pageErrors = collectPageErrors(page);
     const TEST_TS = Date.now();
     const SUBJECT = `HTML-SAFETY-REAL-${TEST_TS}-malformed-table`;
 
-    // ── 1. Send crash email with malformed HTML ───────────────────────
-    // Unclosed <tr> / <td> tags that browsers typically try to "fix"
+    // Unclosed table cells exercise browser/parser recovery.
     const htmlContent = '<table><tr><td>cell1<tr><td>cell2</table>';
 
     const sendResp = await page.request.post(
@@ -301,7 +244,6 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
       `SMTP send failed (${sendResp.status()}): HTML safety requires a real sent message`,
     ).toBeTruthy();
 
-    // ── 2. Sync INBOX ─────────────────────────────────────────────────
     await new Promise((r) => setTimeout(r, 2000));
 
     const syncResp = await page.request.post(
@@ -310,19 +252,16 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     expect(syncResp.ok()).toBeTruthy();
     await waitForFolderCache(page, "INBOX");
 
-    // ── 3. Find the email UID via API search ──────────────────────────
     const uid = await findEmailBySubject(page, SUBJECT, "INBOX", 5);
     if (uid === null) {
       throw new Error(`Could not find test email "${SUBJECT}" in INBOX`);
     }
 
-    // ── 4. Pre-cache the email body ───────────────────────────────────
     const bodyResp = await page.request.get(
       `${API_BASE}/emails/${uid}?project=global-default&account=${ACCOUNT_ID}&folder=INBOX`,
     );
     expect(bodyResp.ok()).toBeTruthy();
 
-    // ── 5. Navigate to /mail and find the email ───────────────────────
     await page.goto("/mail", { waitUntil: "load" });
     await waitForWarmCache(page);
 
@@ -336,38 +275,28 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15_000 });
 
-    // Find the crash email by subject
     const crashEmailRow = emailRows.filter({ hasText: SUBJECT }).first();
     await expect(crashEmailRow, `Could not find email row with subject "${SUBJECT}" in the UI`).toBeVisible({ timeout: 10_000 });
 
     await crashEmailRow.click();
 
-    // ── 6. Assert safety ──────────────────────────────────────────────
-
-    // ✅ The malformed HTML doesn't have <html>/<body> tags, so the
-    // EmailReader wraps it in a skeleton. It renders either as an iframe
-    // (if parsed as HTML) or as a text pre block.
+    // The reader must choose a safe HTML or text representation for malformed input.
     const readerContent = page.locator('[data-testid="email-reader-content"]');
     await expect(readerContent).toBeVisible({ timeout: 10_000 });
 
-    // ✅ Error boundary must not appear (malformed HTML handled gracefully)
     const errorBoundary = page.locator('[data-testid="email-error-boundary"]');
     await expect(errorBoundary).not.toBeVisible({ timeout: 3000 });
 
-    // ✅ Zero page-level crash errors
     expect(pageErrors).toHaveLength(0);
 
-    // ✅ The reader should show either an iframe (html email) or pre (text)
     const renderedBody = page
       .locator('[data-testid="email-html-iframe"]')
       .or(readerContent.locator("pre"));
     await expect(renderedBody).toBeVisible({ timeout: 5000 });
 
-    // ✅ Page heading "Mail" must still be visible
     const mailHeading = page.locator("h1").filter({ hasText: "Mail" });
     await expect(mailHeading).toBeVisible({ timeout: 3000 });
 
-    // ── 7. Cleanup ────────────────────────────────────────────────────
     const deleted = await deleteTestEmail(page, uid!);
     test.info().annotations.push({
       type: "cleanup",

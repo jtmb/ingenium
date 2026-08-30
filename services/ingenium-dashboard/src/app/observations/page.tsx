@@ -4,8 +4,10 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Observation } from "../../lib/api";
+import { buildProjectNavigationHref } from "../../lib/project-navigation";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import Select from "../components/Select";
 
 function typeColors(type: string): string {
   const hues: Record<string, string> = {
@@ -58,38 +60,76 @@ export default function ObservationsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [selected, setSelected] = useState<any>(null);
-  const [stats, setStats] = useState({ total: 0, pending: 0 });
-  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<{ total: number; pending: number } | null>(null);
+  const [observationsState, setObservationsState] = useState<"loading" | "success" | "error">("loading");
+  const [statsState, setStatsState] = useState<"loading" | "success" | "error">("loading");
+  const [observationsError, setObservationsError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   useEffect(() => {
-    setError(null);
+    let cancelled = false;
+    setObservations([]);
+    setStats(null);
+    setObservationsState("loading");
+    setStatsState("loading");
+    setObservationsError(null);
+    setStatsError(null);
+
     api.observations.list(project, statusFilter, typeFilter)
-      .then((r) => setObservations(r.data || []))
-      .catch(() => setError("Failed to load observations — API may be unreachable"));
+      .then((response) => {
+        if (cancelled) return;
+        setObservations(Array.isArray(response.data) ? response.data : []);
+        setObservationsState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setObservationsError(error instanceof Error ? error.message : "API may be unreachable");
+        setObservationsState("error");
+      });
     api.observations.stats(project)
-      .then((r) => setStats(r.data || { total: 0, pending: 0 }))
-      .catch(() => { /* stats are non-critical */ });
+      .then((response) => {
+        if (cancelled) return;
+        const data = response.data;
+        if (!data || !Number.isFinite(data.total) || !Number.isFinite(data.pending)) {
+          throw new Error("Invalid observation stats response");
+        }
+        setStats(data);
+        setStatsState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setStatsError(error instanceof Error ? error.message : "Unable to load observation stats");
+        setStatsState("error");
+      });
+
+    return () => { cancelled = true; };
   }, [project, statusFilter, typeFilter]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Observations</h1>
-        <div className="text-sm text-[var(--color-text-muted)] space-x-4">
-          <span>Total: <strong>{stats.total}</strong></span>
-          <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Observations</h1>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]">
+          {statsState === "loading" && <span aria-busy="true">Loading stats...</span>}
+          {statsState === "error" && <span role="alert">Stats unavailable: {statsError}</span>}
+          {statsState === "success" && stats && (
+            <>
+              <span>Total: <strong>{stats.total}</strong></span>
+              <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Select wrapperClassName="w-full min-w-0 sm:w-auto" aria-label="Filter observations by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
           <option value="processed">Processed</option>
           <option value="skipped">Skipped</option>
           <option value="failed">Failed</option>
-        </select>
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+        </Select>
+        <Select wrapperClassName="w-full min-w-0 sm:w-auto" aria-label="Filter observations by type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
           <option value="">All types</option>
           <option value="correction">Correction</option>
           <option value="preference">Preference</option>
@@ -101,48 +141,55 @@ export default function ObservationsPage() {
           <option value="workflow">Workflow</option>
           <option value="error">Error</option>
           <option value="goal">Goal</option>
-        </select>
+        </Select>
       </div>
 
       <div className="space-y-2">
-        {error && (
-          <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
-            {error}
+        {observationsState === "loading" && (
+          <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-6 text-center text-sm text-[var(--color-text-muted)]" aria-busy="true">
+            Loading observations...
           </div>
         )}
-        {!error && observations.length === 0 && (
+        {observationsState === "error" && (
+          <div className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center text-sm text-[var(--color-error-text)]" role="alert">
+            Failed to load observations — {observationsError}
+          </div>
+        )}
+        {observationsState === "success" && observations.length === 0 && (
           <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
             No observations yet. The agent will record observations automatically during interactions.
           </div>
         )}
-        {observations.map((o: Observation) => (
+        {observationsState === "success" && observations.map((o: Observation) => (
           <div
             key={o.id}
-            className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] cursor-pointer hover:shadow-md transition-shadow group"
-            onClick={() => setSelected(o)}
+            className="group min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
           >
-            <div className="flex gap-2 items-center mb-1 flex-wrap">
-              <span className={`${BADGE_BASE} ${typeColors(o.observation_type)}`}>
-                {o.observation_type}
-              </span>
-              <span className={`${BADGE_BASE} ${statusColors(o.status)}`}>{o.status}</span>
-              <span className="text-xs text-[var(--color-text-muted)]">{new Date(o.created_at).toLocaleString()}</span>
-              {o.importance && <span className="text-xs text-[var(--color-text-muted)]">Importance: {o.importance}/10</span>}
-              <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push(`/observations/${o.id}`);
-                  }}
-                  className="text-xs text-[var(--color-text-link)] hover:text-blue-800 underline"
-                  title="View full details"
-                >
-                  Open
-                </button>
-              </span>
+            <div className="flex min-w-0 items-start gap-3">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                onClick={() => setSelected(o)}
+                aria-label={`View observation ${o.id}`}
+              >
+                <span className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className={`${BADGE_BASE} ${typeColors(o.observation_type)}`}>{o.observation_type}</span>
+                  <span className={`${BADGE_BASE} ${statusColors(o.status)}`}>{o.status}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">{new Date(o.created_at).toLocaleString()}</span>
+                  {o.importance && <span className="text-xs text-[var(--color-text-muted)]">Importance: {o.importance}/10</span>}
+                </span>
+                <span className="block break-words text-sm">{o.content}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(buildProjectNavigationHref(`/observations/${o.id}`, project))}
+                className="shrink-0 text-xs text-[var(--color-text-link)] underline hover:text-blue-800"
+                title="View full details"
+              >
+                Open
+              </button>
             </div>
-            <p className="text-sm">{o.content}</p>
-            {o.context && <pre className="text-xs text-[var(--color-text-muted)] mt-1 truncate">{o.context}</pre>}
+            {o.context && <pre className="mt-1 break-all whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">{o.context}</pre>}
           </div>
         ))}
       </div>
@@ -151,16 +198,16 @@ export default function ObservationsPage() {
         subtitle={selected?.observation_type ? `Type: ${selected.observation_type}` : undefined}>
         {selected && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-semibold">Type:</span> <span className={`inline-block ${BADGE_BASE} ${typeColors(selected.observation_type)}`}>{selected.observation_type}</span></div>
-              <div><span className="font-semibold">Status:</span> <span className={`inline-block ${BADGE_BASE} ${statusColors(selected.status)}`}>{selected.status}</span></div>
-              <div><span className="font-semibold">Importance:</span> <span className="text-[var(--color-text-secondary)]">{selected.importance ?? 5}/10</span></div>
-              <div><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selected.source || "agent"}</span></div>
-              <div><span className="font-semibold">Created:</span> <span className="text-[var(--color-text-secondary)]">{new Date(selected.created_at).toLocaleString()}</span></div>
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              <div className="break-words"><span className="font-semibold">Type:</span> <span className={`inline-block ${BADGE_BASE} ${typeColors(selected.observation_type)}`}>{selected.observation_type}</span></div>
+              <div className="break-words"><span className="font-semibold">Status:</span> <span className={`inline-block ${BADGE_BASE} ${statusColors(selected.status)}`}>{selected.status}</span></div>
+              <div className="break-words"><span className="font-semibold">Importance:</span> <span className="text-[var(--color-text-secondary)]">{selected.importance ?? 5}/10</span></div>
+              <div className="break-words"><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selected.source || "agent"}</span></div>
+              <div className="break-words"><span className="font-semibold">Created:</span> <span className="text-[var(--color-text-secondary)]">{new Date(selected.created_at).toLocaleString()}</span></div>
             </div>
             <div>
               <h3 className="font-semibold mb-1">Content</h3>
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
+              <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
             </div>
             {selected.context && (
               <div>
@@ -168,9 +215,9 @@ export default function ObservationsPage() {
                 {(() => {
                   const parsed = safeParseJson(selected.context);
                   return parsed ? (
-                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
+                    <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
                   ) : (
-                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
+                    <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
                   );
                 })()}
               </div>

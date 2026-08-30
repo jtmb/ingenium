@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
 
 /**
- * MCP tool tests — validates all 23 Ingenium MCP tools via direct API calls.
+ * MCP tool contract tests via direct API calls.
  *
  * These tests call the API owned by the Playwright run using request(), which
  * bypasses the dashboard UI and tests the tool handlers directly.
@@ -88,28 +88,28 @@ test.describe("MCP Tools — Skills", () => {
   });
 });
 
-test.describe("MCP Tools — Learnings", () => {
-  const entryContent = `E2E learning ${Date.now()}`;
+test.describe("MCP Tools — Observations", () => {
+  const observationContent = `E2E observation ${Date.now()}`;
 
-  test("learning_log creates a learning entry", async ({ request }) => {
-    const res = await request.post(`${API}/learnings?project=${PROJECT}`, {
+  test("observe creates an observation", async ({ request }) => {
+    const res = await request.post(`${API}/observations?project=${PROJECT}`, {
       headers: API_HEADERS,
-      data: { entry_type: "pattern", content: entryContent, tags: "e2e" },
+      data: { observation_type: "pattern", content: observationContent, source: "manual" },
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    expect(body.data.content).toBe(entryContent);
+    expect(body.data.content).toBe(observationContent);
   });
 
-  test("learning_search searches learnings", async ({ request }) => {
-    const res = await request.get(`${API}/learnings/search?project=${PROJECT}&q=E2E`, { headers: API_HEADERS });
+  test("observation_search searches observations", async ({ request }) => {
+    const res = await request.get(`${API}/observations/search?project=${PROJECT}&q=E2E`, { headers: API_HEADERS });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(Array.isArray(body.data)).toBeTruthy();
   });
 
-  test("learning_list returns entries", async ({ request }) => {
-    const res = await request.get(`${API}/learnings?project=${PROJECT}`, { headers: API_HEADERS });
+  test("observation_list returns entries", async ({ request }) => {
+    const res = await request.get(`${API}/observations?project=${PROJECT}`, { headers: API_HEADERS });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(Array.isArray(body.data)).toBeTruthy();
@@ -169,7 +169,7 @@ test.describe("MCP Tools — Context", () => {
   test("context_save saves a context entry", async ({ request }) => {
     const res = await request.post(`${API}/context?project=${PROJECT}`, {
       headers: API_HEADERS,
-      data: { content: `E2E context ${Date.now()}`, tags: "e2e", priority: 5 },
+      data: { content: `E2E context ${Date.now()}`, tags: ["e2e"], priority: 5 },
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();

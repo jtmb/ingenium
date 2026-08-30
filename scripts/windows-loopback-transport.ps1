@@ -22,9 +22,13 @@ function Invoke-GatewayProbe {
     try {
         $request = [System.Net.WebRequest]::Create($Uri)
         $request.Method = "GET"
+        # Observe the gateway's local response directly; redirects and machine
+        # proxy settings could otherwise hide the transport being verified.
         $request.AllowAutoRedirect = $false
         $request.Proxy = $null
         if ($HostHeader) {
+            # Virtual-host routing is part of the gateway contract, so test the
+            # requested Host without changing the loopback destination URI.
             $request.Host = $HostHeader
         }
         $response = $request.GetResponse()

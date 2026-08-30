@@ -30,11 +30,17 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => navigationMock.searchParams,
 }));
 
-vi.mock("../src/app/components/settings/panels", () => ({
-  GeneralPanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Gen"),
-  MailPanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Mail"),
-  PipelinePanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Pipe"),
-  ConfigPanel: () => React.createElement("div", { "data-testid": "test-panel" }, "Config"),
+vi.mock("../src/app/components/settings/panels/GeneralPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Gen"),
+}));
+vi.mock("../src/app/components/settings/panels/MailPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Mail"),
+}));
+vi.mock("../src/app/components/settings/panels/PipelinePanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Pipe"),
+}));
+vi.mock("../src/app/components/settings/panels/ConfigPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "test-panel" }, "Config"),
 }));
 
 // Re-import after mocks
@@ -152,52 +158,36 @@ describe("SettingsOverlay — SSR guard invariants", () => {
   });
 });
 
-describe("SettingsOverlay — all panels rendered, active visible", () => {
+describe("SettingsOverlay — active panel mounting", () => {
   afterEach(() => {
     cleanup();
     document.body.innerHTML = "";
     document.body.style.overflow = "";
   });
 
-  it("renders all fourteen registered panels in the DOM when any tab is active", async () => {
+  it("mounts only the active registered panel", async () => {
     navigationMock.searchParams = new URLSearchParams("settings=providers");
     render(React.createElement(SettingsOverlay));
 
-    // The four embedded panels are in the DOM alongside ten route-linked panels.
     await waitFor(() => {
       const panels = screen.getAllByTestId("test-panel", { hidden: true });
-      expect(panels).toHaveLength(4);
-      expect(screen.getAllByTestId(/^settings-panel-/)).toHaveLength(14);
+      expect(panels).toHaveLength(1);
+      expect(document.body.querySelectorAll('section[data-testid^="settings-panel-"]')).toHaveLength(1);
+      expect(screen.getByTestId("settings-panel-providers").getAttribute("hidden")).toBeNull();
     });
   });
 
-  it("marks inactive panel containers as hidden and inert", async () => {
+  it("does not mount inactive panels or their fetch effects", async () => {
     navigationMock.searchParams = new URLSearchParams("settings=providers");
     render(React.createElement(SettingsOverlay));
 
     await waitFor(() => {
-      // Portal renders to document.body, so use body-level query
       const dialog = document.body.querySelector('[role="dialog"]');
       expect(dialog).not.toBeNull();
-
-      // Find the first hidden panel wrapper inside the dialog
-      const firstHiddenPanel = dialog!.querySelector('[hidden]');
-      expect(firstHiddenPanel).not.toBeNull();
-
-      // Its parent is the panels container
-      const panelsContainer = firstHiddenPanel!.parentElement;
-      expect(panelsContainer).not.toBeNull();
-
-      // The panels container has 14 direct children (one per declared tab).
-      const allPanelWrappers = panelsContainer!.children;
-      expect(allPanelWrappers).toHaveLength(14);
-
-      // Count hidden panel wrappers (13 — all except the active providers panel).
-      let hiddenCount = 0;
-      for (const wrapper of allPanelWrappers) {
-        if ((wrapper as HTMLElement).hidden) hiddenCount++;
-      }
-      expect(hiddenCount).toBe(13);
+      expect(dialog!.querySelector('[hidden]')).toBeNull();
+      expect(dialog!.querySelector('[inert]')).toBeNull();
+      expect(screen.queryByTestId("settings-panel-general")).toBeNull();
+      expect(screen.queryByTestId("settings-panel-mail")).toBeNull();
     });
   });
 

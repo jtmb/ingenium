@@ -1,10 +1,20 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createConnection } from "node:net";
 import { basename, join } from "node:path";
 import {
   cleanupTestRun,
   getPortEnvironment,
+  getTestRunDashboardWorkspace,
   getTestRunTelemetryPath,
   markTestRunRecovered,
   markTestRunProcessCleared,
@@ -18,12 +28,57 @@ import {
   type TestRunProcess,
   updateTestRunManifest,
 } from "./test-run-context";
+import {
+  capturePreexistingProcessBaseline,
+  inspectProcessIdentity,
+  readProcStat,
+  type ProcessIdentity,
+} from "./test-run-process-discovery";
+import { normalizeDashboardStorageState, writeDashboardStorageState } from "./ingenium-dashboard/fixture-credentials";
+import {
+  FIXTURE_INTERNAL_SERVICE_HEADER,
+  TEST_API_TOKEN,
+  testRunApiAuthHeaders,
+} from "./fixture-api-auth";
+
+export { inspectProcessIdentity, type ProcessIdentity } from "./test-run-process-discovery";
+export { FIXTURE_INTERNAL_SERVICE_HEADER, TEST_API_TOKEN } from "./fixture-api-auth";
 
 export const SERVER_START_TIMEOUT_MS = 45_000;
 export const SERVER_STOP_TIMEOUT_MS = 8_000;
 export const PRODUCTION_BUILD_TIMEOUT_MS = 180_000;
 export const READINESS_REQUEST_TIMEOUT_MS = 1_000;
-export const TEST_API_TOKEN = "A".repeat(48);
+export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
+// The serialized fixture suite creates deliberate browser/API traffic. Keep
+// this bounded override local to its isolated API process; production retains
+// the configured default of 100 requests/minute.
+export const FIXTURE_API_RATE_LIMIT = 1_000;
+export const FIXTURE_OWNER_EMAIL = "playwright-owner@example.test";
+export const FIXTURE_OWNER_PASSWORD = "Playwright-fixture-password-2026!";
+export const FIXTURE_SESSION_COOKIE_NAME = "__Host-ingenium_session";
+
+function ensureTestRunAuthEncryptionKey(context: TestRunContext): void {
+  const path = join(context.homeDir, "auth-encryption-key");
+  if (!existsSync(path)) {
+    writeFileSync(path, randomBytes(32).toString("base64url"), { flag: "wx", mode: 0o600 });
+  }
+}
+
+function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildArtifacts: boolean): string {
+  const source = join(context.repoRoot, "services", "ingenium-dashboard");
+  const target = getTestRunDashboardWorkspace(context);
+  rmSync(target, { recursive: true, force: true });
+  cpSync(source, target, {
+    recursive: true,
+    filter: (path) => {
+      const name = basename(path);
+      if (name === "node_modules") return false;
+      return includeBuildArtifacts || name !== ".next";
+    },
+  });
+  symlinkSync(join(source, "node_modules"), join(target, "node_modules"), "dir");
+  return target;
+}
 
 interface CommandResult {
   code: number | null;
@@ -40,14 +95,6 @@ export interface ServerSpec {
   env: NodeJS.ProcessEnv;
   readinessUrl: string;
   readinessHeaders?: Record<string, string>;
-}
-
-export interface ProcessIdentity {
-  pidStartTime: string;
-  pgid: number;
-  executable: string;
-  groupIdentity: string;
-  runNonce?: string;
 }
 
 interface RunningServer {
@@ -79,6 +126,8 @@ export interface TestServerLifecycleOptions {
   spawnServer?: (spec: ServerSpec) => ChildProcess;
   /** Server-only dashboard credential produced by the suite runtime. */
   dashboardEnvironment?: Readonly<Record<string, string>>;
+  /** Release parent stdio/handles after a manifest-owned external lease starts. */
+  detachAfterStart?: boolean;
   /**
    * Test-only failure injection for the first durable process-record hand-off.
    * The default remains the real run-context writer.
@@ -99,6 +148,121 @@ export interface TestServerLifecycleOptions {
 export interface StopRunOptions {
   stopTimeoutMs?: number;
   cleanup?: boolean;
+}
+
+/**
+ * Create the manifest-owned project through the same authenticated API that
+ * the fixture exercises. A 200 means an interrupted setup already created
+ * this exact run project, so it is the idempotent success case.
+ */
+export async function provisionTestRunProject(
+  context: TestRunContext,
+  timeoutMs = FIXTURE_PROJECT_PROVISION_TIMEOUT_MS,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = `http://127.0.0.1:${context.ports.api}/api/v1/auth/fixture-bootstrap`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: testRunApiAuthHeaders(context),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to provision fixture project ${context.project}: ${reason}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.status !== 200 && response.status !== 201) {
+    throw new Error(`Unable to provision fixture project ${context.project}: API returned ${response.status}`);
+  }
+
+  // The run directory, database, and this manifest entry share one lifecycle:
+  // a successful teardown removes all three. Retained runs keep the timestamp
+  // as recovery evidence rather than redirecting fixture writes elsewhere.
+  updateTestRunManifest(context.manifestPath, {
+    projectProvisionedAt: new Date().toISOString(),
+  });
+}
+
+function cookieFromResponse(response: Response, name: string): string {
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+  const prefix = `${name}=`;
+  if (!cookie?.startsWith(prefix) || cookie.length === prefix.length) {
+    throw new Error(`Fixture authentication did not return ${name}`);
+  }
+  return cookie.slice(prefix.length);
+}
+
+async function fixtureRequest(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(FIXTURE_PROJECT_PROVISION_TIMEOUT_MS) });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to authenticate fixture dashboard: ${reason}`);
+  }
+}
+
+export async function provisionTestRunOwner(context: TestRunContext): Promise<void> {
+  const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
+  const operatorHeaders = { ...testRunApiAuthHeaders(context), "Content-Type": "application/json" };
+  const claim = await fixtureRequest(`${apiBase}/bootstrap/claim`, {
+    method: "POST",
+    headers: operatorHeaders,
+    body: JSON.stringify({ email: FIXTURE_OWNER_EMAIL, displayName: "Playwright Owner", password: FIXTURE_OWNER_PASSWORD }),
+  });
+  if (claim.status !== 201 && claim.status !== 409) {
+    throw new Error(`Unable to claim fixture installation: API returned ${claim.status}`);
+  }
+}
+
+export async function createTestRunBrowserStorageState(
+  context: TestRunContext,
+  dashboardHost: "127.0.0.1" | "localhost" = "127.0.0.1",
+) {
+  const apiBase = `http://127.0.0.1:${context.ports.api}/api/v1`;
+  const session = await fixtureRequest(`${apiBase}/auth/fixture-session`, {
+    method: "POST",
+    headers: testRunApiAuthHeaders(context),
+  });
+  if (!session.ok) throw new Error(`Unable to create fixture dashboard session: API returned ${session.status}`);
+  const sessionToken = cookieFromResponse(session, FIXTURE_SESSION_COOKIE_NAME);
+  return normalizeDashboardStorageState(context, {
+    cookies: [{
+      name: FIXTURE_SESSION_COOKIE_NAME,
+      value: sessionToken,
+      domain: dashboardHost,
+      path: "/",
+      expires: Math.floor(Date.now() / 1000) + 12 * 60 * 60,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Strict",
+    }],
+    origins: [],
+  });
+}
+
+export async function provisionTestRunBrowserSession(
+  context: TestRunContext,
+  dashboardHost: "127.0.0.1" | "localhost" = "127.0.0.1",
+): Promise<string> {
+  return writeDashboardStorageState(
+    context,
+    await createTestRunBrowserStorageState(context, dashboardHost),
+  );
+}
+
+export async function resetTestRunChatFixture(context: TestRunContext): Promise<void> {
+  const response = await fixtureRequest(`http://127.0.0.1:${context.ports.fixture}/__fixture/reset`, {
+    method: "POST",
+    headers: { "x-ingenium-fixture-run-nonce": context.runNonce },
+  });
+  if (response.status !== 204) {
+    throw new Error(`Unable to reset chat fixture state: fixture returned ${response.status}`);
+  }
 }
 
 function npmCommand(): string {
@@ -145,7 +309,7 @@ function serverEnvironment(context: TestRunManifest, extra: Record<string, strin
     INGENIUM_PROJECT: context.project,
     INGENIUM_TEST_RUN_NONCE: context.runNonce,
     INGENIUM_API_PORT: String(context.ports.api),
-    DASHBOARD_ALLOWED_ORIGINS: `http://127.0.0.1:${context.ports.dashboard}`,
+    DASHBOARD_ALLOWED_ORIGINS: `http://127.0.0.1:${context.ports.dashboard},http://localhost:${context.ports.dashboard}`,
     NODE_ENV: "production",
     ...extra,
   });
@@ -159,7 +323,9 @@ export function getServerSpecs(
   const tsx = nodeModuleBin(context.repoRoot, "tsx");
   const next = nodeModuleBin(context.repoRoot, "next");
   const apiEntry = join(context.repoRoot, "services", "ingenium-api", "dist", "scripts", "api-server.js");
-  const dashboardDir = join(context.repoRoot, "services", "ingenium-dashboard");
+  const dashboardDir = production
+    ? getTestRunDashboardWorkspace(context)
+    : join(context.repoRoot, "services", "ingenium-dashboard");
 
   return [
     {
@@ -172,14 +338,16 @@ export function getServerSpecs(
         OPENCODE_SERVER_URL: `http://127.0.0.1:${context.ports.fixture}`,
         OPENCODE_SERVER_PASSWORD: "test-fixture",
         INGENIUM_API_TOKEN: TEST_API_TOKEN,
+        INGENIUM_AUTH_ENCRYPTION_KEY_FILE: join(context.homeDir, "auth-encryption-key"),
         INGENIUM_API_TEST_MODE: "1",
         INGENIUM_API_DISABLE_BACKGROUND_SCHEDULERS: "1",
         INGENIUM_API_DISABLE_SCHEDULERS: "1",
         INGENIUM_API_DISABLE_MAIL_MAINTENANCE: "1",
         INGENIUM_API_DISABLE_MAIL: "1",
+        INGENIUM_API_RATE_LIMIT: String(FIXTURE_API_RATE_LIMIT),
       }),
       readinessUrl: `http://127.0.0.1:${context.ports.api}/api/v1/health`,
-      readinessHeaders: { Authorization: `Bearer ${TEST_API_TOKEN}` },
+      readinessHeaders: testRunApiAuthHeaders(context),
     },
     {
       name: "dashboard",
@@ -190,6 +358,7 @@ export function getServerSpecs(
         : ["dev", "--hostname", "127.0.0.1", "--port", String(context.ports.dashboard)],
       cwd: dashboardDir,
       env: serverEnvironment(context, {
+        INGENIUM_API_TEST_MODE: "1",
         PORT: String(context.ports.dashboard),
         ...Object.fromEntries(
           Object.entries(dashboardEnvironment).filter(([key]) => key !== "INGENIUM_API_TOKEN"),
@@ -216,54 +385,6 @@ export function getServerSpecs(
 function appendOutput(buffer: { value: string }, chunk: Buffer | string): void {
   const text = chunk.toString();
   buffer.value = `${buffer.value}${text}`.slice(-32_000);
-}
-
-function readProcStat(pid: number): { pgid: number; startTime: string; state: string } | undefined {
-  if (process.platform === "win32") return undefined;
-  try {
-    const value = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const closingParen = value.lastIndexOf(")");
-    if (closingParen < 0) return undefined;
-    const fields = value.slice(closingParen + 1).trim().split(/\s+/);
-    const state = fields[0];
-    const pgid = Number(fields[2]);
-    const startTime = fields[19];
-    if (!state || !Number.isInteger(pgid) || pgid <= 1 || !startTime || !/^\d+$/.test(startTime)) return undefined;
-    return { pgid, startTime, state };
-  } catch {
-    return undefined;
-  }
-}
-
-function readProcessNonce(pid: number): string | undefined {
-  if (process.platform === "win32") return undefined;
-  try {
-    const environment = readFileSync(`/proc/${pid}/environ`, "utf8");
-    const entry = environment.split("\u0000").find((item) => item.startsWith("INGENIUM_TEST_RUN_NONCE="));
-    return entry?.slice("INGENIUM_TEST_RUN_NONCE=".length);
-  } catch {
-    return undefined;
-  }
-}
-
-export function inspectProcessIdentity(pid: number): ProcessIdentity | undefined {
-  if (!Number.isInteger(pid) || pid <= 1) return undefined;
-  const processStat = readProcStat(pid);
-  if (!processStat) return undefined;
-  const groupStat = readProcStat(processStat.pgid);
-  if (!groupStat || groupStat.pgid !== processStat.pgid) return undefined;
-  try {
-    const executable = realpathSync(`/proc/${pid}/exe`);
-    return {
-      pidStartTime: processStat.startTime,
-      pgid: processStat.pgid,
-      executable,
-      groupIdentity: `${processStat.pgid}:${groupStat.startTime}`,
-      runNonce: readProcessNonce(pid),
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -709,12 +830,12 @@ export async function waitForReady(
   throw new Error(`${spec.name} did not become ready at ${spec.readinessUrl}`);
 }
 
-function spawnServer(spec: ServerSpec): ChildProcess {
+function spawnServer(spec: ServerSpec, ignoreOutput = false): ChildProcess {
   const child = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
     env: spec.env,
     detached: process.platform !== "win32",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ignoreOutput ? "ignore" : ["ignore", "pipe", "pipe"],
   });
   captureSpawnedChildPgid(child);
   const output = { value: "" };
@@ -1028,7 +1149,6 @@ export async function buildProductionArtifacts(context: TestRunContext, timeoutM
     "packages/ingenium-core",
     "packages/ingenium-email",
     "services/ingenium-api",
-    "services/ingenium-dashboard",
   ];
   try {
     for (const workspace of workspaces) {
@@ -1036,15 +1156,25 @@ export async function buildProductionArtifacts(context: TestRunContext, timeoutM
         context.repoRoot,
         ["run", "build", `--workspace=${workspace}`],
         timeoutMs,
-        workspace === "services/ingenium-dashboard"
-          ? { NODE_ENV: "production", INGENIUM_API_PORT: String(context.ports.api) }
-          : {},
+        {},
         context.runNonce,
         context,
       );
       if (result.code !== 0) {
         throw new Error(`Production build failed for ${workspace}\n${result.output}`);
       }
+    }
+    const dashboardWorkspace = prepareTestRunDashboardWorkspace(context, false);
+    const dashboard = await runBoundedCommand(
+      context.repoRoot,
+      ["--prefix", dashboardWorkspace, "run", "build"],
+      timeoutMs,
+      { NODE_ENV: "production", INGENIUM_API_PORT: String(context.ports.api) },
+      context.runNonce,
+      context,
+    );
+    if (dashboard.code !== 0) {
+      throw new Error(`Production build failed for services/ingenium-dashboard\n${dashboard.output}`);
     }
   } catch (error) {
     try {
@@ -1174,17 +1304,20 @@ export async function startTestServers(
   const specs = getServerSpecs(context, production, options.dashboardEnvironment);
   const running: RunningServer[] = [];
   try {
+    capturePreexistingProcessBaseline(context);
+    ensureTestRunAuthEncryptionKey(context);
     if (production && shouldBuild) await buildProductionArtifacts(context, options.buildTimeoutMs);
+    else if (production) prepareTestRunDashboardWorkspace(context, true);
     if (production) {
       if (!existsSync(specs[0]!.args[0]!)) throw new Error("API production entrypoint is missing after build");
-      if (!existsSync(join(context.repoRoot, "services", "ingenium-dashboard", ".next", "BUILD_ID"))) {
+      if (!existsSync(join(getTestRunDashboardWorkspace(context), ".next", "BUILD_ID"))) {
         throw new Error("Dashboard production build is missing after build");
       }
     }
 
     updateTestRunManifest(context.manifestPath, { status: "starting", processes: [] });
     for (const spec of specs) {
-      const child = options.spawnServer?.(spec) ?? spawnServer(spec);
+      const child = options.spawnServer?.(spec) ?? spawnServer(spec, options.detachAfterStart === true);
       captureSpawnedChildPgid(child);
       if (!child.pid) {
         try {
@@ -1253,12 +1386,23 @@ export async function startTestServers(
         throw new Error(`${spec.name} process identity could not be bound to this test run`);
       }
       await waitForReady(spec, startTimeoutMs, options.readinessRequestTimeoutMs);
+      // No dashboard or fixture process is started until the API has accepted
+      // this exact manifest-owned project. This is the boundary before any
+      // project-scoped fixture write can occur; there is intentionally no
+      // global-project fallback.
+      if (spec.name === "api") {
+        await provisionTestRunProject(context);
+        await provisionTestRunOwner(context);
+      }
       // The filesystem reservation protects the pre-listener race. The exact
       // readiness response is the ownership-transfer boundary; after it, the
       // child listener itself prevents another process from binding the port.
       transferTestRunPortOwnership(context.manifestPath, spec.port);
     }
     updateTestRunManifest(context.manifestPath, { status: "running" });
+    if (options.detachAfterStart) {
+      for (const { child } of running) child.unref();
+    }
   } catch (error) {
     const diagnostics: unknown[] = [];
     let manifestUsable = false;
@@ -1492,5 +1636,5 @@ export function installRunSignalHandlers(
 
 export function productionArtifactsExist(context: TestRunContext): boolean {
   return existsSync(join(context.repoRoot, "services", "ingenium-api", "dist", "scripts", "api-server.js"))
-    && existsSync(join(context.repoRoot, "services", "ingenium-dashboard", ".next", "BUILD_ID"));
+    && existsSync(join(getTestRunDashboardWorkspace(context), ".next", "BUILD_ID"));
 }

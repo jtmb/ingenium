@@ -7,7 +7,10 @@ description: Configuration of the synthesis pipeline — OpenCode provider block
 
 ## What It Does
 
-The synthesis pipeline processes observations into personality traits (Phase 1) and optionally creates/updates skills via an LLM (Phase 2). It runs automatically every 15 minutes (configurable) and can be triggered manually.
+The synthesis pipeline processes observations into personality traits (Phase 1) and
+optionally creates pending governed skill proposals via an LLM (Phase 2). Approved
+proposals apply skill changes. It runs automatically every 15 minutes (configurable)
+and can be triggered manually.
 
 ## Managing LLM Providers
 
@@ -25,6 +28,69 @@ To enable Phase 2 (LLM-driven skill synthesis):
 > **Fresh store / new Docker volume**: If the Docker volume (`ingenium-data`) is new or empty, no saved settings exist. The field placeholder will show "API key" — you must re-enter the API key. Without a saved API key, the synthesis pipeline logs `Synthesis LLM not configured` and skips LLM-dependent phases.
 
 > **Vault-backed credential storage**: API keys are stored in the encrypted vault (`vault_items` table with AES-256-GCM), never in the plaintext settings table. On `GET` responses, only `apiKeySet: boolean` is returned — the actual key is never exposed. Empty or omitted `apiKey` fields preserve the saved credential. Legacy `synthesis_api_key` / `synthesis_backup_api_key` settings are migrated into the vault on first read and then deleted from settings.
+
+Managed provider metadata is the desired state. `llm_provider_configs` stores
+provider metadata plus an optional `credentialItemId`; the API key remains only in
+the active vault item named `Managed LLM API Key: <providerId>`. Before a provider
+save, the API validates every stored reference as a unique UUID pointing to that
+provider's active restricted `api_key` vault item. Missing, duplicate, deleted, or
+non-restricted references fail closed with `409 PROVIDER_CREDENTIAL_REFERENCE_INVALID`
+before settings or credentials are changed. Omitted `apiKey` preserves the
+referenced item; a non-empty value is staged and decrypt-verified; an explicit empty
+value clears the reference.
+
+For a removed provider or an explicit credential clear, the referenced vault item is
+soft-deleted and verified **before** the desired provider settings and OpenCode
+global configuration are committed. This removal-only path is allowed while the
+vault is sealed because vault soft deletion changes only `access_policy` and does
+not require the master key. Saving a new key while sealed still returns
+`409 VAULT_REQUIRED`. Credential deletion is attempted once per reference; a
+failure restores earlier deletions and staged writes and returns
+`409 VAULT_CREDENTIAL_DELETE_FAILED` with the provider configuration unchanged.
+If settings/config persistence fails after deletion, the prior desired state and
+credential policies are restored and the API returns `409 CONFIG_SAVE_FAILED`.
+There is no background retry loop; retry a failed request after the underlying
+condition is fixed. OpenCode auth/config synchronization happens after the durable
+commit; a failed synchronization is returned as a warning rather than rolling back
+the desired state. Native auth calls use the separate 5-second deadline described
+below.
+
+### Server-global provider ownership and recovery
+
+Managed provider configuration used by server-owned features resolves against the
+canonical `global-default` project. The selected dashboard or external worktree
+project does not redirect provider metadata or credentials to another namespace.
+When recovery finds stranded compatible mail/provider records in other project
+namespaces, it moves only unambiguous, non-conflicting records. Existing
+destination values are never overwritten; conflicts remain for operator review
+and are reported only as content-free status/counts. Credential values and
+ciphertext are never returned or included in recovery diagnostics.
+
+Native OpenCode provider API keys use the same protected vault-backed persistence
+before being synchronized through OpenCode's auth API. The key is not written to
+OpenCode configuration files or exposed in API responses. When the protected
+store is available during startup/unseal recovery, durable API-key records can
+rehydrate OpenCode auth state. Native OAuth-only auth has no durable API-key copy;
+if OpenCode auth storage is lost and no durable credential exists, that connection
+remains unrecoverable by Ingenium and must be authorized again.
+
+Native API-key connect and disconnect operations are per-provider compensating
+sagas. One operation runs at a time for a provider; up to **four waiters** may be
+queued behind it, while different providers proceed independently. An overflow is
+rejected immediately, and a queued operation is rejected at the **2-second**
+deadline before any vault write or OpenCode call. The API reports this as
+`503 PROVIDER_OPERATION_RETRY` with `Retry-After: 2` and `retryable: true`.
+
+Every OpenCode operation used by these native API-key sagas and every compensation
+call is backed by an `AbortController` with a **5-second** deadline. This covers
+auth apply/remove/status calls and compensation restores. Connect stores the
+desired encrypted vault credential before applying it to OpenCode; if the OpenCode
+operation fails, Ingenium restores the previous vault/OpenCode state or reports
+the failure as recoverable. Disconnect removes the OpenCode auth state before
+deleting the vault credential; if deletion
+fails, the saved credential and OpenCode auth are restored or the operation is
+reported as recoverable. The API returns only fixed status/error data, never the key
+or compensation details that could disclose it.
 
 ## Provider Roles
 
@@ -61,25 +127,41 @@ When both `roles` and `role` are present, `roles` takes precedence.
 
 If the primary LLM fails during synthesis, the pipeline automatically falls back to the backup provider. If no backup is configured, the pipeline degrades by skipping the LLM-dependent phases.
 
-### Broker Fallback and 30-Second Timeout Cap
+### Broker Fallback and Bounded Timeout Policies
 
 Interactive AI features (Docs AI, RAG Ask, Job Suggestions) use the **synthesis broker** (`executeSynthesisBroker` in `opencode-client.ts`). The broker:
 
-1. For callers without a validated explicit selection, reads `synthesis_provider` + `synthesis_model` (primary) and `synthesis_backup_provider` + `synthesis_backup_model` (secondary) from the global project's settings
-2. Deduplicates identical `(providerID, modelID)` pairs — if primary and secondary are the same provider+model, only one call is made
-3. For callers without a validated explicit selection, tries the primary first and falls back to the secondary on failure; an explicit selection is attempted exactly once
-4. Caps **every** call at **30 seconds** (`Math.min(Math.max(timeoutMs, 0), 30_000)` — the passed timeout is clamped between 0 and 30s)
+1. Resolves valid enabled managed synthesis primary and backup pairs from the server-owned Chat catalog, then deduplicates identical `(providerID, modelID)` pairs.
+2. When those managed pairs are absent or stale, falls through to the server-resolved Chat default. That default includes the active zero-cost OpenCode Zen runtime model when Zen is the available safe choice.
+3. Tries resolved choices in order. An explicit server-validated Docs AI selection is attempted exactly once; RAG Ask, Job Suggestions, and background learning do not accept a browser provider/model override.
+4. Keeps default interactive callers hard-capped at **30 seconds**. Docs AI and background learning use server-owned bounded 60-second policies, preserving the direct pipeline's 60-second work limit. Every policy remains bounded by the broker-wide **60-second** maximum.
 5. Creates an ephemeral OpenCode session using the named `ingenium-llm-broker` agent. Its wildcard-deny profile has no tool allowances, and the API-owned request uses an empty `tools: {}` selection; callers cannot override either boundary. The broker then sends the prompt via OpenCode's model routing and polls for the response with exponential backoff (500ms → 30s max)
-6. If all configured providers fail, returns `{ ok: false, error: "all configured synthesis providers failed" }`
+6. If all resolved providers fail, returns a sanitized failure without exposing provider endpoints, credentials, or upstream error text.
 
-This is separate from the core synthesis pipeline (`callSynthesisLLM` in `synthesis-llm.ts`), which makes direct HTTP calls to the LLM endpoint with a 60-second timeout. The broker exists for interactive features that need OpenCode's provider routing infrastructure.
+Explicit direct endpoint consumers retain their bounded direct-call policy. The
+API-owned background entrypoints pass extraction, trait consolidation, skill
+synthesis, and skill consolidation through a narrow text-only bridge to the
+bounded, tool-denied broker. Core never selects a provider/model or enables tools;
+the API retains those responsibilities and preserves the executing project scope.
+
+### Background runtime authorization
+
+Scheduled extraction and per-project background synthesis use an API-owned
+executor that resolves exactly one ready or idle workspace runtime with an active
+runtime capability, service principal, and project-level execute grant. If that
+authorized runtime is unavailable, the operation returns a fixed unavailable
+result without probing providers. Background work never falls back to a global
+OpenCode target, a user's runtime, or a browser-supplied selection, and private
+project observations are never sent to another runtime.
 
 **Docs AI selection rule:** Chat persists a provider/model pair only through an
 authenticated server endpoint that validates it against the sole active global
 Chat catalog. Docs AI resolves that server-owned global selection; browser
 provider/model fields are not in the Docs AI DTO and cannot affect the broker.
 When a saved pair is absent or stale, Docs uses the safe server-derived global
-Chat default only; it does not choose an arbitrary managed provider.
+Chat default only; it does not choose an arbitrary managed provider. The default
+precedence is a valid stored Chat selection, then a managed primary, then a
+valid legacy primary, then the runtime OpenCode Zen free-model default.
 
 ### Local / Private Endpoint Opt-In
 
@@ -161,10 +243,10 @@ not place the bearer token in shell arguments or history.
 
 To share learned patterns across all projects:
 
-1. Mark a project as global: `ingenium_project_set_global(project, "global-default", true)`
+1. Ensure the trusted server lifecycle has an active canonical `global-default` project
 2. Trigger cross-project synthesis: `ingenium_synthesis_cross_project()`
-3. Global skills are created in the `global-default` project
-4. All projects can access global skills via shared skill resolution
+3. Create/update proposals are submitted in the `global-default` project
+4. Approved proposals apply global skills that all projects can access via shared skill resolution
 
 Cross-project synthesis also runs automatically every 15 minutes as part of the scheduled maintenance cycle.
 
@@ -190,20 +272,22 @@ The same Synthesis LLM configuration powers several features beyond the pipeline
 - **Docs AI** — `POST /api/v1/docs/ai` provides AI-powered documentation actions (outline, continue, rewrite, summarize, fix grammar, tone adjustments)
 - **RAG Ask** — `POST /api/v1/rag/ask` provides natural-language Q&A with LLM-grounded answers
 
-**Two dispatch modes:**
+**Dispatch modes:**
 
 | Mode | Used By | Mechanism | Timeout |
 |------|---------|-----------|---------|
-| **Broker** (via `executeSynthesisBroker`) | Docs AI, RAG Ask, Job Suggestions | Creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure, polls for response | 30s cap (hard-clamped) |
-| **Direct** (via `synthesisLlm.resolveLLMConfig()` + `safeLlmFetch`) | Email suggestions, Email summaries, self-learning pipeline | Calls the LLM endpoint directly via HTTP | 60s (configurable) |
+| **Broker** (via `executeSynthesisBroker`) | Docs AI, RAG Ask, Job Suggestions; self-learning only when no direct endpoint exists | Creates an ephemeral, tool-denied OpenCode broker session, resolves managed synthesis pairs then the safe Chat/Zen default, and polls for response | 30s hard cap for interactive work; Docs AI/background learning: 60s server-owned policy |
+| **Direct** (via `synthesisLlm.resolveLLMConfig()` + `safeLlmFetch`) | Email suggestions, Email summaries, self-learning when a direct endpoint is configured | Calls the LLM endpoint directly via HTTP | 60s |
 
 The broker mode uses OpenCode's model routing. Docs AI supplies a validated
-exact `(providerID, modelID)` pair with no fallback; other broker consumers may
-use the configured fallback chain. The direct mode uses the resolved provider,
-model, endpoint, and API key from settings or env vars.
+exact `(providerID, modelID)` pair with no fallback; other broker consumers use
+the server-resolved managed/Chat fallback chain. Browser request bodies cannot
+supply provider or model fields for RAG Ask, Job Suggestions, or learning work.
+The direct mode uses the resolved provider, model, endpoint, and API key from
+settings or environment variables.
 
 ## Related Docs
 - [Self-Learning Pipeline](../concepts/self-learning.md) — Full pipeline reference (Phase 1, Phase 2, architecture, DB schema)
 - [API Reference](../develop/api.md#settings--llm-config) — LLM config endpoint documentation
-- [Personality Traits](personality.md) — Personality traits
+- [Personality Traits](../concepts/self-learning.md#personality_traits-table) — Personality traits
 - [Jobs](../operations/jobs.md) — Job scheduling (magic-wand feature)

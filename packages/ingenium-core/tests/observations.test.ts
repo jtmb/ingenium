@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { ZodError } from "zod";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,15 +15,18 @@ import {
   deleteObservation,
   deleteObservationsBySource,
 } from "../lib/tools/observations.js";
+import { OBSERVATION_SOURCES } from "../lib/schema.js";
 
 let tempDir: string;
 let projectId: string;
+let otherProjectId: string;
 
 beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-test-observations-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
   const project = createProject("test-project");
   projectId = project.id;
+  otherProjectId = createProject("other-project").id;
 });
 
 afterAll(() => {
@@ -36,6 +40,7 @@ describe("observations", () => {
     expect(obs.content).toBe("User prefers snake_case naming");
     expect(obs.status).toBe("pending");
     expect(obs.importance).toBe(5);
+    expect(obs.source).toBe("agent");
     expect(obs.id).toBeGreaterThan(0);
   });
 
@@ -90,7 +95,7 @@ describe("observations", () => {
 
   it("gets a single observation by ID", () => {
     const obs = storeObservation(projectId, "insight", "Terminal works with glibc");
-    const found = getObservation(obs.id);
+    const found = getObservation(projectId, obs.id);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(obs.id);
     expect(found!.content).toBe("Terminal works with glibc");
@@ -98,9 +103,23 @@ describe("observations", () => {
 
   it("updates observation status", () => {
     const obs = storeObservation(projectId, "feedback", "User accepted refactored code");
-    const updated = updateObservation(obs.id, { status: "processed" });
+    const updated = updateObservation(projectId, obs.id, { status: "processed" });
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe("processed");
+  });
+
+  it("does not retrieve or update observations owned by another project", () => {
+    const foreign = storeObservation(otherProjectId, "preference", "External project preference", 8);
+
+    expect(getObservation(projectId, foreign.id)).toBeUndefined();
+    expect(updateObservation(projectId, foreign.id, { status: "processed" })).toBeNull();
+
+    const unchanged = getObservation(otherProjectId, foreign.id);
+    expect(unchanged).toMatchObject({
+      id: foreign.id,
+      project_id: otherProjectId,
+      status: "pending",
+    });
   });
 
   it("counts unprocessed observations", () => {
@@ -123,7 +142,7 @@ describe("observations", () => {
     const obs = storeObservation(projectId, "insight", "User prefers dark theme");
     const deleted = deleteObservation(projectId, obs.id);
     expect(deleted).toBe(true);
-    const refetched = getObservation(obs.id);
+    const refetched = getObservation(projectId, obs.id);
     expect(refetched).toBeUndefined();
   });
 
@@ -157,27 +176,37 @@ describe("observations", () => {
     expect(obs.content).toBe("Auto-observer detected user preference");
 
     // Verify the observation is retrievable and persisted
-    const found = getObservation(obs.id);
+    const found = getObservation(projectId, obs.id);
     expect(found).not.toBeNull();
     expect(found!.source).toBe("auto-observer");
   });
 
   it("migration state is valid: observations table allows all expected source values", () => {
     // Verify all allowed source values work (including auto-observer from migration 015)
-    const sources: Array<string> = [
-      "agent", "email", "chat", "document", "calendar",
-      "synthesis", "import", "manual", "auto-observer",
-    ];
-    for (const source of sources) {
+    for (const source of OBSERVATION_SOURCES) {
       const obs = storeObservation(projectId, "insight", `Test source: ${source}`, 5, source);
       expect(obs.source).toBe(source);
     }
   });
 
+  it("rejects unsupported sources before attempting SQL persistence", () => {
+    const countBefore = getObservations(projectId).length;
+
+    expect(() => storeObservation(
+      projectId,
+      "correction",
+      "Invalid source must not reach SQLite",
+      5,
+      "explicit-user-correction" as never,
+    )).toThrow(ZodError);
+
+    expect(getObservations(projectId)).toHaveLength(countBefore);
+  });
+
   it("can query and search observations with auto-observer source", () => {
     const obs = storeObservation(projectId, "behavior", "User frequently opens mail dashboard", 6, "auto-observer");
     // Can retrieve by ID
-    const found = getObservation(obs.id);
+    const found = getObservation(projectId, obs.id);
     expect(found!.source).toBe("auto-observer");
 
     // Can search via FTS

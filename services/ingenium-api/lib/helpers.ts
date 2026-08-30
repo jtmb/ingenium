@@ -1,14 +1,6 @@
 import { Request, Response } from "express";
-import { projects } from "ingenium-core";
-
-/**
- * Resolve a project name to its UUID, or null if the project doesn't exist.
- * Projects MUST be created explicitly via POST /api/v1/projects or the dashboard.
- */
-export function resolveProjectId(name: string): string | null {
-  const existing = projects.getProject(name);
-  return existing ? existing.id : null;
-}
+import { authorization, getDb, projects } from "ingenium-core";
+import { toAuthorizationPrincipal } from "./authorization-policy.js";
 
 /**
  * Express middleware helper that reads the `project` query parameter,
@@ -30,10 +22,108 @@ export function requireProject(req: Request, res: Response): string | null {
     res.status(400).json({ error: { code: "BAD_REQUEST", message: "project query parameter is required. Create a project first." } });
     return null;
   }
-  const id = resolveProjectId(name);
-  if (!id) {
+  const project = projects.getProject(name);
+  if (!project || project.archived_at) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${name}' not found. Create it first via POST /api/v1/projects or the dashboard.` } });
     return null;
   }
-  return id;
+  if (!req.authorizationPolicy || req.authorizationPolicy.target === "installation") return project.id;
+  const principal = req.principal;
+  if (!principal) {
+    res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
+    return null;
+  }
+  const permission = req.authorizationPolicy?.permission ?? "read";
+  const resource = req.authorizationPolicy?.resource ?? "projects";
+  const decision = authorization.requireProjectPermission(
+    toAuthorizationPrincipal(principal),
+    project.id,
+    resource,
+    permission,
+  );
+  if (!decision.allowed) {
+    res.status(decision.visible ? 403 : 404).json({ error: { code: decision.visible ? "FORBIDDEN" : "NOT_FOUND", message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found" } });
+    return null;
+  }
+  return project.id;
+}
+
+export function requestContentActor(req: Request, projectId: string): { organizationId: string; ownerUserId: string | null } | null {
+  const project = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT organization_id FROM projects WHERE id = ? AND archived_at IS NULL",
+  ).get(projectId) as { organization_id: string } | undefined;
+  if (!project) return null;
+  return {
+    organizationId: project.organization_id,
+    ownerUserId: req.principal?.type === "user" ? req.principal.id : null,
+  };
+}
+
+export function requestAuthorizationPrincipal(req: Request): authorization.AuthorizationPrincipal {
+  const principal = req.principal;
+  if (!principal) return { type: "compatibility", id: "direct-router", scopes: ["*"] };
+  return toAuthorizationPrincipal(principal);
+}
+
+export function requestOwnerScope(req: Request): string | null | undefined {
+  if (!req.authorizationPolicy) return undefined;
+  const principal = requestAuthorizationPrincipal(req);
+  return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
+}
+
+export function requireContentAccess(
+  req: Request,
+  res: Response,
+  scope: authorization.ContentScope,
+): boolean {
+  if (!req.authorizationPolicy) return true;
+  const decision = authorization.requireContentPermission(
+    requestAuthorizationPrincipal(req),
+    scope,
+    req.authorizationPolicy.permission,
+  );
+  if (decision.allowed) return true;
+  res.status(decision.visible ? 403 : 404).json({
+    error: {
+      code: decision.visible ? "FORBIDDEN" : "NOT_FOUND",
+      message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found",
+    },
+  });
+  return false;
+}
+
+/**
+ * Resolve the sole active global project for server-owned resources.
+ *
+ * The caller's project query parameter is intentionally ignored. This keeps
+ * shared resources such as backups in the canonical server namespace even
+ * when a dashboard tab or MCP client still carries an external project
+ * context in its URL/request.
+ */
+export function requireActiveGlobalProject(_req: Request, res: Response): { id: string; name: string } | null {
+  try {
+    const global = projects.getGlobalProject();
+    if (!global) {
+      res.status(503).json({
+        error: {
+          code: "GLOBAL_PROJECT_UNAVAILABLE",
+          message: "The canonical active global project is not configured.",
+        },
+      });
+      return null;
+    }
+    return { id: global.id, name: global.name };
+  } catch {
+    res.status(503).json({
+      error: {
+        code: "GLOBAL_PROJECT_UNAVAILABLE",
+        message: "The canonical active global project is unavailable.",
+      },
+    });
+    return null;
+  }
+}
+
+export function requireGlobalProject(req: Request, res: Response): string | null {
+  return requireActiveGlobalProject(req, res)?.id ?? null;
 }

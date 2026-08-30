@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 
 const { getProviderConfigs, saveProviderConfigs } = vi.hoisted(() => ({
@@ -7,13 +7,27 @@ const { getProviderConfigs, saveProviderConfigs } = vi.hoisted(() => ({
   saveProviderConfigs: vi.fn(),
 }));
 
-const { listProviders, listIntegrations, connectKey, beginOAuth, disconnect } = vi.hoisted(() => ({
+const { listProviders, listIntegrations, connectKey, beginOAuth, cancelAttempt, disconnect } = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listIntegrations: vi.fn(),
   connectKey: vi.fn(),
   beginOAuth: vi.fn(),
+  cancelAttempt: vi.fn(),
   disconnect: vi.fn(),
 }));
+
+const runtimeClient = {
+  providers: { list: listProviders },
+  integrations: {
+    list: listIntegrations,
+    connectKey,
+    beginOAuth,
+    attemptStatus: vi.fn(),
+    completeAttempt: vi.fn(),
+    cancelAttempt,
+  },
+  auth: { disconnect },
+};
 
 vi.mock("../src/lib/api", () => ({
   api: {
@@ -35,13 +49,26 @@ vi.mock("../src/lib/opencode", () => ({
       beginOAuth,
       attemptStatus: vi.fn(),
       completeAttempt: vi.fn(),
-      cancelAttempt: vi.fn(),
+      cancelAttempt,
     },
     auth: { disconnect },
   },
 }));
 
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useRuntime: () => ({
+    client: runtimeClient,
+    runtimeId: "11111111-1111-4111-8111-111111111111",
+    workspace: {},
+  }),
+}));
+
+vi.mock("../src/lib/ProjectContext", () => ({
+  useGlobalProject: () => ({ project: "global-default", loading: false, error: null }),
+}));
+
 import PipelinePanel from "../src/app/components/settings/panels/PipelinePanel";
+import Overlay from "../src/app/components/Overlay";
 
 const providerFixture = [
   {
@@ -83,12 +110,22 @@ beforeEach(() => {
   getProviderConfigs.mockResolvedValue({ data: { providers: providerFixture } });
   saveProviderConfigs.mockResolvedValue({ data: { saved: true, warnings: [] } });
   listProviders.mockResolvedValue({
-    all: [
-      { id: "deepseek", name: "DeepSeek", source: "custom", models: { "deepseek-chat": {}, "deepseek-reasoner": {} } },
-      { id: "openai", name: "OpenAI", source: "custom", models: { "gpt-5": {} } },
+    providers: [
+      {
+        id: "deepseek",
+        label: "DeepSeek",
+        models: [{ id: "deepseek-chat", label: "DeepSeek Chat" }, { id: "deepseek-reasoner", label: "DeepSeek Reasoner" }],
+        defaultModel: "deepseek-chat",
+        connected: false,
+      },
+      {
+        id: "openai",
+        label: "OpenAI",
+        models: [{ id: "gpt-5", label: "GPT-5" }],
+        defaultModel: "gpt-5",
+        connected: false,
+      },
     ],
-    default: {},
-    connected: [],
   });
   listIntegrations.mockResolvedValue({
     data: [
@@ -97,6 +134,7 @@ beforeEach(() => {
     ],
   });
   connectKey.mockResolvedValue(undefined);
+  cancelAttempt.mockResolvedValue(undefined);
   disconnect.mockResolvedValue(undefined);
 });
 
@@ -261,6 +299,27 @@ describe("provider block panel", () => {
     expect(screen.getByText("2 models")).not.toBeNull();
   });
 
+  it("keeps the panel rendered and reports a native catalog error", async () => {
+    listProviders.mockRejectedValueOnce(new Error("provider catalog unavailable"));
+
+    render(<PipelinePanel />);
+
+    expect((await screen.findByRole("status")).textContent).toContain("provider catalog unavailable");
+    expect(screen.getByRole("heading", { name: "Native providers", exact: true })).not.toBeNull();
+  });
+
+  it("renders explicit empty states when provider collections are absent", async () => {
+    getProviderConfigs.mockResolvedValueOnce({ data: { providers: undefined, synthesis: {} } });
+    listProviders.mockResolvedValueOnce({ providers: undefined });
+    listIntegrations.mockResolvedValueOnce({ data: undefined });
+
+    render(<PipelinePanel />);
+
+    expect(await screen.findByText("No custom providers configured. Add your first custom provider.")).not.toBeNull();
+    expect(await screen.findByText("No native providers are available.")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Providers", exact: true })).not.toBeNull();
+  });
+
   it("offers OpenAI subscription OAuth methods from OpenCode", async () => {
     render(<PipelinePanel />);
     const openAi = await screen.findByText("OpenAI", { selector: "div.font-medium" });
@@ -269,5 +328,55 @@ describe("provider block panel", () => {
 
     expect(screen.getByRole("dialog", { name: "Connect OpenAI" })).not.toBeNull();
     expect(screen.getByRole("option", { name: "ChatGPT Pro/Plus (browser)" })).not.toBeNull();
+  });
+
+  it("cancels OAuth when the nested connection dialog closes with Escape", async () => {
+    beginOAuth.mockResolvedValue({
+      data: {
+        attemptID: "attempt-1",
+        mode: "code",
+        url: "https://example.test/oauth",
+      },
+    });
+    const outerOnClose = vi.fn();
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    render(
+      <Overlay isOpen onClose={outerOnClose} title="Settings">
+        <PipelinePanel />
+      </Overlay>,
+    );
+
+    const openAi = await screen.findByText("OpenAI", { selector: "div.font-medium" });
+    fireEvent.click(openAi.closest("div.flex.items-center.justify-between")!.querySelector("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Continue in browser" }));
+    expect(await screen.findByLabelText("Authorization code")).not.toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await vi.waitFor(() => expect(cancelAttempt).toHaveBeenCalledWith("attempt-1"));
+    expect(outerOnClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Connect OpenAI" })).toBeNull();
+    windowOpen.mockRestore();
+  });
+
+  it("does not leave a new connection dialog disabled after cancelling an in-flight key connection", async () => {
+    let resolveConnect!: () => void;
+    connectKey.mockReturnValue(new Promise<void>((resolve) => { resolveConnect = resolve; }));
+    render(<PipelinePanel />);
+
+    const deepSeek = await screen.findByText("DeepSeek", { selector: "div.font-medium" });
+    fireEvent.click(deepSeek.closest("div.flex.items-center.justify-between")!.querySelector("button")!);
+    let dialog = screen.getByRole("dialog", { name: "Connect DeepSeek" });
+    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "key" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(deepSeek.closest("div.flex.items-center.justify-between")!.querySelector("button")!);
+    dialog = screen.getByRole("dialog", { name: "Connect DeepSeek" });
+    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "new-key" } });
+
+    expect((within(dialog).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false);
+    resolveConnect();
   });
 });

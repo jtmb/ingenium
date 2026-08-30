@@ -27,6 +27,11 @@ const emailMocks = vi.hoisted(() => {
     storeTokens: noop,
     getEmailEncryptionDiagnostics: vi.fn(() => ({ status: "ready" as EncryptionStatus, globalProjectId: "global-project" })),
     validateEmailAccountMigrationCredentials: vi.fn(),
+    sanitizeProviderError: vi.fn(() => ({
+      code: "PROVIDER_ERROR",
+      message: "The email operation could not be completed. Try again later.",
+      retryable: true,
+    })),
     connectAccount: noop,
     disconnectAccount: noop,
     moveEmail: noop,
@@ -53,7 +58,8 @@ const emailMocks = vi.hoisted(() => {
     getEngineStatus: noop,
     stopAccountWorker: noop,
     setAccountConnected: noop,
-    GmailProvider: class {},
+    GmailProvider: {},
+    EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING: "email_encryption_key_fingerprint",
   };
 });
 
@@ -94,8 +100,16 @@ afterEach(() => {
 
 function seedLegacyProject() {
   const legacy = projects.createProject("legacy-mail-project");
-  const global = projects.getGlobalProject()!;
+  const global = projects.getProject("global-default")!;
+  expect(projects.setProjectGlobal(legacy.name, true)).toBe(true);
+  expect(projects.setProjectGlobal(global.name, true)).toBe(true);
+  settings.setSetting(global.id, "email_encryption_key_fingerprint", getEmailEncryptionKeyFingerprint());
   return { legacyId: legacy.id, globalId: global.id, db: getDb(process.env.INGENIUM_CORE_DB_PATH!) };
+}
+
+function markProjectAsFormerGlobal(name: string): void {
+  expect(projects.setProjectGlobal(name, true)).toBe(true);
+  expect(projects.setProjectGlobal("global-default", true)).toBe(true);
 }
 
 function insertSetting(db: ReturnType<typeof getDb>, projectId: string, key: string, value: unknown): void {
@@ -233,7 +247,138 @@ describe("Phase 4 email account migration", () => {
       collisions: 0,
       skippedForEncryption: false,
     });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM settings WHERE project_id = ?").get(globalId)).toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM settings WHERE project_id = ?").get(globalId)).toEqual({ count: 3 });
+  });
+
+  it("moves an unambiguous account from an archived former-global source project", async () => {
+    const { legacyId, globalId, db } = seedLegacyProject();
+    const accountValue = JSON.stringify({
+      id: "archived-source",
+      email: "archived-source@example.test",
+      name: "Archived source",
+      provider: "custom",
+      authType: "app_password",
+      connected: false,
+      imapPass: encryptCredentialValue("archived-password"),
+    });
+    insertSetting(db, legacyId, "email_account_archived-source", accountValue);
+    expect(projects.archiveProject("legacy-mail-project")).toBe(true);
+
+    await expect(migrateEmailAccountsToGlobal()).resolves.toEqual({
+      migratedSettings: 1,
+      migratedAccounts: 1,
+      collisions: 0,
+      skippedForEncryption: false,
+    });
+    expect(settings.getSetting(globalId, "email_account_archived-source")).toBe(accountValue);
+    expect(settings.getSetting(legacyId, "email_account_archived-source")).toBeUndefined();
+  });
+
+  it("leaves active and archived non-global accounts untouched across repeated automatic migrations", async () => {
+    const globalId = projects.getProject("global-default")!.id;
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH!);
+    const active = projects.createProject("active-mail-project");
+    const archived = projects.createProject("archived-mail-project");
+    const activeValue = JSON.stringify({
+      id: "active-account",
+      email: "active@example.test",
+      provider: "custom",
+      authType: "app_password",
+      connected: false,
+      imapPass: encryptCredentialValue("active-password"),
+    });
+    const archivedValue = JSON.stringify({
+      id: "archived-account",
+      email: "archived@example.test",
+      provider: "custom",
+      authType: "app_password",
+      connected: false,
+      imapPass: encryptCredentialValue("archived-password"),
+    });
+    settings.setSetting(globalId, "email_encryption_key_fingerprint", getEmailEncryptionKeyFingerprint());
+    insertSetting(db, active.id, "email_account_active-account", activeValue);
+    insertSetting(db, archived.id, "email_account_archived-account", archivedValue);
+    expect(projects.archiveProject(archived.name)).toBe(true);
+
+    await expect(migrateEmailAccountsToGlobal()).resolves.toEqual({
+      migratedSettings: 0,
+      migratedAccounts: 0,
+      collisions: 0,
+      skippedForEncryption: false,
+    });
+    await expect(migrateEmailAccountsToGlobal()).resolves.toEqual({
+      migratedSettings: 0,
+      migratedAccounts: 0,
+      collisions: 0,
+      skippedForEncryption: false,
+    });
+    expect(settings.getSetting(active.id, "email_account_active-account")).toBe(activeValue);
+    expect(settings.getSetting(archived.id, "email_account_archived-account")).toBe(archivedValue);
+    expect(settings.getSetting(globalId, "email_account_active-account")).toBeUndefined();
+    expect(settings.getSetting(globalId, "email_account_archived-account")).toBeUndefined();
+  });
+
+  it("leaves all ambiguous source candidates untouched and reports only a conflict count", async () => {
+    const { legacyId, globalId, db } = seedLegacyProject();
+    const second = projects.createProject("second-legacy-mail-project");
+    markProjectAsFormerGlobal(second.name);
+    const firstValue = JSON.stringify({
+      id: "shared-account",
+      email: "first@example.test",
+      name: "First source",
+      provider: "custom",
+      authType: "app_password",
+      connected: false,
+      imapPass: encryptCredentialValue("first-password"),
+    });
+    const secondValue = JSON.stringify({
+      id: "shared-account",
+      email: "second@example.test",
+      name: "Second source",
+      provider: "custom",
+      authType: "app_password",
+      connected: false,
+      imapPass: encryptCredentialValue("second-password"),
+    });
+    insertSetting(db, legacyId, "email_account_shared-account", firstValue);
+    insertSetting(db, second.id, "email_account_shared-account", secondValue);
+
+    const result = await migrateEmailAccountsToGlobal();
+    expect(result).toEqual({
+      migratedSettings: 0,
+      migratedAccounts: 0,
+      collisions: 1,
+      skippedForEncryption: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("first-password");
+    expect(JSON.stringify(result)).not.toContain("second-password");
+    expect(settings.getSetting(globalId, "email_account_shared-account")).toBeUndefined();
+    expect(settings.getSetting(legacyId, "email_account_shared-account")).toBe(firstValue);
+    expect(settings.getSetting(second.id, "email_account_shared-account")).toBe(secondValue);
+  });
+
+  it("retains a source when its encryption fingerprint does not match the canonical global", async () => {
+    const { legacyId, globalId, db } = seedLegacyProject();
+    const accountValue = JSON.stringify({
+      id: "fingerprint-source",
+      email: "fingerprint-source@example.test",
+      name: "Fingerprint source",
+      provider: "custom",
+      authType: "app_password",
+      connected: false,
+      imapPass: encryptCredentialValue("fingerprint-password"),
+    });
+    insertSetting(db, legacyId, "email_account_fingerprint-source", accountValue);
+    settings.setSetting(legacyId, "email_encryption_key_fingerprint", "different-key-fingerprint");
+
+    await expect(migrateEmailAccountsToGlobal()).resolves.toEqual({
+      migratedSettings: 0,
+      migratedAccounts: 0,
+      collisions: 0,
+      skippedForEncryption: true,
+    });
+    expect(settings.getSetting(globalId, "email_account_fingerprint-source")).toBeUndefined();
+    expect(settings.getSetting(legacyId, "email_account_fingerprint-source")).toBe(accountValue);
   });
 
   it("keeps the source account on a key collision while migrating non-colliding OAuth data", async () => {

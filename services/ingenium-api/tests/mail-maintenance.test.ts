@@ -39,7 +39,6 @@ function dependencies(
   return {
     establishContinuity: vi.fn(() => ({ status: "ready" })),
     getDiagnostics: vi.fn(() => ({ status: "ready", globalProjectId: "global-project" })),
-    getGlobalProjectId: vi.fn(() => "global-project"),
     info: vi.fn(),
     migrateEmailAccounts,
     startEngine: vi.fn(),

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { ActivityItem } from "../../lib/api";
+import { formatRelativeTime } from "../../lib/time";
 
 interface ActivityTimelineProps {
   items: ActivityItem[] | null;
@@ -14,7 +15,6 @@ interface ActivityTimelineProps {
 export default function ActivityTimeline({ items, loading }: ActivityTimelineProps) {
   const [showAll, setShowAll] = useState(false);
 
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-md transition-shadow">
@@ -36,7 +36,6 @@ export default function ActivityTimeline({ items, loading }: ActivityTimelinePro
     );
   }
 
-  // ── Empty state ────────────────────────────────────────────────────────────
   if (!items || items.length === 0) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-md transition-shadow">
@@ -92,7 +91,7 @@ export default function ActivityTimeline({ items, loading }: ActivityTimelinePro
                   </p>
                 )}
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                  {relativeTime(item.timestamp)}
+                  {formatRelativeTime(item.timestamp)}
                 </p>
               </div>
             </div>
@@ -112,8 +111,6 @@ export default function ActivityTimeline({ items, loading }: ActivityTimelinePro
     </div>
   );
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const typeIconMap: Record<string, string> = {
   skill_created: "\uD83E\uDDE0",
@@ -158,19 +155,4 @@ function dotColor(type: string): string {
   if (type.includes("created") || type.includes("imported") || type.includes("received")) return "bg-purple-500";
   if (type.includes("updated") || type.includes("processed")) return "bg-amber-500";
   return "bg-gray-400";
-}
-
-function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const diff = Date.now() - new Date(iso).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  return `${weeks}w ago`;
 }

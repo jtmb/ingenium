@@ -9,6 +9,12 @@ description: Using the documentation workspace — creating, editing, publishing
 
 An immersive 3-pane docs workspace at `/docs` for creating, editing, and managing documentation pages organized into spaces. Each page supports a draft-first lifecycle, hierarchical nesting, rich metadata (tags, backlinks, comments, version history, attachments, project links), and full-text search.
 
+Spaces belong to the authenticated organization. The workspace lists and searches
+only that organization's spaces and pages; IDs and slugs from another organization
+behave as not found. Existing installations retain their Docs IDs and content in
+the bootstrap organization. New organizations receive an organization default
+space instead of an automatic global Personal space.
+
 ## How to Use
 
 1. Navigate to `/docs` in the dashboard (or `/docs?space=<id>` to open a specific space)
@@ -16,6 +22,25 @@ An immersive 3-pane docs workspace at `/docs` for creating, editing, and managin
 3. The **center pane** displays the page editor (View/Edit/Source/Split modes)
 4. The **right sidebar** has 8 tabbed panels: Info, Tags, Backlinks, Comments, History, Linked (project links), Files (attachments), Trash
 5. Use the **top toolbar** to: create a new page, publish a draft, archive a page, search (FTS5), create from template, import/export
+
+### Responsive panes
+
+The docs workspace keeps the center editor inline. On smaller screens, the left
+page tree opens as a left edge drawer; the right details panel opens as a right
+edge drawer (the details panel remains inline at `lg` and above). Both use the
+shared edge-drawer pattern: the panel translates from its edge while the
+backdrop fades over `240ms` with `cubic-bezier(0.22, 1, 0.36, 1)`. Closing
+retains the panel until its transform transition ends, allowing a rapid reopen
+to reverse the same mounted panel. The tree closes when a page is selected or
+when the backdrop is clicked; the details panel closes from its close control or
+the backdrop. Panels retained only for exit are `aria-hidden` and inert.
+
+Reduced-motion preferences disable the transition and apply open/close
+immediately. These responsive drawers are separate from the inline desktop
+tree/editor/details panes and from centered modals, dropdowns, and disclosures;
+those surfaces do not use the edge-drawer motion pattern. The docs drawers do
+not add the navigation/chat focus trap or Escape handling; their existing
+close-control and backdrop behavior is unchanged.
 
 ### Actions
 
@@ -28,6 +53,24 @@ An immersive 3-pane docs workspace at `/docs` for creating, editing, and managin
 | **Move** | Move dialog — select new parent from tree |
 | **Rename** | Inline rename — triggered from tree context |
 | **Edit** | Switch to Edit/Source mode in the editor |
+
+### Create a Task from a Page
+
+On the selected page, choose **Create task** in the top toolbar. The
+confirmation form is **title-only**: enter a non-empty title and choose
+**Create Task**. The page body and any autosaved editor draft are not copied to
+the task.
+
+Capture is authorized by the selected dashboard project. The page must be
+available to that project through its project link (or be globally available);
+otherwise the capture fails without creating a task. The request sends the
+canonical page ID, and repeated capture of the same page reuses the existing
+task and reference. Task Detail displays the server-derived provenance after
+reload as `available`, `missing`, or `unavailable`; it does not fabricate a
+source URL or link.
+
+The Create task and confirmation controls are labeled and keyboard-usable with
+at least 44px targets, including in the responsive workspace layout.
 
 ### MCP Tools
 

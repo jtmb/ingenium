@@ -1,6 +1,6 @@
 {
   "name": "engineering-workflow",
-  "description": "Agent execution quality, debugging methodology, OpenCode agent configuration, orchestrator pipeline, logging visibility, per-project scoping, supervision, and direct response patterns.",
+  "description": "Agent execution quality, debugging methodology, OpenCode agent configuration, orchestrator pipeline, logging visibility, per-project scoping, supervision, and direct response patterns. Use when creating agents, debugging failures, configuring pipelines, scoping work, or reviewing agent behavior.",
   "tags": ["engineering", "workflow", "agents", "debugging", "orchestrator", "logging", "supervision"],
   "alwaysApply": true
 }

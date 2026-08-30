@@ -120,12 +120,12 @@ export default function PluginsPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Plugins</h1>
+    <div className="space-y-8 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Plugins</h1>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition-colors"
+          className="w-full rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 transition-colors sm:w-auto"
         >
           {showCreate ? "Cancel" : "Add Plugin"}
         </button>
@@ -133,38 +133,38 @@ export default function PluginsPage() {
 
       {showCreate && (
         <div         className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow">
-          <div className="flex flex-row gap-2 items-end flex-wrap">
-            <div className="flex flex-col">
+          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex min-w-0 flex-col">
               <label className="text-xs text-[var(--color-text-muted)] mb-1">Name</label>
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="my-plugin"
-                className="border rounded px-3 py-2 text-sm"
+                className="w-full min-w-0 rounded border px-3 py-2 text-sm"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex min-w-0 flex-col">
               <label className="text-xs text-[var(--color-text-muted)] mb-1">File Path</label>
               <input
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
                 placeholder="my-plugin.ts"
-                className="border rounded px-3 py-2 text-sm"
+                className="w-full min-w-0 rounded border px-3 py-2 text-sm"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex min-w-0 flex-col">
               <label className="text-xs text-[var(--color-text-muted)] mb-1">File (.ts)</label>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".ts,.js"
                 onChange={handleFileUpload}
-                className="text-sm"
+                className="w-full min-w-0 text-sm"
               />
             </div>
             <button
               onClick={handleCreate}
-              className="bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full rounded bg-green-600 px-4 py-2 text-white hover:bg-green-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               disabled={!newName || !newPath}
             >
               Upload &amp; Create
@@ -181,7 +181,7 @@ export default function PluginsPage() {
         <div className="space-y-3">
           {plugins.map((p) =>
             editingId === p.id ? (
-              <div key={p.id} className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] space-y-3 hover:shadow-md transition-shadow">
+                <div key={p.id} className="min-w-0 space-y-3 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
                 <input
                   value={editPath}
                   onChange={(e) => setEditPath(e.target.value)}
@@ -194,16 +194,16 @@ export default function PluginsPage() {
                   rows={10}
                   className="w-full border rounded px-3 py-2 text-sm font-mono"
                 />
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <button
                     onClick={() => handleUpdate(p.name)}
-                    className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700 transition-colors"
+                    className="w-full rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 transition-colors sm:w-auto"
                   >
                     Save
                   </button>
                   <button
                     onClick={() => setEditingId(null)}
-                    className="bg-gray-200 text-[var(--color-text-primary)] py-2 px-4 rounded text-sm hover:bg-gray-300 transition-colors"
+                    className="w-full rounded bg-gray-200 px-4 py-2 text-sm text-[var(--color-text-primary)] hover:bg-gray-300 transition-colors sm:w-auto"
                   >
                     Cancel
                   </button>
@@ -212,18 +212,22 @@ export default function PluginsPage() {
             ) : (
               <div
                 key={p.id}
-                className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow flex flex-col gap-2 cursor-pointer"
-                onClick={() => setSelectedPlugin(p)}
+                className="flex min-w-0 flex-col gap-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-medium">{p.name}</span>
-                    <span className="text-sm text-[var(--color-text-muted)] ml-2">{p.file_path}</span>
-                  </div>
-                  <div className="flex gap-2">
+                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                    onClick={() => setSelectedPlugin(p)}
+                    aria-label={`View plugin ${p.name}`}
+                  >
+                    <span className="break-all font-medium">{p.name}</span>
+                    <span className="ml-2 break-all text-sm text-[var(--color-text-muted)]">{p.file_path}</span>
+                  </button>
+                  <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
                     <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
+                      type="button"
+                      onClick={async () => {
                         let content = p.source_content || "";
                         if (!content) {
                           try {
@@ -235,13 +239,14 @@ export default function PluginsPage() {
                         setEditPath(p.file_path);
                         setEditContent(content);
                       }}
-                      className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] py-1 px-3 rounded text-sm hover:bg-[var(--color-surface-hover)] transition-colors"
+                       className="flex-1 rounded bg-[var(--color-surface-muted)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors sm:flex-none"
                     >
                       Edit
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggle(p); }}
-                      className={`py-1 px-3 rounded text-sm transition-colors ${
+                      type="button"
+                      onClick={() => void toggle(p)}
+                       className={`flex-1 rounded px-3 py-1 text-sm transition-colors sm:flex-none ${
                         p.enabled
                           ? "bg-[var(--color-success-bg)] text-green-700 hover:bg-[var(--color-surface-hover)]"
                           : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
@@ -250,15 +255,16 @@ export default function PluginsPage() {
                       {p.enabled ? "Enabled" : "Disabled"}
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(p); }}
-                      className="bg-red-600 text-white py-1 px-3 rounded text-sm hover:bg-red-700 transition-colors"
+                      type="button"
+                      onClick={() => void handleDelete(p)}
+                       className="flex-1 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 transition-colors sm:flex-none"
                     >
                       Delete
                     </button>
                   </div>
                 </div>
                 {p.source_content && (
-                  <pre className="text-xs text-[var(--color-text-muted)] font-mono truncate bg-[var(--color-surface-muted)] p-2 rounded">
+                  <pre className="break-all whitespace-pre-wrap rounded bg-[var(--color-surface-muted)] p-2 text-xs font-mono text-[var(--color-text-muted)]">
                     {p.source_content.slice(0, 120)}
                     {p.source_content.length > 120 ? "..." : ""}
                   </pre>
@@ -289,7 +295,7 @@ export default function PluginsPage() {
                   <span className="px-3 py-1 text-sm rounded bg-blue-600 text-white">Source</span>
                   <span className="text-xs text-[var(--color-text-muted)] ml-auto">Source code — not markdown</span>
                 </div>
-                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+               <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-sm font-mono whitespace-pre-wrap">
                   {selectedPlugin.source_content}
                 </pre>
               </div>

@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { synthesis, logger, maintenanceLocks } from "ingenium-core";
+import { z } from "zod";
 import { requireProject } from "../helpers.js";
+import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 
 /** Handles /api/v1/synthesis — triggers the self-learning pipeline (per-project and cross-project). */
 export const synthesisRouter = Router();
@@ -8,6 +10,7 @@ export const synthesisRouter = Router();
 const LOCK_RESOURCE = "skills";
 const SYNTHESIS_LOCK_MS = 120_000; // 2 minutes
 const RENEW_INTERVAL_MS = 60_000; // Renew every 60s
+export const SynthesisSessionIdSchema = z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/);
 
 /**
  * POST /synthesis/run — trigger synthesis for a project.
@@ -20,7 +23,7 @@ synthesisRouter.post("/run", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sessionId = (req.query.session_id as string) || undefined;
+  const sessionId = SynthesisSessionIdSchema.optional().parse(req.query.session_id);
 
   // Acquire project-lifetime lock
   const ownerToken = maintenanceLocks.generateOwnerToken();
@@ -64,7 +67,10 @@ async function scheduleAsync(projectId: string, sessionId: string | undefined, o
       }
     }, RENEW_INTERVAL_MS);
 
-    const result = await synthesis.runSynthesis(projectId, sessionId);
+    const result = await synthesis.runSynthesis(projectId, sessionId, {
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+      ownerToken,
+    });
     logger.info("synthesis", `Completed: ${JSON.stringify(result)}`);
   } catch (err: any) {
     logger.error("synthesis", `Synthesis pipeline failed: ${err.message}`, {
@@ -77,11 +83,31 @@ async function scheduleAsync(projectId: string, sessionId: string | undefined, o
   }
 }
 
+function synthesisStatusResponse(status: ReturnType<typeof synthesis.getSynthesisStatus>) {
+  return {
+    total_observations: status.total_observations,
+    pending_count: status.pending_count,
+    processed_count: status.processed_count,
+    trait_count: status.trait_count,
+    last_synthesis_at: status.last_synthesis_at,
+    incompleteBatch: status.incompleteBatch === null ? null : {
+      stage: status.incompleteBatch.stage,
+      observationCount: status.incompleteBatch.observationCount,
+      hasStoredProposalPlan: status.incompleteBatch.hasStoredProposalPlan,
+      errorCount: status.incompleteBatch.errorCount,
+      lastErrorCode: status.incompleteBatch.lastErrorCode,
+      createdAt: status.incompleteBatch.createdAt,
+      updatedAt: status.incompleteBatch.updatedAt,
+      leaseState: status.incompleteBatch.leaseState,
+    },
+  };
+}
+
 synthesisRouter.get("/status", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const status = synthesis.getSynthesisStatus(projectId);
-  res.json({ data: status });
+  res.json({ data: synthesisStatusResponse(status) });
 });
 
 /**

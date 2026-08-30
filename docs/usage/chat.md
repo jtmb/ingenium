@@ -7,6 +7,66 @@ description: Complete guide to the Ingenium Chat interface — provider/model se
 
 Ingenium Chat is a standalone conversational AI interface that uses OpenCode's native chat API. It lives on the Dashboard at `/chat`, separated from the `/opencode` page which embeds OpenCode Web/CLI iframes.
 
+Chat-owned tools use the API's authoritative active global project. The Chat
+page resolves that project rather than trusting the selected dashboard project;
+if no sole active global project can be resolved, Chat does not run its tool
+configuration.
+
+## Context project selector
+
+On `/chat`, the top navigation **Context project** selector chooses the project
+used by optional project-context retrieval. A selection is represented explicitly
+as `?project=<name>` in the URL and is persisted for the next visit. The API
+validates the URL or stored value against the current, non-archived project list
+before mounting the Chat shell; an invalid, missing, or archived selection never
+falls back to another project. URL query values are encoded with
+`URLSearchParams`.
+
+If the URL or stored selection is no longer valid, Chat fails closed with
+**Project context unavailable** and mounts no project-scoped Chat content. Use
+**Clear project selection and use server default** to remove the invalid URL and
+stored values and retry resolution against the sole active global project.
+
+This selector is separate from Chat's server-owned authority. The banner
+**Chat tools run through global project** identifies the project used by Chat
+tools, provider/model configuration, and other global Chat mutations. Changing
+the Context project does not redirect those tools.
+
+## Runtime and Context checkpointing
+
+In the isolated production profile, Chat shows the authorized workspace picker
+until a workspace is explicitly started or resumed. No Chat client is created
+before the confirmed runtime is ready, and each session/configuration/stream call
+uses that runtime binding. In production, the dashboard-owned SSE route streams
+directly from private Express `4096`; it never sends a cookie-only browser stream
+to the public bearer boundary on `4097`. Compatibility mode uses the fixed local
+runtime path.
+
+After a successful terminal turn, Chat reads the session history and persists only
+a non-empty user message paired with a non-empty assistant message that finished
+normally. The API appends both messages and one immutable Context checkpoint in a
+single optimistic-revision transaction. Deterministic idempotency keys make a
+replayed completion safe. Isolated-runtime checkpoints use the confirmed
+workspace's project rather than an unrelated project selected in the dashboard.
+
+Interrupted or failed turns, empty assistant responses, and failed checkpoint
+writes produce no partial Context record. API responses contain checkpoint
+metadata and hashes rather than message bodies.
+
+The browser may render a user message with an optimistic client ID before
+OpenCode assigns its authoritative ID. SSE `message.updated` events and fetched
+message snapshots reconcile that alias through the assistant message's
+`parentID`, scoped to the active project/runtime/session. Persistence uses the
+authoritative user and assistant IDs, so switching between Chat sessions cannot
+attach a response to the previous session and repeated terminal events produce
+at most one checkpoint for the completed turn.
+
+Immutable Context conversations created by authenticated users are private by
+default. Their messages, checkpoints, restore branches, and cited restricted RAG
+sources remain bound to the conversation owner. Organization/project-visible
+conversation scope must be selected explicitly; foreign private IDs are returned
+as not found and organization administrators do not implicitly read them.
+
 ## Quick Start
 
 ```bash
@@ -69,9 +129,28 @@ The left sidebar lists all chat sessions. Sessions are loaded from OpenCode via 
 | **Share** | Click the share button to generate a shareable link and copy it to clipboard. Share state auto-resets after 5 seconds. |
 | **Compact** | Click the compact button to summarize the conversation via the selected model. Compact state auto-resets after 5 seconds. |
 
+Newly created sessions are selected immediately and remain in the sidebar even if
+the following OpenCode list refresh is briefly stale. The composer stays disabled
+and the previous transcript stays hidden until the new session's own history has
+loaded, preventing a fast first prompt from being appended to the prior session.
+
 ### Mobile Responsiveness
 
-On screens narrower than 1280px, the sidebar auto-collapses. On mobile (<768px), the sidebar becomes an overlay drawer triggered by a hamburger button in the header.
+On screens narrower than 1280px, the sidebar auto-collapses. On mobile (<768px), the sidebar becomes the shared left edge-drawer pattern, triggered by a hamburger button in the header. The panel translates from the edge and the backdrop fades using `240ms` with `cubic-bezier(0.22, 1, 0.36, 1)`. Closing retains the panel through its transform transition so a rapid reopen reverses the same mounted drawer instead of restarting from a removed panel. The session drawer is inert and `aria-hidden` while retained only for exit; its existing mobile focus behavior remains in place.
+
+### Create a Task from Chat
+
+With a loaded, idle conversation selected, choose **Create task** (the plus
+button in the Chat header). The confirmation form asks for a **title only**;
+it does not copy the transcript, session title, or other Chat content into the
+task. Chat capture belongs to the active global Ingenium project; the server
+also verifies the OpenCode source instance, upstream project, and mapped global
+project. Unmapped, mismatched, or unavailable sessions cannot be captured.
+
+The stored reference uses fixed metadata (`OpenCode chat`), not the upstream
+session title or transcript. Repeating the same capture reuses the existing
+task and reference. The controls are labeled, keyboard-usable, and at least
+44px; the header control remains available in the mobile layout.
 
 ## Composer
 
@@ -85,6 +164,35 @@ The composer bar sits at the bottom of the chat area with a `rounded-2xl` border
 | **Instructions** | Toggle (gear icon) opens a system prompt textarea above the composer. |
 | **Attachments** | Paperclip button opens a file picker (max 5 files, 10MB each). Also supports drag-and-drop. Text files show code-block previews; images show inline thumbnails; binary files show download links. |
 | **Send/Stop** | Arrow icon to send (text required); square icon to stop generation (when streaming). |
+
+### Optional Project Context
+
+The **Use project context** checkbox is an explicit per-send control and is off
+by default. After an accepted send, it resets to off. The selected project is
+validated before Chat mounts and is the authority for this optional Context
+search; Chat tools and provider/model selection remain owned by the active
+global project.
+
+The request binds the validated Context project to that send. Retrieval is sent
+only when the checkbox is enabled; a failed search leaves the prompt unsent so
+the user can retry. The API rechecks the project at request time, so an archive
+race is rejected rather than serving another project's context. Context source
+contents and excerpts are not written to logs.
+
+When enabled, retrieval is bounded to at most 5 sources, the query is limited
+to 512 characters, and provider-bound context is limited to 5,000 characters.
+The provider receives excerpts as untrusted reference data inside delimiters;
+they are never rendered in Chat. Chat displays the exact citation metadata only:
+title, the persisted chunk UUID as `citationId`, `sourceId`, `sourceHash`,
+`chunkIndex`, current `availability` (`available`), heading, provenance, and
+optional source reference. It never renders the source excerpt.
+
+If retrieval finds no matches, the original prompt is still sent without
+grounding. If the search fails, Chat preserves the prompt and the checkbox so
+you can retry. Citation metadata is live per-turn UI state and is not durable
+across a reload. Stable citation reproducibility comes from CTX-101's immutable
+chunk identity and deterministic retrieval order, not from persisted Chat UI
+grounding metadata.
 
 ### Attachments
 
@@ -105,10 +213,10 @@ Right-aligned with `rounded-2xl` and a `--color-surface-selected` background.
 
 ### Assistant Messages
 Left-aligned with **no card wrapper** — full-width text with relaxed leading. Includes:
-- **Live provider-emitted reasoning**: OpenCode v1.18.3 first identifies a part through `message.part.updated` (`part.type: "reasoning"`), then sends its text through `message.part.delta` with `field: "text"`. Chat uses that authoritative part ID/type mapping, so reasoning remains separate from the user-facing answer. It is displayed as escaped plain text in an open disclosure while streaming, then becomes user-toggleable as "Reasoning" after the terminal event. The display is not generated by the dashboard and is not mixed into Markdown content or copy.
+- **Live provider-emitted reasoning**: OpenCode v1.18.9 first identifies a part through `message.part.updated` (`part.type: "reasoning"`), then sends its text through `message.part.delta` with `field: "text"`. Chat uses that authoritative part ID/type mapping, so reasoning remains separate from the user-facing answer. It is displayed as escaped plain text in an open disclosure while streaming, then becomes user-toggleable as "Reasoning" after the terminal event. The display is not generated by the dashboard and is not mixed into Markdown content or copy.
 - **Markdown content**: Rendered via ChatMarkdown component in plain flow. Chat-only callouts, quotes, code blocks, and tables do not add card, border, or background-bubble chrome; Docs callouts are unchanged.
 - **File parts**: Rendered inline based on MIME type without attachment cards, borders, or background bubbles.
-- **Tool-call traces**: Compact OpenCode-style rows showing a human-friendly tool label and a short argument summary. **Web Search is the sole compact-trace exception**: its row is keyboard-accessible and exposes the actual search query inline with an `aria-expanded` disclosure. If the provider returns concrete sites, the disclosure may list only those validated `http`/`https` URLs, grouped as **Visited**, **Results**, or **Sites**. A URL is **Visited** only when it is in an explicit `visited`/`crawled` collection or its own object has an exact positive visitation flag; status fields, unrelated sibling fields, and names such as `unvisited` do not imply visitation. Query text is never converted into a fabricated URL or title; provider result titles and arbitrary payload fields are not rendered. Opened links use a new tab with `noopener noreferrer`. All other tools remain non-interactive compact traces; traces do not expand into payloads or expose execution status, duration, output, or error details. A separate revert affordance may appear for failed calls.
+- **Tool-call traces**: Compact OpenCode-style rows showing a human-friendly tool label and a short argument summary. **Web Search is the sole interactive trace**: its keyboard-accessible row opens the **Activity** drawer for the selected assistant message rather than expanding details inline. The drawer shows the provider's chronological reasoning, response text, and tool activity; Web Search entries may include the query and only concrete, validated `http`/`https` URLs, grouped as **Visited**, **Results**, or **Sites**. A URL is **Visited** only when it is in an explicit `visited`/`crawled` collection or its own object has an exact positive visitation flag; status fields, unrelated sibling fields, and names such as `unvisited` do not imply visitation. Query text is never converted into a fabricated URL or title; provider result titles and arbitrary payload fields are not rendered. Opened links use a new tab with `noopener noreferrer`. All other tools remain non-interactive compact traces; traces do not expand into payloads or expose execution status, duration, output, or error details. A separate revert affordance may appear for failed calls.
 
 All LLM and agent output in Chat uses this borderless, background-free plain-flow treatment. User messages intentionally retain their distinct right-aligned selected-surface bubble.
 
@@ -123,6 +231,26 @@ Before actual provider reasoning or answer text arrives, Chat shows only a muted
 | **Reconnecting** | "Reconnecting…" | Reconnecting after disconnect |
 
 The status is derived from the `streamActivity` prop and maps via `data-testid="chat-activity-status"` with `role="status"` for accessibility. Stream errors use the same inline treatment.
+
+### Activity Drawer
+
+Web Search tool rows open the **Activity** drawer for the selected assistant
+message. The drawer presents a chronological, live-updating timeline containing
+provider reasoning, response text, and tool activity. Tool entries may include
+the query and validated `http`/`https` sites grouped as **Visited**, **Results**,
+or **Sites**; it does not expose arbitrary provider payloads. The Web Search row
+does not render those details inline.
+
+The drawer is a right edge-mounted modal dialog using the shared edge-drawer
+motion pattern: the panel transforms and the backdrop opacity changes over
+`240ms` with `cubic-bezier(0.22, 1, 0.36, 1)`. Exit presence is retained until
+the panel transform ends, so rapid reversal reopens the mounted panel. It traps
+`Tab` focus, moves focus to its close button when opened, restores the
+previously focused element when closed, and closes with the close button,
+backdrop, or `Escape`. It disables body scrolling while open and uses a
+full-width panel on small screens and a 400px panel on larger screens. A panel
+retained only for exit is `aria-hidden` and inert. Reduced-motion preferences
+disable the transition and close/open immediately.
 
 ### Action Row
 Each assistant message has an action row beneath it with:
@@ -159,7 +287,29 @@ response produces `502 MCP_STATUS_INVALID` rather than an empty server list.
 Each server has a connect/disconnect toggle and the drawer provides refresh and
 retry feedback when status loading fails. Connect and disconnect success is the
 fixed `{ data: { accepted: true } }` DTO; raw upstream mutation bodies are never
-returned to the browser.
+returned to the browser. Opening the drawer refreshes its data automatically;
+the footer's **Refresh** button performs a manual refresh and shows the last
+refresh time alongside the current connection status.
+
+MCP tool state is refreshed after connection mutations and when the MCP session
+reconnects. If a direct built-in tool call is blocked, Chat shows fixed,
+actionable errors (`TOOL_DISABLED`, `TOOL_STATE_UNAVAILABLE`, or
+`PROJECT_IDENTITY_REQUIRED`) and links to **MCP Servers** when the project is
+known. The statically registered extension tools are the exception: they remain
+visible, but their execution is still project-state-gated and fails closed.
+
+The MCP status panel is a right edge drawer using the same `240ms`
+`cubic-bezier(0.22, 1, 0.36, 1)` panel-transform/backdrop-opacity contract as
+the session and Activity drawers. It remains mounted through exit and reverses
+cleanly if reopened during that transition. While open it traps `Tab`, focuses
+the close button, closes on the close button, backdrop, or `Escape`, and
+restores focus to the trigger on close. The exiting panel is `aria-hidden` and
+inert; reduced motion removes the transition and applies state changes
+immediately.
+
+These edge drawers are distinct from Chat's inline desktop panes and from
+centered modals, dropdowns, and disclosures, which do not use this motion
+primitive.
 
 ## API
 

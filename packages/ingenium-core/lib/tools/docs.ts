@@ -37,6 +37,7 @@ export interface DocsError {
 /** A docs space (wiki-style namespace grouping pages together). */
 export interface DocSpace {
   id: number;
+  organization_id: string;
   name: string;
   slug: string;
   description: string;
@@ -54,6 +55,7 @@ export interface DocSpace {
  */
 export interface DocPage {
   id: number;
+  organization_id: string;
   space_id: number;
   parent_page_id: number | null;
   title: string;
@@ -182,6 +184,8 @@ function nowISO(): string {
   return new Date().toISOString();
 }
 
+const BOOTSTRAP_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000093";
+
 function makeError(code: DocsErrorCode, message: string): DocsError {
   return { code, message };
 }
@@ -222,12 +226,12 @@ function rebuildBacklinks(db: ReturnType<typeof getDb>, pageId: number, content:
   }
 
   const insertLink = db.prepare(
-    "INSERT OR IGNORE INTO docs_page_links (source_page_id, target_page_id, link_text) VALUES (?, ?, ?)"
+    "INSERT OR IGNORE INTO docs_page_links (organization_id, source_page_id, target_page_id, link_text) SELECT organization_id, id, ?, ? FROM docs_pages WHERE id = ?"
   );
   for (const slug of slugs) {
     const targetId = slugMap.get(slug);
     if (targetId && targetId !== pageId) {
-      insertLink.run(pageId, targetId, slug);
+      insertLink.run(targetId, slug, pageId);
     }
   }
 }
@@ -312,30 +316,40 @@ function defendChildComment(db: ReturnType<typeof getDb>, commentId: number): vo
 
 // ── Spaces ───────────────────────────────────────────────────────────────────
 
-export function listSpaces(): DocSpace[] {
+export function listSpaces(organizationId = BOOTSTRAP_ORGANIZATION_ID): DocSpace[] {
   const db = getDb(dbPath());
-  return db.prepare("SELECT * FROM docs_spaces ORDER BY sort_order, name").all() as DocSpace[];
+  return db.prepare("SELECT * FROM docs_spaces WHERE organization_id = ? ORDER BY sort_order, name").all(organizationId) as DocSpace[];
 }
 
-export function getSpace(id: number): DocSpace | undefined {
+export function getSpace(id: number, organizationId?: string): DocSpace | undefined {
   const db = getDb(dbPath());
-  return db.prepare("SELECT * FROM docs_spaces WHERE id = ?").get(id) as DocSpace | undefined;
+  return (organizationId
+    ? db.prepare("SELECT * FROM docs_spaces WHERE id = ? AND organization_id = ?").get(id, organizationId)
+    : db.prepare("SELECT * FROM docs_spaces WHERE id = ?").get(id)) as DocSpace | undefined;
 }
 
-export function getSpaceBySlug(slug: string): DocSpace | undefined {
+export function getSpaceBySlug(slug: string, organizationId = BOOTSTRAP_ORGANIZATION_ID): DocSpace | undefined {
   const db = getDb(dbPath());
-  return db.prepare("SELECT * FROM docs_spaces WHERE slug = ?").get(slug) as DocSpace | undefined;
+  return db.prepare("SELECT * FROM docs_spaces WHERE slug = ? AND organization_id = ?").get(slug, organizationId) as DocSpace | undefined;
 }
 
-export function createSpace(name: string, slug: string, description?: string, icon?: string): DocSpace {
+export function createSpace(name: string, slug: string, description?: string, icon?: string): DocSpace;
+export function createSpace(organizationId: string, name: string, slug: string, description?: string, icon?: string): DocSpace;
+export function createSpace(first: string, second: string, third?: string, fourth?: string, fifth?: string): DocSpace {
+  const explicitOrganization = arguments.length >= 5;
+  const organizationId = explicitOrganization ? first : BOOTSTRAP_ORGANIZATION_ID;
+  const name = explicitOrganization ? second : first;
+  const slug = explicitOrganization ? third! : second;
+  const description = explicitOrganization ? fourth : third;
+  const icon = explicitOrganization ? fifth : fourth;
   const space = execTransaction(() => {
     const db = getDb(dbPath());
     const now = nowISO();
     db.prepare(
-      `INSERT INTO docs_spaces (name, slug, description, icon, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(name, slug, description || "", icon || "folder", now, now);
-    return db.prepare("SELECT * FROM docs_spaces WHERE slug = ?").get(slug) as DocSpace;
+      `INSERT INTO docs_spaces (organization_id, name, slug, description, icon, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(organizationId, name, slug, description || "", icon || "folder", now, now);
+    return db.prepare("SELECT * FROM docs_spaces WHERE slug = ? AND organization_id = ?").get(slug, organizationId) as DocSpace;
   });
   checkpointAfterWrite();
   return space;
@@ -506,9 +520,9 @@ export function createPage(
 
     const now = nowISO();
     const result = db.prepare(
-      `INSERT INTO docs_pages (space_id, parent_page_id, title, slug, content, revision, status, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, 'draft', 0, ?, ?)`
-    ).run(spaceId, parentPageId || null, title, slug, safeContent, now, now);
+      `INSERT INTO docs_pages (organization_id, space_id, parent_page_id, title, slug, content, revision, status, sort_order, created_at, updated_at)
+       SELECT organization_id, id, ?, ?, ?, ?, 0, 'draft', 0, ?, ? FROM docs_spaces WHERE id = ?`
+    ).run(parentPageId || null, title, slug, safeContent, now, now, spaceId);
 
     const pageId = result.lastInsertRowid as number;
 
@@ -560,8 +574,8 @@ export function publishPage(pageId: number, expectedRevision?: number): PublishP
 
     // Save old state as a version snapshot (exactly one version)
     db.prepare(
-      "INSERT INTO docs_page_versions (page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(pageId, newRevision, newTitle, newContent, now);
+      "INSERT INTO docs_page_versions (organization_id, page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(existing.organization_id, pageId, newRevision, newTitle, newContent, now);
 
     // Update page to published
     db.prepare(
@@ -623,8 +637,8 @@ export function updatePage(
 
     // Save old state as a version
     db.prepare(
-      "INSERT INTO docs_page_versions (page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, newRevision, newTitle, newContent, now);
+      "INSERT INTO docs_page_versions (organization_id, page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(existing.organization_id, id, newRevision, newTitle, newContent, now);
 
     // Update page
     db.prepare(
@@ -757,15 +771,15 @@ export function saveDraft(
 
     const now = nowISO();
     db.prepare(
-      `INSERT INTO docs_page_drafts (page_id, title, slug, content, base_revision, saved_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO docs_page_drafts (organization_id, page_id, title, slug, content, base_revision, saved_at)
+       SELECT organization_id, id, ?, ?, ?, ?, ? FROM docs_pages WHERE id = ?
        ON CONFLICT(page_id) DO UPDATE SET
          title = excluded.title,
          slug = excluded.slug,
          content = excluded.content,
          base_revision = excluded.base_revision,
          saved_at = excluded.saved_at`
-    ).run(pageId, title || "", slug || "", content, baseRevision ?? null, now);
+    ).run(title || "", slug || "", content, baseRevision ?? null, now, pageId);
 
     return db.prepare("SELECT * FROM docs_page_drafts WHERE page_id = ?").get(pageId) as DocDraft;
   });
@@ -817,8 +831,8 @@ export function restoreVersion(pageId: number, versionId: number): DocPage | und
 
     // Save current state as a version before restoring
     db.prepare(
-      "INSERT INTO docs_page_versions (page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(pageId, newRevision, version.title, version.content, now);
+      "INSERT INTO docs_page_versions (organization_id, page_id, revision, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(existing.organization_id, pageId, newRevision, version.title, version.content, now);
 
     // Restore from the selected version
     db.prepare(
@@ -840,15 +854,18 @@ export interface SearchResult extends DocPage {
   rank: number;
 }
 
-export function searchPages(query: string, spaceId?: number): SearchResult[] {
+export function searchPages(query: string, spaceId?: number, organizationId?: string): SearchResult[] {
   const db = getDb(dbPath());
+  const resolvedOrganizationId = organizationId ?? (spaceId === undefined
+    ? BOOTSTRAP_ORGANIZATION_ID
+    : (db.prepare("SELECT organization_id FROM docs_spaces WHERE id = ?").get(spaceId) as { organization_id?: string } | undefined)?.organization_id ?? BOOTSTRAP_ORGANIZATION_ID);
   const sanitized = sanitizeFts5Query(query);
   if (!sanitized) return [];
 
   let sql = `SELECT p.*, rank FROM docs_pages p
      INNER JOIN docs_pages_fts fts ON fts.rowid = p.id
-     WHERE docs_pages_fts MATCH ?`;
-  const params: (string | number)[] = [sanitized];
+     WHERE docs_pages_fts MATCH ? AND p.organization_id = ?`;
+  const params: (string | number)[] = [sanitized, resolvedOrganizationId];
 
   if (spaceId) {
     sql += " AND p.space_id = ?";
@@ -865,9 +882,9 @@ function ensureTagSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-export function listAllTags(): DocTag[] {
+export function listAllTags(organizationId = BOOTSTRAP_ORGANIZATION_ID): DocTag[] {
   const db = getDb(dbPath());
-  return db.prepare("SELECT * FROM docs_tags ORDER BY name").all() as DocTag[];
+  return db.prepare("SELECT * FROM docs_tags WHERE organization_id = ? ORDER BY name").all(organizationId) as DocTag[];
 }
 
 export function getPageTags(pageId: number): DocTag[] {
@@ -887,16 +904,16 @@ export function addTag(pageId: number, tagName: string): DocTag | undefined {
 
     // Ensure tag exists
     db.prepare(
-      "INSERT OR IGNORE INTO docs_tags (name, slug) VALUES (?, ?)"
-    ).run(tagName, slug);
+      "INSERT OR IGNORE INTO docs_tags (organization_id, name, slug) SELECT organization_id, ?, ? FROM docs_pages WHERE id = ?"
+    ).run(tagName, slug, pageId);
 
-    const tag = db.prepare("SELECT * FROM docs_tags WHERE slug = ?").get(slug) as DocTag | undefined;
+    const tag = db.prepare("SELECT tag.* FROM docs_tags tag JOIN docs_pages page ON page.organization_id = tag.organization_id WHERE tag.slug = ? AND page.id = ?").get(slug, pageId) as DocTag | undefined;
     if (!tag) return undefined;
 
     // Link tag to page
     db.prepare(
-      "INSERT OR IGNORE INTO docs_page_tags (page_id, tag_id) VALUES (?, ?)"
-    ).run(pageId, tag.id);
+      "INSERT OR IGNORE INTO docs_page_tags (organization_id, page_id, tag_id) SELECT organization_id, id, ? FROM docs_pages WHERE id = ?"
+    ).run(tag.id, pageId);
 
     return tag;
   });
@@ -967,9 +984,9 @@ export function createComment(
 
     const now = nowISO();
     const insertResult = db.prepare(
-      `INSERT INTO docs_comments (page_id, parent_comment_id, content, selection_text, selection_offset, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(pageId, parentCommentId || null, content, selectionText || "", selectionOffset || 0, now, now);
+      `INSERT INTO docs_comments (organization_id, page_id, parent_comment_id, content, selection_text, selection_offset, created_at, updated_at)
+       SELECT organization_id, id, ?, ?, ?, ?, ?, ? FROM docs_pages WHERE id = ?`
+    ).run(parentCommentId || null, content, selectionText || "", selectionOffset || 0, now, now, pageId);
 
     return {
       comment: db.prepare("SELECT * FROM docs_comments WHERE id = ?").get(insertResult.lastInsertRowid) as DocComment,
@@ -1014,11 +1031,6 @@ export function getAttachment(attId: number): DocAttachment | undefined {
   return db.prepare("SELECT * FROM docs_attachments WHERE id = ?").get(attId) as DocAttachment | undefined;
 }
 
-/** Look up attachments by owning page (alias for listAttachments). */
-export function getAttachmentsByPage(pageId: number): DocAttachment[] {
-  return listAttachments(pageId);
-}
-
 /**
  * Save or update an attachment record.
  * Uses ON CONFLICT DO UPDATE (not INSERT OR REPLACE) so FK-referenced child
@@ -1042,15 +1054,15 @@ export function saveAttachment(
     const now = nowISO();
     // HARD RULE #11: ON CONFLICT DO UPDATE, never INSERT OR REPLACE
     db.prepare(
-      `INSERT INTO docs_attachments (page_id, filename, original_name, mime_type, size_bytes, storage_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO docs_attachments (organization_id, page_id, filename, original_name, mime_type, size_bytes, storage_path, created_at)
+       SELECT organization_id, id, ?, ?, ?, ?, ?, ? FROM docs_pages WHERE id = ?
        ON CONFLICT(page_id, filename) DO UPDATE SET
          original_name = excluded.original_name,
          mime_type = excluded.mime_type,
          size_bytes = excluded.size_bytes,
          storage_path = excluded.storage_path,
          created_at = excluded.created_at`
-    ).run(pageId, filename, originalName, mimeType, sizeBytes, storagePath, now);
+    ).run(filename, originalName, mimeType, sizeBytes, storagePath, now, pageId);
 
     return db.prepare(
       "SELECT * FROM docs_attachments WHERE page_id = ? AND filename = ?"
@@ -1078,9 +1090,9 @@ export function deleteAttachment(attId: number): DocAttachment | undefined {
 
 // ── Templates ────────────────────────────────────────────────────────────────
 
-export function listTemplates(): DocTemplate[] {
+export function listTemplates(organizationId = BOOTSTRAP_ORGANIZATION_ID): DocTemplate[] {
   const db = getDb(dbPath());
-  return db.prepare("SELECT * FROM docs_templates ORDER BY category, name").all() as DocTemplate[];
+  return db.prepare("SELECT * FROM docs_templates WHERE organization_id = ? ORDER BY category, name").all(organizationId) as DocTemplate[];
 }
 
 export function getTemplate(id: number): DocTemplate | undefined {
@@ -1088,14 +1100,22 @@ export function getTemplate(id: number): DocTemplate | undefined {
   return db.prepare("SELECT * FROM docs_templates WHERE id = ?").get(id) as DocTemplate | undefined;
 }
 
-export function createTemplate(name: string, content: string, description?: string, category?: string): DocTemplate {
+export function createTemplate(name: string, content: string, description?: string, category?: string): DocTemplate;
+export function createTemplate(organizationId: string, name: string, content: string, description?: string, category?: string): DocTemplate;
+export function createTemplate(first: string, second: string, third?: string, fourth?: string, fifth?: string): DocTemplate {
+  const explicitOrganization = arguments.length >= 5;
+  const organizationId = explicitOrganization ? first : BOOTSTRAP_ORGANIZATION_ID;
+  const name = explicitOrganization ? second : first;
+  const content = explicitOrganization ? third! : second;
+  const description = explicitOrganization ? fourth : third;
+  const category = explicitOrganization ? fifth : fourth;
   const tmpl = execTransaction(() => {
     const db = getDb(dbPath());
     const now = nowISO();
     db.prepare(
-      "INSERT INTO docs_templates (name, description, content, category, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(name, description || "", content, category || "general", now);
-    return db.prepare("SELECT * FROM docs_templates WHERE name = ?").get(name) as DocTemplate;
+      "INSERT INTO docs_templates (organization_id, name, description, content, category, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(organizationId, name, description || "", content, category || "general", now);
+    return db.prepare("SELECT * FROM docs_templates WHERE name = ? AND organization_id = ?").get(name, organizationId) as DocTemplate;
   });
   checkpointAfterWrite();
   return tmpl;
@@ -1161,8 +1181,8 @@ export function linkProject(pageId: number, projectId: string): DocProjectLink {
     }
 
     db.prepare(
-      "INSERT OR IGNORE INTO docs_page_projects (page_id, project_id) VALUES (?, ?)"
-    ).run(pageId, projectId);
+      "INSERT OR IGNORE INTO docs_page_projects (organization_id, page_id, project_id) SELECT organization_id, id, ? FROM docs_pages WHERE id = ?"
+    ).run(projectId, pageId);
     return { page_id: pageId, project_id: projectId };
   });
   checkpointAfterWrite();
@@ -1198,11 +1218,11 @@ export function toggleFavorite(pageId: number): DocPage | undefined {
   return result;
 }
 
-export function listFavorites(): DocPage[] {
+export function listFavorites(organizationId = BOOTSTRAP_ORGANIZATION_ID): DocPage[] {
   const db = getDb(dbPath());
   return db.prepare(
-    "SELECT * FROM docs_pages WHERE is_favorite = 1 AND status != 'archived' ORDER BY updated_at DESC"
-  ).all() as DocPage[];
+    "SELECT * FROM docs_pages WHERE organization_id = ? AND is_favorite = 1 AND status != 'archived' ORDER BY updated_at DESC"
+  ).all(organizationId) as DocPage[];
 }
 
 // ── Import / Export ──────────────────────────────────────────────────────────
@@ -1273,16 +1293,17 @@ export function exportSpace(spaceId: number): ExportSpaceResult | undefined {
 
 // ── Stats ────────────────────────────────────────────────────────────────────
 
-export function getDocStats(): DocStatCounts {
+export function getDocStats(organizationId = BOOTSTRAP_ORGANIZATION_ID): DocStatCounts {
   const db = getDb(dbPath());
-  const spaces = (db.prepare("SELECT COUNT(*) as count FROM docs_spaces").get() as { count: number }).count;
-  const pages = (db.prepare("SELECT COUNT(*) as count FROM docs_pages").get() as { count: number }).count;
-  const drafts = (db.prepare("SELECT COUNT(*) as count FROM docs_page_drafts").get() as { count: number }).count;
-  const versions = (db.prepare("SELECT COUNT(*) as count FROM docs_page_versions").get() as { count: number }).count;
-  const tags = (db.prepare("SELECT COUNT(*) as count FROM docs_tags").get() as { count: number }).count;
-  const comments = (db.prepare("SELECT COUNT(*) as count FROM docs_comments").get() as { count: number }).count;
-  const attachments = (db.prepare("SELECT COUNT(*) as count FROM docs_attachments").get() as { count: number }).count;
-  const templates = (db.prepare("SELECT COUNT(*) as count FROM docs_templates").get() as { count: number }).count;
+  const count = (table: string) => (db.prepare(`SELECT COUNT(*) as count FROM ${table} WHERE organization_id = ?`).get(organizationId) as { count: number }).count;
+  const spaces = count("docs_spaces");
+  const pages = count("docs_pages");
+  const drafts = count("docs_page_drafts");
+  const versions = count("docs_page_versions");
+  const tags = count("docs_tags");
+  const comments = count("docs_comments");
+  const attachments = count("docs_attachments");
+  const templates = count("docs_templates");
 
   return { spaces, pages, drafts, versions, tags, comments, attachments, templates };
 }

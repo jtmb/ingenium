@@ -4,14 +4,14 @@
 # entrypoint or this launcher's plaintext environment.
 set -eu
 
-token_file="${INGENIUM_API_TOKEN_FILE:-/run/ingenium-secrets/api-token}"
+token_file="/run/ingenium-secrets/dashboard/bootstrap-token"
 
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  HOME="/home/appuser" \
+  HOME="/home/ingenium-dashboard" \
   NODE_ENV="production" \
-  INGENIUM_API_TOKEN_FILE="$token_file" \
+  INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE="$token_file" \
   DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}" \
   PORT="3001" \
   HOSTNAME="127.0.0.1" \
-  node /app/scripts/run-dashboard.mjs
+  node /app/services/ingenium-dashboard/server.js

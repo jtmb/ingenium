@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import {
   logger,
   getDb,
@@ -16,6 +15,7 @@ import {
 import { opencodeClient, type OpenCodeResult } from "../lib/opencode-client.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import { settingsRouter } from "../lib/routes/settings.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const PROVIDER_ERROR_CANARY = "phase4c-provider-error-canary-do-not-echo";
 const OAUTH_SECRET = "phase4c-gmail-client-secret";
@@ -45,22 +45,17 @@ beforeEach(async () => {
   process.env.INGENIUM_HOME = join(tempDir, "home");
   process.env.OPENCODE_SERVER_PASSWORD = "phase4c-opencode-password";
   projectName = "phase4c-api";
-  projects.createProject(projectName, true);
+  projects.createProject("global-default", true);
+  projects.createProject(projectName);
 
   server = createServer(buildApp());
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const address = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${address.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
   vault.sealVault();
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   server = undefined;
   resetDbForTest();
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -75,7 +70,7 @@ afterEach(async () => {
 });
 
 function projectId(): string {
-  return projects.getProject(projectName)!.id;
+  return projects.getProject("global-default")!.id;
 }
 
 async function getSetting(key: string): Promise<{ response: Response; body: any }> {
@@ -131,7 +126,7 @@ describe("Phase 4C startup ordering", () => {
     const startup = source.slice(source.indexOf("setTimeout(() => {"));
     const continuity = startup.indexOf("dependencies.establishContinuity()");
     const migration = startup.indexOf("dependencies.migrateEmailAccounts()");
-    const engine = startup.indexOf("dependencies.startEngine(dependencies.getGlobalProjectId())");
+    const engine = startup.indexOf("dependencies.startEngine()");
 
     expect(continuity).toBeGreaterThanOrEqual(0);
     expect(migration).toBeGreaterThan(continuity);

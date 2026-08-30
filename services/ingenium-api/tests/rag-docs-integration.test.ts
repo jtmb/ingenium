@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { docs, projects } from "ingenium-core";
 import { ragRouter } from "../lib/routes/rag.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "ingenium-rag-docs-"));
 process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
@@ -27,16 +27,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/rag", ragRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeHttpServer(server);
   delete process.env.INGENIUM_CORE_DB_PATH;
   rmSync(tempDir, { recursive: true, force: true });
 });
@@ -48,7 +43,7 @@ describe("Docs RAG integration", () => {
     expect((await response.json()).data[0]).toEqual(expect.objectContaining({ source_title: "Indexed Page", source_path: "docs-page:1" }));
   });
 
-  it("returns the indexed Docs page through hybrid search", async () => {
+  it("returns the indexed Docs page through full-text search", async () => {
     const response = await fetch(`${baseUrl}/api/v1/rag/search?project=${projectName}&q=lighthouse`);
     expect(response.status).toBe(200);
     const body = await response.json();

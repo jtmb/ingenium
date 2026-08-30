@@ -2,44 +2,77 @@ import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { MCPToolState } from "../schema.js";
 import {
   MCP_TOOL_CATALOG,
-  getAllToolNames,
+  getAllToolNames as getStaticToolNames,
   getToolsByCategory,
-  getCatalogMap,
+  getCatalogMap as getStaticCatalogMap,
   getCategoryOrder,
 } from "./mcp-tool-catalog.js";
+import { listEffectiveChildMcpTools } from "./child-mcp-servers.js";
+import { childMcpAuthorizationPolicy } from "./mcp-authorization-policy.js";
 
 /**
  * MCP tool state — per-project enable/disable persistence for individual tools.
  *
- * All tools default to enabled. Once a user explicitly sets a state, it's stored
- * in the mcp_tool_states table. Tools not present in the table are implicitly enabled.
- * The catalog in mcp-tool-catalog.ts is the canonical list of all known tools;
- * this module provides the per-project toggle layer on top.
+ * The effective catalog determines each tool's default. Once a user explicitly
+ * sets a state, it is stored in the mcp_tool_states table. Unknown tools fail
+ * closed rather than inheriting an implicit enabled state.
  *
  * 🔴 All mutations use execTransaction() with checkpointAfterWrite() outside the txn.
  */
 
-export { getToolsByCategory, getAllToolNames };
+export { getToolsByCategory };
 export type { McpToolCatalogEntry } from "./mcp-tool-catalog.js";
 
-/** Returns the full catalog map (name → entry). */
-export function getAllTools() {
-  return getCatalogMap();
+/**
+ * Returns static catalog entries and, when a project is supplied, its eligible
+ * persisted child-discovery metadata. This is metadata only: no child tool is
+ * registered or forwarded by this function. Child entries remain present when
+ * their server is disabled so the project can toggle them back on.
+ */
+export function getAllTools(projectId?: string) {
+  const catalog = getStaticCatalogMap();
+  if (!projectId) return catalog;
+
+  for (const tool of listEffectiveChildMcpTools(projectId)) {
+    catalog.set(tool.canonical_name, {
+      name: tool.canonical_name,
+      category: tool.category,
+      description: tool.description,
+      projectScope: tool.scope === "global" ? "global" : "per-project",
+      defaultEnabled: true,
+      apiEndpoints: [],
+      authorization: childMcpAuthorizationPolicy(),
+    });
+  }
+  return catalog;
+}
+
+/** Return static tool names, plus effective discovered child tool names when scoped to a project. */
+export function getAllToolNames(projectId?: string): string[] {
+  if (!projectId) return getStaticToolNames();
+  return Array.from(getAllTools(projectId).keys());
 }
 
 /**
  * Read a tool's enabled state for a project.
- * Absence in the DB means "default enabled" — this avoids populating the table
- * for every tool on every project; only explicitly toggled tools get rows.
+ * Absence in the DB means the effective catalog default — this avoids populating
+ * the table for every tool on every project; only explicitly toggled tools get rows.
  */
 export function getToolState(projectId: string, toolName: string): boolean {
+  const entry = getAllTools(projectId).get(toolName);
+  if (!entry) return false;
+
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const row = db.prepare("SELECT enabled FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?").get(projectId, toolName) as { enabled: number } | undefined;
-  if (!row) return true; // default enabled
+  if (!row) return entry.defaultEnabled;
   return row.enabled === 1;
 }
 
 export function setToolState(projectId: string, toolName: string, enabled: boolean): MCPToolState {
+  if (!getAllTools(projectId).has(toolName)) {
+    throw new Error("MCP_TOOL_NOT_REGISTERED");
+  }
+
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
@@ -48,8 +81,12 @@ export function setToolState(projectId: string, toolName: string, enabled: boole
       INSERT INTO mcp_tool_states (project_id, tool_name, enabled, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(project_id, tool_name) DO UPDATE SET enabled = ?, updated_at = ?
+      WHERE mcp_tool_states.enabled IS NOT excluded.enabled
     `).run(projectId, toolName, enabled ? 1 : 0, now, now, enabled ? 1 : 0, now);
-    return db.prepare("SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?").get(projectId, toolName) as MCPToolState;
+    const row = db.prepare(
+      "SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?",
+    ).get(projectId, toolName) as Omit<MCPToolState, "enabled"> & { enabled: number };
+    return { ...row, enabled: row.enabled === 1 };
   });
   // 🔴 checkpointAfterWrite MUST be outside the transaction — calling it inside
   // the execTransaction callback causes SQLITE_LOCKED under concurrent access.
@@ -59,7 +96,7 @@ export function setToolState(projectId: string, toolName: string, enabled: boole
 
 /**
  * List only explicitly-set tool states (tools with DB rows).
- * Tools not in the result are implicitly enabled. To get a complete view
+ * Tools not in the result use their catalog default. To get a complete view
  * with defaults filled in, use listToolStatesWithDefaults() instead.
  */
 export function listToolStates(projectId: string): Array<{ tool_name: string; enabled: boolean }> {
@@ -68,27 +105,25 @@ export function listToolStates(projectId: string): Array<{ tool_name: string; en
   return rows.map(r => ({ tool_name: r.tool_name, enabled: r.enabled === 1 }));
 }
 
-/** Derived from the catalog — all known tool names. */
-export const ALL_TOOLS: string[] = MCP_TOOL_CATALOG.map(e => e.name);
-
 /**
  * Return the complete tool state list for a project — every known tool from the
- * catalog with its effective enabled state. Tools that were never explicitly toggled
- * default to true. This is the preferred function for UI rendering and permission checks.
+ * effective catalog with its enabled state. Tools that were never explicitly toggled
+ * use their catalog default. This is the preferred function for UI rendering and
+ * permission checks.
  */
 export function listToolStatesWithDefaults(projectId: string): Array<{ tool_name: string; enabled: boolean }> {
   const states = listToolStates(projectId);
   const stateMap = new Map(states.map(s => [s.tool_name, s.enabled]));
-  return getAllToolNames().map(name => ({
-    tool_name: name,
-    enabled: stateMap.has(name) ? stateMap.get(name)! : true,
+  return Array.from(getAllTools(projectId).values(), (entry) => ({
+    tool_name: entry.name,
+    enabled: stateMap.get(entry.name) ?? entry.defaultEnabled,
   }));
 }
 
 /** Derived from catalog: category name → set of tool names in that category. */
-export function getCategoryMap(): Map<string, string[]> {
+export function getCategoryMap(projectId?: string): Map<string, string[]> {
   const map = new Map<string, string[]>();
-  for (const entry of MCP_TOOL_CATALOG) {
+  for (const entry of getAllTools(projectId).values()) {
     if (!map.has(entry.category)) map.set(entry.category, []);
     map.get(entry.category)!.push(entry.name);
   }
@@ -122,8 +157,8 @@ export const CATEGORY_PREFIX: Record<string, string> = (() => {
  * then falls back to prefix-based lookup for any rogue tools not in the catalog.
  * Returns "Other" as a last resort.
  */
-export function getCategory(toolName: string): string {
-  const catalogMap = getCatalogMap();
+export function getCategory(toolName: string, projectId?: string): string {
+  const catalogMap = getAllTools(projectId);
   const entry = catalogMap.get(toolName);
   if (entry) return entry.category;
 
@@ -151,7 +186,7 @@ export function listCategorizedTools(projectId: string): Array<{
   tools: Array<{ tool_name: string; enabled: boolean }>;
 }> {
   const tools = listToolStatesWithDefaults(projectId);
-  const categorized = tools.map(t => ({ ...t, category: getCategory(t.tool_name) }));
+  const categorized = tools.map(t => ({ ...t, category: getCategory(t.tool_name, projectId) }));
 
   // Group by category
   const groups = new Map<string, Array<{ tool_name: string; enabled: boolean }>>();
@@ -180,19 +215,40 @@ export function listCategorizedTools(projectId: string): Array<{
 }
 
 /**
- * Bulk-enable or bulk-disable all tools in a category.
- * Iterates through each tool individually (not a single UPDATE) to trigger
- * per-tool logging and side effects. Returns the number of tools toggled.
+ * Bulk-enable or bulk-disable all tools in a category. Every category change
+ * commits atomically, so a constraint failure cannot leave a partial category
+ * state. Returns the number of tools whose effective state changed.
  */
 export function setCategoryState(projectId: string, category: string, enabled: boolean): number {
-  const categoryMap = getCategoryMap();
-  const matchingTools = categoryMap.get(category);
-  if (!matchingTools || matchingTools.length === 0) return 0;
+  const matchingTools = Array.from(getAllTools(projectId).values())
+    .filter((entry) => entry.category === category);
+  if (matchingTools.length === 0) return 0;
 
-  let changed = 0;
-  for (const toolName of matchingTools) {
-    setToolState(projectId, toolName, enabled);
-    changed++;
-  }
+  const changed = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existingStates = db.prepare(
+      `SELECT tool_name, enabled
+       FROM mcp_tool_states
+       WHERE project_id = ?
+         AND tool_name IN (${matchingTools.map(() => "?").join(", ")})`,
+    ).all(projectId, ...matchingTools.map((entry) => entry.name)) as Array<{ tool_name: string; enabled: number }>;
+    const stateMap = new Map(existingStates.map((state) => [state.tool_name, state.enabled === 1]));
+    const now = new Date().toISOString();
+    const upsert = db.prepare(`
+      INSERT INTO mcp_tool_states (project_id, tool_name, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, tool_name) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at
+      WHERE mcp_tool_states.enabled IS NOT excluded.enabled
+    `);
+
+    let changedCount = 0;
+    for (const tool of matchingTools) {
+      const current = stateMap.get(tool.name) ?? tool.defaultEnabled;
+      if (current !== enabled) changedCount++;
+      upsert.run(projectId, tool.name, enabled ? 1 : 0, now, now);
+    }
+    return changedCount;
+  });
+  checkpointAfterWrite();
   return changed;
 }

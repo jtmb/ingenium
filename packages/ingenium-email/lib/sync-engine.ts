@@ -1,7 +1,7 @@
 /**
  * Mail Sync Engine — Outlook Cached-Mode background synchronization.
  *
- * One background engine owns all mailbox I/O via a MailProvider with a priority queue:
+ * One background engine owns Gmail mailbox I/O with a priority queue:
  *   P0: Gmail delta poll (cheap historyId check, 30s interval)
  *   P1: boostFolder'd folders (user is viewing)
  *   P2: Full resync (all folders) or INBOX if stale
@@ -18,16 +18,16 @@
  * 🔴 `lastSyncedAt` timestamps survive restarts (Lesson 16 — no in-memory booleans).
  */
 
-import { emailCache, emailSuggestionQueue, logger, settings, synthesisLlm } from "ingenium-core";
+import { randomUUID } from "node:crypto";
 import { listAccounts, getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
 import { GmailProvider } from "./providers/gmail.js";
-import type { MailProvider } from "./providers/mail-provider.js";
 import { getVoiceSamples, generateSmartReplies } from "./suggest-llm.js";
 import {
   isAuthenticationProviderError,
   providerErrorDiagnostic,
   sanitizeProviderError,
 } from "./provider-errors.js";
+import { getEmailRuntime } from "./runtime.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +73,8 @@ interface EngineTask {
   folder: string;
   /** Specific UID to prioritize for body fetch (from boostBody). */
   boostUid?: string;
+  /** Full-resync generation whose cursor this folder can help commit. */
+  fullResyncGeneration?: number;
 }
 
 // ── Default settings ────────────────────────────────────────────────────────
@@ -100,22 +102,24 @@ interface AccountWorker {
   email: string;
   projectId: string;
   running: boolean;
-  /** The mail provider — GmailProvider (stateless HTTPS, no connection needed). */
-  provider: MailProvider;
+  /** Gmail REST provider (stateless HTTPS, no connection needed). */
+  provider: typeof GmailProvider;
   /** Priority-ordered task queue (lowest priority number = highest priority). */
   taskQueue: EngineTask[];
   /** Per-folder engine state. */
   folderStates: Map<string, FolderEngineState>;
   /** Folders boosted by boostFolder() — cleared after sync. */
   boostedFolders: Set<string>;
-  /** Specific UIDs boosted by boostBody() — front-loaded in body backfill. */
-  boostedBodyUids: Map<string, Set<string>>; // key: folder
   /** The worker's async loop promise (used for stop). */
   loopPromise: Promise<void> | null;
   /** AbortController for stopping the loop. */
   abortController: AbortController | null;
   /** Keep a recoverable credential failure visible to the dashboard. */
   needsCredentialUpdate: boolean;
+  /** Cursor held until every folder from the matching full resync has been persisted. */
+  fullResyncCursor: string | null;
+  fullResyncGeneration: number;
+  fullResyncPendingFolders: Set<string>;
 }
 
 const engineState: {
@@ -138,6 +142,7 @@ function getProjectId(): string {
 
 function readSetting(key: string, defaultVal: number): number {
   try {
+    const { settings } = getEmailRuntime();
     const pid = getProjectId();
     const val = settings.getSetting(pid, key);
     if (val !== undefined) {
@@ -194,6 +199,9 @@ function enqueueTask(worker: AccountWorker, task: EngineTask): void {
       t.type === task.type,
   );
   if (existing && existing.priority <= task.priority) {
+    if (task.fullResyncGeneration !== undefined) {
+      existing.fullResyncGeneration = task.fullResyncGeneration;
+    }
     return; // already queued at equal or higher priority, skip
   }
   // Remove any lower-priority duplicate
@@ -242,10 +250,31 @@ function setFolderState(
   Object.assign(state, partial);
 }
 
+function commitFullResyncCursor(
+  worker: AccountWorker,
+  folder: string,
+  generation: number | undefined,
+): void {
+  if (generation === undefined || generation !== worker.fullResyncGeneration) return;
+  if (!worker.fullResyncPendingFolders.has(folder)) return;
+
+  if (worker.fullResyncPendingFolders.size > 1) {
+    worker.fullResyncPendingFolders.delete(folder);
+    return;
+  }
+
+  const cursor = worker.fullResyncCursor;
+  if (!cursor) return;
+  getEmailRuntime().cache.setAccountCursor(worker.accountId, cursor, "gmail");
+  worker.fullResyncPendingFolders.clear();
+  worker.fullResyncCursor = null;
+}
+
 /**
  * Return true if a folder was synced recently enough to skip.
  */
 function isFolderFresh(accountId: string, folder: string): boolean {
+  const { cache: emailCache } = getEmailRuntime();
   const interval = getSyncIntervalMs();
   const st = emailCache.getSyncState(accountId, folder);
   if (!st.last_synced_at) return false;
@@ -266,7 +295,14 @@ function isFolderFresh(accountId: string, folder: string): boolean {
  * 🔴 Sequential for...of + await — Lesson 25 (don't overload external LLM).
  * 🔴 AbortSignal at 30s timeout to prevent stuck jobs.
  */
-async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
+async function processSuggestionQueue(): Promise<void> {
+  const {
+    cache: emailCache,
+    suggestionQueue: emailSuggestionQueue,
+    logger,
+    settings,
+    llm: synthesisLlm,
+  } = getEmailRuntime();
   // 1. Check settings
   const pid = getProjectId();
   const repliesEnabled = settings.getSetting(pid, "mail_smart_replies_enabled");
@@ -276,63 +312,63 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
   if (prefetchEnabled !== "true") return; // explicitly "true" only
 
   // 2. Check LLM config
-  if (!synthesisLlm.isLLMSynthesisConfigured(pid)) return;
+  if (!synthesisLlm.isConfigured(pid)) return;
 
-  const llmConfig = synthesisLlm.resolveLLMConfig(pid);
+  const llmConfig = synthesisLlm.resolveConfig(pid);
   if (!llmConfig?.endpoint || !llmConfig?.model) return;
 
   // 3. Dequeue up to 2 jobs per iteration
   for (let i = 0; i < 2; i++) {
-    const job = emailSuggestionQueue.dequeueSuggestionJob();
+    const ownerToken = randomUUID();
+    const job = emailSuggestionQueue.claimSuggestionJob(ownerToken);
     if (!job) break;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const timeoutSignal = AbortSignal.timeout(30_000);
 
     try {
       // Check noreply gate (from email_cache)
       const cachedEmail = emailCache.getCachedEmail(job.account_id, job.folder, job.uid);
       if (!cachedEmail) {
-        emailSuggestionQueue.markJobComplete(job.id);
+        emailSuggestionQueue.markJobComplete(job.id, ownerToken);
         continue;
       }
 
       if (isNoreplySender(cachedEmail.from_addr, cachedEmail.from_name)) {
-        emailSuggestionQueue.markJobComplete(job.id);
+        emailSuggestionQueue.markJobComplete(job.id, ownerToken);
         continue;
       }
 
       // Check suggestions already cached
       const existing = emailCache.getCachedSuggestions(job.account_id, job.folder, job.uid);
       if (existing) {
-        emailSuggestionQueue.markJobComplete(job.id);
+        emailSuggestionQueue.markJobComplete(job.id, ownerToken);
         continue;
       }
 
       // Check body cached
       const body = emailCache.getCachedEmailBody(job.account_id, job.folder, job.uid);
       if (!body?.text && !body?.html) {
-        emailSuggestionQueue.markJobFailed(job.id, "Body not yet cached");
+        emailSuggestionQueue.markJobFailed(job.id, ownerToken, "Body not yet cached");
         logger.warn("sync-engine", `Suggestion job ${job.id}: body not cached, retrying with backoff`);
         continue;
       }
 
       // Get voice samples from the account
-      const account = getAccount(worker.projectId, job.account_id);
+      const account = getAccount(job.account_id);
       if (!account) {
         logger.warn("sync-engine", `processSuggestionQueue: account ${job.account_id} not found`);
-        emailSuggestionQueue.markJobFailed(job.id, "Account not found");
+        emailSuggestionQueue.markJobFailed(job.id, ownerToken, "Account not found");
         continue;
       }
 
-      const creds = getCredentials(worker.projectId, job.account_id);
+      const creds = getCredentials(job.account_id);
       if (!creds?.tokens) {
         logger.warn("sync-engine", `processSuggestionQueue: no OAuth tokens for ${job.account_id}`);
-        emailSuggestionQueue.markJobFailed(job.id, "No OAuth tokens");
+        emailSuggestionQueue.markJobFailed(job.id, ownerToken, "No OAuth tokens");
         continue;
       }
 
-      const voiceSamples = await getVoiceSamples(account, creds.tokens, 15, controller.signal);
+      const voiceSamples = await getVoiceSamples(account, creds.tokens, 15, timeoutSignal);
 
       // Generate suggestions via LLM
       const bodySnippet = (body.text ?? body.html ?? "").substring(0, 800);
@@ -349,7 +385,7 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
           apiKey: llmConfig.apiKey,
           allowPrivateNetwork: llmConfig.allowPrivateNetwork,
         },
-        controller.signal,
+        timeoutSignal,
       );
 
       // Cache suggestions if any were generated
@@ -362,7 +398,7 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
       }
 
       // Mark job complete
-      emailSuggestionQueue.markJobComplete(job.id);
+      emailSuggestionQueue.markJobComplete(job.id, ownerToken);
       logger.info("sync-engine",
         `Generated ${suggestions.length} smart replies for ${job.account_id}/${job.folder}/${job.uid}`,
       );
@@ -372,9 +408,7 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
         jobId: job.id,
         ...providerErrorDiagnostic(safe, "sync"),
       });
-      emailSuggestionQueue.markJobFailed(job.id, safe.message);
-    } finally {
-      clearTimeout(timeout);
+      emailSuggestionQueue.markJobFailed(job.id, ownerToken, safe.message);
     }
   }
 }
@@ -401,10 +435,11 @@ function withWatchdog<T>(
 // ── Account worker ──────────────────────────────────────────────────────────
 
 async function runAccountWorker(worker: AccountWorker): Promise<void> {
+  const { cache: emailCache, suggestionQueue: emailSuggestionQueue, logger } = getEmailRuntime();
   logger.info("sync-engine", `Worker started for ${worker.email}`);
 
   try {
-    const account = getAccount(worker.projectId, worker.accountId);
+    const account = getAccount(worker.accountId);
     if (!account) {
       logger.warn("sync-engine", `Worker for ${worker.accountId}: account not found, stopping`);
       return;
@@ -412,7 +447,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
 
     let creds: ReturnType<typeof getCredentials>;
     try {
-      creds = getCredentials(worker.projectId, worker.accountId);
+      creds = getCredentials(worker.accountId);
     } catch {
       creds = undefined;
     }
@@ -481,6 +516,13 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
             logger.info("sync-engine",
               `Full resync required for ${worker.email} (historyId ${historyId ?? "none"})`,
             );
+            let fullResyncGeneration: number | undefined;
+            if (delta.newCursor) {
+              worker.fullResyncGeneration++;
+              worker.fullResyncCursor = delta.newCursor;
+              worker.fullResyncPendingFolders = new Set(folders);
+              fullResyncGeneration = worker.fullResyncGeneration;
+            }
             // Enqueue sync-folder for every folder at P2 priority
             for (const folder of folders) {
               enqueueTask(worker, {
@@ -488,17 +530,14 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
                 type: "sync-folder",
                 accountId: worker.accountId,
                 folder,
+                fullResyncGeneration,
               });
             }
-            // Set the new cursor after resync — GmailProvider always returns a
-            // non-empty cursor now (profile historyId), so the cursor advances
-            // and the next delta poll is incremental.
-            emailCache.setAccountCursor(worker.accountId, delta.newCursor || "", "gmail");
           } else {
-            // Apply upserts to cache
-            if (delta.upserts.length > 0) {
-              for (const msg of delta.upserts) {
-                emailCache.upsertEmailCache(worker.accountId, msg.folder, [{
+            emailCache.applyEmailCacheDelta(worker.accountId, {
+              upserts: delta.upserts.map((msg) => ({
+                folder: msg.folder,
+                entry: {
                   uid: msg.id,
                   subject: msg.subject,
                   from_name: msg.fromName,
@@ -508,7 +547,19 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
                   flags: JSON.stringify(msg.flags),
                   has_attachments: msg.hasAttachments ? 1 : 0,
                   envelope_json: msg.envelopeJson,
-                }]);
+                },
+              })),
+              deletes: delta.deletes.map((message) => (
+                message.folder === undefined
+                  ? { uid: message.id }
+                  : { folder: message.folder, uid: message.id }
+              )),
+              historyId: delta.newCursor || "",
+              provider: "gmail",
+            });
+
+            if (delta.upserts.length > 0) {
+              for (const msg of delta.upserts) {
                 // Trigger body backfill for upserted messages (P4)
                 enqueueTask(worker, {
                   priority: 4,
@@ -534,18 +585,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
               );
             }
 
-            // Deletes: log for now — per-UID cache deletion not yet supported
             if (delta.deletes.length > 0) {
               logger.info("sync-engine",
-                `Delta deletes for ${worker.email}: ${delta.deletes.length} messages (cache cleanup not yet implemented)`,
+                `Delta deletes for ${worker.email}: ${delta.deletes.length} messages`,
               );
             }
-
-            // Store new cursor unconditionally — GmailProvider always returns a
-            // non-empty cursor now (even for fullResyncRequired, it fetches the
-            // profile historyId).  Skipping the save here would cause every
-            // delta poll to be a full resync.
-            emailCache.setAccountCursor(worker.accountId, delta.newCursor || "", "gmail");
           }
         } catch (error: unknown) {
           logger.warn("sync-engine", "Delta poll failed", {
@@ -566,7 +610,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       // 🟡 FUTURE OPTIMIZATION: Consider queuing suggestion jobs to an external
       // queue (e.g., Bull/BullMQ, a dedicated worker thread, or a separate
       // microservice) to avoid blocking delta poll entirely.
-      await processSuggestionQueue(worker);
+      await processSuggestionQueue();
 
       // ── Generate maintenance tasks if queue is empty ─────────────────
       if (worker.taskQueue.length === 0) {
@@ -679,7 +723,7 @@ async function executeTask(worker: AccountWorker, task: EngineTask): Promise<voi
 
   switch (task.type) {
     case "sync-folder": {
-      await executeSyncFolder(worker, accountId, folder);
+      await executeSyncFolder(worker, accountId, folder, task.fullResyncGeneration);
       break;
     }
     case "backfill-bodies": {
@@ -693,17 +737,19 @@ async function executeSyncFolder(
   worker: AccountWorker,
   accountId: string,
   folder: string,
+  fullResyncGeneration?: number,
 ): Promise<void> {
+  const { cache: emailCache, logger } = getEmailRuntime();
   setFolderState(worker, folder, { state: "syncing-headers", lastError: null });
 
   try {
-    const account = getAccount(worker.projectId, accountId);
+    const account = getAccount(accountId);
     if (!account) {
       logger.warn("sync-engine", `executeSyncFolder: account ${accountId} not found`);
       setFolderState(worker, folder, { state: "error", lastError: "Account not found" });
       return;
     }
-    const creds = getCredentials(worker.projectId, accountId);
+    const creds = getCredentials(accountId);
     if (!creds?.tokens) {
       logger.warn("sync-engine", `executeSyncFolder: no tokens for ${worker.email}`);
       setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
@@ -760,6 +806,8 @@ async function executeSyncFolder(
       emailCache.updateSyncState(accountId, folder, "0", 0);
     } catch { /* non-fatal — don't abort sync over DB write failure */ }
 
+    commitFullResyncCursor(worker, folder, fullResyncGeneration);
+
     // If bodies missing and not at window cap, queue body backfill
     if (missingUids.length > 0 && bodyCount < bodyWindow) {
       enqueueTask(worker, {
@@ -802,16 +850,17 @@ async function executeBackfillBodies(
   folder: string,
   boostUid?: string,
 ): Promise<void> {
+  const { cache: emailCache, logger } = getEmailRuntime();
   setFolderState(worker, folder, { state: "backfilling-bodies", lastError: null });
 
   try {
-    const account = getAccount(worker.projectId, accountId);
+    const account = getAccount(accountId);
     if (!account) {
       logger.warn("sync-engine", `executeBackfillBodies: account ${accountId} not found`);
       setFolderState(worker, folder, { state: "error", lastError: "Account not found" });
       return;
     }
-    const creds = getCredentials(worker.projectId, accountId);
+    const creds = getCredentials(accountId);
     if (!creds?.tokens) {
       logger.warn("sync-engine", `executeBackfillBodies: no tokens for ${worker.email}`);
       setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
@@ -936,7 +985,8 @@ function sleep(ms: number): Promise<void> {
  * Safe to call repeatedly: an already-running engine reconciles workers for
  * accounts that became available after startup.
  */
-export function startEngine(_projectId: string): void {
+export function startEngine(): void {
+  const { logger } = getEmailRuntime();
   const projectId = getGlobalProjectId();
   if (engineState.projectId && engineState.projectId !== projectId) {
     // Global assignment can change without a process restart. Workers are bound
@@ -950,8 +1000,8 @@ export function startEngine(_projectId: string): void {
   }
   engineState.projectId = projectId;
   if (engineState.running) {
-    spawnWorkers(projectId).catch((error: unknown) => {
-      logger.warn("sync-engine", "Worker reconciliation failed", providerErrorDiagnostic(error, "sync"));
+    spawnWorkers().catch((error: unknown) => {
+      logger.warn("sync-engine", "Worker reconciliation failed", providerErrorDiagnostic(error, "sync") as unknown as Record<string, unknown>);
     });
     return;
   }
@@ -962,15 +1012,16 @@ export function startEngine(_projectId: string): void {
   logger.info("sync-engine", `Starting sync engine for project ${projectId}`);
 
   // Launch workers asynchronously
-  spawnWorkers(projectId).catch((error: unknown) => {
-    logger.warn("sync-engine", "Worker startup failed", providerErrorDiagnostic(error, "sync"));
+  spawnWorkers().catch((error: unknown) => {
+    logger.warn("sync-engine", "Worker startup failed", providerErrorDiagnostic(error, "sync") as unknown as Record<string, unknown>);
   });
 }
 
-async function spawnWorkers(_projectId: string): Promise<void> {
+async function spawnWorkers(): Promise<void> {
+  const { logger } = getEmailRuntime();
   const pid = getProjectId();
   engineState.projectId = pid;
-  const accounts = listAccounts(pid);
+  const accounts = listAccounts();
 
   if (accounts.length === 0) {
     logger.info("sync-engine", "No email accounts configured, engine idle");
@@ -990,10 +1041,12 @@ async function spawnWorkers(_projectId: string): Promise<void> {
       taskQueue: [],
       folderStates: new Map(),
       boostedFolders: new Set(),
-      boostedBodyUids: new Map(),
       loopPromise: null,
       abortController: new AbortController(),
       needsCredentialUpdate: false,
+      fullResyncCursor: null,
+      fullResyncGeneration: 0,
+      fullResyncPendingFolders: new Set(),
     };
 
     engineState.workers.set(acct.id, worker);
@@ -1018,6 +1071,7 @@ async function spawnWorkers(_projectId: string): Promise<void> {
  * deregisters the worker, and cleans up auth-error counters for the account.
  */
 export function stopAccountWorker(accountId: string): void {
+  const { logger } = getEmailRuntime();
   const worker = engineState.workers.get(accountId);
   if (!worker) return;
   worker.running = false;
@@ -1038,6 +1092,7 @@ export function stopAccountWorker(accountId: string): void {
  * Aborts all workers and waits for them to finish.
  */
 export async function stopEngine(): Promise<void> {
+  const { logger } = getEmailRuntime();
   if (!engineState.running) return;
 
   logger.info("sync-engine", "Stopping sync engine...");
@@ -1069,6 +1124,7 @@ export async function stopEngine(): Promise<void> {
  * Non-blocking, fire-and-forget.
  */
 export function boostFolder(accountId: string, folder: string): void {
+  const { logger } = getEmailRuntime();
   const worker = engineState.workers.get(accountId);
   if (!worker) {
     logger.warn("sync-engine", `boostFolder: no worker for ${accountId}`);
@@ -1086,18 +1142,12 @@ export function boostFolder(accountId: string, folder: string): void {
  * Non-blocking, fire-and-forget.
  */
 export function boostBody(accountId: string, folder: string, uid: string): void {
+  const { logger } = getEmailRuntime();
   const worker = engineState.workers.get(accountId);
   if (!worker) {
     logger.warn("sync-engine", `boostBody: no worker for ${accountId}`);
     return;
   }
-
-  let uidSet = worker.boostedBodyUids.get(folder);
-  if (!uidSet) {
-    uidSet = new Set();
-    worker.boostedBodyUids.set(folder, uidSet);
-  }
-  uidSet.add(uid);
 
   // Immediately enqueue a backfill task with the boosted UID
   enqueueTask(worker, {

@@ -5,7 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 export const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 
 /** The entrypoint copies the bootstrap credential to this ephemeral, mode-0600 file. */
-export const DEFAULT_API_TOKEN_FILE = "/run/ingenium-secrets/api-token";
+export const DEFAULT_API_TOKEN_FILE = "/run/ingenium-secrets/api/installation-api-token";
 
 export class ApiTokenConfigurationError extends Error {
   constructor(message: string) {

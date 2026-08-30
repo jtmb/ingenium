@@ -1,10 +1,10 @@
-import type { EmailProvider } from "./types.js";
+import type { EmailAccount, EmailProvider } from "./types.js";
 
 /**
  * Provider configuration: default IMAP/SMTP host, port, and TLS settings.
  *
- * Accounts can override these defaults via their own imapHost/imapPort/smtpHost/smtpPort
- * fields.  The defaults are used when the account doesn't specify custom values.
+ * Only custom accounts can override these endpoints. Fixed-provider accounts
+ * always resolve through this canonical configuration.
  */
 export interface ProviderConfig {
   imap: { host: string; port: number; tls: boolean };
@@ -37,3 +37,33 @@ export const PROVIDERS: Record<EmailProvider, ProviderConfig> = {
     smtp: { host: "smtp.example.com", port: 587, tls: true },
   },
 };
+
+export function isEmailProvider(value: unknown): value is EmailProvider {
+  return typeof value === "string"
+    && Object.prototype.hasOwnProperty.call(PROVIDERS, value);
+}
+
+export function isFixedProvider(provider: EmailProvider): boolean {
+  return provider !== "custom";
+}
+
+/** Resolve endpoints at transport time so fixed-provider overrides cannot redirect credentials. */
+export function resolveProviderEndpoints(
+  account: Pick<EmailAccount, "provider" | "imapHost" | "imapPort" | "smtpHost" | "smtpPort">,
+): ProviderConfig {
+  const config = PROVIDERS[account.provider];
+  if (isFixedProvider(account.provider)) return config;
+
+  return {
+    imap: {
+      ...config.imap,
+      host: account.imapHost || config.imap.host,
+      port: account.imapPort || config.imap.port,
+    },
+    smtp: {
+      ...config.smtp,
+      host: account.smtpHost || config.smtp.host,
+      port: account.smtpPort || config.smtp.port,
+    },
+  };
+}

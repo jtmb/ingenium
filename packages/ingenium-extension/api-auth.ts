@@ -1,71 +1,226 @@
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
+import {
+  resolveExtensionBinding,
+  type ExtensionBinding,
+  type ExtensionCredentialPurpose,
+} from "./extension-binding.js";
 
-const TOKEN_FILE_NAME = ".ingenium-api-token";
-const MAX_TOKEN_LENGTH = 4096;
-const TOKEN_FILE_REFERENCE = /^\{file:([^{}\u0000\r\n]+)\}$/;
+const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const DEFAULT_PREFLIGHT_TIMEOUT_MS = 5_000;
+
+/** Startup probes remain deliberately small and finite so plugin loading cannot hang. */
+export const EXTENSION_STARTUP_READINESS_ATTEMPTS = 3;
+export const EXTENSION_STARTUP_PREFLIGHT_TIMEOUT_MS = 1_000;
+export const EXTENSION_STARTUP_RETRY_DELAY_MS = 250;
 
 function normalizeToken(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const token = value.trim();
-  if (token.length === 0 || token.length > MAX_TOKEN_LENGTH) return undefined;
-  // Reject whitespace, control characters, and non-ASCII bytes so a token can
-  // never alter the HTTP Authorization header structure.
-  if (!/^[\x21-\x7e]+$/.test(token)) return undefined;
-  return token;
+  // Match the API's exact one-line token contract. Broad trimming would accept
+  // otherwise-invalid credentials and can mask a damaged protected file.
+  const token = value.endsWith("\n") ? value.slice(0, -1) : value;
+  return API_TOKEN_PATTERN.test(token) ? token : undefined;
 }
 
-function isContainedBy(parent: string, candidate: string): boolean {
-  const relativePath = relative(parent, candidate);
-  return relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath);
-}
-
-function readTokenFile(worktree: string | undefined, reference = `.opencode/${TOKEN_FILE_NAME}`): string | undefined {
-  if (!worktree || !isAbsolute(worktree)) return undefined;
-  if (isAbsolute(reference)) return undefined;
-
+function readProtectedTokenFile(tokenPath: string): string | undefined {
+  let descriptor: number | undefined;
   try {
-    const worktreeRoot = realpathSync(resolve(worktree));
-    if (!statSync(worktreeRoot).isDirectory()) return undefined;
-
-    const opencodeDir = resolve(worktreeRoot, ".opencode");
-    if (!isContainedBy(worktreeRoot, opencodeDir)) return undefined;
-    const opencodeStat = lstatSync(opencodeDir);
-    if (!opencodeStat.isDirectory() || opencodeStat.isSymbolicLink()) return undefined;
-
-    const tokenPath = resolve(worktreeRoot, reference);
-    const expectedTokenPath = resolve(opencodeDir, TOKEN_FILE_NAME);
-    if (tokenPath !== expectedTokenPath || !isContainedBy(opencodeDir, tokenPath)) return undefined;
-    const tokenLinkStat = lstatSync(tokenPath);
-    if (!tokenLinkStat.isFile() || tokenLinkStat.isSymbolicLink()) return undefined;
-
-    const tokenStat = statSync(tokenPath);
-    // The token must be owner-readable and inaccessible to group/other users.
-    if ((tokenStat.mode & 0o400) === 0 || (tokenStat.mode & 0o077) !== 0) return undefined;
-    if (process.platform !== "win32" && typeof process.getuid === "function" && tokenStat.uid !== process.getuid()) {
-      return undefined;
-    }
-
-    return normalizeToken(readFileSync(tokenPath, "utf8"));
+    descriptor = openSync(tokenPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const tokenStat = fstatSync(descriptor);
+    if (!tokenStat.isFile() || (tokenStat.mode & 0o400) === 0 || (tokenStat.mode & 0o077) !== 0) return undefined;
+    if (process.platform !== "win32" && typeof process.getuid === "function" && tokenStat.uid !== process.getuid()) return undefined;
+    return normalizeToken(readFileSync(descriptor, "utf8"));
   } catch {
-    // Missing, unsafe, or unreadable fallback files are intentionally silent.
     return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
+}
+
+export interface ApiRequestAuthOptions {
+  purpose?: ExtensionCredentialPurpose;
+  binding?: ExtensionBinding;
 }
 
 /**
  * Builds request headers without exposing the credential to callers or logs.
  * The environment remains authoritative; plugins fall back to a protected
- * worktree-local token file only when that variable is absent or unusable.
+ * worktree-local or protected absolute token file only when that variable is
+ * absent or unusable. The token is used only to construct the request header.
  */
-export function apiRequestHeaders(worktree?: string, headers?: HeadersInit): Headers {
+export function apiRequestHeaders(
+  worktree?: string,
+  headers?: HeadersInit,
+  options: ApiRequestAuthOptions = {},
+): Headers {
   const requestHeaders = new Headers(headers);
-  const configuredToken = process.env.INGENIUM_API_TOKEN;
-  const placeholder = configuredToken?.match(TOKEN_FILE_REFERENCE)?.[1];
-  const token = placeholder !== undefined
-    ? readTokenFile(worktree, placeholder)
-    : normalizeToken(configuredToken)
-      ?? readTokenFile(worktree, process.env.INGENIUM_API_TOKEN_FILE);
+  // Callers must never be able to smuggle a caller-controlled credential onto
+  // an extension request. Only a token resolved from the protected sources
+  // below may be sent to the API.
+  requestHeaders.delete("Authorization");
+  requestHeaders.delete("Proxy-Authorization");
+  let binding: ExtensionBinding;
+  try {
+    binding = options.binding ?? resolveExtensionBinding(worktree ?? process.cwd(), { purpose: options.purpose });
+  } catch {
+    return requestHeaders;
+  }
+  const token = readProtectedTokenFile(binding.credentialFile);
   if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+  requestHeaders.set("X-Ingenium-Audience", binding.audience);
+  requestHeaders.set("X-Ingenium-Workspace", binding.workspaceId);
+  requestHeaders.set("X-Ingenium-Launcher-Worktree", binding.launcherWorktree);
   return requestHeaders;
+}
+
+export interface ApiAuthenticationPreflightResult {
+  authenticated: boolean;
+  error?: "Unable to authenticate with Ingenium API";
+  /** Safe category only; it never contains a status, URL, response body, or credential detail. */
+  failure?: ApiAuthenticationFailureKind;
+  binding?: ApiAuthenticationBinding;
+}
+
+export type ApiAuthenticationFailureKind = "authentication" | "scope" | "not_found" | "unavailable" | "invalid_target";
+
+export interface ApiAuthenticationBinding {
+  scopes: string[];
+  organizationId: string;
+  projectId: string;
+  projectIds: string[];
+  audience: "mcp" | "runtime" | "repository-sync";
+  workspaceId: string;
+  launcherWorktree: string;
+  storageMappingHash: string;
+  restartRequiredOnCredentialChange: true;
+}
+
+export interface ApiAuthenticationPreflightOptions {
+  timeoutMs?: number;
+  credentialPurpose?: ExtensionCredentialPurpose;
+}
+
+export interface ApiAuthenticationReadinessOptions extends ApiAuthenticationPreflightOptions {
+  attempts?: number;
+  retryDelayMs?: number;
+  request?: typeof fetch;
+  sleep?: (milliseconds: number) => Promise<void>;
+}
+
+function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number): number {
+  if (!Number.isInteger(value) || value === undefined) return fallback;
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function normalizeApiBase(apiBase: string): string | null {
+  try {
+    const parsed = new URL(apiBase);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash) {
+      return null;
+    }
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function failedPreflight(failure: ApiAuthenticationFailureKind): ApiAuthenticationPreflightResult {
+  return { authenticated: false, error: "Unable to authenticate with Ingenium API", failure };
+}
+
+function authenticationBinding(value: unknown): ApiAuthenticationBinding | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const data = "data" in value && value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : value as Record<string, unknown>;
+  if (!Array.isArray(data.scopes) || !data.scopes.every((scope) => typeof scope === "string")
+    || typeof data.organizationId !== "string" || typeof data.projectId !== "string"
+    || !Array.isArray(data.projectIds) || !data.projectIds.every((project) => typeof project === "string")
+    || (data.audience !== "mcp" && data.audience !== "runtime" && data.audience !== "repository-sync")
+    || typeof data.workspaceId !== "string" || typeof data.launcherWorktree !== "string"
+    || typeof data.storageMappingHash !== "string" || !/^[0-9a-f]{64}$/.test(data.storageMappingHash)
+    || data.restartRequiredOnCredentialChange !== true) return undefined;
+  return data as unknown as ApiAuthenticationBinding;
+}
+
+function sleepFor(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * Confirm that a protected token can authenticate the API without exposing the
+ * token, response body, URL diagnostics, or HTTP status to extension callers.
+ */
+export async function preflightApiAuthentication(
+  apiBase: string,
+  worktree?: string,
+  request: typeof fetch = fetch,
+  options: ApiAuthenticationPreflightOptions = {},
+): Promise<ApiAuthenticationPreflightResult> {
+  const base = normalizeApiBase(apiBase);
+  if (!base) return failedPreflight("invalid_target");
+  let binding: ExtensionBinding;
+  try {
+    binding = resolveExtensionBinding(worktree ?? process.cwd(), { purpose: options.credentialPurpose });
+  } catch {
+    return failedPreflight("invalid_target");
+  }
+  if (base !== binding.apiUrl) return failedPreflight("invalid_target");
+
+  try {
+    const response = await request(`${binding.apiUrl}/auth/preflight`, {
+      headers: apiRequestHeaders(worktree, undefined, { binding }),
+      signal: AbortSignal.timeout(boundedInteger(options.timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS, 1, DEFAULT_PREFLIGHT_TIMEOUT_MS)),
+    });
+    if (response.status === 200) {
+      const binding = authenticationBinding(await response.json().catch(() => null));
+      return binding ? { authenticated: true, binding } : failedPreflight("authentication");
+    }
+    if (response.status === 401) return failedPreflight("authentication");
+    if (response.status === 403) return failedPreflight("scope");
+    if (response.status === 404) return failedPreflight("not_found");
+  } catch {
+    // Error details can contain a URL or transport diagnostic. Deliberately
+    // collapse every failure into the same caller-safe response.
+  }
+  return failedPreflight("unavailable");
+}
+
+/**
+ * Wait for a bounded number of authenticated capability probes before startup
+ * project provisioning. Authentication and invalid-target failures fail closed
+ * immediately; only a transient unavailable API consumes the retry budget.
+ */
+export async function waitForAuthenticatedApiReadiness(
+  apiBase: string,
+  worktree?: string,
+  options: ApiAuthenticationReadinessOptions = {},
+): Promise<ApiAuthenticationPreflightResult> {
+  const attempts = boundedInteger(
+    options.attempts,
+    EXTENSION_STARTUP_READINESS_ATTEMPTS,
+    1,
+    EXTENSION_STARTUP_READINESS_ATTEMPTS,
+  );
+  const retryDelayMs = boundedInteger(options.retryDelayMs, EXTENSION_STARTUP_RETRY_DELAY_MS, 0, 1_000);
+  const request = options.request ?? fetch;
+  const sleep = options.sleep ?? sleepFor;
+  let result = failedPreflight("unavailable");
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    result = await preflightApiAuthentication(apiBase, worktree, request, {
+      credentialPurpose: options.credentialPurpose,
+      timeoutMs: boundedInteger(
+        options.timeoutMs,
+        EXTENSION_STARTUP_PREFLIGHT_TIMEOUT_MS,
+        1,
+        DEFAULT_PREFLIGHT_TIMEOUT_MS,
+      ),
+    });
+    if (result.authenticated || result.failure !== "unavailable" || attempt === attempts) return result;
+    await sleep(retryDelayMs);
+  }
+
+  return result;
 }
