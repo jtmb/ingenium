@@ -21,8 +21,11 @@ ROAD MAP, @docs/reference/roadmap.md Lets update a feature in the roadmap.
 
 Requested Fetaures:
 
-I want to add cloudflare tunnels to ingenium. This should be configurable through the settings menu.
+1. I want to add cloudflare tunnels to ingenium. This should be configurable through the settings menu.
 
+2. I want playwright to be one of the ingenium managed mcp servers *add in* 
+
+3. Diagnose why the MCP server keeps breaking.
 
 
 
