@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { configureEmailRuntime, resetEmailRuntimeForTest } from "../lib/runtime.js";
 import { createMemoryEmailRuntime } from "./runtime-fixture.js";
 
@@ -42,6 +42,33 @@ describe("accounts", () => {
     const { getAccount } = await import("../lib/accounts.js");
     const result = getAccount("nonexistent");
     expect(result).toBeUndefined();
+  });
+
+  it("keeps normalized account lookup organization-scoped unless no organization is requested", async () => {
+    const runtime = createMemoryEmailRuntime(values);
+    const account = {
+      id: "normalized-account",
+      organizationId: "organization-id",
+      email: "normalized@example.test",
+      name: "Normalized",
+      provider: "gmail" as const,
+      authType: "oauth2" as const,
+      connected: false,
+    };
+    runtime.accounts.getAccount = vi.fn((organizationId, accountId) => (
+      organizationId === account.organizationId && accountId === account.id ? account : undefined
+    ));
+    runtime.accounts.listAccounts = vi.fn(() => [account]);
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(runtime);
+    const { getAccount } = await import("../lib/accounts.js");
+
+    expect(getAccount(account.id, account.organizationId)).toBe(account);
+    expect(runtime.accounts.getAccount).toHaveBeenCalledWith(account.organizationId, account.id);
+    expect(runtime.accounts.listAccounts).not.toHaveBeenCalled();
+
+    expect(getAccount(account.id)).toBe(account);
+    expect(runtime.accounts.listAccounts).toHaveBeenCalledOnce();
   });
 
   it("should list multiple accounts", async () => {

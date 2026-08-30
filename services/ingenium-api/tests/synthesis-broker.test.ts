@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projects, resetDbForTest, settings } from "ingenium-core";
-import { executeSynthesisBroker, opencodeClient } from "../lib/opencode-client.js";
+import { getDb, identity, mcpCredentials, observations, organizations, projects, resetDbForTest, runtimes, settings, synthesis } from "ingenium-core";
+import { createBackgroundSynthesisBrokerExecutor, executeSynthesisBroker, opencodeClient } from "../lib/opencode-client.js";
 
 const temporaryPaths: string[] = [];
 
@@ -45,10 +45,66 @@ function configuredProject(primary?: [string, string], secondary?: [string, stri
   return project.id;
 }
 
+function activateRuntime(
+  projectId: string,
+  owner = identity.createUser(`runtime-${crypto.randomUUID()}@example.test`, "Runtime Owner"),
+  authorizeAutomation = false,
+): runtimes.RuntimeInstance {
+  const project = projects.listProjects().find((candidate) => candidate.id === projectId)!;
+  organizations.addOrganizationMember(project.organization_id, owner.id, "member");
+  const workspaceId = `workspace-${crypto.randomUUID()}`;
+  const storagePath = `/srv/approved/${workspaceId}`;
+  runtimes.authorizeWorkspace({
+    id: workspaceId,
+    organizationId: project.organization_id,
+    projectId,
+    ownerUserId: owner.id,
+    storagePath,
+  });
+  let runtime = runtimes.createRuntimeInstance(workspaceId, {
+    cpuMillis: 1_000,
+    memoryBytes: 536_870_912,
+    pidsLimit: 128,
+    diskBytes: 536_870_912,
+    processLimit: 64,
+  });
+  const credential = mcpCredentials.createMcpCredential({
+    servicePrincipalName: `Runtime ${runtime.id}`,
+    kind: "runtime",
+    audience: "runtime",
+    name: `Runtime ${runtime.id}`,
+    scopes: ["child-mcp:runtime", "projects:read"],
+    organizationId: project.organization_id,
+    projectId,
+    workspaceId,
+    launcherWorktree: storagePath,
+    expiresAt: new Date(Date.now() + 60_000),
+    createdByUserId: owner.id,
+  });
+  runtimes.bindRuntimeCapability(runtime.id, credential.id);
+  if (authorizeAutomation) {
+    const now = new Date().toISOString();
+    getDb().prepare(`INSERT INTO automation_principal_grants
+      (id, organization_id, project_id, service_principal_id, permission, granted_by_actor_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'execute', 'system', ?, ?)`)
+      .run(crypto.randomUUID(), project.organization_id, projectId, credential.servicePrincipalId, now, now);
+  }
+  for (const toState of ["PROVISIONING", "STARTING", "READY"] as const) {
+    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState, actorType: "system", actorId: "test" });
+  }
+  return runtime;
+}
+
+function response(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
 afterEach(() => {
   resetDbForTest();
   while (temporaryPaths.length) rmSync(temporaryPaths.pop()!, { recursive: true, force: true });
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 beforeEach(() => {
@@ -56,6 +112,67 @@ beforeEach(() => {
 });
 
 describe("executeSynthesisBroker", () => {
+  it("returns an actionable unavailable result without probing providers when no authorized executor exists", async () => {
+    const projectId = configuredProject();
+    const providers = vi.spyOn(opencodeClient, "listProviders");
+
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({
+      system: "system",
+      user: "user",
+      timeoutMs: 1_000,
+    })).resolves.toEqual({
+      ok: false,
+      content: "",
+      error: "no authorized synthesis automation executor configured",
+    });
+    expect(providers).not.toHaveBeenCalled();
+  });
+
+  it("never sends a victim-private observation to another member's runtime or the global OpenCode target", async () => {
+    const canary = "VICTIM_PRIVATE_SYNTHESIS_CANARY";
+    const projectId = configuredProject(["custom", "model-a"]);
+    const project = projects.listProjects().find((candidate) => candidate.id === projectId)!;
+    const victim = identity.createUser(`victim-${crypto.randomUUID()}@example.test`, "Victim");
+    const attacker = identity.createUser(`attacker-${crypto.randomUUID()}@example.test`, "Attacker");
+    organizations.addOrganizationMember(project.organization_id, victim.id, "member");
+    activateRuntime(projectId, attacker);
+    observations.storeObservation(projectId, "preference", canary, 10, "manual", undefined, undefined, {
+      organizationId: project.organization_id,
+      ownerUserId: victim.id,
+      visibility: "private",
+    });
+    const fetchMock = vi.fn();
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-password");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await synthesis.runSynthesis(projectId, undefined, {
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+    });
+
+    expect(result.summary).toContain("unavailable");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(canary);
+  });
+
+  it("executes background synthesis through an explicitly authorized automation runtime", async () => {
+    const projectId = configuredProject(["custom", "model-a"]);
+    const runtime = activateRuntime(projectId, undefined, true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ id: "broker-session", title: "Broker" }))
+      .mockResolvedValueOnce(response({ info: { id: "user", role: "user" }, parts: [] }))
+      .mockResolvedValueOnce(response([{ info: { id: "assistant", role: "assistant", finish: "stop" }, parts: [{ type: "text", text: "done" }] }]))
+      .mockResolvedValueOnce(response(true));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({
+      system: "system",
+      user: "user",
+      timeoutMs: 1_000,
+    })).resolves.toEqual({ ok: true, content: "done" });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith(`http://${runtime.backendName}:4098`))).toBe(true);
+  });
+
   it("reports an absent selection without executing", async () => {
     const executor = vi.fn();
     const result = await executeSynthesisBroker({ projectId: configuredProject(), system: "system", user: "user", executor });

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   executeSynthesisBroker: vi.fn(),
@@ -51,18 +51,13 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/rag", ragRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(() => vi.clearAllMocks());
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
 });
 
 function ask(): Promise<Response> {

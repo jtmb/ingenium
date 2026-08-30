@@ -33,10 +33,7 @@ reject_pattern() {
 sh -n "$START_SCRIPT"
 require_text 'exec env -i'
 require_text '/bin/sh "$0" --clean-env'
-require_text 'deployment_mode="${INGENIUM_DEPLOYMENT_MODE:?INGENIUM_DEPLOYMENT_MODE is required}"'
-require_text 'case "$INGENIUM_DEPLOYMENT_MODE:$(id -un)" in'
-require_text 'user-runtime:appuser) VSCODE_DATA_DIR="/home/appuser/vscode-data" ;;'
-require_text 'compatibility:ingenium-vscode) VSCODE_DATA_DIR="/home/ingenium-vscode/vscode-data" ;;'
+require_text '"$(id -un)" != "appuser"'
 require_text 'VSCODE_EXTENSION_FILE="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"'
 require_text 'VSCODE_EXTENSION_ID="sst-dev.opencode@0.0.13"'
 require_text 'VSCODE_EXTENSION_SHA256="e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4"'

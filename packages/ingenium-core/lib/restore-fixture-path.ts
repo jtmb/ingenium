@@ -13,7 +13,7 @@ const FIXTURE_BASENAME = /^ingenium-restore-fixture-[A-Za-z0-9_-]+$/;
 const FIXTURE_MANIFEST = ".ingenium-restore-fixture.json";
 const FIXTURE_NONCE = /^[a-f0-9]{64}$/;
 const APPROVED_TEMP_ROOTS = ["/tmp", "/var/tmp"] as const;
-const PRODUCTION_ROOTS = ["/app/.ingenium", "/home/appuser/.local/share/opencode"] as const;
+const PRODUCTION_ROOTS = ["/app/.ingenium", "/home/ingenium-opencode/.local/share/opencode"] as const;
 
 let authorizedFixtureRoot: string | null = null;
 

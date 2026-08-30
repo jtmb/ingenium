@@ -105,6 +105,13 @@ export default function SecretsPage() {
     setRefreshKey((k) => k + 1);
   }, []);
 
+  const handleEmptyVaultReset = useCallback(() => {
+    setShowUnseal(false);
+    setSealed(true);
+    setInitialized(false);
+    setShowCreateVault(true);
+  }, []);
+
   const handleSelectFolder = useCallback((folderId: string | null) => {
     setSelectedFolder(folderId);
     setSelectedItem(null);
@@ -231,6 +238,7 @@ export default function SecretsPage() {
           isOpen={showUnseal}
           onClose={() => setShowUnseal(false)}
           onSuccess={handleUnsealSuccess}
+          onReset={handleEmptyVaultReset}
           project={project}
         />
       </div>

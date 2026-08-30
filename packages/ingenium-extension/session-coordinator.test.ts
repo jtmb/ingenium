@@ -782,6 +782,9 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await firstHooks.event!({ event: { type: "message.part.updated", properties: { part: {
       type: "tool", sessionID: "failure-a", callID: "failed-call", state: { status: "error" },
     } } } as any });
+    await firstHooks.event!({ event: { type: "message.part.updated", properties: { part: {
+      type: "tool", sessionID: "failure-a", callID: "failed-call", state: { status: "error" },
+    } } } as any });
     const claimCall = fixture.calls.find((call) => call.tool === "coordination_claim")!;
     const quarantineCall = fixture.calls.find((call) => call.tool === "coordination_claim" && call.args.action === "quarantine")!;
     expect(quarantineCall.args.client_claim_key).toBe(claimCall.args.client_claim_key);
@@ -871,6 +874,27 @@ describe("SessionCoordinatorPlugin hooks", () => {
     expect((coordinator as any).pendingMutations.size).toBe(0);
   });
 
+  it("completes a terminal managed invocation once when the after-hook is missing", async () => {
+    const fixture = coordinationFixture();
+    const process = processHarness("fallback-project", "/tmp/fallback/home", "/tmp/fallback/xdg", 43027, {});
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, now: () => 306, token: () => "F".repeat(32), disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const input = { tool: "write", sessionID: "fallback-session", callID: "fallback-call", args: { path: "src/fallback.ts" } };
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: input.sessionID } } } as any });
+    await hooks["tool.execute.before"]!(input, { args: input.args });
+
+    const completed = { event: { type: "message.part.updated", properties: { part: {
+      type: "tool", sessionID: input.sessionID, callID: input.callID, state: { status: "completed" },
+    } } } as any };
+    await hooks.event!(completed);
+    await hooks.event!(completed);
+
+    expect(fixture.calls.filter(({ tool, args }) => tool === "coordination_claim" && args.action === "complete")).toHaveLength(1);
+    expect((coordinator as any).pendingMutations.size).toBe(0);
+  });
+
   it("denies generic shell text and admits only fixed encoded repository/build wrappers", async () => {
     const fixture = coordinationFixture();
     const process = processHarness("wrapper-project", "/tmp/wrapper/home", "/tmp/wrapper/xdg", 43024, {});
@@ -883,8 +907,6 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await expect(hooks["tool.execute.before"]!(rawShell, { args: rawShell.args }))
       .rejects.toThrow("Managed shell coordination denied the command");
 
-    const reset = { tool: "bash", sessionID, callID: "reset", args: { command: "ingenium-coordination-reset reset" } };
-    await expect(hooks["tool.execute.before"]!(reset, { args: reset.args })).resolves.toBeUndefined();
     for (const [callID, args] of [
       ["reset-lookalike", { command: "./ingenium-coordination-reset reset" }],
       ["reset-shell", { command: "ingenium-coordination-reset reset && npm test" }],
@@ -892,6 +914,15 @@ describe("SessionCoordinatorPlugin hooks", () => {
       ["reset-env", { command: "INGENIUM_PROJECT=other ingenium-coordination-reset reset" }],
       ["reset-endpoint", { command: "ingenium-coordination-reset reset", environment: { INGENIUM_API_URL: "https://attacker.invalid" } }],
       ["reset-project", { command: "ingenium-coordination-reset reset", project: "other" }],
+      ["reset-empty-description", { command: "ingenium-coordination-reset reset", description: "" }],
+      ["reset-control-description", { command: "ingenium-coordination-reset reset", description: "rotate\nnow" }],
+      ["reset-long-description", { command: "ingenium-coordination-reset reset", description: "x".repeat(257) }],
+      ["reset-one-ms-timeout", { command: "ingenium-coordination-reset reset", timeout: 1 }],
+      ["reset-bounded-timeout", { command: "ingenium-coordination-reset reset", timeout: 300_000 }],
+      ["reset-described-timeout", { command: "ingenium-coordination-reset reset", description: "Rotate coordination credential", timeout: 5_000 }],
+      ["reset-zero-timeout", { command: "ingenium-coordination-reset reset", timeout: 0 }],
+      ["reset-fractional-timeout", { command: "ingenium-coordination-reset reset", timeout: 1.5 }],
+      ["reset-excessive-timeout", { command: "ingenium-coordination-reset reset", timeout: 300_001 }],
     ] as const) {
       await expect(hooks["tool.execute.before"]!({ tool: "bash", sessionID, callID }, { args }))
         .rejects.toThrow("Managed shell coordination denied the command");
@@ -908,6 +939,92 @@ describe("SessionCoordinatorPlugin hooks", () => {
         .toEqual([{ claim: { kind: "reserved", name: reserved } }]);
       await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
     }
+
+    const describedReset = { command: "ingenium-coordination-reset reset", description: "Rotate coordination credential" };
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID, callID: "reset-description" },
+      { args: describedReset },
+    )).resolves.toBeUndefined();
+  });
+
+  it("fails reset closed around managed mutations and keeps the barrier active without its after-hook", async () => {
+    const fixture = coordinationFixture();
+    const process = processHarness("reset-cleanup", "/tmp/reset-cleanup/home", "/tmp/reset-cleanup/xdg", 43028, {});
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, now: () => 307, token: () => "Q".repeat(32), disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: "reset-owner" } } } as any });
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: "reset-peer" } } } as any });
+    const reset = { tool: "bash", sessionID: "reset-owner", callID: "reset-call", args: { command: "ingenium-coordination-reset reset" } };
+    const pendingMutations = (coordinator as any).pendingMutations as Map<string, unknown>;
+    const claimingMutations = (coordinator as any).claimingMutations as Set<string>;
+    const finalizingMutations = (coordinator as any).finalizingMutations as Map<string, Promise<void>>;
+    const uncertainMutations = (coordinator as any).uncertainMutations as Set<string>;
+    for (const [activate, clear] of [
+      [() => pendingMutations.set("pending", {}), () => pendingMutations.clear()],
+      [() => claimingMutations.add("claiming"), () => claimingMutations.clear()],
+      [() => finalizingMutations.set("finalizing", Promise.resolve()), () => finalizingMutations.clear()],
+      [() => uncertainMutations.add("uncertain"), () => uncertainMutations.clear()],
+    ] as const) {
+      activate();
+      const beforeBlockedReset = fixture.calls.length;
+      await expect(hooks["tool.execute.before"]!(reset, { args: reset.args }))
+        .rejects.toThrow("Coordination reset is unavailable while managed mutations are active");
+      clear();
+      const blockedResetCalls = fixture.calls.slice(beforeBlockedReset);
+      expect(blockedResetCalls.filter(({ tool }) => tool === "coordination_release")).toHaveLength(0);
+      expect(blockedResetCalls.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "close")).toHaveLength(0);
+    }
+
+    const beforeReset = fixture.calls.length;
+    await hooks["tool.execute.before"]!(reset, { args: reset.args });
+    const cleanup = fixture.calls.slice(beforeReset);
+    expect(cleanup.filter(({ tool }) => tool === "coordination_release")).toHaveLength(0);
+    expect(cleanup.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "close")).toHaveLength(2);
+    expect((coordinator as any).pendingMutations.size).toBe(0);
+    expect((coordinator as any).sessions.size).toBe(0);
+    expect((coordinator as any).credentialResetSessionIds.size).toBe(2);
+
+    await expect(coordinator.preclaim("reset-owner", "blocked-preclaim", {
+      operation: "write", paths: ["src/pending-reset.ts"],
+    })).rejects.toThrow("Coordination reset is active");
+    expect((coordinator as any).pendingMutations.size).toBe(0);
+    await expect(hooks["tool.execute.before"]!(reset, { args: reset.args }))
+      .rejects.toThrow("Coordination reset is already active");
+  });
+
+  it.each([
+    ["CLAIM_CONFLICT", "CLAIM_CONFLICT"],
+    ["SECRET_TOKEN_LEAK", undefined],
+  ])("preserves only allowlisted preclaim bridge code %s", async (errorCode, expectedCode) => {
+    const fixture = coordinationFixture();
+    const process = processHarness(`safe-error-${errorCode}`, "/tmp/safe-error/home", "/tmp/safe-error/xdg", 43029, {});
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: async (worktree, tool, args) => {
+        if (tool === "coordination_claim") {
+          throw new McpBridgeError("request_failed", "Bearer credential-secret /private/path", "call", undefined, errorCode);
+        }
+        return fixture.callTool(worktree, tool, args);
+      },
+      now: () => 308,
+      token: () => "E".repeat(32),
+      disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const input = { tool: "write", sessionID: `safe-error-${errorCode}`, callID: "safe-error-call", args: { path: "src/safe-error.ts" } };
+
+    const error = await hooks["tool.execute.before"]!(input, { args: input.args }).then(
+      () => { throw new Error("expected preclaim rejection"); },
+      (caught) => caught as Error & { cause?: unknown },
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Managed write coordination is unavailable");
+    expect(error.cause).toBeInstanceOf(McpBridgeError);
+    expect(error.cause).toMatchObject({ diagnostic: "", errorCode: expectedCode });
+    expect(JSON.stringify(error.cause)).not.toMatch(/credential-secret|private\/path/);
   });
 
   it("rereads a replaced credential, closes the old bridge, and establishes a fresh zero-mutation epoch", async () => {

@@ -18,6 +18,7 @@ import {
   listContextCheckpoints,
   listContextConversations,
   listContextMessages,
+  persistContextChatTurn,
   previewContextMaintenance,
   restoreContextCheckpoint,
   retrieveContextMessages,
@@ -605,6 +606,98 @@ describe("immutable context conversations", () => {
       expect(JSON.stringify({ pages: [firstPage, secondPage, thirdPage], decodedCursors }))
         .not.toMatch(new RegExp(`${conversation.id}|${hiddenTimestamp}`));
     }
+  });
+
+  it("persists completed OpenCode turns with one idempotent checkpoint per assistant response", () => {
+    const { first } = setup();
+    const conversation = createContextConversation(first.id, {
+      title: "OpenCode chat",
+      visibility: "project",
+      metadata: {
+        source: "opencode-chat",
+        sourceRuntimeId: "compatibility",
+        sourceSessionId: "session-one",
+      },
+    });
+    const firstTurn = persistContextChatTurn(first.id, conversation.id, {
+      sourceRuntimeId: "compatibility",
+      sourceSessionId: "session-one",
+      userMessageId: "user-one",
+      assistantMessageId: "assistant-one",
+      userContent: "First question",
+      assistantContent: "First answer",
+      expectedRevision: 0,
+    });
+    expect(firstTurn).toMatchObject({ revision: 2, idempotent: false, checkpoint: { message_count: 2 } });
+
+    const secondTurn = persistContextChatTurn(first.id, conversation.id, {
+      sourceRuntimeId: "compatibility",
+      sourceSessionId: "session-one",
+      userMessageId: "user-two",
+      assistantMessageId: "assistant-two",
+      userContent: "Second question",
+      assistantContent: "Second answer",
+      expectedRevision: 2,
+    });
+    expect(secondTurn).toMatchObject({ revision: 4, idempotent: false, checkpoint: { message_count: 4 } });
+
+    const replay = persistContextChatTurn(first.id, conversation.id, {
+      sourceRuntimeId: "compatibility",
+      sourceSessionId: "session-one",
+      userMessageId: "user-one",
+      assistantMessageId: "assistant-one",
+      userContent: "First question",
+      assistantContent: "First answer",
+      expectedRevision: 0,
+    });
+    expect(replay).toMatchObject({ revision: 4, idempotent: true, checkpoint: { id: firstTurn.checkpoint.id } });
+    expect(listContextCheckpoints(first.id, conversation.id).data).toHaveLength(2);
+
+    expect(() => persistContextChatTurn(first.id, conversation.id, {
+      sourceRuntimeId: "compatibility",
+      sourceSessionId: "session-one",
+      userMessageId: "user-three",
+      assistantMessageId: "assistant-three",
+      userContent: "Incomplete question",
+      assistantContent: "",
+      expectedRevision: 4,
+    })).toThrow(expect.objectContaining({ code: "INVALID_CONTEXT_INPUT" }));
+    expect(listContextCheckpoints(first.id, conversation.id).data).toHaveLength(2);
+  });
+
+  it("rolls back the whole completed turn when its checkpoint path fails", () => {
+    const { first } = setup();
+    const conversation = createContextConversation(first.id, {
+      title: "Atomic OpenCode chat",
+      visibility: "project",
+      metadata: {
+        source: "opencode-chat",
+        sourceRuntimeId: "compatibility",
+        sourceSessionId: "session-atomic",
+      },
+    });
+    const assistantMessageId = "assistant-conflict";
+    const assistantKey = `opencode-assistant:${createHash("sha256")
+      .update(`compatibility\0session-atomic\0${assistantMessageId}`, "utf8")
+      .digest("hex")}`;
+    appendContextMessage(first.id, conversation.id, {
+      role: "assistant",
+      content: "Conflicting prior assistant",
+      expectedRevision: 0,
+      idempotencyKey: assistantKey,
+    });
+
+    expect(() => persistContextChatTurn(first.id, conversation.id, {
+      sourceRuntimeId: "compatibility",
+      sourceSessionId: "session-atomic",
+      userMessageId: "user-atomic",
+      assistantMessageId,
+      userContent: "Must roll back",
+      assistantContent: "Different assistant",
+      expectedRevision: 1,
+    })).toThrow(expect.objectContaining({ code: "IDEMPOTENCY_KEY_REUSED" }));
+    expect(listContextMessages(first.id, conversation.id).data).toHaveLength(1);
+    expect(listContextCheckpoints(first.id, conversation.id).data).toHaveLength(0);
   });
 
   it("previews content-free candidates, requires one-time authorization, and archives reversibly", () => {

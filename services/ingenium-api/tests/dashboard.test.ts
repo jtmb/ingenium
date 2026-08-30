@@ -13,6 +13,7 @@ const emailMocks = vi.hoisted(() => ({
   listAccounts: vi.fn(() => []),
   getEngineStatus: vi.fn(() => ({ running: false, heartbeatAt: null, accounts: [] })),
 }));
+const supervisorMocks = vi.hoisted(() => ({ rpc: vi.fn() }));
 
 // ── Controlled failure flag for partial-failure test ─────────────────────────
 let throwTasksList = false;
@@ -34,6 +35,10 @@ vi.mock("ingenium-core", async (importOriginal) => {
   };
 });
 vi.mock("ingenium-email", () => emailMocks);
+vi.mock("../lib/supervisor-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/supervisor-client.js")>();
+  return { ...actual, supervisorRpc: supervisorMocks.rpc };
+});
 
 let tempDir: string;
 let projectId: string;
@@ -41,9 +46,11 @@ let projectName: string;
 let server: Server | null = null;
 let baseUrl: string;
 const nativeFetch = globalThis.fetch;
+const originalDeploymentMode = process.env.INGENIUM_DEPLOYMENT_MODE;
 
 function supervisorResponse(): string {
-  return [
+  const processes = [
+    "restore-handoff",
     "ingenium-api",
     "ingenium-api-boundary",
     "ingenium-dashboard",
@@ -52,8 +59,9 @@ function supervisorResponse(): string {
     "ttyd-opencode",
     "vscode",
   ]
-    .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>RUNNING</string></value></member><member><name>start</name><value><i4>1</i4></value></member></struct>`)
+    .map((name) => `<value><struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>RUNNING</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>now</name><value><i4>2</i4></value></member></struct></value>`)
     .join("");
+  return `<methodResponse><params><param><value><array><data>${processes}</data></array></value></param></params></methodResponse>`;
 }
 
 function buildApp(): express.Express {
@@ -66,6 +74,7 @@ function buildApp(): express.Express {
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-dashboard-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
+  process.env.INGENIUM_DEPLOYMENT_MODE = "compatibility";
 
   projectName = "dashboard-test-project";
   const project = projects.createProject(projectName);
@@ -83,17 +92,13 @@ beforeAll(async () => {
     });
   });
 
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input) === "http://127.0.0.1:9001/RPC2") {
-      return new Response(supervisorResponse(), { status: 200 });
-    }
-    return nativeFetch(input, init);
-  });
+  supervisorMocks.rpc.mockResolvedValue(supervisorResponse());
 });
 
 afterAll(async () => {
-  vi.unstubAllGlobals();
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (originalDeploymentMode === undefined) delete process.env.INGENIUM_DEPLOYMENT_MODE;
+  else process.env.INGENIUM_DEPLOYMENT_MODE = originalDeploymentMode;
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -162,6 +167,23 @@ describe("GET /api/v1/dashboard/summary", () => {
     expect(body.data.health.services).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "VS Code", status: "running" }),
     ]));
+  });
+
+  it("uses the expected Supervisor processes in control-plane mode", async () => {
+    process.env.INGENIUM_DEPLOYMENT_MODE = "control-plane";
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/dashboard/summary?project=${projectName}`);
+      const body = await res.json();
+
+      expect(body.data.health.services).toHaveLength(7);
+      expect(body.data.health.services).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "Restore Handoff", status: "running" }),
+        expect.objectContaining({ name: "API", status: "running" }),
+      ]));
+      expect(body.data.health.services).not.toContainEqual(expect.objectContaining({ name: "OpenCode" }));
+    } finally {
+      process.env.INGENIUM_DEPLOYMENT_MODE = "compatibility";
+    }
   });
 
   it("correctly counts tasks by column", async () => {

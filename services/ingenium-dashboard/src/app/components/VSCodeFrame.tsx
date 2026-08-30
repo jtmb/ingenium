@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { useRuntimeLaunch, useRuntimeWorkspace } from "@/lib/use-runtime-launch";
+import { useRuntimeLaunch } from "@/lib/use-runtime-launch";
+import { useRuntime } from "@/lib/RuntimeContext";
 import RuntimeWorkspacePicker from "./RuntimeWorkspacePicker";
 
 export const VSCODE_STATUS_MAX_ATTEMPTS = 3;
@@ -74,7 +75,7 @@ export default function VSCodeFrame() {
   const [retryNonce, setRetryNonce] = useState(0);
   const alertRef = useRef<HTMLDivElement>(null);
   const frameTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const workspace = useRuntimeWorkspace();
+  const { workspace } = useRuntime();
   const launch = useRuntimeLaunch("vscode", workspace);
 
   const clearFrameTimeout = () => {

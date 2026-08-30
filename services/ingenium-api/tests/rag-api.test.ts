@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { projects, resetDbForTest } from "ingenium-core";
 import { contextRouter } from "../lib/routes/context.js";
 import { ragRouter } from "../lib/routes/rag.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const directory = mkdtempSync(join(tmpdir(), "ingenium-rag-api-"));
 const databasePath = join(directory, "data.db");
@@ -36,16 +36,11 @@ beforeAll(async () => {
   app.use("/api/v1/rag", ragRouter);
   app.use("/api/v1/context", contextRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeHttpServer(server);
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   rmSync(directory, { recursive: true, force: true });

@@ -9,6 +9,21 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useRuntime: () => ({ workspace: {
+    mode: null,
+    status: "loading",
+    workspaces: [],
+    selectedWorkspaceId: null,
+    confirmedWorkspaceId: null,
+    confirmedRuntimeId: null,
+    error: null,
+    selectWorkspace: vi.fn(),
+    start: vi.fn(),
+    retry: vi.fn(),
+  } }),
+}));
+
 import StandalonePage from "@/app/standalone/page";
 
 beforeEach(() => {

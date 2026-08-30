@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +8,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { getDb, resetDbForTest } from "ingenium-core";
 import { jobsRouter } from "../lib/routes/jobs.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let directory: string;
 let server: Server;
@@ -51,16 +51,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/jobs", jobsRouter);
   server = createServer(app);
-  await new Promise<void>((complete) => {
-    server.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      complete();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  await new Promise<void>((complete) => server.close(() => complete()));
+  await closeHttpServer(server);
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   rmSync(directory, { recursive: true, force: true });

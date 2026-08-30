@@ -1,8 +1,8 @@
 import { apiRequestHeaders } from "./api-auth.js";
+import { resolveExtensionBinding } from "./extension-binding.js";
 import { ensureMcpProject } from "./mcp-client.js";
 import { resolveExtensionProject } from "./project-resolver.js";
 
-const DEFAULT_API_BASE = "http://localhost:4097/api/v1";
 const TOOL_STATE_TIMEOUT_MS = 10_000;
 
 export const EXTENSION_TOOL_STATE_ERRORS = {
@@ -23,10 +23,6 @@ export class ExtensionToolStateError extends Error {
 
 export interface AssertExtensionToolEnabledOptions {
   request?: typeof fetch;
-}
-
-function apiBase(): string {
-  return (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? DEFAULT_API_BASE;
 }
 
 function unavailable(): ExtensionToolStateError {
@@ -62,9 +58,11 @@ export async function assertExtensionToolEnabled(
 ): Promise<string> {
   const request = options.request ?? fetch;
   let project: string;
+  let binding: ReturnType<typeof resolveExtensionBinding>;
   try {
-    project = resolveExtensionProject(worktree);
-    await ensureMcpProject(worktree);
+    binding = resolveExtensionBinding(worktree, { purpose: "learning" });
+    project = resolveExtensionProject(worktree, binding.project);
+    await ensureMcpProject(worktree, binding.purpose);
   } catch {
     throw unavailable();
   }
@@ -72,9 +70,9 @@ export async function assertExtensionToolEnabled(
   let response: Response;
   try {
     response = await request(
-      `${apiBase().replace(/\/+$/, "")}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`,
+      `${binding.apiUrl}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`,
       {
-        headers: apiRequestHeaders(worktree),
+        headers: apiRequestHeaders(worktree, undefined, { binding }),
         signal: AbortSignal.timeout(TOOL_STATE_TIMEOUT_MS),
       },
     );

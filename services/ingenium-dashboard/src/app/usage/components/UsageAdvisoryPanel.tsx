@@ -94,11 +94,11 @@ export default function UsageAdvisoryPanel({ project, selectedRange }: UsageAdvi
   const loadThresholds = useCallback(async (replaceDraft: boolean) => {
     const request = ++thresholdRequest.current;
     setThresholdLoading(true);
-    setThresholdError(null);
     try {
       const response = await api.usage.thresholds.get(project);
       if (request !== thresholdRequest.current) return;
       setThresholds(response.data);
+      setThresholdError(null);
       if (replaceDraft) setDraft(thresholdsToDraft(response.data));
     } catch (error: unknown) {
       if (request === thresholdRequest.current) setThresholdError(failureMessage(error, "Advisory thresholds could not be loaded."));
@@ -110,10 +110,12 @@ export default function UsageAdvisoryPanel({ project, selectedRange }: UsageAdvi
   const loadEvaluation = useCallback(async () => {
     const request = ++evaluationRequest.current;
     setEvaluationLoading(true);
-    setEvaluationError(null);
     try {
       const response = await api.usage.thresholds.evaluate(selectedRange, project);
-      if (request === evaluationRequest.current) setEvaluation(response.data);
+      if (request === evaluationRequest.current) {
+        setEvaluation(response.data);
+        setEvaluationError(null);
+      }
     } catch (error: unknown) {
       if (request === evaluationRequest.current) setEvaluationError(failureMessage(error, "Selected-range advisory evaluation could not be loaded."));
     } finally {
@@ -125,11 +127,8 @@ export default function UsageAdvisoryPanel({ project, selectedRange }: UsageAdvi
     const request = ++attentionRequest.current;
     if (append) {
       setAttentionMoreLoading(true);
-      setAttentionMoreError(null);
     } else {
       setAttentionLoading(true);
-      setAttentionError(null);
-      setAttentionMoreError(null);
     }
     try {
       const page = await api.usage.attention.list({ includeResolved, limit: 50, ...(cursor ? { cursor } : {}) }, project);
@@ -139,6 +138,11 @@ export default function UsageAdvisoryPanel({ project, selectedRange }: UsageAdvi
         const seen = new Set(current.data.map((item) => item.id));
         return { ...page, data: [...current.data, ...page.data.filter((item) => !seen.has(item.id))] };
       });
+      if (append) setAttentionMoreError(null);
+      else {
+        setAttentionError(null);
+        setAttentionMoreError(null);
+      }
     } catch (error: unknown) {
       if (request !== attentionRequest.current) return;
       const message = failureMessage(error, "Usage attention could not be loaded.");

@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { logger } from "ingenium-core";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   getMCPStatus: vi.fn(),
@@ -28,17 +28,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/opencode", opencodeRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const address = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${address.port}/api/v1/opencode`;
-      resolve();
-    });
-  });
+  baseUrl = `${await listenOnLoopback(server)}/api/v1/opencode`;
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
 });
 
 beforeEach(() => {

@@ -48,6 +48,9 @@ build/
 .opencode/.ingenium-learning-credential
 .opencode/.ingenium-repository-sync-credential
 .opencode/.ingenium-runtime-credential
+.opencode/.ingenium-sync-recovery/
+.opencode/protected-runtime-index/
+.opencode/skills/mcp-tooling/references/site-recipes/
 **/.opencode/.ingenium-learning-credential
 
 # Editor and temporary files

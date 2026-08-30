@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,13 +12,14 @@ import {
 } from "ingenium-core";
 import { observationsRouter } from "../lib/routes/observations.js";
 import { personalityRouter } from "../lib/routes/personality.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let tempDir = "";
 let server: Server | undefined;
 const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
 
 afterEach(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   server = undefined;
   resetDbForTest();
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -34,11 +34,7 @@ async function startLearningRoutes(): Promise<string> {
   app.use("/observations", observationsRouter);
   app.use("/personality", personalityRouter);
   server = createServer(app);
-  return await new Promise<string>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      resolve(`http://127.0.0.1:${(server!.address() as AddressInfo).port}`);
-    });
-  });
+  return listenOnLoopback(server);
 }
 
 describe("learning route ownership", () => {

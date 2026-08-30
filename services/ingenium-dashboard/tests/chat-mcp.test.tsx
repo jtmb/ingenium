@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   mcpStatus: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
+  chatScope: vi.fn(),
   globalProject: "global-default",
 }));
 
@@ -26,10 +27,16 @@ vi.mock("../src/lib/api", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/lib/opencode", () => ({
-  opencode: {
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useOpenCodeClient: () => ({
+    chat: {
+      config: async () => (await mocks.chatConfig()).data,
+      saveSelection: mocks.saveChatSelection,
+    },
     mcp: { status: mocks.mcpStatus, connect: mocks.connect, disconnect: mocks.disconnect },
-  },
+    sessions: { compact: vi.fn() },
+  }),
+  useRuntime: () => ({ runtimeId: "11111111-1111-4111-8111-111111111111", projectName: "runtime-project" }),
 }));
 
 vi.mock("../src/lib/ProjectContext", () => ({
@@ -47,10 +54,13 @@ vi.mock("../src/lib/use-opencode-sessions", () => ({
 }));
 
 vi.mock("../src/lib/use-opencode-chat", () => ({
-  useOpenCodeChat: () => ({
-    messages: [], isStreaming: false, isLoading: false, error: null, streamActivity: "idle",
-    permissions: [], questions: [], replyPermission: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), revert: vi.fn(),
-  }),
+  useOpenCodeChat: (_sessionId: string | null, scope: unknown) => {
+    mocks.chatScope(scope);
+    return {
+      messages: [], isStreaming: false, isLoading: false, error: null, streamActivity: "idle",
+      permissions: [], questions: [], replyPermission: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), revert: vi.fn(),
+    };
+  },
 }));
 
 import ChatShell from "../src/app/chat/components/ChatShell";
@@ -116,6 +126,16 @@ describe("ChatShell MCP refresh and action errors", () => {
     mocks.saveChatSelection.mockResolvedValue({ data: { providerId: "provider", modelId: "model" } });
     mocks.connect.mockResolvedValue({});
     mocks.disconnect.mockResolvedValue({});
+  });
+
+  it("persists chat checkpoints in the confirmed runtime project", async () => {
+    mocks.mcpStatus.mockResolvedValue({});
+    render(<ChatShell />);
+
+    await waitFor(() => expect(mocks.chatScope).toHaveBeenCalledWith(expect.objectContaining({
+      project: "runtime-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+    })));
   });
 
   afterEach(() => {

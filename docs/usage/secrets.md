@@ -84,6 +84,37 @@ On subsequent visits, the vault is sealed but initialized. The page shows an "Un
 
 The submit button is enabled only when the passphrase field is non-empty. Pressing Enter also submits.
 
+### Recent step-up and empty-vault reset
+
+Vault lifecycle actions—initialize, unseal, and seal—and empty-vault reset are
+installation-admin operations. Mutations require an authenticated browser session
+and a recent step-up; compatibility principals, API tokens, and stale sessions are
+rejected. The empty-reset eligibility read requires the browser administrator but
+not a recent step-up and returns only eligibility and a reason. A sealed vault's
+ordinary status check remains safe and does not unseal it.
+
+The sealed-vault dialog checks eligibility when it opens and shows **Forgot
+passphrase / Reset empty vault** without requiring a failed unseal attempt, but
+only after the server verifies that an
+initialized, sealed vault has zero dependent rows. Eligibility includes no
+encrypted items, provider credential references, protected settings, child-MCP or
+job references/audit rows, runtime use rows, or resource grants. Reset accepts no
+passphrase or replacement credential; it removes only the vault initialization so
+the user can create an unrelated new vault. The server rechecks eligibility in
+the same transaction. A concurrent change blocks with no mutation, and an
+eligibility-check failure returns an unavailable error with no changes made.
+When protected provider or vault dependencies block reset, the dialog directs the
+user to enter the current passphrase or remove/reconfigure those dependencies; it
+does not expose dependency names or counts.
+
+After an explicitly authorized reset succeeds, the sealed-safe status is
+`initialized: false`, `sealed: true`, and `nextAction: "initialize"`. Reset does
+not create or accept a replacement passphrase; the user must choose a new one
+locally through the first-run initialization flow. Reset removes only the vault
+initialization record and does not delete provider, mail, or project data. The
+reset is recorded in a metadata-only audit sequence; never place a secret or
+password in documentation, audit details, or retained evidence.
+
 ### Attempt throttling
 
 Vault creation and unseal attempts are limited to five per client IP per
@@ -161,6 +192,8 @@ be changed through ordinary metadata updates.
 | `/api/v1/vault/initialize` | POST | Create a new vault (passphrase + confirmation) |
 | `/api/v1/vault/unseal` | POST | Unseal vault with passphrase |
 | `/api/v1/vault/seal` | POST | Re-seal the vault |
+| `/api/v1/vault/empty-reset` | GET | Inspect strict empty-vault reset eligibility (browser installation administrator only; no recent step-up required) |
+| `/api/v1/vault/empty-reset` | POST | Reset an eligible empty sealed vault; requires recent step-up and exact body `{ "confirmation": "RESET EMPTY VAULT" }` |
 | `/api/v1/vault/folders` | GET | List all folders |
 | `/api/v1/vault/folders` | POST | Create a new folder |
 | `/api/v1/vault/folders/:id` | DELETE | Delete a folder |

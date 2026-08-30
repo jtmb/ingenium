@@ -13,13 +13,13 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 - **Production** — Always renders the authorization-filtered workspace picker before
   launching exact runtime audience roots. It never selects a singleton or falls back
   to compatibility aliases. OpenCode is not served under a shared dashboard subpath.
-- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099` remain private upstreams. LAN/remote use requires the isolated profile's operator-managed TLS runtime domain.
+- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099`/`4100` remain private upstreams. LAN/remote use requires the isolated profile's operator-managed TLS runtime domain.
 - **Authentication** — The default Windows↔WSL gateway does not use HTTP Basic Auth or browser bearer tokens. It is a local plain-HTTP profile, not a LAN/remote security profile; remote access requires an operator-managed authenticated TLS profile.
 - **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The standalone pop-out (`/standalone?page=opencode`) uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.
 - **Session sharing**: Web iframe and CLI ttyd sessions share the same backend process state; direct host attachment to the private upstream ports is not part of the browser-facing contract.
-- **Production runtime roots**: Each audience uses exact HTTPS `<audience>--<runtime-id>.<INGENIUM_RUNTIME_ROOT_DOMAIN>`. A browser-generated body-only proof redeems a one-time launch record before iframe/pop-out navigation; the API returns only the launch URL/status, and fixed global health, session tokens, and backend URLs are not exposed.
+- **Production runtime roots**: Each audience uses exact `<audience>--<runtime-id>.<INGENIUM_RUNTIME_ROOT_DOMAIN>` roots. Special-use `.localhost` roots use browser-trusted HTTP through a loopback-only host binding; remote/custom roots require HTTPS. A browser-generated body-only proof redeems a one-time launch record before iframe/pop-out navigation; the API returns only the launch URL/status, and fixed global health, session tokens, and backend URLs are not exposed.
 - **Audience sessions**: Web, CLI, and VS Code use distinct host-only secure cookies. Host, runtime, workspace, owner, auth session, origin, audience, and revocation generation must match.
 - **Workspace** (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 
@@ -32,7 +32,7 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 - **Boundary** — code-server listens privately at `127.0.0.1:4100`; no host `3002` or public `4100` endpoint is supported. The default Windows/WSL firewall and localhost-forwarding assumption is for local use only, not LAN, remote, shared, or untrusted access.
 - **Embedding** — The trusted separate-origin iframe is unsandboxed and requests only `allow="clipboard-write"`; the page also offers a standalone/new-tab fallback. code-server provides the `/workspace` terminal and stock Open VSX/user-managed extension flow.
 - **Theme defaults** — Use the code-free built-in `configurationDefaults` contribution to enable system color detection with **Dark Modern** and **Light Modern**. User and workspace settings override these defaults; never mutate User `settings.json` or workspace settings to enforce a theme.
-- **Pinned extension** — `sst-dev.opencode@0.0.13` is baked from the official Open VSX VSIX (`https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`, SHA-256 `e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`) and installed offline/idempotently as `appuser` into persistent `vscode-data`. Runtime registry installation is not supported; upgrades revalidate identity, engine, hash, and persistence.
+- **Pinned extension** — `sst-dev.opencode@0.0.13` is baked from the official Open VSX VSIX (`https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`, SHA-256 `e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`) and installed offline/idempotently as `ingenium-vscode` into persistent `vscode-data`. Runtime registry installation is not supported; upgrades revalidate identity, engine, hash, and persistence.
 - **Workspace trust** — The extension is preinstalled, but Restricted Mode disables it until the user explicitly trusts the workspace. Ingenium does not auto-trust. This is an administrator-grade local surface and must not be exposed to LAN, remote, shared, or untrusted users.
 
 ## DB Isolation
@@ -209,7 +209,7 @@ export default function DynamicComponent() {
 
 ## 🔴 Skill Data Integrity & Security Rules
 
-These are non-negotiable rules enforced across core (`packages/ingenium-core/lib/tools/skills.ts`) and extension (`packages/ingenium-extension/resource-sync.ts`). Full detail at [skills.md](../reference/skills.md).
+These are non-negotiable rules enforced across core (`packages/ingenium-core/lib/tools/skills.ts`) and extension (`packages/ingenium-extension/resource-sync.ts`). Full detail at [skill-taxonomy.md](../reference/skill-taxonomy.md).
 
 | Rule | Enforcement | Scope |
 |------|-------------|-------|

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +8,7 @@ import Database from "better-sqlite3";
 import { getDb, resetDbForTest } from "../../../packages/ingenium-core/lib/db.js";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import { backupsRouter } from "../lib/routes/backups.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "ingenium-restore-api-"));
 const coreDbPath = join(tempDir, "data");
@@ -50,14 +50,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/backups", backupsRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => {
-    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    resolve();
-  }));
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   delete process.env.INGENIUM_BACKUPS_DIR;

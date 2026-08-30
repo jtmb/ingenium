@@ -1,26 +1,22 @@
 import { Router } from "express";
 import { personality } from "ingenium-core";
-import { requestContentActor, requireProject } from "../helpers.js";
+import { requestContentActor, requestOwnerScope, requireProject } from "../helpers.js";
 
 /** Handles /api/v1/personality — personality traits CRUD and aggregated profile for self-learning. */
 export const personalityRouter = Router();
-
-function ownerScope(req: Parameters<typeof requestContentActor>[0], projectId: string): string | null | undefined {
-  return req.authorizationPolicy ? requestContentActor(req, projectId)?.ownerUserId ?? null : undefined;
-}
 
 personalityRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const traitType = req.query.trait_type as string | undefined;
-  const list = personality.getTraits(projectId, traitType as any, undefined, ownerScope(req, projectId));
+  const list = personality.getTraits(projectId, traitType as any, undefined, requestOwnerScope(req));
   res.json({ data: list, total: list.length });
 });
 
 personalityRouter.get("/profile", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const profile = personality.getProfile(projectId, { ownerUserId: ownerScope(req, projectId) });
+  const profile = personality.getProfile(projectId, { ownerUserId: requestOwnerScope(req) });
   res.json({ data: profile });
 });
 
@@ -55,7 +51,7 @@ personalityRouter.post("/:id/dismiss", (req, res) => {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid trait ID" } });
     return;
   }
-  const dismissed = personality.setActive(projectId, id, false, ownerScope(req, projectId));
+  const dismissed = personality.setActive(projectId, id, false, requestOwnerScope(req));
   if (!dismissed) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Trait not found" } });
     return;
@@ -72,7 +68,7 @@ personalityRouter.post("/:id/disable", (req, res) => {
     res.status(400).json({ error: { code: "INVALID_ID", message: "Trait ID must be a number" } });
     return;
   }
-  const disabled = personality.disableTrait(projectId, id, ownerScope(req, projectId));
+  const disabled = personality.disableTrait(projectId, id, requestOwnerScope(req));
   if (!disabled) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Trait not found" } });
     return;
@@ -89,7 +85,7 @@ personalityRouter.delete("/:id", (req, res) => {
     res.status(400).json({ error: { code: "INVALID_ID", message: "Trait ID must be a number" } });
     return;
   }
-  const deleted = personality.deleteTrait(projectId, id, ownerScope(req, projectId));
+  const deleted = personality.deleteTrait(projectId, id, requestOwnerScope(req));
   if (!deleted) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Trait not found" } });
     return;
@@ -101,6 +97,6 @@ personalityRouter.delete("/:id", (req, res) => {
 personalityRouter.delete("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const count = personality.deleteAllTraits(projectId, ownerScope(req, projectId));
+  const count = personality.deleteAllTraits(projectId, requestOwnerScope(req));
   res.json({ data: { deleted: count } });
 });

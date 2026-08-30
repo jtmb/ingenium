@@ -5,23 +5,27 @@ const retry = vi.hoisted(() => vi.fn());
 const workspaceControl = vi.hoisted(() => vi.fn());
 
 vi.mock("../src/lib/use-runtime-launch", () => ({
-  useRuntimeWorkspace: () => ({
-    mode: "compatibility",
-    status: "ready",
-    workspaces: [],
-    selectedWorkspaceId: null,
-    confirmedWorkspaceId: null,
-    error: null,
-    selectWorkspace: vi.fn(),
-    start: vi.fn(),
-    retry: vi.fn(),
-  }),
   useRuntimeLaunch: () => ({
     status: "ready",
     url: "http://vscode.localhost:3000/",
     error: null,
     retry,
   }),
+}));
+
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useRuntime: () => ({ workspace: {
+    mode: "compatibility",
+    status: "ready",
+    workspaces: [],
+    selectedWorkspaceId: null,
+    confirmedWorkspaceId: null,
+    confirmedRuntimeId: null,
+    error: null,
+    selectWorkspace: vi.fn(),
+    start: vi.fn(),
+    retry: vi.fn(),
+  } }),
 }));
 
 vi.mock("../src/app/components/WorkspaceControl", () => ({

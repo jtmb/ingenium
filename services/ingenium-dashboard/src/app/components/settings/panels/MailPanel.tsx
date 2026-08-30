@@ -239,6 +239,7 @@ export default function MailPanel() {
     onChange,
     placeholder,
     name,
+    id,
     secret,
     onClear,
     clearDisabled,
@@ -247,24 +248,26 @@ export default function MailPanel() {
     onChange: (v: string) => void;
     placeholder?: string;
     name: string;
+    id: string;
     secret: SecretState;
     onClear: () => void;
     clearDisabled: boolean;
   }) {
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-1 sm:w-auto sm:flex-nowrap">
         <input
+          id={id}
           type={showPw[name] ? "text" : "password"}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={secret.isSet ? "Saved secret — leave blank to preserve" : placeholder}
           autoComplete="new-password"
-          className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-64 text-[var(--color-text-primary)]"
+          className="min-w-0 w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] sm:w-64"
         />
         <button
           type="button"
           onClick={() => togglePw(name)}
-          className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] whitespace-nowrap px-1"
+          className="px-1 py-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] whitespace-nowrap sm:py-0"
         >
           {showPw[name] ? "Hide" : "Show"}
         </button>
@@ -273,7 +276,7 @@ export default function MailPanel() {
             type="button"
             onClick={onClear}
             disabled={clearDisabled}
-            className="text-xs text-[var(--color-error-text)] hover:underline disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap px-1"
+            className="px-1 py-2 text-xs text-[var(--color-error-text)] hover:underline disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap sm:py-0"
           >
             {clearDisabled ? "Clearing..." : "Clear"}
           </button>
@@ -304,19 +307,21 @@ export default function MailPanel() {
         </div>
       ) : (
         <>
-          <SettingRow label="Gmail Client ID" description="Google Cloud OAuth client ID">
+          <SettingRow label="Gmail Client ID" description="Google Cloud OAuth client ID" controlId="mail-gmail-client-id">
             <input
+              id="mail-gmail-client-id"
               type="text"
               value={gmailClientId}
               onChange={(e) => setGmailClientId(e.target.value)}
               placeholder="Google Cloud OAuth client ID"
-              className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-64 text-[var(--color-text-primary)]"
+              className="min-w-0 w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] sm:w-64"
             />
           </SettingRow>
 
-          <SettingRow label="Gmail Client Secret" description="Google Cloud OAuth client secret">
+          <SettingRow label="Gmail Client Secret" description="Google Cloud OAuth client secret" controlId="mail-gmail-client-secret">
             <PwInput
               name="gmailSecret"
+              id="mail-gmail-client-secret"
               value={gmailClientSecret}
               onChange={setGmailClientSecret}
               placeholder="Google Cloud OAuth client secret"
@@ -327,19 +332,21 @@ export default function MailPanel() {
             <span className="block text-xs text-[var(--color-text-muted)] mt-1">{secretStatusLabel(gmailSecretState)}</span>
           </SettingRow>
 
-          <SettingRow label="Outlook Client ID" description="Azure AD application client ID">
+          <SettingRow label="Outlook Client ID" description="Azure AD application client ID" controlId="mail-outlook-client-id">
             <input
+              id="mail-outlook-client-id"
               type="text"
               value={outlookClientId}
               onChange={(e) => setOutlookClientId(e.target.value)}
               placeholder="Azure AD application client ID"
-              className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-64 text-[var(--color-text-primary)]"
+              className="min-w-0 w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] sm:w-64"
             />
           </SettingRow>
 
-          <SettingRow label="Outlook Client Secret" description="Azure AD application client secret">
+          <SettingRow label="Outlook Client Secret" description="Azure AD application client secret" controlId="mail-outlook-client-secret">
             <PwInput
               name="outlookSecret"
+              id="mail-outlook-client-secret"
               value={outlookClientSecret}
               onChange={setOutlookClientSecret}
               placeholder="Azure AD application client secret"
@@ -354,7 +361,7 @@ export default function MailPanel() {
             <button
               onClick={saveOauth}
               disabled={savingOauth || globalProjectLoading || !globalProject}
-              className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50 cursor-pointer sm:py-1.5"
             >
               {savingOauth ? "Saving..." : "Save OAuth Credentials"}
             </button>
@@ -396,9 +403,10 @@ export default function MailPanel() {
             </Select>
           </SettingRow>
 
-          <SettingRow label="Offline window" description="Max email headers to sync per folder (default 500)">
+          <SettingRow label="Offline window" description="Max email headers to sync per folder (default 500)" controlId="mail-offline-window">
             <div className="flex items-center gap-2">
               <input
+                id="mail-offline-window"
                 type="number"
                 min={50}
                 max={5000}
@@ -416,9 +424,10 @@ export default function MailPanel() {
             </div>
           </SettingRow>
 
-          <SettingRow label="Body window" description="Max email bodies to cache per folder (default 200)">
+          <SettingRow label="Body window" description="Max email bodies to cache per folder (default 200)" controlId="mail-body-window">
             <div className="flex items-center gap-2">
               <input
+                id="mail-body-window"
                 type="number"
                 min={10}
                 max={2000}
@@ -436,8 +445,13 @@ export default function MailPanel() {
             </div>
           </SettingRow>
 
-          <SettingRow label="Enable Smart Replies" description="Show AI-drafted reply suggestions when reading emails">
+          <SettingRow
+            label="Enable Smart Replies"
+            description="Show AI-drafted reply suggestions when reading emails"
+            controlId="mail-smart-replies-enabled"
+          >
             <input
+              id="mail-smart-replies-enabled"
               type="checkbox"
               checked={smartRepliesEnabled}
               onChange={(e) => {
@@ -473,8 +487,13 @@ export default function MailPanel() {
             </Select>
           </SettingRow>
 
-          <SettingRow label="Precompute replies" description="Pre-generate smart replies in the background so they load instantly when you open an email">
+          <SettingRow
+            label="Precompute replies"
+            description="Pre-generate smart replies in the background so they load instantly when you open an email"
+            controlId="mail-smart-replies-prefetch"
+          >
             <input
+              id="mail-smart-replies-prefetch"
               type="checkbox"
               checked={smartRepliesPrefetch}
               onChange={async (e) => {

@@ -1808,7 +1808,7 @@ function inspectBackupDeletionReservationsMigration(
 }
 
 function normalizeSchemaSql(sql: string): string {
-  return sql.replace(/^\s*--[^\r\n]*(?:\r?\n|$)/gm, " ").replace(/\s+/g, " ").trim().replace(/;$/, "").toLowerCase();
+  return sql.replace(/\s+/g, " ").trim().replace(/;$/, "").toLowerCase();
 }
 
 function inspectSkillProposalRetentionPaginationMigration(

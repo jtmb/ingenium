@@ -135,6 +135,43 @@ describe("StatusPage aggregate health", () => {
     expect(screen.getByRole("button", { name: "View email-client application details" })).toBeTruthy();
   });
 
+  it("keeps process cards responsive and preserves the optional restore state", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          services: [
+            { name: "API", state: "running", required: true, uptime: 1, restartCount: 0, port: 4097, description: "API" },
+            {
+              name: "restore-maintenance",
+              state: "stopped",
+              required: false,
+              uptime: 0,
+              restartCount: 0,
+              port: 0,
+              description: "One-shot restore maintenance executor",
+            },
+          ],
+          applications: [{ name: "email-client", state: "idle", description: "Mail sync engine", required: false }],
+          overall: "healthy",
+        },
+      }),
+    });
+
+    render(<StatusPage />);
+
+    const restoreCard = await screen.findByRole("button", { name: "View restore-maintenance service details" });
+    expect(restoreCard.className).toContain("p-6");
+    expect(restoreCard.parentElement?.className).toContain("grid-cols-1");
+    expect(screen.getByText("restore-maintenance")).toBeTruthy();
+    expect(screen.getByText("One-shot restore maintenance executor")).toBeTruthy();
+    expect(screen.getByText("Stopped")).toBeTruthy();
+
+    const applicationCard = screen.getByRole("button", { name: "View email-client application details" });
+    expect(applicationCard.className).toContain("p-4");
+    expect(applicationCard.parentElement?.className).toContain("grid-cols-1");
+  });
+
   it("serializes polling and aborts an active request on unmount", async () => {
     vi.useFakeTimers();
     let resolveResponse!: (response: ReturnType<typeof statusResponse>) => void;

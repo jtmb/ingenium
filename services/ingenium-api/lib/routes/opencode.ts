@@ -8,6 +8,7 @@ import { logger, settings } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
+  buildAuthHeader,
   isOpenCodeError,
   type SendPromptBody,
 } from "../opencode-client.js";
@@ -239,7 +240,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
  * Returns 503 if missing so the caller gets a clear signal.
  */
 function guardPassword(req: any, res: any): boolean {
-  if (!process.env.OPENCODE_SERVER_PASSWORD && !currentOpenCodeRuntimeTarget()) {
+  if (!buildAuthHeader() && !currentOpenCodeRuntimeTarget()) {
     logger.warn(SOURCE, `Route blocked: OPENCODE_SERVER_PASSWORD not configured`, {
       method: req.method,
       path: req.originalUrl,

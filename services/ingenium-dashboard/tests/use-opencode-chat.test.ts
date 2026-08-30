@@ -17,27 +17,48 @@ import {
 } from "../src/lib/use-opencode-chat";
 import type { OpenCodePart } from "../src/lib/opencode";
 
-const { mockPrompt, mockMessages } = vi.hoisted(() => ({
+const { mockPrompt, mockMessages, mockContextLink, mockPersistTurn } = vi.hoisted(() => ({
   mockPrompt: vi.fn(),
   mockMessages: vi.fn(),
+  mockContextLink: vi.fn(),
+  mockPersistTurn: vi.fn(),
 }));
+
+const mockOpenCodeClient = {
+  sessions: {
+    messages: mockMessages,
+    prompt: mockPrompt,
+    abort: vi.fn(),
+    revert: vi.fn(),
+  },
+  permissions: {
+    list: vi.fn().mockResolvedValue([]),
+  },
+  questions: {
+    list: vi.fn().mockResolvedValue([]),
+  },
+  events: { url: (sessionId: string) => `/api/v1/opencode/sessions/${sessionId}/events?runtime_id=11111111-1111-4111-8111-111111111111` },
+};
 
 // Mock opencode so the hook never makes real HTTP calls.
 // This must be at module level (vitest hoists it before imports).
-vi.mock("../src/lib/opencode", () => ({
-  opencode: {
-    sessions: {
-      messages: mockMessages,
-      prompt: mockPrompt,
-    },
-    permissions: {
-      list: vi.fn().mockResolvedValue([]),
-    },
-    questions: {
-      list: vi.fn().mockResolvedValue([]),
-    },
-  },
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useOpenCodeClient: () => mockOpenCodeClient,
 }));
+
+vi.mock("../src/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      context: {
+        ...actual.api.context,
+        chat: { link: mockContextLink, persistTurn: mockPersistTurn },
+      },
+    },
+  };
+});
 
 function getReducer(): (
   state: ChatState,
@@ -62,6 +83,7 @@ function createInitialState(overrides?: Partial<ChatState>): ChatState {
     questions: [],
     streamActivity: "idle",
     partTypes: {},
+    userMessageAliases: {},
     ...overrides,
   };
 }
@@ -478,6 +500,44 @@ describe("chatReducer", () => {
       expect(next.messages[1]!.id).toBe("assist-1");
     });
 
+    it("rekeys only the correlated optimistic user when identical prompt text repeats", () => {
+      const first = createMessage({ id: "optimistic-1", role: "user", content: "same prompt" });
+      const second = createMessage({ id: "optimistic-2", role: "user", content: "same prompt" });
+
+      const next = reducer(createInitialState({ messages: [first, second] }), {
+        type: "CORRELATE_USER_MESSAGE",
+        optimisticId: "optimistic-1",
+        authoritativeId: "server-user-1",
+      });
+
+      expect(next.messages.map(({ id }) => id)).toEqual(["server-user-1", "optimistic-2"]);
+    });
+
+    it("keeps a proven ID alias for delayed user events and snapshots", () => {
+      const optimistic = createMessage({ id: "optimistic", role: "user", content: "Question" });
+      let state = reducer(createInitialState({ messages: [optimistic] }), {
+        type: "CORRELATE_USER_MESSAGE",
+        optimisticId: "optimistic",
+        authoritativeId: "server-user",
+      });
+
+      state = reducer(state, {
+        type: "UPSERT_MESSAGE",
+        message: createMessage({ id: "optimistic", role: "user", content: "Question" }),
+      });
+      state = reducer(state, {
+        type: "RECONCILE_MESSAGES",
+        messages: [
+          createMessage({ id: "optimistic", role: "user", content: "Question" }),
+          createMessage({ id: "server-user", role: "user", content: "Question" }),
+          createMessage({ id: "assistant", role: "assistant", content: "Answer" }),
+        ],
+      });
+
+      expect(state.messages.map(({ id }) => id)).toEqual(["server-user", "assistant"]);
+      expect(state.userMessageAliases).toEqual({ optimistic: "server-user" });
+    });
+
     it("preserves locally streaming assistant messages during reconciliation", () => {
       // When SSE is still delivering deltas, the local assistant message
       // has isStreaming:true.  RECONCILE_MESSAGES must keep that flag so
@@ -769,6 +829,7 @@ describe("chatReducer", () => {
         streamActivity: "idle",
         partTypes: {},
         activeAssistantMessageId: undefined,
+        userMessageAliases: {},
       });
     });
   });
@@ -939,6 +1000,8 @@ describe("useOpenCodeChat hook — send() integration", () => {
     mockMessages.mockReset();
     mockMessages.mockResolvedValue([]);
     mockPrompt.mockReset();
+    mockContextLink.mockReset();
+    mockPersistTurn.mockReset();
 
     // Spy on fetch so SSE connections fail silently (AbortError)
     fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(
@@ -975,6 +1038,300 @@ describe("useOpenCodeChat hook — send() integration", () => {
 
     // Streaming must be false after error
     expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("correlates an optimistic user to the server parent ID without duplicating the completed turn", async () => {
+    const completed = [
+      { info: { id: "server-user", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ id: "user-part", sessionID: "session-1", messageID: "server-user", type: "text", text: "Question" }] },
+      { info: { id: "server-assistant", sessionID: "session-1", role: "assistant", parentID: "server-user", time: { created: 2, completed: 3 }, finish: "stop" }, parts: [{ id: "assistant-part", sessionID: "session-1", messageID: "server-assistant", type: "text", text: "Answer" }] },
+    ];
+    mockMessages.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValue(completed);
+    mockPrompt.mockResolvedValue({ accepted: true });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    mockPersistTurn.mockResolvedValue({ data: { revision: 1 } });
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    fetchSpy.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start: (controller) => { streamController = controller; },
+    })));
+    const { result } = renderHook(() => useOpenCodeChat("session-1", {
+      project: "selected-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      title: "Conversation",
+    }));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => { await result.current.send([{ type: "text", text: "Question" }]); });
+
+    expect(mockPrompt.mock.calls[0]?.[1].messageID).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    await act(async () => {
+      streamController.enqueue(encoder.encode([
+        { type: "message.updated", properties: { info: completed[0]!.info } },
+        { type: "message.part.updated", properties: { part: completed[0]!.parts[0] } },
+        { type: "message.updated", properties: { info: completed[1]!.info } },
+        { type: "message.part.updated", properties: { part: completed[1]!.parts[0] } },
+      ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")));
+    });
+    await vi.waitFor(() => expect(result.current.messages.map(({ id, role }) => ({ id, role }))).toEqual([
+        { id: "server-user", role: "user" },
+        { id: "server-assistant", role: "assistant" },
+      ]));
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+    });
+    await vi.waitFor(() => expect(mockPersistTurn).toHaveBeenCalledTimes(1));
+    expect(mockPersistTurn.mock.calls[0]?.[1]).toMatchObject({
+      userMessageId: "server-user",
+      assistantMessageId: "server-assistant",
+    });
+  });
+
+  it.each([
+    "response-first",
+    "user-event-first",
+    "assistant-event-first",
+    "duplicate-events",
+    "prompt-error-first",
+    "idle-before-assistant",
+  ])("reconciles one authoritative turn and checkpoint when ordering is %s", async (ordering) => {
+    const completed = [
+      { info: { id: "server-user", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ id: "user-part", sessionID: "session-1", messageID: "server-user", type: "text", text: "Question" }] },
+      { info: { id: "server-assistant", sessionID: "session-1", role: "assistant", parentID: "server-user", time: { created: 2, completed: 3 }, finish: "stop" }, parts: [{ id: "assistant-part", sessionID: "session-1", messageID: "server-assistant", type: "text", text: "Answer" }] },
+    ];
+    let historyReady = ordering === "response-first";
+    mockMessages.mockResolvedValueOnce([]).mockImplementation(async () => historyReady ? completed : []);
+    if (ordering === "prompt-error-first") mockPrompt.mockRejectedValue(new Error("Prompt acknowledgement lost"));
+    else mockPrompt.mockResolvedValue({ accepted: true });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    mockPersistTurn.mockResolvedValue({ data: { revision: 1 } });
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    fetchSpy.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start: (controller) => { streamController = controller; },
+    })));
+    const persistence = {
+      project: "selected-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      title: "Conversation",
+    };
+    const { result } = renderHook(() => useOpenCodeChat("session-1", persistence));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send([{ type: "text", text: "Question" }]); });
+
+    const userEvents = [
+      { type: "message.updated", properties: { info: completed[0]!.info } },
+      { type: "message.part.updated", properties: { part: completed[0]!.parts[0] } },
+    ];
+    const assistantEvents = [
+      { type: "message.updated", properties: { info: completed[1]!.info } },
+      { type: "message.part.updated", properties: { part: completed[1]!.parts[0] } },
+    ];
+    const emit = async (events: unknown[]) => {
+      await act(async () => {
+        streamController.enqueue(encoder.encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")));
+      });
+    };
+    const idle = { type: "session.idle", properties: { sessionID: "session-1" } };
+
+    if (ordering === "user-event-first" || ordering === "prompt-error-first") {
+      await emit([...userEvents, ...assistantEvents]);
+    } else if (ordering === "assistant-event-first") {
+      await emit([...assistantEvents, ...userEvents]);
+    } else if (ordering === "duplicate-events") {
+      await emit([...assistantEvents, ...assistantEvents, ...userEvents, ...userEvents]);
+    } else if (ordering === "idle-before-assistant") {
+      historyReady = true;
+      await emit([idle]);
+      await emit([...assistantEvents, ...userEvents]);
+    }
+    if (ordering !== "idle-before-assistant") {
+      historyReady = true;
+      await emit([idle]);
+    }
+
+    await vi.waitFor(() => expect(result.current.messages.map(({ id, role }) => ({ id, role }))).toEqual([
+      { id: "server-user", role: "user" },
+      { id: "server-assistant", role: "assistant" },
+    ]));
+    await vi.waitFor(() => expect(mockPersistTurn).toHaveBeenCalledTimes(1));
+    expect(mockPersistTurn.mock.calls[0]?.[1]).toMatchObject({
+      userMessageId: "server-user",
+      assistantMessageId: "server-assistant",
+      userContent: "Question",
+      assistantContent: "Answer",
+    });
+  });
+
+  it("keeps repeated identical prompts as distinct request-correlated turns", async () => {
+    let turn = 0;
+    let history: unknown[] = [];
+    mockMessages.mockImplementation(async () => history);
+    mockPrompt.mockImplementation(async (_sessionId, body) => {
+      turn += 1;
+      const userId = body.messageID as string;
+      history = [
+        ...history,
+        { info: { id: userId, sessionID: "session-1", role: "user", time: { created: turn * 2 - 1 } }, parts: [{ type: "text", text: "Repeat" }] },
+        { info: { id: `server-assistant-${turn}`, sessionID: "session-1", role: "assistant", parentID: userId, time: { created: turn * 2, completed: turn * 2 }, finish: "stop" }, parts: [{ type: "text", text: `Answer ${turn}` }] },
+      ];
+      return { accepted: true };
+    });
+    const { result } = renderHook(() => useOpenCodeChat("session-1"));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => { await result.current.send([{ type: "text", text: "Repeat" }]); });
+    await act(async () => { await result.current.send([{ type: "text", text: "Repeat" }]); });
+
+    expect(mockPrompt.mock.calls[0]?.[1].messageID).not.toBe(mockPrompt.mock.calls[1]?.[1].messageID);
+    expect(result.current.messages.filter(({ role }) => role === "user").map(({ id }) => id))
+      .toEqual(mockPrompt.mock.calls.map(([, body]) => body.messageID));
+    expect(result.current.messages.filter(({ role }) => role === "assistant").map(({ id }) => id))
+      .toEqual(["server-assistant-1", "server-assistant-2"]);
+  });
+
+  it("persists one checkpoint when a completed assistant turn reaches session idle", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start: (controller) => { streamController = controller; } });
+    fetchSpy.mockResolvedValue(new Response(stream));
+    const completed = [
+      { info: { id: "user-source", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ id: "user-part", sessionID: "session-1", messageID: "user-source", type: "text", text: "Question" }] },
+      { info: { id: "assistant-source", sessionID: "session-1", role: "assistant", time: { created: 2, completed: 3 }, finish: "stop" }, parts: [{ id: "assistant-part", sessionID: "session-1", messageID: "assistant-source", type: "text", text: "Answer" }] },
+    ];
+    mockMessages.mockResolvedValueOnce([]).mockResolvedValue(completed);
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    mockPersistTurn.mockResolvedValue({ data: { revision: 2 } });
+    const persistence = { project: "selected-project", runtimeId: "11111111-1111-4111-8111-111111111111", title: "Conversation" };
+    const { result } = renderHook(() => useOpenCodeChat("session-1", persistence));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send([{ type: "text", text: "Question" }]); });
+
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`id: idle-one\ndata: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+    });
+    await vi.waitFor(() => expect(mockPersistTurn).toHaveBeenCalledTimes(1));
+    expect(mockPersistTurn).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111112",
+      expect.objectContaining({
+        runtimeId: persistence.runtimeId,
+        sessionId: "session-1",
+        userMessageId: "user-source",
+        assistantMessageId: "assistant-source",
+        userContent: "Question",
+        assistantContent: "Answer",
+        expectedRevision: 0,
+      }),
+      "selected-project",
+    );
+
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`id: idle-two\ndata: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(4));
+    expect(mockPersistTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues distinct completed turns while an earlier checkpoint is pending", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start: (controller) => { streamController = controller; } });
+    fetchSpy.mockResolvedValue(new Response(stream));
+    const turnA = [
+      { info: { id: "user-a", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "Question A" }] },
+      { info: { id: "assistant-a", sessionID: "session-1", role: "assistant", time: { created: 2, completed: 3 }, finish: "stop" }, parts: [{ type: "text", text: "Answer A" }] },
+    ];
+    const turnB = [
+      ...turnA,
+      { info: { id: "user-b", sessionID: "session-1", role: "user", time: { created: 4 } }, parts: [{ type: "text", text: "Question B" }] },
+      { info: { id: "assistant-b", sessionID: "session-1", role: "assistant", time: { created: 5, completed: 6 }, finish: "stop" }, parts: [{ type: "text", text: "Answer B" }] },
+    ];
+    let history = turnA;
+    mockMessages.mockResolvedValueOnce([]).mockImplementation(async () => history);
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    let resolveTurnA!: (value: { data: { revision: number } }) => void;
+    mockPersistTurn
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveTurnA = resolve; }))
+      .mockResolvedValueOnce({ data: { revision: 2 } });
+    const persistence = { project: "selected-project", runtimeId: "11111111-1111-4111-8111-111111111111", title: "Conversation" };
+    const { result } = renderHook(() => useOpenCodeChat("session-1", persistence));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send([{ type: "text", text: "Question A" }]); });
+
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`id: idle-a\ndata: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+    });
+    await vi.waitFor(() => expect(mockPersistTurn).toHaveBeenCalled());
+    expect(mockPersistTurn.mock.calls.map(([, turn]) => turn.assistantMessageId)).toEqual(["assistant-a"]);
+
+    history = turnB;
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`id: idle-b\ndata: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+    });
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(4));
+    expect(mockPersistTurn).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveTurnA({ data: { revision: 1 } }); });
+    await vi.waitFor(() => expect(mockPersistTurn).toHaveBeenCalledTimes(2));
+    expect(mockPersistTurn.mock.calls.map(([, turn]) => turn.assistantMessageId)).toEqual(["assistant-a", "assistant-b"]);
+    expect(mockPersistTurn.mock.calls[1]?.[1]).toMatchObject({
+      userMessageId: "user-b",
+      assistantMessageId: "assistant-b",
+      expectedRevision: 1,
+    });
+  });
+
+  it("does not checkpoint assistant text from a failed finish state", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start: (controller) => { streamController = controller; } });
+    fetchSpy.mockResolvedValue(new Response(stream));
+    mockMessages.mockResolvedValueOnce([]).mockResolvedValue([
+      { info: { id: "user-source", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "Question" }] },
+      { info: { id: "assistant-source", sessionID: "session-1", role: "assistant", time: { created: 2, completed: 3 }, finish: "error" }, parts: [{ type: "text", text: "Failed answer" }] },
+    ]);
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    const { result } = renderHook(() => useOpenCodeChat("session-1", {
+      project: "selected-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      title: "Conversation",
+    }));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send([{ type: "text", text: "Question" }]); });
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(3));
+    expect(mockPersistTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not checkpoint an incomplete assistant response", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start: (controller) => { streamController = controller; } });
+    fetchSpy.mockResolvedValue(new Response(stream));
+    mockMessages.mockResolvedValueOnce([]).mockResolvedValue([
+      { info: { id: "user-source", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "Question" }] },
+      { info: { id: "assistant-source", sessionID: "session-1", role: "assistant", time: { created: 2 } }, parts: [{ type: "text", text: "Partial" }] },
+    ]);
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    const { result } = renderHook(() => useOpenCodeChat("session-1", {
+      project: "selected-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      title: "Conversation",
+    }));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send([{ type: "text", text: "Question" }]); });
+    await act(async () => {
+      streamController.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "session.idle", properties: { sessionID: "session-1" } })}\n\n`));
+      await Promise.resolve();
+    });
+    expect(mockPersistTurn).not.toHaveBeenCalled();
   });
 
   it("keeps the SSE turn active when send reconciliation fails", async () => {
@@ -1165,6 +1522,110 @@ describe("useOpenCodeChat hook — send() integration", () => {
 
     // Prompt should never have been called
     expect(mockPrompt).not.toHaveBeenCalled();
+  });
+
+  it("hides the previous history and blocks sends until the new session history loads", async () => {
+    let resolveSecond!: (messages: unknown[]) => void;
+    mockMessages
+      .mockResolvedValueOnce([
+        { info: { id: "old-user", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "Old conversation" }] },
+      ])
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useOpenCodeChat(sessionId),
+      { initialProps: { sessionId: "session-1" as string | null } },
+    );
+    await vi.waitFor(() => expect(result.current.messages[0]?.content).toBe("Old conversation"));
+
+    rerender({ sessionId: "session-2" });
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => {
+      expect(await result.current.send([{ type: "text", text: "Must wait" }])).toBe(false);
+    });
+    expect(mockPrompt).not.toHaveBeenCalled();
+
+    await act(async () => { resolveSecond([]); });
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.messages).toEqual([]);
+    expect(mockMessages.mock.calls.map(([sessionId]) => sessionId)).toEqual(["session-1", "session-2"]);
+  });
+
+  it("rejects a delayed old-session reconciliation after selecting a blank session", async () => {
+    const currentPrompt = "N".repeat(38);
+    const oldSessionText = "O".repeat(68);
+    let resolveOldRefresh!: (messages: unknown[]) => void;
+    mockMessages
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldRefresh = resolve; }))
+      .mockResolvedValueOnce([]);
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+    mockContextLink.mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
+    const persistence = {
+      project: "selected-project",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      title: "Conversation",
+    };
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useOpenCodeChat(sessionId, persistence),
+      { initialProps: { sessionId: "session-1" } },
+    );
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let sendPromise!: Promise<boolean>;
+    act(() => { sendPromise = result.current.send([{ type: "text", text: currentPrompt }]); });
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(2));
+
+    rerender({ sessionId: "session-2" });
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.messages).toEqual([]);
+
+    await act(async () => {
+      resolveOldRefresh([
+        {
+          info: { id: "old-user", sessionID: "session-1", role: "user", time: { created: 1 } },
+          parts: [{ id: "old-part", sessionID: "session-1", messageID: "old-user", type: "text", text: oldSessionText }],
+        },
+      ]);
+      await sendPromise;
+    });
+
+    expect(result.current.messages).toEqual([]);
+  });
+
+  it("keys transcript readiness by project, runtime, and session", async () => {
+    mockMessages
+      .mockResolvedValueOnce([
+        {
+          info: { id: "runtime-a-user", sessionID: "shared-session", role: "user", time: { created: 1 } },
+          parts: [{ id: "runtime-a-part", sessionID: "shared-session", messageID: "runtime-a-user", type: "text", text: "Runtime A history" }],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    const runtimeA = {
+      project: "project-a",
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      title: "Conversation",
+    };
+    const runtimeB = {
+      project: "project-b",
+      runtimeId: "22222222-2222-4222-8222-222222222222",
+      title: "Conversation",
+    };
+    const { result, rerender } = renderHook(
+      ({ persistence }) => useOpenCodeChat("shared-session", persistence),
+      { initialProps: { persistence: runtimeA } },
+    );
+    await vi.waitFor(() => expect(result.current.messages[0]?.content).toBe("Runtime A history"));
+
+    rerender({ persistence: runtimeB });
+
+    expect(result.current.messages).toEqual([]);
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.messages).toEqual([]);
   });
 
   it("dispatches ADD_USER_MESSAGE before calling the prompt API", async () => {

@@ -16,6 +16,19 @@ const { listProviders, listIntegrations, connectKey, beginOAuth, cancelAttempt, 
   disconnect: vi.fn(),
 }));
 
+const runtimeClient = {
+  providers: { list: listProviders },
+  integrations: {
+    list: listIntegrations,
+    connectKey,
+    beginOAuth,
+    attemptStatus: vi.fn(),
+    completeAttempt: vi.fn(),
+    cancelAttempt,
+  },
+  auth: { disconnect },
+};
+
 vi.mock("../src/lib/api", () => ({
   api: {
     settings: {
@@ -40,6 +53,14 @@ vi.mock("../src/lib/opencode", () => ({
     },
     auth: { disconnect },
   },
+}));
+
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useRuntime: () => ({
+    client: runtimeClient,
+    runtimeId: "11111111-1111-4111-8111-111111111111",
+    workspace: {},
+  }),
 }));
 
 vi.mock("../src/lib/ProjectContext", () => ({

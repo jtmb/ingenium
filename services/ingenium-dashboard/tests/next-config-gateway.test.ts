@@ -20,6 +20,7 @@ afterEach(() => {
   delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
   delete process.env.INGENIUM_API_PORT;
   delete process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN;
+  delete process.env.NEXT_PUBLIC_RUNTIME_SCHEME;
   if (initialNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = initialNodeEnv;
 });
@@ -119,6 +120,7 @@ describe("Next.js gateway configuration", () => {
   it("adds only a validated runtime wildcard to frame and exchange policies", async () => {
     process.env.NODE_ENV = "production";
     process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
+    process.env.NEXT_PUBLIC_RUNTIME_SCHEME = "https";
     const csp = await contentSecurityPolicy(await loadNextConfig());
     expect(csp).toContain("connect-src 'self' http://localhost:4097 https://*.runtime.example.test");
     expect(csp).toContain("frame-src 'self' http://opencode.localhost:3000 http://cli.localhost:3000 http://vscode.localhost:3000 https://*.runtime.example.test");

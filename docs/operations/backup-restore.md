@@ -7,7 +7,7 @@ description: Database backup and restore procedures, automated backup scheduling
 
 This document covers backup and restore procedures for the Ingenium SQLite database and associated data.
 
-The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by signed v2 manifests and a dry-run-only restore-plan lifecycle. RESTORE-100 does not apply data to active databases; it prepares the validated handoff consumed only by the fixed RESTORE-101 executor.
+The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by signed v2 manifests and the RESTORE-100/RESTORE-101 lifecycle. RESTORE-100 validates and stages a plan; RESTORE-101 separately authorizes and queues the fixed root-only maintenance executor. API and MCP routes never apply snapshot bytes directly.
 
 ## RESTORE-100 Contract
 
@@ -40,7 +40,7 @@ A background scheduler (`backup-scheduler.ts`) creates consistent snapshots on a
 | `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | Directory for backup snapshot files. Empty or whitespace-only values are treated as unset. |
 | `INGENIUM_RESTORE_STAGING_DIR` | `/app/.ingenium/restore-staging` | Separate owner-only root for plan-addressed, tamper-evident staged copies. |
 | `INGENIUM_BACKUP_DOWNLOAD_MAX_BYTES` | `268435456` | Maximum verified backup-component download buffered in memory. Oversize components are rejected. |
-| `INGENIUM_RESTORE_HANDOFF_MAX_BYTES` | `268435456` | Maximum total verified staged bytes returned to the future in-process executor handoff. |
+| `INGENIUM_RESTORE_HANDOFF_MAX_BYTES` | `268435456` | Maximum total verified staged bytes returned through the fixed executor handoff. |
 
 Schedule configuration is managed via:
 
@@ -169,21 +169,31 @@ const ready = await ingenium_backup_restore_start({
   project: "global-default", planId: preview.id, expectedRevision: authorization.plan.revision,
   confirmationToken: authorization.confirmationToken, idempotencyKey: "confirm-20260803",
 });
+
+const executionAuthorization = await ingenium_backup_restore_execution_authorize({
+  project: "global-default", planId: ready.id, expectedRevision: ready.revision,
+});
+
+const queued = await ingenium_backup_restore_execute({
+  project: "global-default", planId: ready.id, expectedRevision: executionAuthorization.plan.revision,
+  executionToken: executionAuthorization.executionToken, idempotencyKey: "execute-20260803",
+});
 ```
 
 Confirmation consumes the one-time authorization and copies both components into
 a read-only (`0444` files under an owner-only directory), plan-ID-addressed staging
 directory using verified file descriptors. File permissions are **not** treated as
-filesystem immutability: every confirmed/ready status check and future executor
+filesystem immutability: every confirmed/ready status check and fixed-executor
 handoff reopens the fixed files without following symlinks, then rechecks hashes,
 sizes, SQLite integrity, and signed schema compatibility. A mismatch appends the
 content-free `stage_integrity_failed` audit event and moves the plan to `failed`.
-The future executor receives only bounded verified in-memory buffers through a
-trusted in-process Core handoff; buffers contain no file descriptor or pathname
-and must be released (zeroed) after use. Neither REST nor MCP serializes them.
+The fixed RESTORE-101 executor receives only bounded verified stage data through
+a trusted handoff; the execution capsule contains no raw authorization, owner or
+fence tokens, database bytes, or user-controlled path. Neither REST nor MCP
+serializes those privileged values.
 The plan becomes `ready_for_executor` only after the staged hashes match the
-component hashes bound into its plan hash. The API never replaces active database
-files and exposes no executor route. The preflight validates the signed manifest,
+files during RESTORE-100; RESTORE-101 is the separate fixed-executor route. The
+preflight validates the signed manifest,
 component hashes, SQLite integrity, and exact current schema compatibility for
 both snapshots.
 
@@ -191,6 +201,23 @@ Downloads are copied from a verified descriptor into a bounded in-memory buffer,
 hashed again, and unlinked before the HTTP response begins. The response buffer is
 wiped on finish, close, or error; no live file descriptor or `/proc/.../fd` path is
 streamed to clients.
+
+## RESTORE-101 Fixed Executor Handoff
+
+After a plan reaches `ready_for_executor`, authorize execution with
+`ingenium_backup_restore_execution_authorize`. The one-time execution token
+expires after 15 minutes. `ingenium_backup_restore_execute` consumes that token,
+creates the durable queued run, and asks the fixed Supervisor Unix-socket handoff
+to start `restore-maintenance`; a successful handoff returns `202`.
+
+The fixed program claims the queued run, revalidates the staged hashes and
+security schema, quiesces database users, creates a pre-restore safety snapshot,
+swaps and verifies both database files, rehydrates the restored runtime state, and
+restarts the managed services. It owns the privileged filesystem and process
+operations; callers cannot supply paths, processes, or buffers. If Supervisor
+cannot start it, the API records terminal `SUPERVISOR_FAILED` rather than
+acknowledging an unstartable run. API startup retries durable queued runs after a
+restart.
 
 ### Hot Backup (WAL Mode)
 
@@ -219,15 +246,15 @@ sqlite3 /app/.ingenium/data ".backup /app/.ingenium/data.snapshot"
 
 ```bash
 # Backup from running container
-docker compose exec ingenium bash -c "sqlite3 /app/.ingenium/data '.backup /app/.ingenium/data.snapshot'"
+docker compose --profile compatibility exec ingenium bash -c "sqlite3 /app/.ingenium/data '.backup /app/.ingenium/data.snapshot'"
 
 # Copy backup to host
-docker compose cp ingenium:/app/.ingenium/data.snapshot ./data.snapshot-$(date +%Y%m%d)
+docker compose --profile compatibility cp ingenium:/app/.ingenium/data.snapshot ./data.snapshot-$(date +%Y%m%d)
 
 # Full volume backup (stops the container briefly)
-docker compose stop ingenium
+docker compose --profile compatibility stop ingenium
 docker run --rm -v ingenium_ingenium-data:/data -v "$(pwd)":/backup alpine tar czf /backup/ingenium-data-$(date +%Y%m%d).tar.gz -C /data .
-docker compose start ingenium
+docker compose --profile compatibility start ingenium
 ```
 
 ### Database File Structure
@@ -255,9 +282,10 @@ from `/backups` (or `ingenium_backup_create`). If the new deployment is unhealth
 
 ```bash
 # Stop the current container and return to the previously known-good checkout/image
-docker compose down
+docker compose --profile compatibility down
 # restore the previous image or checkout, then recreate the service
-docker compose up --build -d
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose --profile compatibility up --build -d
 ```
 
 If data must also be reverted, use the restore preview/authorization workflow below; do not

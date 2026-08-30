@@ -33,19 +33,18 @@ cd ingenium
 
 ## Step 2 — Start the Services
 
-Set the required secrets before starting. Keep them in your shell or an ignored `.env` file; never commit them:
+Create the required protected secret files before starting:
 
 ```bash
-export OPENCODE_SERVER_PASSWORD='choose-a-server-password'
-export INGENIUM_API_TOKEN='<generate-a-32-to-128-character-base64url-token>'
-export INGENIUM_EMAIL_ENCRYPTION_KEY='64-hex-or-base64url-characters'
+./scripts/bootstrap-local-secrets.sh
+export IMAGE_REVISION="$(git rev-parse HEAD)"
 docker compose --profile compatibility up --build
 ```
 
 The deployed database is `/app/.ingenium/data` on the `ingenium-data` named
 volume. Rebuilding the image does not remove this volume. Keep the same Compose
 project name across invocations (for example, always use
-`docker compose -p ingenium ...`) and never use `docker compose down -v` for a
+`docker compose --profile compatibility -p ingenium ...`) and never use `docker compose down -v` for a
 normal restart; otherwise Docker can select or create an empty volume.
 
 Seed the internal installation credential before starting the deployment:
@@ -54,15 +53,15 @@ Seed the internal installation credential before starting the deployment:
 ./scripts/bootstrap-local-secrets.sh
 ```
 
-This creates or updates only the ignored mode-`0600` `.env`; it does not expose
-the installation bearer to OpenCode. In the container, the entrypoint validates
-the bootstrap secret, atomically creates `/run/ingenium-secrets/api-token`, then
-removes the inline token from the supervised process environment. After browser
+This creates separate owner-only mode-`0600` installation, OpenCode-proxy, and
+email-encryption files below mode-`0700` directories and writes only their paths
+to ignored `.env`. In the container, the entrypoint validates and atomically
+copies each read-only mount into protected `/run` storage. After browser
 bootstrap and recent step-up, issue separate MCP and repository-sync credentials
 and store them as owner-only `.opencode/.ingenium-mcp-credential` and
 `.opencode/.ingenium-repository-sync-credential` files.
 
-`OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` are required. The
+The three protected deployment-secret file paths are required. The
 `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` are retained only
 as legacy build-time CSP allowlist inputs; they do not select an iframe target. The
 isolated production profile obtains exact audience roots only after an authorized
@@ -104,18 +103,20 @@ regular mode-0600 owner-only file containing the bearer header; do not paste a
 real token into shell history, process arguments, or documentation. OpenCode MCP
 reads only its ignored scoped credential file when it is a regular mode-0600
 owner-only file; tracked `opencode.json` must remain
-credential-free. The dashboard injects its token server-side and never sends
-it to browser JavaScript. The exact OAuth callback exception is
+credential-free. The dashboard uses a protected bootstrap credential only for
+public bootstrap routes and never sends the installation bearer to browser
+JavaScript. The exact OAuth callback exception is
 `GET http://localhost:1455/auth/callback`. Host port `1455` reaches the Nginx
 callback listener, which forwards only that exact path to private Express
 `4096`; other paths are rejected.
 
-A source/config or build-time-origin change requires `docker compose --profile compatibility up --build -d`; a secret-only change normally requires `docker compose --profile compatibility up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099 as a workaround. The isolated `production` profile is documented in [Deployment](deployment.md#isolated-production-runtime-profile). Its dashboard always shows the authorized workspace picker—even for one candidate—and its fixed local runtime aliases intentionally return static `404` guidance.
+A source/config or build-time-origin change requires `docker compose --profile compatibility up --build -d`; a secret-only change normally requires `docker compose --profile compatibility up -d`. Refresh the browser after either operation. If the new deployment cannot be verified, roll back to the last known-good image and build-time configuration; never expose 4098/4099/4100/4101 as a workaround. The isolated `production` profile is documented in [Deployment](deployment.md#isolated-production-runtime-profile). Its dashboard always shows the authorized workspace picker—even for one candidate—and its fixed local runtime aliases intentionally return static `404` guidance.
 
 If the API boundary returns `401`, the bearer header is missing or malformed;
 `403` means the token is wrong. If the dashboard proxy returns `503`, its
-server-side token file is unavailable. Health is also authenticated and fails
-closed when token configuration is missing. Port `1455` is not a general API
+server-side bootstrap credential file is unavailable. Health is a credential-free
+liveness check; management routes fail closed when token configuration is
+missing. Port `1455` is not a general API
 tunnel: only `GET /auth/callback` is accepted. Never include token bytes in
 commands, logs, screenshots, or support reports.
 
@@ -132,7 +133,7 @@ commands, logs, screenshots, or support reports.
 
 Once everything is running:
 
-- **Explore the dashboard** — click through all 21 primary routes plus the Settings overlay
+- **Explore the dashboard** — click through all 24 primary navigation routes plus the 19-tab Settings overlay
 - **Read feature guides** — see `usage/` for per-feature instructions
 - **Initialize repository resources (optional)** — from the active worktree, run
   `ingenium-init-project --dry-run` to preview the repository-authoritative

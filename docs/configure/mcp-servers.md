@@ -31,7 +31,7 @@ vault and are never returned by the browser/API projection.
 ## Tool Manager
 
 The Tools tab shows the current project-scoped total. The built-in catalog
-contains 282 tools in 30 baseline categories (280 `ingenium_` catalog entries
+contains 283 tools in 30 baseline categories (281 `ingenium_` catalog entries
 plus 2 extension tools); discovered child tools are added dynamically and may increase
 both the total and the category list for that project.
 

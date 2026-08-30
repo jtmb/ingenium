@@ -1,7 +1,9 @@
 import { Router, type Request, type Response } from "express";
-import { authorization, context, contextConversations, contextRag, getDb } from "ingenium-core";
+import { createHash } from "node:crypto";
+import { authorization, context, contextConversations, contextRag, getDb, runtimes } from "ingenium-core";
 import { requestAuthorizationPrincipal, requestContentActor, requireContentAccess, requireProject } from "../helpers.js";
 import { executeSynthesisBroker } from "../opencode-client.js";
+import { deploymentMode } from "../runtime-mode.js";
 
 /**
  * Context routes retain the mutable entry compatibility surface and add the
@@ -66,6 +68,36 @@ function mutationInput(req: Request): Record<string, unknown> {
     throw new contextConversations.ContextConversationError("INVALID_CONTEXT_INPUT");
   }
   return { ...body, ...(headerKey === undefined ? {} : { idempotencyKey: headerKey }) };
+}
+
+function chatRuntimeScope(req: Request, res: Response, projectId: string, runtimeId: unknown): string | null {
+  if (req.principal?.type !== "user" || !req.principal.session) {
+    res.status(403).json({ error: { code: "FORBIDDEN", message: "A browser session is required" } });
+    return null;
+  }
+  if (deploymentMode() === "compatibility") {
+    if (runtimeId !== undefined && runtimeId !== null) {
+      res.status(422).json({ error: { code: "INVALID_CONTEXT_INPUT", message: "Compatibility chat does not accept a runtime identifier" } });
+      return null;
+    }
+    return "compatibility";
+  }
+  if (typeof runtimeId !== "string") {
+    res.status(409).json({ error: { code: "RUNTIME_REQUIRED", message: "Select and start an authorized workspace runtime" } });
+    return null;
+  }
+  const runtime = runtimes.getRuntimeInstance(runtimeId);
+  if (!runtime || runtime.projectId !== projectId || runtime.ownerUserId !== req.principal.id
+    || (runtime.state !== "READY" && runtime.state !== "IDLE")) {
+    res.status(404).json({ error: { code: "RUNTIME_NOT_FOUND", message: "Runtime not found" } });
+    return null;
+  }
+  return runtime.id;
+}
+
+function boundedChatIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 512
+    && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 function listOptions(req: Request): { limit?: number; cursor?: string } {
@@ -456,6 +488,35 @@ contextRouter.post("/conversations", (req, res) => {
   }
 });
 
+contextRouter.post("/chat-sessions/link", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const actor = requestContentActor(req, projectId);
+  const sessionId = req.body?.sessionId;
+  const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+  if (!actor?.ownerUserId || !boundedChatIdentifier(sessionId) || !title || title.length > 256) {
+    sendConversationError(res, new contextConversations.ContextConversationError("INVALID_CONTEXT_INPUT"));
+    return;
+  }
+  const sourceRuntimeId = chatRuntimeScope(req, res, projectId, req.body?.runtimeId);
+  if (!sourceRuntimeId) return;
+  try {
+    const idempotencyKey = `opencode-chat:${createHash("sha256").update(`${sourceRuntimeId}\0${sessionId}`).digest("hex")}`;
+    const conversation = contextConversations.createContextConversation(projectId, {
+      title,
+      tags: ["chat", "opencode"],
+      metadata: { source: "opencode-chat", sourceRuntimeId, sourceSessionId: sessionId },
+      idempotencyKey,
+      organizationId: actor.organizationId,
+      ownerUserId: actor.ownerUserId,
+      visibility: "private",
+    });
+    res.status(201).json({ data: conversation });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
+});
+
 contextRouter.param("conversationId", (req, res, next, conversationId) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -646,6 +707,27 @@ contextRouter.post("/conversations/:conversationId/checkpoints", (req, res) => {
   if (!projectId) return;
   try {
     const result = contextConversations.createContextCheckpoint(projectId, req.params.conversationId!, mutationInput(req));
+    res.status(201).json({ data: result });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
+});
+
+contextRouter.post("/conversations/:conversationId/chat-turns", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const sourceRuntimeId = chatRuntimeScope(req, res, projectId, req.body?.runtimeId);
+  if (!sourceRuntimeId) return;
+  try {
+    const result = contextConversations.persistContextChatTurn(projectId, req.params.conversationId!, {
+      sourceRuntimeId,
+      sourceSessionId: req.body?.sessionId,
+      userMessageId: req.body?.userMessageId,
+      assistantMessageId: req.body?.assistantMessageId,
+      userContent: req.body?.userContent,
+      assistantContent: req.body?.assistantContent,
+      expectedRevision: req.body?.expectedRevision,
+    });
     res.status(201).json({ data: result });
   } catch (error) {
     sendConversationError(res, error);

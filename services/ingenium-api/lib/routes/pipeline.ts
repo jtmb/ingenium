@@ -1,13 +1,9 @@
 import { Router } from "express";
 import { pipelineEvents } from "ingenium-core";
-import { requestContentActor, requireProject } from "../helpers.js";
+import { requestContentActor, requestOwnerScope, requireProject } from "../helpers.js";
 
 /** Handles /api/v1/pipeline — event logging and timeline grouping used by the Pipeline dashboard page. */
 export const pipelineRouter = Router();
-
-function ownerScope(req: Parameters<typeof requestContentActor>[0], projectId: string): string | null | undefined {
-  return req.authorizationPolicy ? requestContentActor(req, projectId)?.ownerUserId ?? null : undefined;
-}
 
 pipelineRouter.get("/events", (req, res) => {
   const projectId = requireProject(req, res);
@@ -27,7 +23,7 @@ pipelineRouter.get("/events", (req, res) => {
     limit,
     since,
     parentEventId,
-    ownerUserId: ownerScope(req, projectId),
+    ownerUserId: requestOwnerScope(req),
   });
 
   res.json({ data: list, total: list.length });
@@ -46,7 +42,7 @@ pipelineRouter.get("/timeline", (req, res) => {
     source: source as any,
     limit,
     since,
-    ownerUserId: ownerScope(req, projectId),
+    ownerUserId: requestOwnerScope(req),
   });
 
   res.json({ data: timeline, total: timeline.length });

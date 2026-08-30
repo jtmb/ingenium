@@ -12,7 +12,7 @@ import {
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { getTestRunApiTokenPath, type TestRunContext, type TestRunManifest } from "../test-run-context";
 
-export const DASHBOARD_API_TOKEN_FILE_ENV = "INGENIUM_API_TOKEN_FILE";
+export const DASHBOARD_API_TOKEN_FILE_ENV = "INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE";
 export const DASHBOARD_STORAGE_STATE_FILENAME = "browser-storage-state.json";
 export const DASHBOARD_GLOBAL_PROJECT_STORAGE_KEY = "ingenium_global_project";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;

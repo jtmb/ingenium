@@ -2804,6 +2804,298 @@ and `ingenium-api`, `ingenium-api-boundary`, `ingenium-dashboard`, and
 zero. Plugin/config changes still require rebuilding the extension and
 restarting OpenCode.
 
+## Current source/deployment verification note (2026-08-16)
+
+This note records the current implementation wave and does not alter prior task
+markers, replace earlier evidence, or claim release completion.
+
+- **Dashboard/runtime:** isolated OpenCode, Chat, and VS Code clients require an
+  explicit authorized workspace selection and a ready runtime binding. A stopped
+  runtime remains in the picker and requires explicit start/resume; list reads and
+  remembered preferences never auto-start or substitute another runtime. Failed,
+  incomplete, or unavailable states remain retryable and do not use a fallback.
+- **Chat/Context:** only a completed non-empty user/assistant turn is persisted.
+  The pair and immutable checkpoint are appended atomically with optimistic CAS
+  and deterministic idempotency; replay is safe, while failed, interrupted, or
+  empty-assistant turns create no partial checkpoint. Responses expose metadata
+  and hashes rather than message bodies.
+- **Background synthesis:** per-project background extraction/synthesis uses only
+  one authorized ready/idle runtime with an active service principal and execute
+  grant. Missing authorization returns unavailable without provider probing or a
+  global/user-runtime fallback.
+- **MCP:** the owner-scoped response records `230` visible tools across `27`
+  available categories. Summary and report aggregates are computed only from
+  authorized rows, and disabled tools are reported as not applicable rather than
+  unreachable.
+- **Vault:** lifecycle mutations and empty reset require a recent-step-up browser
+  installation administrator. The eligibility read requires the browser
+  administrator without a recent step-up and returns only eligibility and a reason.
+  Empty reset is allowed only for a sealed vault with zero encrypted items and
+  credential/reference dependencies; it accepts no replacement passphrase and
+  rechecks the guard transactionally.
+- **Projects:** regular projects support reversible archive/restore with the
+  applicable authorization and step-up controls. The canonical global project is
+  protected from external archive, restore, rename, creation, and designation
+  changes.
+- **Deployment:** live deployment HEAD is `713c914`; dirty source digest is
+  `366d0f8f-8c69-4538-abb6-71b9399d9344`; safety backup UUID is
+  `066d0f8f-8c69-4538-abb6-71b9399d9344`. Services and database are healthy;
+  synthesis is pending `0`, processed `184`; runtime/provider metadata is healthy.
+- **Authenticated browser visual/full-site acceptance:** **BLOCKED** — no
+  attachable DevTools session is available at `127.0.0.1:9222`, and real-password
+  automation is prohibited. No visual UI PASS is claimed for this current wave.
+
+## Final documentation reconciliation (2026-08-17)
+
+This appended note supersedes only the stale “current” deployment and visual
+claims in the 2026-08-16 note above; prior markers and evidence remain immutable.
+
+### Shipped behavior recorded
+
+- **Runtime selection:** OpenCode, Chat, and VS Code require an authorized
+  workspace and ready runtime. The user/project-scoped remembered preference is
+  revalidated against the current workspace list; stopped, unavailable,
+  unauthorized, or non-ready entries are cleared or returned to the picker and
+  never auto-start or fall back to another runtime.
+- **Runtime sessions:** Audience cookies have ordinary host-only and paired CHIPS
+  forms. The `Partitioned` variant supports privacy-blocked dashboard iframes;
+  mismatched paired tokens fail closed.
+- **Chat/context:** Optimistic user IDs reconcile to authoritative OpenCode IDs
+  through `parentID`, scoped by project/runtime/session. Only a completed non-empty
+  user/assistant turn is persisted, with one atomic checkpoint; deterministic
+  source runtime/session/message IDs make replay idempotent.
+- **Multi-tab CSRF:** Migration 106 provides hash-only grants bound to session,
+  user, security epoch, and expiry. Grants do not rotate the session cookie, last
+  at most ten minutes, and are capped at eight active grants per session.
+- **Secrets:** Process launchers clear inherited environments and use distinct
+  service identities with protected owner-only files. OpenCode proxy and email
+  encryption secrets have separate file sources and explicit rotation commands;
+  email-key rotation requires the empty-transition gate.
+- **MCP report:** The live probe uses a separate API-owned `mcp-report` credential,
+  bound to project/workspace/worktree, expiring after 60 seconds, limited to
+  read-only authorized tool state, and removed after cleanup. The owner-scoped
+  live result recorded 230 visible tools across 27 categories, 227 reachable,
+  zero unreachable, one disabled, and two extension-only entries.
+- **Vault/projects:** Blocked vault reset explains the safe passphrase/dependency
+  path without exposing dependency names or counts. Regular projects retain
+  reversible archive/restore; the canonical global project remains protected.
+- **Responsive UI:** The Organizations and Mail mobile remediations passed the
+  browser-agent layout checks. Task-board horizontal scrolling remains
+  informational only.
+
+### Safe-read policy and deployment evidence
+
+- The canonical policy is `services/ingenium-api/config/dashboard-safe-reads.json`
+  with generated parity in `nginx/dashboard-safe-reads-map.conf` (sha256
+  `811825df9462512dc90220f165bc0891431f9d93024a4d4a5f065ccb5815af24`). Its nine
+  positive templates are project detail, Context source summary, Context
+  conversations, task UUID detail, usage thresholds, threshold evaluation,
+  usage attention, usage summary, and usage events. The retained profile has 86
+  states, 329 observed GETs, 26 safe GETs, 303 strict GETs, 51 strict non-GETs,
+  maximum fanout 12, and a 10-second human-paced transition interval.
+- Nginx uses safe `60r/s` with burst `360` and strict `30r/s` with burst `60`.
+  Express uses the authenticated safe aggregate `480` reads/minute and the
+  strict/invalid-auth `100` reads/minute policy. HEAD, ambiguous/encoded,
+  sensitive, unbounded, report, stream, search, export, download, backup, and
+  mutation-on-read paths remain strict. The human-paced sweep recorded zero
+  `429` responses.
+- Production was healthy with migrations through 106 and clean database/foreign
+  key checks. The rate-policy deployment evidence is tied to dirty source digest
+  `5034c00aac599fae2925ed02f535f317128b6d5424d967ea3eae969118ec187a` and safety
+  backup `b82e04a0-0ca9-4a26-b8ff-e748d3f30df2`; no unverified latest HEAD or source
+  digest is asserted here.
+
+### Acceptance evidence
+
+- Functional PASS evidence includes the migration-106 run
+  `tests/artifacts/visual-qa/run-20260817T111924Z-m106-53327/m106-evidence.json`
+  and the CSRF-grant diagnostic run
+  `tests/artifacts/visual-qa/run-20260817T061700-csrf-grants/`. The m106 result
+  recorded OpenCode preference persistence, reload `200`, server revalidation
+  `200/200`, restored iframe, Chat A/B one-user/one-assistant turns, two recent
+  Context conversations, two latest messages, one latest checkpoint, no duplicate
+  messages, and no `401`/`429` loop.
+- The full human-paced browser-agent run
+  `tests/artifacts/visual-qa/run-20260817T162245Z-f70175c080/` covers 24 routes and
+  19 Settings views at desktop/mobile sizes: 86 states and 430 structured files.
+  It recorded zero `429`, HTTP, console, or page errors and rendered OpenCode.
+  Its sanitized bundle is retained under `sanitized-review/`.
+- QA Vision PASS is limited to the safe subset: 54 non-sensitive operational
+  states and 270 per-state files, with no blocker, unnamed controls, or viewport
+  overflow. The 32 protocol-sensitive states were excluded from QA Vision and
+  remain covered only by sanitized browser-agent evidence and functional checks;
+  no QA Vision review is claimed for them.
+- The pre-migration Chat reload failure remains historical evidence and is
+  superseded by the migration-106 and later rate-policy PASS evidence; it is not
+  a current documentation blocker.
+
+### Final finding reconciliation
+
+Retain only these `FOLLOW_UP` classifications: safe-policy trailing-slash
+behavior; Usage unmount cancellation; MCP report subprocess UID/startup
+stale-file cleanup; short-lived revoked-cookie physical expiry; and the 13 still
+applicable dependency advisories. No new roadmap task is opened automatically.
+There is no in-scope `BLOCKING` documentation defect after the targeted wording,
+command, policy-parity, and diff checks.
+
+### Work marker log (continued)
+<!-- (work-started) DOC-101 2026-08-17T19:16:54Z ingenium-docs -->
+<!-- (work-complete) DOC-101 2026-08-17T19:20:53Z ingenium-docs -->
+Evidence DOC-101: Directly affected canonical docs were reconciled against the
+runtime, Chat, CSRF migration 106, secret-isolation, MCP report, vault, project,
+safe-read, deployment, and browser evidence listed above. Targeted Markdown diff,
+generated safe-read parity, command/path, archive immutability, and append-only
+roadmap checks passed. No Docs Workspace mutation, source/test/config edit,
+follow-on dispatch, commit, or deployment was performed.
+
+## Final operational incident reconciliation (2026-08-17)
+
+This addendum records the final live Vault and production status scope. It is
+append-only: earlier task markers, evidence, retained full-site/operational
+QA Vision evidence, and FOLLOW_UP classifications remain unchanged. It does not
+claim that the Vault has been reinitialized or that a new passphrase exists.
+
+### Scoped completion state
+
+- **Live incident scope — COMPLETE:** The authorized reset and production status
+  acceptance are reconciled below; no new roadmap task is invented for this
+  incident and no automatic follow-up work is opened.
+- **Vault reset scope — COMPLETE:** Existing Vault task completion markers remain
+  authoritative; this addendum records the final reset outcome without duplicating
+  a completed marker.
+- **Production status scope — COMPLETE:** The Supervisor socket, process set,
+  application separation, deployment, and final `/status` evidence are recorded
+  below.
+
+### Authorized Vault reset outcome
+
+- The empty Vault reset completed under explicit user authorization after the
+  verified backup `3651f068-19ea-40bd-9fc6-f6b1b19106a4`. The strict dependency
+  check was zero. Post-reset status was `initialized: false`, `sealed: true`,
+  `nextAction: "initialize"`.
+- The Vault has not been reinitialized and no new passphrase was supplied. The
+  user must choose a new passphrase locally through the first-run initialization
+  flow. No provider, mail, or project deletion occurred.
+- A metadata-only audit sequence records the reset. This roadmap and its retained
+  evidence contain no secret or password.
+
+### Production status and deployment evidence
+
+- `/api/v1/services/status` uses the production Supervisor Unix socket
+  `/run/ingenium-supervisor/supervisor.sock` and reported an overall healthy
+  result with five required processes running: `ingenium-api`,
+  `ingenium-api-boundary`, `ingenium-dashboard`, `ingenium-gateway`, and
+  `restore-handoff`. Optional `restore-maintenance` was stopped/not started.
+  `synthesis-engine` and `email-client` remain separate application entries;
+  neither is a Supervisor process. There is no TCP `9001` listener.
+- The deployment safety backup is
+  `9288cd07-8f0b-4ba1-ac63-3a887a8871af`. Control-plane evidence is the healthy
+  `ingenium-control-plane` container
+  (`3a5be513a40857dd238eb14779e8d0b667da1268f88932b0861f9acc94b1202d`) using
+  image `sha256:60b0ed0fd683c8fc0006f3b6bb5d2af0ea4c03a4e7eb763247eb3425d86c4958`
+  with OCI revision `713c91407c6618c1934c5d5a79306903b1287372`.
+
+### Final `/status` visual evidence
+
+- Final status evidence is retained at
+  `tests/artifacts/visual-qa/run-20260817T223031Z-status-1139428/` and landmark
+  evidence at `tests/artifacts/visual-qa/run-20260817T224545Z-status-a11y/`.
+  The exact viewport sizes were `1440x900` and `390x844`; QA Vision is **PASS**
+  with no blocker.
+- The prior full-site and operational QA Vision evidence remains the claimed
+  coverage for the broader acceptance. Retain the existing FOLLOW_UP list:
+  safe-policy trailing-slash behavior; Usage unmount cancellation; MCP report
+  subprocess UID/startup stale-file cleanup; short-lived revoked-cookie physical
+  expiry; and the 13 still applicable dependency advisories.
+- No QA informational FATAL-state test gap is added because the current roadmap
+  conventions do not define a FATAL-specific classification. No automatic work
+  is opened.
+
+## Final learning-boundary reconciliation (2026-08-17)
+
+This append-only note records the protected learning-credential and OpenCode
+session acceptance evidence. It does not add an implementation task, mutate
+earlier markers, or mark current-session acceptance complete before the required
+parent-process restart.
+
+### Root causes and durable fix
+
+- **Root causes:** The parent OpenCode plugin did not have the workspace context
+  supplied only to the child MCP environment; the old credential had only
+  `projects:read`; and the wrapper mapped preflight/authorization failure to
+  `TOOL_STATE_UNAVAILABLE`.
+- **Durable fix:** Binding resolution now has a safe configured fallback while
+  the API remains the independently trusted authority. Learning uses an
+  operation-specific protected credential separate from general MCP and
+  repository-sync. Its exact seven scopes are `projects:read`,
+  `extraction:write`, `extraction:execute`, `synthesis:write`,
+  `synthesis:execute`, `pipeline:write`, and `observe:write`. The binding covers
+  project, workspace, launcher worktree, and audience; repository-local
+  credential files are ignored by Git and Docker context; credential purpose is
+  propagated to the child; extraction wording truthfully describes asynchronous
+  started/scheduled work; and synthesis forwards `sessionId`.
+
+### Deployment and fresh-session evidence
+
+- The deployment safety backup is `3f54221e-eccd-4bdd-bb43-b82d4ed28fba`.
+- Read-only current control-plane evidence is the running/healthy
+  `ingenium-control-plane` container ID
+  `a1963f6a1f4d91c41db73aa1671ef62679b474f2ae8529b1dfbe31ce5ab18139`, using
+  image `sha256:cdff14e5bc654564a5f04ce1b87f951809db1151463cc42459932b25129a71c8`,
+  OCI revision `713c91407c6618c1934c5d5a79306903b1287372`, and the recorded
+  source `https://github.com/jtmb/ingenium`. This does not claim that the dirty
+  worktree is deployed.
+- Fresh OpenCode session `ses_fed3b75b7ffejkWCtPUZjJ6k8u` is **PASS** for:
+  auto-observation extraction started; synthesis started/scheduled; extension
+  tool states enabled; extraction and synthesis stdio tools listed; synthesis
+  status pending `0`, processed `184`, incomplete `null`; and a healthy
+  scheduler.
+
+### Current-session restart boundary
+
+The current external OpenCode PIDs remain on the old loaded plugin state.
+Exactly one full OpenCode restart from `/home/brajam/repos/ingenium` remains
+required; restarting only an MCP child or hot-reloading a tool is
+insufficient. Current-session acceptance remains **PENDING** and must not receive
+a completion marker until that full restart has occurred.
+
+### Retained findings and worktree boundary
+
+Retain the non-blocking security `FOLLOW_UP` findings for the observe scope
+naming mismatch and ancestor symlink traversal, together with all prior retained
+follow-ups, including safe-policy trailing-slash behavior, Usage unmount
+cancellation, MCP report subprocess UID/startup stale-file cleanup, short-lived
+revoked-cookie physical expiry, and the retained dependency advisories. No new
+implementation task is opened automatically unless an existing roadmap contract
+records follow-up evidence. No credentials or credential values are recorded.
+
+No commit was made; the worktree remains dirty. No source, test, or configuration
+file, Docs Workspace page, deployment, delegation, QA, security review, or visual
+review was changed or run for this documentation reconciliation.
+
+## Current-session learning acceptance closure (2026-08-18)
+
+This append-only marker supersedes only the pending restart boundary above; its
+prior wording, retained `FOLLOW_UP`s, and worktree state remain unchanged.
+
+- **Learning-tool task/current-session acceptance:** **COMPLETE**.
+
+### Content-free runtime evidence
+
+- Full OpenCode restart completed. In this evidence context only, current
+  OpenCode PID `2069239` and MCP child PID `2069359` loaded the expected
+  project/workspace/worktree binding.
+- `auto_observe_now` returned `triggered/start`; settled extraction scanned `0`,
+  candidates `0`, created `0`, skipped `0`, and had `0` failed batches.
+- `synthesize_observations` returned `triggered/start`; completion reported
+  pending `0`, processed total `184`, latest processed `0`, and no incomplete
+  batch or error.
+- Scheduler healthy with no retry/failure loop; both learning-tool states are
+  enabled.
+- Evidence is metadata-only: no secrets, transcript content, provider
+  identities, or payload content are recorded. No commit was made; the
+  worktree remains dirty.
+
 ## Shared-memory rollout in progress (2026-08-25)
 
 This status is evidence-backed but not a completion claim. It preserves all
@@ -2852,6 +3144,39 @@ acceptance gates pass.
   omitted ownership/session identifiers in public projections, hash-only claim
   keys, and post-revocation `401`. Final bounded security acceptance remains open.
 
+#### 2026-08-25 canonical production recovery and migration-110 canary
+
+- The protected Runtime Manager map now contains only the authorized
+  `shared-memory-ingenium` mapping from `/home/brajam/repos/ingenium` to
+  `/workspace-validation/shared-memory-ingenium`; it remains owner-only, and the
+  owner-only `runtime-workspaces.json.backup-20260825T231450Z` backup retains the
+  pre-change bytes.
+- Runtime Manager was recreated without replacing the control plane or gateway.
+  The supported runtime API recovered existing runtime
+  `ce1ebd95-3f8c-4d60-87e8-aa0174c2f6d0`; the revoked
+  `acceptance-ingenium` tombstone remains revoked and is not mounted.
+- The stale user-runtime image was rebuilt, and the same runtime ID was
+  reprovisioned with
+  `ingenium-user-runtime:e2840445a90db2b2d2e211608eaf5ab42fef36b8` at image
+  `sha256:0b8e82cc97b76b249585043ab438049cbc241fb2e835997125b1b34ae0bdd23f`.
+  Runtime readiness and the web, provider, MCP, SSE, CLI, and VS Code routes pass;
+  a private Context request remains non-enumerating `404`.
+- A content-free migration-110 canary passed at baseline cursor `17`: first
+  publish/read/replay/ack at cursor `18`, second read empty, second publish at
+  cursor `19`, overlapping transforms `[1,0]`, and zero claims. All canary
+  sessions were closed.
+- After the canary, a fresh external MCP client completed initialization and two
+  consecutive tool-list requests over one held transport. It listed all seven
+  scoped tools, including `coordination_update`, `coordination_status`, and
+  `coordination_handoff`.
+- Focused verification passes: deployment static validation, control-plane
+  startup environment contract, Runtime Manager contract (`3/3`), runtime-route
+  fail-closed regression (`1/1` selected), and live-memory coordinator
+  regressions (`3/3` selected).
+- This is source, deployed-canary, and fresh external-MCP evidence only. It does
+  not replace the still-pending simultaneous A/B/C model-window proof or restart
+  replay.
+
 ### Current execution checklist
 
 - [x] Source foundation: canonical identity, runtime scopes, typed Context-backed
@@ -2861,7 +3186,7 @@ acceptance gates pass.
 - [x] Deployment foundation: external A/B loaded the coordinator in isolated host
   OpenCode processes and completed the sanitized changed-path proof with owned
   cleanup.
-- [ ] Runtime recovery: prove the final internal and external restart/recovery
+- [x] Runtime recovery: prove the final internal and external restart/recovery
   paths against the rollout build.
 - [ ] Three-window proof: run external A, external B, and internal C
   simultaneously and prove A/B/C cross-awareness, restart replay, independent
@@ -2892,11 +3217,11 @@ start or completion marker is added by this update. The checklist below
 supersedes the earlier execution checklist's commit timing while preserving its
 historical text and evidence.
 
-- [ ] External MCP connection blocker: exercise the configured protected-
+- [x] External MCP connection blocker: exercise the configured protected-
   credential and already-authorized supported grant path, retain the first
   actionable connection failure and causal remediation, and do not infer a
   credential cause or successful connection without its artifact.
-- [ ] Internal runtime recovery and deployment: rebuild/restart the rollout
+- [x] Internal runtime recovery and deployment: rebuild/restart the rollout
   source, recover internal C through the supported runtime path, and retain
   health plus restart evidence tied to the deployed build.
 - [ ] Three-window shared-memory proof: run external A, external B, and internal
@@ -2918,9 +3243,56 @@ historical text and evidence.
   checklist/marker state, then reconcile both before any terminal response; no
   open gate may be ignored.
 
-## Agent and skill cleanup source evidence (2026-08-26)
+### Failed three-window attempt (2026-08-25)
 
-This append-only source/configuration update adds no coordination completion marker and makes no deployment, visual, or three-window model claim.
+The finite attempt retained at
+`tests/artifacts/test-runs/run-20260825T205447Z-shared-memory-ingenium/`
+is a **FAIL**, not rollout evidence for completion. External A and B failed MCP
+readiness because the run-specific credential copies used the unsupported
+basename `run.credential`; the general extension binding requires
+`.ingenium-mcp-credential`. The harness continued incorrectly, so model-local
+A/B/C file operations do not prove shared operational memory. TodoWrite was
+also unavailable in the isolated agent configuration, and the later A2 request
+timed out without retry.
+
+The run credential, homes, sessions, claims, listeners, and synthetic files
+were cleaned. The persistent credential, authorized workspace, and runtime were
+preserved and reverified ready. All open checklist items above remain open;
+`COORD-103` stays in progress and `COORD-104`–`COORD-106` remain incomplete.
+TodoWrite is unavailable in this agent's tool surface, so no TodoWrite item was
+altered; this roadmap entry is the exact retained reconciliation state.
+
+### Causally remediated retry (2026-08-25)
+
+The prior readiness defects were remediated before one new finite attempt:
+run-specific credential copies used the required `.ingenium-mcp-credential`
+basename, and the premium execution profile now permits TodoWrite. A
+fresh isolated proof reached connected MCP and completed two `todowrite` calls.
+
+The attempt retained at
+`tests/artifacts/test-runs/run-20260825T213507Z-shared-memory-ingenium/` is still
+a **FAIL**. External A/B and internal C reached connected MCP readiness and a
+60,084 ms simultaneous health overlap. A completed its full typed lifecycle,
+but B1 exceeded its single 180-second model-request bound. Logs contain no
+corresponding transport failure, no deeper reproducible cause was established,
+and the semantic request was not retried. C1, A2/B2, restart replay,
+independent-write, and conflict gates remain unproven.
+
+Cleanup revoked the run credential and removed run-owned sessions, homes,
+listeners, processes, and synthetic files. A cleanup observer found zero active
+claims and peers. Persistent credential preflight returned 200; the authorized
+workspace and runtime were preserved ready. `COORD-103` remains in progress,
+`COORD-104`–`COORD-106` remain incomplete, and every open checklist item above
+stays open. The external A TodoWrite item completed before its run-owned session
+was deleted; TodoWrite remains unavailable in this agent's own tool surface, so
+there is no persistent TodoWrite item to reconcile.
+
+## Coordination and configuration evidence reconciliation (2026-08-26)
+
+This append-only evidence update does not add completion markers. `COORD-103`
+remains in progress and `COORD-104`–`COORD-106` remain incomplete. Source/config,
+deployed-canary, actual-model/session, and visual evidence below prove different
+boundaries and are not interchangeable.
 
 ### Agent configuration and skill-policy source evidence
 
@@ -2938,6 +3310,13 @@ This append-only source/configuration update adds no coordination completion mar
   profiles require nonempty initialization before work, updates after every
   implementation/evidence transition, terminal reconciliation, and explicit
   failure reporting. No completion is inferred merely from a roadmap marker.
+- Agent profile or root configuration changes require a full OpenCode restart.
+  The post-restart passive home check retained at
+  `tests/artifacts/visual-qa/run-20260826-post-restart-home/evidence.json` is
+  **BLOCKING**, not visual acceptance: both `1440x900` and `390x844` visits
+  received `307` from `/` and ended at `/login?returnTo=%2F`. Console/network,
+  accessibility, screenshots, and browser cleanup were retained, but the
+  authenticated dashboard home was not reached.
 
 ### Skill-taxonomy cleanup source evidence
 
@@ -2952,6 +3331,209 @@ This append-only source/configuration update adds no coordination completion mar
   `.opencode/skills/consolidation-map.json` and the 10 canonical skill trees.
   This is source/worktree evidence only; no repository-sync deployment is claimed
   by this docs update.
+
+### Deployed numeric canary
+
+- `tests/artifacts/test-runs/run-20260826T022523Z-numeric-context-revision-canary/result.json`
+  is **PASS** for the content-free deployed operational-memory boundary at source
+  revision `e2840445a90db2b2d2e211608eaf5ab42fef36b8`. It records revisions
+  `[0,1]`, unacknowledged restart replay, validated nonduplicate injection,
+  durable acknowledgement after restart, healthy control plane/runtime, database
+  integrity, and image provenance. No model was invoked, so this does not prove
+  three-window model behavior.
+
+### Actual three-window/model attempts
+
+- `run-20260826T011226Z-shared-memory-ingenium-final` is **FAIL** overall, but
+  retains a successful hint-free memory-derived B read: A published typed
+  operational memory, B decoded and read A's exact path, reported every typed
+  field category, wrote and checked its own path, and did not receive the path in
+  its prompt. The first failure was a harness literal/schema mismatch: it expected
+  unavailable prose (`A ready for peers`) rather than the privacy-preserving typed
+  projection. C propagation, concurrent/conflict, and restart gates were skipped;
+  owned cleanup passed.
+- `run-20260826T023126Z-shared-memory-ingenium-v2` is **FAIL**. A's numeric V2
+  publish passed, and B returned A's exact entry ID, decoded/read exact path, and
+  exact marker without prompt leakage. B nevertheless invented or changed action,
+  check, todo, status, current-task, numeric revision, and next-work fields. The
+  run stopped without semantic retry; C, duplicate-zero, concurrent/conflict, and
+  restart gates were skipped. Owned cleanup passed.
+- `run-20260826T033316Z-shared-memory-v2-final` is **FAIL** with
+  `actual_model_noncompliance`, not a source/runtime defect. B completed the
+  injected-path read but fabricated a different memory schema and used a Markdown
+  fence. No semantic retry occurred; C, peer, duplicate-zero, write/conflict, and
+  restart gates were skipped. Credential/session/process/file cleanup passed.
+- `run-20260826T043824Z-shared-memory-behavior-v2` failed before semantic work at
+  the first retained error, `C readiness timeout`. A and B reached connected MCP
+  readiness; C repeatedly returned healthy global/MCP/provider responses but did
+  not satisfy the runner's readiness condition before the bound. Its `events.json`
+  is empty, so it proves no model-memory gate.
+
+### Separate protected-learning boundary
+
+No new protected synthesis-credential result is inferred from the coordination
+runs or from unavailable tools in this docs agent. The accepted historical
+learning evidence remains the 2026-08-18 closure above. A new credential blocker
+may be recorded only with a retained failed configured-path artifact; none of the
+cited 2026-08-26 coordination artifacts supplies that evidence. No credential
+value was read, copied, or recorded during this reconciliation.
+
+### Reconciled open gates
+
+- [ ] Simultaneous external A, external B, and internal C exact typed-memory
+  cross-awareness through all required fields.
+- [ ] C publish plus exactly-once A/B receipt and duplicate-zero behavior.
+- [ ] Independent concurrent writes and same-path pre-write conflict blocking.
+- [ ] Restart replay once, durable acknowledgement, then zero duplicate replay.
+- [ ] Final bounded QA/security, authenticated visual acceptance where applicable,
+  deployment/health, and cleanup evidence.
+- [ ] TodoWrite and roadmap marker reconciliation before any completion marker.
+
+No `(work-complete)` marker is appended for `COORD-103`–`COORD-106`.
+
+### COORD-104/105 hardening and production canary (2026-08-26)
+
+- Source hardening now completes or quarantines a managed mutation before any
+  snapshot publish can fail, restricts managed Git to literal-path `add`, `mv`,
+  and `rm`, suppresses executable Git configuration and inherited execution
+  overrides, and requires the repository-sync path to retain and prove its
+  coarse claim through apply and manifest publication.
+- Focused source evidence passed: session coordinator (`29`), managed command
+  wrapper (`6`), extension repository/resource sync (`51`), Core MCP catalog
+  parity (`6`), Server authorization parity (`3`), the affected Core and API
+  coordination/repository suites, all four affected workspace typechecks, the
+  Extension build, 281-registration MCP transport parity, and `git diff --check`.
+- Production control plane, runtime gateway, and runtime manager were rebuilt
+  and recreated from the current source at revision
+  `5ea014a6624e88242ae40e03ce886b9ebaa020e3`. All three reached healthy/running
+  state; OCI provenance and database integrity passed. The supported runtime API
+  reprovisioned existing `shared-memory-ingenium` runtime
+  `ce1ebd95-3f8c-4d60-87e8-aa0174c2f6d0` to READY with a healthy backend and the
+  same revision label.
+- Deployed canaries passed the runtime coordination register, heartbeat, and
+  owned-close path. The deployed managed repository wrapper rejected both an
+  unsupported Git operation and option smuggling. Post-change synthesis
+  completed with zero pending observations and no errors.
+- This evidence closes the assigned source/deployment hardening boundary only.
+  It does not replace the open three-window/model, conflict, restart-replay,
+  bounded review, final cleanup, or scoped-commit gates above, so no
+  `(work-complete)` marker is appended.
+
+### Runtime activity canary and finite COORD-106 attempt (2026-08-26)
+
+- Runtime activity renewal is capability-authenticated, bound to the exact
+  runtime/workspace/worktree, requires a live coordination session, rejects
+  replay, and cannot extend beyond absolute expiry. The reconciler starts the
+  idle lease when a runtime reaches `READY`, and the external MCP bridge forwards
+  the bound runtime ID. Focused Core, API, and Extension tests and typechecks
+  passed, together with the Extension build and 281-registration transport
+  parity.
+- The deployed finite canary retained at
+  `tests/artifacts/test-runs/run-20260826T110344Z-coord106-three-window/runtime-activity-canary.json`
+  is **PASS**: an active session renewed a 60-second lease across a 75-second
+  interval, renewed again after the internal OpenCode process restarted under a
+  different PID, and then allowed inactivity to stop the runtime. The production
+  30-minute idle lease was restored afterward; the control plane and authorized
+  runtime were reverified healthy at revision
+  `5ea014a6624e88242ae40e03ce886b9ebaa020e3`. This is deployed runtime evidence,
+  not three-window model acceptance.
+- The one fresh finite model attempt in the same run directory is **FAIL**. A, B,
+  and C reached simultaneous connected readiness, A published typed operational
+  memory, and B's captured `COORDINATION_MEMORY_V2` entry exactly matched the
+  authoritative A entry, including action kinds, passing check, in-progress todo,
+  idle status, numeric context revision, `continue_task`, and the encoded changed
+  path. B then called the unsupported MCP resource-list method, made two malformed
+  Bash calls, and completed a Read with an empty path instead of decoding and
+  reading A's exact path. `machine.json` therefore stopped at the first behavioral
+  failure. This is `actual_model_noncompliance`; the retained transform and
+  authoritative-memory equality do not identify a source/runtime projection
+  defect.
+- The attempt cannot satisfy the exact version contract independently of that
+  first failure: external A/B reported OpenCode `1.18.23`, while internal C
+  reported `1.18.9`. No semantic retry occurred. C publication and A/B receipt,
+  duplicate-zero behavior, concurrent and conflicting writes, crash/quarantine,
+  outage, generation convergence, and restart replay were not executed. The
+  runner's `finally` path stopped A/B listeners and internal C, but run-session
+  deletion and synthetic-file cleanup were after the failed assertion and remain
+  unproven.
+- The retained first failure is authoritative; it is not converted to partial
+  PASS by the runtime canary or source tests. The three-window, cleanup, bounded
+  QA/security, scoped-commit, TodoWrite, and marker gates remain open. No
+  `(work-complete)` marker is appended for `COORD-103`–`COORD-106`.
+
+### Corrected exact-version COORD-106 attempt (2026-08-26)
+
+- The corrected finite run retained at
+  `tests/artifacts/test-runs/run-20260826T153535Z-coord106-opencode-1.18.9/`
+  is **FAIL**. Its pre-model preflight and live process inspection both prove
+  OpenCode `1.18.9`, `ingenium-software-engineer-premium`,
+  `openai/gpt-5.6-sol`, variant `high`, connected OpenAI and coordination MCP,
+  and the actual model-visible `bash`, `read`, `todowrite`, and `apply_patch`
+  tool schemas for external A, external B, and internal C.
+- A, B, and C reached simultaneous readiness under `shared-memory-ingenium`.
+  Internal C's authenticated activity heartbeat kept the deployed runtime
+  running and healthy across the bounded 65-second limiter window. B and C then
+  completed the clean-cursor preparation turns without tools.
+- The first behavioral A turn completed `todowrite`, but its requested
+  `apply_patch` ended in an error before the marker file existed. The subsequent
+  exact-file `read` and reserved build check also ended in errors, so A never
+  published the required typed changed-path memory. The runner stopped at the
+  first assertion. The retained privacy-safe projection proves the failed tool
+  states but intentionally omits tool error text; bounded post-run inspection
+  therefore does not establish a reproducible source/runtime defect. This
+  failed real model/tool artifact is not retried or converted into acceptance.
+- Causal gates after A publication were not executed: A-to-B, A+B-to-C,
+  C-to-A/B, duplicate-zero behavior, independent and conflicting writes,
+  crash/quarantine recovery, outage fail-closed, resource-sync generation
+  convergence, and restart replay remain open.
+- Owned failure cleanup passed: all three run sessions returned 200 on deletion,
+  both scoped credentials were revoked, private homes and synthetic paths were
+  removed, external ports closed, and the runtime remained running and healthy.
+  All 16 retained JSON evidence files match `checksums.json`; a retained privacy
+  audit found no credential value, prompt, raw session/fence/claim identifier,
+  command, or tool output in retained JSON.
+- `COORD-106` remains incomplete. Bounded QA/security, a scoped rollout commit,
+  TodoWrite closure, and the `(work-complete)` marker remain open; no completion
+  marker is appended.
+
+### COORD-106 A-only ApplyPatch diagnosis (2026-08-26)
+
+- The bounded private diagnostic retained at
+  `tests/artifacts/test-runs/run-20260826T162247Z-coord106-a-apply-patch-diagnostic/`
+  is **PASS** for root-cause classification only. One external A process used
+  OpenCode `1.18.9`, `ingenium-software-engineer-premium`,
+  `openai/gpt-5.6-sol`, variant `high`, the same project/workspace binding, and
+  the same requested operation pattern as the failed acceptance turn.
+- OpenCode exposed the supported `apply_patch` schema with required `patchText`.
+  The model supplied that key and an exact four-line Add File envelope whose
+  normalized path and payload hashes matched the requested values. The
+  coordinator parser entered its before hook, but the claim failed before tool
+  execution with `request_failed` at bridge stage `call`; OpenCode surfaced the
+  fixed coordinator-unavailable error. The target was absent before and after,
+  proving zero mutation.
+- A direct same-shape path claim returned `409 EPOCH_QUARANTINED`. After the
+  bounded limiter window, a fresh worktree scan recovered the epoch with `200`;
+  the immediate same-shape claim and release both returned `200`. A focused
+  source-loaded coordinator canary then recorded `claimed` followed by
+  `released`, again with zero mutation. This excludes an unsupported tool
+  schema, malformed model patch, coordinator parser/rewrite defect, and OpenCode
+  ApplyPatch engine defect. The product failed closed on a quarantined epoch.
+- The malformed-model conditional is not met, and `write` is not model-visible
+  in the exact `1.18.9` Premium/Sol/high tool catalog, so the final harness is
+  not changed to request Write. The next proving gate is a separately authorized
+  semantic acceptance preceded immediately by successful epoch recovery and a
+  zero-mutation ApplyPatch preclaim/release canary, with no concurrent mutation
+  writer between that canary and the model turn.
+- Environment-gated tracing now retains only normalized claim state and an
+  allowlisted error code; no raw payload or API error body is propagated. The
+  affected MCP client test file passed `17/17`, the exact coordinator trace test
+  passed `1/1`, Extension typecheck and `git diff --check` passed, and no causal
+  source defect required deployment.
+- Both diagnostic credential generations were revoked, credential IDs and files,
+  the OpenCode session/home, private traces, synthetic paths, and listener were
+  removed. All 19 retained JSON files match `checksums.json` and pass the
+  credential/prompt/patch/source/session/fence/claim privacy scan. `COORD-106`
+  remains incomplete; no semantic retry, completion marker, or commit is claimed.
 
 ### Deployed COORD-103–COORD-106 acceptance and rollout completion (2026-08-27)
 

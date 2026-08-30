@@ -5,10 +5,10 @@ description: Canonical contract for the Documentation Workspace API — routes, 
 
 # Docs Workspace Reference — Canonical Contract
 
-> **STATUS**: ✅ ROUTES VERIFIED (W1B) + ✅ DASHBOARD UI — The Express API implements **52 canonical endpoints** (51 in `docs.ts` + 1 in `docs-ai.ts`). All 6 backward-compatibility aliases have been **removed** from the API. All routes have DTO camelCase mapping, ownership checks, and error mapping.
+> **STATUS**: ✅ ROUTES VERIFIED (W1B) + ✅ DASHBOARD UI — The Express API implements **53 canonical route registrations** (52 in `docs.ts` + 1 in `docs-ai.ts`). All 6 backward-compatibility aliases have been **removed** from the API. All routes have DTO camelCase mapping, ownership checks, and error mapping.
 > 🟢 **MCP handlers: ALIGNED** — All 7 handler defects verified as fixed in `services/ingenium-server/lib/tools/docs.ts`. Handlers use canonical paths with pageId scoping.  
 > 🟢 **Dashboard client: ALIGNED** — All paths verified in `services/ingenium-dashboard/src/lib/api.ts`. PUT (not PATCH), `expectedRevision` camelCase, pageId in all comment/version/trash routes.  
-> 🟢 **DOCS_ENDPOINTS catalog: ALIGNED** (49 entries; 3 source-verified gaps in `mcp-tool-catalog.ts`) — Gaps: slug-lookup `GET /pages` (not in array), non-resolve `PUT /comments/:commentId` (not in array), and `POST /docs/ai` (docs-ai.ts, separate router).
+> 🟢 **DOCS_ENDPOINTS catalog: ALIGNED** (48 Documentation-category tools share 49 endpoint strings; 3 source-verified documentation gaps in `mcp-tool-catalog.ts`) — Gaps: slug-lookup `GET /pages` (not in array), non-resolve `PUT /comments/:commentId` (not in array), and `POST /docs/ai` (docs-ai.ts, separate router). Repository synchronization is cataloged separately under the Repository Sync category.
 > 🟢 **Dashboard UI: IMPLEMENTED** — `/docs` is an immersive responsive 3-pane workspace with tree refresh/mutations, named create dialog, explicit publish, archive/trash/restore, move with cycle prevention, rename, project links, attachments, panel tabs (Info/Tags/Backlinks/Comments/History/Linked/Files/Trash), FTS5 search, template picker, and import/export entry actions. `/standalone` routes into `/docs?space=...` as a docs-space selector/creator. Navigation Docs link is active. See [Dashboard UI](#dashboard-ui) below.
 > 🔴 **Rich editor proof pending**: The Markdown editor has CodeMirror source and split-preview modes; a WYSIWYG TipTap editor and focused E2E proof remain pending.
 >
@@ -48,7 +48,7 @@ MCP callers, and explicitly authorized workflows.
 ## 🔴 Rescue Contract Ledger
 
 🟢 **W1A Core-fixed items** are verified at the `packages/ingenium-core` level by unit tests (89+ tests).  
-🟢 **W1B Route-implemented items** are verified by reading `services/ingenium-api/lib/routes/docs.ts` + `docs-ai.ts` (51 canonical endpoints in docs.ts + 1 in docs-ai.ts = 52 route registrations; all 6 aliases removed from API).  
+🟢 **W1B Route-implemented items** are verified by reading `services/ingenium-api/lib/routes/docs.ts` + `docs-ai.ts` (52 canonical route registrations in docs.ts + 1 in docs-ai.ts = 53 route registrations; all 6 aliases removed from API).
 🟢 **Dashboard UI** is verified by `services/ingenium-dashboard/src/app/docs/page.tsx` and `services/ingenium-dashboard/src/app/standalone/page.tsx`: 3-pane workspace, tree refresh/mutations, create/publish/archive/move/rename, panel tabs, attachments, project links, search, templates, import/export, trash, and docs-space selection/creation. Navigation Docs link is active.
 🔴 **Pending**: rich TipTap WYSIWYG editor and focused E2E Playwright proof.
 
@@ -60,7 +60,7 @@ MCP callers, and explicitly authorized workflows.
 | 4 | **Trash endpoints missing** | API | ✅ ROUTE IMPL | `GET /spaces/:spaceId/trash` (list, line 634) and `DELETE /spaces/:spaceId/trash` (purge all, line 646) implemented. Dashboard UI: `TrashPanel` component in right sidebar with archive/restore per page and purge-all button. Soft-delete (`handleArchive`) sends page to trash, restore available from trash tab. |
 | 5 | **Slug-based page lookup broken** | MCP → API | ✅ ROUTE IMPL | `GET /pages?spaceId=&slug=` implemented at line 371, uses core `getPageBySlug()`. MCP handler `docsGetPage` calls correct path at line 71. Dashboard UI: pages selected by URL `?page=<id>` param. |
 | 6 | **Slug-based space lookup broken** | MCP → API | ✅ ROUTE IMPL | `GET /spaces?slug=` implemented at line 201, uses core `getSpaceBySlug()`. MCP handler `docsGetSpace` calls correct path at line 22. Dashboard UI: `/docs?space=<id>` param selects space, `/standalone?page=docs` lists spaces and routes into `/docs?space=...`. |
-| 7 | **DOCS_ENDPOINTS mismatch** — 3 of 48 paths missing (not 11+ wrong) | Catalog | 🟢 W1B CALLER ALIGNED | `mcp-tool-catalog.ts:233-283` has 48 entries. Verified: 0 wrong paths. Missing: `GET /pages` (slug lookup), `PUT /pages/:id/comments/:commentId` (non-resolve), `POST /docs/ai` (docs-ai.ts). All other routes present with correct verb+path. |
+| 7 | **DOCS_ENDPOINTS mismatch** — 3 documentation paths missing from the 49-endpoint-string Documentation-category array (not 11+ wrong) | Catalog | 🟢 W1B CALLER ALIGNED | `mcp-tool-catalog.ts:334-384` has 49 endpoint strings shared by 48 Documentation-category tools. Verified: 0 wrong paths. Missing: `GET /pages` (slug lookup), `PUT /pages/:id/comments/:commentId` (non-resolve), and `POST /docs/ai` (docs-ai.ts, separate router). The `POST /docs/repository/sync` route is represented by the separate Repository Sync category. |
 | 8 | **Project link MCP handler sends `linkedProjectId: number`** | MCP → API | 🟢 W1B CALLER ALIGNED | `docsLinkProject` (line 298) now uses `projectId: string` param and POST `/docs/pages/${pageId}/projects`. `docsUnlinkProject` (line 304) uses DELETE `/docs/pages/${pageId}/projects/${encodeURIComponent(linkedProjectId)}`. Both verified from source. |
 | 9 | **`saveAttachment` uses `INSERT OR REPLACE`** | Core | ✅ FIXED | Changed to `ON CONFLICT(page_id, filename) DO UPDATE` in `docs.ts:986-994`. HARD RULE #11 compliant. Tested. |
 | 10 | **No trash/prune lifecycle** | API | ✅ ROUTE IMPL | `GET /spaces/:spaceId/trash` (line 634), `DELETE /spaces/:spaceId/trash` (line 646). Core `purgeArchivedPages()`, `listArchivedPages()` at lines 376-393. |
@@ -675,13 +675,13 @@ For the older direct file-source ingestion path, `POST /api/v1/rag/ingest` and
 
 See [../concepts/architecture.md](../concepts/architecture.md) for the full RAG indexing architecture, embedding strategy, chunker details, and citation format.
 
-## MCP Tool Catalog (48 Documentation Tools — 🟢 CALLER ALIGNED)
+## MCP Tool Catalog (48 Documentation Tools; 49 endpoint strings — 🟢 CALLER ALIGNED)
 
-All tools are in the `"Documentation"` category, default-enabled, and per-project scoped. The canonical tool names and their mapping to API endpoints are defined in [mcp-tool-catalog.ts](../../packages/ingenium-core/lib/tools/mcp-tool-catalog.ts) (the `DOCS_ENDPOINTS` array at line 233).
+All tools are in the `"Documentation"` category, default-enabled, and per-project scoped. The canonical tool names and their mapping to API endpoints are defined in [mcp-tool-catalog.ts](../../packages/ingenium-core/lib/tools/mcp-tool-catalog.ts) (the `DOCS_ENDPOINTS` array at line 334).
 
-**Status: 🟢 ALIGNED.** The `DOCS_ENDPOINTS` array at `mcp-tool-catalog.ts:233-283` contains **49 entries** (source-verified count; includes `GET /api/v1/docs/stats` at line 282). All 6 backward-compat aliases have been **removed** from `docs.ts`.
+**Status: 🟢 ALIGNED.** The `DOCS_ENDPOINTS` array at `mcp-tool-catalog.ts:334-384` contains **49 endpoint strings** shared by **48 Documentation-category tools** (source-verified counts; includes `GET /api/v1/docs/stats` at line 383). All 6 backward-compat aliases have been **removed** from `docs.ts`.
 
-All canonical routes present except 3 source-verified gaps (not in array):
+All Documentation-category routes are present except 3 source-verified gaps (not in the array):
 1. `GET /api/v1/docs/pages` (slug lookup, docs.ts line 371 — registered with query params, no param-capture conflict with `GET /pages/:id`)
 2. `PUT /api/v1/docs/pages/:id/comments/:commentId` (non-resolve comment update, docs.ts line 1072 — inline DB update, no core function)
 3. `POST /api/v1/docs/ai` (docs-ai.ts — separate router, not in DOCS_ENDPOINTS)

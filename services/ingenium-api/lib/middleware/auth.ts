@@ -88,9 +88,9 @@ function cookieValue(req: Request, name: string): string | undefined {
  * is the narrowly scoped exception because an OAuth provider cannot attach the
  * local API credential to its browser redirect.
  *
- * Placement in the middleware chain matters: auth sits AFTER rate limiting so
- * brute-force attempts are throttled before the constant-time comparison runs.
- * 401 vs 403 distinguishes "missing/invalid header" from "wrong token provided".
+ * Placement in the middleware chain matters: auth sits after the strict
+ * pre-auth limiter. Only allowlisted browser GET requests receive their separate
+ * session-aware read allowance after this middleware resolves the session.
  *
  * 🔴 Token loading and comparison are centralized in api-token.ts so runtime-file
  * and inline configuration have the same strength and timing-safe guarantees.

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, request as httpRequest, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
@@ -23,7 +22,7 @@ import {
   CONTEXT_SNAPSHOT_INGEST_PATH,
   contextSnapshotIngestRouter,
 } from "../lib/routes/context-snapshot-ingest.js";
-import { compatibilityAuthHeaders } from "./http-fixtures.js";
+import { closeHttpServer, compatibilityAuthHeaders, listenOnLoopback } from "./http-fixtures.js";
 
 const API_TOKEN = "a".repeat(32);
 const primaryProjectName = "snapshot-ingest-primary";
@@ -169,17 +168,12 @@ beforeEach(async () => {
   app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
   app.use(errorHandler);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      origin = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  origin = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
   if (server) {
-    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    await closeHttpServer(server);
   }
   server = undefined;
   resetDbForTest();

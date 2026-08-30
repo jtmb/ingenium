@@ -588,7 +588,7 @@ describe("opencodeClient — method routing", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.sendPrompt("ses_123", {
-      text: "Hello",
+      messageID: "msg_000000000001abcdefghijklmN",
       parts: [{ type: "text", text: "Hello" }],
     });
 
@@ -596,7 +596,10 @@ describe("opencodeClient — method routing", () => {
     const init = fetchSpy.mock.calls[0][1] as RequestInit;
     expect(url).toContain("/session/ses_123/message");
     expect(init.method).toBe("POST");
-    expect(init.body).toContain("Hello");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      messageID: "msg_000000000001abcdefghijklmN",
+      parts: [{ type: "text", text: "Hello" }],
+    });
   });
 
   it("createSession() calls POST /session", async () => {

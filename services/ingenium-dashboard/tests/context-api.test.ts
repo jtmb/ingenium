@@ -68,4 +68,29 @@ describe("context API client", () => {
       }),
     });
   });
+
+  it("links and persists a runtime-scoped completed chat turn", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ data: { id: "conversation-id", revision: 0 } }),
+    });
+    installDashboardFetchMock(fetchMock);
+    const runtimeId = "11111111-1111-4111-8111-111111111111";
+
+    await api.context.chat.link({ runtimeId, sessionId: "session/id", title: "Chat" }, "project/one");
+    await api.context.chat.persistTurn("conversation/id", {
+      runtimeId,
+      sessionId: "session/id",
+      userMessageId: "user/id",
+      assistantMessageId: "assistant/id",
+      userContent: "Question",
+      assistantContent: "Answer",
+      expectedRevision: 0,
+    }, "project/one");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/context/chat-sessions/link?project=project%2Fone");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/context/conversations/conversation%2Fid/chat-turns?project=project%2Fone");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+  });
 });

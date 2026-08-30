@@ -99,19 +99,6 @@ try {
 }
 NODE
 
-mkdir -p "$RUN_ROOT/package/.config/opencode/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/node_modules/tool"
-printf '#!/bin/sh\n' > "$RUN_ROOT/package/.config/opencode/node_modules/tool/cli"
-ln -s ../tool/cli "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool"
-helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660
-[[ "$(readlink "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool")" == ../tool/cli ]] \
-  || fail 'contained package-manager executable link changed during validation'
-ln -s ../../../../../protected "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
-if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
-  fail 'escaping package-manager executable link was accepted'
-fi
-[[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
-  || fail 'escaping package-manager link changed the protected target'
-
 mkdir -p "$RUN_ROOT/valid"
 helper directory "$RUN_ROOT/valid/config" "$uid" "$gid" 2770
 helper directory "$RUN_ROOT/valid/config/opencode" "$uid" "$gid" 2770
@@ -129,4 +116,4 @@ restart_state="$(stat -c '%u:%g:%a' "$RUN_ROOT/valid/config")|$(stat -c '%u:%g:%
 [[ "$(grep -Fc 'node /app/scripts/validate-root-entrypoint-chain.mjs' "$ROOT/scripts/docker-entrypoint.sh")" -eq 2 ]] \
   || fail 'immutable root chain is not revalidated after persistent setup'
 
-printf 'PASS: persistent path provisioning accepts contained package links and rejects unsafe links, non-directories, escapes, and races\n'
+printf 'PASS: persistent path provisioning rejects links, non-directories, escapes, and races while preserving restart metadata\n'

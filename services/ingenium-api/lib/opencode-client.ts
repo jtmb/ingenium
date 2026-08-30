@@ -69,6 +69,7 @@ export interface FilePartInput {
 
 /** Shape for prompt send request body (v1.18.9 contract) */
 export interface SendPromptBody {
+  messageID?: string;
   parts: Array<TextPartInput | FilePartInput>;
   model?: { providerID: string; modelID: string };
   agent?: string;

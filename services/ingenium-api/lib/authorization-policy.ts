@@ -122,6 +122,27 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     const permission = permissionFor(req as Request);
     return { action: `docs.${permission}`, resource: "docs", permission, target: "organization", sensitive: permission !== "read" };
   }
+  if (req.method === "GET" && req.path === "/api/v1/vault/empty-reset") {
+    return {
+      action: "vault.empty-reset.inspect",
+      resource: "vault",
+      permission: "admin",
+      target: "installation",
+      sensitive: true,
+      browserSessionOnly: true,
+    };
+  }
+  if (req.method === "POST" && req.path === "/api/v1/vault/empty-reset") {
+    return {
+      action: "vault.empty-reset.reset",
+      resource: "vault",
+      permission: "admin",
+      target: "installation",
+      sensitive: true,
+      stepUp: true,
+      browserSessionOnly: true,
+    };
+  }
   if (req.method === "POST" && /^\/api\/v1\/vault\/(initialize|unseal|seal)$/.test(req.path)) {
     return {
       action: "vault.lifecycle.admin",

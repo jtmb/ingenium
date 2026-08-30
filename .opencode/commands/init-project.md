@@ -5,11 +5,11 @@ agent: ingenium-orchestrator
 
 # `/init-project` — deterministic repository sync
 
-Invoke the dedicated authenticated MCP repository-sync operation. The operation
-accepts the verified worktree manifest and applies it through the configured MCP
-stdio transport; it is not a direct API/CLI `repositorySync` call and does not
-perform direct database synchronization. Do **not** enumerate files into MCP
-`*_create` calls or hardcode a project name.
+Run the packaged `ingenium-init-project` entry point. It performs the bounded
+local repository scan and submits one verified manifest through the dedicated
+authenticated MCP `repository_sync` operation. It never synchronizes the
+database directly. Do **not** enumerate files into MCP `*_create` calls, call a
+mutation REST endpoint, or hardcode a project name.
 
 ## Arguments
 
@@ -29,16 +29,16 @@ Optional scope:
 - `--project <name>` — use a validated project name for this invocation. It
   takes precedence over `INGENIUM_PROJECT` and the validated worktree basename.
 
-The MCP operation exposes the complete non-interactive contract; do not invoke
-an extension CLI or API endpoint as a substitute.
+The packaged entry point exposes the complete non-interactive contract; do not
+substitute resource-specific mutation loops or direct API calls.
 
 ## Execution contract
 
-1. From the active worktree, call the dedicated MCP repository-sync operation in
-   dry-run or apply mode; append the Docs-only scope and `--project <name>` when
-   an explicit validated target is required. The operation is the only supported
-   repository projection entry point.
-2. The MCP operation resolves the project with validated `--project` first, then
+1. From the active worktree, run `ingenium-init-project` in dry-run or apply mode;
+   append `--docs-only` and `--project <name>` when needed. The entry point
+   preflights the protected repository-sync credential and uses the configured
+   MCP stdio transport for projection.
+2. The entry point resolves the project with validated `--project` first, then
    validated `INGENIUM_PROJECT`, otherwise a validated worktree basename; it
    never defaults to `global-default`.
 3. For `all` scope, lineage-proven legacy tombstone cleanup runs before the full
@@ -47,7 +47,7 @@ an extension CLI or API endpoint as a substitute.
    otherwise empty mapped legacy directory, then removes that directory. The
    consolidation map and canonical source indexes remain untouched. `--docs-only`
    does not run tombstone cleanup.
-4. Report its JSON result. Surface errors without retrying with resource-specific
+4. Report the JSON result. Surface errors without retrying with resource-specific
    create/update loops. Rebuild/restart the extension and restart OpenCode when
    the transport or plugin source changes; a repository content change alone is
    consumed by the next sync lifecycle event.

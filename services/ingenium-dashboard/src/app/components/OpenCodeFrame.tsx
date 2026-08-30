@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { useRuntimeLaunch, useRuntimeWorkspace } from "@/lib/use-runtime-launch";
+import { useRuntimeLaunch } from "@/lib/use-runtime-launch";
+import { useRuntime } from "@/lib/RuntimeContext";
 import RuntimeWorkspacePicker from "./RuntimeWorkspacePicker";
 
 interface OpenCodeFrameProps {
@@ -34,7 +35,7 @@ export default function OpenCodeFrame({
   const modeRef = useRef(mode);
   const [frameError, setFrameError] = useState<{ mode: "web" | "cli"; message: string } | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
-  const workspace = useRuntimeWorkspace();
+  const { workspace } = useRuntime();
   const webLaunch = useRuntimeLaunch("web", workspace);
   const cliLaunch = useRuntimeLaunch("cli", workspace, cliMounted);
   const activeLaunch = mode === "web" ? webLaunch : cliLaunch;

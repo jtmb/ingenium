@@ -10,6 +10,13 @@ const compose = read("docker-compose.yml");
 const dashboardRunner = read("scripts/run-dashboard.sh");
 const healthcheck = read("scripts/healthcheck.sh");
 const gateway = read("nginx/gateway.conf");
+const apiConfig = read("services/ingenium-api/config/index.ts");
+const generatedSafeReads = read("nginx/dashboard-safe-reads-map.conf");
+const safeReadPolicy = JSON.parse(read("services/ingenium-api/config/dashboard-safe-reads.json")) as {
+  evidence: { runId: string; networkStates: number; observedGetRequests: number; safeGetRequests: number; strictGetRequests: number; observedStrictNonGetRequests: number; maxSinglePageFanout: number; maxSinglePageApiRequests: number; humanPacedTransitionIntervalMs: number };
+  safeRoutes: Array<{ template: string; observedCount: number }>;
+  observedStrictRoutes: Array<{ template: string; observedCount: number }>;
+};
 const dashboardProxy = read("nginx/proxy-dashboard.conf");
 const vscodeProxy = read("nginx/proxy-vscode.conf");
 const compatibilityAliases = read("nginx/runtime-aliases-compatibility.conf");
@@ -40,9 +47,9 @@ function locationBlock(location: string): string {
 
 function dashboardLocationFor(requestTarget: string): string {
   const pathname = new URL(requestTarget, "http://gateway.local").pathname;
-  return pathname.startsWith("/_next/static/")
-    ? locationBlock("location ^~ /_next/static/ {")
-    : locationBlock("location / {");
+  if (pathname.startsWith("/_next/static/")) return locationBlock("location ^~ /_next/static/ {");
+  if (pathname.startsWith("/api/v1/")) return locationBlock("location ^~ /api/v1/ {");
+  return locationBlock("location / {");
 }
 
 describe("dashboard deployment static contract", () => {
@@ -53,7 +60,7 @@ describe("dashboard deployment static contract", () => {
 
   it("copies standalone public assets into the runtime image", () => {
     expect(dockerfile).toContain(
-      "COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/public ./services/ingenium-dashboard/public",
+      "COPY --from=builder --chown=root:root /app/services/ingenium-dashboard/public ./services/ingenium-dashboard/public",
     );
   });
 
@@ -62,14 +69,15 @@ describe("dashboard deployment static contract", () => {
     expect(compose).toContain('- "127.0.0.1:4097:4097"');
     expect(compose).not.toContain("3002");
     expect(compose).not.toMatch(/(?:^|\n)\s*-\s*"?(?:127\.0\.0\.1:)?409[89]:409[89]/);
-    expect(dashboardRunner).toContain('INGENIUM_API_TOKEN_FILE="$token_file"');
+    expect(dashboardRunner).toContain('INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE="$token_file"');
     expect(dashboardRunner).toContain("exec env -i");
     expect(dashboardRunner).not.toContain('INGENIUM_API_TOKEN="$token_file"');
     expect(dashboardRunner).toContain("node /app/services/ingenium-dashboard/server.js");
   });
 
-  it("exempts only normalized immutable Next assets from the dashboard request limiter", () => {
+  it("separates immutable assets, safe API reads, and strict dashboard traffic", () => {
     const assets = locationBlock("location ^~ /_next/static/ {");
+    const api = locationBlock("location ^~ /api/v1/ {");
     const dynamic = locationBlock("location / {");
 
     expect(dashboardServer).toContain("server_name _;");
@@ -84,17 +92,24 @@ describe("dashboard deployment static contract", () => {
     expect(assets).not.toContain("add_header Cache-Control");
 
     expect(dynamic).toContain("limit_req zone=dashboard_request burst=60 nodelay;");
+    expect(api).toContain("limit_req zone=dashboard_api_read burst=360 nodelay;");
+    expect(api).toContain("limit_req zone=dashboard_api_strict burst=60 nodelay;");
+    expect(api).not.toContain("limit_req zone=dashboard_request");
+    expect(gateway).toContain("limit_req_zone $dashboard_api_read_limit_key zone=dashboard_api_read:10m rate=60r/s;");
+    expect(gateway).toContain("limit_req_zone $dashboard_api_strict_limit_key zone=dashboard_api_strict:10m rate=30r/s;");
+    expect(gateway).toContain("include /app/nginx/dashboard-safe-reads-map.conf;");
+    expect(gateway).toContain("add_header Retry-After \"1\" always;");
     for (const requestTarget of [
       "/",
       "/?settings",
       "/?_rsc",
       "/api",
-      "/api/v1/projects",
       "/projects",
       "/_next/data/build/projects.json",
     ]) {
       expect(dashboardLocationFor(requestTarget)).toBe(dynamic);
     }
+    expect(dashboardLocationFor("/api/v1/projects")).toBe(api);
     for (const requestTarget of [
       "/_next/static/chunks/app.js",
       "/_next/static/chunks/app.js?cache-bust=1",
@@ -109,6 +124,76 @@ describe("dashboard deployment static contract", () => {
     ]) {
       expect(dashboardLocationFor(requestTarget)).toBe(dynamic);
     }
+  });
+
+  it("models the observed safe-read sweep without weakening protected requests", () => {
+    const safeBurst = Number(gateway.match(/dashboard_api_read burst=(\d+) nodelay/)?.[1]);
+    const strictBurst = Number(gateway.match(/dashboard_api_strict burst=(\d+) nodelay/)?.[1]);
+    const strictSustainedRate = Number(gateway.match(/dashboard_api_strict:10m rate=(\d+)r\/s/)?.[1]);
+    const apiStrictRequestsPerMinute = Number(apiConfig.match(/INGENIUM_API_RATE_LIMIT \?\? "(\d+)"/)?.[1]);
+
+    expect(safeReadPolicy.evidence).toEqual({ runId: "run-20260817T134326Z-324949", networkStates: 86, observedGetRequests: 329, safeGetRequests: 26, strictGetRequests: 303, observedStrictNonGetRequests: 51, maxSinglePageFanout: 12, maxSinglePageApiRequests: 13, humanPacedTransitionIntervalMs: 10000 });
+    expect(safeReadPolicy.safeRoutes).toHaveLength(9);
+    expect(safeReadPolicy.safeRoutes.reduce((total, route) => total + route.observedCount, 0)).toBe(26);
+    expect(safeReadPolicy.observedStrictRoutes.reduce((total, route) => total + route.observedCount, 0)).toBe(303);
+    expect(safeReadPolicy.evidence.maxSinglePageFanout).toBeLessThanOrEqual(strictBurst);
+    expect(safeReadPolicy.evidence.maxSinglePageApiRequests).toBeLessThanOrEqual(strictBurst);
+    expect(safeReadPolicy.evidence.maxSinglePageApiRequests * (1000 / safeReadPolicy.evidence.humanPacedTransitionIntervalMs)).toBeLessThanOrEqual(strictSustainedRate);
+    expect(safeReadPolicy.evidence.maxSinglePageApiRequests * (60_000 / safeReadPolicy.evidence.humanPacedTransitionIntervalMs)).toBeLessThanOrEqual(apiStrictRequestsPerMinute);
+    const humanPacedStrictRequestsPerMinute = (safeReadPolicy.evidence.strictGetRequests + safeReadPolicy.evidence.observedStrictNonGetRequests)
+      / safeReadPolicy.evidence.networkStates * (60_000 / safeReadPolicy.evidence.humanPacedTransitionIntervalMs);
+    expect(humanPacedStrictRequestsPerMinute).toBeLessThanOrEqual(apiStrictRequestsPerMinute);
+    expect(safeBurst).toBe(360);
+    expect(strictBurst).toBe(60);
+    expect(generatedSafeReads).toContain("map $request_uri $dashboard_api_raw_path {");
+    expect(generatedSafeReads).toContain('map "$request_method|$uri|$dashboard_api_raw_path" $dashboard_api_limit_class {');
+    expect(generatedSafeReads).toContain("default strict;");
+    expect(generatedSafeReads).toContain("^GET\\|");
+    expect(generatedSafeReads).toContain("\\|\\1$");
+    expect(generatedSafeReads).not.toContain("HEAD");
+    expect(generatedSafeReads).not.toContain("?!");
+    for (const protectedPath of [
+      "/api/v1/auth/session",
+      "/api/v1/settings/provider-configs",
+      "/api/v1/logs",
+      "/api/v1/backups",
+      "/api/v1/projects",
+      "/api/v1/organizations",
+      "/api/v1/runtimes/browser/status",
+      "/api/v1/runtimes/browser/workspaces",
+      "/api/v1/docs/spaces",
+      "/api/v1/mcp-servers",
+      "/api/v1/mcp-servers/tools",
+      "/api/v1/mcp-tools",
+      "/api/v1/personality",
+      "/api/v1/usage/breakdown",
+    ]) expect(safeReadPolicy.observedStrictRoutes.map((route) => route.template)).toContain(protectedPath);
+    for (const removedPattern of [
+      "(/api/v1/projects/?)",
+      "(/api/v1/organizations/?)",
+      "(/api/v1/runtimes/browser/status/?)",
+      "(/api/v1/runtimes/browser/workspaces/?)",
+      "(/api/v1/docs/spaces/?)",
+      "(/api/v1/mcp-servers/?)",
+      "(/api/v1/mcp-servers/tools/?)",
+      "(/api/v1/mcp-tools/?)",
+      "(/api/v1/personality/?)",
+      "(/api/v1/usage/breakdown/?)",
+    ]) expect(generatedSafeReads).not.toContain(removedPattern);
+
+    const clientCounts = new Map<string, number>();
+    const allowStrict = (client: string) => {
+      const count = (clientCounts.get(client) ?? 0) + 1;
+      clientCounts.set(client, count);
+      return count <= strictBurst;
+    };
+    for (let index = 0; index < strictBurst; index += 1) expect(allowStrict("client-a")).toBe(true);
+    expect(allowStrict("client-a")).toBe(false);
+    expect(allowStrict("client-b")).toBe(true);
+
+    expect(dockerfile).toContain("scripts/generate-dashboard-safe-read-policy.mjs");
+    expect(dockerfile).toContain("nginx/dashboard-safe-reads-map.conf");
+    expect(dockerfile).toContain("services/ingenium-api/config/dashboard-safe-reads.json ./services/ingenium-api/dist/config/dashboard-safe-reads.json");
   });
 
   it("uses the dashboard proxy policy for immutable assets", () => {
@@ -133,10 +218,8 @@ describe("dashboard deployment static contract", () => {
 
   it("uses one identical no-store 404 for production aliases and no absent upstream proxy", () => {
     expect(gateway).toContain("include /run/ingenium-gateway/runtime-aliases.conf;");
-    for (const host of ["opencode.localhost", "cli.localhost", "vscode.localhost"]) {
-      expect(productionAliases).toContain(`server_name ${host};`);
-    }
-    expect(productionAliases.match(/include \/app\/nginx\/runtime-alias-unavailable-location\.conf;/g)).toHaveLength(3);
+    expect(productionAliases).toContain("server_name opencode.localhost cli.localhost vscode.localhost;");
+    expect(productionAliases.match(/include \/app\/nginx\/runtime-alias-unavailable-location\.conf;/g)).toHaveLength(1);
     expect(productionAliases).not.toContain("proxy_pass");
     expect(unavailableAlias).toContain('return 404 "Direct local runtime aliases are unavailable in production. Open the Ingenium Dashboard and choose an authorized workspace.\\n";');
     expect(healthcheck).toContain('expected="$(printf \'%s\\n|404\' "$expected_body")"');

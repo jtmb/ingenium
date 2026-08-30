@@ -38,6 +38,7 @@ import {
   FIXTURE_API_RATE_LIMIT,
   FIXTURE_OWNER_EMAIL,
   FIXTURE_OWNER_PASSWORD,
+  FIXTURE_SESSION_COOKIE_NAME,
   createTestRunBrowserStorageState,
   buildProductionArtifacts,
   captureSpawnedChildPgid,
@@ -149,11 +150,11 @@ describe("test server lifecycle contracts", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 201 }))
       .mockResolvedValueOnce(new Response("{}", {
         status: 200,
-        headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
+        headers: { "Set-Cookie": `${FIXTURE_SESSION_COOKIE_NAME}=${sessionToken}; Path=/; Secure; HttpOnly` },
       }))
       .mockResolvedValueOnce(new Response("{}", {
         status: 200,
-        headers: { "Set-Cookie": `__Host-ingenium_session=${"t".repeat(43)}; Path=/; Secure; HttpOnly` },
+        headers: { "Set-Cookie": `${FIXTURE_SESSION_COOKIE_NAME}=${"t".repeat(43)}; Path=/; Secure; HttpOnly` },
       }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -162,7 +163,7 @@ describe("test server lifecycle contracts", () => {
     const renewedStorageState = await createTestRunBrowserStorageState(context);
 
     expect(storageState.cookies).toEqual([expect.objectContaining({
-      name: "__Host-ingenium_session",
+      name: FIXTURE_SESSION_COOKIE_NAME,
       value: sessionToken,
       domain: "127.0.0.1",
       secure: true,
@@ -203,7 +204,7 @@ describe("test server lifecycle contracts", () => {
     const sessionToken = "s".repeat(43);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("{}", {
       status: 200,
-      headers: { "Set-Cookie": `__Host-ingenium_session=${sessionToken}; Path=/; Secure; HttpOnly` },
+      headers: { "Set-Cookie": `${FIXTURE_SESSION_COOKIE_NAME}=${sessionToken}; Path=/; Secure; HttpOnly` },
     })));
 
     expect(await provisionTestRunBrowserSession(context, "localhost"))
@@ -211,7 +212,7 @@ describe("test server lifecycle contracts", () => {
     expect(statSync(getDashboardStorageStatePath(context)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(getDashboardStorageStatePath(context), "utf8"))).toMatchObject({
       cookies: [{
-        name: "__Host-ingenium_session",
+        name: FIXTURE_SESSION_COOKIE_NAME,
         value: sessionToken,
         domain: "localhost",
       }],

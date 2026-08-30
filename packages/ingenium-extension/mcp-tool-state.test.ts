@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockEnsureMcpProject = vi.hoisted(() => vi.fn());
+const mockBinding = vi.hoisted(() => ({
+  apiUrl: "http://api.test/api/v1",
+  project: "extension-project",
+  workspaceId: "workspace",
+  launcherWorktree: "/worktree",
+  audience: "mcp" as "mcp" | "runtime",
+  credentialFile: "/private/.ingenium-learning-credential",
+  purpose: "learning" as "learning" | "runtime",
+}));
 
 vi.mock("./mcp-client.js", () => ({
   ensureMcpProject: mockEnsureMcpProject,
@@ -8,6 +17,10 @@ vi.mock("./mcp-client.js", () => ({
 
 vi.mock("./project-resolver.js", () => ({
   resolveExtensionProject: () => "extension-project",
+}));
+
+vi.mock("./extension-binding.js", () => ({
+  resolveExtensionBinding: () => mockBinding,
 }));
 
 vi.mock("./api-auth.js", () => ({
@@ -34,6 +47,8 @@ describe("extension MCP tool state guard", () => {
   });
 
   afterEach(() => {
+    mockBinding.audience = "mcp";
+    mockBinding.purpose = "learning";
     vi.clearAllMocks();
   });
 
@@ -45,11 +60,24 @@ describe("extension MCP tool state guard", () => {
     await expect(assertExtensionToolEnabled("auto_observe_now", "/worktree", { request }))
       .resolves.toBe("extension-project");
 
-    expect(mockEnsureMcpProject).toHaveBeenCalledWith("/worktree");
+    expect(mockEnsureMcpProject).toHaveBeenCalledWith("/worktree", "learning");
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("/mcp-tools/auto_observe_now/state?project=extension-project"),
       expect.objectContaining({ headers: expect.any(Headers) }),
     );
+  });
+
+  it("uses the runtime purpose selected by the binding resolver", async () => {
+    mockBinding.audience = "runtime";
+    mockBinding.purpose = "runtime";
+    const request = vi.fn().mockResolvedValue(response({
+      data: { tool_name: "auto_observe_now", enabled: true },
+    }));
+
+    await expect(assertExtensionToolEnabled("auto_observe_now", "/worktree", { request }))
+      .resolves.toBe("extension-project");
+
+    expect(mockEnsureMcpProject).toHaveBeenCalledWith("/worktree", "runtime");
   });
 
   it("throws the fixed disabled code without returning API details", async () => {
@@ -65,6 +93,7 @@ describe("extension MCP tool state guard", () => {
   });
 
   it.each([
+    ["insufficient credential scope", response({ error: { code: "FORBIDDEN" } }, 403)],
     ["HTTP failure", response({ error: { code: "private-api-detail" } }, 503)],
     ["wrong catalog entry", response({ data: { tool_name: "other_tool", enabled: true } })],
     ["malformed state", response({ data: { tool_name: "auto_observe_now", enabled: "true" } })],

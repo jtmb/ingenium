@@ -6,7 +6,11 @@ description: Service status page — supervisord process states, application hea
 # HOW-TO: Status
 
 ## What It Does
-Service status page showing real-time process and application health. Displays supervisord-managed process states (API, Dashboard, opencode-web, ttyd-opencode) alongside in-process application services (email-client, synthesis-engine).
+Service status page showing real-time process and application health. In the
+production control-plane profile it displays the five required Supervisor
+processes—`ingenium-api`, `ingenium-api-boundary`, `ingenium-dashboard`,
+`ingenium-gateway`, and `restore-handoff`—alongside the optional
+`restore-maintenance` process and in-process application services.
 
 ## How to Use
 1. Navigate to `/status` from the dashboard nav bar
@@ -74,6 +78,16 @@ processes, in-process application health, and the overall `healthy`, `degraded`,
 or `down` result. Selecting a process card opens its process-detail view, while
 selecting an application card opens application detail with the relevant engine
 or statistics payload; detail data does not replace the aggregate health result.
+
+Production reads Supervisor XML-RPC through the private
+`/run/ingenium-supervisor/supervisor.sock` Unix socket. The production
+configuration has no TCP Supervisor listener, including no TCP `9001` listener.
+Local development may set `SUPERVISOR_SERVER_URL` to an explicit loopback HTTP
+endpoint. The on-demand `restore-maintenance` program is optional, so its normal
+`STOPPED`/not-started state does not degrade aggregate health. `email-client` and
+`synthesis-engine` remain separate in-process application entries, not Supervisor
+processes. Compatibility mode may expose additional OpenCode, CLI, and VS Code
+process cards.
 
 Unknown process names return `404 PROCESS_NOT_FOUND`. If Supervisor cannot
 answer a process or log request, the API returns `502 SUPERVISOR_UNAVAILABLE`

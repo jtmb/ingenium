@@ -1,12 +1,17 @@
-import { request } from "./api";
+import { getApiBase, normalizeChatConfigResponse, request, type ChatConfigResponse } from "./api";
 
 /**
  * Thin wrapper that unwraps the `{ data: T }` envelope the proxy routes return.
  * Every proxy endpoint at /api/v1/opencode/* wraps its payload in `{ data: ... }`.
  */
-async function oc<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await request<{ data: T }>(path, options);
-  return res.data;
+function runtimePath(path: string, runtimeId: string | null): string {
+  if (runtimeId === null) return path;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runtimeId)) {
+    throw new Error("Invalid OpenCode runtime binding");
+  }
+  const url = new URL(path, "http://dashboard.invalid");
+  url.searchParams.set("runtime_id", runtimeId);
+  return `${url.pathname}${url.search}`;
 }
 
 
@@ -411,6 +416,7 @@ export interface OpenCodeIntegrationAttempt {
 }
 
 export interface OpenCodePromptParams {
+  messageID?: string;
   parts: Array<
     | { type: "text"; text: string }
     | { type: "file"; mime: string; url: string; filename?: string }
@@ -422,7 +428,17 @@ export interface OpenCodePromptParams {
   variant?: string;
 }
 
-export const opencode = {
+export interface OpenCodePromptAccepted {
+  accepted: boolean;
+}
+
+export function createOpenCodeClient(runtimeId: string | null) {
+  const oc = async <T>(path: string, options?: RequestInit): Promise<T> => {
+    const res = await request<{ data: T }>(runtimePath(path, runtimeId), options);
+    return res.data;
+  };
+
+  return {
   sessions: {
     list: (directory?: string) =>
       oc<OpenCodeSession[]>(
@@ -465,7 +481,7 @@ export const opencode = {
       ),
 
     prompt: (id: string, body: OpenCodePromptParams) =>
-      oc<OpenCodeMessage>(`/opencode/sessions/${encodeURIComponent(id)}/prompt`, {
+      oc<OpenCodePromptAccepted>(`/opencode/sessions/${encodeURIComponent(id)}/prompt`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -569,6 +585,15 @@ export const opencode = {
     },
   },
 
+  chat: {
+    config: async (): Promise<ChatConfigResponse> => normalizeChatConfigResponse(await oc<unknown>("/opencode/chat-config")),
+    saveSelection: (selection: { providerId: string; modelId: string }) =>
+      oc<{ project: string; providerId: string; modelId: string }>("/opencode/chat-selection", {
+        method: "PUT",
+        body: JSON.stringify(selection),
+      }),
+  },
+
   integrations: {
     list: async (directory = "/workspace") => {
       const response = await oc<unknown>(
@@ -666,6 +691,10 @@ export const opencode = {
       ),
   },
 
+  events: {
+    url: (sessionId: string) => `${getApiBase()}${runtimePath(`/opencode/sessions/${encodeURIComponent(sessionId)}/events`, runtimeId)}`,
+  },
+
   /* ── File upload ── */
 
   upload: {
@@ -681,11 +710,14 @@ export const opencode = {
       formData.append("file", file);
       // Use request() with empty headers to override the default JSON Content-Type
       // so the browser auto-sets multipart/form-data with the boundary.
-      return request("/opencode/upload", {
+      return request(runtimePath("/opencode/upload", runtimeId), {
         method: "POST",
         headers: {},
         body: formData,
       });
     },
   },
-};
+  };
+}
+
+export type OpenCodeClient = ReturnType<typeof createOpenCodeClient>;

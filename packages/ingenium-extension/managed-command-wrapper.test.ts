@@ -14,7 +14,10 @@ import {
 describe("managed command wrappers", () => {
   it("decodes bounded argv without a shell and rejects unsupported commands", () => {
     const encoded = Buffer.from(JSON.stringify(["add", "src/file.ts"])).toString("base64url");
+    const message = "chore(checkpoint): preserve runtime and coordination hardening work";
     expect(decodeManagedArgv(encoded)).toEqual(["add", "src/file.ts"]);
+    expect(decodeManagedArgv(Buffer.from(JSON.stringify(["commit", message])).toString("base64url")))
+      .toEqual(["commit", message]);
     expect(() => decodeManagedArgv(Buffer.from(JSON.stringify(["add", "src/file.ts;rm"])).toString("base64url")))
       .toThrow("Invalid managed command payload");
     expect(() => managedCommand("repository", ["status"])).toThrow("Repository wrapper rejected the command");
@@ -28,12 +31,27 @@ describe("managed command wrappers", () => {
     expect(managedRepositoryArgv(["mv", "src/old.ts", "src/new.ts"])).toEqual([
       "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "mv", "--", "src/old.ts", "src/new.ts",
     ]);
+    expect(managedRepositoryArgv(["commit", "chore(checkpoint): preserve runtime and coordination hardening work"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+      "-c", "commit.gpgSign=false", "-c", "credential.helper=",
+      "commit", "--no-verify", "--no-gpg-sign", "--cleanup=verbatim", "-m",
+      "chore(checkpoint): preserve runtime and coordination hardening work",
+    ]);
     for (const argv of [
       ["add", "--all"],
       ["add", "../outside"],
       ["add", ".git/config"],
       ["checkout", "main"],
+      ["commit"],
+      ["commit", ""],
+      ["commit", " leading"],
+      ["commit", "trailing "],
+      ["commit", "line\nbreak"],
+      ["commit", "control\u0000character"],
+      ["commit", "-option-like"],
+      ["commit", "x".repeat(101)],
       ["commit", "-m", "message"],
+      ["commit", "message", "extra"],
       ["merge", "--strategy=evil", "main"],
       ["rebase", "--exec=payload", "main"],
       ["reset", "--hard"],
@@ -100,6 +118,44 @@ describe("managed command wrappers", () => {
       expect(execFileSync("/usr/bin/git", ["-C", directory, "diff", "--cached", "--name-only"], { encoding: "utf8" }))
         .toBe("safe.txt\n");
       expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("commits the staged index with the exact message without running hooks", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.name", "Managed Wrapper Test"]);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.email", "managed-wrapper@example.invalid"]);
+      const marker = join(directory, "hook-ran");
+      const hook = join(directory, ".git", "hooks", "pre-commit");
+      writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+      chmodSync(hook, 0o700);
+      writeFileSync(join(directory, "safe.txt"), "safe\n");
+      const message = "chore(checkpoint): preserve runtime and coordination hardening work";
+
+      expect(managedCommand("repository", ["add", "safe.txt"], directory)).toBe(0);
+      expect(managedCommand("repository", ["commit", message], directory)).toBe(0);
+      expect(execFileSync("/usr/bin/git", ["-C", directory, "log", "-1", "--format=%s"], { encoding: "utf8" }))
+        .toBe(`${message}\n`);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails safely when the index is empty", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.name", "Managed Wrapper Test"]);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.email", "managed-wrapper@example.invalid"]);
+
+      expect(managedCommand("repository", ["commit", "chore: empty index"], directory)).toBe(1);
+      expect(() => execFileSync("/usr/bin/git", ["-C", directory, "rev-parse", "--verify", "HEAD"]))
+        .toThrow();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

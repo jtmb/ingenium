@@ -17,7 +17,7 @@ import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { getDb, execTransaction, checkpointAfterWrite, logger, projects, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
-import { requestAuthorizationPrincipal, requireContentAccess, requireProject } from "../helpers.js";
+import { requestOwnerScope, requireContentAccess, requireProject } from "../helpers.js";
 
 export const ragRouter = Router();
 
@@ -30,12 +30,6 @@ function dbPath(): string {
 }
 
 const SOURCE = "rag-routes";
-
-function ownerScope(req: Request): string | null | undefined {
-  if (!req.authorizationPolicy) return undefined;
-  const principal = requestAuthorizationPrincipal(req);
-  return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
-}
 
 function requireSource(req: Request, res: Response, projectId: string): any | null {
   const source = getDb(dbPath()).prepare("SELECT * FROM rag_sources WHERE id = ? AND project_id = ?")
@@ -147,7 +141,7 @@ ragRouter.get("/sources", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0, ownerScope(req));
+  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0, requestOwnerScope(req));
   res.json({
     data: sources.data.map((s) => ({
       id: s.id,
@@ -302,7 +296,7 @@ ragRouter.get("/search", (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit as string ?? "20", 10) || 20, 1), 100);
 
   try {
-    const results = rag.searchChunks(projectId, q, limit, true, ownerScope(req));
+    const results = rag.searchChunks(projectId, q, limit, true, requestOwnerScope(req));
 
     res.json({
       data: results.map((r, i) => ({
@@ -339,7 +333,7 @@ ragRouter.post("/ask", async (req, res) => {
   }
 
   // Step 1: Search for relevant chunks
-  const results = rag.searchChunks(projectId, question, 10, true, ownerScope(req));
+  const results = rag.searchChunks(projectId, question, 10, true, requestOwnerScope(req));
 
   if (results.length === 0) {
     res.json({
@@ -447,7 +441,7 @@ ragRouter.post("/export", (req, res) => {
 
   const db = getDb(dbPath());
 
-  const sources = rag.listSources(projectId, 100, 0, ownerScope(req)).data;
+  const sources = rag.listSources(projectId, 100, 0, requestOwnerScope(req)).data;
 
   const exportData = sources.map((source) => {
     const chunks = db.prepare(

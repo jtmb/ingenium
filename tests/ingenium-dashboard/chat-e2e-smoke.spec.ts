@@ -1,5 +1,13 @@
 import { test, expect } from "./fixture";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  FIXTURE_OWNER_EMAIL,
+  FIXTURE_OWNER_PASSWORD,
+  FIXTURE_SESSION_COOKIE_NAME,
+  resetTestRunChatFixture,
+} from "../test-server-lifecycle";
 
 const PIXEL_TOLERANCE = 1;
 
@@ -152,9 +160,145 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(markdownCallout).toBeInViewport();
   });
 
-  test("session survives refresh", async ({ page }) => {
-    await page.goto("/chat", { waitUntil: "domcontentloaded" });
-    await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 15000 });
+  test("authenticated chat survives a hard reload without duplicating its checkpoint", async ({ browser, baseURL }) => {
+    test.setTimeout(90_000);
+    if (!baseURL) throw new Error("Fixture dashboard URL is unavailable");
+
+    const runtime = getDefaultSuiteRuntime();
+    await resetTestRunChatFixture(runtime.context);
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const timeline: Array<Record<string, unknown>> = [];
+    const cookieLabels = new Map<string, string>();
+    const pendingCaptures: Promise<void>[] = [];
+    let sequence = 0;
+    let reloadStarted = false;
+
+    const endpoint = (urlValue: string) => new URL(urlValue).pathname
+      .replace(/\/context\/conversations\/[^/]+/, "/context/conversations/[conversation]")
+      .replace(/\/opencode\/sessions\/[^/]+/, "/opencode/sessions/[session]");
+    const cookieLabel = (value: string | undefined) => {
+      if (!value) return null;
+      const existing = cookieLabels.get(value);
+      if (existing) return existing;
+      const label = `session-${cookieLabels.size + 1}`;
+      cookieLabels.set(value, label);
+      return label;
+    };
+    const requestCookieLabel = async (request: import("@playwright/test").Request) => {
+      const cookieHeader = (await request.allHeaders()).cookie;
+      const token = cookieHeader?.split(";").map((part) => part.trim())
+        .find((part) => part.startsWith(`${FIXTURE_SESSION_COOKIE_NAME}=`))
+        ?.slice(FIXTURE_SESSION_COOKIE_NAME.length + 1);
+      return cookieLabel(token);
+    };
+    const browserCookieLabel = async () => cookieLabel(
+      (await context.cookies()).find(({ name }) => name === FIXTURE_SESSION_COOKIE_NAME)?.value,
+    );
+    const record = (event: Record<string, unknown>) => {
+      timeline.push({ sequence: ++sequence, phase: reloadStarted ? "reload" : "initial", ...event });
+    };
+    page.on("request", (request) => {
+      if (!new URL(request.url()).pathname.startsWith("/api/v1/")) return;
+      pendingCaptures.push((async () => record({
+        event: "request",
+        method: request.method(),
+        endpoint: endpoint(request.url()),
+        cookie: await requestCookieLabel(request).catch(() => "unavailable"),
+      }))());
+    });
+    page.on("response", (response) => {
+      if (!new URL(response.url()).pathname.startsWith("/api/v1/")) return;
+      pendingCaptures.push((async () => record({
+        event: "response",
+        method: response.request().method(),
+        endpoint: endpoint(response.url()),
+        status: response.status(),
+        retryAfter: await response.headerValue("retry-after"),
+        rotatesCookie: (await response.headerValue("set-cookie"))?.startsWith(`${FIXTURE_SESSION_COOKIE_NAME}=`) ?? false,
+        browserCookie: await browserCookieLabel(),
+      }))());
+    });
+
+    try {
+      await page.goto("/login", { waitUntil: "domcontentloaded" });
+      await page.getByLabel("Email").fill(FIXTURE_OWNER_EMAIL);
+      await page.getByLabel("Password").fill(FIXTURE_OWNER_PASSWORD);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.waitForURL((url) => url.pathname === "/");
+
+      const firstLink = page.waitForResponse((response) =>
+        response.request().method() === "POST"
+          && new URL(response.url()).pathname === "/api/v1/context/chat-sessions/link");
+      await page.goto("/chat?project=global-default", { waitUntil: "domcontentloaded" });
+      await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20_000 });
+      const composer = page.locator('[data-testid="chat-composer"]');
+      await expect(composer).toBeEnabled({ timeout: 15_000 });
+      const firstLinkResponse = await firstLink;
+      expect(firstLinkResponse.status()).toBe(201);
+      const linkedConversation = ((await firstLinkResponse.json()) as {
+        data: { id: string; checkpoint_count: number };
+      }).data;
+      const activeSession = await page.evaluate(() => localStorage.getItem("opencode-chat-active-session"));
+      const messageCount = await page.locator('[data-testid="chat-user-message"], [data-testid="chat-assistant-message"]').count();
+      expect(activeSession).not.toBeNull();
+      expect(messageCount).toBeGreaterThan(0);
+      const otherPage = await context.newPage();
+      await otherPage.goto("/login", { waitUntil: "domcontentloaded" });
+
+      timeline.length = 0;
+      sequence = 0;
+      reloadStarted = true;
+      const otherTabCsrfResponse = otherPage.waitForResponse((response) =>
+        response.request().method() === "POST"
+          && new URL(response.url()).pathname === "/api/v1/auth/session/csrf");
+      const [, otherTabCsrfStatus] = await Promise.all([
+        page.reload({ waitUntil: "domcontentloaded" }),
+        otherPage.evaluate(async () => (await fetch("/api/v1/auth/session/csrf", {
+          method: "POST",
+          headers: { "x-ingenium-ui": "dashboard" },
+        })).status),
+      ]);
+      const otherTabCsrf = await otherTabCsrfResponse;
+      expect(otherTabCsrfStatus).toBe(200);
+      expect(await otherTabCsrf.headerValue("set-cookie")).toBeNull();
+      await expect(composer).toBeEnabled({ timeout: 20_000 });
+      const reloadedCheckpoint = await page.evaluate(async ({ conversationId, project }) => {
+        const response = await fetch(`/api/v1/context/conversations/${encodeURIComponent(conversationId)}?project=${encodeURIComponent(project)}`);
+        return { status: response.status, body: await response.json() };
+      }, { conversationId: linkedConversation.id, project: "global-default" }) as {
+        status: number;
+        body: { data: { checkpoint_count: number } };
+      };
+      expect(reloadedCheckpoint.status).toBe(200);
+
+      expect(await page.evaluate(() => localStorage.getItem("opencode-chat-active-session"))).toBe(activeSession);
+      expect(await page.locator('[data-testid="chat-user-message"], [data-testid="chat-assistant-message"]').count()).toBe(messageCount);
+      expect(reloadedCheckpoint.body.data.checkpoint_count).toBe(linkedConversation.checkpoint_count);
+
+      await Promise.all(pendingCaptures);
+      const reloadResponses = timeline.filter(({ phase, event }) => phase === "reload" && event === "response");
+      expect(reloadResponses.filter(({ endpoint: path }) => path === "/api/v1/auth/session/csrf")).toHaveLength(1);
+      expect(reloadResponses.filter(({ rotatesCookie }) => rotatesCookie === true)).toEqual([]);
+      expect(new Set(reloadResponses.map(({ browserCookie }) => browserCookie).filter(Boolean)).size).toBe(1);
+      expect(reloadResponses.filter(({ endpoint: path, status }) =>
+        path === "/api/v1/context/chat-sessions/link" && status === 201)).toHaveLength(1);
+      expect(reloadResponses.filter(({ status }) => status === 401 || status === 429)).toEqual([]);
+      expect(timeline.length).toBeLessThanOrEqual(30);
+    } finally {
+      await Promise.allSettled(pendingCaptures);
+      const evidenceDirectory = process.env.INGENIUM_AUTH_RELOAD_EVIDENCE_DIR;
+      if (evidenceDirectory) {
+        const directory = resolve(evidenceDirectory);
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(resolve(directory, "request-cookie-timeline.json"), `${JSON.stringify({
+          capturedAt: new Date().toISOString(),
+          contentFree: true,
+          timeline,
+        }, null, 2)}\n`, { mode: 0o600 });
+      }
+      await context.close();
+    }
   });
 
   test("rich fixture: reasoning, tool call, and response stream correctly", async ({ page }) => {

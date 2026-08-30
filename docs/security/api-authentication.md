@@ -11,12 +11,12 @@ logs.
 
 ## Required API token
 
-`INGENIUM_API_TOKEN` or `INGENIUM_API_TOKEN_FILE` is mandatory for normal
-operation. Docker startup rejects a missing, malformed, symlinked, or
+`INGENIUM_API_TOKEN_FILE` is mandatory for Compose operation. Docker startup
+rejects a missing, malformed, symlinked, or
 non-regular bootstrap file before supervised services start. The canonical
 credential is an opaque base64url token of **32–128 ASCII characters** matching
-`[A-Za-z0-9_-]`; this validation is repeated by the API, boundary proxy, and
-dashboard loader before they serve requests.
+`[A-Za-z0-9_-]`; the entrypoint and private API repeat this validation before
+serving management requests.
 
 Compose receives only the absolute host file path and mounts it read-only at
 `/run/ingenium-bootstrap/api-token`; token bytes never enter the rendered
@@ -50,23 +50,61 @@ installation bearer:
 
 ```text
 .opencode/.ingenium-mcp-credential
+.opencode/.ingenium-learning-credential
 .opencode/.ingenium-repository-sync-credential
 ```
 
-The file is ignored by Git and must be a regular, owner-readable-only file
-(mode `0600`), owned by the current user, below the current worktree's real
-`.opencode` directory. Symlinks, unsafe permissions, invalid characters, and
-oversized values are ignored. Use `INGENIUM_MCP_CREDENTIAL_FILE`, with explicit
-project/workspace/worktree and audience bindings. The broad installation bearer is
-accepted only from explicit internal services and is never a user-runtime fallback.
+Each repository-local file is ignored by both Git and the Docker build context and
+must be a regular, owner-readable-only file (mode `0600`) owned by the current
+user. General MCP and repository-sync files remain below the current worktree's
+real `.opencode` directory. The learning credential may instead use an absolute
+`INGENIUM_LEARNING_CREDENTIAL_FILE` locator whose parent is an owner-only
+directory. Symlinks, unsafe permissions, invalid characters, and oversized values
+are ignored. Bind every credential to the explicit project, workspace, launcher
+worktree, and audience. The broad installation bearer is accepted only from
+explicit internal services and is never a user-runtime fallback.
+Isolated user runtimes keep using their runtime capability for learning operations;
+the host learning credential is never copied or mounted into a runtime.
+
+Credential-bearing extension requests derive their API authority independently of
+repository configuration. A repository may retain the canonical loopback deployment
+URL, but cannot redirect credentials to another HTTP or HTTPS origin. Operators use
+`INGENIUM_TRUSTED_API_URL` for an explicit remote HTTPS authority; loopback HTTP is
+accepted for local operation. A conflicting or repository-declared trust override
+fails closed before an Authorization header is sent.
 
 Scoped values are random 256-bit secrets stored only as SHA-256 hashes. Metadata
 includes audience, scopes, organization, immutable project grants, workspace,
 launcher worktree, expiry, service-principal security epoch, last-used time, and
 rotation/revocation state. Human issue, rotate, and revoke operations require recent
 step-up; plaintext appears only in the create/rotate response. Restart OpenCode after
-replacing either protected credential file. The project must already exist so
+replacing a protected credential file. The project must already exist so
 its immutable UUID can be included in the credential grant.
+
+The learning credential is a separate operation-specific `mcp`-audience service
+credential. It has exactly these seven scopes:
+
+- `projects:read`
+- `extraction:write`
+- `extraction:execute`
+- `synthesis:write`
+- `synthesis:execute`
+- `pipeline:write`
+- `observe:write`
+
+Extension tool-state, extraction, synthesis, pipeline-event, and observation
+lifecycle calls select it explicitly, and credential purpose is propagated into
+the short-lived MCP child. Repository sync continues to use its separate
+two-scope credential and cannot inherit learning privileges.
+
+The live MCP usefulness collector uses a separate ephemeral `mcp-report`
+credential rather than either credential above. The API writes it to a unique
+mode-`0600` file below its own mode-`0700` secret directory, passes only the file
+path to the API-UID child, and binds authentication to the report marker,
+project UUID/name, workspace marker, and `/app` launcher worktree. Authorization
+permits only read-only MCP tool-state requests for the outer caller's filtered
+catalog. Cleanup revokes the in-memory credential and removes the file; no
+installation, Dashboard, OpenCode, or runtime secret is shared.
 
 ### Isolated runtime capability
 
@@ -82,6 +120,14 @@ audience, expiry, or epoch mismatch fails on the next API call.
 The runtime-manager bearer is a different owner-only file shared only by the control
 plane and manager. It authorizes the manager's narrow health/provision/inspect/stop
 API and is not a user-runtime capability.
+
+### Background synthesis runtime boundary
+
+Per-project background extraction and synthesis may execute only through one
+ready or idle runtime whose capability, service principal, security epoch, and
+project-level execute grant are all active. The API returns an unavailable result
+when that authorized runtime cannot be resolved; it does not probe providers or
+fall back to a global OpenCode target or another user's runtime.
 
 Migration 102 completes browser launch with browser-generated exchange proofs and
 random session values stored only as hashes. A launch record binds the exact dashboard auth session, owner, workspace,
@@ -130,22 +176,14 @@ users. Each launcher clears Supervisor's inherited environment. Supervisor uses
 detail, and bounded-log XML-RPC methods. Restore execution remains limited to the
 fixed program exposed through `/run/ingenium-restore-handoff/request.sock`.
 
-### Background synthesis runtime boundary
-
-Per-project background extraction and synthesis may execute only through one
-ready or idle runtime whose capability, service principal, security epoch, and
-project-level execute grant are all active. The API returns an unavailable result
-when that authorized runtime cannot be resolved; it does not probe providers or
-fall back to a global OpenCode target or another user's runtime.
-
 On every container start, the entrypoint projects the container-owned Ingenium
 MCP and plugin entries into the persistent global OpenCode config. This replaces
 the legacy `skill-sync` bootstrap entry with the canonical `resource-sync`
 projection and configures the `auto-observer`, `observer`, `resource-sync`,
 `session-coordinator`, and Ponytail adapter entries without projecting the
 installation bearer. The projection removes accidental `INGENIUM_API_TOKEN` and
-`INGENIUM_API_TOKEN_FILE` entries from the Ingenium MCP environment, preserves unrelated
-operator settings, and never logs credential contents.
+`INGENIUM_API_TOKEN_FILE` entries from the Ingenium MCP environment, preserves
+unrelated operator settings, and never logs credential contents.
 
 Do not add the token to a tracked `opencode.json` or `opencode.jsonc`. Those
 files should contain the MCP command, API URL, and non-secret settings only.
@@ -272,6 +310,25 @@ CORS and its browser CSRF check. Bearer-authenticated MCP/server-to-server
 requests without browser headers are not subject to this browser-only CSRF
 check. The bearer is never returned in a browser response.
 
+Authenticated login returns a legacy session CSRF token whose SHA-256 hash
+remains on the session for compatibility. A tab that does not have that
+plaintext token calls `POST /api/v1/auth/session/csrf` with the session cookie,
+exact allowed `Origin`, and dashboard marker. This bootstrap call does not
+require a prior CSRF token and does not rotate or replace the session cookie.
+It returns a fresh random grant whose hash is bound to the exact session, user,
+and user security epoch. Grants expire after at most ten minutes and never past
+the session idle or absolute deadline. Each session retains at most eight active
+grants; issuance transactionally removes expired or invalid rows and keeps the
+newest eight deterministically.
+
+Unsafe cookie-authenticated requests accept either the login token or an active
+grant. A grant cannot validate for another session or user, and session revocation,
+user disablement, security-epoch changes, grant expiry, and session expiry all fail
+closed. Revocation and security changes delete grants through database triggers;
+deleting the parent session cascades. CSRF grants prove browser request authenticity
+only: organization and project authorization still run independently and remain the
+final authority for every resource.
+
 ### Trusted loopback origin contract
 
 The default browser mutation origins are explicitly limited to
@@ -312,25 +369,6 @@ unauthenticated management path.
 The extraction engine reaches `GET /api/v1/opencode/messages` through an
 API-owned internal client. That client loads the same protected runtime token
 only while creating the loopback request, sends it only as the bearer header,
-Authenticated login returns a legacy session CSRF token whose SHA-256 hash
-remains on the session for compatibility. A tab that does not have that
-plaintext token calls `POST /api/v1/auth/session/csrf` with the session cookie,
-exact allowed `Origin`, and dashboard marker. This bootstrap call does not
-require a prior CSRF token and does not rotate or replace the session cookie.
-It returns a fresh random grant whose hash is bound to the exact session, user,
-and user security epoch. Grants expire after at most ten minutes and never past
-the session idle or absolute deadline. Each session retains at most eight active
-grants; issuance transactionally removes expired or invalid rows and keeps the
-newest eight deterministically.
-
-Unsafe cookie-authenticated requests accept either the login token or an active
-grant. A grant cannot validate for another session or user, and session revocation,
-user disablement, security-epoch changes, grant expiry, and session expiry all fail
-closed. Revocation and security changes delete grants through database triggers;
-deleting the parent session cascades. CSRF grants prove browser request authenticity
-only: organization and project authorization still run independently and remain the
-final authority for every resource.
-
 and returns stable failure categories rather than headers, endpoint details, or
 response bodies. The route remains protected; loopback callers do not receive
 an authentication bypass.

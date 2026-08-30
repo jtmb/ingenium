@@ -9,7 +9,8 @@ const serverSource = readFileSync(fileURLToPath(new URL("../scripts/mcp-server.t
 
 describe("AUTH-102 MCP policy parity", () => {
   it("declares authorization for every registered tool", () => {
-    const registered = [...serverSource.matchAll(/server\.registerTool\(\s*"([^"]+)"/g)].map((match) => `ingenium_${match[1]}`);
+    const registered = [...serverSource.matchAll(/(?:server\.registerTool|registerProjectTool)\(\s*"([^"]+)"/g)]
+      .map((match) => `ingenium_${match[1]}`);
     const policyByName = new Map(MCP_TOOL_CATALOG.map((tool) => [tool.name, tool.authorization]));
     expect(registered).toHaveLength(281);
     expect(registered.filter((name) => !policyByName.get(name))).toEqual([]);

@@ -89,6 +89,8 @@ if [ "$CHROME_STATUS" = "NOT_RUNNING" ]; then
     --remote-debugging-port=${CHROME_PORT} \
     --remote-allow-origins=* \
     --user-data-dir="${CHROME_DATA_DIR}" \
+    --incognito \
+    --disable-save-password-bubble \
     --no-first-run \
     --new-window about:blank > /dev/null 2>&1 &
 

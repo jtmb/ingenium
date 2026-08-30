@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { identity, organizations, projects, resetDbForTest } from "ingenium-core";
+import { identity, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
 import { contextRouter } from "../lib/routes/context.js";
 import { ragRouter } from "../lib/routes/rag.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
@@ -335,6 +335,88 @@ describe("immutable context conversation API", () => {
       expect(deniedChunk.status).toBe(404);
       expect(JSON.stringify(await json(deniedChunk))).not.toContain(chunk);
     } finally {
+      await new Promise<void>((resolve) => isolated.close(() => resolve()));
+    }
+  });
+
+  it("links an owned active runtime to private context and checkpoints only completed idempotent turns", async () => {
+    const owner = identity.createUser("api-chat-owner@example.test", "API Chat Owner");
+    organizations.addOrganizationMember(organizations.BOOTSTRAP_ORGANIZATION_ID, owner.id, "admin");
+    const project = projects.getProject(projectName)!;
+    const workspaceId = `chat-workspace-${crypto.randomUUID()}`;
+    runtimes.authorizeWorkspace({
+      id: workspaceId,
+      organizationId: project.organization_id,
+      projectId: project.id,
+      ownerUserId: owner.id,
+      storagePath: `/srv/approved/${workspaceId}`,
+    });
+    let runtime = runtimes.createRuntimeInstance(workspaceId, {
+      cpuMillis: 1_000,
+      memoryBytes: 536_870_912,
+      pidsLimit: 128,
+      diskBytes: 536_870_912,
+      processLimit: 64,
+    });
+    for (const toState of ["PROVISIONING", "STARTING", "READY"] as const) {
+      runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState, actorType: "system", actorId: "test" });
+    }
+
+    const authorized = express();
+    authorized.use(express.json());
+    authorized.use((req, _res, next) => {
+      req.principal = { type: "user", id: owner.id, scopes: ["user:*"], session: { id: "chat-owner-session" } } as any;
+      next();
+    });
+    authorized.use(authorizationMiddleware);
+    authorized.use("/api/v1/context", contextRouter);
+    const isolated = createServer(authorized);
+    await new Promise<void>((resolve) => isolated.listen(0, "127.0.0.1", resolve));
+    const isolatedUrl = `http://127.0.0.1:${(isolated.address() as AddressInfo).port}/api/v1/context`;
+    process.env.INGENIUM_DEPLOYMENT_MODE = "control-plane";
+    try {
+      const linked = await fetch(`${isolatedUrl}/chat-sessions/link?project=${projectName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtimeId: runtime.id, sessionId: "session-one", title: "Private chat" }),
+      });
+      expect(linked.status).toBe(201);
+      const conversation = (await json(linked)).data;
+      expect(conversation).toMatchObject({ revision: 0, visibility: "private", owner_user_id: owner.id });
+
+      const body = {
+        runtimeId: runtime.id,
+        sessionId: "session-one",
+        userMessageId: "user-one",
+        assistantMessageId: "assistant-one",
+        userContent: "private-user-canary",
+        assistantContent: "private-assistant-canary",
+        expectedRevision: 0,
+      };
+      const first = await fetch(`${isolatedUrl}/conversations/${conversation.id}/chat-turns?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      expect(first.status).toBe(201);
+      const firstBody = await json(first);
+      expect(firstBody.data).toMatchObject({ revision: 2, idempotent: false, checkpoint: { message_count: 2 } });
+      expect(JSON.stringify(firstBody)).not.toContain("private-user-canary");
+      expect(JSON.stringify(firstBody)).not.toContain("private-assistant-canary");
+
+      const replay = await fetch(`${isolatedUrl}/conversations/${conversation.id}/chat-turns?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      expect((await json(replay)).data).toMatchObject({ revision: 2, idempotent: true });
+
+      const incomplete = await fetch(`${isolatedUrl}/conversations/${conversation.id}/chat-turns?project=${projectName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, userMessageId: "user-two", assistantMessageId: "assistant-two", assistantContent: "", expectedRevision: 2 }),
+      });
+      expect(incomplete.status).toBe(422);
+      const checkpoints = await fetch(`${isolatedUrl}/conversations/${conversation.id}/checkpoints?project=${projectName}`);
+      expect((await json(checkpoints)).data.data).toHaveLength(1);
+    } finally {
+      delete process.env.INGENIUM_DEPLOYMENT_MODE;
       await new Promise<void>((resolve) => isolated.close(() => resolve()));
     }
   });

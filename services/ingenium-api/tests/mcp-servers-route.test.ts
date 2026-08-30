@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -14,7 +13,7 @@ import {
   mcpServersRouter,
 } from "../lib/routes/mcp-servers.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
-import { runtimeServicePrincipal } from "./http-fixtures.js";
+import { closeHttpServer, listenOnLoopback, runtimeServicePrincipal } from "./http-fixtures.js";
 
 let directory = "";
 let server: Server | undefined;
@@ -55,13 +54,11 @@ async function startRouter(): Promise<string> {
   app.use("/mcp-servers", mcpServersRouter);
   app.use("/mcp-tools", mcpToolsRouter);
   server = createServer(app);
-  return await new Promise<string>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server!.address() as AddressInfo).port}`));
-  });
+  return listenOnLoopback(server);
 }
 
 afterEach(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   server = undefined;
   if (directory) vault.sealVault();
   resetDbForTest();

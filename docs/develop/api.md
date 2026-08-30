@@ -29,9 +29,11 @@ repair/import interfaces, not automatic worktree sync.
 
 ## Public Endpoint (Auth Allowlist)
 
-The following endpoint is the sole exact unauthenticated exception. The auth
-middleware explicitly allowlists this method/path so provider redirects can
-arrive without a local bearer credential:
+Within the `/api/v1/opencode` integration routes, the following endpoint is the
+dedicated exact unauthenticated exception. The auth middleware explicitly
+allowlists this method/path so provider redirects can arrive without a local
+bearer credential; the global health and local-browser-auth allowlists are
+separate and documented below:
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -45,6 +47,23 @@ arrive without a local bearer credential:
 | GET/POST | `/api/v1/auth/mcp-credentials` | List redacted metadata or issue a scoped service/runtime/repository-sync credential. Human issuance requires recent step-up; plaintext is returned once. `servicePrincipalId` is optional and omission creates the credential's service principal atomically. |
 | POST | `/api/v1/auth/mcp-credentials/:id/rotate` | Issue a replacement and immediately revoke the prior credential. Requires recent step-up; plaintext is returned once. |
 | DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Requires recent step-up. |
+
+### Local browser authentication
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/auth/csrf` | Issue the cookie-bound pre-authentication CSRF token used by login and recovery flows. |
+| POST | `/api/v1/auth/login` | Authenticate a local user and set the secure HttpOnly session cookie. Returns the session's compatibility CSRF token. |
+| GET | `/api/v1/auth/session` | Return the current authenticated user and redacted session security metadata. |
+| POST | `/api/v1/auth/session/csrf` | Issue a bounded hash-only CSRF grant for the current session without changing its cookie. Requires the exact allowed Origin and dashboard marker, but no prior CSRF token. |
+| POST | `/api/v1/auth/session/refresh` | Explicitly rotate the current session and return its replacement CSRF token. |
+| POST | `/api/v1/auth/logout` | Revoke the current session and clear its cookie. |
+
+Session CSRF grants last at most ten minutes, are capped at eight per session,
+and are invalid outside their session, user, security epoch, or session lifetime.
+The endpoint returns `401` without a valid session and `403 CSRF_REJECTED` for a
+missing or untrusted Origin/marker. Successful grant issuance returns `200`,
+`Cache-Control: no-store`, and no `Set-Cookie` header.
 
 ### OIDC authentication
 
@@ -75,7 +94,7 @@ The API performs the following at startup (in order):
 
 If the global project is unavailable:
 
-- **Health endpoint** (`GET /api/v1/health`) — responds with `200 OK` with a valid bearer even with zero projects; it is not unauthenticated
+- **Health endpoint** (`GET /api/v1/health`) — is credential-free and responds with `200 OK` even with zero projects; management routes remain bearer-protected
 - **Mail sync** — skips silently with a `debug`-level log: `"Skipping mail sync — no global project configured"`
 - **Synthesis** — reads interval from the env var default (15 min) and logs that no global project is configured
 - **All other routes** — operate normally on a per-project basis
@@ -87,14 +106,42 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 - **Ports**: public bearer boundary `4097`; private Express listener `4096` in Docker (configurable via `INGENIUM_API_PORT`)
 - **Body limit**: `express.json({ limit: "2mb" })` for large skill/plugin uploads
 - **Security**: helmet for security headers (default configuration — no custom CSP), CORS and browser mutation CSRF share the exact `DASHBOARD_ALLOWED_ORIGINS` allowlist, mandatory bearer auth; browser mutations also require the dashboard marker contract
-- **Rate limits**: Three independent in-memory sliding-window rate limiters:
+- **Rate limits**: Independent in-memory sliding-window policies preserve strict
+  handling for mutations and sensitive reads while allowing measured Dashboard
+  read fanout. A valid browser read must pass both the per-IP admission policy
+  before authentication and the per-IP/session policy after authentication:
 
   | Limiter | Default | Applies To | Location |
   |---------|---------|------------|----------|
-  | General API | 100 req/min per IP | All authenticated routes (before auth middleware to throttle brute-force) | `lib/middleware/rate-limit.ts` |
-  | Vault | 5 req/min per IP | All `/api/v1/vault/*` routes | `scripts/api-server.ts:134` |
+  | General API | 100 req/min per IP | Mutations, sensitive/expensive reads, unauthenticated reads, and non-browser clients | `lib/middleware/rate-limit.ts` |
+  | Dashboard read admission | 480 req/min per socket IP | Positive canonical `GET` candidates before authentication; bounds aggregate session rotation | `lib/middleware/rate-limit.ts` |
+  | Authenticated Dashboard reads | 480 req/min per IP and session | Safe browser reads after session authentication | `lib/middleware/rate-limit.ts` |
+  | Runtime gateway | 10,000 req/min per IP | Boundary-attested private runtime-gateway traffic only | `lib/middleware/rate-limit.ts` |
+  | Vault passphrase | 5 req/min per IP | `POST /api/v1/vault/initialize` and `POST /api/v1/vault/unseal` | `lib/routes/vault.ts` |
   | OAuth callback | 20 req/min per IP | `GET /auth/callback` (public, before auth) | `lib/routes/opencode.ts` |
   | OIDC start/callback | 5 req/min per IP/provider and phase | `/api/v1/auth/oidc/start` and `/api/v1/auth/oidc/callback` | `lib/middleware/auth-rate-limit.ts` |
+
+  The authoritative positive policy is
+  `services/ingenium-api/config/dashboard-safe-reads.json`. The API reads it
+  directly; `scripts/generate-dashboard-safe-read-policy.mjs` deterministically
+  generates the Nginx map, and gateway startup/static validation fails if the
+  generated map is stale. HEAD, unmatched, encoded/ambiguous paths and all
+  declared sensitive categories are strict. Candidate authentication failures
+  consume the shared strict IP bucket, so the 101st invalid attempt is rejected
+  before another token/session lookup; valid browser reads do not consume that
+  strict bucket but remain under the shared 480/IP admission ceiling.
+
+  The retained 86-state profile contains 329 GETs: 26 match the 9 positive
+  allowlisted templates and 303 remain strict. The maximum observed single-page
+  fanout is 12, safely below the strict burst of 60; human-paced acceptance uses
+  at least ten seconds between navigations. The retained 303 strict GETs plus
+  51 strict non-GETs then average about 25 requests/minute. The largest state
+  contained 12 GETs and one non-GET, so its 13 total requests remain below both
+  the strict API ceiling of 100/minute at that cadence and Nginx's burst of 60.
+  Unbounded project, organization,
+  runtime workspace, Docs space, MCP server/tool, personality, and usage
+  breakdown collections intentionally remain strict without changing their
+  endpoint behavior.
 
   > Rate limit state is in-memory only — resets on process restart. Suitable for single-instance deployments with supervisord restarts. For multi-replica deployments, replace with Redis or an external store.
 
@@ -208,6 +255,12 @@ data that is absent remains explicitly unknown.
 | POST | `/api/v1/projects/purge` | Purge expired projects |
 | POST | `/api/v1/projects/migrate-workspace` | DB-only migration of historical invalid `/workspace` project into `global-default`. Optional `dry_run: true` for pre-flight validation. Returns `WorkspaceMigrationResult`. Never touches filesystem. |
 
+Regular archive/restore mutations are authorization- and recent-step-up-bound.
+The trusted server lifecycle protects the canonical `global-default`: external
+create, rename, archive, restore, purge-target, and global-designation requests
+for it return `403 GLOBAL_PROJECT_LIFECYCLE_FORBIDDEN` rather than changing the
+shared namespace.
+
 ### Skills
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -259,8 +312,18 @@ in SQL before returning rows.
 ### Synthesis
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/api/v1/synthesis/run` | Trigger synthesis pipeline |
+| POST | `/api/v1/synthesis/run` | Start the asynchronous synthesis pipeline; optional `project=<name>&session_id=<opaque-id>` binds the run to its OpenCode session |
 | GET | `/api/v1/synthesis/status` | Check pipeline status |
+
+Background extraction and synthesis use an API-owned executor that requires one
+ready or idle runtime with an active capability, service principal, and project
+execute grant. If it cannot resolve that runtime, the API returns a fixed
+unavailable result without probing providers or falling back to a global or user
+runtime.
+
+The synthesis POST returns a started acknowledgement before background work runs.
+The MCP `sessionId` argument is forwarded as `session_id`; use the status endpoint
+for results rather than treating the trigger response as completion evidence.
 
 ### Config
 | Method | Endpoint | Purpose |
@@ -638,6 +701,8 @@ All routes prefixed with `/api/v1/vault`.
 | POST | `/unseal` | Unseal vault with passphrase. When called from the dashboard (`x-ingenium-ui: dashboard` header present) on an uninitialized vault, returns `409 VAULT_NOT_INITIALIZED` — the Dashboard must use `/initialize`. For MCP/programmatic clients, auto-initializes on first use using the same new-vault passphrase policy. Returns `403` on invalid passphrase and `429` with `Retry-After` after five shared initialize/unseal attempts per IP per minute. |
 | POST | `/seal` | Seal (lock) vault |
 | GET | `/status` | Vault sealed/unsealed status plus `nextAction` (`initialize`, `unseal`, or `null`). Not subject to the vault brute-force limiter. |
+| GET | `/empty-reset` | Inspect strict empty-vault reset eligibility; requires a browser installation administrator but no recent step-up |
+| POST | `/empty-reset` | Reset an eligible empty sealed vault; requires recent step-up and exact body `{ "confirmation": "RESET EMPTY VAULT" }` |
 | GET | `/items` | List vault item metadata (optionally `?folder_id=`); never returns secret values and is not subject to the vault brute-force limiter. |
 | POST | `/items` | Create a vault item |
 | GET | `/items/:id` | Get vault item metadata (no secret value) |
@@ -661,6 +726,17 @@ That bounded endpoint returns only job/item/run identifiers, `authorized`,
 and timestamp. It returns no names, values, ciphertext, free text, or parsed
 actor strings.
 
+Vault lifecycle mutations and `POST /empty-reset` require a browser session for a
+recently elevated installation administrator. `GET /empty-reset` requires the same
+browser administrator but not a recent step-up and returns only eligibility and a
+reason. Empty reset requires an initialized, sealed vault with zero encrypted items
+and zero credential/reference dependencies. The server rechecks that condition
+transactionally; malformed reset bodies, concurrent changes, blocked dependencies,
+and unverifiable eligibility fail closed without accepting a replacement passphrase
+or mutating the vault. A blocked response directs the administrator either to enter
+the current passphrase or remove/reconfigure protected dependencies without exposing
+dependency names or counts.
+
 ### Backups
 All routes prefixed with `/api/v1/backups`.
 
@@ -671,26 +747,33 @@ All routes prefixed with `/api/v1/backups`.
 | GET | `/:id` | Get a single backup record |
 | GET | `/:id/download` | Download backup snapshot files |
 | DELETE | `/:id` | Delete a backup and its snapshot files |
-| POST | `/restore/preview` | Create or replay a dry-run-only plan (`{ backupId, dryRun: true, idempotencyKey }`) |
+| POST | `/restore/preview` | Create or replay a RESTORE-100 preview plan; requires dryRun: true (`{ backupId, dryRun: true, idempotencyKey }`) |
 | POST | `/restore/:planId/authorize` | Issue a one-time confirmation token for a previewed plan (`{ expectedRevision }`) |
 | POST | `/restore/:planId/confirm` | Consume the token (`{ confirmationToken, expectedRevision, idempotencyKey }`) and advance only to `ready_for_executor` |
+| POST | `/restore/:planId/execution/authorize` | Issue the one-time RESTORE-101 execution token for a ready plan (`{ expectedRevision }`) |
+| POST | `/restore/:planId/execute` | Consume the execution token, queue the fixed maintenance executor, and return `202` (`{ executionToken, expectedRevision, idempotencyKey }`) |
 | GET | `/restore/:planId` | Get content-free restore-plan state |
 | GET | `/restore/:planId/audit` | List bounded immutable, content-free plan transition evidence (`?limit=1..100`) |
 | POST | `/restore` | Legacy confirmation route; always returns `410 RESTORE_MIGRATION_REQUIRED` |
 | GET | `/schedule` | Get backup schedule configuration |
 | PUT | `/schedule` | Set backup schedule configuration |
 
-Restore-plan endpoints require the active global project and never apply a source
-backup; confirmation stores descriptor-verified read-only staged copies before a
-plan can become `ready_for_executor`. Execution remains unavailable through the API.
+Restore-plan endpoints require the active global project and RESTORE-100 never
+applies a source backup; confirmation stores descriptor-verified read-only staged
+copies before a plan can become `ready_for_executor`. RESTORE-101 execution is
+separate: its one-time token authorizes queueing, and the execute route starts the
+fixed root-only `restore-maintenance` program through the Unix-socket Supervisor
+handoff. The API returns `202` only after that handoff succeeds, or records and
+returns `503 SUPERVISOR_FAILED` when it cannot start.
 The v2 bundle contract is fixed-name and signed; preview validates the manifest,
 component hashes, SQLite integrity, and both schema fingerprints. Legacy records
 are preview-only. The legacy boolean-confirm `POST /restore` path returns `410
 RESTORE_MIGRATION_REQUIRED`; it cannot bypass authorization. Authorization is a
 short-lived one-time capability, and plan revisions, audit events, stages, and
 idempotency receipts are immutable under migration 083. Confirmed stages are
-revalidated and handed off only as bounded in-process buffers; source files and
-active databases are never replaced by these routes.
+revalidated and handed off only through the fixed executor boundary; source files
+and active databases are never replaced by RESTORE-100 routes. The fixed
+RESTORE-101 program owns the privileged swap and restart work.
 
 ### Context — Canonical Agent Memory
 All routes prefixed with `/api/v1/context`. Project-scoped entries persist working context across sessions. FTS5-backed search. Backward-compatible with `plan_*` tools.
@@ -803,6 +886,22 @@ surfaces rather than this internal transport for browsing.
 Context checkpoint links freeze their referenced RAG source/chunks and persist a
 citation snapshot. Attempts to re-ingest or delete such a source are rejected;
 normal checkpoint and source ownership checks remain project-scoped.
+
+#### Live OpenCode chat checkpoints
+
+Dashboard chat persists only completed user/assistant turns after the browser
+has selected an authorized runtime. The API verifies that the runtime belongs
+to the selected project and that private conversations belong to the current
+user. Responses contain metadata and hashes, not message bodies.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/chat-sessions/link` | Idempotently link `{ runtimeId, sessionId, title? }` to one immutable private conversation. |
+| POST | `/conversations/:conversationId/chat-turns` | Atomically append one completed user/assistant pair and one immutable checkpoint. The request includes runtime/session/message IDs, both message bodies, and `expectedRevision`; deterministic idempotency keys make completion-event replay safe. |
+
+Interrupted or empty assistant responses are not checkpointed. A failed append
+or checkpoint rolls back the complete turn, and revision conflicts return the
+current revision without exposing stored content.
 
 #### Immutable conversation checkpoint maintenance (CTX-004)
 
@@ -929,7 +1028,7 @@ All routes prefixed with `/api/v1/services`. Two distinct card types rendered on
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/status` | List all process and application statuses |
-| GET | `/:name` | Single process detail via supervisord `getProcessInfo` (ingenium-api, ingenium-dashboard, opencode-web, ttyd-opencode) |
+| GET | `/:name` | Single process detail via supervisord `getProcessInfo` for any configured process; compatibility includes `restore-handoff`, `ingenium-api`, `ingenium-api-boundary`, `ingenium-dashboard`, `ingenium-gateway`, `opencode-web`, `opencode-internal-proxy`, `ttyd-opencode`, and `vscode` (with on-demand `restore-maintenance`) |
 | GET | `/:name/logs` | Read process logs (offset/limit, max 10000 bytes) |
 | GET | `/applications/:name` | Detailed status for an in-process application |
 
@@ -945,8 +1044,9 @@ All routes prefixed with `/api/v1/services`. Two distinct card types rendered on
 ### OpenCode Integration Routes
 
 Provider integration routes are prefixed with `/api/v1/opencode`. The exact
-`GET /auth/callback` endpoint is the sole unauthenticated auth-middleware
-allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allowlist).
+`GET /auth/callback` endpoint is the dedicated unauthenticated callback
+allowlist for this route group; health and local browser-auth exceptions are
+separate — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allowlist).
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -984,35 +1084,61 @@ and compensation details are never returned.
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/api/v1/mcp-tools/report?project=<name>` | Return a bounded, project-scoped MCP usefulness report. Optional filters are `q`, `category`, `enabled`, `boundary`, `visibility`, and `invocation`. |
+| GET | `/api/v1/mcp-tools?project=<name>&include_categories=true` | Return authorized categorized tool state plus `visibleTools` and `visibleCategories` counts. Category totals and enabled counts use authorized rows only; canonical/hidden aggregates and private tool names are excluded. |
 
 The report response is an envelope with `project`, `project_id`, `data`, and
 `total`. `data` is the evidence-only report: it includes global provenance,
 freshness, catalog status, and per-tool `boundary`, `visibility`, and
 `invocation` evidence. The API enriches each tool with its current catalog
 `category` and effective project `enabled` state before applying filters.
+Report rows and aggregates are authorization-filtered before construction;
+disabled tools use `not-applicable` with `TOOL_DISABLED` rather than being
+reported as transport failures. `data.catalog.authorizedVisibleExpected` contains
+only `toolCount` and `categoryCount`, both derived from that same filtered catalog.
 
 The live collector uses a fixed, server-owned packaged MCP launcher in an
 ephemeral probe. It lists the tools and invokes only the provider-free
 `health_check`; the probe closes the child before returning. Probe mode uses
 `INGENIUM_MCP_REPORT_MODE=1`, so the child starts without the child MCP
 gateway. Runtime probing cannot certify source registration or catalog parity;
-when that evidence is unavailable, `data.catalog.status` is `unknown`.
+transport absence is therefore represented per tool rather than being used to infer
+private or canonical catalog state. The complete authorization-filtered catalog and
+effective-state join is reported as conformant when its internal projection matches.
 
-Reports are capped at 64 KiB, cached per project for 30 seconds, and returned
+Reports are capped at 64 KiB, cached per project and authorization-filtered tool
+set for 30 seconds, and returned
 with `Cache-Control: private, no-store` plus `Vary: Authorization`. Invalid or
 oversized queries use fixed errors: `422 INVALID_MCP_REPORT_QUERY` and `413
 MCP_REPORT_QUERY_TOO_LARGE`. Collection or size failures use `503
 MCP_REPORT_UNAVAILABLE`; concurrent collection may use `503 MCP_REPORT_BUSY`.
 
+The API issues each probe a short-lived `mcp-report` credential in an owner-only
+file under `/run/ingenium-secrets/api`. The child receives only that file path
+and exact report/project/workspace/worktree bindings; it receives neither the
+installation bearer nor internal-service authority. Express accepts this
+credential only for read-only MCP tool-state requests in the caller's already
+authorization-filtered tool set. The credential is revoked and its file removed
+after bounded child cleanup.
+
 ## OpenCode Proxy Routes
 
-The API proxies requests to the OpenCode server at :4098. The API-to-OpenCode
-upstream request uses HTTP Basic Auth credentials injected server-side (never
-exposed to the browser); this is separate from the local port-3000 gateway,
-which does not show a browser password prompt. All proxy routes require
-`OPENCODE_SERVER_PASSWORD` to be set (returns 503 otherwise). The API boundary
+In the compatibility deployment, the API proxies requests through the private
+OpenCode auth proxy at :4101, which forwards to the OpenCode server at :4098. The
+API-to-OpenCode upstream request uses HTTP Basic Auth credentials loaded server-side from the
+protected `OPENCODE_SERVER_PASSWORD_FILE` in Compose (an inline value is only a
+local-development fallback and cannot be combined with the file); the password
+is never exposed to the browser. This is separate from the local port-3000
+gateway, which does not show a browser password prompt. All proxy routes require
+the protected credential to be configured (returns 503 otherwise). The API boundary
 itself remains private and bearer-protected. SSE routes stream
 `text/event-stream` with proper caching and buffering headers.
+
+In control-plane mode, the dashboard supplies an authorized `runtime_id` (or the
+equivalent internal runtime header) and the API resolves only a ready/idle runtime
+owned by the caller or an installation administrator. The resolved runtime backend
+is used for the request; missing, foreign, stopped, or unavailable runtimes return
+not found instead of falling back to a singleton or global target. Compatibility
+mode omits the runtime binding and uses the fixed local path.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -1050,7 +1176,7 @@ itself remains private and bearer-protected. SSE routes stream
 | POST | `/api/v1/opencode/mcp/:name/disconnect` | Disconnect MCP server; success is fixed `{ data: { accepted: true } }`, failure is fixed `502 MCP_DISCONNECT_FAILED` |
 | GET | `/api/v1/opencode/permissions` | Pending permissions (global) |
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
-| POST | `/api/v1/opencode/upload` | File upload for chat attachments (multipart, validated MIME allowlist) |
+| POST | `/api/v1/opencode/upload` | Accepts one MIME-allowlisted multipart file, maximum 5 MiB, stores it temporarily in `/tmp/ingenium-chat-uploads/`, and schedules deletion after one hour. This endpoint is not the Chat composer multi-file path. |
 | GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in OpenCode 1.18.9) |
 
 ### Chat Context project authority

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { authorization, getDb, projects } from "ingenium-core";
+import { toAuthorizationPrincipal } from "./authorization-policy.js";
 
 /**
  * Express middleware helper that reads the `project` query parameter,
@@ -34,14 +35,12 @@ export function requireProject(req: Request, res: Response): string | null {
   }
   const permission = req.authorizationPolicy?.permission ?? "read";
   const resource = req.authorizationPolicy?.resource ?? "projects";
-  const decision = authorization.requireProjectPermission({
-    type: principal.type === "user" ? (principal.session ? "browser-user" : "user-token") : principal.type === "service" ? "service-principal" : principal.type,
-    id: principal.id,
-    scopes: principal.scopes,
-    organizationId: "organizationId" in principal ? principal.organizationId : undefined,
-    projectId: "projectId" in principal ? principal.projectId : undefined,
-    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
-  }, project.id, resource, permission);
+  const decision = authorization.requireProjectPermission(
+    toAuthorizationPrincipal(principal),
+    project.id,
+    resource,
+    permission,
+  );
   if (!decision.allowed) {
     res.status(decision.visible ? 403 : 404).json({ error: { code: decision.visible ? "FORBIDDEN" : "NOT_FOUND", message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found" } });
     return null;
@@ -63,14 +62,13 @@ export function requestContentActor(req: Request, projectId: string): { organiza
 export function requestAuthorizationPrincipal(req: Request): authorization.AuthorizationPrincipal {
   const principal = req.principal;
   if (!principal) return { type: "compatibility", id: "direct-router", scopes: ["*"] };
-  return {
-    type: principal.type === "user" ? (principal.session ? "browser-user" : "user-token") : principal.type === "service" ? "service-principal" : principal.type,
-    id: principal.id,
-    scopes: principal.scopes,
-    organizationId: "organizationId" in principal ? principal.organizationId : undefined,
-    projectId: "projectId" in principal ? principal.projectId : undefined,
-    projectIds: "projectIds" in principal ? principal.projectIds : undefined,
-  };
+  return toAuthorizationPrincipal(principal);
+}
+
+export function requestOwnerScope(req: Request): string | null | undefined {
+  if (!req.authorizationPolicy) return undefined;
+  const principal = requestAuthorizationPrincipal(req);
+  return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
 }
 
 export function requireContentAccess(

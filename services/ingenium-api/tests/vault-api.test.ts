@@ -11,6 +11,7 @@ import { createProject } from "../../../packages/ingenium-core/lib/tools/project
 import { vaultRouter } from "../lib/routes/vault.js";
 import { vaultBruteForceLimiter } from "../lib/middleware/rate-limit.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
+import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 
 const passphrase = "correct horse battery staple";
@@ -396,6 +397,7 @@ describe("vault lifecycle authorization", () => {
   let lifecycleBaseUrl: string;
   let lifecycleProject: string;
   let principals: Record<string, Express.Request["principal"]>;
+  let csrfTokens: Record<string, string>;
 
   beforeEach(async () => {
     vaultBruteForceLimiter.clear();
@@ -411,26 +413,43 @@ describe("vault lifecycle authorization", () => {
     core.getDb().prepare("INSERT INTO installation_admins (user_id, created_at) VALUES (?, ?)")
       .run(installationAdmin.id, new Date().toISOString());
 
+    const adminRecent = core.authentication.createSession(installationAdmin.id, new Date(), "vault matrix", true);
+    const adminStale = core.authentication.createSession(installationAdmin.id);
+    const editorRecent = core.authentication.createSession(projectEditor.id, new Date(), "vault matrix", true);
+    csrfTokens = {
+      "admin-recent": adminRecent.csrfToken,
+      "admin-stale": adminStale.csrfToken,
+      "editor-recent": editorRecent.csrfToken,
+    };
     principals = {
       "admin-recent": {
         type: "user",
         id: installationAdmin.id,
         scopes: ["user:*"],
-        session: core.authentication.createSession(installationAdmin.id, new Date(), "vault matrix", true).session,
+        session: adminRecent.session,
       },
       "admin-stale": {
         type: "user",
         id: installationAdmin.id,
         scopes: ["user:*"],
-        session: core.authentication.createSession(installationAdmin.id).session,
+        session: adminStale.session,
       },
+      "admin-token": { type: "user", id: installationAdmin.id, scopes: ["user:*"] },
       "editor-recent": {
         type: "user",
         id: projectEditor.id,
         scopes: ["user:*"],
-        session: core.authentication.createSession(projectEditor.id, new Date(), "vault matrix", true).session,
+        session: editorRecent.session,
       },
       compatibility: { type: "compatibility", id: "legacy-server-bearer", scopes: ["legacy:*"] },
+      service: {
+        type: "service",
+        id: "installation-service",
+        tokenId: "service-token",
+        scopes: ["*"],
+        organizationId: null,
+        projectId: null,
+      },
     };
 
     const app = express();
@@ -439,6 +458,7 @@ describe("vault lifecycle authorization", () => {
       req.principal = principals[String(req.headers["x-test-principal"] ?? "")];
       next();
     });
+    app.use(csrfMiddleware);
     app.use(authorizationMiddleware);
     app.use("/api/v1/vault", vaultRouter);
     app.use(errorHandler);
@@ -457,12 +477,37 @@ describe("vault lifecycle authorization", () => {
   });
 
   async function lifecycleRequest(operation: "initialize" | "seal" | "unseal", principal: string): Promise<Response> {
+    const csrfToken = csrfTokens[principal];
     return fetch(`${lifecycleBaseUrl}/api/v1/vault/${operation}?project=${lifecycleProject}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-test-principal": principal },
+      headers: {
+        "Content-Type": "application/json",
+        "x-test-principal": principal,
+        ...(csrfToken ? { Origin: "http://localhost:3000", "x-csrf-token": csrfToken } : {}),
+      },
       body: operation === "seal" ? undefined : JSON.stringify(operation === "initialize"
         ? { password: passphrase, confirmation: passphrase }
         : { password: passphrase }),
+    });
+  }
+
+  async function emptyResetRequest(
+    method: "GET" | "POST",
+    principal?: string,
+    options: { body?: string | null; csrf?: boolean } = {},
+  ): Promise<Response> {
+    const csrfToken = principal ? csrfTokens[principal] : undefined;
+    const body = method === "POST"
+      ? Object.hasOwn(options, "body") ? options.body ?? undefined : JSON.stringify({ confirmation: "RESET EMPTY VAULT" })
+      : undefined;
+    return fetch(`${lifecycleBaseUrl}/api/v1/vault/empty-reset?project=${lifecycleProject}`, {
+      method,
+      headers: principal ? {
+        "x-test-principal": principal,
+        ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+        ...(csrfToken && options.csrf !== false ? { Origin: "http://localhost:3000", "x-csrf-token": csrfToken } : {}),
+      } : undefined,
+      body,
     });
   }
 
@@ -481,5 +526,86 @@ describe("vault lifecycle authorization", () => {
     expect((await lifecycleRequest("unseal", "editor-recent")).status).toBe(403);
     expect((await lifecycleRequest("unseal", "admin-stale")).status).toBe(403);
     expect((await lifecycleRequest("unseal", "admin-recent")).status).toBe(200);
+  });
+
+  it("allows a browser installation administrator to inspect and only recent step-up to reset an empty sealed vault", async () => {
+    expect((await lifecycleRequest("initialize", "admin-recent")).status).toBe(201);
+    const unsealed = await emptyResetRequest("GET", "admin-recent");
+    expect(unsealed.status).toBe(200);
+    expect((await unsealed.json()).data).toEqual({
+      eligible: false,
+      reason: "Enter your current passphrase to continue, or lock the vault before checking reset eligibility.",
+    });
+    expect((await lifecycleRequest("seal", "admin-recent")).status).toBe(200);
+
+    expect((await emptyResetRequest("GET")).status).toBe(401);
+    expect((await emptyResetRequest("GET", "editor-recent")).status).toBe(403);
+    expect((await emptyResetRequest("GET", "compatibility")).status).toBe(403);
+    expect((await emptyResetRequest("GET", "admin-token")).status).toBe(403);
+    const stale = await emptyResetRequest("GET", "admin-stale");
+    expect(stale.status).toBe(200);
+    expect((await stale.json()).data).toEqual({ eligible: true, reason: null });
+
+    const metadata = await emptyResetRequest("GET", "admin-recent");
+    expect(metadata.status).toBe(200);
+    expect((await metadata.json()).data).toEqual({
+      eligible: true,
+      reason: null,
+    });
+
+    expect((await emptyResetRequest("POST")).status).toBe(401);
+    expect((await emptyResetRequest("POST", "compatibility")).status).toBe(403);
+    expect((await emptyResetRequest("POST", "admin-token")).status).toBe(403);
+    expect((await emptyResetRequest("POST", "service")).status).toBe(403);
+    const noCsrf = await emptyResetRequest("POST", "admin-recent", { csrf: false });
+    expect(noCsrf.status).toBe(403);
+    expect((await noCsrf.json()).error.code).toBe("CSRF_REJECTED");
+    const staleReset = await emptyResetRequest("POST", "admin-stale");
+    expect(staleReset.status).toBe(403);
+    expect((await staleReset.json()).error.code).toBe("STEP_UP_REQUIRED");
+
+    const submittedSecret = "replacement-passphrase-must-not-be-accepted";
+    for (const invalidBody of [
+      null,
+      "{}",
+      JSON.stringify({ confirmation: "wrong" }),
+      JSON.stringify({ confirmation: 7 }),
+      JSON.stringify({ confirmation: "RESET EMPTY VAULT", extra: true }),
+      JSON.stringify({ passphrase: submittedSecret }),
+    ]) {
+      const rejected = await emptyResetRequest("POST", "admin-recent", { body: invalidBody });
+      const rejectedText = await rejected.text();
+      expect(rejected.status).toBe(422);
+      expect(rejectedText).not.toContain(submittedSecret);
+      expect(core.getDb().prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 1 });
+      expect(core.getDb().prepare("SELECT count(*) AS count FROM resource_audit_events WHERE action = 'vault.empty_reset'").get()).toEqual({ count: 0 });
+    }
+
+    const response = await emptyResetRequest("POST", "admin-recent");
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(JSON.parse(body).data).toEqual({ reset: true, initialized: false });
+    expect(body).not.toContain(passphrase);
+    expect(core.getDb().prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 0 });
+    expect(core.getDb().prepare(
+      "SELECT action, actor_type, actor_id FROM resource_audit_events WHERE action = 'vault.empty_reset'",
+    ).get()).toEqual({ action: "vault.empty_reset", actor_type: "user", actor_id: principals["admin-recent"]!.id });
+  });
+
+  it("fails closed with an actionable error when strict reset metadata cannot be queried", async () => {
+    expect((await lifecycleRequest("initialize", "admin-recent")).status).toBe(201);
+    expect((await lifecycleRequest("seal", "admin-recent")).status).toBe(200);
+    core.getDb().exec("DROP TABLE provider_model_policies; DROP TABLE provider_connections;");
+
+    const metadata = await emptyResetRequest("GET", "admin-recent");
+    expect(metadata.status).toBe(503);
+    expect((await metadata.json()).error).toEqual({
+      code: "VAULT_RESET_CHECK_FAILED",
+      message: "Vault reset eligibility could not be verified. No changes were made.",
+    });
+    const reset = await emptyResetRequest("POST", "admin-recent");
+    expect(reset.status).toBe(503);
+    expect((await reset.json()).error.code).toBe("VAULT_RESET_CHECK_FAILED");
+    expect(core.getDb().prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 1 });
   });
 });

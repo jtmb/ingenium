@@ -1728,6 +1728,108 @@ describe("COORD-101 coordination registry fixtures", () => {
     expect(status(alpha.id)?.session.state).toBe("quarantined");
   });
 
+  it("keeps accepted baselines authoritative and rejects stale or mismatched claims atomically", () => {
+    const { db, alpha } = setup();
+    const session = register(alpha.id);
+    const oldHash = "1".repeat(64);
+    const repositoryHash = "2".repeat(64);
+    const paths = ["src/authoritative.ts", "src/forged.ts", "src/dirty.ts", "src/missing.ts", "src/stale-epoch.ts", "src/concurrent.ts"];
+    const insert = db.prepare(
+      `INSERT INTO coordination_managed_paths
+       (project_id, worktree_id, path, accepted_sha256, accepted_epoch, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    for (const path of paths) insert.run(alpha.id, MAIN.worktreeId, path, oldHash, path === "src/stale-epoch.ts" ? 2 : 1, "now");
+
+    const key = claimKey("authoritative-baseline");
+    const claimed = claimCoordinationBatch(alpha.id, {
+      ...lease(MAIN, session, TOKEN_A, "authoritative-baseline"),
+      clientClaimKey: key,
+      operation: "edit",
+      claims: [{
+        claim: { kind: "path", path: "src/authoritative.ts" },
+        baselineSha256: oldHash,
+        currentSha256: oldHash,
+        repositorySha256: repositoryHash,
+      }],
+    });
+    const completed = completeManagedMutation(alpha.id, {
+      ...lease(MAIN, claimed.session, TOKEN_A, "authoritative-baseline-complete"),
+      clientClaimKey: key,
+      acceptedEpoch: claimed.acceptedEpoch,
+      operationId: claimed.operationId!,
+      operation: "edit",
+      footprint: [],
+    });
+    expect(db.prepare(
+      "SELECT accepted_sha256, accepted_epoch FROM coordination_managed_paths WHERE project_id = ? AND worktree_id = ? AND path = ?",
+    ).get(alpha.id, MAIN.worktreeId, "src/authoritative.ts")).toEqual({ accepted_sha256: oldHash, accepted_epoch: 1 });
+    expect(db.prepare(
+      "SELECT state FROM coordination_managed_operations WHERE id = ?",
+    ).get(claimed.operationId)).toEqual({ state: "verified" });
+    expect(db.prepare(
+      "SELECT operation FROM coordination_mutation_receipts WHERE project_id = ? AND idempotency_key = ?",
+    ).get(alpha.id, "authoritative-baseline")).toEqual({ operation: "claim_batch" });
+
+    for (const [idempotencyKey, path, currentSha256, repositorySha256] of [
+      ["forged-repository-baseline", "src/forged.ts", repositoryHash, repositoryHash],
+      ["dirty-baseline", "src/dirty.ts", "3".repeat(64), repositoryHash],
+      ["missing-baseline", "src/missing.ts", null, null],
+      ["stale-accepted-epoch", "src/stale-epoch.ts", oldHash, repositoryHash],
+    ] as const) {
+      expectCode(() => claimCoordinationBatch(alpha.id, {
+        ...lease(MAIN, completed.session, TOKEN_A, idempotencyKey),
+        clientClaimKey: claimKey(idempotencyKey),
+        operation: "edit",
+        claims: [{
+          claim: { kind: "path", path },
+          baselineSha256: currentSha256,
+          currentSha256,
+          repositorySha256,
+        }],
+      }), "BASELINE_MISMATCH");
+    }
+    expectCode(() => claimCoordinationBatch(alpha.id, {
+      ...lease(MAIN, completed.session, TOKEN_A, "foreign-scope-baseline"),
+      worktreeId: OTHER_WORKTREE.worktreeId,
+      clientClaimKey: claimKey("foreign-scope-baseline"),
+      operation: "edit",
+      claims: [{
+        claim: { kind: "path", path: "src/authoritative.ts" },
+        baselineSha256: oldHash,
+        currentSha256: oldHash,
+        repositorySha256: repositoryHash,
+      }],
+    }), "SESSION_NOT_FOUND");
+
+    const peer = register(alpha.id, SECOND_SESSION, TOKEN_B, "concurrent-peer-register");
+    claimCoordinationBatch(alpha.id, {
+      ...lease(SECOND_SESSION, peer, TOKEN_B, "concurrent-repository-claim"),
+      clientClaimKey: claimKey("concurrent-repository-claim"),
+      claims: [{ claim: { kind: "reserved", name: "@repository" } }],
+    });
+    expectCode(() => claimCoordinationBatch(alpha.id, {
+      ...lease(MAIN, completed.session, TOKEN_A, "concurrent-baseline"),
+      clientClaimKey: claimKey("concurrent-baseline"),
+      operation: "edit",
+      claims: [{
+        claim: { kind: "path", path: "src/concurrent.ts" },
+        baselineSha256: oldHash,
+        currentSha256: oldHash,
+        repositorySha256: repositoryHash,
+      }],
+    }), "CLAIM_CONFLICT");
+    expect(db.prepare(
+      "SELECT accepted_sha256 FROM coordination_managed_paths WHERE project_id = ? AND worktree_id = ? AND path = ?",
+    ).get(alpha.id, MAIN.worktreeId, "src/concurrent.ts")).toEqual({ accepted_sha256: oldHash });
+    expect(db.prepare(
+      "SELECT count(*) AS count FROM coordination_mutation_receipts WHERE project_id = ? AND idempotency_key IN (?, ?, ?, ?, ?, ?)",
+    ).get(
+      alpha.id, "forged-repository-baseline", "dirty-baseline", "missing-baseline", "stale-accepted-epoch",
+      "foreign-scope-baseline", "concurrent-baseline",
+    )).toEqual({ count: 0 });
+  });
+
   it("recovers only an exactly reconciled quarantined owner and fences its old claims", () => {
     const { db, alpha } = setup();
     const crashed = register(alpha.id);

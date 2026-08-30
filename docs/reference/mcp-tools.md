@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 282-tool built-in Ingenium MCP catalog across 30 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 283-tool built-in Ingenium MCP catalog across 30 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **282 tools** across **30 baseline categories**:
-280 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
+The built-in catalog contains **283 tools** across **30 baseline categories**:
+281 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** display locator (except where noted). The locator
@@ -68,6 +68,11 @@ statically visible because OpenCode registers them as plugin tools; this is the
 visibility exception, not an execution bypass—they remain project-state-gated
 and fail closed when disabled or when state is unknown.
 
+`TOOL_STATE_UNAVAILABLE` is a fail-closed state result, not proof that preflight
+or authorization succeeded. Protected binding and the API's authoritative state
+must be established independently before an extension operation is considered
+enabled.
+
 The guarantee is tested with an in-memory fixture in
 `services/ingenium-server/tests/tool-visibility.test.ts` and the dashboard
 toggle path in `tests/ingenium-dashboard/mcp-tool-controls.spec.ts`.
@@ -123,7 +128,7 @@ fixed top-level shape is:
 ```json
 {
   "schemaVersion": 1,
-  "provenance": "fixture",
+  "provenance": "live",
   "generatedAt": "2026-07-31T12:00:10.000Z",
   "freshness": {
     "status": "fresh",
@@ -132,7 +137,11 @@ fixed top-level shape is:
   },
   "catalog": {
     "status": "conformant",
-    "issues": []
+    "issues": [],
+    "authorizedVisibleExpected": {
+      "toolCount": 230,
+      "categoryCount": 27
+    }
   },
   "tools": []
 }
@@ -145,7 +154,8 @@ fixed top-level shape is:
 - `catalog.status` is `conformant`, `nonconformant`, or `unknown`.
   `catalog.issues` is a bounded list of `{ code, toolName }`; it contains
   fixed conformance issue codes, never diagnostic messages. An unknown catalog
-  has no issues attached to it.
+  has no issues attached to it. `catalog.authorizedVisibleExpected` contains
+  only tool/category counts derived from the authorization-filtered catalog.
 - Each `tools[]` entry has `{ name, boundary, visibility, invocation }`.
   `boundary` is `mcp-stdio` or `opencode-extension`; `visibility.status` is
   `reachable`, `unreachable`, `unknown`, or `not-applicable`; and
@@ -165,8 +175,8 @@ the state. Extension-boundary tools are not applicable to the stdio visibility
 probe and are not invoked (`not-applicable` / `not-requested`, then `not-run` /
 `not-requested`).
 
-The configured collector reads the local `mcp.ingenium` entry, lists tools, and
-invokes only the provider-free `health_check` safely; all other tool
+The fixed server-owned collector lists tools and invokes only the provider-free
+`health_check` safely; all other tool
 invocations are `not-run` with `unsafe-invocation` when invocation is possible
 (transport/list failures remain `unknown`, and extension tools remain
 `not-run` / `not-requested`). Fixture and live runs use the same report schema;
@@ -180,22 +190,36 @@ Its response envelope is `{ project, project_id, data, total }`; `data` is the
 bounded report above, and each tool is enriched with its current catalog
 `category` and effective project `enabled` state before filters are applied.
 The endpoint accepts `q`, `category`, `enabled`, `boundary`, `visibility`, and
-`invocation` filters. It is capped at 64 KiB, uses a per-project 30-second
-cache for collection, and sends `Cache-Control: private, no-store` with
+`invocation` filters. It is capped at 64 KiB, uses a 30-second cache keyed by
+project and authorization-filtered tool set, and sends `Cache-Control: private, no-store` with
 `Vary: Authorization`.
 
 The live collector uses a fixed server-owned packaged launcher and an
 ephemeral probe. Probe mode lists tools and invokes only the provider-free
 `health_check`, then closes the child. It sets
 `INGENIUM_MCP_REPORT_MODE=1`; that mode does not start the child MCP gateway.
+Each child receives a short-lived `mcp-report` credential through an API-owned
+mode-`0600` file. The credential is bound to the exact project, workspace marker,
+and `/app` launcher worktree, can read only the filtered MCP state projection,
+expires after 60 seconds, and is removed after cleanup or expiry. At most two
+report credentials may be active at once. The installation bearer is not
+inherited.
 Fixed query errors are `413 MCP_REPORT_QUERY_TOO_LARGE` and `422
 INVALID_MCP_REPORT_QUERY`; unavailable or oversized report generation returns
 `503 MCP_REPORT_UNAVAILABLE`, and concurrent collection may return `503
-MCP_REPORT_BUSY`. When a runtime probe cannot certify source registration or
-catalog parity, `catalog.status` is `unknown` rather than a conformance claim.
+MCP_REPORT_BUSY`. Transport absence is represented in per-tool evidence and is
+not correlated with canonical, hidden, or private catalog state. A complete
+authorization-filtered catalog/effective-state projection is conformant.
 
 The report is also exposed as the project-scoped tool
 `ingenium_mcp_report_get`, with the same filters and bounded response.
+
+The supplied owner-scoped response recorded **230 visible tools** across **27
+available categories**. Tool-state and report aggregates are computed only from
+authorized rows; canonical/hidden aggregate counts and private tool names are not
+returned to the principal. Disabled tools are reported as `not-applicable` with
+`TOOL_DISABLED`, not as transport failures. Project-scoped child discovery can
+still add authorized tools and categories dynamically.
 
 ## PROJECTS — Managing workspaces
 
@@ -203,11 +227,11 @@ The report is also exposed as the project-scoped tool
 |------|-------------|
 | `ingenium_project_list` | Shows all your projects. **No project needed.** |
 | `ingenium_project_init` | Creates a brand new project. **No project needed.** |
-| `ingenium_project_delete` | Deletes a project forever. **No project needed.** |
+| `ingenium_project_delete` | Archives a regular project through the reversible lifecycle. **No project needed.** |
 | `ingenium_project_restore` | Brings back an archived project. |
 | `ingenium_project_list_archived` | Shows deleted/archived projects. |
 | `ingenium_project_purge` | Permanently wipes old projects. |
-| `ingenium_project_set_global` | Makes a project shared across everything. |
+| `ingenium_project_set_global` | Forwards an API-enforced global-lifecycle request; protected global designation changes are rejected for ordinary external callers. |
 | `ingenium_project_detail` | Gets detailed info about one project. **No project param needed.** |
 | `ingenium_project_rename` | Renames an existing project. |
 | `ingenium_project_migrate_workspace` | DB-only migration — moves the historical `/workspace` project into `global-default`. Never touches filesystem. Use `dryRun: true` first. |
@@ -253,10 +277,16 @@ the page and counts tools are the bounded read surface.
 ## SYNTHESIS — Turns observations into skills & traits
 
 `ingenium_synthesis_run`, `ingenium_synthesis_status`, `ingenium_synthesis_cross_project`, `synthesize_observations`.
+`ingenium_synthesis_run` accepts an optional `sessionId`; the MCP server forwards
+it as API `session_id`. The trigger returns a started acknowledgement and runs
+asynchronously, so use `ingenium_synthesis_status` for completion state.
 
 ## EXTRACTION — Scans chat history
 
 `ingenium_extraction_run`, `auto_observe_now`.
+`auto_observe_now` is a thin server-side trigger and returns only a
+started/scheduled acknowledgement; extraction results are available later in
+pipeline status.
 
 ## PIPELINE — Observability timeline
 
@@ -453,7 +483,7 @@ not expect them in audit responses.
 | `ingenium_vault_password_gen` | Generate a secure random password |
 | `ingenium_vault_audit_list` | List vault audit log entries |
 
-## BACKUPS — Database snapshots and restore (12 tools)
+## BACKUPS — Database snapshots and restore (14 tools)
 
 | Tool | What it does |
 |------|-------------|
@@ -464,7 +494,7 @@ not expect them in audit responses.
 | `ingenium_backup_delete` | Delete a backup by ID |
 | `ingenium_backup_restore_preview` | Create or replay a durable dry-run restore plan |
 | `ingenium_backup_restore_authorize` | Issue the plan's one-time confirmation token |
-| `ingenium_backup_restore_start` | Confirm a plan, atomically stage verified tamper-evident copies, and advance it to external-executor readiness without applying data |
+| `ingenium_backup_restore_start` | Confirm a plan, atomically stage verified tamper-evident copies, and advance it to the fixed RESTORE-101 executor handoff without applying data |
 | `ingenium_backup_restore_status` | Get the current content-free restore-plan state |
 | `ingenium_backup_restore_audit_list` | List bounded immutable restore-plan audit evidence |
 | `ingenium_backup_restore_execution_authorize` | Issue the distinct one-time RESTORE-101 execution token for a ready plan |
@@ -539,6 +569,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 282 tools across 30 categories (280 `ingenium_` catalog entries + 2 extension).** Project-scoped child
+**Built-in baseline: 283 tools across 30 categories (281 `ingenium_` catalog entries + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

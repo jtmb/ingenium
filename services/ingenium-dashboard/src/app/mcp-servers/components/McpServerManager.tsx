@@ -11,9 +11,10 @@ import {
   type McpToolReportResponse,
   type McpToolReportTool,
 } from "@/lib/api";
-import { opencode } from "@/lib/opencode";
+import { useRuntime } from "@/lib/RuntimeContext";
 import { useProject } from "@/lib/ProjectContext";
 import Select from "../../components/Select";
+import RuntimeWorkspacePicker from "../../components/RuntimeWorkspacePicker";
 import {
   getMcpStatusLabel,
   normalizeMcpServers,
@@ -202,11 +203,17 @@ function reportDate(value: unknown): string {
 
 export default function McpServerManager() {
   const project = useProject();
+  const runtime = useRuntime();
+  const opencode = runtime.client;
   const [tab, setTab] = useState<Tab>("servers");
   const [servers, setServers] = useState<ChildMcpServer[]>([]);
   const [discoveredTools, setDiscoveredTools] = useState<Array<{ server_id: string }>>([]);
   const [runtimeStatuses, setRuntimeStatuses] = useState<McpServerView[]>([]);
   const [categories, setCategories] = useState<CategorizedMcpTool[]>([]);
+  const [catalogCounts, setCatalogCounts] = useState<{
+    visibleTools: number;
+    visibleCategories: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -245,7 +252,7 @@ export default function McpServerManager() {
       api.mcpServers.list(project),
       api.mcpServers.listTools(project),
       api.mcpTools.list(project, true),
-      opencode.mcp.status(),
+       opencode ? opencode.mcp.status() : Promise.reject(new Error("runtime unavailable")),
     ]);
 
     if (serverResult.status === "fulfilled") {
@@ -264,9 +271,11 @@ export default function McpServerManager() {
 
     if (categoryResult.status === "fulfilled") {
       setCategories(Array.isArray(categoryResult.value.data) ? categoryResult.value.data : []);
+      setCatalogCounts(categoryResult.value.counts ?? null);
       setCatalogProjectAuthority(catalogAuthority(categoryResult.value));
     } else {
       setCategories([]);
+      setCatalogCounts(null);
       setToolError("Unable to refresh the MCP tool catalog.");
     }
 
@@ -284,7 +293,7 @@ export default function McpServerManager() {
 
     setLoading(false);
     setRefreshing(false);
-  }, [project]);
+  }, [opencode, project]);
 
   const loadReport = useCallback(async () => {
     setReportLoading(true);
@@ -336,6 +345,16 @@ export default function McpServerManager() {
     () => new Map((report?.tools ?? []).map((tool) => [tool.name, tool])),
     [report],
   );
+  const reportCounts = useMemo(() => {
+    const tools = report?.tools ?? [];
+    return {
+      enabled: tools.filter((tool) => tool.enabled).length,
+      disabled: tools.filter((tool) => !tool.enabled).length,
+      extensionOnly: tools.filter((tool) => tool.boundary === "opencode-extension").length,
+      reachable: tools.filter((tool) => tool.visibility.status === "reachable").length,
+      unreachable: tools.filter((tool) => tool.visibility.status === "unreachable").length,
+    };
+  }, [report]);
   const filteredCategories = categories
     .filter((category) => categoryFilter === "All" || category.category === categoryFilter)
     .map((category) => ({
@@ -393,6 +412,10 @@ export default function McpServerManager() {
   };
 
   const connectOrDisconnect = async (server: ChildMcpServer, connected: boolean) => {
+    if (!opencode) {
+      setLifecycleError("Select and start an authorized workspace before changing MCP connections.");
+      return;
+    }
     const action = connected ? "disconnect" : "connect";
     setBusyAction(`${action}:${server.name}`);
     setLifecycleError(null);
@@ -505,6 +528,7 @@ export default function McpServerManager() {
             : <>MCP tool state belongs to project <strong>{authoritativeProject}</strong>, not the selected project. Tool controls are disabled until the project context is refreshed.</>}
         </div>
       )}
+      {!opencode && <RuntimeWorkspacePicker controller={runtime.workspace} product="MCP status" />}
 
       {tab === "servers" && (
         <div className="space-y-5">
@@ -650,6 +674,11 @@ export default function McpServerManager() {
             </div>
             <div className="text-sm text-[var(--color-text-muted)]">
               <strong className="text-[var(--color-success-text)]">{enabledTools}</strong> enabled · <strong>{totalTools - enabledTools}</strong> disabled · <strong>{totalTools}</strong> total
+              {catalogCounts && (
+                <span className="block text-xs">
+                  {catalogCounts.visibleTools} visible tools · {catalogCounts.visibleCategories} available categories
+                </span>
+              )}
             </div>
           </div>
           <section aria-labelledby="mcp-report-heading" className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
@@ -677,6 +706,12 @@ export default function McpServerManager() {
                   <div><dt className="text-[var(--color-text-muted)]">Freshness</dt><dd>{reportLabel(report.freshness.status, { fresh: "Fresh", stale: "Stale", unknown: "Unknown" })}</dd></div>
                   <div><dt className="text-[var(--color-text-muted)]">Catalog</dt><dd>{reportLabel(report.catalog.status, { conformant: "Conformant", nonconformant: "Nonconformant", unknown: "Unknown" })} · {report.catalog.issues.length} issues</dd></div>
                 </dl>
+                <p data-testid="mcp-report-authorized-expected" className="mt-3 text-xs text-[var(--color-text-muted)]">
+                  {report.catalog.authorizedVisibleExpected.toolCount} authorized-visible expected tools · {report.catalog.authorizedVisibleExpected.categoryCount} authorized-visible expected categories
+                </p>
+                <p data-testid="mcp-report-counts" className="mt-3 text-xs text-[var(--color-text-muted)]">
+                  {reportCounts.enabled} enabled · {reportCounts.disabled} disabled · {reportCounts.extensionOnly} extension-only · {reportCounts.reachable} reachable · {reportCounts.unreachable} unreachable
+                </p>
                 {report.tools.length === 0 && <p data-testid="mcp-report-empty" className="mt-3 text-sm text-[var(--color-text-muted)]">The MCP report returned no rows.</p>}
               </>
             )}

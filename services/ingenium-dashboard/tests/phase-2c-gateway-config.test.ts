@@ -28,6 +28,8 @@ afterEach(() => {
   delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
   delete process.env.OPENCODE_SERVER_PASSWORD;
   delete process.env.INGENIUM_API_PORT;
+  delete process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN;
+  delete process.env.NEXT_PUBLIC_RUNTIME_SCHEME;
   if (initialNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = initialNodeEnv;
 });
@@ -44,6 +46,7 @@ describe("Phase 2C — build-time gateway configuration", () => {
       NEXT_PUBLIC_OPENCODE_WEB_URL: "http://opencode.localhost:3000/",
       NEXT_PUBLIC_OPENCODE_CLI_URL: "http://cli.localhost:3000/",
       NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "",
+      NEXT_PUBLIC_RUNTIME_SCHEME: "",
     });
     expect(Object.keys(config.env)).not.toContain("OPENCODE_SERVER_PASSWORD");
     expect(JSON.stringify(config.env)).not.toContain("server-secret-must-not-be-public");
@@ -61,6 +64,7 @@ describe("Phase 2C — build-time gateway configuration", () => {
       NEXT_PUBLIC_OPENCODE_WEB_URL: "https://web.example.test/",
       NEXT_PUBLIC_OPENCODE_CLI_URL: "https://cli.example.test/",
       NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: "",
+      NEXT_PUBLIC_RUNTIME_SCHEME: "",
     });
   });
 
@@ -115,5 +119,23 @@ describe("Phase 2C — build-time gateway configuration", () => {
     expect(frameSrc).not.toContain("/opencode-web");
     expect(frameSrc).not.toContain("/opencode-cli");
     expect(csp).toContain("frame-ancestors 'self'");
+  });
+
+  it("allows trustworthy localhost runtime HTTP while keeping remote runtime roots on HTTPS", async () => {
+    process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.localhost";
+    process.env.NEXT_PUBLIC_RUNTIME_SCHEME = "http";
+    let csp = getHeaderValue(await (await loadNextConfig()).headers(), "Content-Security-Policy");
+    expect(csp).toContain("connect-src 'self' http://localhost:4097 http://*.runtime.localhost");
+    expect(csp).toContain("http://*.runtime.localhost");
+    expect(csp).not.toContain("https://*.runtime.localhost");
+
+    process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN = "runtime.example.test";
+    process.env.NEXT_PUBLIC_RUNTIME_SCHEME = "https";
+    csp = getHeaderValue(await (await loadNextConfig()).headers(), "Content-Security-Policy");
+    expect(csp).toContain("https://*.runtime.example.test");
+    expect(csp).not.toContain("http://*.runtime.example.test");
+
+    process.env.NEXT_PUBLIC_RUNTIME_SCHEME = "http";
+    await expect((await loadNextConfig()).headers()).rejects.toThrow("Runtime scheme and root domain are incompatible");
   });
 });

@@ -3,9 +3,9 @@
   "evidence": {
     "runId": "run-20260817T134326Z-324949",
     "networkStates": 86,
-    "observedGetRequests": 328,
+    "observedGetRequests": 329,
     "safeGetRequests": 26,
-    "strictGetRequests": 302,
+    "strictGetRequests": 303,
     "observedStrictNonGetRequests": 51,
     "maxSinglePageFanout": 12,
     "maxSinglePageApiRequests": 13,
@@ -357,6 +357,14 @@
       "source": "lib/routes/vault.ts",
       "mount": "/api/v1/vault",
       "registration": "vaultRouter.get(\"/status\","
+    },
+    {
+      "template": "/api/v1/vault/empty-reset",
+      "observedCount": 1,
+      "reason": "destructive-reset eligibility",
+      "source": "lib/routes/vault.ts",
+      "mount": "/api/v1/vault",
+      "registration": "vaultRouter.get(\"/empty-reset\","
     }
   ]
 }

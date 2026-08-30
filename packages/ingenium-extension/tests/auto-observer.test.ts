@@ -15,6 +15,10 @@ vi.mock("../project-resolver.js", () => ({
   resolveExtensionProject: () => "extension-project",
 }));
 
+vi.mock("../extension-binding.js", () => ({
+  resolveExtensionBinding: () => ({ project: "extension-project" }),
+}));
+
 vi.mock("../mcp-client.js", () => ({
   callMcpTool: mockCallMcpTool,
   mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
@@ -48,6 +52,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
   it.each([
     ["API-down", () => mockCallMcpTool.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack")), "request_failed"],
     ["authentication", () => mockCallMcpTool.mockRejectedValue({ name: "McpBridgeError", failure: "authentication" }), "authentication"],
+    ["non-extraction", () => mockCallMcpTool.mockRejectedValue({ name: "McpBridgeError", failure: "locked" }), "request_failed"],
     ["timeout", () => {
       const error = new Error("Bearer secret-token http://private.example/timeout");
       error.name = "TimeoutError";
@@ -81,5 +86,16 @@ describe("AutoObserverPlugin lifecycle output", () => {
     const manual = await (plugin.tool.auto_observe_now as any).execute({}, { worktree: "/worktree" });
     expect(JSON.parse(manual)).toEqual({ triggered: false, message: "Extraction request failed" });
     expect(mockAssertExtensionToolEnabled).toHaveBeenCalledWith("auto_observe_now", "/worktree");
+  });
+
+  it("reports the asynchronous extraction acknowledgment without inventing a created count", async () => {
+    mockCallMcpTool.mockResolvedValue({ content: [{ type: "text", text: JSON.stringify({ status: "started" }) }] });
+    const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { app: { log: vi.fn() } } });
+
+    const manual = JSON.parse(await (plugin.tool.auto_observe_now as any).execute({}, { worktree: "/worktree" }));
+
+    expect(manual).toEqual({ triggered: true, status: "started", message: "Extraction scheduled" });
+    expect(JSON.stringify(manual)).not.toContain("unknown");
+    expect(JSON.stringify(manual)).not.toContain("created");
   });
 });

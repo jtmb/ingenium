@@ -256,6 +256,14 @@ server.registerTool = ((name: string, toolConfig: Parameters<typeof server.regis
   return registration;
 }) as typeof server.registerTool;
 
+function registerProjectTool(
+  name: string,
+  toolConfig: any,
+  handler: (args: any) => Promise<any>,
+) {
+  server.registerTool(name, toolConfig, wrapHandler(C(name), handler));
+}
+
 const childToolHost = server as unknown as ChildMcpToolHost;
 let childGateway: ChildMcpGateway | null = null;
 
@@ -752,9 +760,12 @@ server.registerTool(
   "synthesis_run",
   {
     description: "Trigger the background synthesis pipeline — processes pending observations into personality traits and skill updates.",
-    inputSchema: { project: projectParam },
+    inputSchema: {
+      project: projectParam,
+      sessionId: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
+    },
   },
-  wrapHandler(C("synthesis_run"), async ({ project }) => synthesisRun(project)),
+  wrapHandler(C("synthesis_run"), async ({ project, sessionId }) => synthesisRun(project, sessionId)),
 );
 
 server.registerTool(
@@ -1575,37 +1586,37 @@ server.registerTool(
   wrapLauncherScopedHandler(C("project_delete"), launcherProject, async ({ name }) => projectTools.projectDelete(name)),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_restore",
   { description: "Restore an archived project.", inputSchema: { project: projectParam, name: z.string() } },
-  wrapHandler(C("project_restore"), async ({ project, name }) => projectTools.projectRestore(project, name)),
+  async ({ project, name }) => projectTools.projectRestore(project, name),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_list_archived",
   { description: "List archived projects.", inputSchema: { project: projectParam } },
-  wrapHandler(C("project_list_archived"), async ({ project }) => projectTools.projectListArchived(project)),
+  async ({ project }) => projectTools.projectListArchived(project),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_purge",
   { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: projectRetentionDaysParam.optional() } },
-  wrapHandler(C("project_purge"), async ({ project, retentionDays }) => projectTools.projectPurge(project, retentionDays)),
+  async ({ project, retentionDays }) => projectTools.projectPurge(project, retentionDays),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_set_global",
   { description: "Forward an API-enforced global lifecycle request.", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } },
-  wrapHandler(C("project_set_global"), async ({ project, name, isGlobal }) => projectTools.projectSetGlobal(project, name, isGlobal)),
+  async ({ project, name, isGlobal }) => projectTools.projectSetGlobal(project, name, isGlobal),
 );
 
-server.registerTool(
+registerProjectTool(
   "project_rename",
   {
     description: "Rename an existing project.",
     inputSchema: { project: projectParam, name: z.string(), newName: z.string() },
   },
-  wrapHandler(C("project_rename"), async ({ project, name, newName }) => projectTools.projectRename(project, name, newName)),
+  async ({ project, name, newName }) => projectTools.projectRename(project, name, newName),
 );
 
 server.registerTool(
@@ -2328,7 +2339,9 @@ server.registerTool(
 server.registerTool(
   "health_check",
   { description: "API health check — returns status and uptime. No project param needed.", inputSchema: {} },
-  wrapLauncherScopedHandler(C("health_check"), launcherProject, async () => healthCheck()),
+  mcpReportMode
+    ? async () => healthCheck()
+    : wrapLauncherScopedHandler(C("health_check"), launcherProject, async () => healthCheck()),
 );
 
 server.registerTool(
@@ -3064,7 +3077,7 @@ server.registerTool(
 // Child tools have their own registration/reconciliation path. Do not route
 // those dynamic registrations through the built-in visibility controller.
 server.registerTool = originalRegisterTool;
-installToolVisibilityProjection(server, toolVisibility);
+if (!mcpReportMode) installToolVisibilityProjection(server, toolVisibility);
 
 /**
  * Connects the MCP server via stdio transport.
@@ -3075,8 +3088,8 @@ installToolVisibilityProjection(server, toolVisibility);
  */
 async function main() {
   const transport = new StdioServerTransport();
-  await toolVisibility.prepare();
   if (!mcpReportMode) {
+    await toolVisibility.prepare();
     const preflight = await api.settled.get("/auth/preflight");
     if (preflight.status === 429) throw new Error("MCP_AUTH_PREFLIGHT_RATE_LIMITED");
     if (!preflight.ok) throw new Error("MCP_AUTH_PREFLIGHT_UNAVAILABLE");
@@ -3093,7 +3106,7 @@ async function main() {
     );
   }
   await server.connect(transport);
-  await toolVisibility.start();
+  if (!mcpReportMode) await toolVisibility.start();
   if (childGateway) await childGateway.start();
   logger.info("ingenium-server MCP transport started on stdio");
 }

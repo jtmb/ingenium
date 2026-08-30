@@ -55,6 +55,7 @@ export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
 export const FIXTURE_API_RATE_LIMIT = 1_000;
 export const FIXTURE_OWNER_EMAIL = "playwright-owner@example.test";
 export const FIXTURE_OWNER_PASSWORD = "Playwright-fixture-password-2026!";
+export const FIXTURE_SESSION_COOKIE_NAME = "__Host-ingenium_session";
 
 function ensureTestRunAuthEncryptionKey(context: TestRunContext): void {
   const path = join(context.homeDir, "auth-encryption-key");
@@ -228,10 +229,10 @@ export async function createTestRunBrowserStorageState(
     headers: testRunApiAuthHeaders(context),
   });
   if (!session.ok) throw new Error(`Unable to create fixture dashboard session: API returned ${session.status}`);
-  const sessionToken = cookieFromResponse(session, "__Host-ingenium_session");
+  const sessionToken = cookieFromResponse(session, FIXTURE_SESSION_COOKIE_NAME);
   return normalizeDashboardStorageState(context, {
     cookies: [{
-      name: "__Host-ingenium_session",
+      name: FIXTURE_SESSION_COOKIE_NAME,
       value: sessionToken,
       domain: dashboardHost,
       path: "/",

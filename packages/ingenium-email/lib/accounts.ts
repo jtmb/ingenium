@@ -157,6 +157,16 @@ export function getGlobalProjectId(): string {
   return getEmailRuntime().accounts.getGlobalProjectId();
 }
 
+function getNormalizedAccount(
+  accounts: ReturnType<typeof getEmailRuntime>["accounts"],
+  accountId: string,
+  organizationId?: string,
+): EmailAccount | undefined {
+  return organizationId
+    ? accounts.getAccount?.(organizationId, accountId)
+    : accounts.listAccounts?.().find((account) => account.id === accountId);
+}
+
 function parseStoredAccount(raw: string): StoredAccount {
   const parsed = JSON.parse(raw) as StoredAccount;
   if (!parsed.id || !parsed.email) throw new Error("Stored email account metadata is malformed");
@@ -411,11 +421,10 @@ export function listAccounts(): EmailAccount[] {
 }
 
 export function getAccount(accountId: string, organizationId?: string): EmailAccount | undefined {
-  const normalized = organizationId
-    ? getEmailRuntime().accounts.getAccount?.(organizationId, accountId)
-    : getEmailRuntime().accounts.listAccounts?.().find((account) => account.id === accountId);
+  const runtime = getEmailRuntime();
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
   if (normalized) return normalized;
-  const raw = getEmailRuntime().accounts.getGlobalSetting(settingsKey(accountId));
+  const raw = runtime.accounts.getGlobalSetting(settingsKey(accountId));
   if (!raw) return undefined;
   try {
     return storedToAccount(parseStoredAccount(raw));
@@ -507,9 +516,7 @@ export function createOAuthAccountWithTokens(
 
 export function removeAccount(accountId: string, organizationId?: string): void {
   const runtime = getEmailRuntime();
-  const normalized = organizationId
-    ? runtime.accounts.getAccount?.(organizationId, accountId)
-    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
   if (normalized?.organizationId) {
     const { deleteAccount, deleteCredentials } = runtime.accounts;
     if (!deleteAccount || !deleteCredentials) throw new Error("Normalized mail account deletion is unavailable");
@@ -541,9 +548,7 @@ export function storeCredentials(
   organizationId?: string,
 ): void {
   const runtime = getEmailRuntime();
-  const normalized = organizationId
-    ? runtime.accounts.getAccount?.(organizationId, accountId)
-    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
   if (normalized?.organizationId) {
     const setCredential = runtime.accounts.setCredential;
     if (!setCredential) throw new Error("Normalized mail credential persistence is unavailable");
@@ -582,9 +587,7 @@ export function storeCredentials(
 /** Store encrypted OAuth tokens atomically after checking the account still exists. */
 export function storeOAuthTokens(accountId: string, tokens: OAuthToken, organizationId?: string): void {
   const runtime = getEmailRuntime();
-  const normalized = organizationId
-    ? runtime.accounts.getAccount?.(organizationId, accountId)
-    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
   if (normalized?.organizationId) {
     const setCredential = runtime.accounts.setCredential;
     if (!setCredential) throw new Error("Normalized mail credential persistence is unavailable");
@@ -619,9 +622,7 @@ export function getCredentials(
   organizationId?: string,
 ): { password?: string; tokens?: OAuthToken } | undefined {
   const runtime = getEmailRuntime();
-  const normalizedAccount = organizationId
-    ? runtime.accounts.getAccount?.(organizationId, accountId)
-    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  const normalizedAccount = getNormalizedAccount(runtime.accounts, accountId, organizationId);
   if (normalizedAccount?.organizationId) {
     const getCredential = runtime.accounts.getCredential;
     if (!getCredential) return undefined;
@@ -685,9 +686,7 @@ export async function testConnection(
 
 export function setAccountConnected(accountId: string, connected: boolean, organizationId?: string): void {
   const runtime = getEmailRuntime();
-  const normalized = organizationId
-    ? runtime.accounts.getAccount?.(organizationId, accountId)
-    : runtime.accounts.listAccounts?.().find((account) => account.id === accountId);
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
   if (normalized?.organizationId) {
     const updateAccount = runtime.accounts.updateAccount;
     if (!updateAccount) throw new Error("Normalized mail account persistence is unavailable");

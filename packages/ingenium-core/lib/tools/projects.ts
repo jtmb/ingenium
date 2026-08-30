@@ -158,10 +158,9 @@ export function archiveProject(name: string): boolean {
   const changed = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NULL").get(name) as Project | undefined;
-    if (!existing) return false;
+    if (!existing || existing.is_global) return false;
     const now = new Date().toISOString();
-    db.prepare("UPDATE projects SET archived_at = ? WHERE name = ?").run(now, name);
-    if (existing.is_global) recordGlobalProjectTransition(db, existing.id, "ceased_global", now);
+    db.prepare("UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL").run(now, now, existing.id);
     return true;
   });
   if (changed) checkpointAfterWrite();

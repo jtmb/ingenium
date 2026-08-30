@@ -8,8 +8,10 @@ vi.mock("../src/lib/api", () => ({ request }));
 
 import {
   normalizeOpenCodeProviderCatalog,
-  opencode,
+  createOpenCodeClient,
 } from "../src/lib/opencode";
+
+const runtimeId = "11111111-1111-4111-8111-111111111111";
 
 describe("OpenCode provider catalog client", () => {
   beforeEach(() => {
@@ -29,7 +31,7 @@ describe("OpenCode provider catalog client", () => {
       },
     });
 
-    await expect(opencode.providers.list("/workspace")).resolves.toEqual({
+    await expect(createOpenCodeClient(runtimeId).providers.list("/workspace")).resolves.toEqual({
       providers: [{
         id: "openai",
         label: "OpenAI",
@@ -38,7 +40,7 @@ describe("OpenCode provider catalog client", () => {
         connected: true,
       }],
     });
-    expect(request).toHaveBeenCalledWith("/opencode/providers?directory=%2Fworkspace", undefined);
+    expect(request).toHaveBeenCalledWith(`/opencode/providers?directory=%2Fworkspace&runtime_id=${runtimeId}`, undefined);
   });
 
   it("accepts a nested production envelope without leaving an optional collection undefined", () => {

@@ -105,6 +105,11 @@ describe("UI-103 application shell navigation", () => {
     expect(layout).toContain('data-nav-background="content"');
   });
 
+  it("keeps the top-bar controls from flex-shrinking into mobile overflow", () => {
+    const layout = read("services/ingenium-dashboard/src/app/components/DashboardShell.tsx");
+    expect(layout).toContain('className={`ml-auto flex min-w-0 items-center gap-2 ${isChatRoute ? "" : "shrink-0"}`}');
+  });
+
   it("uses a full 224px rail by default and persists a 56px compact rail", () => {
     pathname.current = "/tasks";
     renderShell();

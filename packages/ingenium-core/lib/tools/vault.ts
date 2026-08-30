@@ -108,6 +108,19 @@ export interface VaultOwnership {
   ownerUserId?: string | null;
 }
 
+export interface EmptyVaultResetEligibility {
+  initialized: boolean;
+  eligible: boolean;
+  dependentRows: number;
+  blockers: Array<"vault_unsealed" | "encrypted_items" | "credential_references" | "vault_references">;
+}
+
+export type EmptyVaultResetResult =
+  | { status: "reset" }
+  | { status: "not_initialized" }
+  | { status: "blocked"; eligibility: EmptyVaultResetEligibility }
+  | { status: "concurrent_change" };
+
 const SYSTEM_ACTOR: VaultActor = { type: "system" };
 
 function dbPath(): string {
@@ -287,6 +300,95 @@ export function sealVault(): void {
 /** Return whether this process currently holds an unsealed vault key. */
 export function isSealed(): boolean {
   return masterKey === null;
+}
+
+function emptyVaultResetEligibility(): EmptyVaultResetEligibility {
+  const row = getDb(dbPath()).prepare(`SELECT
+    (SELECT count(*) FROM vault_config WHERE id = 1) AS config_count,
+    (SELECT sealed FROM vault_config WHERE id = 1) AS sealed,
+    (SELECT count(*) FROM vault_items) AS vault_items,
+    (SELECT count(*) FROM provider_connections connection
+      WHERE credential_item_id IS NOT NULL OR EXISTS (
+        SELECT 1 FROM json_tree(connection.config_json) field WHERE field.key = 'credentialItemId'
+      )) AS provider_connections,
+    (SELECT count(*) FROM (
+      SELECT value FROM settings WHERE key = 'llm_provider_configs' AND json_valid(value)
+    ) configured, json_tree(configured.value) field
+      WHERE field.key = 'credentialItemId'
+    ) AS provider_setting_references,
+    (SELECT coalesce(sum(CASE
+      WHEN json_valid(value) = 0 THEN 1
+      WHEN json_type(value) <> 'array' THEN 1
+      ELSE 0 END), 0)
+      FROM settings WHERE key = 'llm_provider_configs') AS malformed_provider_settings,
+    (SELECT count(*) FROM protected_settings) AS protected_settings,
+    (SELECT count(*) FROM mcp_child_server_vault_refs) AS child_mcp_references,
+    (SELECT count(*) FROM job_vault_references) AS job_references,
+    (SELECT count(*) FROM job_vault_reference_audit) AS job_reference_audit,
+    (SELECT count(*) FROM job_vault_run_items) AS job_run_items,
+    (SELECT count(*) FROM job_vault_runtime_audit WHERE item_id IS NOT NULL) AS job_runtime_audit,
+    (SELECT count(*) FROM resource_grants WHERE resource_type = 'vault_item') AS resource_grants`).get() as Record<string, number | null>;
+  const encryptedItems = Number(row.vault_items);
+  const credentialReferences = Number(row.provider_connections)
+    + Number(row.provider_setting_references)
+    + Number(row.malformed_provider_settings);
+  const vaultReferences = Number(row.protected_settings)
+    + Number(row.child_mcp_references)
+    + Number(row.job_references)
+    + Number(row.job_reference_audit)
+    + Number(row.job_run_items)
+    + Number(row.job_runtime_audit)
+    + Number(row.resource_grants);
+  const dependentRows = encryptedItems + credentialReferences + vaultReferences;
+  const initialized = row.config_count === 1;
+  const blockers: EmptyVaultResetEligibility["blockers"] = [];
+  if (initialized && (row.sealed !== 1 || masterKey !== null)) blockers.push("vault_unsealed");
+  if (encryptedItems > 0) blockers.push("encrypted_items");
+  if (credentialReferences > 0) blockers.push("credential_references");
+  if (vaultReferences > 0) blockers.push("vault_references");
+  return { initialized, eligible: initialized && blockers.length === 0, dependentRows, blockers };
+}
+
+/** Auth and mail ciphertext use independent installation keys; only vault-key dependencies are counted here. */
+export function getEmptyVaultResetEligibility(): EmptyVaultResetEligibility {
+  return emptyVaultResetEligibility();
+}
+
+class EmptyVaultResetConcurrentChangeError extends Error {}
+
+export function resetEmptyVaultInitialization(projectId: string, actor: VaultActor): EmptyVaultResetResult {
+  try {
+    const result = execTransaction(() => {
+      const eligibility = emptyVaultResetEligibility();
+      if (!eligibility.initialized) return { status: "not_initialized" as const };
+      if (!eligibility.eligible) return { status: "blocked" as const, eligibility };
+      const db = getDb(dbPath());
+      const project = db.prepare("SELECT organization_id FROM projects WHERE id = ?").get(projectId) as { organization_id: string } | undefined;
+      if (!project) throw new Error("Vault reset audit project is unavailable");
+      if (db.prepare("DELETE FROM vault_config WHERE id = 1").run().changes !== 1) {
+        throw new EmptyVaultResetConcurrentChangeError();
+      }
+      if (emptyVaultResetEligibility().dependentRows !== 0) {
+        throw new EmptyVaultResetConcurrentChangeError();
+      }
+      insertResourceAuditEvent({
+        organizationId: project.organization_id,
+        projectId,
+        resourceType: "vault",
+        action: "vault.empty_reset",
+        actorType: actor.type,
+        actorId: actor.id,
+        outcome: "success",
+        requestId: actor.requestId,
+      });
+      return { status: "reset" as const };
+    });
+    if (result.status === "reset") checkpointAfterWrite();
+    return result;
+  } catch (error) {
+    if (error instanceof EmptyVaultResetConcurrentChangeError) return { status: "concurrent_change" };
+    throw error;
+  }
 }
 
 function unavailableJobSecrets(): never {

@@ -1,11 +1,17 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 import { getPlaywrightOutputDirectory } from "./test-run-context";
+import { externalPlaywrightDefaults } from "./playwright.external-defaults";
 import {
   DOCKER_EXTERNAL_SUITE_TRANSITION_INTERVAL_MS,
 } from "./ingenium-dashboard/external-suite-navigation-governor";
 
 const PLAYWRIGHT_REPO_ROOT = resolve(__dirname, "..");
+const dockerDefaults = externalPlaywrightDefaults satisfies {
+  retries: 0;
+  workers: 1;
+  fullyParallel: false;
+};
 
 export const DOCKER_TEST_MATCH: string[] = [
   "**/ingenium-dashboard/opencode.spec.ts",
@@ -24,13 +30,10 @@ export const DOCKER_TEST_MATCH: string[] = [
  * global setup if the requested Docker services are not reachable.
  */
 export default defineConfig({
-  testDir: ".",
+  ...dockerDefaults,
   testMatch: DOCKER_TEST_MATCH,
   globalSetup: "./ingenium-dashboard/docker-global-setup.ts",
   timeout: 60000,
-  retries: 0,
-  workers: 1,
-  fullyParallel: false,
   projects: [{
     name: "docker",
     metadata: {
@@ -39,11 +42,8 @@ export default defineConfig({
   }],
   outputDir: getPlaywrightOutputDirectory("docker", PLAYWRIGHT_REPO_ROOT),
   use: {
+    ...externalPlaywrightDefaults.use,
     baseURL: process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000",
-    headless: true,
-    viewport: { width: 1280, height: 720 },
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
   },
   // No webServer config — an already-running Docker deployment provides all services.
 });

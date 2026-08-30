@@ -603,6 +603,10 @@ export interface CategorizedMcpTool {
 export interface McpToolCatalogResponse {
   data: CategorizedMcpTool[];
   total: number;
+  counts?: {
+    visibleTools: number;
+    visibleCategories: number;
+  };
   project?: string;
   project_id?: string;
 }
@@ -645,6 +649,10 @@ export interface McpToolReport {
   catalog: {
     status: "conformant" | "nonconformant" | "unknown";
     issues: Array<{ code: string; toolName: string }>;
+    authorizedVisibleExpected: {
+      toolCount: number;
+      categoryCount: number;
+    };
   };
   tools: McpToolReportTool[];
 }
@@ -758,6 +766,15 @@ export type ContextMessageBatch = { messages: ContextMessage[]; missingIds: stri
 
 export type ContextCheckpointRestoreResult = {
   conversation: ContextConversationSummary;
+  checkpoint: ContextCheckpoint;
+  revision: number;
+  idempotent: boolean;
+};
+
+export type ContextChatTurnResult = {
+  conversation: ContextConversationSummary;
+  userMessage: ContextMessageSummary;
+  assistantMessage: ContextMessageSummary;
   checkpoint: ContextCheckpoint;
   revision: number;
   idempotent: boolean;
@@ -1321,6 +1338,16 @@ function jobsQuery(project: string, options?: { limit?: number; cursor?: string 
 
 
 export type VaultStatus = "sealed" | "unsealed";
+export const EMPTY_VAULT_RESET_CONFIRMATION = "RESET EMPTY VAULT" as const;
+export const EMPTY_VAULT_RESET_REASONS = {
+  notInitialized: "The vault is not initialized.",
+  unsealed: "Enter your current passphrase to continue, or lock the vault before checking reset eligibility.",
+  protectedDependencies: "Protected provider or vault dependencies still exist. Enter the current passphrase, or remove/reconfigure those dependencies before trying again.",
+} as const;
+
+export type EmptyVaultResetEligibility =
+  | { eligible: true; reason: null }
+  | { eligible: false; reason: typeof EMPTY_VAULT_RESET_REASONS[keyof typeof EMPTY_VAULT_RESET_REASONS] };
 
 export type VaultItemType = "login" | "api_key" | "note" | "oauth";
 
@@ -2344,6 +2371,29 @@ export const api = {
   },
   /** Immutable, project-scoped conversation memory. */
   context: {
+    chat: {
+      link: (input: { runtimeId: string | null; sessionId: string; title: string }, project = DEFAULT_PROJECT) =>
+        request<{ data: ContextConversationSummary }>(
+          `/context/chat-sessions/link?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify(input) },
+        ),
+      persistTurn: (
+        conversationId: string,
+        input: {
+          runtimeId: string | null;
+          sessionId: string;
+          userMessageId: string;
+          assistantMessageId: string;
+          userContent: string;
+          assistantContent: string;
+          expectedRevision: number;
+        },
+        project = DEFAULT_PROJECT,
+      ) => request<{ data: ContextChatTurnResult }>(
+        `/context/conversations/${encodeURIComponent(conversationId)}/chat-turns?project=${encodeURIComponent(project)}`,
+        { method: "POST", body: JSON.stringify(input) },
+      ),
+    },
     sources: {
       list: listContextSources,
     },
@@ -2569,18 +2619,6 @@ export const api = {
       };
     },
 
-    /** Sanitized, server-global Chat config — no caller project selection is accepted. */
-    chatConfig: async () => {
-      const response = await request<{ data: unknown }>("/opencode/chat-config");
-      return { data: normalizeChatConfigResponse(response.data) };
-    },
-
-    /** Persist an exact, server-validated global Chat provider/model selection. */
-    saveChatSelection: (selection: { providerId: string; modelId: string }) =>
-      request<{ data: { project: string; providerId: string; modelId: string } }>("/opencode/chat-selection", {
-        method: "PUT",
-        body: JSON.stringify(selection),
-      }),
   },
   configs: {
     get: (type: string = "project", project = DEFAULT_PROJECT) =>
@@ -3201,6 +3239,16 @@ export const api = {
         `/vault/seal?project=${encodeURIComponent(project)}`,
         { method: "POST" },
       ),
+
+    emptyReset: {
+      eligibility: (project = DEFAULT_PROJECT) =>
+        request<{ data: EmptyVaultResetEligibility }>(`/vault/empty-reset?project=${encodeURIComponent(project)}`),
+      reset: (confirmation: typeof EMPTY_VAULT_RESET_CONFIRMATION, project = DEFAULT_PROJECT) =>
+        request<{ data: { reset: boolean; initialized: false } }>(
+          `/vault/empty-reset?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify({ confirmation }) },
+        ),
+    },
 
     items: {
       /** GET /vault/items — list items, optionally filtered by folder_id */

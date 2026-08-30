@@ -14,7 +14,10 @@ afterEach(() => vi.unstubAllGlobals());
 describe("project lifecycle API paths", () => {
   it("encodes project names for archive and restore requests", async () => {
     fetchMock
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { archived: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { restored: true } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -25,7 +28,11 @@ describe("project lifecycle API paths", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/projects/team%20%2F%20project%3F");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "DELETE" });
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-CSRF-Token": "csrf-fixture" });
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/projects/team%20%2F%20project%3F/restore");
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({ "X-CSRF-Token": "csrf-fixture" });
   });
 });

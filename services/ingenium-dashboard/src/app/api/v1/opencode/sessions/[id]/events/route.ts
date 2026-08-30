@@ -1,10 +1,9 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DEFAULT_API_PORT = 4097;
-
 function apiPort(): number | null {
-  const configured = process.env.INGENIUM_API_PORT ?? String(DEFAULT_API_PORT);
+  const configured = process.env.INGENIUM_API_PORT
+    ?? (process.env.NODE_ENV === "production" ? "4096" : "4097");
   if (!/^\d{1,5}$/.test(configured)) return null;
 
   const port = Number(configured);

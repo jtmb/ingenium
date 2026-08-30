@@ -378,16 +378,18 @@ describe("project restore authorization", () => {
     tempDir = mkdtempSync(join(tmpdir(), "ingenium-project-restore-authz-"));
     process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "data.db");
     process.env.INGENIUM_HOME = join(tempDir, "home");
-    const { identity, organizations } = await import("ingenium-core");
     const organizationA = organizations.createOrganization("Organization A", "restore-org-a");
     const organizationB = organizations.createOrganization("Organization B", "restore-org-b");
     const adminA = identity.createUser("restore-admin-a@example.test", "Admin A");
     organizations.addOrganizationMember(organizationA, adminA.id, "admin");
     const projectA = projects.createProject("restore-project-a", false, organizationA);
     const projectB = projects.createProject("restore-project-b", false, organizationB);
-    projects.archiveProject(projectB.name);
 
     const baseUrl = await startPolicyRouter({ type: "user", id: adminA.id, scopes: ["user:*"] });
+    const archiveResponse = await fetch(`${baseUrl}/api/v1/projects/${projectB.name}`, { method: "DELETE" });
+    expect(archiveResponse.status).toBe(404);
+    expect(projects.getProject(projectB.name)?.archived_at).toBeNull();
+    projects.archiveProject(projectB.name);
     const response = await fetch(`${baseUrl}/api/v1/projects/${projectB.name}/restore?project=${projectA.name}`, { method: "POST" });
     expect(response.status).toBe(404);
     expect(projects.getProject(projectB.name)?.archived_at).toBeTruthy();

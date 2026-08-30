@@ -27,7 +27,7 @@ function coreDbPath(): string {
 }
 
 function opencodeDbPath(): string {
-  return process.env.OPENCODE_DB_PATH ?? "/home/appuser/.local/share/opencode/opencode.db";
+  return process.env.OPENCODE_DB_PATH ?? "/home/ingenium-opencode/.local/share/opencode/opencode.db";
 }
 
 function getSchedule(projectId: string): BackupSchedule {

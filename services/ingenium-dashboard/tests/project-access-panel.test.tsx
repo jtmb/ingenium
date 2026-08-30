@@ -22,4 +22,13 @@ describe("project access panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" })); fireEvent.click(screen.getByRole("button", { name: "Confirm step-up" })); await waitFor(() => expect(mocks.removeProjectMember).toHaveBeenCalledWith("org-one", "project-one", "user-two"));
   });
   it("renders denied capability without mutation controls", async () => { mocks.projectMembers.mockResolvedValue({ data: [{ userId: "user-two", email: "two@example.test", displayName: "Two", role: "viewer" }], capabilities: { ...capabilities, effectiveRole: "member", canManageProjectMembers: false } }); render(<ProjectAccessPanel organization={{ ...organization, role: "member" }} />); await screen.findByText("You can view project access but cannot change it."); expect(screen.queryByRole("button", { name: "Remove" })).toBeNull(); });
+  it("bounds the member picker to the project access card on narrow screens", async () => {
+    render(<ProjectAccessPanel organization={organization} />);
+
+    const memberPicker = await screen.findByLabelText("Organization member");
+    expect(memberPicker.className).toContain("w-full");
+    expect(memberPicker.className).toContain("sm:w-auto");
+    expect(memberPicker.parentElement?.className).toContain("min-w-0");
+    expect(memberPicker.closest("form")?.className).toContain("min-w-0");
+  });
 });

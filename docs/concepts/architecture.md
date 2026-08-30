@@ -11,11 +11,11 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 
 ### Server/Public Project (`global-default`)
 - **Project name**: `global-default` (with `is_global=1`)
-- **Used by**: The container's own OpenCode session (opencode-webui), email service, and dashboard default
-- **Global config location**: `/home/appuser/.config/opencode/opencode.jsonc` (set by the Docker entrypoint at `scripts/docker-entrypoint.sh`)
+- **Used by**: The compatibility container's own `opencode-web` session, email service, and dashboard default; the production control plane retains the namespace without running a local OpenCode process
+- **Global config location**: `/home/ingenium-opencode/.config/opencode/opencode.jsonc` in Docker (set by `scripts/docker-entrypoint.sh`)
 - **Plugin target**: Extension plugins inside the container use `INGENIUM_PROJECT=global-default` (set in `opencode.jsonc` at line 32 of the entrypoint)
 - **Created automatically** in two contexts:
-  1. **Docker deployment** — `scripts/docker-entrypoint.sh` creates it during container startup via `POST /api/v1/projects`
+  1. **Docker deployment** — API startup, launched by `scripts/docker-entrypoint.sh`, calls `ensureGlobalProject()` before schedulers or mail maintenance use it
   2. **Local development** — The API server (`api-server.ts`) calls `ensureGlobalProject()` before the scheduler or email engine starts. This is idempotent: if the project already exists, it is a no-op.
 - If the global project cannot be created (DB error, permissions), the API logs a warning and degrades gracefully — the health endpoint and non-global routes still work, but the mail sync scheduler skips with the log message `Skipping mail sync — no global project configured`
 
@@ -23,7 +23,7 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 - **Project name**: A display locator that must resolve to an immutable project UUID granted by the scoped credential
 - **Used by**: External OpenCode sessions (CLI, VS Code) that connect via the `@ingenium/extension` plugins
 - **Plugin target**: Explicit `--project` or `INGENIUM_PROJECT` locators take precedence; otherwise extension plugins use the validated worktree basename
-- **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the observer, skill-sync, and auto-observer plugins
+- **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the canonical `resource-sync`, `observer`, `auto-observer`, `session-coordinator`, and Ponytail adapter plugins
 
 ### External Worktree Project Initialization
 
@@ -39,10 +39,10 @@ When an external OpenCode session (CLI, VS Code) loads the `@ingenium/extension`
 
 The `global-default` project carries `is_global=1` and serves as the sole server/public namespace. The database permits at most one active global project (an archived global does not count). Runtime resolution does not silently choose among duplicate active globals; ambiguity is an integrity failure that must be repaired before shared resources or mail operations continue:
 
-- **Docker deployment**: Created at startup by `scripts/docker-entrypoint.sh` via `POST /api/v1/projects`
+- **Docker deployment**: Created by API startup, launched by `scripts/docker-entrypoint.sh`, via `ensureGlobalProject()`
 - **Local development**: Created by `ensureGlobalProject()` in the API server before the scheduler or email engine start — idempotent no-op if already present
 - **Shared resources**: Skills, plugins, configs, and settings written to `global-default` are accessible from every project via `resolveProjectBase()` path resolution
-- **Global config path**: `/home/appuser/.config/opencode/opencode.jsonc` (set by the Docker entrypoint)
+- **Global config path**: `/home/ingenium-opencode/.config/opencode/opencode.jsonc` in Docker
 - **Auto-loading**: When a new project is created, global skills from `global-default` are automatically copied into it via `copySkills()`
 - **Graceful degradation**: If `global-default` cannot be created, the API logs a warning and skips mail sync with `"Skipping mail sync — no global project configured"`
 
@@ -71,7 +71,8 @@ This check is applied in the API route handler (`services/ingenium-api/lib/route
 - Users can switch projects via:
   - The **ProjectDropdown** (folder icon + chevron) in the nav bar, positioned before the settings gear — available on all pages except `/mail` and `/opencode`, where it is disabled (`opacity-50 cursor-not-allowed`)
   - The `/projects` page, which shows an ACTIVE badge on the current project and a "Set Active" button on others
-  - MCP tools like `ingenium_project_init` and `ingenium_project_set_global`
+  - MCP tools like `ingenium_project_init`; global designation remains a trusted
+    server-lifecycle operation rather than a caller-selected project setting
 - When writing shared resources (skills, plugins, configs, settings), use `global-default`. External sessions resolve explicit `--project`, then `INGENIUM_PROJECT`, then a validated worktree basename; the credential-authorized UUID remains authoritative
 
 ### Key Rule
@@ -159,8 +160,8 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **280 built-in catalog entries** across **30 baseline categories**. Two extension-registered tools bring the built-in catalog to **282**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **281 built-in catalog entries** across **30 baseline categories**. Two extension-registered tools bring the built-in catalog to **283**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **24 primary navigation routes plus the 19-tab Settings overlay**. It talks to the API over HTTP.
 
 ### Resource tenancy (AUTH-104)
 
@@ -241,7 +242,9 @@ unprivileged HTTPS gateway has a narrow credential and no Docker socket. Host-on
 audience cookies and generation-checked sessions bind the runtime root to the
 originating dashboard auth session. Migration 103 persists that exact launcher
 origin so gateway health and proxied CSP responses permit only that dashboard
-origin; logout/revoke closes streams and reconnects.
+origin. Migration 105 preserves exact HTTPS audience origins and permits HTTP only
+when the persisted audience origin exactly matches a special-use `.localhost` host;
+logout/revoke closes streams and reconnects.
 
 ### Content tenancy (AUTH-105)
 
@@ -523,7 +526,7 @@ Skills use an **archive-only deletion** model — no hard-delete is possible. Th
 
 2. **Lineage (migration 043):** Provenance records in `skill_lineage` link source skills to targets via `(sourceProjectId, sourceName) → targetSkillId` (UUID). Tracks merges, copies, and derivations with optional `sourceHash`, `mergedFilePaths`, `tombstonePath`, and `reason`. Cycle detection via depth-limited BFS (max 100 depth).
 
-3. **Proposals (migration 044):** A review workflow of `draft → pending → applied | rejected | stale`, followed by `applied → rolledBack` in governance DTOs (`rolled_back` in storage/status filters). Proposal IDs are UUIDs. Approval stale-checks revision conflicts and missing or archived targets before applying; merge approvals create lineage where applicable. Automatic and cross-project synthesis still write skills directly; converting those paths to proposal-only generation is Phase 5 work.
+3. **Proposals (migration 044):** A review workflow of `draft → pending → applied | rejected | stale`, followed by `applied → rolledBack` in governance DTOs (`rolled_back` in storage/status filters). Proposal IDs are UUIDs. Approval stale-checks revision conflicts and missing or archived targets before applying; merge approvals create lineage where applicable. Automatic and cross-project synthesis create and submit governed create/update proposals; approval applies the skill change.
 
 **Wire compatibility boundary**: The API routes layer (`services/ingenium-api/lib/routes/skills.ts`) separates legacy Skill rows from governance DTOs:
 - Legacy CRUD routes (list, get, create, update, delete, enable, disable) return raw `snake_case` DB rows with `file_tree` as a JSON string, `enabled` as numeric 0/1.
@@ -565,7 +568,7 @@ The self-learning pipeline enables agents to learn from user interactions throug
 
 - **Phase 1 — Trait Consolidation**: `consolidateTraits()` sends observations + existing traits to the LLM, which returns CONFIRM/CREATE/IGNORE decisions. Traits are normalized statements (not verbatim copies). Confidence model: start 0.10–0.15, +0.15 per confirmation, cap 0.95, display threshold ≥0.30.
 
- - **Phase 2 — LLM Skill Synthesis**: Groups 3+ related observations and sends them to the LLM with existing skills/traits as context. Creates/updates skills through the API with the `llm-synthesized` prefix. A backup provider provides fallback if the primary LLM fails. Scheduled and manual per-project runs hold a project `skills` lease; cross-project synthesis holds the global `skills` lease.
+- **Phase 2 — LLM Skill Synthesis**: Groups 3+ related observations and sends them to the LLM with existing skills/traits as context. Creates and submits governed create/update proposals through the API with LLM evidence; approval applies the skill change. Scheduled and manual per-project runs use one explicitly authorized runtime executor and fail closed when it is unavailable; they do not fall back to a global or user runtime. Per-project runs hold a project `skills` lease; cross-project synthesis holds the global `skills` lease.
 
 - **Auto-Observer Plugin**: Thin trigger (~62 lines) that calls Ingenium MCP on `session.idle`; MCP invokes the authenticated extraction API route. The 15-minute scheduler covers extraction if the plugin fails to load.
 
@@ -577,9 +580,9 @@ The `configs` table stores `opencode.json` (project-level) and `opencode.jsonc` 
 
 ### Global Config Path Resolution
 
-Global projects write skills, plugins, and commands to `/home/appuser/.config/opencode/` instead of the project root. This is handled by `packages/ingenium-core/lib/tools/paths.ts`:
+Global projects write skills, plugins, and commands to `INGENIUM_GLOBAL_CONFIG_PATH` instead of the project root. Docker sets it to `/home/ingenium-opencode/.config/opencode/`. This is handled by `packages/ingenium-core/lib/tools/paths.ts`:
 
-- **`resolveProjectBase(projectId?)`** — Checks if a project has `is_global=1`. If so, returns `INGENIUM_GLOBAL_CONFIG_PATH` (default: `/home/appuser/.config/opencode/`). Otherwise returns the project root derived from `INGENIUM_CORE_DB_PATH`.
+- **`resolveProjectBase(projectId?)`** — Checks if a project has `is_global=1`. If so, returns `INGENIUM_GLOBAL_CONFIG_PATH` (non-container default: `/home/appuser/.config/opencode/`). Otherwise returns the project root derived from `INGENIUM_CORE_DB_PATH`.
 - **`getSkillsBase()`**, **`getPluginsBase()`**, **`getCommandsBase()`** — Resolve the appropriate `.opencode/` subdirectory based on project type.
 - **`getConfigPath()`** — Resolves to `opencode.jsonc` for global projects (JSONC supports comments) and `opencode.json` for regular projects.
 
@@ -668,10 +671,10 @@ Every pipeline event is logged to the `pipeline_events` table and displayed at `
 | Source | Events Emitted |
 |--------|---------------|
 | `observations.ts` — `storeObservation()` | `observation_created` |
-| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `synthesis_completed`, `synthesis_failed` |
+| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `proposal_created`, `synthesis_completed`, `synthesis_failed` |
 | `observer.ts` plugin | `session_created`, `session_idle`, `plugin_initialized`, `plugin_error` |
 | `observer-core.ts` | `observation_imported`, `synthesis_triggered` |
-| API Server (scheduled) | Runs extraction → synthesis every 15 minutes; skill mutations persist their own disk representation |
+| API Server (scheduled) | Runs extraction → synthesis every 15 minutes; approved proposal mutations persist their own disk representation |
 
 ### Timeline Architecture
 
@@ -691,9 +694,9 @@ Cross-project synthesis evaluates observations and skills across multiple projec
 
 1. **`ingenium_synthesis_cross_project`** iterates all active projects
 2. **Pattern detection**: Compares observations across projects, looking for shared patterns
-3. **Promotion**: Shared patterns are synthesized into skills in the `global-default` project
-4. **Resolution**: Global skills are accessible from every project via `resolveProjectBase()` path resolution
-5. **`ingenium_project_set_global(project, name, isGlobal)`** marks/unmarks a project as the global-default
+3. **Promotion**: Shared patterns create and submit skill proposals in the `global-default` project; approval applies the shared skill
+4. **Resolution**: Approved global skills are accessible from every project via `resolveProjectBase()` path resolution
+5. **Global designation** is maintained by the trusted server lifecycle; external project lifecycle requests cannot promote, demote, rename, archive, or restore the protected canonical global
 
 This runs as part of the scheduled 15-minute maintenance cycle or can be triggered manually.
 
@@ -718,9 +721,10 @@ Every plugin lifecycle operation (create, enable, disable, delete, update) trigg
 
 The system uses two parallel LLM dispatch modes for fault tolerance:
 
-### Direct Mode (Synthesis Pipeline)
+### Direct Mode (Explicit Endpoint Consumers)
 
-The core self-learning pipeline (`callSynthesisLLM` in `synthesis-llm.ts`) makes direct HTTP calls to the LLM endpoint:
+Explicit direct consumers (`callSynthesisLLM`/`safeLlmFetch` in
+`synthesis-llm.ts`) make direct HTTP calls to a configured LLM endpoint:
 
 1. **Primary provider**: Configured via Settings (provider, model, API key, endpoint) with 60s timeout
 2. **Backup provider**: Optional failover (same configuration shape) with 60s timeout
@@ -746,6 +750,12 @@ Docs AI, RAG Ask, and Job Suggestions use `executeSynthesisBroker()` which route
 5. Creates ephemeral OpenCode sessions using only `ingenium-llm-broker`, whose
    wildcard-deny profile has no tool allowances; the request also carries an
    empty `tools: {}` selection as defense in depth
+
+Per-project background extraction and synthesis use a separate API-owned broker
+executor. It resolves exactly one ready or idle runtime with an active capability,
+service principal, and project execute grant. If no such runtime exists, the
+operation returns an unavailable result without probing providers and never uses a
+global OpenCode target or another user's runtime.
 
 The broker profile's `hidden` frontmatter is persisted in the agent record and
 restored by agent disk sync and enable/disable lifecycle writes. This prevents
@@ -1229,16 +1239,16 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 | Package | Description | DB Access |
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
-| `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 273 built-in tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
-| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 21 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-api/` | Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole database authority. | Yes |
+| `services/ingenium-server/` | MCP stdio server with 281 built-in catalog tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 24 primary navigation routes plus the 19-tab Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
 ## Status Page Architecture
 
 The `/status` page renders two distinct card types from separate data sources:
 
-- **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-web, ttyd-opencode). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
+- **Service cards** — supervisord-managed processes. Compatibility exposes the API, API boundary, dashboard, gateway, OpenCode Web, OpenCode CLI, and VS Code processes; the production control plane exposes its required control-plane subset. Data is sourced from `GET /api/v1/services/:name`, which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
 - **Application cards** — in-process scheduled tasks and stateful modules (email-client, synthesis-engine, docs-workspace, tasks-board) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries the respective module directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders, doc/task counts).
 
 > **Service cards in local dev**: When running without supervisord, the supervisord XML-RPC endpoint is unreachable, so **service cards will not appear**. Application cards (in-process modules) remain fully available since they query the API process directly. Both card types render the same `ServiceOverlay` detail modal when clicked; the overlay correctly handles the absence of supervisord data.
@@ -1247,16 +1257,20 @@ The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnos
 
 ## Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 21 primary route-based pages plus the Settings overlay (22 user-facing views):
+The Ingenium Dashboard (http://localhost:3000) provides 24 primary navigation routes plus the Settings overlay (19 tabs):
 
 | Page | Purpose |
 |------|---------|
 | `/` | Home — operational home dashboard with live metrics (learning stats, task counts, job counts, mail status) via `/api/v1/dashboard/summary` in a 2×2 card grid |
 | `/chat` | Ingenium Chat — standalone conversational agent interface |
 | `/opencode` | Embedded OpenCode Web/CLI iframes (no native chat) |
+| `/vscode` | Embedded VS Code workspace through the local/runtime audience gateway |
 | `/projects` | Project management (create, rename, archive, restore) |
+| `/organizations` | Organization membership, invitations, roles, and project access |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/docs` | Documentation workspace with spaces, page tree, editor (autoFocus on rename inline bar for immediate typing), search, templates, metadata, history, and trash |
+| `/secrets` | Encrypted secrets vault with scrypt key derivation, AES-256-GCM, and audit trail |
+| `/backups` | Backup and restore management with snapshots, scheduling, and fixed-executor handoff |
 | `/jobs` | Job queue and background task monitoring — create/edit modal with 2-column responsive layout (metadata left, prompt_template right) and magic-wand button for AI job config generation from description |
 | `/logs` | Structured logging and event viewer |
 | `/mail` | Mail (inbox, compose, reader, auto-responses) — email client interface |
@@ -1268,15 +1282,17 @@ The Ingenium Dashboard (http://localhost:3000) provides 21 primary route-based p
 | `/config` | OpenCode project/global configuration editor and disk sync |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
+| `/context` | Immutable context conversation memory |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen, URL-driven overlay with 14 panels opened with `?settings=<tab>`; four panels are functional forms/launchers and ten link to their dedicated workspaces; `/settings` redirects to `/?settings=general` |
+| `/usage` | Project-scoped provider-neutral usage totals, breakdowns, freshness, and export |
+| Settings (overlay) | Full-screen, URL-driven overlay with 19 panels opened with `?settings=<tab>`; route-linked panels reuse their dedicated workspaces, while compact panels provide focused settings forms; `/settings` redirects to `/?settings=general` |
 
-Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. Together with the 21 primary routes, the App Router contains 26 page entrypoints. The dashboard talks to the API layer only — zero direct DB access.
+Additional `page.tsx` entrypoints support `/account`, the `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. The dashboard talks to the API layer only — zero direct DB access.
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **282 tools** across **30 baseline
-categories** (**280 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **283 tools** across **30 baseline
+categories** (**281 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
@@ -1337,7 +1353,6 @@ The dashboard includes an embedded OpenCode experience at `/opencode` with a **W
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
 - **Sandbox**: The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). Only `allow="clipboard-write"` (Permissions Policy) is retained.
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
-- The `appuser` has passwordless `sudo` access inside the container for package installation.
 
 Runtime gateway validation rechecks session generation before use. Accepted HTTP and
 WebSocket connections and generation start/finish events update counters and renew the
@@ -1369,64 +1384,83 @@ Dashboard document and skill previews use the shared `MarkdownDocument` componen
 
 ## Docker Deployment
 
-The project ships as a single Docker container via `Dockerfile` (multi-stage build, root) and `docker-compose.yml` (single service):
+The compatibility profile ships as a single Docker container via `Dockerfile`
+(multi-stage glibc build with a root bootstrap entrypoint that assigns distinct
+non-login service identities) and `docker-compose.yml`. The production profile
+uses the same image family as separate control-plane, runtime-manager,
+runtime-gateway, and per-workspace runtime containers. The `runtime-build` profile
+builds the `user-runtime` image independently and does not start an application
+service:
 
 ```yaml
 services:
   ingenium:
     build: .
     ports:
-       - "3000:3000"             # Local dashboard and gateway roots; WSL-forwardable
+      - "3000:3000"             # Local dashboard and gateway roots; WSL-forwardable
       - "127.0.0.1:4097:4097"   # Bearer-authenticated host-loopback API boundary
       - "127.0.0.1:1455:1455"   # Exact OAuth callback listener (host loopback only)
     volumes:
       - ingenium-data:/app/.ingenium
 ```
 
-Inside the container, **supervisord** manages seven processes:
-1. **API boundary** (:4097 → private Express :4096) — authenticated bearer boundary and `express.json({ limit: "2mb" })` for large skill/plugin uploads
-2. **Dashboard** (Next.js on :3000) — 21 primary routes plus the Settings overlay
-3. **API** (private Express on :4096) — sole database authority
-4. **Nginx gateway** (:3000 and :1455) — compatibility root proxies or production
-   static alias guidance, plus the exact OAuth callback route
-5. **opencode-web** (on :4098) — private OpenCode web upstream behind the local `opencode.localhost:3000` gateway
-6. **ttyd-opencode** (on :4099) — private OpenCode CLI upstream behind the local `cli.localhost:3000` gateway. It serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe.
-7. **code-server** (private on :4100) — VS Code workspace upstream behind the exact local `vscode.localhost:3000` gateway; it is not publicly published.
+Inside the container, root **supervisord** assigns a distinct non-login identity to
+each program. Both profiles run private API (`ingenium-api`), API boundary
+(`ingenium-boundary`), Dashboard (`ingenium-dashboard`), Nginx
+(`ingenium-gateway`), and restore handoff/maintenance (`ingenium-restore`).
+Compatibility additionally runs OpenCode and its authenticated internal proxy
+(`ingenium-opencode`), ttyd (`ingenium-ttyd`), and code-server
+(`ingenium-vscode`). Restore maintenance is disabled until the fixed Unix-socket
+handoff starts it.
 
-Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
+Compatibility grants only the three interactive identities workspace ACLs on
+`~/repos` → `/workspace`. Docker volumes `opencode-config` and `opencode-data`
+persist dedicated OpenCode state across rebuilds.
+
+In production, the control plane publishes the dashboard gateway, loopback API
+boundary, and OAuth callback on the same ports as compatibility. The runtime
+manager listens privately on `4110` and owns the Docker socket; the unprivileged
+runtime gateway publishes `127.0.0.1:80` to its `8080` listener by default, or
+the explicitly configured remote HTTPS `443` to `8443` mapping.
 
 The builder and runtime stages both use glibc-based `node:22-slim`, keeping native
 Node module artifacts compatible with the runtime libc. The image verifies that
-`better-sqlite3` loads in the runtime stage. Nginx runs as `appuser`; its PID,
+`better-sqlite3` loads in the runtime stage. Nginx runs as `ingenium-gateway`; its PID,
 lock, and temporary paths are recreated as owner-writable directories
 under ephemeral `/run/ingenium-gateway` on each start.
 
 > 🔴 **Docker git**: The Dockerfile installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
 
-Start with:
+Start the local compatibility profile with:
 ```bash
-docker compose up --build
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose --profile compatibility up --build
 ```
 
 ### Port Mappings
 
 | Host Port | Service | Description |
 |-----------|---------|-------------|
-| `3000` | Dashboard and gateways | Next.js frontend plus local root gateways without HTTP Basic Auth; supports default Windows-to-WSL localhost forwarding |
+| `3000` | Nginx gateway | Local dashboard and root gateways without HTTP Basic Auth; supports default Windows-to-WSL localhost forwarding |
+| internal `3001` | Dashboard | Next.js frontend behind the local gateway |
 | `127.0.0.1:4097` | API boundary | Authenticated bearer boundary for host MCP and in-container OpenCode traffic; the Dashboard server rewrites to private Express `4096` |
 | internal `4096` | Express API | Private REST gateway and sole DB authority |
+| internal `4101` | OpenCode internal auth proxy | Private API-only Basic-auth proxy to OpenCode Web |
 | internal `4098` | opencode-web | OpenCode Web upstream behind local `opencode.localhost:3000` |
 | internal `4099` | ttyd-opencode | OpenCode CLI upstream behind local `cli.localhost:3000` |
+| internal `4100` | code-server | VS Code upstream behind local `vscode.localhost:3000` |
+| internal `4110` | runtime-manager | Private Docker-socket-owning runtime control service; never host-published |
+| `127.0.0.1:80:8080` by default, or configured `443:8443` | runtime-gateway | Unprivileged runtime audience gateway; remote HTTPS uses the explicit wildcard certificate/key |
 | `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → Nginx listener → private Express `:4096`; only exact `GET /auth/callback` is forwarded, and the auth middleware allowlists it without a bearer token. |
 
-> Note: 4098 and 4099 are internal container listeners and are not browser-facing host ports. The loopback-only 4097 boundary requires a bearer credential; the local 3000 gateway has no HTTP Basic Auth and never receives a browser bearer token.
+> Note: 4098, 4099, and 4100 are internal container listeners and are not browser-facing host ports. The loopback-only 4097 boundary requires a bearer credential; the local 3000 gateway has no HTTP Basic Auth and never receives a browser bearer token.
 
 ### Volume Configurations
 
 | Volume Name | Mount Path | Purpose |
 |-------------|------------|---------|
 | `ingenium-data` | `/app/.ingenium` | SQLite databases, learnings, tasks, projects, commands |
-| `opencode-config` | `/home/appuser/.config` | OpenCode configuration (persists across rebuilds) |
-| `opencode-data` | `/home/appuser/.local` | OpenCode user data, session state |
+| `opencode-config` | `/home/ingenium-opencode/.config` | OpenCode configuration (persists across rebuilds) |
+| `opencode-data` | `/home/ingenium-opencode/.local` | OpenCode user data and session state |
 
 **Workspace bind-mount:** Your local `~/repos` is mounted at `/workspace` for file editing.

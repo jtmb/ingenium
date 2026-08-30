@@ -164,7 +164,7 @@ record the unused active slot and concrete dependency or applicability reason in
 
 ## Email MCP Tools
 
-The 13 email MCP tools (`ingenium_email_list` through `ingenium_email_watch_status`) provide full email client capabilities including inbox triage, AI-powered response suggestions, and IMAP IDLE monitoring.
+The 27 email MCP tools (`ingenium_email_list` through `ingenium_email_attachment_get`) provide full email client capabilities including inbox triage, AI-powered response suggestions, and IMAP IDLE monitoring.
 
 ---
 

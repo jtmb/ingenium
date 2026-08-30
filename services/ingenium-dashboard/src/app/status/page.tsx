@@ -423,7 +423,7 @@ export default function StatusPage() {
         <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-12 text-center">
           <p className="text-[var(--color-text-muted)]">No services detected.</p>
           <p className="text-[var(--color-text-muted)] text-sm mt-1">
-            Ensure supervisord XML-RPC is enabled on port 9001.
+            Ensure the configured Supervisor XML-RPC socket is available.
           </p>
         </div>
       )}

@@ -100,38 +100,14 @@ function applyMetadata(descriptor, modeSpec) {
     || (mode !== undefined && (metadata.mode & 0o7777) !== mode)) fail();
 }
 
-function validatePackageBinLink(parentDescriptor, name, metadata, rootDevice, relative) {
-  const childRelative = relative ? `${relative}/${name}` : name;
-  if (path.basename(target) !== ".config" || !/^opencode\/node_modules\/\.bin\/[^/]+$/.test(childRelative)) fail();
-  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
-  try {
-    const linkTarget = fs.readlinkSync(childPath);
-    const modulesRoot = fs.realpathSync(path.join(target, "opencode/node_modules"));
-    const resolvedTarget = fs.realpathSync(childPath);
-    const resolvedMetadata = fs.statSync(childPath);
-    if (path.isAbsolute(linkTarget) || !resolvedTarget.startsWith(`${modulesRoot}${path.sep}`)
-      || !resolvedMetadata.isFile() || resolvedMetadata.dev !== rootDevice) fail();
-    if (uid !== undefined || gid !== undefined) {
-      fs.lchownSync(childPath, uid ?? metadata.uid, gid ?? metadata.gid);
-    }
-    const linked = fs.lstatSync(childPath);
-    if (!sameObject(metadata, linked) || (uid !== undefined && linked.uid !== uid)
-      || (gid !== undefined && linked.gid !== gid)) fail();
-  } catch {
-    fail();
-  }
-}
-
 function walkTree(descriptor, rootDevice, relative = "") {
   const directoryPath = `/proc/self/fd/${descriptor}`;
   for (const name of fs.readdirSync(directoryPath)) {
     if (!relative && name === excludedName) continue;
     const childPath = `${directoryPath}/${name}`;
     const metadata = fs.lstatSync(childPath);
-    if (metadata.dev !== rootDevice) fail();
-    if (metadata.isSymbolicLink()) {
-      validatePackageBinLink(descriptor, name, metadata, rootDevice, relative);
-    } else if (metadata.isDirectory()) {
+    if (metadata.isSymbolicLink() || metadata.dev !== rootDevice) fail();
+    if (metadata.isDirectory()) {
       const child = openDirectory(descriptor, name, false);
       walkTree(child, rootDevice, relative ? `${relative}/${name}` : name);
       applyMetadata(child, directoryMode);

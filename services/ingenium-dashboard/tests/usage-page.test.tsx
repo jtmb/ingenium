@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { UsageBreakdownRow, UsageEventsPage, UsageSummary } from "../src/lib/api";
+import { ApiError, type UsageBreakdownRow, type UsageEventsPage, type UsageSummary } from "../src/lib/api";
 
 const mocks = vi.hoisted(() => ({
+  project: "usage-project",
   summary: vi.fn(),
   breakdown: vi.fn(),
   events: vi.fn(),
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   dashboardFetch: vi.fn(),
 }));
 
-vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "usage-project" }));
+vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => mocks.project }));
 vi.mock("../src/lib/api", () => ({
   ApiError: class ApiError extends Error { constructor(public status: number, message: string, public retryAfterSeconds: number | null) { super(message); } },
   api: { usage: {
@@ -36,6 +37,16 @@ import UsagePage from "../src/app/usage/page";
 
 const unavailable = { value: null, availability: "unavailable" as const };
 const known = (value: number) => ({ value, availability: "known" as const });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   return {
@@ -119,6 +130,7 @@ const evaluation = {
 };
 
 beforeEach(() => {
+  mocks.project = "usage-project";
   mocks.summary.mockReset().mockResolvedValue({ data: summary() });
   mocks.breakdown.mockReset().mockResolvedValue({ data: breakdown });
   mocks.events.mockReset().mockResolvedValue(events);
@@ -238,6 +250,56 @@ describe("UsagePage", () => {
     render(<UsagePage />);
     expect((await screen.findByTestId("usage-error-state")).textContent).toContain("Usage data is temporarily unavailable.");
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("keeps a 429 banner until the newest retry succeeds", async () => {
+    const retry = deferred<{ data: UsageSummary }>();
+    mocks.summary
+      .mockRejectedValueOnce(new Error("Too many requests. Please wait before retrying."))
+      .mockImplementationOnce(() => retry.promise);
+    render(<UsagePage />);
+
+    const errorState = await screen.findByTestId("usage-error-state");
+    expect(errorState.textContent).toContain("Too many requests");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(screen.getByTestId("usage-error-state").textContent).toContain("Too many requests");
+
+    retry.resolve({ data: summary() });
+    await waitFor(() => expect(screen.queryByTestId("usage-error-state")).toBeNull());
+    expect(screen.getByTestId("usage-metric-requests").textContent).toContain("2");
+  });
+
+  it("keeps an advisory error until its reload succeeds", async () => {
+    const reload = deferred<{ data: typeof thresholds }>();
+    mocks.thresholdsGet
+      .mockRejectedValueOnce(new ApiError(429, "Advisory threshold rate limit", 1))
+      .mockImplementationOnce(() => reload.promise);
+    render(<UsagePage />);
+
+    expect(await screen.findByText("Advisory threshold rate limit")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(screen.getByText("Advisory threshold rate limit")).toBeTruthy();
+
+    reload.resolve({ data: thresholds });
+    await waitFor(() => expect(screen.queryByText("Advisory threshold rate limit")).toBeNull());
+  });
+
+  it("ignores an older failed refresh after a newer refresh succeeds", async () => {
+    const stale = deferred<{ data: UsageSummary }>();
+    mocks.summary
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValueOnce({ data: summary({ totals: { ...summary().totals, requests: 7 } }) });
+    const { rerender } = render(<UsagePage />);
+
+    await waitFor(() => expect(mocks.summary).toHaveBeenCalledTimes(1));
+    mocks.project = "usage-project-new";
+    rerender(<UsagePage />);
+    await waitFor(() => expect(screen.getByTestId("usage-metric-requests").textContent).toContain("7"));
+
+    stale.reject(new Error("stale rate limit"));
+    await waitFor(() => expect(screen.queryByRole("alert", { name: /unable to load usage analytics/i })).toBeNull());
+    expect(screen.queryByText("stale rate limit")).toBeNull();
+    expect(screen.getByTestId("usage-metric-requests").textContent).toContain("7");
   });
 
   it("downloads CSV through the authenticated dashboard fetch path", async () => {

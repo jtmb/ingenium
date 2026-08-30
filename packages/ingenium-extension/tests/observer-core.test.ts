@@ -6,6 +6,10 @@ vi.mock("../project-resolver.js", () => ({
   resolveExtensionProject: () => "extension-project",
 }));
 
+vi.mock("../extension-binding.js", () => ({
+  resolveExtensionBinding: () => ({ project: "extension-project" }),
+}));
+
 vi.mock("../mcp-client.js", () => ({
   callMcpTool: mockCallMcpTool,
   mcpToolData: () => ({}),

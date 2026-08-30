@@ -17,9 +17,9 @@ import {
 } from "./mcp-status";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
-import { opencode } from "../../../lib/opencode";
 import { api, ApiError, type ChatConfigResponse, type TaskCaptureResult } from "../../../lib/api";
 import { useProject } from "../../../lib/ProjectContext";
+import { useOpenCodeClient, useRuntime } from "../../../lib/RuntimeContext";
 import TaskCaptureModal from "../../tasks/components/TaskCaptureModal";
 import {
   CHAT_CONTEXT_MAX_SOURCES,
@@ -43,6 +43,9 @@ import {
  * Responsive: on mobile (<768px) the sidebar becomes an overlay drawer.
  */
 export default function ChatShell() {
+  const opencode = useOpenCodeClient();
+  const runtime = useRuntime();
+  const selectedProject = useProject();
   /* ---- Layout state ---- */
   const [collapsed, setCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -116,11 +119,15 @@ export default function ChatShell() {
     isLoading: sessionsLoading,
     error: sessionsError,
     autoCreated = false,
+    isCreating = false,
   } = useOpenCodeSessions();
 
-  const chat = useOpenCodeChat(activeId);
-  // ProjectProvider validates this selected dashboard project before ChatShell mounts.
-  const selectedProject = useProject();
+  const activeSession = sessions.find((session) => session.id === activeId);
+  const chat = useOpenCodeChat(activeId, activeId ? {
+    project: runtime.projectName ?? selectedProject,
+    runtimeId: runtime.runtimeId,
+    title: activeSession?.title ?? "New conversation",
+  } : undefined);
 
   const openActivity = useCallback((messageId: string, partId: string) => {
     setActivitySelection({ messageId, partId });
@@ -189,11 +196,11 @@ export default function ChatShell() {
       setChatConfigLoading(true);
       setChatConfigReady(false);
       if (!isRetry) setChatConfigError(null);
-      const result = await api.settings.chatConfig();
-      setChatConfig(result.data);
+      const result = await opencode.chat.config();
+      setChatConfig(result);
       // Success clears any active rate-limit state
       clearRateLimit();
-      return result.data;
+      return result;
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
         const retryAfter = err.retryAfterSeconds ?? 5;
@@ -209,7 +216,7 @@ export default function ChatShell() {
     } finally {
       setChatConfigLoading(false);
     }
-  }, [clearRateLimit]);
+  }, [clearRateLimit, opencode]);
 
   // Countdown effect — decrement rateLimitSeconds every second
   useEffect(() => {
@@ -317,7 +324,7 @@ export default function ChatShell() {
     if (!provider?.models.some((model) => model.id === nextModelId)) return;
     const persist = async () => {
       try {
-        await api.settings.saveChatSelection({ providerId: nextProviderId, modelId: nextModelId });
+        await opencode.chat.saveSelection({ providerId: nextProviderId, modelId: nextModelId });
       } catch {
         // The local Chat turn remains usable. Docs AI will use the last
         // validated server selection or server-derived default until a later
@@ -325,7 +332,7 @@ export default function ChatShell() {
       }
     };
     selectionSaveQueueRef.current = selectionSaveQueueRef.current.then(persist, persist);
-  }, [chatConfig]);
+  }, [chatConfig, opencode]);
 
   /** Provider recovery remains available when only the selected model is stale. */
   // A missing default must not disable recovery when the catalog still offers
@@ -350,16 +357,6 @@ export default function ChatShell() {
     setSelection((current) => ({ ...current, modelId: nextModelId }));
     saveChatSelection(providerId, nextModelId);
   }, [providerId, saveChatSelection]);
-
-  /* ---- Derived session data ---- */
-  const activeSession = sessions.find((s) => s.id === activeId);
-
-  /** Sessions in the sidebar-compatible shape. */
-  const sidebarSessions = sessions.map((s) => ({
-    id: s.id,
-    title: s.title,
-    updatedAt: s.time.updated,
-  }));
 
   /** Task capture is identity-only and waits for the hook's session validation. */
   const taskCaptureDisabled = !activeId || !activeSession || sessionsLoading || chat.isLoading || chat.isStreaming;
@@ -457,10 +454,11 @@ export default function ChatShell() {
   /* ---- Session handlers ---- */
 
   const handleNew = useCallback(async () => {
+    if (isCreating) return;
     closeActivity();
     await create("New conversation");
     setMobileDrawerOpen(false);
-  }, [closeActivity, create]);
+  }, [closeActivity, create, isCreating]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -660,11 +658,12 @@ export default function ChatShell() {
       {/* Sidebar — hidden on mobile, visible as drawer overlay instead */}
       <div className="hidden md:flex">
         <ChatSessionSidebar
-          sessions={sidebarSessions}
+          sessions={sessions}
           activeId={activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
           onNew={handleNew}
+          newDisabled={isCreating}
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}
           isLoading={sessionsLoading}
@@ -689,11 +688,12 @@ export default function ChatShell() {
         onClosed={handleMobileDrawerClosed}
       >
         <ChatSessionSidebar
-          sessions={sidebarSessions}
+          sessions={sessions}
           activeId={activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
           onNew={handleNew}
+          newDisabled={isCreating}
           collapsed={false}
           onToggle={() => setMobileDrawerOpen(false)}
           isDrawer={mobileDrawerOpen}
@@ -935,7 +935,8 @@ export default function ChatShell() {
               <button
                 type="button"
                 onClick={handleNew}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+                disabled={isCreating}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-wait disabled:opacity-50"
               >
                 <svg
                   width="14"
@@ -982,7 +983,8 @@ export default function ChatShell() {
               <button
                 type="button"
                 onClick={handleNew}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+                disabled={isCreating}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-wait disabled:opacity-50"
               >
                 <svg
                   width="14"

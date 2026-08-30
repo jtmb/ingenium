@@ -428,15 +428,6 @@ export function trustedArtifactPolicy(): ArtifactPolicy {
   return { ownerUid: parse(process.env[TRUSTED_ARTIFACT_UID_ENV]), ownerGid: parse(process.env[TRUSTED_ARTIFACT_GID_ENV]) };
 }
 
-function serviceSecretPolicy(): ArtifactPolicy {
-  const ownerUid = process.getuid?.();
-  const ownerGid = process.getgid?.();
-  if (!Number.isSafeInteger(ownerUid) || ownerUid! < 0 || !Number.isSafeInteger(ownerGid) || ownerGid! < 0) {
-    throw new BackupError("BACKUP_INVALID");
-  }
-  return { ownerUid: ownerUid!, ownerGid: ownerGid! };
-}
-
 /** Resolve the single absolute directory used for all snapshot components. */
 export function resolveBackupDirectory(dbPath: string): string {
   const configuredDirectory = process.env.INGENIUM_BACKUPS_DIR?.trim();
@@ -500,7 +491,9 @@ function openExactRegular(path: string, maxBytes?: number, policy?: ArtifactPoli
 
 /** Read the owner-only signing key without exposing it to logs, API DTOs, or manifests. */
 export function loadBackupSigningKey(): Buffer {
-  const policy = serviceSecretPolicy();
+  const policy = typeof process.getuid === "function" && typeof process.getgid === "function"
+    ? { ownerUid: process.getuid(), ownerGid: process.getgid() }
+    : trustedArtifactPolicy();
   const keyPath = resolveBackupSigningKeyPath();
   const parent = lstatSync(dirname(keyPath));
   if (!parent.isDirectory() || parent.isSymbolicLink()) throw new BackupError("BACKUP_INVALID");
@@ -1530,11 +1523,16 @@ function copyVerifiedDescriptor(source: OpenedFile, target: string, expected: { 
       }
       position += bytes;
     }
+    const policy = trustedArtifactPolicy();
+    fchownSync(destination, policy.ownerUid, policy.ownerGid);
+    fchmodSync(destination, 0o400);
     const destinationStat = fstatSync(destination);
     if (
       position !== expected.sizeBytes || destinationStat.size !== expected.sizeBytes
       || digest.digest("hex") !== expected.sha256 || hashFd(source.fd) !== expected.sha256
       || !sameIdentity(source.identity, identity(fstatSync(source.fd))) || !destinationStat.isFile()
+      || destinationStat.uid !== policy.ownerUid || destinationStat.gid !== policy.ownerGid
+      || (destinationStat.mode & 0o777) !== 0o400
     ) throw new BackupError("BACKUP_INVALID");
     fsyncSync(destination);
   } finally {

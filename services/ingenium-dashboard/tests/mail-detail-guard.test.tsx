@@ -64,6 +64,9 @@ describe("BUG-001: EmailDetailPage account guard", () => {
     expect(
       await screen.findByText("account query parameter is required"),
     ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Email" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to Inbox" })).toBeTruthy();
+    expect(screen.queryByText(/loading/i)).toBeNull();
 
     // Verify NO email fetch was issued
     const emailFetches = fetchSpy.mock.calls.filter(([url]) =>
@@ -128,20 +131,4 @@ describe("BUG-001: EmailDetailPage account guard", () => {
     expect(url).toContain("folder=Sent");
   });
 
-  it("renders validation state cleanly without React error", async () => {
-    // Verify the DOM structure for the validation state
-    await renderPage("1");
-
-    const heading = await screen.findByRole("heading", { name: "Email" });
-    expect(heading).toBeTruthy();
-
-    const message = screen.getByText("account query parameter is required");
-    expect(message).toBeTruthy();
-
-    const backBtn = screen.getByRole("button", { name: "Back to Inbox" });
-    expect(backBtn).toBeTruthy();
-
-    // No loading spinner
-    expect(screen.queryByText(/loading/i)).toBeNull();
-  });
 });

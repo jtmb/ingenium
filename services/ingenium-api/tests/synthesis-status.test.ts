@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { observations, projects, resetDbForTest, synthesis } from "ingenium-core";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
 
@@ -46,16 +46,11 @@ beforeEach(async () => {
   app.use(express.json());
   app.use("/api/v1/synthesis", synthesisRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   server = undefined;
   resetDbForTest();
   rmSync(directory, { recursive: true, force: true });

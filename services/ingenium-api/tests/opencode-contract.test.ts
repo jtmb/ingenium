@@ -20,7 +20,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 
 /* ── Module-level mock of opencode-client ────────────────────────────────── */
 
@@ -57,6 +56,7 @@ vi.mock("../lib/opencode-client.js", () => ({
 
 // eslint-disable-next-line import/first
 import { opencodeRouter } from "../lib/routes/opencode.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 /* ── Types under test (re-imported for verification) ──────────────────────── */
 
@@ -95,18 +95,12 @@ afterEach(() => {
 beforeAll(async () => {
   const app = buildApp();
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const addr = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
   if (server) {
-    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    await closeHttpServer(server);
   }
   // Restore password
   if (SAVED_PASSWORD) {

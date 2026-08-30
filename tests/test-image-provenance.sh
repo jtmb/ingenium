@@ -93,7 +93,6 @@ node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[
 
 if ! OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/tmp/email-encryption.key \
-  INGENIUM_API_TOKEN_FILE=/tmp/installation-api.token \
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
   DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \
   IMAGE_REVISION="$REVISION" \

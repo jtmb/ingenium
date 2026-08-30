@@ -17,13 +17,13 @@ function candidate(method: string, originalUrl: string, headers: Record<string, 
 }
 
 describe("Dashboard safe-read policy", () => {
-  it("reconciles the complete observed 328-GET, 86-state profile", () => {
+  it("reconciles the complete observed 329-GET, 86-state profile", () => {
     expect(dashboardSafeReadPolicy.evidence).toMatchObject({
       runId: "run-20260817T134326Z-324949",
       networkStates: 86,
-      observedGetRequests: 328,
+      observedGetRequests: 329,
       safeGetRequests: 26,
-      strictGetRequests: 302,
+      strictGetRequests: 303,
       observedStrictNonGetRequests: 51,
       maxSinglePageFanout: 12,
       maxSinglePageApiRequests: 13,
@@ -31,7 +31,7 @@ describe("Dashboard safe-read policy", () => {
     });
     expect(dashboardSafeReadPolicy.safeRoutes).toHaveLength(9);
     expect(dashboardSafeReadPolicy.safeRoutes.reduce((total, route) => total + route.observedCount, 0)).toBe(26);
-    expect(dashboardSafeReadPolicy.observedStrictRoutes.reduce((total, route) => total + route.observedCount, 0)).toBe(302);
+    expect(dashboardSafeReadPolicy.observedStrictRoutes.reduce((total, route) => total + route.observedCount, 0)).toBe(303);
   });
 
   it("matches only explicit normalized GET routes and one optional trailing slash", () => {

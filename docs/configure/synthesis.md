@@ -7,7 +7,10 @@ description: Configuration of the synthesis pipeline — OpenCode provider block
 
 ## What It Does
 
-The synthesis pipeline processes observations into personality traits (Phase 1) and optionally creates/updates skills via an LLM (Phase 2). It runs automatically every 15 minutes (configurable) and can be triggered manually.
+The synthesis pipeline processes observations into personality traits (Phase 1) and
+optionally creates pending governed skill proposals via an LLM (Phase 2). Approved
+proposals apply skill changes. It runs automatically every 15 minutes (configurable)
+and can be triggered manually.
 
 ## Managing LLM Providers
 
@@ -135,7 +138,21 @@ Interactive AI features (Docs AI, RAG Ask, Job Suggestions) use the **synthesis 
 5. Creates an ephemeral OpenCode session using the named `ingenium-llm-broker` agent. Its wildcard-deny profile has no tool allowances, and the API-owned request uses an empty `tools: {}` selection; callers cannot override either boundary. The broker then sends the prompt via OpenCode's model routing and polls for the response with exponential backoff (500ms → 30s max)
 6. If all resolved providers fail, returns a sanitized failure without exposing provider endpoints, credentials, or upstream error text.
 
-The core self-learning pipeline still prefers an explicit direct synthesis endpoint. When no direct endpoint is configured, extraction, trait consolidation, skill synthesis, and skill consolidation receive a narrow text-only bridge to the bounded, tool-denied broker. Core never selects a provider/model or enables tools; the API retains both responsibilities and preserves the executing project scope.
+Explicit direct endpoint consumers retain their bounded direct-call policy. The
+API-owned background entrypoints pass extraction, trait consolidation, skill
+synthesis, and skill consolidation through a narrow text-only bridge to the
+bounded, tool-denied broker. Core never selects a provider/model or enables tools;
+the API retains those responsibilities and preserves the executing project scope.
+
+### Background runtime authorization
+
+Scheduled extraction and per-project background synthesis use an API-owned
+executor that resolves exactly one ready or idle workspace runtime with an active
+runtime capability, service principal, and project-level execute grant. If that
+authorized runtime is unavailable, the operation returns a fixed unavailable
+result without probing providers. Background work never falls back to a global
+OpenCode target, a user's runtime, or a browser-supplied selection, and private
+project observations are never sent to another runtime.
 
 **Docs AI selection rule:** Chat persists a provider/model pair only through an
 authenticated server endpoint that validates it against the sole active global
@@ -226,10 +243,10 @@ not place the bearer token in shell arguments or history.
 
 To share learned patterns across all projects:
 
-1. Mark a project as global: `ingenium_project_set_global(project, "global-default", true)`
+1. Ensure the trusted server lifecycle has an active canonical `global-default` project
 2. Trigger cross-project synthesis: `ingenium_synthesis_cross_project()`
-3. Global skills are created in the `global-default` project
-4. All projects can access global skills via shared skill resolution
+3. Create/update proposals are submitted in the `global-default` project
+4. Approved proposals apply global skills that all projects can access via shared skill resolution
 
 Cross-project synthesis also runs automatically every 15 minutes as part of the scheduled maintenance cycle.
 

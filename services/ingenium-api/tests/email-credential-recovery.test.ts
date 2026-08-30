@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 
 const {
   addAccount,
@@ -99,6 +98,7 @@ vi.mock("ingenium-email", () => ({
 }));
 
 import { emailsRouter } from "../lib/routes/emails.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let server: Server;
 let baseUrl: string;
@@ -121,16 +121,11 @@ beforeAll(async () => {
   });
   app.use("/api/v1/emails", emailsRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeHttpServer(server);
 });
 
 beforeEach(() => {

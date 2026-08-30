@@ -19,6 +19,7 @@ import {
   purgeExpiredProjects,
   setProjectGlobal,
   updateProject,
+  unarchiveProject,
 } from "../lib/tools/projects.js";
 
 let tempDir = "";
@@ -76,14 +77,29 @@ describe("project identity", () => {
   });
 
   it("lists active and archived projects separately while direct lookup retains archived detail", () => {
-    database();
+    const db = database();
     createProject("active-project");
-    createProject("archived-project");
+    const archived = createProject("archived-project");
+    insertOrganizationTask(db, archived.id, "preserved child");
     expect(archiveProject("archived-project")).toBe(true);
 
     expect(listProjects().map((project) => project.name)).toEqual(["active-project"]);
     expect(listArchivedProjects().map((project) => project.name)).toEqual(["archived-project"]);
     expect(getProject("archived-project")?.archived_at).not.toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?").get(archived.id)).toEqual({ count: 1 });
+
+    expect(unarchiveProject("archived-project")).toBe(true);
+    expect(listProjects().map((project) => project.name).sort()).toEqual(["active-project", "archived-project"]);
+    expect(listArchivedProjects()).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?").get(archived.id)).toEqual({ count: 1 });
+  });
+
+  it("refuses to archive the protected global organization home project", () => {
+    database();
+    const global = createProject("global-default", true);
+
+    expect(archiveProject(global.name)).toBe(false);
+    expect(getProject(global.name)?.archived_at).toBeNull();
   });
 
   it("rejects invalid retention periods before inspecting projects for deletion", () => {

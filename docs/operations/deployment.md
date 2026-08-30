@@ -356,12 +356,12 @@ providers, searches, exports, downloads, backups, and other protected reads stay
 strict or retain their dedicated limiter. Gateway-generated `429` responses
 include `Retry-After: 1`.
 
-The retained 86-state evidence classifies 26 of 328 observed GETs as safe and
-302 as strict. Project/organization/runtime workspace, Docs space, MCP server
+The retained 86-state evidence classifies 26 of 329 observed GETs as safe and
+303 as strict. Project/organization/runtime workspace, Docs space, MCP server
 and tool catalogs, personality collections, and usage breakdowns remain strict
 because their handlers are not numerically bounded. The largest observed page issued 12 API GETs, below the
 strict burst of 60. Human-paced acceptance is sequential navigation with at
-least ten seconds between route transitions. Across the retained profile, 302
+least ten seconds between route transitions. Across the retained profile, 303
 strict GETs plus 51 strict non-GETs then average about 25 requests/minute, below
 the API's strict 100 requests/minute. The largest state contained 12 GETs and one
 non-GET: its 13 total requests remain below Nginx's burst of 60 and, at the

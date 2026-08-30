@@ -18,14 +18,6 @@ function createManager(timeouts: ChildMcpTimeouts = {}): ChildMcpRuntimeManager 
   return manager;
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started >= timeoutMs) throw new Error("Timed out waiting for child MCP state");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -96,7 +88,10 @@ describe("child MCP runtime", () => {
     expect(isProcessAlive(descendantPid)).toBe(true);
 
     await manager.stopServer("fixture");
-    await waitFor(() => !isProcessAlive(directPid) && !isProcessAlive(descendantPid));
+    await vi.waitFor(
+      () => expect(!isProcessAlive(directPid) && !isProcessAlive(descendantPid)).toBe(true),
+      { timeout: 1_000, interval: 20 },
+    );
     expect(manager.getStatus("fixture")).toMatchObject({ state: "stopped", pid: null });
   });
 
@@ -107,7 +102,10 @@ describe("child MCP runtime", () => {
     const firstPid = started.pid!;
 
     process.kill(firstPid, "SIGTERM");
-    await waitFor(() => manager.getStatus("fixture").state === "exited");
+    await vi.waitFor(
+      () => expect(manager.getStatus("fixture").state).toBe("exited"),
+      { timeout: 1_000, interval: 20 },
+    );
     expect(manager.getStatus("fixture")).toMatchObject({
       state: "exited",
       lastExit: { signal: "SIGTERM" },
@@ -160,7 +158,10 @@ describe("child MCP runtime", () => {
       manager.stopServer("fixture"),
       manager.stopAll(),
     ])).resolves.toEqual([undefined, undefined, undefined]);
-    await waitFor(() => !isProcessAlive(directPid) && !isProcessAlive(descendantPid));
+    await vi.waitFor(
+      () => expect(!isProcessAlive(directPid) && !isProcessAlive(descendantPid)).toBe(true),
+      { timeout: 1_000, interval: 20 },
+    );
     expect(manager.getStatus("fixture")).toMatchObject({ state: "stopped", pid: null });
   });
 

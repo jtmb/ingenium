@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, request } from "./api";
 import {
   OPENCODE_CLI_GATEWAY_URL,
@@ -17,6 +17,12 @@ export interface RuntimeWorkspaceOption {
   organizationName: string;
   projectName: string;
   status: "ready" | "starting" | "stopped" | "unavailable";
+  runtimeId: string | null;
+}
+
+export interface RuntimeWorkspaceScope {
+  userId: string;
+  projectName: string;
 }
 
 type RuntimeDescriptor = {
@@ -26,12 +32,21 @@ type RuntimeDescriptor = {
 };
 
 type RuntimeLaunch = { launchUrl: string; status: "ready" };
-type RuntimeStart = { status: "ready" | "starting" };
+type RuntimeStart = { status: "ready" | "starting"; runtimeId: string | null };
 type RuntimeHealth = { status: "ready" | "unavailable" };
 
 export const RUNTIME_START_POLL_MS = 1_000;
 export const RUNTIME_START_MAX_ATTEMPTS = 60;
-const LAST_WORKSPACE_KEY = "ingenium-runtime-workspace-preference";
+const LEGACY_WORKSPACE_KEY = "ingenium-runtime-workspace-preference";
+
+type StoredRuntimeBinding = RuntimeWorkspaceScope & {
+  workspaceId: string;
+  runtimeId: string;
+};
+
+export function runtimeWorkspacePreferenceKey(scope: RuntimeWorkspaceScope): string {
+  return `ingenium-runtime-workspace-preference:${encodeURIComponent(scope.userId)}:${encodeURIComponent(scope.projectName)}`;
+}
 
 function compatibilityUrl(audience: RuntimeAudience): string {
   if (audience === "web") return OPENCODE_WEB_GATEWAY_URL;
@@ -44,23 +59,57 @@ function createExchangeProof(): string {
   return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
-function preferredWorkspace(options: RuntimeWorkspaceOption[]): string | null {
+function storedRuntimeBinding(preferenceKey: string, scope: RuntimeWorkspaceScope): StoredRuntimeBinding | null {
   try {
-    const preferred = localStorage.getItem(LAST_WORKSPACE_KEY);
-    return preferred && options.some((workspace) => workspace.id === preferred) ? preferred : null;
+    localStorage.removeItem(LEGACY_WORKSPACE_KEY);
+    const stored = localStorage.getItem(preferenceKey);
+    if (!stored) return null;
+    const binding = JSON.parse(stored) as Partial<StoredRuntimeBinding>;
+    if (binding.userId === scope.userId
+      && binding.projectName === scope.projectName
+      && typeof binding.workspaceId === "string"
+      && typeof binding.runtimeId === "string") return binding as StoredRuntimeBinding;
+    localStorage.removeItem(preferenceKey);
   } catch {
-    return null;
+    try { localStorage.removeItem(preferenceKey); } catch { /* Preference storage is optional. */ }
   }
+  return null;
 }
 
-export function useRuntimeWorkspace(enabled = true) {
+function clearStoredWorkspace(preferenceKey: string): void {
+  try { localStorage.removeItem(preferenceKey); } catch { /* Preference storage is optional. */ }
+}
+
+export function useRuntimeWorkspace(scope: RuntimeWorkspaceScope, enabled = true) {
+  const { userId, projectName } = scope;
+  const preferenceKey = runtimeWorkspacePreferenceKey(scope);
   const [mode, setMode] = useState<RuntimeDescriptor["mode"] | null>(null);
   const [status, setStatus] = useState<RuntimeWorkspaceStatus>("loading");
   const [workspaces, setWorkspaces] = useState<RuntimeWorkspaceOption[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [confirmedWorkspaceId, setConfirmedWorkspaceId] = useState<string | null>(null);
+  const [confirmedRuntimeId, setConfirmedRuntimeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const startInFlight = useRef(false);
+  const scopeGeneration = useRef(0);
+
+  useEffect(() => {
+    scopeGeneration.current += 1;
+    return () => { scopeGeneration.current += 1; };
+  }, [preferenceKey]);
+
+  const confirmServerBinding = useCallback((workspace: RuntimeWorkspaceOption, runtimeId: string) => {
+    if (workspace.projectName !== projectName) return false;
+    const binding: StoredRuntimeBinding = { userId, projectName, workspaceId: workspace.id, runtimeId };
+    try { localStorage.setItem(preferenceKey, JSON.stringify(binding)); } catch { /* Preference storage is optional. */ }
+    setSelectedWorkspaceId(workspace.id);
+    setConfirmedWorkspaceId(workspace.id);
+    setConfirmedRuntimeId(runtimeId);
+    setStatus("ready");
+    setError(null);
+    return true;
+  }, [preferenceKey, projectName, userId]);
 
   const retry = useCallback(() => {
     setStatus("loading");
@@ -68,6 +117,7 @@ export function useRuntimeWorkspace(enabled = true) {
     setWorkspaces([]);
     setSelectedWorkspaceId(null);
     setConfirmedWorkspaceId(null);
+    setConfirmedRuntimeId(null);
     setError(null);
     setNonce((value) => value + 1);
   }, []);
@@ -93,12 +143,35 @@ export function useRuntimeWorkspace(enabled = true) {
         if (!active) return;
         setWorkspaces(listed.data);
         if (listed.data.length === 0) {
+          clearStoredWorkspace(preferenceKey);
           setStatus("empty");
           setError("No workspace has been authorized for your account.");
           return;
         }
-        setSelectedWorkspaceId(preferredWorkspace(listed.data));
-        setStatus("selecting");
+        const preferredBinding = storedRuntimeBinding(preferenceKey, { userId, projectName });
+        if (!preferredBinding) {
+          setSelectedWorkspaceId(null);
+          setStatus("selecting");
+          return;
+        }
+        const preferred = listed.data.find((workspace) => workspace.id === preferredBinding.workspaceId);
+        if (!preferred || preferred.projectName !== projectName) {
+          clearStoredWorkspace(preferenceKey);
+          setSelectedWorkspaceId(null);
+          setError("The remembered workspace is no longer authorized for this account and project. Choose an available workspace.");
+          setStatus("selecting");
+          return;
+        }
+        if (preferred.status !== "ready" || !preferred.runtimeId || preferred.runtimeId !== preferredBinding.runtimeId) {
+          clearStoredWorkspace(preferenceKey);
+          setSelectedWorkspaceId(preferred.id);
+          setError(preferred.status === "stopped"
+            ? "The remembered workspace is stopped. Open it to start a new runtime."
+            : "The remembered workspace runtime is not ready. Choose a workspace or retry.");
+          setStatus("selecting");
+          return;
+        }
+        confirmServerBinding(preferred, preferred.runtimeId);
       } catch (failure) {
         if (!active) return;
         setStatus("error");
@@ -109,17 +182,41 @@ export function useRuntimeWorkspace(enabled = true) {
     };
     void load();
     return () => { active = false; };
-  }, [enabled, nonce]);
+  }, [confirmServerBinding, enabled, nonce, preferenceKey, projectName, userId]);
 
   const selectWorkspace = useCallback((workspaceId: string) => {
     if (!workspaces.some((workspace) => workspace.id === workspaceId)) return;
+    clearStoredWorkspace(preferenceKey);
     setSelectedWorkspaceId(workspaceId);
+    setConfirmedWorkspaceId(null);
+    setConfirmedRuntimeId(null);
     setError(null);
-  }, [workspaces]);
+  }, [preferenceKey, workspaces]);
 
   const start = useCallback(async () => {
-    if (mode !== "isolated" || !selectedWorkspaceId
-      || !workspaces.some((workspace) => workspace.id === selectedWorkspaceId)) return;
+    const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
+    if (startInFlight.current || mode !== "isolated" || !selectedWorkspaceId || !selectedWorkspace) return;
+    if (selectedWorkspace.projectName !== projectName) {
+      clearStoredWorkspace(preferenceKey);
+      setSelectedWorkspaceId(null);
+      setError("That workspace does not belong to the selected project.");
+      setStatus("selecting");
+      return;
+    }
+    if (selectedWorkspace.status === "ready") {
+      if (selectedWorkspace.runtimeId) {
+        confirmServerBinding(selectedWorkspace, selectedWorkspace.runtimeId);
+      } else {
+        setError("The workspace runtime is not ready. Refresh the workspace list and retry.");
+      }
+      return;
+    }
+    if (selectedWorkspace.status === "unavailable") {
+      setError("The workspace runtime is unavailable.");
+      return;
+    }
+    startInFlight.current = true;
+    const generation = scopeGeneration.current;
     setStatus("starting");
     setError(null);
     try {
@@ -127,24 +224,34 @@ export function useRuntimeWorkspace(enabled = true) {
         `/runtimes/browser/workspaces/${encodeURIComponent(selectedWorkspaceId)}/start`,
         { method: "POST", body: "{}" },
       );
+      if (scopeGeneration.current !== generation) return;
       let current = started.data.status;
+      let runtimeId = started.data.runtimeId;
+      let confirmedWorkspace = selectedWorkspace;
       for (let attempt = 0; current === "starting" && attempt < RUNTIME_START_MAX_ATTEMPTS; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, RUNTIME_START_POLL_MS));
+        if (scopeGeneration.current !== generation) return;
         const listed = await request<{ data: RuntimeWorkspaceOption[] }>("/runtimes/browser/workspaces");
+        if (scopeGeneration.current !== generation) return;
         const selected = listed.data.find((workspace) => workspace.id === selectedWorkspaceId);
         setWorkspaces(listed.data);
         if (!selected) throw new ApiError(404, "Workspace unavailable", null);
+        confirmedWorkspace = selected;
         current = selected.status === "ready" ? "ready" : "starting";
+        runtimeId = selected.runtimeId;
         if (selected.status === "unavailable") throw new Error("Workspace runtime unavailable");
       }
-      if (current !== "ready") {
+      if (current !== "ready" || !runtimeId) {
         setStatus("error");
         setError("The workspace is still starting. Retry to check again.");
         return;
       }
-      try { localStorage.setItem(LAST_WORKSPACE_KEY, selectedWorkspaceId); } catch { /* Preference storage is optional. */ }
-      setConfirmedWorkspaceId(selectedWorkspaceId);
-      setStatus("ready");
+      if (!confirmServerBinding(confirmedWorkspace, runtimeId)) {
+        clearStoredWorkspace(preferenceKey);
+        setSelectedWorkspaceId(null);
+        setStatus("selecting");
+        setError("That workspace no longer belongs to the selected project.");
+      }
     } catch (failure) {
       setStatus("error");
       setError(failure instanceof ApiError && failure.status === 429
@@ -152,10 +259,16 @@ export function useRuntimeWorkspace(enabled = true) {
         : failure instanceof ApiError && failure.status === 404
           ? "That workspace is no longer authorized for your account."
           : "The workspace could not be started.");
+    } finally {
+      startInFlight.current = false;
     }
-  }, [mode, selectedWorkspaceId, workspaces]);
+  }, [confirmServerBinding, mode, preferenceKey, projectName, selectedWorkspaceId, workspaces]);
 
-  return { mode, status, workspaces, selectedWorkspaceId, confirmedWorkspaceId, error, selectWorkspace, start, retry };
+  const confirmedProjectName = confirmedWorkspaceId
+    ? workspaces.find((workspace) => workspace.id === confirmedWorkspaceId)?.projectName ?? null
+    : null;
+
+  return { mode, status, workspaces, selectedWorkspaceId, confirmedWorkspaceId, confirmedRuntimeId, confirmedProjectName, error, selectWorkspace, start, retry };
 }
 
 export type RuntimeWorkspaceController = ReturnType<typeof useRuntimeWorkspace>;

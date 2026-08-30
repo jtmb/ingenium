@@ -33,7 +33,6 @@ reject_text docker-compose.yml '${HOME:-~}/repos'
 # create or inspect the host directory when rendering its configuration.
 rendered_config="$(
   HOME="$RENDER_HOME" \
-  INGENIUM_API_TOKEN_FILE=/tmp/installation-api.token \
   OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/tmp/email-encryption.key \
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
@@ -47,7 +46,6 @@ expected_mount=$'        source: /tmp/ingenium-workspace-contract-home/repos\n  
 
 # HOME is required rather than silently falling back to an arbitrary host path.
 if env -u HOME \
-  INGENIUM_API_TOKEN_FILE=/tmp/installation-api.token \
   OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/tmp/email-encryption.key \
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \

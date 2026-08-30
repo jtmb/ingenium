@@ -2,10 +2,11 @@
 export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProject, persistProject } from "../../lib/ProjectContext";
-import { api, Project } from "../../lib/api";
+import { api, ApiError, Project } from "../../lib/api";
 import { badgeTones } from "../../lib/badgeTones";
 import { formatRelativeTime } from "../../lib/time";
 import Overlay from "../components/Overlay";
+import StepUpDialog from "../components/auth/StepUpDialog";
 
 /**
  * ProjectsPage — Multi-project management (create, rename, archive, restore, delete).
@@ -24,6 +25,18 @@ type ProjectDetailState = {
   data?: any;
   error?: string;
 };
+type ProjectLifecycleAction = { type: "archive" | "restore"; name: string };
+
+function lifecycleError(action: ProjectLifecycleAction["type"], error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "GLOBAL_PROJECT_LIFECYCLE_FORBIDDEN") {
+      return "The global organization home project is protected and cannot be archived or restored.";
+    }
+    if (error.status === 404) return "The project is unavailable or you no longer have access.";
+    if (error.status === 403) return `You do not have permission to ${action} this project.`;
+  }
+  return `The project could not be ${action === "archive" ? "archived" : "restored"}.`;
+}
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -38,6 +51,9 @@ export default function ProjectsPage() {
   const [details, setDetails] = useState<Record<string, ProjectDetailState>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmArchive, setConfirmArchive] = useState<string | null>(null);
+  const [stepUpAction, setStepUpAction] = useState<ProjectLifecycleAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<ProjectLifecycleAction | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [renameProject, setRenameProject] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -126,8 +142,23 @@ export default function ProjectsPage() {
     await load();
   };
 
-  const archive = async (n: string) => { await api.projects.archive(n); await load(); };
-  const restore = async (n: string) => { await api.projects.restore(n); await load(); };
+  const runLifecycleAction = async (action: ProjectLifecycleAction) => {
+    setActionError(null);
+    setPendingAction(action);
+    try {
+      if (action.type === "archive") await api.projects.archive(action.name);
+      else await api.projects.restore(action.name);
+      await load();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "STEP_UP_REQUIRED") {
+        setStepUpAction(action);
+      } else {
+        setActionError(lifecycleError(action.type, error));
+      }
+    } finally {
+      setPendingAction(null);
+    }
+  };
   const rename = async (oldName: string, newName = renameValue.trim()) => {
     if (newName && newName !== oldName) {
       await api.projects.update(oldName, newName);
@@ -216,11 +247,11 @@ export default function ProjectsPage() {
                     <>
                       {p.name !== activeName && <button type="button" onClick={() => { persistProject(p.name); setActiveName(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">Set Active</button>}
                        <button type="button" onClick={() => { setRenameProject(p.name); setRenameValue(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">Rename</button>
-                      <button type="button" onClick={() => void archive(p.name)} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] sm:flex-none">Archive</button>
+                      <button type="button" disabled={pendingAction !== null} onClick={() => setConfirmArchive(p.name)} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] disabled:opacity-50 sm:flex-none">Archive</button>
                     </>
                   ) : (
                     <div className="flex w-full gap-2 sm:w-auto">
-                      <button type="button" onClick={() => void restore(p.name)} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-success-text)] hover:bg-[var(--color-success-bg)] sm:flex-none">Restore</button>
+                       <button type="button" disabled={pendingAction !== null} onClick={() => void runLifecycleAction({ type: "restore", name: p.name })} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-success-text)] hover:bg-[var(--color-success-bg)] disabled:opacity-50 sm:flex-none">Restore</button>
                       <button type="button" onClick={() => setConfirmDelete(p.name)} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] sm:flex-none">Delete</button>
                     </div>
                   )}
@@ -275,6 +306,26 @@ export default function ProjectsPage() {
         })}
       </div>
       {renameProject && <Overlay isOpen title={`Rename ${renameProject}`} onClose={() => setRenameProject(null)}><form className="space-y-4 p-6" onSubmit={(e) => { e.preventDefault(); void rename(renameProject); }}><label htmlFor="rename-project" className="block text-sm font-medium">Project name</label><input id="rename-project" className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus required /><div className="flex justify-end gap-2"><button type="button" className="rounded border border-[var(--color-border)] px-4 py-2" onClick={() => setRenameProject(null)}>Cancel</button><button className="rounded bg-blue-600 px-4 py-2 text-white">Rename</button></div></form></Overlay>}
+
+      <Overlay isOpen={confirmArchive !== null} onClose={() => setConfirmArchive(null)} title="Archive Project">
+        {confirmArchive && <div className="space-y-4">
+          <p className="text-sm text-[var(--color-text-secondary)]">Archive <strong>{confirmArchive}</strong>? Its data is preserved and the project can be restored later.</p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setConfirmArchive(null)} className="w-full rounded border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">Cancel</button>
+            <button type="button" onClick={() => { const project = confirmArchive; setConfirmArchive(null); void runLifecycleAction({ type: "archive", name: project }); }} className="w-full rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 sm:w-auto">Archive project</button>
+          </div>
+        </div>}
+      </Overlay>
+
+      <StepUpDialog
+        open={stepUpAction !== null}
+        onClose={() => setStepUpAction(null)}
+        onComplete={() => {
+          const action = stepUpAction;
+          setStepUpAction(null);
+          if (action) void runLifecycleAction(action);
+        }}
+      />
 
       {/* Create modal */}
       {showCreate && (

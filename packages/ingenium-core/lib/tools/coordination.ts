@@ -1150,6 +1150,7 @@ function assertAcceptedBaselines(
   projectId: string,
   worktreeId: string,
   claims: ReturnType<typeof normalizedClaimBatch>,
+  acceptedEpoch: number,
 ): void {
   for (const entry of claims) {
     if (entry.claim.kind !== "path") {
@@ -1162,11 +1163,13 @@ function assertAcceptedBaselines(
       throw new CoordinationError("INVALID_COORDINATION_INPUT");
     }
     const accepted = db.prepare(
-      `SELECT accepted_sha256 FROM coordination_managed_paths
+      `SELECT accepted_sha256, accepted_epoch FROM coordination_managed_paths
        WHERE project_id = ? AND worktree_id = ? AND path = ?`,
-    ).get(projectId, worktreeId, entry.claim.path) as { accepted_sha256: string | null } | undefined;
+    ).get(projectId, worktreeId, entry.claim.path) as { accepted_sha256: string | null; accepted_epoch: number } | undefined;
     const expected = accepted ? accepted.accepted_sha256 : entry.repositorySha256;
-    if (entry.currentSha256 !== expected) throw new CoordinationError("BASELINE_MISMATCH");
+    if ((accepted && accepted.accepted_epoch !== acceptedEpoch) || entry.currentSha256 !== expected) {
+      throw new CoordinationError("BASELINE_MISMATCH");
+    }
   }
 }
 
@@ -2461,7 +2464,9 @@ export function claimCoordinationBatch(
          AND incarnation = ? AND client_claim_key_hash = ? LIMIT 1`,
     ).get(projectId, session.id, input.worktreeId, input.incarnation, clientClaimKeyHash);
     if (reusedKey) throw new CoordinationError("CLAIM_KEY_REUSED");
-    if (input.operation !== undefined) assertAcceptedBaselines(db, projectId, input.worktreeId, claims);
+    if (input.operation !== undefined) {
+      assertAcceptedBaselines(db, projectId, input.worktreeId, claims, epoch.accepted_epoch);
+    }
     assertNoPersistedOverlap(db, projectId, input.worktreeId, claims);
     const priorFence = maximumForeignClaimFence(db, projectId, session);
     const claimFence = priorFence >= session.fence

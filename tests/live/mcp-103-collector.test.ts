@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
   lstatSync,
@@ -73,14 +73,6 @@ function createFixtureRepository(config: unknown): string {
   temporaryDirectories.push(repository);
   writeFileSync(join(repository, "opencode.json"), JSON.stringify(config), { mode: 0o600 });
   return repository;
-}
-
-async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 3_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await check())) {
-    if (Date.now() >= deadline) throw new Error("bounded test wait expired");
-    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
-  }
 }
 
 function portListening(port: number): Promise<boolean> {
@@ -307,12 +299,18 @@ describe("MCP-103 usefulness collector", () => {
     try {
       expect(mcp103ToolNamesFromList(await connection.listTools())).toEqual(["health_check"]);
       await connection.callHealthCheck();
-      await waitFor(() => existsSync(portFile));
+      await vi.waitFor(
+        () => expect(existsSync(portFile)).toBe(true),
+        { timeout: 3_000, interval: 20 },
+      );
       const processInfo = JSON.parse(readFileSync(portFile, "utf8")) as { pid: number; port: number };
       expect(await portListening(processInfo.port)).toBe(true);
       await connection.close();
       closed = true;
-      await waitFor(async () => !(await portListening(processInfo.port)));
+      await vi.waitFor(
+        async () => expect(await portListening(processInfo.port)).toBe(false),
+        { timeout: 3_000, interval: 20 },
+      );
       expect(() => process.kill(processInfo.pid, 0)).toThrow();
     } finally {
       if (!closed) await connection.close().catch(() => undefined);

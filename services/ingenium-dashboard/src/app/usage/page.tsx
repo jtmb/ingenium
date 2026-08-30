@@ -103,7 +103,6 @@ export default function UsagePage() {
   const loadUsage = useCallback(async (query: UsageQuery) => {
     const version = ++requestVersion.current;
     setLoading(true);
-    setError(null);
     try {
       const [summary, breakdown, events] = await Promise.all([
         api.usage.summary(query, project),
@@ -112,6 +111,7 @@ export default function UsagePage() {
       ]);
       if (version === requestVersion.current) {
         setData({ project, summary: summary.data, breakdown: breakdown.data, events });
+        setError(null);
         setEventsMoreError(null);
       }
     } catch (fetchError: unknown) {
@@ -295,9 +295,9 @@ export default function UsagePage() {
 
       <UsageAdvisoryPanel key={project} project={project} selectedRange={appliedQuery} />
 
-      {displayedLoading && !displayedData && <UsagePageSkeleton />}
+      {displayedLoading && !displayedData && !displayedError && <UsagePageSkeleton />}
 
-      {!displayedLoading && displayedError && !displayedData && (
+      {displayedError && !displayedData && (
         <section className="rounded-xl border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center hover:shadow-md transition-shadow" role="alert" data-testid="usage-error-state">
           <h2 className="text-lg font-semibold text-[var(--color-error-text)]">Unable to load usage analytics</h2>
           <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{displayedError}</p>
@@ -311,7 +311,7 @@ export default function UsagePage() {
         </section>
       )}
 
-      {!displayedLoading && displayedError && displayedData && (
+      {displayedError && displayedData && (
         <section className="rounded-xl border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-4 hover:shadow-md transition-shadow" role="alert">
           <p className="text-sm text-[var(--color-error-text)]">{displayedError}</p>
           <button type="button" onClick={() => { void loadUsage(appliedQuery); }} className="mt-2 text-sm font-medium text-[var(--color-text-link)] hover:underline">Retry usage data</button>

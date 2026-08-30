@@ -13,6 +13,10 @@ vi.mock("./mcp-tool-state.js", () => ({
   assertExtensionToolEnabled: mockAssertExtensionToolEnabled,
 }));
 
+vi.mock("./extension-binding.js", () => ({
+  resolveExtensionBinding: () => ({ project: "extension-project" }),
+}));
+
 vi.mock("./mcp-client.js", () => ({
   callMcpTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "{}" }] }),
   mcpToolData: () => ({}),

@@ -11,7 +11,7 @@ describe("ChatSessionSidebar session controls", () => {
     const onDelete = vi.fn();
     const { container } = render(
       <ChatSessionSidebar
-        sessions={[{ id: "session-1", title: "Conversation", updatedAt: 1 }]}
+        sessions={[{ id: "session-1", title: "Conversation" }]}
         activeId="session-1"
         onSelect={onSelect}
         onDelete={onDelete}
@@ -35,7 +35,7 @@ describe("ChatSessionSidebar session controls", () => {
     const onDelete = vi.fn();
     render(
       <ChatSessionSidebar
-        sessions={[{ id: "session-1", title: "Conversation", updatedAt: 1 }]}
+        sessions={[{ id: "session-1", title: "Conversation" }]}
         activeId="session-1"
         onSelect={onSelect}
         onDelete={onDelete}
@@ -49,5 +49,38 @@ describe("ChatSessionSidebar session controls", () => {
 
     expect(onDelete).toHaveBeenCalledWith("session-1");
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("disables New Chat only while session creation owns the creation slot", () => {
+    const onNew = vi.fn();
+    const { rerender } = render(
+      <ChatSessionSidebar
+        sessions={[]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onNew={onNew}
+        newDisabled
+        collapsed={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    const newChat = screen.getByRole("button", { name: "New conversation" });
+    expect((newChat as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(newChat);
+    expect(onNew).not.toHaveBeenCalled();
+
+    rerender(
+      <ChatSessionSidebar
+        sessions={[]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onNew={onNew}
+        collapsed={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "New conversation" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

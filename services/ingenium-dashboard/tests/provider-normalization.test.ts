@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  api,
-  normalizeChatConfigResponse,
-  normalizeManagedProviderConfigResponse,
-} from "../src/lib/api";
+import { normalizeChatConfigResponse, normalizeManagedProviderConfigResponse } from "../src/lib/api";
+import { createOpenCodeClient } from "../src/lib/opencode";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -76,6 +73,7 @@ describe("dashboard provider response normalization", () => {
   });
 
   it("requests Chat config without a browser-selected project query", async () => {
+    const runtimeId = "11111111-1111-4111-8111-111111111111";
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -83,10 +81,8 @@ describe("dashboard provider response normalization", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(api.settings.chatConfig()).resolves.toMatchObject({
-      data: { project: "server-shared" },
-    });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/opencode/chat-config");
+    await expect(createOpenCodeClient(runtimeId).chat.config()).resolves.toMatchObject({ project: "server-shared" });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/v1/opencode/chat-config?runtime_id=${runtimeId}`);
   });
 
   it("normalizes current chat provider models before ChatShell searches them", () => {

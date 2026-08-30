@@ -17,6 +17,7 @@ import {
   CreateContextCheckpointInputSchema,
   CreateContextConversationInputSchema,
   PreviewContextMaintenanceInputSchema,
+  PersistContextChatTurnInputSchema,
   RestoreContextCheckpointInputSchema,
   isBoundedContextMetadata,
   type ContextCheckpointAuditEvent,
@@ -89,6 +90,15 @@ export interface ContextMessageAppendResult {
 }
 
 export interface ContextCheckpointCreateResult {
+  checkpoint: ContextCheckpoint;
+  revision: number;
+  idempotent: boolean;
+}
+
+export interface ContextChatTurnPersistResult {
+  conversation: ContextConversationSummary;
+  userMessage: ContextMessageSummary;
+  assistantMessage: ContextMessageSummary;
   checkpoint: ContextCheckpoint;
   revision: number;
   idempotent: boolean;
@@ -187,6 +197,12 @@ function parseCheckpointInput(input: unknown) {
   const parsed = CreateContextCheckpointInputSchema.safeParse(input);
   if (!parsed.success) throw new ContextConversationError("INVALID_CONTEXT_INPUT");
   return { ...parsed.data, ragSourceIds: [...new Set(parsed.data.ragSourceIds)] };
+}
+
+function parseChatTurnInput(input: unknown) {
+  const parsed = PersistContextChatTurnInputSchema.safeParse(input);
+  if (!parsed.success) throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+  return parsed.data;
 }
 
 function parseRestoreInput(input: unknown) {
@@ -873,6 +889,66 @@ export function createContextCheckpoint(
   const result = execTransaction(() => createContextCheckpointInTransaction(getDb(dbPath()), projectId, conversationId, value));
   if (result.written) checkpointAfterWrite();
   return { checkpoint: result.checkpoint, revision: result.revision, idempotent: result.idempotent };
+}
+
+/** Persist one completed OpenCode turn through the existing CAS/idempotency primitives. */
+export function persistContextChatTurn(
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+): ContextChatTurnPersistResult {
+  const value = parseChatTurnInput(input);
+  const turnKey = (role: "user" | "assistant" | "checkpoint", messageId: string) =>
+    `opencode-${role}:${sha256(`${value.sourceRuntimeId}\0${value.sourceSessionId}\0${messageId}`)}`;
+  const sharedMetadata = {
+    source: "opencode-chat",
+    sourceRuntimeId: value.sourceRuntimeId,
+    sourceSessionId: value.sourceSessionId,
+  };
+  const result = execTransaction(() => {
+    const db = getDb(dbPath());
+    const conversation = requireConversation(db, projectId, conversationId);
+    let metadata: Record<string, unknown>;
+    try {
+      metadata = JSON.parse(conversation.metadata) as Record<string, unknown>;
+    } catch {
+      throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+    }
+    if (metadata.source !== "opencode-chat"
+      || metadata.sourceRuntimeId !== value.sourceRuntimeId
+      || metadata.sourceSessionId !== value.sourceSessionId) {
+      throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+    }
+    const user = appendParsedContextMessageInTransaction(db, projectId, conversationId, parseMessageInput({
+      role: "user",
+      content: value.userContent,
+      expectedRevision: value.expectedRevision,
+      idempotencyKey: turnKey("user", value.userMessageId),
+      metadata: { ...sharedMetadata, sourceMessageId: value.userMessageId },
+    }));
+    const assistant = appendParsedContextMessageInTransaction(db, projectId, conversationId, parseMessageInput({
+      role: "assistant",
+      content: value.assistantContent,
+      expectedRevision: value.expectedRevision + 1,
+      idempotencyKey: turnKey("assistant", value.assistantMessageId),
+      metadata: { ...sharedMetadata, sourceMessageId: value.assistantMessageId },
+    }));
+    const checkpoint = createContextCheckpointInTransaction(db, projectId, conversationId, parseCheckpointInput({
+      expectedRevision: value.expectedRevision + 2,
+      idempotencyKey: turnKey("checkpoint", value.assistantMessageId),
+      metadata: { ...sharedMetadata, sourceAssistantMessageId: value.assistantMessageId },
+    }));
+    return { user, assistant, checkpoint, conversation: conversationSummaryRow(db, projectId, conversationId)! };
+  });
+  if (result.user.written || result.assistant.written || result.checkpoint.written) checkpointAfterWrite();
+  return {
+    conversation: result.conversation,
+    userMessage: toContextMessageSummary(result.user.message),
+    assistantMessage: toContextMessageSummary(result.assistant.message),
+    checkpoint: result.checkpoint.checkpoint,
+    revision: result.checkpoint.revision,
+    idempotent: result.user.idempotent && result.assistant.idempotent && result.checkpoint.idempotent,
+  };
 }
 
 /**

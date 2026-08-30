@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 import { getPlaywrightOutputDirectory } from "./test-run-context";
+import { externalPlaywrightDefaults } from "./playwright.external-defaults";
 
 const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
 
@@ -23,20 +24,14 @@ const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
  */
 
 export default defineConfig({
-  testDir: ".",
+  ...externalPlaywrightDefaults,
   testMatch: ["**/ingenium-dashboard/chat-real-provider.smoke.spec.ts"],
   globalSetup: "./ingenium-dashboard/provider-global-setup.ts",
   timeout: 180000,
-  retries: 0,
-  workers: 1,
-  fullyParallel: false,
   outputDir: getPlaywrightOutputDirectory("real-provider", PLAYWRIGHT_REPO_ROOT),
   use: {
+    ...externalPlaywrightDefaults.use,
     baseURL: process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000",
-    headless: true,
-    viewport: { width: 1280, height: 720 },
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
     // Provider responses may exceed normal UI interaction timing.
     actionTimeout: 120000,
   },

@@ -63,9 +63,8 @@ docker run --rm --entrypoint sh -v "$TOKEN_VOLUME:/fixture" "$IMAGE" -ec '
   printf "%064d\n" 2 > /fixture/email-encryption-key
   printf "%064d\n" 3 > /fixture/runtime-manager-token
   printf "%064d\n" 4 > /fixture/runtime-gateway-token
-  printf '{"version":1,"workspaces":[]}\n' > /fixture/runtime-workspaces.json
-  chown appuser:appuser /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/runtime-manager-token /fixture/runtime-gateway-token /fixture/runtime-workspaces.json
-  chmod 0600 /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/runtime-manager-token /fixture/runtime-gateway-token /fixture/runtime-workspaces.json
+  chown appuser:appuser /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/runtime-manager-token /fixture/runtime-gateway-token
+  chmod 0600 /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/runtime-manager-token /fixture/runtime-gateway-token
 '
 
 docker run --rm --entrypoint sh -v "$POISON_VOLUME:/fixture" "$IMAGE" -ec '
@@ -115,7 +114,6 @@ EOF
     socket_gid="$(stat -c '%g' /var/run/docker.sock)"
     socket_args+=(
       -e "EXPECTED_SOCKET_GID=$socket_gid"
-      -e "INGENIUM_RUNTIME_WORKSPACE_BOOTSTRAP_MAP_FILE=/run/ingenium-bootstrap/runtime-workspaces.json"
       --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly
     )
   fi

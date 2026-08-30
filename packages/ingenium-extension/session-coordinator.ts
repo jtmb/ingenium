@@ -27,6 +27,14 @@ const MAX_CHANGED_PATHS = 32;
 const MAX_PATH_SEGMENT_BYTES = 255;
 const MAX_DIFF_COUNT = 1_000_000;
 const TRACE_ROOT = "/tmp/opencode/";
+const MAX_RESET_DESCRIPTION_BYTES = 256;
+const PRECLAIM_ERROR_CODES = new Set([
+  "BASELINE_MISMATCH",
+  "CLAIM_CONFLICT",
+  "EPOCH_QUARANTINED",
+  "RATE_LIMITED",
+  "REVISION_CONFLICT",
+]);
 export const MAX_COORDINATION_TRANSFORM_BYTES = 256 * 1024;
 
 type TraceEvent =
@@ -288,6 +296,25 @@ function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<
   return actual.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
+function isTrustedResetCommand(args: Record<string, unknown>): boolean {
+  if (Object.keys(args).some((key) => !["command", "description"].includes(key))
+    || args.command !== "ingenium-coordination-reset reset") return false;
+  if (args.description !== undefined
+    && (typeof args.description !== "string" || args.description.length < 1
+      || args.description !== args.description.trim()
+      || Buffer.byteLength(args.description, "utf8") > MAX_RESET_DESCRIPTION_BYTES
+      || /[\u0000-\u001f\u007f]/.test(args.description))) return false;
+  return true;
+}
+
+function sanitizedPreclaimError(error: unknown): McpBridgeError | undefined {
+  if (!(error instanceof McpBridgeError)) return undefined;
+  const errorCode = error.errorCode && PRECLAIM_ERROR_CODES.has(error.errorCode)
+    ? error.errorCode
+    : undefined;
+  return new McpBridgeError(error.failure, "", error.stage, error.currentRevision, errorCode);
+}
+
 function mutation(value: unknown): SessionMutation {
   if (!isRecord(value) || typeof value.actorId !== "string" || !/^actor-[0-9a-f]{64}$/.test(value.actorId)
     || !Number.isSafeInteger(value.revision)
@@ -454,7 +481,7 @@ function managedMutation(worktree: string, toolValue: string, args: unknown): Ma
   }
   if (tool === "bash" || tool === "shell") {
     if (typeof args.command !== "string") return undefined;
-    if (hasExactKeys(args, ["command"]) && args.command === "ingenium-coordination-reset reset") {
+    if (isTrustedResetCommand(args)) {
       return { operation: "build", paths: [], readOnly: true, coordinationReset: true };
     }
     if (/^(?:pwd|git (?:status(?: --short)?|diff(?: --stat)?|log --oneline(?: -\d+)?|show --stat|rev-parse (?:HEAD|--show-toplevel)))$/.test(args.command)) {
@@ -811,6 +838,10 @@ export class SessionCoordinator {
   private readonly registering = new Map<string, Promise<SessionState>>();
   private readonly snapshotCursors = new Map<string, Map<string, number>>();
   private readonly pendingMutations = new Map<string, PendingMutation>();
+  private readonly claimingMutations = new Set<string>();
+  private readonly finalizingMutations = new Map<string, Promise<void>>();
+  private readonly uncertainMutations = new Set<string>();
+  private readonly credentialResetSessionIds = new Set<string>();
   private readonly now: () => number;
   private readonly token: () => string;
   private readonly heartbeatMs: number;
@@ -820,6 +851,7 @@ export class SessionCoordinator {
   private credentialFingerprint?: string;
   private reconnecting?: Promise<void>;
   private acceptedCredentialEpoch?: number;
+  private credentialResetActive = false;
 
   constructor(private readonly ctx: CoordinatorContext, dependencies: SessionCoordinatorDependencies = {}) {
     this.binding = dependencies.binding ?? resolveExtensionBinding(ctx.worktree, {
@@ -899,14 +931,16 @@ export class SessionCoordinator {
 
   async reconnectAfterCredentialReset(sessionId: string): Promise<void> {
     if (this.binding.purpose !== "general") throw new ExtensionBindingError();
+    if (!this.credentialResetActive) throw new ExtensionBindingError();
     if (this.reconnecting) return this.reconnecting;
     const pending = (async () => {
       const fingerprint = this.readCredentialFingerprint();
-      if (!fingerprint || fingerprint === this.credentialFingerprint || this.pendingMutations.size > 0) {
+      if (!fingerprint || fingerprint === this.credentialFingerprint || this.pendingMutations.size > 0
+        || this.claimingMutations.size > 0 || this.finalizingMutations.size > 0 || this.uncertainMutations.size > 0) {
         trace({ event: "credential_reset", resetState: "rejected", failure: "authentication" });
         throw new ExtensionBindingError();
       }
-      const sessionIds = new Set([sessionId, ...this.sessions.keys()]);
+      const sessionIds = new Set([sessionId, ...this.credentialResetSessionIds, ...this.sessions.keys()]);
       for (const [id, state] of this.sessions) this.retainOperationalState(id, state);
       if (this.heartbeat) {
         clearInterval(this.heartbeat);
@@ -920,19 +954,21 @@ export class SessionCoordinator {
       this.snapshotCursors.clear();
       this.credentialFingerprint = fingerprint;
       await this.attestGeneralBinding();
-      for (const id of sessionIds) await this.register(id);
+      for (const id of sessionIds) await this.register(id, true);
       const callId = `credential-reset-${randomUUID()}`;
       try {
-        await this.preclaim(sessionId, callId, { operation: "build", paths: [], reserved: "@build" });
+        await this.preclaim(sessionId, callId, { operation: "build", paths: [], reserved: "@build" }, true);
       } catch (error) {
         if (!(error instanceof McpBridgeError) || error.errorCode !== "EPOCH_QUARANTINED") throw error;
         await this.recoverQuarantinedEpoch(sessionId);
-        await this.preclaim(sessionId, callId, { operation: "build", paths: [], reserved: "@build" });
+        await this.preclaim(sessionId, callId, { operation: "build", paths: [], reserved: "@build" }, true);
       }
       const proof = this.pendingMutations.get(this.pendingKey(sessionId, callId));
       if (!proof) throw new Error("credential reset claim unavailable");
       this.acceptedCredentialEpoch = proof.acceptedEpoch;
       await this.releasePending(sessionId, callId);
+      this.credentialResetSessionIds.clear();
+      this.credentialResetActive = false;
       trace({ event: "credential_reset", resetState: "accepted" });
     })().catch(async (error) => {
       await this.closeBridge();
@@ -1231,9 +1267,10 @@ export class SessionCoordinator {
     await this.closeAfterFailure(sessionId, reason);
   }
 
-  private async register(sessionId: string): Promise<SessionState> {
+  private async register(sessionId: string, credentialResetInternal = false): Promise<SessionState> {
     const existing = this.sessions.get(sessionId);
     if (existing) return existing;
+    if (this.credentialResetActive && !credentialResetInternal) throw new Error("Coordination reset is active");
     const inFlight = this.registering.get(sessionId);
     if (inFlight) return inFlight;
     const pending = (async () => {
@@ -1365,6 +1402,35 @@ export class SessionCoordinator {
       this.dropSession(sessionId, "close");
     }
     if (this.sessions.size === 0) await this.closeBridge();
+  }
+
+  private async prepareForCredentialReset(): Promise<void> {
+    if (this.binding.purpose !== "general") throw new ExtensionBindingError();
+    if (this.credentialResetActive) throw new Error("Coordination reset is already active");
+    if (this.pendingMutations.size > 0 || this.claimingMutations.size > 0
+      || this.finalizingMutations.size > 0 || this.uncertainMutations.size > 0) {
+      throw new Error("Coordination reset is unavailable while managed mutations are active");
+    }
+    this.credentialResetActive = true;
+    try {
+      await Promise.all([...this.registering.values()]);
+      const sessionIds = [...this.sessions.keys()];
+      sessionIds.forEach((sessionId) => this.credentialResetSessionIds.add(sessionId));
+      for (const sessionId of sessionIds) {
+        const state = this.sessions.get(sessionId);
+        if (!state) continue;
+        await this.serialized(sessionId, async (current) => {
+          const result = await this.invoke("coordination_update", { ...this.lease(current), operation: "close" });
+          this.apply(current, result.session);
+        });
+        this.retainOperationalState(sessionId, state);
+        this.dropSession(sessionId, "close", true);
+      }
+      await this.closeBridge();
+    } catch (error) {
+      await this.closeBridge();
+      throw error;
+    }
   }
 
   private snapshot(state: SessionState): Record<string, unknown> {
@@ -1535,41 +1601,53 @@ export class SessionCoordinator {
     return `${sessionId}\0${callId}`;
   }
 
-  async preclaim(sessionId: string, callId: string, descriptor: ManagedMutationDescriptor): Promise<void> {
-    const before = worktreeSnapshot(this.ctx.worktree);
-    const baselines = new Map(descriptor.paths.map((path) => [path, fileBaselineSha256(this.ctx.worktree, path)]));
-    const clientClaimKey = randomBytes(OWNERSHIP_BYTES).toString("base64url");
-    await this.serialized(sessionId, async (state) => {
-      const result = await this.invoke("coordination_claim", {
-        ...this.lease(state),
-        client_claim_key: clientClaimKey,
-        operation: descriptor.operation,
-        claims: descriptor.reserved
-          ? [{ claim: { kind: "reserved", name: descriptor.reserved } }]
-          : descriptor.paths.map((path) => ({
-            claim: { kind: "path", path },
-            baseline_sha256: baselines.get(path) ?? null,
-            current_sha256: baselines.get(path) ?? null,
-            repository_sha256: repositoryBaselineSha256(this.ctx.worktree, path),
-          })),
+  async preclaim(
+    sessionId: string,
+    callId: string,
+    descriptor: ManagedMutationDescriptor,
+    credentialResetInternal = false,
+  ): Promise<void> {
+    if (this.credentialResetActive && !credentialResetInternal) throw new Error("Coordination reset is active");
+    const key = this.pendingKey(sessionId, callId);
+    this.claimingMutations.add(key);
+    try {
+      const before = worktreeSnapshot(this.ctx.worktree);
+      const baselines = new Map(descriptor.paths.map((path) => [path, fileBaselineSha256(this.ctx.worktree, path)]));
+      const clientClaimKey = randomBytes(OWNERSHIP_BYTES).toString("base64url");
+      await this.serialized(sessionId, async (state) => {
+        const result = await this.invoke("coordination_claim", {
+          ...this.lease(state),
+          client_claim_key: clientClaimKey,
+          operation: descriptor.operation,
+          claims: descriptor.reserved
+            ? [{ claim: { kind: "reserved", name: descriptor.reserved } }]
+            : descriptor.paths.map((path) => ({
+              claim: { kind: "path", path },
+              baseline_sha256: baselines.get(path) ?? null,
+              current_sha256: baselines.get(path) ?? null,
+              repository_sha256: repositoryBaselineSha256(this.ctx.worktree, path),
+            })),
+        });
+        this.apply(state, result.session);
+        if (!Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
+          || typeof result.operationId !== "string" || !/^[0-9a-f-]{36}$/i.test(result.operationId)) {
+          throw new Error("invalid coordination response");
+        }
+        this.pendingMutations.set(key, {
+          sessionId,
+          callId,
+          clientClaimKey,
+          operation: descriptor.operation,
+          paths: descriptor.paths,
+          baselines,
+          before,
+          acceptedEpoch: result.acceptedEpoch as number,
+          operationId: result.operationId,
+        });
       });
-      this.apply(state, result.session);
-      if (!Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
-        || typeof result.operationId !== "string" || !/^[0-9a-f-]{36}$/i.test(result.operationId)) {
-        throw new Error("invalid coordination response");
-      }
-      this.pendingMutations.set(this.pendingKey(sessionId, callId), {
-        sessionId,
-        callId,
-        clientClaimKey,
-        operation: descriptor.operation,
-        paths: descriptor.paths,
-        baselines,
-        before,
-        acceptedEpoch: result.acceptedEpoch as number,
-        operationId: result.operationId,
-      });
-    });
+    } finally {
+      this.claimingMutations.delete(key);
+    }
     trace({ event: "claim_state", operation: "tool.execute.before", sessionHash: sessionHash(sessionId),
       mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
       claimState: "claimed" });
@@ -1608,6 +1686,39 @@ export class SessionCoordinator {
     trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(sessionId),
       mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
       claimState: "completed" });
+  }
+
+  private async finalizePending(sessionId: string, callId: string, outcome: "completed" | "error"): Promise<void> {
+    const key = this.pendingKey(sessionId, callId);
+    const inFlight = this.finalizingMutations.get(key);
+    if (inFlight) return inFlight;
+    const pending = this.pendingMutations.get(key);
+    if (!pending) return;
+    const finalizing = (async () => {
+      if (outcome === "completed") {
+        await this.completePending(sessionId, pending);
+        return;
+      }
+      await this.serialized(sessionId, async (state) => {
+        const result = await this.invoke("coordination_claim", {
+          ...this.claimProof(state, pending), action: "quarantine", code: "uncertain_apply",
+        });
+        this.apply(state, result.session);
+      });
+      this.pendingMutations.delete(key);
+      trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(sessionId),
+        mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
+        claimState: "quarantined" });
+    })().catch((error) => {
+      this.uncertainMutations.add(key);
+      throw error;
+    });
+    this.finalizingMutations.set(key, finalizing);
+    try {
+      await finalizing;
+    } finally {
+      if (this.finalizingMutations.get(key) === finalizing) this.finalizingMutations.delete(key);
+    }
   }
 
   async releasePending(sessionId: string, callId: string): Promise<PendingMutation | undefined> {
@@ -1658,26 +1769,35 @@ export class SessionCoordinator {
   async withRepositoryClaim<T>(sessionId: string, action: (claim: RepositoryClaimContext) => Promise<T>): Promise<T | undefined> {
     let pending: PendingMutation | undefined;
     let quarantined = false;
+    const callId = `repository-${randomUUID()}`;
+    const key = this.pendingKey(sessionId, callId);
     try {
-      const before = worktreeSnapshot(this.ctx.worktree);
+      if (this.credentialResetActive) throw new Error("Coordination reset is active");
+      this.claimingMutations.add(key);
       let manifestGeneration = 0;
-      await this.serialized(sessionId, async (state) => {
-        const clientClaimKey = randomBytes(OWNERSHIP_BYTES).toString("base64url");
-        const result = await this.invoke("coordination_claim", {
-          ...this.lease(state), client_claim_key: clientClaimKey,
-          operation: "repository",
-          claims: [{ claim: { kind: "reserved", name: "@repository" } }],
+      try {
+        const before = worktreeSnapshot(this.ctx.worktree);
+        await this.serialized(sessionId, async (state) => {
+          const clientClaimKey = randomBytes(OWNERSHIP_BYTES).toString("base64url");
+          const result = await this.invoke("coordination_claim", {
+            ...this.lease(state), client_claim_key: clientClaimKey,
+            operation: "repository",
+            claims: [{ claim: { kind: "reserved", name: "@repository" } }],
+          });
+          this.apply(state, result.session);
+          if (!Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
+            || !Number.isSafeInteger(result.manifestGeneration) || (result.manifestGeneration as number) < 0
+            || typeof result.operationId !== "string") throw new Error("invalid coordination response");
+          manifestGeneration = result.manifestGeneration as number;
+          pending = {
+            sessionId, callId, clientClaimKey, operation: "repository", paths: [],
+            baselines: new Map(), before, acceptedEpoch: result.acceptedEpoch as number, operationId: result.operationId,
+          };
+          this.pendingMutations.set(key, pending);
         });
-        this.apply(state, result.session);
-        if (!Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
-          || !Number.isSafeInteger(result.manifestGeneration) || (result.manifestGeneration as number) < 0
-          || typeof result.operationId !== "string") throw new Error("invalid coordination response");
-        manifestGeneration = result.manifestGeneration as number;
-        pending = {
-          sessionId, callId: `repository-${result.operationId}`, clientClaimKey, operation: "repository", paths: [],
-          baselines: new Map(), before, acceptedEpoch: result.acceptedEpoch as number, operationId: result.operationId,
-        };
-      });
+      } finally {
+        this.claimingMutations.delete(key);
+      }
       const currentPending = pending!;
       const context: RepositoryClaimContext = {
         manifestGeneration,
@@ -1711,6 +1831,7 @@ export class SessionCoordinator {
             });
             this.apply(state, result.session);
           });
+          this.pendingMutations.delete(key);
           quarantined = true;
         },
       };
@@ -1728,7 +1849,10 @@ export class SessionCoordinator {
             });
             this.apply(state, result.session);
           });
+          this.pendingMutations.delete(key);
+          pending = undefined;
         } catch {
+          this.uncertainMutations.add(key);
           await this.closeAfterFailure(sessionId, "claim_failure");
         }
       }
@@ -1836,28 +1960,13 @@ export class SessionCoordinator {
         if (event.type === "message.part.updated") {
           const part = event.properties.part;
           if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
-            const key = this.pendingKey(part.sessionID, part.callID);
-            if (part.state.status === "error") {
-              try {
-                const pending = this.pendingMutations.get(key);
-                if (pending) {
-                  await this.serialized(part.sessionID, async (state) => {
-                    const result = await this.invoke("coordination_claim", {
-                      ...this.claimProof(state, pending), action: "quarantine", code: "uncertain_apply",
-                    });
-                    this.apply(state, result.session);
-                  });
-                  this.pendingMutations.delete(key);
-                  trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(part.sessionID),
-                    mapMember: this.sessions.has(part.sessionID), incarnation: this.sessions.get(part.sessionID)?.incarnation ?? null,
-                    claimState: "quarantined" });
-                }
-              } catch {
-                trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(part.sessionID),
-                  mapMember: this.sessions.has(part.sessionID), incarnation: this.sessions.get(part.sessionID)?.incarnation ?? null,
-                  claimState: "quarantine_failed" });
-                await this.closeAfterFailure(part.sessionID, "claim_failure");
-              }
+            try {
+              await this.finalizePending(part.sessionID, part.callID, part.state.status);
+            } catch {
+              trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(part.sessionID),
+                mapMember: this.sessions.has(part.sessionID), incarnation: this.sessions.get(part.sessionID)?.incarnation ?? null,
+                claimState: part.state.status === "error" ? "quarantine_failed" : "claim_failed" });
+              await this.closeAfterFailure(part.sessionID, "claim_failure");
             }
           }
           return;
@@ -1949,7 +2058,10 @@ export class SessionCoordinator {
           if (isManagedMutationTool(tool)) throw new Error("Managed mutation coordination rejected the tool arguments");
           return;
         }
-        if (descriptor.readOnly) return;
+        if (descriptor.readOnly) {
+          if (descriptor.coordinationReset) await this.prepareForCredentialReset();
+          return;
+        }
         trace({
           event: "hook_entry",
           operation: "tool.execute.before",
@@ -1960,13 +2072,16 @@ export class SessionCoordinator {
         try {
           await this.preclaim(sessionID, callID, descriptor);
         } catch (error) {
+          const sanitized = sanitizedPreclaimError(error);
           trace({ event: "claim_state", operation: "tool.execute.before", sessionHash: sessionHash(sessionID),
             mapMember: this.sessions.has(sessionID), incarnation: this.sessions.get(sessionID)?.incarnation ?? null,
             claimState: "claim_failed", failure: error instanceof McpBridgeError ? error.failure : "request_failed",
             bridgeStage: error instanceof McpBridgeError ? error.stage : undefined,
-            errorCode: error instanceof McpBridgeError ? error.errorCode : undefined });
+            errorCode: sanitized?.errorCode });
           await this.handleFailure(sessionID, "claim_failure", error);
-          throw new Error("Managed write coordination is unavailable", { cause: error });
+          throw sanitized
+            ? new Error("Managed write coordination is unavailable", { cause: sanitized })
+            : new Error("Managed write coordination is unavailable");
         }
         trace({
           event: "hook_exit",
@@ -2002,7 +2117,7 @@ export class SessionCoordinator {
         }
         try {
           await this.renewPending(sessionID, pending);
-          await this.completePending(sessionID, pending);
+          await this.finalizePending(sessionID, callID, "completed");
         } catch (error) {
           await this.closeAfterFailure(sessionID, "publish_failure");
           throw new Error("Managed mutation footprint verification failed", { cause: error });

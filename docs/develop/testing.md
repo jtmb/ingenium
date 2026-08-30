@@ -14,7 +14,7 @@ affected Playwright file and optional `--grep` expression:
 
 ```bash
 npm run typecheck --workspace=packages/ingenium-core
-npm run lint --workspace=services/ingenium-api -- lib/routes/feature.ts
+npm run typecheck --workspace=services/ingenium-api
 npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts
 npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts -t "handles the changed case"
 npx playwright test tests/dashboard/feature.spec.ts --grep "changed behavior"
@@ -49,8 +49,8 @@ divergent snapshot rejection without partial writes. The tests also verify
 fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
 markers and rejection of same-inode, same-size mutation during the
 descriptor-bound read. The transport-parity check
-also verifies `ingenium_context_upload_file` and the **282-tool** inventory
-(280 `ingenium_` catalog entries plus 2 extension tools).
+also verifies `ingenium_context_upload_file` and the **283-tool** inventory
+(281 `ingenium_` catalog entries plus 2 extension tools).
 
 ## Explicit full/release/cross-cutting acceptance gates
 
@@ -481,7 +481,7 @@ and existing `vscode-data` volumes, restart/offline operation, exact
 compatibility, appuser ownership, idempotence, user/workspace theme override
 preservation, and dark/light system behavior at 1440x900 and 390x844. QA and
 security review are bounded to the declared acceptance and provenance/offline
-boundary respectively; Docker acceptance verifies all 7 supervisord services
+boundary respectively; Docker acceptance verifies all 9 active compatibility supervisord services
 remain healthy. Evidence contains no workspace content or secrets.
 
 ## Production-mode dashboard route parity
@@ -510,7 +510,7 @@ credential is installed in browser state. The route inventory uses the run
 project rather than `global-default`.
 
 The suite loads the production `.next` route manifests, derives the canonical 24
-primary routes from dashboard navigation, checks all 14 settings deep links and
+primary routes from dashboard navigation, checks all 19 settings deep links and
 supported query variants, rejects retired routes, and smoke-renders every route.
 The serialized navigation governor remains active.
 

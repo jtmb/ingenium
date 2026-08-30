@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { synthesis, logger, maintenanceLocks } from "ingenium-core";
+import { z } from "zod";
 import { requireProject } from "../helpers.js";
 import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 
@@ -9,6 +10,7 @@ export const synthesisRouter = Router();
 const LOCK_RESOURCE = "skills";
 const SYNTHESIS_LOCK_MS = 120_000; // 2 minutes
 const RENEW_INTERVAL_MS = 60_000; // Renew every 60s
+export const SynthesisSessionIdSchema = z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/);
 
 /**
  * POST /synthesis/run — trigger synthesis for a project.
@@ -21,7 +23,7 @@ synthesisRouter.post("/run", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sessionId = (req.query.session_id as string) || undefined;
+  const sessionId = SynthesisSessionIdSchema.optional().parse(req.query.session_id);
 
   // Acquire project-lifetime lock
   const ownerToken = maintenanceLocks.generateOwnerToken();

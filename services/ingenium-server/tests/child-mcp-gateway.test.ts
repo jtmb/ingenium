@@ -93,14 +93,6 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
   };
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1_500): Promise<void> {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started >= timeoutMs) throw new Error("Timed out waiting for gateway reconciliation");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.shutdown()));
 });
@@ -246,11 +238,20 @@ describe("ChildMcpGateway", () => {
 
     await gateway.start();
     definitions.push(runtimeDefinition());
-    await waitFor(() => tools.has("fixture_echo"));
+    await vi.waitFor(
+      () => expect(tools.has("fixture_echo")).toBe(true),
+      { timeout: 1_500, interval: 20 },
+    );
 
     definitions.splice(0);
-    await waitFor(() => !tools.has("fixture_echo"));
-    await waitFor(() => host.sendToolListChanged!.mock.calls.length === 2);
+    await vi.waitFor(
+      () => expect(tools.has("fixture_echo")).toBe(false),
+      { timeout: 1_500, interval: 20 },
+    );
+    await vi.waitFor(
+      () => expect(host.sendToolListChanged).toHaveBeenCalledTimes(2),
+      { timeout: 1_500, interval: 20 },
+    );
     expect(host.sendToolListChanged).toHaveBeenCalledTimes(2);
   });
 });

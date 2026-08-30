@@ -9,7 +9,11 @@
  */
 
 import { callMcpTool, McpBridgeError, mcpToolData } from "./mcp-client.js";
-import { resolveExtensionProject } from "./project-resolver.js";
+import { resolveExtensionBinding } from "./extension-binding.js";
+
+function learningProject(worktree: string): string {
+  return resolveExtensionBinding(worktree, { purpose: "learning" }).project;
+}
 
 /** Stable, credential-free diagnostics emitted by observer lifecycle hooks. */
 export type ObserverRequestFailure = "authentication" | "not_found" | "locked" | "timeout" | "request_failed";
@@ -55,7 +59,7 @@ export async function logPipelineEvent(
   onFailure?: ObserverFailureReporter,
 ): Promise<void> {
   try {
-    const project = resolveExtensionProject(worktree);
+    const project = learningProject(worktree);
     await callMcpTool(worktree, "pipeline_event_log", {
       project,
       eventType,
@@ -88,7 +92,7 @@ export async function importObservationsFromFile(
   worktree: string,
   onFailure?: ObserverFailureReporter,
 ): Promise<{ imported: number; skipped: number }> {
-  const project = resolveExtensionProject(worktree);
+  const project = learningProject(worktree);
   const pathModule = require("path");
   const fs = require("fs");
 
@@ -174,7 +178,7 @@ export async function triggerSynthesis(
   failure?: ObserverRequestFailure;
 }> {
   try {
-    const project = resolveExtensionProject(worktree);
+    const project = learningProject(worktree);
     await logPipelineEvent(
       "synthesis_triggered",
       "plugin",

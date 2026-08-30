@@ -11,14 +11,15 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 
 ```bash
 # Local compatibility profile
+export IMAGE_REVISION="$(git rev-parse HEAD)"
 docker compose --profile compatibility up --build
 ```
 
-Compatibility starts one container with seven supervised processes and fixed local
+Compatibility starts one container with nine active supervisord processes and fixed local
 runtime aliases. Production separates the control plane, manager, gateway, and
 per-workspace runtimes; its fixed aliases return static `404` picker guidance. Direct
-4098/4099/4100 access is not supported. The built-in MCP catalog contains **282 tools**
-across **30 baseline categories** (280 `ingenium_` catalog entries plus 2 extension
+4098/4099/4100 access is not supported. The built-in MCP catalog contains **283 tools**
+across **30 baseline categories** (281 `ingenium_` catalog entries plus 2 extension
 tools); project-scoped child discovery can add tools and categories at runtime.
 
 ### Connecting an MCP Client
@@ -28,16 +29,16 @@ Point your MCP client to the `@ingenium/extension` package:
 ```jsonc
 {
   "mcp": {
-    "servers": {
-      "ingenium": {
-        "type": "local",
-        "command": ["npx", "-y", "@ingenium/extension"],
-        "disabled": false,
-        "env": {
-          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-          "INGENIUM_API_TIMEOUT": "10000",
-          "LOG_LEVEL": "info"
-        }
+    "ingenium": {
+      "type": "local",
+      "command": ["npx", "-y", "@ingenium/extension"],
+      "enabled": true,
+      "environment": {
+        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
+        "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+        "INGENIUM_API_TIMEOUT": "10000",
+        "LOG_LEVEL": "info"
       }
     }
   }
@@ -64,7 +65,7 @@ OpenCode restart.
 
 ### Routes
 
-The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
+The Ingenium Dashboard provides **24 primary navigation routes** plus the Settings overlay with 19 URL-addressable tabs:
 
 | Page | Purpose |
 |------|---------|
@@ -73,6 +74,7 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 | `/opencode` | Runtime-specific authenticated OpenCode Web/CLI audiences |
 | `/vscode` | Runtime-specific authenticated VS Code audience |
 | `/projects` | Project management |
+| `/organizations` | Organization membership, invitations, roles, and project access |
 | `/skills` | Skills grid with detail overlay |
 | `/docs` | Documentation workspace |
 | `/secrets` | Encrypted secrets vault — password manager with scrypt key derivation and AES-256-GCM. First-run creates a vault; subsequent visits unseal the existing vault. |
@@ -90,8 +92,8 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 | `/personality` | Personality traits |
 | `/context` | Immutable context conversation memory |
 | `/pipeline` | Pipeline event timeline |
- | `/usage` | Provider-neutral project usage totals, daily UTC series, breakdowns, freshness, filters, and CSV export |
- | Settings (overlay) | Full-screen settings overlay
+| `/usage` | Provider-neutral project usage totals, daily UTC series, breakdowns, freshness, filters, and CSV export |
+| Settings (overlay) | Full-screen settings overlay
 
 ### Navigation shell
 
@@ -140,7 +142,10 @@ The same picker is used by `/opencode`, `/vscode`, standalone views, and pop-out
 It lists only owned workspaces whose organization/project membership remains active,
 requires an explicit choice and start/resume even when exactly one option exists, and
 polls starting state for a bounded interval before offering retry. It never creates
-workspace authorization or accepts a host path from the browser.
+workspace authorization or accepts a host path from the browser. A `stopped` row is
+not an active client: the user must explicitly open it, and the returned runtime ID
+becomes the binding for subsequent runtime calls. A remembered workspace is only a
+selection preference and never starts a runtime or substitutes another one.
 
 Open `/vscode` from the Workspace navigation group or directly by URL. Compatibility
 embeds `http://vscode.localhost:3000/`; production uses the selected runtime's exact
@@ -170,7 +175,7 @@ The official Open VSX extension `sst-dev.opencode@0.0.13` is preinstalled from
 the image-baked VSIX at
 `https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix`
 (`SHA-256: e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4`).
-It is installed offline as `appuser` into the persistent `vscode-data` volume;
+It is installed offline as `ingenium-vscode` into the persistent `vscode-data` volume;
 there is no runtime marketplace or registry installation. On first start and
 after upgrades, the service revalidates the extension identity, engine
 compatibility, and hash before ensuring the persisted installation is present.
@@ -215,7 +220,8 @@ semantics, keyboard-focusable tables, and responsive mobile cards.
 - Search by name, tag, or keyword
 - Click a skill card to open a split-pane overlay with file tree navigation and content viewer
 - Upload a skill from a `.md` file (frontmatter-parsed) using the Upload button
-- Skills auto-load on session start via /skill-load
+- Skills load from `.opencode/skills/<name>/SKILL.md` at session startup; use
+  `ingenium_skill_load` to open one specific skill through the MCP boundary.
 - Open the **Proposals** tab to switch between bounded Open proposals and retained
   Proposal history. Counts load separately; history loads when selected, and
   **Load more** follows the keyset cursor without fetching the entire history.
@@ -244,13 +250,17 @@ semantics, keyboard-focusable tables, and responsive mobile cards.
 
 ## Synthesis & Cross-Project Features
 
-**What it does**: The synthesis pipeline processes observations into personality traits and skills. When configured with an LLM (Phase 2), the pipeline creates skills in standard split-skill format.
+**What it does**: The synthesis pipeline processes observations into personality traits
+and governed skill proposals. When configured with an LLM (Phase 2), it creates
+pending create/update proposals whose proposed content uses the standard split-skill
+format; approval applies the skill change.
 
 **How to use**:
 - Observations are automatically processed via the scheduled synthesis pipeline (every 15 minutes)
 - Trigger manual synthesis via `ingenium_synthesis_run` for the current project
 - Use `ingenium_synthesis_cross_project` to evaluate observations and skills across all active projects
-- Global skills are created in the `global-default` project and shared across all projects
+- Cross-project skill changes are submitted as proposals in `global-default`; approved
+  proposals apply the shared skill change for all projects.
 
 ## Personality
 
@@ -347,11 +357,16 @@ lifecycle, partial-cost, UTC, freshness, project reset, and export details.
 
 ### Settings deep links
 
-All 14 supported panel IDs are:
+All 19 supported panel IDs are:
 
 | Deep link | Panel behavior | Full workspace |
 |---|---|---|
 | `general` | Edit theme and archive-retention days (1–365). | — |
+| `account` | Manage account profile and password. | `/account` |
+| `security` | Manage authenticator and recovery protection. | `/account#security` |
+| `sessions` | Review and revoke browser sessions and devices. | `/account#sessions` |
+| `api-tokens` | Create and revoke scoped API tokens. | `/account#api-tokens` |
+| `organizations` | Manage organization members, invitations, roles, and project access. | `/organizations` |
 | `projects` | Route-linked summary for project management. | `/projects` |
 | `skills` | Route-linked summary for skills, governance, versions, and sync. | `/skills` |
 | `tasks` | Route-linked summary for task creation, prioritization, and tracking. | [`/tasks`](./tasks.md) |

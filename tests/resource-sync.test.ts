@@ -717,6 +717,7 @@ describe("Plugin opencode.json Merge", () => {
       "./packages/ingenium-extension/plugins/auto-observer.ts",
       "./packages/ingenium-extension/plugins/observer.ts",
       "./packages/ingenium-extension/plugins/resource-sync.ts",
+      "./packages/ingenium-extension/plugins/session-coordinator.ts",
     ]);
     mockFetch([
       { pattern: "/plugins?project=test-project", status: 200, body: { data: [] } },
@@ -732,6 +733,7 @@ describe("Plugin opencode.json Merge", () => {
         "./packages/ingenium-extension/plugins/auto-observer.ts",
         "./packages/ingenium-extension/plugins/observer.ts",
         "./packages/ingenium-extension/plugins/resource-sync.ts",
+        "./packages/ingenium-extension/plugins/session-coordinator.ts",
       ]);
     } finally {
       restoreFetch();

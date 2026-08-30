@@ -794,6 +794,23 @@ export const CreateContextCheckpointInputSchema = z.object({
 }).strict();
 export type CreateContextCheckpointInput = z.input<typeof CreateContextCheckpointInputSchema>;
 
+export const PersistContextChatTurnInputSchema = z.object({
+  sourceRuntimeId: z.string().min(1).max(64)
+    .refine((value) => value === "compatibility" || /^[0-9a-f-]{36}$/i.test(value), "Invalid runtime identifier"),
+  sourceSessionId: z.string().min(1).max(512)
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Invalid session identifier"),
+  userMessageId: z.string().min(1).max(512)
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Invalid message identifier"),
+  assistantMessageId: z.string().min(1).max(512)
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Invalid message identifier"),
+  userContent: AppendContextMessageInputSchema.shape.content,
+  assistantContent: AppendContextMessageInputSchema.shape.content,
+  expectedRevision: ContextExpectedRevisionSchema,
+}).strict().refine((value) => value.userMessageId !== value.assistantMessageId, {
+  message: "Chat message identifiers must be distinct",
+});
+export type PersistContextChatTurnInput = z.input<typeof PersistContextChatTurnInputSchema>;
+
 export const RestoreContextCheckpointInputSchema = z.object({
   expectedRevision: ContextExpectedRevisionSchema,
   confirmationToken: ContextConfirmationTokenSchema,

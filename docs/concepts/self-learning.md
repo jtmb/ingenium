@@ -90,12 +90,12 @@ flowchart TB
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │  PHASE 2: SKILL SYNTHESIS + PERSONALITY                     │
-│  - Groups 3+ related observations → LLM creates skills     │
-│  - Skills persisted by the API; worktree projection is separate │
+│  - Groups 3+ related observations → LLM creates proposals  │
+│  - Approved proposals persist skills; worktree projection is separate │
 │  - LLM-suggested personality_traits actually created        │
 │  - Confidence: 0.10–0.15 start, +0.15/confirmation,        │
 │    cap 0.95, display gate ≥0.30, 7-day decay -0.05         │
-│  - Cross-project: skills in 2+ projects promoted to global  │
+│  - Cross-project: skills in 2+ projects propose global changes │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -157,13 +157,14 @@ User interacts with OpenCode (:4098)
       Phase 2 (if LLM configured): LLM Skill Synthesis
       → groups 3+ related observations from batch
       → sends to LLM with existing skills + traits as context
-      → creates/updates skills through the API with llm-synthesized prefix
+       → creates and submits governed create/update proposals with LLM evidence
+       → approved proposals apply the skill change and trigger disk projection
       → LLM-suggested personality_traits actually created (previously dropped)
       → logs errors but doesn't block Phase 1 results
 
       Cross-Project (manual/scheduled): Cross-Project Synthesis
       → evaluates skills across all non-global, non-archived projects
-      → promotes skills present in 2+ projects to global-default
+       → creates and submits proposals for skills present in 2+ projects to global-default
       → logs cross-project skill events to pipeline timeline
 ```
 
@@ -199,8 +200,8 @@ Synthesis claims one durable batch of up to **50 pending observations** and
 advances it through these persisted stages:
 
 1. `created` — consolidate traits and apply the trait stage.
-2. `traits_applied` — persist the proposal plan, then apply skill proposals and
-   any LLM-suggested traits.
+2. `traits_applied` — persist the proposal plan, then create and submit skill
+   proposals and apply any LLM-suggested traits.
 3. `proposals_applied` — acknowledge the batch.
 4. `complete` — mark every batch observation as `processed`.
 
@@ -261,10 +262,11 @@ Extraction Engine (extraction.ts)
    │   → max_tokens: 8192
    │   → empty content produces no extracted rules; reasoning traces are not used
   │
-  └─ No-LLM = No Observations
-      → If no synthesis LLM configured, extraction creates 0 observations
-      → Zero regex fallback to garbage
+  └─ No authorized executor = No Background LLM Work
+      → If no synthesis LLM or authorized runtime is available, extraction creates 0 observations
+      → Zero regex or global/user-runtime fallback
       → Pipeline event: extraction_failed (or extraction_completed with 0 observations)
+```
 
 ### LLM Dispatch Modes
 
@@ -272,10 +274,16 @@ The system uses two LLM dispatch modes depending on the feature:
 
 | Mode | Mechanism | Timeout | Used By | Configuration Source |
 |------|-----------|---------|---------|---------------------|
-| **Direct** | `callSynthesisLLM()` / `safeLlmFetch()` — calls LLM endpoint directly via HTTP | 60s | Self-learning pipeline (Phase 0 extraction, Phase 1 consolidation, Phase 2 skill synthesis), Email suggestions/summaries | `resolveLLMConfig()` — global→project→env vars chain |
-| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s interactive default cap**; Docs AI permits 60s; background extraction/synthesis preserves a 60s request budget and may explicitly request up to a finite 180s | Docs AI, RAG Ask, Job Suggestions, background self-learning fallback | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use the synthesis primary/backup chain with dedup; background work uses the API-owned background policy |
+| **Direct** | `callSynthesisLLM()` / `safeLlmFetch()` — calls an LLM endpoint directly via HTTP | 60s | Explicit direct callers such as email suggestions/summaries | `resolveLLMConfig()` for the direct caller |
+| **Broker** | `executeSynthesisBroker()` — creates an ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s interactive default cap**; Docs AI permits 60s; background extraction/synthesis preserves a 60s request budget and may explicitly request up to a finite 180s | Docs AI, RAG Ask, Job Suggestions, and per-project background extraction/synthesis | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use their server-owned chain; background work uses an authorized runtime executor |
 
-The core pipeline uses direct calls (60s timeout) for batch processing when an endpoint is configured. Its OpenCode broker fallback uses the API-owned background policy: the existing 60-second per-request budget is retained, explicitly longer background requests are capped at 180 seconds, and each ephemeral session is deleted on success, failure, and timeout. Interactive broker consumers retain a 30-second cap for responsiveness and OpenCode model routing, except Docs AI's server-owned 60-second policy for longer document transformations.
+Per-project background extraction and synthesis are invoked through the API-owned
+executor, which requires exactly one ready or idle runtime with a valid capability,
+active service principal, and project execute grant. Missing authorization returns
+an unavailable result without provider probing; there is no global- or user-runtime
+fallback. The executor targets only that runtime's backend and deletes each
+ephemeral broker session on success, failure, and timeout. Interactive broker
+consumers retain a 30-second cap, except Docs AI's server-owned 60-second policy.
 
 | Trigger | Mechanism |
 |---------|-----------|
@@ -298,10 +306,16 @@ Auto-Observer Plugin (auto-observer.ts)
   │
   └─ MCP Tool: auto_observe_now
       → Manual trigger for immediate server-side extraction
-      → Returns JSON with { detected, created, observations }
+      → Returns only a started/scheduled acknowledgment; results are asynchronous
 ```
 
 If the plugin fails to load in OpenCode, the scheduler covers extraction anyway — plugin loading is no longer a dependency. The plugin requires no `better-sqlite3` dependency since it only makes HTTP calls.
+
+The extraction trigger does not report observations created at request time.
+Check pipeline status after the asynchronous work completes. When a session
+lifecycle event triggers synthesis, the current OpenCode session ID is forwarded
+through the MCP `sessionId` argument to the API `session_id` query parameter so
+the durable synthesis run retains session provenance.
 
 ---
 

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "./fixture";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
+import { FIXTURE_SESSION_COOKIE_NAME } from "../test-server-lifecycle";
 
 const emptySummary = {
   learning: null,
@@ -44,7 +45,7 @@ test("bootstraps a clean QA Vision browser into the isolated fixture session", a
     await page.goto(fixtureUrl.toString());
     expect(new URL(page.url()).searchParams.has("project")).toBe(false);
     const project = getDefaultSuiteRuntime().project;
-    expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ingenium_session")).toBe(true);
+    expect((await context.cookies()).some((cookie) => cookie.name === FIXTURE_SESSION_COOKIE_NAME)).toBe(true);
     expect(browserServerOnlyHeaders).toEqual([]);
 
     const fixtureState = await page.evaluate(async () => {

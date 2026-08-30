@@ -16,6 +16,14 @@ const mocks = vi.hoisted(() => ({
   mcpDisconnect: vi.fn(),
 }));
 
+const runtimeClient = {
+  mcp: {
+    status: mocks.mcpStatus,
+    connect: mocks.mcpConnect,
+    disconnect: mocks.mcpDisconnect,
+  },
+};
+
 vi.mock("../src/lib/api", () => ({
   api: {
     mcpServers: {
@@ -33,14 +41,12 @@ vi.mock("../src/lib/api", () => ({
   },
 }));
 
-vi.mock("../src/lib/opencode", () => ({
-  opencode: {
-    mcp: {
-      status: mocks.mcpStatus,
-      connect: mocks.mcpConnect,
-      disconnect: mocks.mcpDisconnect,
-    },
-  },
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useRuntime: () => ({
+    client: runtimeClient,
+    runtimeId: "11111111-1111-4111-8111-111111111111",
+    workspace: {},
+  }),
 }));
 
 vi.mock("../src/lib/ProjectContext", () => ({
@@ -82,7 +88,11 @@ function reportResponse(overrides: Record<string, unknown> = {}) {
       provenance: "live" as const,
       generatedAt: "2026-07-31T12:00:00.000Z",
       freshness: { status: "fresh" as const, observedAt: "2026-07-31T11:59:30.000Z", durationMs: 30_000 },
-      catalog: { status: "conformant" as const, issues: [] },
+      catalog: {
+        status: "conformant" as const,
+        issues: [],
+        authorizedVisibleExpected: { toolCount: 230, categoryCount: 27 },
+      },
       tools: [{
         name: "ingenium_calendar_list_events",
         category: "Child MCP / calendar",
@@ -107,6 +117,10 @@ beforeEach(() => {
       tools: [{ tool_name: "ingenium_calendar_list_events", enabled: true }],
     }],
     total: 1,
+    counts: {
+      visibleTools: 230,
+      visibleCategories: 27,
+    },
     project: "mcp-dashboard-project",
     project_id: "project-id",
   });
@@ -168,6 +182,8 @@ describe("MCP-004 dashboard", () => {
 
     expect(await screen.findByRole("heading", { name: "Child MCP / calendar" })).toBeTruthy();
     expect(screen.getByText("ingenium_calendar_list_events")).toBeTruthy();
+    expect(screen.getByText("230 visible tools · 27 available categories")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/canonical|hidden/i);
     fireEvent.click(screen.getByRole("switch", { name: "Disable ingenium_calendar_list_events" }));
 
     await waitFor(() => expect(mocks.toggleTool).toHaveBeenCalledWith(
@@ -192,6 +208,9 @@ describe("MCP-004 dashboard", () => {
     expect((await screen.findByTestId("mcp-report-summary")).textContent).toContain("Live");
     expect(screen.getByTestId("mcp-report-summary").textContent).toContain("Fresh");
     expect(screen.getByTestId("mcp-report-summary").textContent).toContain("Conformant · 0 issues");
+    expect(screen.getByTestId("mcp-report-authorized-expected").textContent)
+      .toBe("230 authorized-visible expected tools · 27 authorized-visible expected categories");
+    expect(screen.getByTestId("mcp-report-counts").textContent).toBe("1 enabled · 0 disabled · 0 extension-only · 1 reachable · 0 unreachable");
     expect(screen.getByTestId("mcp-report-tool-ingenium_calendar_list_events").textContent).toContain("Category: Child MCP / calendar");
     expect(screen.getByTestId("mcp-report-tool-ingenium_calendar_list_events").textContent).toContain("State: Enabled");
     expect(screen.getByTestId("mcp-report-tool-ingenium_calendar_list_events").textContent).toContain("Boundary: MCP stdio");
@@ -199,12 +218,50 @@ describe("MCP-004 dashboard", () => {
     expect(screen.getByTestId("mcp-report-tool-ingenium_calendar_list_events").textContent).toContain("Invocation: Not run — Not run safely");
   });
 
+  it("counts disabled and extension tools separately from transport reachability", async () => {
+    mocks.report.mockResolvedValueOnce(reportResponse({
+      data: {
+        ...reportResponse().data,
+        tools: [
+          reportResponse().data.tools[0],
+          {
+            ...reportResponse().data.tools[0],
+            name: "ingenium_disabled",
+            enabled: false,
+            visibility: { status: "not-applicable" as const, reason: "TOOL_DISABLED" as const },
+          },
+          {
+            ...reportResponse().data.tools[0],
+            name: "auto_observe_now",
+            boundary: "opencode-extension" as const,
+            visibility: { status: "not-applicable" as const, reason: "not-requested" as const },
+          },
+          {
+            ...reportResponse().data.tools[0],
+            name: "ingenium_missing",
+            visibility: { status: "unreachable" as const, reason: "not-listed" as const },
+          },
+        ],
+      },
+    }));
+
+    render(<McpServerManager />);
+    fireEvent.click(screen.getByRole("button", { name: /Tools/ }));
+
+    expect((await screen.findByTestId("mcp-report-counts")).textContent)
+      .toBe("3 enabled · 1 disabled · 1 extension-only · 1 reachable · 1 unreachable");
+  });
+
   it("uses stale and unknown wording without inventing report certainty", async () => {
     mocks.report.mockResolvedValueOnce(reportResponse({
       data: {
         ...reportResponse().data,
         freshness: { status: "stale", observedAt: "2026-07-31T11:00:00.000Z", durationMs: 30_000 },
-        catalog: { status: "unknown", issues: [] },
+        catalog: {
+          status: "unknown",
+          issues: [],
+          authorizedVisibleExpected: { toolCount: 230, categoryCount: 27 },
+        },
         tools: [{
           ...reportResponse().data.tools[0],
           visibility: { status: "unknown", reason: "not-requested" },

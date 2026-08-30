@@ -3,7 +3,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
-import { resolve } from "node:path";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { MCP_TOOL_CATALOG } from "../../packages/ingenium-core/lib/tools/mcp-tool-catalog";
 
 const REPOSITORY_ROOT = resolve(__dirname, "../..");
@@ -257,6 +259,12 @@ async function startFixtureApi(): Promise<FixtureApi> {
 }
 
 async function connectMcp(fixture: FixtureApi): Promise<McpConnection> {
+  const credentialDirectory = mkdtempSync(join(tmpdir(), "mcp-102-credential-"));
+  chmodSync(credentialDirectory, 0o700);
+  const credentialFile = join(credentialDirectory, ".ingenium-mcp-credential");
+  writeFileSync(credentialFile, `${SCOPED_CREDENTIAL}\n`, { mode: 0o600 });
+  chmodSync(credentialFile, 0o600);
+  cleanups.push(async () => { rmSync(credentialDirectory, { recursive: true, force: true }); });
   const transport = new StdioClientTransport({
     command: TSX,
     args: [MCP_ENTRYPOINT],
@@ -266,7 +274,9 @@ async function connectMcp(fixture: FixtureApi): Promise<McpConnection> {
       HOME: process.env.HOME ?? REPOSITORY_ROOT,
       TMPDIR: process.env.TMPDIR ?? "/tmp",
       INGENIUM_API_URL: `${fixture.origin}/api/v1`,
-      INGENIUM_MCP_CREDENTIAL: SCOPED_CREDENTIAL,
+      INGENIUM_API_URL_TRUSTED: "1",
+      INGENIUM_MCP_CREDENTIAL_FILE: credentialFile,
+      INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
       INGENIUM_MCP_AUDIENCE: "mcp",
       INGENIUM_RUNTIME_CREDENTIAL: RUNTIME_CREDENTIAL,
       INGENIUM_WORKSPACE_ID: WORKSPACE_ID,
@@ -348,8 +358,8 @@ async function callRepresentative(client: Client, representative: { name: string
 
 describe("MCP-102 provider-free live acceptance", () => {
   it("connects all 30 categories with exact catalog accounting and enforces policy, project, error, disabled, and child inheritance boundaries", async () => {
-    expect(MCP_TOOL_CATALOG).toHaveLength(282);
-    expect(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_"))).toHaveLength(280);
+    expect(MCP_TOOL_CATALOG).toHaveLength(283);
+    expect(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_"))).toHaveLength(281);
     expect(MCP_TOOL_CATALOG.filter((tool) => !tool.name.startsWith("ingenium_")).map((tool) => tool.name).sort())
       .toEqual([...EXTENSION_TOOL_NAMES].sort());
     expect(new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))).toHaveLength(30);

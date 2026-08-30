@@ -105,9 +105,9 @@ packages/
 └── ingenium-extension/   # Client-side package — MCP server, plugins. Installable: npx -y @ingenium/extension.
 
 services/
-├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 269 tools. HTTP to API. Zero DB access.
-└── ingenium-dashboard/   # Next.js 16 App Router frontend (20 primary routes + Settings overlay). HTTP to API. Zero DB access.
+├── ingenium-api/         # Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole DB authority.
+├── ingenium-server/      # MCP stdio server with 281 catalog tools. HTTP to API. Zero DB access.
+└── ingenium-dashboard/   # Next.js 16 App Router frontend (24 primary navigation routes + Settings overlay). HTTP to API. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
@@ -170,7 +170,7 @@ with prose. No other active profile receives TodoWrite permission.
 
 ### MCP Tool Naming Convention
 
-All Ingenium MCP tools use a **single `ingenium_` prefix**:
+Built-in Ingenium server tools use a **single `ingenium_` prefix**:
 
 | Scope | Pattern | Example |
 |-------|---------|---------|
@@ -178,7 +178,7 @@ All Ingenium MCP tools use a **single `ingenium_` prefix**:
 | Catalog name | `ingenium_`-prefixed | `ingenium_skill_list` |
 | Exposed tool name | `ingenium_<noun>_<verb>` | `ingenium_task_create` |
 
-The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `ingenium_task_create`). The prefix appears exactly once — never `ingenium_ingenium_`. See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) for the complete catalog.
+The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `ingenium_task_create`). The prefix appears exactly once — never `ingenium_ingenium_`. The two extension-registered plugin tools are intentionally unprefixed: `synthesize_observations` and `auto_observe_now`. See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) for the complete catalog.
 
 ### OAuth Callback Semantics
 
@@ -191,14 +191,16 @@ Native OpenCode provider integrations use two OAuth modes:
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus the Settings overlay (21 user-facing views):
+The Ingenium Dashboard (http://localhost:3000) provides 24 primary navigation routes plus the Settings overlay (19 tabs):
 
 | Page | Purpose |
 |------|---------|
 | `/` | Home — operational dashboard with live metrics via `/api/v1/dashboard/summary` |
 | `/chat` | Ingenium Chat — standalone conversational agent interface |
 | `/opencode` | Embedded OpenCode Web/CLI iframes (no native chat) |
+| `/vscode` | Embedded VS Code workspace through the local/runtime audience gateway |
 | `/projects` | Project management (create, rename, archive, restore) |
+| `/organizations` | Organization membership, invitations, roles, and project access |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/docs` | Documentation workspace (spaces, editor, search, templates, history, trash) |
 | `/secrets` | Encrypted secrets vault (scrypt key derivation, AES-256-GCM, full audit trail) |
@@ -210,12 +212,14 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus t
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/mcp-servers` | MCP servers + Tool Manager (271 catalog tools, 28 categories, search, category filter) |
+| `/mcp-servers` | MCP servers + Tool Manager (283 baseline catalog tools, 30 categories, search, category filter) |
 | `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
+| `/context` | Immutable context conversation memory |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen overlay via gear icon. 14 functional tabs (General, Projects, Skills, Tasks, Jobs, Plugins, Mail, Agents, MCP, Config, Observations, Personality, Providers, Logs), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. The **Providers** tab (aliased to PipelinePanel) features native-provider cards with Connect/Disconnect, an OAuth connect dialog with auto/code modes, and separate Primary/Secondary synthesis provider selectors. |
+| `/usage` | Project-scoped provider-neutral usage totals, breakdowns, freshness, and export |
+| Settings (overlay) | Full-screen overlay via gear icon. 19 URL-addressable tabs (General, Account, Security, Sessions, API tokens, Organizations, Projects, Skills, Tasks, Jobs, Plugins, Mail, Agents, MCP, Config, Observations, Personality, Providers, Logs), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. The **Providers** tab (aliased to PipelinePanel) features native-provider cards with Connect/Disconnect, an OAuth connect dialog with auto/code modes, and separate Primary/Secondary synthesis provider selectors. |
 
 > **Nav bar layout**: Settings gear far-right. **ProjectDropdown** (folder icon) to its left for project switching — disabled on `/mail` and `/opencode`. Chat link added to the Workspace group alongside OpenCode. The dashboard talks to the API layer only — zero direct DB access.
 
@@ -286,10 +290,6 @@ OpenCode interactive `question` access is denied globally and in every custom ag
 
 QA and security each report scope-classified findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a writer fixes an in-scope reviewer blocker, run only the minimum targeted regression for that root cause. Do not rerun QA or security unless the source change in that review boundary requires the reviewer’s originally declared check; never create a recursive reviewer handoff.
 
-### 🔴 Git and GitHub Workflow
-
-Manual and user-created commits are valid and never block continued agent work;
-repository history may contain ordinary commits. Before committing, inspect
 ### Human-Readable Orchestration Communication
 
 The structured task contract and phase accounting remain mandatory, but the
@@ -314,6 +314,10 @@ internal workflow terms:
   **How I verified it**, **Where the proof is**, and
   **Findings / What remains**.
 
+### 🔴 Git and GitHub Workflow
+
+Manual and user-created commits are valid and never block continued agent work;
+repository history may contain ordinary commits. Before committing, inspect
 `git status`, `git diff`, and recent `git log`, then stage only the intended
 paths. Use ordinary non-interactive Git for local commits and `gh` for GitHub
 pushes, pull requests, and checks. Never commit unrelated changes, rewrite
@@ -371,16 +375,12 @@ implementation to be finalized.
 
 ```text
 Phase: "Dashboard implementation, direct docs, and browser work"
+Independent streams: dashboard implementation; direct docs; browser recipes; pattern search; context retrieval; post-wave QA (dependent)
   @ingenium-software-engineer-fast → dashboard/components/ (writer)
   @ingenium-docs                   → docs/              (writer)
   @browser-agent                   → browser recipes/   (writer)
   @ingenium-explore                → search patterns    (non-writer)
-Independent streams: dashboard implementation; direct docs; browser recipes; pattern search; context retrieval; post-wave QA (dependent)
   @ingenium-scout                  → retrieve context   (non-writer)
-```
-
-No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
-
 UNUSED_CAPACITY:
   active slot 6 → reserved for post-wave QA; premature until relevant implementation is finalized
   writer slots → none
@@ -410,6 +410,10 @@ UNUSED_CAPACITY:
 BAD:
   Dispatch one writer and defer safe, non-overlapping Docs or research streams
   for convenience, or fill an active slot with QA before its implementation is finalized.
+```
+
+No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
+
 ### Phase Declaration Protocol
 
 Every task and phase MUST declare before dispatch:
@@ -586,43 +590,48 @@ if (!parent) return; // parent removed — skip silently
 
 ## Docker Deployment
 
-**Single-container via `docker compose up --build`.** Six supervisord processes: API boundary (:4097), private Express API (:4096), Dashboard (:3000), Nginx gateway (:3000/:1455), opencode-web (:4098), and ttyd-opencode (:4099).
+**Single-container compatibility deployment via `docker compose --profile compatibility up --build`.** Nine active supervisord processes: API boundary (:4097), private Express API (:4096), Dashboard (:3001), Nginx gateway (:3000/:1455), restore handoff (fixed Unix socket), OpenCode internal auth proxy (:4101), opencode-web (:4098), ttyd-opencode (:4099), and code-server (:4100).
 
 ### Start/Stop Commands
 
 ```bash
-docker compose up --build    # Start all services
-docker compose down          # Stop all services
-docker compose logs -f       # View logs
-docker compose exec ingenium npm run test   # Execute inside container
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose --profile compatibility up --build    # Start compatibility services
+docker compose --profile compatibility down             # Stop compatibility services
+docker compose --profile compatibility logs -f          # View logs
+docker compose --profile compatibility exec ingenium npm run test   # Execute inside container
 ```
 
 ### Port Mappings
 
 | Host Port | Service | Description |
 |-----------|---------|-------------|
-| `3000` | Dashboard + root gateways | WSL-forwardable local gateway; dashboard, Web, and CLI roots do not use HTTP Basic Auth |
-| `127.0.0.1:4097` | API | Host-loopback bearer boundary for MCP clients; not the browser gateway |
-| internal `4098` | OpenCode Web | Private container upstream; access only through authenticated `opencode.localhost:3000` root |
-| internal `4099` | ttyd-opencode | Private container upstream; access only through authenticated `cli.localhost:3000` root |
+| `3000` | Nginx gateway | WSL-forwardable local gateway for the Dashboard, OpenCode, and VS Code roots; browser traffic does not use HTTP Basic Auth |
+| `127.0.0.1:4097` | API boundary | Host-loopback bearer boundary for MCP clients; not the browser gateway |
+| internal `4096` | Express API | Private sole DB authority behind the API boundary and gateway |
+| internal `4101` | OpenCode internal auth proxy | Private API-only Basic-auth proxy to OpenCode Web on `4098` |
+| internal `4098` | OpenCode Web | Private container upstream; access only through the dedicated `opencode.localhost:3000` gateway root |
+| internal `4099` | ttyd-opencode | Private container upstream; access only through the dedicated `cli.localhost:3000` gateway root |
+| internal `4100` | code-server | Private container upstream; access only through `vscode.localhost:3000` root |
+| fixed Unix socket | restore handoff | Private restore-maintenance handoff; no network listener |
 | `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → Nginx listener → private Express `:4096`. Only exact unauthenticated `GET /auth/callback` is allowed; the API validates and forwards the callback |
 
-> 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, and 1455. OpenCode ports 4098 and 4099 remain private container listeners.
+> 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, and 1455. The OpenCode internal proxy 4101, OpenCode ports 4098/4099, and code-server 4100 remain private container listeners.
 
 ### Key Docker Notes
 
 - **Volumes**: `ingenium-data` (/app/.ingenium), `opencode-config`, `opencode-data`. Workspace bind-mount: `~/repos` → `/workspace`.
 - **Native-module libc parity**: Docker builder and runtime both use glibc-based `node:22-slim`; the runtime image verifies that copied native modules such as `better-sqlite3` load successfully. Do not mix an Alpine/musl builder with this runtime.
-- **Nginx runtime paths and validation**: Nginx runs unprivileged as `appuser`; the image and entrypoint validate writable runtime paths and run `nginx -t` as `appuser`. Startup recreates the owner-only PID, lock, temporary, and error-log paths under ephemeral `/run/ingenium-gateway`; access logs are disabled and warning-level errors use the Supervisor-readable `nginx-error.log` file.
+- **Nginx runtime paths and validation**: Nginx runs unprivileged as `ingenium-gateway`; the image and entrypoint validate writable runtime paths and run `nginx -t` as `ingenium-gateway`. Startup recreates the owner-only PID, lock, temporary, and error-log paths under ephemeral `/run/ingenium-gateway`; access logs are disabled and warning-level errors use the Supervisor-readable `nginx-error.log` file.
 - **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`. The `sandbox` attribute has been removed from OpenCode iframes (trusted first-party content on separate origins).
 - **OpenCode Access**: The Dashboard iframe connects to OpenCode Web via a URL derived at runtime by `runtime-urls.ts` using a **two-tier embedding model**. The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path:
-  - **Loopback HTTP**: the dashboard accepts `http://localhost:3000/` and `http://127.0.0.1:3000/`; authenticated OpenCode roots are `http://opencode.localhost:3000/` (Web) and `http://cli.localhost:3000/` (CLI). Unexpected dashboard Host headers are rejected.
-  - **Gateway separation**: dashboard and OpenCode traffic use independent Nginx `30r/s`, burst-60 buckets; assets and upgrade handshakes do not consume the dynamic OpenCode bucket. Direct IPv6 loopback dashboard navigation (`::1`/`[::1]`) is canonicalized with `308` to `localhost` so the CSP origin remains valid.
-  - **Private upstream boundary**: OpenCode Web/ttyd ports `4098`/`4099` are container-internal only. The gateway strips browser authorization, identity, and proxy-chain headers, injects ttyd's fixed internal identity, and owns the loopback-only iframe CSP.
+  - **Loopback HTTP**: the dashboard accepts `http://localhost:3000/` and `http://127.0.0.1:3000/`; dedicated OpenCode roots are `http://opencode.localhost:3000/` (Web) and `http://cli.localhost:3000/` (CLI). Unexpected dashboard Host headers are rejected.
+  - **Gateway separation**: OpenCode/VS Code and protected Dashboard traffic retain independent Nginx `30r/s`, burst-60 buckets. Only positive GET templates from `services/ingenium-api/config/dashboard-safe-reads.json` use the per-address `60r/s`, burst-360 bucket followed by authenticated per-IP/session `480` reads/minute accounting; generated Nginx/API policy drift fails validation. HEAD, unmatched, encoded/ambiguous, auth/session/token, provider/upstream, stream, report, search, export/download/backup, and mutation-on-read paths remain strict. Invalid candidate authentication consumes the shared strict `100`/minute socket-IP bucket before repeated credential work, and all valid sessions share the `480`/IP admission ceiling. Assets and upgrade handshakes do not consume the dynamic OpenCode bucket. Direct IPv6 loopback dashboard navigation (`::1`/`[::1]`) is canonicalized with `308` to `localhost` so the CSP origin remains valid.
+  - **Private upstream boundary**: OpenCode Web/ttyd and VS Code ports `4098`/`4099`/`4100` are container-internal only. The gateway strips browser authorization, identity, and proxy-chain headers, injects ttyd's fixed internal identity, and owns the loopback-only iframe CSP.
   - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL` pointing to a dedicated root HTTPS origin (e.g., `https://opencode.example.com/`). Only root HTTPS origins are accepted — relative same-origin paths are no longer supported.
   - **Unsupported LAN HTTP**: `getOpenCodeAvailability()` returns `"unavailable"`. The iframe shows explicit guidance: "OpenCode serves root-relative assets and cannot be proxied under a shared origin" with a fallback "Open OpenCode in a new tab" button.
   - The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). The `allow="clipboard-write"` Permissions Policy is retained.
-  - The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty. The local Windows↔WSL gateway does not use browser credentials; ports 4098 and 4099 remain private container listeners. `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
+  - The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty. The local Windows↔WSL gateway does not use browser credentials; ports 4098, 4099, and 4100 remain private container listeners. `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
 - 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks in the API Express process. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts).
 - 🔴 **Docker git**: `git` package installed for OpenCode repo creation.
 
@@ -639,7 +648,7 @@ affected Playwright file and optional `--grep` expression:
 
 ```bash
 npm run typecheck --workspace=packages/ingenium-core
-npm run lint --workspace=services/ingenium-api -- lib/routes/feature.ts
+npm run typecheck --workspace=services/ingenium-api
 npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts
 npm run test --workspace=packages/ingenium-core -- tests/feature.test.ts -t "handles the changed case"
 npx playwright test tests/dashboard/feature.spec.ts --grep "changed behavior"
@@ -749,7 +758,7 @@ Commands are captured in the DB alongside skills, agents, and plugins:
 |---------|------|---------|
 | `/synthesize` | `.opencode/commands/synthesize.md` | Trigger synthesis pipeline to process pending observations |
 | `/init-project` | `.opencode/commands/init-project.md` | Preview or apply repository-authoritative docs, skills, agents, and plugins sync; supports `--docs-only` |
-| `/repo-context` | `.opencode/commands/repo-context.md` | Load project identity — reads `.opencode.json`, identifies workspace, and loads relevant context files |
+| `/repo-context` | `.opencode/commands/repo-context.md` | Load project identity — reads `opencode.json`, identifies workspace, and loads relevant context files |
 
 **Commands MCP Tools:** `ingenium_command_list`, `ingenium_command_get`, `ingenium_command_create`, `ingenium_command_update`, `ingenium_command_delete`
 
@@ -759,23 +768,23 @@ Commands are captured in the DB alongside skills, agents, and plugins:
 
 The `configs` table stores `opencode.json` (project-level) and `opencode.jsonc` (global) content in the DB. Dashboard `/config` page provides a tabbed editor with sync-from-disk and save.
 
-- **Global config path**: `/home/appuser/.config/opencode/` (override via `INGENIUM_GLOBAL_CONFIG_PATH`)
+- **Global config path**: `/home/ingenium-opencode/.config/opencode/` in Docker; the non-container fallback is `/home/appuser/.config/opencode/` (override via `INGENIUM_GLOBAL_CONFIG_PATH`)
 - **Config MCP tools**: `ingenium_config_get`, `ingenium_config_set`, `ingenium_config_sync`
 
-For API endpoints and detailed MCP tool reference, see [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md) and [docs/HOW-TO/mcp-tools.md](docs/HOW-TO/mcp-tools.md).
+For API endpoints and detailed MCP tool reference, see [docs/configure/settings.md](docs/configure/settings.md) and [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
 
 ---
 
 ## Plugin & Skill Conventions
 
 - **Plugin Auto-Config Sync**: Every plugin lifecycle operation MUST sync `.opencode/plugins/<file>.ts` on disk AND `opencode.json`'s `plugin` array.
-- **Plugin Source Auto-Populate**: If `sourceContent` is empty at creation, the API reads the file from disk. See [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md).
+- **Plugin Source Auto-Populate**: If `sourceContent` is empty at creation, the API reads the file from disk. See [docs/configure/plugins.md](docs/configure/plugins.md).
 - **🔴 Git-authoritative Resource Sync**: Git worktree files flow through `@ingenium/extension` resource-sync, configured MCP stdio, authenticated API, and then the database. Administrative skill CRUD/sync tools are repair/import operations only. See [docs/concepts/skill-system.md](docs/concepts/skill-system.md).
 - **🔴 Plugin/Config Restart Requirement**: When the sync engine detects changes to plugins or config (opencode.json), `restartRequired: true` is returned. OpenCode must be restarted for plugin array or config content changes to take effect. Skills, agents, and commands do not require a restart.
 - **Skill file_tree Format**: The API stores a JSON map of paths → content for
   persistence and repair. Worktree authority remains Git and projection follows
   the resource-sync/MCP/API path.
-- **Dashboard Styling**: Every service with a frontend must have a `STYLING-GUIDE.md`. All `<select>` elements use `hover:bg-gray-50 cursor-pointer`. See [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+- **Dashboard Styling**: Every service with a frontend must have a `STYLING-GUIDE.md`. All `<select>` elements use `hover:bg-gray-50 cursor-pointer`. See [docs/concepts/conventions.md](docs/concepts/conventions.md).
 - 🔴 **Auto-observer auto-registration**: Must be registered in DB plugins table + both opencode configs (project + global).
 
 ---

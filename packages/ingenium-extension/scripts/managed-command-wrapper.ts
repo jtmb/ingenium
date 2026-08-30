@@ -9,13 +9,25 @@ const GIT_CONFIGURATION = [
   "-c", "core.fsmonitor=false",
   "-c", "core.hooksPath=/dev/null",
 ];
-const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
+const COMMIT_CONFIGURATION = [
+  "-c", "commit.gpgSign=false",
+  "-c", "credential.helper=",
+];
+const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
+
+function isSafeCommitMessage(value: string): boolean {
+  return value.length >= 1 && value.length <= 100 && value === value.trim()
+    && !value.startsWith("-") && !/[\u0000-\u001f\u007f]/.test(value);
+}
 
 export function decodeManagedArgv(encoded: string): string[] {
   if (!/^[A-Za-z0-9_-]{2,8192}$/.test(encoded)) throw new Error("Invalid managed command payload");
   const parsed: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64
-    || !parsed.every((value) => typeof value === "string" && ARG.test(value))) {
+    || !parsed.every((value) => typeof value === "string")
+    || (parsed[0] === "commit"
+      ? parsed.length !== 2 || !isSafeCommitMessage(parsed[1]!)
+      : !parsed.every((value) => ARG.test(value)))) {
     throw new Error("Invalid managed command payload");
   }
   return parsed;
@@ -49,6 +61,16 @@ function isSafeRepositoryPath(value: string): boolean {
 
 export function managedRepositoryArgv(argv: string[]): string[] {
   const [operation, ...paths] = argv;
+  if (operation === "commit") {
+    if (paths.length !== 1 || !isSafeCommitMessage(paths[0]!)) {
+      throw new Error("Repository wrapper rejected the command");
+    }
+    return [
+      ...GIT_CONFIGURATION,
+      ...COMMIT_CONFIGURATION,
+      "commit", "--no-verify", "--no-gpg-sign", "--cleanup=verbatim", "-m", paths[0]!,
+    ];
+  }
   const validPaths = paths.length > 0 && paths.length <= 32 && paths.every(isSafeRepositoryPath);
   if (!validPaths || (operation === "mv" && paths.length !== 2)
     || (operation !== "add" && operation !== "mv" && operation !== "rm")) {

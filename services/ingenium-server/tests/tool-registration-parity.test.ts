@@ -29,6 +29,19 @@ function isServerRegisterTool(node: ts.Node): node is ts.PropertyAccessExpressio
     && node.name.text === "registerTool";
 }
 
+function isProjectRegisterTool(node: ts.Node): node is ts.Identifier {
+  return ts.isIdentifier(node) && node.text === "registerProjectTool";
+}
+
+function isProjectHelperImplementation(call: ts.CallExpression): boolean {
+  let parent: ts.Node | undefined = call.parent;
+  while (parent) {
+    if (ts.isFunctionDeclaration(parent)) return parent.name?.text === "registerProjectTool";
+    parent = parent.parent;
+  }
+  return false;
+}
+
 function isOriginalRegisterRestoration(node: ts.Node): node is ts.BinaryExpression {
   return ts.isBinaryExpression(node)
     && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
@@ -61,7 +74,10 @@ function collectServerToolRegistrations(source: string): SourceRegistration[] {
   }
 
   const collectCalls = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && isServerRegisterTool(node.expression) && node.getStart(sourceFile) < restorationPosition!) {
+    if (ts.isCallExpression(node)
+      && node.getStart(sourceFile) < restorationPosition!
+      && ((isServerRegisterTool(node.expression) && !isProjectHelperImplementation(node))
+        || isProjectRegisterTool(node.expression))) {
       calls.push(node);
     }
     ts.forEachChild(node, collectCalls);

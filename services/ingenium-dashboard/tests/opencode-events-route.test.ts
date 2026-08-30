@@ -106,6 +106,27 @@ describe("OpenCode session event route", () => {
     await reader!.cancel();
   });
 
+  it("defaults to the private Express listener in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(
+      new Request("http://dashboard.test/api/v1/opencode/sessions/ses_live/events", {
+        headers: { Cookie: "__Host-ingenium_session=fixture" },
+      }),
+      { params: Promise.resolve({ id: "ses_live" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:4096/api/v1/opencode/sessions/ses_live/events",
+    );
+  });
+
   it("does not make an upstream request without a browser session", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

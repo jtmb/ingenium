@@ -352,6 +352,7 @@ beforeAll(async () => {
     authSessionId: authSession.session.id,
     audience: "web",
     rootDomain: "runtime.example.test",
+    scheme: "https",
     launcherOrigin: "https://dashboard.example.test",
     exchangeProof,
   });
@@ -415,6 +416,7 @@ beforeAll(async () => {
     fence: registered.fence,
     ownershipToken,
     idempotencyKey: "restore-claim",
+    clientClaimKey: "c".repeat(43),
     claims: [{ claim: { kind: "path", path: "src/restore.ts" } }],
   });
   const pendingSource = await createSnapshot(globalProjectId, "manual", coreDbPath, openCodeDbPath);
@@ -469,7 +471,7 @@ beforeAll(async () => {
   await new Promise<void>((resolveServer) => supervisor.listen(9001, "127.0.0.1", resolveServer));
 
   health = createServer((request, response) => {
-    if (request.url === "/api/v1/health" && request.headers.authorization === `Bearer ${"t".repeat(43)}`) {
+    if (request.url === "/api/v1/health" && request.headers.authorization === undefined) {
       response.writeHead(200).end("{}")
       return;
     }

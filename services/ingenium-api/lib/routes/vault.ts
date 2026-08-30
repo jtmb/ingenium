@@ -17,6 +17,8 @@ type VaultService = {
   unsealVault(projectId: string, passphrase: string): { ok: boolean; error?: string };
   sealVault(): void;
   isSealed(): boolean;
+  getEmptyVaultResetEligibility(): core.vault.EmptyVaultResetEligibility;
+  resetEmptyVaultInitialization(projectId: string, actor: core.vault.VaultActor): core.vault.EmptyVaultResetResult;
   createItem(
     projectId: string,
     name: string,
@@ -325,6 +327,79 @@ vaultRouter.post("/seal", (req, res) => {
   vault!.sealVault();
   vault!.logAudit(projectId, "vault_sealed", null, vaultActor(req), {});
   res.json({ data: { ok: true } });
+});
+
+function emptyResetReason(eligibility: core.vault.EmptyVaultResetEligibility): string {
+  if (!eligibility.initialized) return "The vault is not initialized.";
+  if (eligibility.blockers.includes("vault_unsealed")) {
+    return "Enter your current passphrase to continue, or lock the vault before checking reset eligibility.";
+  }
+  return "Protected provider or vault dependencies still exist. Enter the current passphrase, or remove/reconfigure those dependencies before trying again.";
+}
+
+const EMPTY_VAULT_RESET_CONFIRMATION = "RESET EMPTY VAULT";
+
+vaultRouter.get("/empty-reset", (req, res) => {
+  if (unavailable(res)) return;
+  if (!requireProject(req, res)) return;
+  try {
+    const eligibility = vault!.getEmptyVaultResetEligibility();
+    res.json({ data: { eligible: eligibility.eligible, reason: eligibility.eligible ? null : emptyResetReason(eligibility) } });
+  } catch {
+    res.status(503).json({
+      error: {
+        code: "VAULT_RESET_CHECK_FAILED",
+        message: "Vault reset eligibility could not be verified. No changes were made.",
+      },
+    });
+  }
+});
+
+vaultRouter.post("/empty-reset", (req, res) => {
+  if (unavailable(res)) return;
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)
+    || Object.keys(req.body).length !== 1
+    || req.body.confirmation !== EMPTY_VAULT_RESET_CONFIRMATION) {
+    res.status(422).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: `confirmation must equal '${EMPTY_VAULT_RESET_CONFIRMATION}'`,
+      },
+    });
+    return;
+  }
+  try {
+    const result = vault!.resetEmptyVaultInitialization(projectId, vaultActor(req));
+    if (result.status === "reset") {
+      res.json({ data: { reset: true, initialized: false } });
+      return;
+    }
+    if (result.status === "not_initialized") {
+      res.status(409).json({ error: { code: "VAULT_NOT_INITIALIZED", message: "The vault is not initialized." } });
+      return;
+    }
+    if (result.status === "concurrent_change") {
+      res.status(409).json({
+        error: {
+          code: "VAULT_RESET_CONFLICT",
+          message: "Vault data changed during the reset check. No changes were made; verify eligibility and try again.",
+        },
+      });
+      return;
+    }
+    res.status(409).json({
+      error: { code: "VAULT_RESET_BLOCKED", message: emptyResetReason(result.eligibility) },
+    });
+  } catch {
+    res.status(503).json({
+      error: {
+        code: "VAULT_RESET_CHECK_FAILED",
+        message: "Vault reset eligibility could not be verified. No changes were made.",
+      },
+    });
+  }
 });
 
 /* ----  Guarded routes (require initialized + unsealed)  ----------------- */

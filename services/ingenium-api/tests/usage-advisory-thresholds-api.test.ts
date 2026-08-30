@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +8,7 @@ import { getDb, projects, resetDbForTest, usage } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { usageRouter } from "../lib/routes/usage.js";
-import { compatibilityAuthHeaders } from "./http-fixtures.js";
+import { closeHttpServer, compatibilityAuthHeaders, listenOnLoopback } from "./http-fixtures.js";
 
 const API_TOKEN = "a".repeat(32);
 const PRIMARY = "usage-advisory-api-primary";
@@ -120,16 +119,11 @@ beforeEach(async () => {
   app.use("/api/v1/usage", usageRouter);
   app.use(errorHandler);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      origin = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  origin = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   server = undefined;
   resetDbForTest();
   if (directory) rmSync(directory, { recursive: true, force: true });

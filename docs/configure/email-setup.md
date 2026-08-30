@@ -23,10 +23,11 @@ export GOOGLE_OAUTH_CLIENT_ID=your-google-oauth-client-id
 export GOOGLE_OAUTH_CLIENT_SECRET=your-google-oauth-secret
 export MS_OAUTH_CLIENT_ID=your-azure-ad-app-id  
 export MS_OAUTH_CLIENT_SECRET=your-azure-ad-app-secret
-export INGENIUM_EMAIL_ENCRYPTION_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 export OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
+./scripts/bootstrap-local-secrets.sh
 ```
-These are passed through to `docker compose` via the `${VAR:-}` expansion in `docker-compose.yml`.
+OAuth configuration is passed through Compose. The email encryption key is an
+owner-only file mounted read-only from the path recorded in ignored `.env`.
 
 > 🔴 **Security**: Never commit these values. The encryption key must be 64 hex characters (32 bytes) or a 64-character base64url secret; the latter is deterministically reduced to an AES-256 key. Generate a unique key per deployment and retain it unchanged while that deployment's encrypted mail data is in use.
 
@@ -152,9 +153,10 @@ credentials are accessed.
 
 ## Security Notes
 
-- **Credentials encrypted**: All OAuth2 secrets are stored using AES-256-GCM with `INGENIUM_EMAIL_ENCRYPTION_KEY`
+- **Credentials encrypted**: All OAuth2 secrets are stored using AES-256-GCM. Compose requires the owner-only `INGENIUM_EMAIL_ENCRYPTION_KEY_FILE`; the inline `INGENIUM_EMAIL_ENCRYPTION_KEY` is only a local-development fallback.
 - **No plaintext storage**: Never see raw client IDs/secrets — decrypted at runtime only
 - **Deployment-scoped key continuity**: Each deployment should have its own encryption key, which must remain available to decrypt its stored credentials
+- **Rotation**: Run `scripts/bootstrap-local-secrets.sh --rotate-email-encryption-key` only with the one-shot empty-transition gate; any remaining mail/account/credential/OAuth/cache/queue/watcher reference blocks startup without changing continuity metadata.
 
 ## Account Removal
 
@@ -179,7 +181,17 @@ If you want to keep an account configured but remove it from the sidebar, use **
 
 ## Re-Authentication After Key Rotation
 
-If `INGENIUM_EMAIL_ENCRYPTION_KEY` is rotated, all stored credentials become undecryptable — both OAuth2 tokens and app-password credentials. The sync engine parks the affected workers (no infinite retry loop) and the dashboard shows a **Reconnect** button for each affected account.
+If the deployment's email encryption key or protected key file is rotated, all
+stored credentials become undecryptable — both OAuth2 tokens and app-password
+credentials. The sync engine parks the affected workers (no infinite retry loop)
+and the dashboard shows a **Reconnect** button for each affected account.
+
+For an installation with no mail data, the protected-file operator path may use
+`INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION=1` for one restart. The API
+updates continuity metadata only after a transaction proves every mail data and
+reference surface empty and records a content-free audit event. If any row
+exists, the transition fails closed; use a separately reviewed decrypt/re-encrypt
+procedure instead of deleting or overwriting credentials.
 
 Recovery path depends on the account's `authType`:
 

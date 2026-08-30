@@ -35,7 +35,7 @@ Projects can be either **regular** (default) or **global**.
 
 ### Global Projects
 - Marked with `is_global = true`
-- Skills, plugins, and commands are written to `/home/appuser/.config/opencode/` (configurable via `INGENIUM_GLOBAL_CONFIG_PATH`)
+- In Docker, skills, plugins, and commands are written to `/home/ingenium-opencode/.config/opencode/` (configurable via `INGENIUM_GLOBAL_CONFIG_PATH`)
 - Resources are shared across **all** projects via shared skill resolution
 - The active global namespace is singular: the database permits at most one
   non-archived `is_global` project, normally `global-default`
@@ -44,38 +44,27 @@ Projects can be either **regular** (default) or **global**.
   using shared settings or mail
 - Global servers appear with "Enabled" badge on the Servers page
 
-### Making a Project Global
+### Protected global project lifecycle
 
-Using MCP tools:
+The canonical `global-default` project is owned by the trusted server lifecycle.
+External API and MCP lifecycle requests cannot create a global project, rename or
+archive the canonical global, restore it, or change its global designation. Such
+requests fail closed with `GLOBAL_PROJECT_LIFECYCLE_FORBIDDEN`; the global
+namespace remains singular and server-managed.
 
-```typescript
-// Mark a project as the global-default
-await ingenium_project_set_global({
-  project: "my-project",
-  name: "global-default",
-  isGlobal: true
-});
-
-// Unmark a project
-await ingenium_project_set_global({
-  project: "my-project",
-  name: "global-default",
-  isGlobal: false
-});
-```
-
-Changing the global designation is a controlled data operation. Do not perform
-live migration or cleanup before deploying the release containing the
-integrity schema and runtime checks. First deploy, then run migration
-preflight and resolve duplicate-global or archived-project conflicts.
+Regular projects can be archived and restored. Archive/restore actions require
+the caller's project authorization and, for browser administration, a recent
+step-up. The active list excludes archived projects, while the Archived tab and
+`GET /api/v1/projects/archive` provide the reversible restore path.
 
 ## Cross-Project Synthesis
 
-When a project is marked as global, patterns discovered in one project can be shared across all projects:
+When the trusted server lifecycle has an active canonical global project, patterns
+discovered in one project can be shared across all projects:
 
 1. The `ingenium_synthesis_cross_project` tool evaluates observations across all active projects
-2. Shared patterns are synthesized into skills in the `global-default` project
-3. All projects can access these global skills
+2. Shared patterns create pending skill proposals in the `global-default` project
+3. Approved proposals apply global skills that all projects can access
 4. Cross-project synthesis runs automatically every 15 minutes
 
 ## API Endpoints
@@ -88,24 +77,33 @@ When a project is marked as global, patterns discovered in one project can be sh
 - `GET /api/v1/projects/archive` — list archived projects
 - `POST /api/v1/projects/purge` — purge expired projects (body: `{ retention_days }`)
 
+The canonical global project is protected from these external lifecycle changes;
+the API returns `403 GLOBAL_PROJECT_LIFECYCLE_FORBIDDEN` rather than silently
+changing the shared namespace. Regular archive/restore mutations are subject to
+authorization and recent-step-up policy.
+
 The dashboard URL-encodes validated project names used in path segments, so
 archive, restore, rename, detail, and one-project purge work with any name that
 passes project-name validation. Purge retention is an integer from **0 through
 3,650 days inclusive**; the default is 7 days. A project is eligible only when
 its archive timestamp is older than the selected retention cutoff, and projects
 with referenced child data are retained.
+Immutable security audit rows retain their historical project UUID after purge
+but do not count as live child data. New audit rows still require an existing
+project in the same organization, and the audit rows themselves remain
+update/delete protected.
 
 ## MCP Tools
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `ingenium_project_init` | `name, isGlobal?` | Create a new project (optionally global) |
+| `ingenium_project_init` | `name, isGlobal?` | Create a regular project; external global creation is rejected |
 | `ingenium_project_list` | — | List all active projects |
 | `ingenium_project_delete` | `name` | Delete a project |
 | `ingenium_project_list_archived` | `project` | List archived projects |
 | `ingenium_project_restore` | `project, name` | Restore an archived project |
 | `ingenium_project_purge` | `project, retentionDays?` | Permanently purge expired projects |
-| `ingenium_project_set_global` | `project, name, isGlobal` | Mark/unmark a project as global |
+| `ingenium_project_set_global` | `project, name, isGlobal` | Forward an API-enforced global-lifecycle request; ordinary external designation changes are rejected |
 
 ## Code Location
 

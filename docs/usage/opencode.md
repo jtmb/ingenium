@@ -7,7 +7,7 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 ## Overview
 
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime HTTPS roots only after explicit start/resume. Direct 4098/4099 ports remain private.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime roots only after explicit start/resume. Special-use `.localhost` roots use browser-trusted HTTP on loopback only; remote/custom roots require HTTPS. Direct 4098/4099 ports remain private.
 
 The supported runtime is OpenCode **1.18.9**. Docker verifies the pinned
 archive SHA-256 and executable version, while package compatibility tests verify
@@ -37,13 +37,17 @@ unbound and offers refresh/retry instead of embedding a fallback runtime.
 
 ## OpenCode Web/CLI Mode Switch
 
-- **Web mode** — Redeems a browser-generated one-time `web` exchange proof before embedding its runtime HTTPS root.
+- **Web mode** — Redeems a browser-generated one-time `web` exchange proof before embedding its exact runtime root.
 - **CLI mode** — Redeems a distinct `cli` proof for the same runtime container; it shares process/worktree state, not the Web cookie.
 - **Mode switch** — A right-edge glass tab toggles between modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` switches between modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
 - **Workspace preference**: Production may preselect a still-visible last-used workspace,
-  but it never starts it automatically or treats that preference as authority.
+  but it never starts it automatically or treats that preference as authority. The
+  preference key is scoped to the URL-encoded authenticated user and project. On
+  reload, the API workspace list must confirm the ID and project; unauthorized,
+  stopped, unavailable, or otherwise non-ready entries are cleared and return the
+  picker instead of launching a fallback.
 - **Toolbar**: The /opencode page toolbar contains only the Web/CLI mode toggle. Chat navigation is handled through the main navigation bar (not duplicated in the toolbar).
 
 ## Terminal Attachment
@@ -52,14 +56,15 @@ Direct attachment to host ports 4098 and 4099 is intentionally unavailable. The 
 gateway roots are compatibility-only. In production they return the same static,
 no-store `404` guidance; use the dashboard picker and selected runtime root instead.
 
-The installation API uses `INGENIUM_API_TOKEN` internally, while external OpenCode
-MCP uses a scoped credential from the ignored, owner-only
+The installation API uses its protected installation-token file internally in
+Compose, while external OpenCode MCP uses a scoped credential from the ignored, owner-only
 `.opencode/.ingenium-mcp-credential` file (mode `0600`). Do not put plaintext
 credentials in tracked `opencode.json`/`opencode.jsonc`. Dashboard API calls use a server-side
 proxy that injects the token; browser code never receives it. The loopback API
 boundary is `127.0.0.1:4097`. OAuth on `127.0.0.1:1455` reaches Nginx and then
-private Express `4096`; the auth middleware allowlists only the exact
-unauthenticated `GET /auth/callback` path.
+private Express `4096`; the callback listener allowlists only the exact
+unauthenticated `GET /auth/callback` path. The API's credential-free health and
+local browser-auth paths are separate auth exceptions.
 
 ## Ingenium MCP launcher preflight
 
@@ -80,9 +85,17 @@ credential issuance because its immutable UUID is part of the credential grant.
 
 OpenCode loads plugins in the parent process; the `environment` block on the
 `ingenium` MCP entry belongs only to the child MCP process and does not supply
-`INGENIUM_PROJECT` to parent plugins. Parent plugins therefore use the same
-explicit-precedence and safe-basename resolver, with the canonical `/workspace`
-worktree remaining fail-closed.
+binding variables to parent plugins. Parent plugins resolve the unique local
+Ingenium MCP entry from the current worktree's regular `opencode.json` when an
+operation-specific environment is absent. Learning, repository-sync, general MCP,
+and runtime credentials remain distinct: learning hooks use the protected
+`.opencode/.ingenium-learning-credential`, repository sync uses
+`.opencode/.ingenium-repository-sync-credential`, and general MCP uses
+`.opencode/.ingenium-mcp-credential` unless an approved protected locator is
+configured. Credential purpose and project/workspace/worktree/audience bindings
+are propagated into each short-lived MCP child. Conflicting entries, unsafe
+credential files, and mismatched bindings fail closed. The canonical `/workspace`
+worktree still requires an explicit project and exact worktree binding.
 
 The container also projects its persistent global config at startup so the
 `auto-observer`, `observer`, and `resource-sync` plugins resolve the owner-only
@@ -116,7 +129,8 @@ use the same exchange, and logout/revoke invalidates reconnects.
 The production status descriptor contains only bounded `mode`, `status`, and `reason`
 fields—no runtime, backend, path, user, or project identifier. Workspace list reads
 never start or authorize anything. Empty, loading, selection, starting, ready,
-unavailable, and retry states are shared by iframe, pop-out, and standalone views.
+stopped, unavailable, and retry states are shared by iframe, pop-out, and standalone
+views.
 Authenticated HTTP, WebSocket, and generation lifecycles renew the bounded idle lease;
 health/status polling does not, and the absolute lease is never extended.
 
@@ -129,7 +143,10 @@ Use `/init-project` and its dedicated MCP repository-sync operation for
 repository projection. Do not run `ingenium_skill_sync*` after edits; those are
 admin repair/import tools. The deleted legacy skill-sync command is not part of
 the workflow.
-Rebuild the extension and restart OpenCode after plugin/config changes.
+Rebuild the extension and restart OpenCode after plugin/config changes. Restarting
+only the child MCP process or hot-reloading a tool is insufficient after a
+parent-plugin or protected-credential change; perform one full OpenCode restart
+from the intended worktree.
 
 ## Ponytail
 
@@ -186,11 +203,14 @@ service or bridge, and no current-session/OpenCode-session import tool.
 
 ## Gateway boundaries
 
-- **Rate limits are separate**: dashboard traffic uses its own `30r/s` bucket
-  with a `60` request burst; OpenCode Web/CLI traffic uses a separate bucket
-  with the same limits. Build assets and WebSocket upgrade handshakes use an
-  empty rate-limit key, so normal iframe startup traffic does not consume the
-  dynamic OpenCode request budget. Each surface still has a shared gateway
+- **Rate limits are separate**: OpenCode Web/CLI retains its own `30r/s`,
+  burst-`60` bucket. Dashboard documents and protected API operations keep the
+  same strict policy; only canonical positive Dashboard GET templates use a
+  separate per-address `60r/s`, burst-`360` Nginx bucket and authenticated
+  per-IP/session API ceiling of `480` reads/minute. OpenCode/provider routes,
+  event streams, HEAD, and unmatched paths remain strict. Build assets and WebSocket upgrade handshakes
+  use an empty rate-limit key, so normal iframe startup traffic does not consume
+  the dynamic OpenCode request budget. Each surface still has a shared gateway
   connection cap of 16.
 - **Loopback canonicalization**: supported dashboard origins are
   `http://localhost:3000/` and `http://127.0.0.1:3000/`. Direct IPv6 loopback
@@ -216,5 +236,4 @@ service or bridge, and no current-session/OpenCode-session import tool.
 ## Related Features
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
-- The `appuser` has passwordless `sudo` access inside the container for package installation.
-- Use the OpenCode interface to interact with the built-in 282-tool Ingenium MCP catalog across 30 baseline categories (280 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 283-tool Ingenium MCP catalog across 30 baseline categories (281 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

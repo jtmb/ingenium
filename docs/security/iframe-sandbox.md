@@ -37,10 +37,17 @@ browser credentials/identity/proxy headers, and emits a gateway-owned
 `frame-ancestors` policy restricted to configured dashboard origins. WebSocket Origin
 must equal the exact runtime origin; private 4098/4099/4100 listeners stay unpublished.
 
+Each runtime audience uses paired host-only cookies: the ordinary
+`__Host-ingenium_runtime_<audience>` cookie supports top-level access, while
+`__Host-ingenium_runtime_<audience>_partitioned` adds `SameSite=None; Partitioned`
+for privacy-blocked dashboard iframes. Both are `Secure` and `HttpOnly` and carry
+the same short-lived session token. If both variants are present with different
+tokens, the gateway rejects the session rather than choosing one.
+
 This VS Code surface is administrator-grade local access. code-server is
 preinstalled, but Restricted Mode disables the pinned extension until the user
 explicitly trusts the workspace; Ingenium never auto-trusts. The extension is
-image-baked and installed offline as `appuser` into persistent `vscode-data`;
+image-baked and installed offline as `ingenium-vscode` into persistent `vscode-data`;
 there is no runtime registry or marketplace installation. Security acceptance
 also verifies the exact Open VSX artifact identity and SHA-256, engine
 compatibility, ownership, and that no content or secrets enter evidence.
@@ -96,16 +103,23 @@ paths remain unsupported.
 ### Gateway security boundary
 
 The iframe origins are separate from the dashboard, but the upstream services
-are also protected by the local gateway boundary. Dashboard and OpenCode
-traffic use separate Nginx rate-limit buckets (`30r/s`, burst `60`); assets and
-upgrade handshakes are excluded from the dynamic OpenCode bucket so dashboard
-prefetch bursts cannot starve iframe startup. The gateway limits connections
-to 16 per client address.
+are also protected by the local gateway boundary. OpenCode and VS Code retain
+independent Nginx `30r/s`, burst-`60` buckets. Dashboard documents, unsafe
+methods, auth-sensitive paths, reports, exports, and downloads retain the same
+strict limit. Only canonical positive GET templates use the separate per-address
+`60r/s`, burst-`360` bucket and downstream authenticated per-IP/session ceiling
+of `480` reads/minute. HEAD, unknown, encoded, normalized-ambiguous, streaming,
+provider, session/token, report, search, backup, and mutation-on-read paths are
+strict by default. Failed candidate authentication shares the strict `100` per-IP
+API ceiling, while valid sessions also share the `480` per-IP admission ceiling
+so session rotation cannot expand it. Assets and upgrade handshakes remain excluded from the
+dynamic OpenCode bucket so dashboard prefetch bursts cannot starve iframe
+startup. The gateway limits connections to 16 per client address.
 
 Only the dashboard's exact `^~ /_next/static/` immutable-asset path bypasses
 the dashboard request bucket. Its trailing slash and Nginx URI normalization
 keep `/_next/data`, RSC queries, server actions, API routes, traversal attempts,
-and near-match paths in the rate-limited dashboard location. The asset location
+and near-match paths in rate-limited dashboard locations. The asset location
 uses the same dashboard proxy policy, so browser-controlled credentials and
 identity headers remain stripped while upstream CSP and cache headers remain
 authoritative.

@@ -12,9 +12,9 @@ import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { getDb, maintenanceLocks, observations, projects, skills as skillsModule } from "ingenium-core";
 import { skillsRouter } from "../lib/routes/skills.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let tempDir: string;
 let projectId: string;
@@ -46,17 +46,11 @@ beforeAll(async () => {
   const app = buildApp();
   server = createServer(app);
 
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const addr = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
 

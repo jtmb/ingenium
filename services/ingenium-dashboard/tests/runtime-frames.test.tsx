@@ -12,18 +12,21 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock("../src/lib/use-runtime-launch", () => ({
-  useRuntimeWorkspace: () => ({
+  useRuntimeLaunch: runtimeLaunch,
+}));
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useRuntime: () => ({ workspace: {
     mode: "isolated",
     status: "ready",
     workspaces: [],
     selectedWorkspaceId: "workspace-one",
     confirmedWorkspaceId: "workspace-one",
+    confirmedRuntimeId: runtimeId,
     error: null,
     selectWorkspace: vi.fn(),
     start: vi.fn(),
     retry: vi.fn(),
-  }),
-  useRuntimeLaunch: runtimeLaunch,
+  } }),
 }));
 vi.mock("../src/app/components/WorkspaceControl", () => ({ default: () => <span data-testid="workspace-control" /> }));
 

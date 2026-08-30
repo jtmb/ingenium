@@ -32,6 +32,35 @@ This selector is separate from Chat's server-owned authority. The banner
 tools, provider/model configuration, and other global Chat mutations. Changing
 the Context project does not redirect those tools.
 
+## Runtime and Context checkpointing
+
+In the isolated production profile, Chat shows the authorized workspace picker
+until a workspace is explicitly started or resumed. No Chat client is created
+before the confirmed runtime is ready, and each session/configuration/stream call
+uses that runtime binding. In production, the dashboard-owned SSE route streams
+directly from private Express `4096`; it never sends a cookie-only browser stream
+to the public bearer boundary on `4097`. Compatibility mode uses the fixed local
+runtime path.
+
+After a successful terminal turn, Chat reads the session history and persists only
+a non-empty user message paired with a non-empty assistant message that finished
+normally. The API appends both messages and one immutable Context checkpoint in a
+single optimistic-revision transaction. Deterministic idempotency keys make a
+replayed completion safe. Isolated-runtime checkpoints use the confirmed
+workspace's project rather than an unrelated project selected in the dashboard.
+
+Interrupted or failed turns, empty assistant responses, and failed checkpoint
+writes produce no partial Context record. API responses contain checkpoint
+metadata and hashes rather than message bodies.
+
+The browser may render a user message with an optimistic client ID before
+OpenCode assigns its authoritative ID. SSE `message.updated` events and fetched
+message snapshots reconcile that alias through the assistant message's
+`parentID`, scoped to the active project/runtime/session. Persistence uses the
+authoritative user and assistant IDs, so switching between Chat sessions cannot
+attach a response to the previous session and repeated terminal events produce
+at most one checkpoint for the completed turn.
+
 Immutable Context conversations created by authenticated users are private by
 default. Their messages, checkpoints, restore branches, and cited restricted RAG
 sources remain bound to the conversation owner. Organization/project-visible
@@ -99,6 +128,11 @@ The left sidebar lists all chat sessions. Sessions are loaded from OpenCode via 
 | **Fork** | Click the fork button in the header; duplicates the session from the last assistant message |
 | **Share** | Click the share button to generate a shareable link and copy it to clipboard. Share state auto-resets after 5 seconds. |
 | **Compact** | Click the compact button to summarize the conversation via the selected model. Compact state auto-resets after 5 seconds. |
+
+Newly created sessions are selected immediately and remain in the sidebar even if
+the following OpenCode list refresh is briefly stale. The composer stays disabled
+and the previous transcript stays hidden until the new session's own history has
+loaded, preventing a fast first prompt from being appended to the prior session.
 
 ### Mobile Responsiveness
 

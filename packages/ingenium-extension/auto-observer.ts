@@ -14,55 +14,41 @@
  */
 import { tool } from "@opencode-ai/plugin"
 import { assertExtensionToolEnabled } from "./mcp-tool-state.js"
+import { resolveExtensionBinding } from "./extension-binding.js"
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
-import { callMcpTool, McpBridgeError, mcpToolData } from "./mcp-client.js"
-import { resolveExtensionProject } from "./project-resolver.js"
+import { callMcpTool, mcpToolData } from "./mcp-client.js"
+import { classifyObserverFailure, type ObserverRequestFailure } from "./observer-core.js"
 
 // Throttle to once per 60s — extraction is expensive and the API's scheduled
 // maintenance cycle (every 15min) will catch anything this misses
 let lastFire = 0
 const THROTTLE_MS = 60000
 
-type ExtractionRequestFailure = "authentication" | "timeout" | "request_failed"
+type ExtractionRequestFailure = Extract<ObserverRequestFailure, "authentication" | "timeout" | "request_failed">
 
-function bridgeFailure(error: unknown): McpBridgeError["failure"] | undefined {
-  if (error instanceof McpBridgeError) return error.failure
-  if (typeof error === "object" && error !== null && "failure" in error) {
-    const failure = (error as { failure?: unknown }).failure
-    if (failure === "authentication" || failure === "timeout" || failure === "request_failed") return failure
-  }
-  return undefined
-}
-
-function classifyExtractionFailure(error: unknown, timedOut: boolean): ExtractionRequestFailure {
-  if (timedOut || (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))) {
-    return "timeout"
-  }
-  const failure = bridgeFailure(error)
-  if (failure) {
-    if (failure === "authentication") return "authentication"
-    if (failure === "timeout") return "timeout"
-  }
+function classifyExtractionFailure(error: unknown): ExtractionRequestFailure {
+  const failure = classifyObserverFailure(error)
+  if (failure === "authentication" || failure === "timeout") return failure
   return "request_failed"
 }
 
 /**
- * Call the server-side extraction tool.
- * Returns success/failure with observation count on success.
+ * Schedule the server-side extraction tool.
  */
 async function triggerExtraction(worktree: string): Promise<{
   triggered: boolean;
   message: string;
+  status?: "started";
   failure?: ExtractionRequestFailure;
 }> {
   try {
-    const project = resolveExtensionProject(worktree)
-    const json = mcpToolData(await callMcpTool(worktree, "extraction_run", { project })) as { created?: unknown }
-    const created = json?.created ?? "unknown"
-    return { triggered: true, message: `Extraction triggered: created ${created} observations` }
+    const project = resolveExtensionBinding(worktree, { purpose: "learning" }).project
+    const json = mcpToolData(await callMcpTool(worktree, "extraction_run", { project })) as { status?: unknown }
+    if (json?.status !== "started") return { triggered: false, message: "Extraction request failed", failure: "request_failed" }
+    return { triggered: true, status: "started", message: "Extraction scheduled" }
   } catch (error) {
     // Swallow errors — server may be down; API scheduler covers extraction anyway
-    return { triggered: false, message: "Extraction request failed", failure: classifyExtractionFailure(error, false) }
+    return { triggered: false, message: "Extraction request failed", failure: classifyExtractionFailure(error) }
   }
 }
 
@@ -93,7 +79,7 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
     tool: {
       auto_observe_now: tool({
         description:
-          "Trigger server-side extraction — the API scans OpenCode message history for behavior patterns and creates observations. Returns a summary of what was found and created.",
+          "Schedule server-side extraction. Returns only whether asynchronous extraction started; results are available later through pipeline status.",
         args: {},
         async execute(_args: any, context: { worktree: string }) {
           await assertExtensionToolEnabled("auto_observe_now", context.worktree)

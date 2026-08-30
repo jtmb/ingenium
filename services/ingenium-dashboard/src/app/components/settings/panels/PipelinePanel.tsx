@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ManagedProviderConfig } from "../../../../lib/api";
 import { useGlobalProject } from "../../../../lib/ProjectContext";
 import {
-  opencode,
   type OpenCodeIntegration,
   type OpenCodeIntegrationAttempt,
   type OpenCodeIntegrationMethod,
   type OpenCodeProvider,
 } from "../../../../lib/opencode";
+import { useRuntime } from "../../../../lib/RuntimeContext";
+import RuntimeWorkspacePicker from "../../RuntimeWorkspacePicker";
 import SettingRow from "../SettingRow";
 import Select from "../../Select";
 import Overlay from "../../Overlay";
@@ -69,6 +70,8 @@ function draftKey(provider: DraftProvider): string {
 }
 
 export default function PipelinePanel() {
+  const runtime = useRuntime();
+  const opencode = runtime.client;
   const { project: globalProject, loading: globalProjectLoading, error: globalProjectError } = useGlobalProject();
   const [providers, setProviders] = useState<DraftProvider[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -99,6 +102,13 @@ export default function PipelinePanel() {
   const refreshNativeProviders = useCallback(async () => {
     setNativeLoading(true);
     setNativeError(null);
+    if (!opencode) {
+      setNativeProviders([]);
+      setIntegrations([]);
+      setNativeError("Select and start an authorized workspace to discover native providers.");
+      setNativeLoading(false);
+      return;
+    }
     try {
       const [runtime, integrationResponse] = await Promise.all([
         opencode.providers.list("/workspace"),
@@ -115,7 +125,7 @@ export default function PipelinePanel() {
     } finally {
       setNativeLoading(false);
     }
-  }, []);
+  }, [opencode]);
 
   useEffect(() => {
     if (globalProjectLoading) return;
@@ -281,17 +291,18 @@ export default function PipelinePanel() {
     setConnectKey("");
     setOauthCode("");
     setConnecting(false);
-    if (attemptID) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
+    if (attemptID && opencode) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
   };
 
   useEffect(() => () => {
     const attemptID = activeAttemptRef.current;
     activeAttemptRef.current = null;
     connectionSessionRef.current += 1;
-    if (attemptID) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
-  }, []);
+    if (attemptID && opencode) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
+  }, [opencode]);
 
   const waitForOAuth = async (attempt: OpenCodeIntegrationAttempt) => {
+    if (!opencode) throw new Error("Select and start an authorized workspace first");
     for (let count = 0; count < 60 && activeAttemptRef.current === attempt.attemptID; count += 1) {
       const response = await opencode.integrations.attemptStatus(attempt.attemptID);
       if (response.data.status === "complete") return true;
@@ -304,7 +315,7 @@ export default function PipelinePanel() {
   };
 
   const connectNativeProvider = async () => {
-    if (!connectProviderId || !connectMethod) return;
+    if (!opencode || !connectProviderId || !connectMethod) return;
     const session = connectionSessionRef.current;
     setConnecting(true);
     setStatus("");
@@ -353,7 +364,7 @@ export default function PipelinePanel() {
   };
 
   const finishOAuth = async () => {
-    if (!oauthAttempt) return;
+    if (!opencode || !oauthAttempt) return;
     const session = connectionSessionRef.current;
     setConnecting(true);
     try {
@@ -383,6 +394,7 @@ export default function PipelinePanel() {
   };
 
   const disconnectNativeProvider = async (providerId: string) => {
+    if (!opencode) return;
     if (!window.confirm("Disconnect this provider? Its OpenCode credential will be removed.")) return;
     setStatus("");
     try {
@@ -439,6 +451,8 @@ export default function PipelinePanel() {
           + Add custom provider
         </button>
       </div>
+
+      {!opencode && <RuntimeWorkspacePicker controller={runtime.workspace} product="provider discovery" />}
 
       <section className="mb-6">
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Connected providers</h4>

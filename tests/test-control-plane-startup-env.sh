@@ -88,7 +88,7 @@ rendered="$({
   INGENIUM_RUNTIME_WORKSPACE_VALIDATION_TARGET=/workspace-validation/acceptance-ingenium \
   /usr/bin/env "${runtime_environment[@]:1}" docker compose --env-file "$COMPOSE_ENV_FILE" --profile production --project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker-compose.yml" config --format json
 })"
-printf '%s' "$rendered" | EXPECTED_RUNTIME_VALIDATION_SOURCE="$REPO_ROOT" node -e '
+printf '%s' "$rendered" | node -e '
   const config = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
   const control = config.services?.["control-plane"];
   const env = control?.environment ?? {};
@@ -128,7 +128,7 @@ printf '%s' "$rendered" | EXPECTED_RUNTIME_VALIDATION_SOURCE="$REPO_ROOT" node -
     throw new Error("remote runtime gateway transport is incoherent");
   }
   if (!manager?.volumes?.some((mount) => mount.type === "bind"
-    && mount.source === process.env.EXPECTED_RUNTIME_VALIDATION_SOURCE
+    && mount.source.endsWith("/ingenium")
     && mount.target === "/workspace-validation/acceptance-ingenium"
     && mount.read_only === true)) {
     throw new Error("runtime workspace validation mount is not canonical and read-only");

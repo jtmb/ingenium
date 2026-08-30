@@ -19,11 +19,15 @@ describe("MCP server startup", () => {
     expect(childReconcile).toBeGreaterThan(parentConnect);
   });
 
-  it("uses exact report mode and skips child gateway lifecycle side effects", () => {
+  it("uses exact report mode and skips child gateway and redundant visibility side effects", () => {
     const source = readFileSync(SERVER_SOURCE_PATH, "utf8");
 
     expect(source).toContain('const mcpReportMode = process.env.INGENIUM_MCP_REPORT_MODE === "1";');
     expect(source).toContain("let childGateway: ChildMcpGateway | null = null;");
+    expect(source).toContain("if (!mcpReportMode) installToolVisibilityProjection(server, toolVisibility);");
+    expect(source).toMatch(/if \(!mcpReportMode\) \{\s+await toolVisibility\.prepare\(\);/);
+    expect(source).toContain("if (!mcpReportMode) await toolVisibility.start();");
+    expect(source).toMatch(/"health_check",[\s\S]*?mcpReportMode\s+\? async \(\) => healthCheck\(\)\s+: wrapLauncherScopedHandler/);
     expect(source).toContain('const preflight = await api.settled.get("/auth/preflight");');
     expect(source).toContain('if (preflight.status === 429) throw new Error("MCP_AUTH_PREFLIGHT_RATE_LIMITED");');
     expect(source).toContain('if (!preflight.ok) throw new Error("MCP_AUTH_PREFLIGHT_UNAVAILABLE");');

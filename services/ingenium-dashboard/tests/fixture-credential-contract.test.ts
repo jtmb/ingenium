@@ -21,7 +21,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const testToken = "A".repeat(48);
 const originalEnvironment = {
   apiToken: process.env.INGENIUM_API_TOKEN,
-  tokenFile: process.env.INGENIUM_API_TOKEN_FILE,
+  tokenFile: process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE,
   repoRoot: process.env.INGENIUM_PLAYWRIGHT_REPO_ROOT,
   apiPort: process.env.INGENIUM_API_PORT,
   port: process.env.PORT,
@@ -46,7 +46,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   for (const [name, value] of Object.entries({
     INGENIUM_API_TOKEN: originalEnvironment.apiToken,
-    INGENIUM_API_TOKEN_FILE: originalEnvironment.tokenFile,
+    INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: originalEnvironment.tokenFile,
     INGENIUM_PLAYWRIGHT_REPO_ROOT: originalEnvironment.repoRoot,
     INGENIUM_API_PORT: originalEnvironment.apiPort,
     PORT: originalEnvironment.port,
@@ -87,7 +87,7 @@ describe("dashboard fixture credential boundary", () => {
     const environment = getDashboardFixtureEnvironment(context, testToken);
     const tokenFile = getTestRunApiTokenPath(context);
 
-    expect(environment).toEqual({ INGENIUM_API_TOKEN_FILE: tokenFile });
+    expect(environment).toEqual({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: tokenFile });
     expect(environment.INGENIUM_API_TOKEN).toBeUndefined();
     expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
     expect(readFileSync(tokenFile, "utf8")).toBe(`${testToken}\n`);
@@ -118,7 +118,7 @@ describe("dashboard fixture credential boundary", () => {
 
   it("bootstraps QA Vision through a test-only server exchange without exposing the bearer", async () => {
     const context = contextForCredentialTest();
-    getDashboardFixtureEnvironment(context, testToken);
+    Object.assign(process.env, getDashboardFixtureEnvironment(context, testToken));
     process.env.INGENIUM_API_TEST_MODE = "1";
     process.env.INGENIUM_TEST_RUN_NONCE = context.runNonce;
     process.env.INGENIUM_PROJECT = context.project;

@@ -12,14 +12,14 @@ interface SettingRowProps {
  */
 export default function SettingRow({ label, description, controlId, children }: SettingRowProps) {
   return (
-    <div className="flex items-center justify-between gap-6 px-6 py-4 border-t border-[var(--color-border)]">
-      <div className="min-w-0 flex-shrink">
-         <label htmlFor={controlId} className="text-sm font-medium text-[var(--color-text-primary)]">{label}</label>
+    <div className="flex flex-col items-stretch gap-2 px-6 py-4 border-t border-[var(--color-border)] sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <div className="min-w-0 w-full sm:flex-1">
+        <label htmlFor={controlId} className="text-sm font-medium text-[var(--color-text-primary)]">{label}</label>
         {description && (
           <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{description}</p>
         )}
       </div>
-      <div className="flex-shrink-0">
+      <div className="min-w-0 w-full sm:w-auto sm:shrink-0">
         {children}
       </div>
     </div>

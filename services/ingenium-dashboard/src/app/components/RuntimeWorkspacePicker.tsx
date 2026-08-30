@@ -55,6 +55,9 @@ export default function RuntimeWorkspacePicker({
 
   if (status !== "selecting") return null;
 
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
+  const selectionUnavailable = !selectedWorkspace || selectedWorkspace.status === "unavailable";
+
   return (
     <div className="absolute inset-0 overflow-y-auto bg-[var(--color-surface-muted)] p-4 sm:p-6">
       <form
@@ -105,7 +108,7 @@ export default function RuntimeWorkspacePicker({
           </button>
           <button
             type="submit"
-            disabled={!selectedWorkspaceId}
+            disabled={selectionUnavailable}
             className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Open workspace

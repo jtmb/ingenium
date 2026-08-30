@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +8,7 @@ import { resetDbForTest } from "ingenium-core";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { bootstrapRouter } from "../lib/routes/bootstrap.js";
-import { compatibilityAuthHeaders } from "./http-fixtures.js";
+import { closeHttpServer, compatibilityAuthHeaders, listenOnLoopback } from "./http-fixtures.js";
 
 const token = "b".repeat(32);
 let server: Server;
@@ -31,12 +30,11 @@ beforeEach(async () => {
   app.use("/api/v1/bootstrap", bootstrapRouter);
   app.use(errorHandler);
   server = createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeHttpServer(server);
   resetDbForTest();
   rmSync(tempDir, { recursive: true, force: true });
   if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;

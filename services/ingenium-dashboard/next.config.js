@@ -43,8 +43,11 @@ function hasConfiguredOpenCodeOrigins() {
 
 function runtimeWildcardOrigin() {
   const domain = (process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN || "").trim().toLowerCase().replace(/^\./, "");
+  const scheme = (process.env.NEXT_PUBLIC_RUNTIME_SCHEME || "").trim().toLowerCase();
   if (!domain || domain.length > 200 || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/.test(domain) || domain.includes("..") || !domain.includes(".")) return "";
-  return `https://*.${domain}`;
+  if ((domain.endsWith(".localhost") && scheme !== "http")
+    || (!domain.endsWith(".localhost") && scheme !== "https")) throw new Error("Runtime scheme and root domain are incompatible");
+  return `${scheme}://*.${domain}`;
 }
 
 const VSCODE_GATEWAY_ORIGIN = "http://vscode.localhost:3000";
@@ -67,6 +70,7 @@ const nextConfig = {
     NEXT_PUBLIC_OPENCODE_WEB_URL: publicOpenCodeOrigin("NEXT_PUBLIC_OPENCODE_WEB_URL"),
     NEXT_PUBLIC_OPENCODE_CLI_URL: publicOpenCodeOrigin("NEXT_PUBLIC_OPENCODE_CLI_URL"),
     NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN: (process.env.NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN || "").trim(),
+    NEXT_PUBLIC_RUNTIME_SCHEME: (process.env.NEXT_PUBLIC_RUNTIME_SCHEME || "").trim(),
   },
 
   /**
