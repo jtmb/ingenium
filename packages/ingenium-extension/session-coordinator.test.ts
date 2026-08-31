@@ -15,6 +15,7 @@ import {
   MAX_COORDINATION_TRANSFORM_BYTES,
   SessionCoordinator,
   SessionCoordinatorPlugin,
+  sessionCoordinatorFor,
 } from "./session-coordinator.js";
 
 type Args = Record<string, any>;
@@ -482,6 +483,174 @@ describe("SessionCoordinatorPlugin hooks", () => {
       { tool: "write", sessionID: "offline", callID: "unsafe" },
       { args: { path: "../escape.ts" } },
     )).rejects.toThrow("Managed mutation coordination rejected the tool arguments");
+  });
+
+  it("coalesces disposal while stale paths stay inert and concurrent reconstruction yields one active replacement", async () => {
+    const workspaceId = process.env.INGENIUM_WORKSPACE_ID;
+    process.env.INGENIUM_WORKSPACE_ID = "workspace-reconstruction";
+    try {
+      const fixture = coordinationFixture();
+      const context = processHarness("replacement-project", "/tmp/replacement/home", "/tmp/replacement/xdg", 43010, {});
+      context.binding = {
+        ...context.binding,
+        projectId: "00000000-0000-4000-8000-000000000001",
+        runtimeId: "00000000-0000-4000-8000-000000000003",
+        audience: "runtime",
+        purpose: "runtime",
+      };
+      const preflight = vi.fn(async (): Promise<ApiAuthenticationPreflightResult> => ({
+        authenticated: true,
+        binding: {
+          scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"],
+          organizationId: "00000000-0000-4000-8000-000000000002",
+          projectId: context.binding.projectId!,
+          projectIds: [context.binding.projectId!],
+          audience: "runtime",
+          workspaceId: context.binding.workspaceId,
+          launcherWorktree: context.binding.launcherWorktree,
+          storageMappingHash: context.binding.storageMappingHash!,
+          restartRequiredOnCredentialChange: true,
+        },
+      }));
+      const request = vi.fn(async () => new Response(JSON.stringify({
+        data: { project: { id: context.binding.projectId } },
+      }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+      let releaseSessionClose!: () => void;
+      let signalSessionClose!: () => void;
+      const sessionCloseGate = new Promise<void>((resolve) => { releaseSessionClose = resolve; });
+      const sessionCloseStarted = new Promise<void>((resolve) => { signalSessionClose = resolve; });
+      let releaseBridgeClose!: () => void;
+      let signalBridgeClose!: () => void;
+      const bridgeCloseGate = new Promise<void>((resolve) => { releaseBridgeClose = resolve; });
+      const bridgeCloseStarted = new Promise<void>((resolve) => { signalBridgeClose = resolve; });
+      const bridgeCall = vi.fn(async (tool: string, args: Args) => {
+        if (tool === "coordination_update" && args.operation === "close") {
+          signalSessionClose();
+          await sessionCloseGate;
+        }
+        return fixture.callTool(context.worktree, tool, args);
+      });
+      const bridgeClose = vi.fn(async () => {
+        signalBridgeClose();
+        await bridgeCloseGate;
+      });
+      const openClient = vi.fn(async () => ({ callTool: bridgeCall, close: bridgeClose }));
+      const outbox = {
+        put: vi.fn(),
+        replay: vi.fn(async () => undefined),
+      } as unknown as CoordinationOutbox;
+      const dependencies = {
+        binding: context.binding,
+        preflight,
+        request,
+        openClient,
+        outbox,
+        now: () => 90,
+        token: () => "O".repeat(32),
+        disableHeartbeat: true,
+      };
+      const oldCoordinator = sessionCoordinatorFor(context, dependencies);
+      const oldHooks = oldCoordinator.hooks();
+      const peerProcess = processHarness("replacement-project", "/tmp/replacement-peer/home", "/tmp/replacement-peer/xdg", 43011, {});
+      const peer = new SessionCoordinator(peerProcess, {
+        binding: peerProcess.binding,
+        callTool: fixture.callTool,
+        now: () => 91,
+        token: () => "P".repeat(32),
+        disableHeartbeat: true,
+      });
+      const peerHooks = peer.hooks();
+      await oldHooks.event!({ event: { type: "session.created", properties: { info: { id: "old-session" } } } as any });
+      await peerHooks.event!({ event: { type: "session.created", properties: { info: { id: "peer-session" } } } as any });
+
+      const firstDisposal = oldCoordinator.dispose();
+      const repeatedDisposal = oldHooks.dispose!();
+      expect(repeatedDisposal).toBe(firstDisposal);
+      await sessionCloseStarted;
+
+      const synchronousReplacement = sessionCoordinatorFor(context, dependencies);
+      const replacements = await Promise.all(Array.from({ length: 3 }, () =>
+        Promise.resolve().then(() => sessionCoordinatorFor(context, dependencies))));
+      expect(new Set([synchronousReplacement, ...replacements]).size).toBe(1);
+      expect(synchronousReplacement).not.toBe(oldCoordinator);
+      expect(synchronousReplacement.isDisposed()).toBe(false);
+      const baseline = {
+        bridgeCalls: bridgeCall.mock.calls.length,
+        registrations: fixture.calls.filter(({ args }) => args.operation === "register"
+          && args.session_id === opaqueSessionId("old-session")).length,
+        heartbeats: fixture.calls.filter(({ args }) => args.operation === "heartbeat"
+          && args.session_id === opaqueSessionId("old-session")).length,
+        preflights: preflight.mock.calls.length,
+        requests: (request as any).mock.calls.length,
+        outboxPuts: (outbox.put as any).mock.calls.length,
+        outboxReplays: (outbox.replay as any).mock.calls.length,
+      };
+
+      await expect(oldHooks.event!({ event: { type: "session.created", properties: { info: { id: "stale-session" } } } as any }))
+        .resolves.toBeUndefined();
+      await oldHooks.event!({ event: { type: "session.idle", properties: { sessionID: "old-session" } } as any });
+      await oldHooks.event!({ event: { type: "message.part.updated", properties: { part: {
+        type: "tool", sessionID: "old-session", callID: "stale-write", state: { status: "completed" },
+      } } } as any });
+      await expect(oldHooks["tool.execute.before"]!(
+        { tool: "write", sessionID: "old-session", callID: "stale-write" },
+        { args: { path: "src/stale.ts" } },
+      )).resolves.toBeUndefined();
+      await expect(oldHooks["tool.execute.before"]!(
+        { tool: "bash", sessionID: "old-session", callID: "stale-commit" },
+        { args: { command: "git commit -m local" } },
+      )).resolves.toBeUndefined();
+      await oldHooks["tool.execute.after"]!(
+        { tool: "write", sessionID: "old-session", callID: "stale-write", args: { path: "src/stale.ts" } },
+        { title: "", output: "", metadata: {} },
+      );
+      const staleOutput = { system: [] as string[] };
+      await oldHooks["experimental.chat.system.transform"]!({ sessionID: "old-session", model: {} as any }, staleOutput);
+      await oldCoordinator.initialize();
+      await oldCoordinator.ensureReady();
+      await oldCoordinator.reconcile();
+      await oldCoordinator.reconnectAfterCredentialReset("old-session");
+      await oldCoordinator.publish("old-session", "write", "src/stale.ts", null);
+      await oldCoordinator.acknowledgeHandoffs("old-session", 1);
+      await oldCoordinator.preclaim("old-session", "stale-public", { operation: "write", paths: ["src/stale.ts"] });
+      await oldCoordinator.releasePending("old-session", "stale-public");
+      const repositoryAction = vi.fn(async () => "local-result");
+      expect(await oldCoordinator.withRepositoryClaim("old-session", repositoryAction)).toBeUndefined();
+      expect(repositoryAction).not.toHaveBeenCalled();
+      await oldCoordinator.closeSession("old-session");
+
+      expect(await oldCoordinator.heartbeatSession("old-session")).toBe(false);
+      expect(await oldCoordinator.readHandoffs("old-session")).toEqual({
+        events: [], throughSequence: 0, acknowledgementRequired: false,
+      });
+      expect(staleOutput.system).toEqual([]);
+      expect(bridgeCall).toHaveBeenCalledTimes(baseline.bridgeCalls);
+      expect(preflight).toHaveBeenCalledTimes(baseline.preflights);
+      expect(request).toHaveBeenCalledTimes(baseline.requests);
+      expect((outbox.put as any).mock.calls).toHaveLength(baseline.outboxPuts);
+      expect((outbox.replay as any).mock.calls).toHaveLength(baseline.outboxReplays);
+      expect(fixture.calls.filter(({ args }) => args.operation === "register"
+        && args.session_id === opaqueSessionId("old-session"))).toHaveLength(baseline.registrations);
+      expect(fixture.calls.filter(({ args }) => args.operation === "heartbeat"
+        && args.session_id === opaqueSessionId("old-session"))).toHaveLength(baseline.heartbeats);
+      await expect(peer.heartbeatSession("peer-session")).resolves.toBe(true);
+
+      releaseSessionClose();
+      await bridgeCloseStarted;
+      expect(bridgeClose).toHaveBeenCalledOnce();
+      releaseBridgeClose();
+      await Promise.all([firstDisposal, repeatedDisposal]);
+
+      expect(fixture.calls.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "close"
+        && args.session_id === opaqueSessionId("old-session"))).toHaveLength(1);
+      expect(openClient).toHaveBeenCalledOnce();
+      expect(bridgeClose).toHaveBeenCalledOnce();
+      expect((oldCoordinator as any).sessions.size).toBe(0);
+      expect([...fixture.sessions.values()].find((state) => state.sessionId === opaqueSessionId("peer-session"))?.state).toBe("active");
+    } finally {
+      if (workspaceId === undefined) delete process.env.INGENIUM_WORKSPACE_ID;
+      else process.env.INGENIUM_WORKSPACE_ID = workspaceId;
+    }
   });
 
   it("uses one canonical identity for different launcher paths with the same storage mapping", async () => {

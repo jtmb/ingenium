@@ -873,6 +873,7 @@ export class SessionCoordinator {
   private readonly sessions = new Map<string, SessionState>();
   private readonly recoverableOperationalState = new Map<string, RecoverableOperationalState>();
   private readonly registering = new Map<string, Promise<SessionState>>();
+  private readonly closingSessions = new Set<string>();
   private readonly snapshotCursors = new Map<string, Map<string, number>>();
   private readonly pendingMutations = new Map<string, PendingMutation>();
   private readonly claimingMutations = new Set<string>();
@@ -891,6 +892,8 @@ export class SessionCoordinator {
   private credentialResetActive = false;
   private deferredReload?: { sessionId: string; timeoutMs: number };
   private replayingOutbox = false;
+  private disposed = false;
+  private disposal?: Promise<void>;
 
   constructor(private readonly ctx: CoordinatorContext, dependencies: SessionCoordinatorDependencies = {}) {
     this.binding = dependencies.binding ?? resolveExtensionBinding(ctx.worktree, {
@@ -925,7 +928,12 @@ export class SessionCoordinator {
     return coordinationWorktreeId(this.binding.workspaceId, mapping);
   }
 
+  private assertActive(): void {
+    if (this.disposed) throw new Error("session coordinator disposed");
+  }
+
   private localSession(sessionId: string): SessionState {
+    this.assertActive();
     const existing = this.sessions.get(sessionId);
     if (existing) return existing;
     const recovered = this.recoverableOperationalState.get(sessionId);
@@ -991,6 +999,7 @@ export class SessionCoordinator {
       mutation?: CoordinationOutboxMutationEvidence;
     } = {},
   ): void {
+    if (this.disposed) return;
     const hashId = sessionHash(sessionId);
     try {
       this.outbox?.put({
@@ -1024,6 +1033,7 @@ export class SessionCoordinator {
   }
 
   private retainLocalMutation(pending: PendingMutation): void {
+    if (this.disposed) return;
     try {
       this.outbox?.put({
         exactKey: `claim:${sessionHash(pending.sessionId)}:${pending.operationId}`,
@@ -1069,10 +1079,12 @@ export class SessionCoordinator {
   }
 
   private async attestGeneralBinding(): Promise<ApiAuthenticationBinding | undefined> {
+    if (this.disposed) return undefined;
     if (this.binding.purpose !== "general") return undefined;
     const result = await this.preflight(this.binding.apiUrl, this.ctx.worktree, this.request, {
       credentialPurpose: "general",
     });
+    if (this.disposed) return undefined;
     const attested = result.binding;
     const requiredScopes = ["coordination:read", "coordination:write", "projects:read", "repository:sync"];
     if (!result.authenticated || !attested || attested.audience !== "mcp"
@@ -1084,6 +1096,7 @@ export class SessionCoordinator {
       `${this.binding.apiUrl}/projects/${encodeURIComponent(this.binding.project)}/detail`,
       { headers: apiRequestHeaders(this.ctx.worktree, undefined, { binding: this.binding }), signal: AbortSignal.timeout(5_000) },
     ).catch(() => null);
+    if (this.disposed) return undefined;
     const payload = project?.ok
       ? await project.json().catch(() => null) as { data?: { project?: { id?: unknown; name?: unknown } } } | null
       : null;
@@ -1099,6 +1112,7 @@ export class SessionCoordinator {
   }
 
   private async reloadCredential(sessionId: string, timeoutMs: number, force = false): Promise<void> {
+    if (this.disposed) return;
     if (this.binding.purpose !== "general") return;
     const fingerprint = this.readCredentialFingerprint();
     if (!fingerprint || (!force && fingerprint === this.credentialFingerprint)) return;
@@ -1115,12 +1129,15 @@ export class SessionCoordinator {
         this.heartbeat = undefined;
       }
       await this.closeBridge();
+      this.assertActive();
       this.attestation = undefined;
       this.canonicalWorktree = undefined;
       const attested = await this.attestGeneralBinding();
+      this.assertActive();
       if (!attested || attested.credentialChangeMode !== "live-mcp-reload") throw new ExtensionBindingError();
       if (isRecord(this.ctx.client) && isRecord(this.ctx.client.mcp)) {
         await reconnectIngeniumMcp(this.ctx.client, this.ctx.worktree, timeoutMs);
+        this.assertActive();
       }
       this.credentialFingerprint = fingerprint;
       for (const state of this.sessions.values()) {
@@ -1132,6 +1149,7 @@ export class SessionCoordinator {
       }
       this.registering.clear();
       for (const id of sessionIds) {
+        this.assertActive();
         try { await this.register(id, true); } catch (error) { this.retainFailure("register", id, error); }
       }
       if (this.sessions.get(sessionId)?.remoteRegistered) {
@@ -1142,12 +1160,14 @@ export class SessionCoordinator {
         }
       }
       await this.replayOutbox();
+      this.assertActive();
       this.credentialResetSessionIds.clear();
       this.credentialResetActive = false;
       this.deferredReload = undefined;
       this.ensureHeartbeat();
       trace({ event: "credential_reset", resetState: "accepted" });
     })().catch(async (error) => {
+      if (this.disposed) return;
       this.retainFailure("recovery", sessionId, error);
       this.deferredReload = { sessionId, timeoutMs };
       await this.closeBridge();
@@ -1155,13 +1175,14 @@ export class SessionCoordinator {
       trace({ event: "credential_reset", resetState: "rejected", failure: "authentication" });
     }).finally(() => {
       this.reconnecting = undefined;
-      this.ensureHeartbeat();
+      if (!this.disposed) this.ensureHeartbeat();
     });
     this.reconnecting = pending;
     return pending;
   }
 
   private checkCredentialFingerprint(sessionId: string, timeoutMs = 10_000): void {
+    if (this.disposed) return;
     const fingerprint = this.readCredentialFingerprint();
     if (!fingerprint || fingerprint === this.credentialFingerprint) return;
     if (this.mutationsActive()) {
@@ -1172,13 +1193,16 @@ export class SessionCoordinator {
   }
 
   private async runDeferredReload(): Promise<void> {
+    if (this.disposed) return;
     if (this.reconnecting) await this.reconnecting;
+    if (this.disposed) return;
     const deferred = this.deferredReload;
     if (!deferred || this.mutationsActive()) return;
     await this.reloadCredential(deferred.sessionId, deferred.timeoutMs);
   }
 
   async reconnectAfterCredentialReset(sessionId: string, timeoutMs = 10_000): Promise<void> {
+    if (this.disposed) return;
     await this.reloadCredential(sessionId, timeoutMs, true);
   }
 
@@ -1216,18 +1240,50 @@ export class SessionCoordinator {
   }
 
   async initialize(): Promise<void> {
+    if (this.disposed) return;
     await this.ensureReady();
+    if (this.disposed) return;
     await this.reconcile();
+  }
+
+  isDisposed(): boolean {
+    return this.disposed;
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal;
+    this.disposed = true;
+    this.attestation = undefined;
+    this.canonicalWorktree = undefined;
+    this.deferredReload = undefined;
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = undefined;
+    }
+    this.disposal = Promise.resolve().then(async () => {
+      await Promise.all([...this.sessions.keys()].map((sessionId) => this.cleanupSession(sessionId)));
+      await this.closeBridge();
+      this.registering.clear();
+      this.closingSessions.clear();
+      this.pendingMutations.clear();
+      this.claimingMutations.clear();
+      this.finalizingMutations.clear();
+      this.uncertainMutations.clear();
+      this.transformQueues.clear();
+    });
+    return this.disposal;
   }
 
   /** Authenticate the runtime capability and bind coordination to its attested identity. */
   async ensureReady(): Promise<void> {
+    if (this.disposed) return;
     if (this.binding.purpose !== "runtime") return;
     if (!this.attestation) {
       const pending = (async () => {
         const result = await this.preflight(this.binding.apiUrl, this.ctx.worktree, this.request, {
           credentialPurpose: "runtime",
         });
+        if (this.disposed) return;
         const attested = result.binding;
         const requiredScopes = ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"];
         if (!result.authenticated || !attested || attested.audience !== "runtime"
@@ -1247,11 +1303,13 @@ export class SessionCoordinator {
             signal: AbortSignal.timeout(5_000),
           },
         ).catch(() => null);
+        if (this.disposed) return;
         const payload = project?.ok
           ? await project.json().catch(() => null) as { data?: { project?: { id?: unknown } } } | null
           : null;
         if (payload?.data?.project?.id !== this.binding.projectId) throw new ExtensionBindingError();
       })().catch((error) => {
+        if (this.disposed) return;
         this.attestation = undefined;
         throw error instanceof ExtensionBindingError ? error : new ExtensionBindingError();
       });
@@ -1261,19 +1319,22 @@ export class SessionCoordinator {
   }
 
   private worktreeIdentity(): Promise<string> {
+    this.assertActive();
     if (!this.canonicalWorktree) {
       this.canonicalWorktree = (async () => {
         await this.ensureReady();
+        this.assertActive();
         const storageMappingHash = this.configuredStorageMappingHash ?? (await this.preflight(
           this.binding.apiUrl,
           this.ctx.worktree,
           this.request,
           { credentialPurpose: this.binding.purpose },
         )).binding?.storageMappingHash;
+        this.assertActive();
         if (!storageMappingHash) throw new Error("coordination binding unavailable");
         return coordinationWorktreeId(this.binding.workspaceId, storageMappingHash);
       })().catch((error) => {
-        this.canonicalWorktree = undefined;
+        if (!this.disposed) this.canonicalWorktree = undefined;
         throw error;
       });
     }
@@ -1281,15 +1342,23 @@ export class SessionCoordinator {
   }
 
   private warning(visibility: "unavailable" | "conflict" = "unavailable"): void {
+    if (this.disposed) return;
     logPluginLifecycle(this.ctx.client, "session-coordinator", "warn", `coordination: ${visibility}`);
   }
 
-  private async invoke(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async invoke(
+    name: string,
+    args: Record<string, unknown>,
+    allowDisposing = false,
+  ): Promise<Record<string, unknown>> {
+    if (!allowDisposing) this.assertActive();
     let raw: unknown;
     if (this.callTool) {
       raw = await this.callTool(this.ctx.worktree, name, args);
     } else {
-      const bridge = await this.bridgeClient();
+      const bridge = allowDisposing ? await this.bridge : await this.bridgeClient();
+      if (!bridge) throw new Error("coordination bridge unavailable");
+      if (!allowDisposing) this.assertActive();
       try {
         raw = await bridge.callTool(name, args);
       } catch (error) {
@@ -1297,15 +1366,17 @@ export class SessionCoordinator {
         throw error;
       }
     }
+    if (!allowDisposing) this.assertActive();
     const result = mcpToolData(raw);
     if (!isRecord(result)) throw new Error("invalid coordination response");
     return result;
   }
 
   private bridgeClient(): Promise<McpToolClient> {
+    this.assertActive();
     if (!this.bridge) {
       const tracked = this.openClient(this.ctx.worktree).catch((error) => {
-        if (this.bridge === tracked) this.bridge = undefined;
+        if (!this.disposed && this.bridge === tracked) this.bridge = undefined;
         throw error;
       });
       this.bridge = tracked;
@@ -1320,10 +1391,11 @@ export class SessionCoordinator {
   }
 
   private async replayOutbox(): Promise<void> {
-    if (!this.outbox || this.replayingOutbox) return;
+    if (this.disposed || !this.outbox || this.replayingOutbox) return;
     this.replayingOutbox = true;
     try {
       await this.outbox.replay(async (record) => {
+        if (this.disposed) return false;
         const session = [...this.sessions.entries()].find(([id]) => sessionHash(id) === record.sessionHash);
         if (!session) return false;
         const [sessionId, local] = session;
@@ -1451,6 +1523,7 @@ export class SessionCoordinator {
   }
 
   private apply(state: SessionState, value: unknown): void {
+    if (this.disposed) return;
     Object.assign(state, mutation(value));
   }
 
@@ -1460,7 +1533,7 @@ export class SessionCoordinator {
   }
 
   private ensureHeartbeat(): void {
-    if (!this.heartbeatEnabled || this.heartbeat || this.sessions.size === 0) return;
+    if (this.disposed || !this.heartbeatEnabled || this.heartbeat || this.sessions.size === 0) return;
     this.heartbeat = setInterval(() => {
       void this.heartbeatSessions();
     }, this.heartbeatMs);
@@ -1468,11 +1541,14 @@ export class SessionCoordinator {
   }
 
   private async heartbeatSessions(): Promise<void> {
+    if (this.disposed) return;
     const results = await Promise.all([...this.sessions.keys()].map((sessionId) => this.heartbeatSession(sessionId, false)));
+    if (this.disposed) return;
     if (results.some(Boolean) && !(await this.recordRuntimeActivity())) this.warning();
   }
 
   private async recordRuntimeActivity(): Promise<boolean> {
+    if (this.disposed) return false;
     if (this.binding.purpose !== "runtime") return true;
     const state = [...this.sessions.values()].find((session) => session.state === "active");
     if (!this.binding.runtimeId || !state) return false;
@@ -1513,6 +1589,7 @@ export class SessionCoordinator {
   }
 
   private async closeAfterFailure(sessionId: string, reason: DropReason): Promise<void> {
+    if (this.disposed) return;
     const failed = this.sessions.get(sessionId);
     if (failed) {
       this.retainOperationalState(sessionId, failed);
@@ -1522,6 +1599,7 @@ export class SessionCoordinator {
       this.warning();
       return;
     }
+    this.closingSessions.add(sessionId);
     try {
       await this.serialized(sessionId, async (state) => {
         const result = await this.invoke("coordination_update", { ...this.lease(state), operation: "close" });
@@ -1530,11 +1608,13 @@ export class SessionCoordinator {
     } catch {
       this.warning();
     } finally {
+      this.closingSessions.delete(sessionId);
       this.dropSession(sessionId, reason, true);
     }
   }
 
   private async handleFailure(sessionId: string, reason: DropReason, error: unknown): Promise<void> {
+    if (this.disposed) return;
     if (error instanceof McpBridgeError && error.failure === "revision_conflict"
       && error.currentRevision !== undefined && this.sessions.has(sessionId)) {
       try {
@@ -1589,13 +1669,16 @@ export class SessionCoordinator {
   }
 
   private async register(sessionId: string, credentialResetInternal = false): Promise<SessionState> {
+    this.assertActive();
     const state = this.localSession(sessionId);
     if (state.remoteRegistered) return state;
     if (this.credentialResetActive && !credentialResetInternal) throw new Error("Coordination reset is active");
     const inFlight = this.registering.get(sessionId);
     if (inFlight) return inFlight;
     const pending = (async () => {
-      state.worktreeId = await this.worktreeIdentity();
+      const worktreeId = await this.worktreeIdentity();
+      this.assertActive();
+      state.worktreeId = worktreeId;
       const result = await this.invoke("coordination_update", {
         ...this.identity(state),
         operation: "register",
@@ -1603,6 +1686,7 @@ export class SessionCoordinator {
         ttl_ms: SESSION_TTL_MS,
         idempotency_key: randomUUID(),
       });
+      this.assertActive();
       this.apply(state, result.session);
       const replay = operationalMemoryWindow(result.memory);
       if (!replay || !isRecord(result.memory)) throw new Error("invalid coordination response");
@@ -1621,7 +1705,7 @@ export class SessionCoordinator {
       void this.replayOutbox();
       return state;
     })().catch((error) => {
-      state.remoteRegistered = false;
+      if (!this.disposed) state.remoteRegistered = false;
       this.retainFailure("register", sessionId, error);
       throw error;
     });
@@ -1634,12 +1718,15 @@ export class SessionCoordinator {
   }
 
   private async serialized<T>(sessionId: string, action: (state: SessionState) => Promise<T>): Promise<T> {
+    this.assertActive();
     const state = await this.register(sessionId);
+    this.assertActive();
     let resolveQueue!: () => void;
     const predecessor = state.queue;
     state.queue = new Promise<void>((resolvePromise) => { resolveQueue = resolvePromise; });
     await predecessor;
     try {
+      this.assertActive();
       return await action(state);
     } finally {
       resolveQueue();
@@ -1647,6 +1734,7 @@ export class SessionCoordinator {
   }
 
   async heartbeatSession(sessionId: string, recordRuntimeActivity = true): Promise<boolean> {
+    if (this.disposed) return false;
     try {
       await this.serialized(sessionId, async (state) => {
         const result = await this.invoke("coordination_update", {
@@ -1672,11 +1760,13 @@ export class SessionCoordinator {
   }
 
   async reconcile(): Promise<void> {
+    if (this.disposed) return;
     const status = (this.ctx.client as { session?: { status?: (options: unknown) => Promise<unknown> } } | undefined)
       ?.session?.status;
     if (typeof status !== "function") return;
     try {
       const response = await status({ query: { directory: this.ctx.worktree } });
+      if (this.disposed) return;
       const data = isRecord(response) && isRecord(response.data) ? response.data : undefined;
       if (data) await Promise.all(Object.entries(data).map(([sessionId, value]) => this.publishSnapshot(sessionId, (state) => {
         state.status = eventStatus(value) ?? "active";
@@ -1688,11 +1778,13 @@ export class SessionCoordinator {
   }
 
   async closeSession(sessionId: string): Promise<void> {
+    if (this.disposed) return;
     if (!this.sessions.has(sessionId)) {
       this.dropSession(sessionId, "close_missing");
       await this.closeBridge();
       return;
     }
+    this.closingSessions.add(sessionId);
     try {
       await this.serialized(sessionId, async (state) => {
         const result = await this.invoke("coordination_update", { ...this.lease(state), operation: "close" });
@@ -1701,12 +1793,37 @@ export class SessionCoordinator {
     } catch {
       this.warning();
     } finally {
+      this.closingSessions.delete(sessionId);
       this.dropSession(sessionId, "close");
     }
     if (this.sessions.size === 0) await this.closeBridge();
   }
 
+  private async cleanupSession(sessionId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state) return;
+    let resolveQueue!: () => void;
+    const predecessor = state.queue;
+    state.queue = new Promise<void>((resolvePromise) => { resolveQueue = resolvePromise; });
+    await predecessor;
+    if (this.sessions.get(sessionId) !== state) {
+      resolveQueue();
+      return;
+    }
+    try {
+      if (!this.closingSessions.has(sessionId) && state.remoteRegistered) {
+        await this.invoke("coordination_update", { ...this.lease(state), operation: "close" }, true);
+      }
+    } catch {
+      // Disposal is best-effort and must still release local resources.
+    } finally {
+      resolveQueue();
+      this.dropSession(sessionId, "close");
+    }
+  }
+
   private async prepareForCredentialReset(): Promise<void> {
+    if (this.disposed) return;
     if (this.binding.purpose !== "general") throw new ExtensionBindingError();
     if (this.credentialResetActive) throw new Error("Coordination reset is already active");
     this.credentialResetActive = true;
@@ -1733,6 +1850,7 @@ export class SessionCoordinator {
     sessionId: string,
     update: (state: SessionState) => void,
   ): Promise<boolean> {
+    if (this.disposed) return false;
     const local = this.localSession(sessionId);
     update(local);
     const snapshotRevision = (local.snapshotRevision ?? 0) + 1;
@@ -1763,6 +1881,7 @@ export class SessionCoordinator {
     path: string,
     baselineSha256: string | null,
   ): Promise<void> {
+    if (this.disposed) return;
     await this.serialized(sessionId, async (state) => {
       const result = await this.invoke("coordination_handoff", {
         ...this.lease(state), operation: "publish", operation_kind: operation, path,
@@ -1777,6 +1896,7 @@ export class SessionCoordinator {
     throughSequence: number;
     acknowledgementRequired: boolean;
   }> {
+    if (this.disposed) return { events: [], throughSequence: 0, acknowledgementRequired: false };
     trace({
       event: "consume",
       sessionHash: sessionHash(sessionId),
@@ -1828,6 +1948,7 @@ export class SessionCoordinator {
   }
 
   async acknowledgeHandoffs(sessionId: string, throughSequence: number): Promise<void> {
+    if (this.disposed) return;
     await this.serialized(sessionId, async (state) => {
       const result = await this.invoke("coordination_handoff", {
         ...this.lease(state), operation: "ack", through_sequence: throughSequence,
@@ -1837,6 +1958,7 @@ export class SessionCoordinator {
   }
 
   private async readMemory(sessionId: string): Promise<OperationalMemoryBatch | undefined> {
+    if (this.disposed) return undefined;
     try {
       return await this.serialized(sessionId, async (state) => {
         const result = await this.invoke("coordination_handoff", {
@@ -1857,6 +1979,7 @@ export class SessionCoordinator {
   }
 
   private async acknowledgeMemory(sessionId: string, throughRevision: number): Promise<void> {
+    if (this.disposed) return;
     await this.serialized(sessionId, async (state) => {
       const result = await this.invoke("coordination_handoff", {
         ...this.lease(state), operation: "memory_ack", through_revision: throughRevision,
@@ -1869,8 +1992,9 @@ export class SessionCoordinator {
   private readonly transformQueues = new Map<string, Promise<void>>();
 
   private async serializedTransform(sessionId: string, action: () => Promise<void>): Promise<void> {
+    if (this.disposed) return;
     const predecessor = this.transformQueues.get(sessionId) ?? Promise.resolve();
-    const current = predecessor.catch(() => undefined).then(action);
+    const current = predecessor.catch(() => undefined).then(() => this.disposed ? undefined : action());
     this.transformQueues.set(sessionId, current);
     try {
       await current;
@@ -1889,6 +2013,7 @@ export class SessionCoordinator {
     descriptor: ManagedMutationDescriptor,
     credentialResetInternal = false,
   ): Promise<void> {
+    if (this.disposed) return;
     if (this.credentialResetActive && !credentialResetInternal) throw new Error("Coordination reset is active");
     const key = this.pendingKey(sessionId, callId);
     const before = worktreeSnapshot(this.ctx.worktree);
@@ -1934,6 +2059,7 @@ export class SessionCoordinator {
         localPending.remoteClaimed = true;
       });
     } catch (error) {
+      if (this.disposed) return;
       localPending.claimFailure = this.outboxFailure(error);
       this.retainFailure("claim", sessionId, error, {
         exactKey: `claim:${sessionHash(sessionId)}:${localPending.operationId}`,
@@ -1957,6 +2083,7 @@ export class SessionCoordinator {
   }
 
   private async renewPending(sessionId: string, pending: PendingMutation): Promise<void> {
+    if (this.disposed) return;
     await this.serialized(sessionId, async (state) => {
       const result = await this.invoke("coordination_claim", {
         ...this.claimProof(state, pending), action: "renew", ttl_ms: SESSION_TTL_MS,
@@ -1966,6 +2093,7 @@ export class SessionCoordinator {
   }
 
   private async completePending(sessionId: string, pending: PendingMutation): Promise<void> {
+    if (this.disposed) return;
     const footprint = changedFootprint(pending.before, worktreeSnapshot(this.ctx.worktree));
     pending.footprint = footprint.map((entry) => ({
       pathSegments: entry.path ? encodeCoordinationPath(entry.path) ?? null : null,
@@ -2006,6 +2134,7 @@ export class SessionCoordinator {
   }
 
   private async finalizePending(sessionId: string, callId: string, outcome: "completed" | "error"): Promise<void> {
+    if (this.disposed) return;
     const key = this.pendingKey(sessionId, callId);
     const inFlight = this.finalizingMutations.get(key);
     if (inFlight) return inFlight;
@@ -2057,6 +2186,7 @@ export class SessionCoordinator {
   }
 
   async releasePending(sessionId: string, callId: string): Promise<PendingMutation | undefined> {
+    if (this.disposed) return undefined;
     const key = this.pendingKey(sessionId, callId);
     const pending = this.pendingMutations.get(key);
     if (!pending) return undefined;
@@ -2081,6 +2211,7 @@ export class SessionCoordinator {
   }
 
   private async unseenPeerSnapshots(sessionId: string): Promise<PeerSnapshot[]> {
+    if (this.disposed) return [];
     try {
       const state = await this.register(sessionId);
       const result = await this.invoke("coordination_status", this.ownership(state));
@@ -2106,6 +2237,7 @@ export class SessionCoordinator {
   }
 
   async withRepositoryClaim<T>(sessionId: string, action: (claim: RepositoryClaimContext) => Promise<T>): Promise<T | undefined> {
+    if (this.disposed) return undefined;
     let pending: PendingMutation | undefined;
     let quarantined = false;
     const callId = `repository-${randomUUID()}`;
@@ -2142,6 +2274,7 @@ export class SessionCoordinator {
       const context: RepositoryClaimContext = {
         manifestGeneration,
         proof: () => {
+          this.assertActive();
           const state = this.sessions.get(sessionId);
           if (!state) throw new Error("coordination session unavailable");
           return {
@@ -2157,6 +2290,7 @@ export class SessionCoordinator {
         },
         renew: () => this.renewPending(sessionId, currentPending),
         verify: async () => {
+          if (this.disposed) return;
           await this.serialized(sessionId, async (state) => {
             const result = await this.invoke("coordination_claim", {
               ...this.claimProof(state, currentPending), action: "verify",
@@ -2165,6 +2299,7 @@ export class SessionCoordinator {
           });
         },
         quarantine: async (code = "uncertain_apply") => {
+          if (this.disposed) return;
           await this.serialized(sessionId, async (state) => {
             const result = await this.invoke("coordination_claim", {
               ...this.claimProof(state, currentPending), action: "quarantine", code,
@@ -2180,6 +2315,7 @@ export class SessionCoordinator {
       pending = undefined;
       return value;
     } catch (error) {
+      if (this.disposed) return undefined;
       this.warning();
       if (pending && !quarantined) {
         try {
@@ -2201,6 +2337,7 @@ export class SessionCoordinator {
   }
 
   private async recordSuccessfulTool(sessionId: string, tool: string, args: unknown, knownPath?: string): Promise<void> {
+    if (this.disposed) return;
     const state = this.localSession(sessionId);
       const normalizedTool = tool.toLowerCase();
       const path = knownPath ?? (isRecord(args) ? relativeToolPath(this.ctx.worktree, args.filePath ?? args.path) : undefined);
@@ -2254,6 +2391,7 @@ export class SessionCoordinator {
     sessionId: string,
     status: OperationalEntry["status"],
   ): Promise<boolean> {
+    if (this.disposed) return false;
     try {
       return await this.serialized(sessionId, async (state) => {
         if (!state.memoryDirty) return false;
@@ -2296,6 +2434,7 @@ export class SessionCoordinator {
   hooks(): Hooks {
     return {
       event: async ({ event }) => {
+        if (this.disposed) return;
         if (event.type === "message.part.updated") {
           const part = event.properties.part;
           if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
@@ -2399,6 +2538,7 @@ export class SessionCoordinator {
         }
       },
       "tool.execute.before": async ({ tool, sessionID, callID }, output) => {
+        if (this.disposed) return;
         const descriptor = managedMutation(this.ctx.worktree, tool, output.args);
         if (!descriptor) {
           if (isManagedMutationTool(tool)) throw new Error("Managed mutation coordination rejected the tool arguments");
@@ -2438,6 +2578,7 @@ export class SessionCoordinator {
         });
       },
       "tool.execute.after": async ({ tool, sessionID, callID, args }, result) => {
+        if (this.disposed) return;
         const descriptor = managedMutation(this.ctx.worktree, tool, args);
         if (descriptor?.readOnly) {
           if (descriptor.coordinationReset) {
@@ -2536,7 +2677,7 @@ export class SessionCoordinator {
         });
       },
       "experimental.chat.system.transform": async ({ sessionID, model }, output) => {
-        if (!sessionID) return;
+        if (this.disposed || !sessionID) return;
         await this.serializedTransform(sessionID, async () => {
           trace({
             event: "hook_entry",
@@ -2580,10 +2721,16 @@ export class SessionCoordinator {
           if (safeMemory.length > 0 && !memory) return;
           if (Buffer.byteLength(activity ?? "", "utf8") + Buffer.byteLength(memory ?? "", "utf8")
             > MAX_COORDINATION_TRANSFORM_BYTES) return;
+          if (this.disposed) return;
           try {
             if (activity) output.system.push(activity);
             if (memory) output.system.push(memory);
           } catch {
+            if (memory && output.system.at(-1) === memory) output.system.pop();
+            if (activity && output.system.at(-1) === activity) output.system.pop();
+            return;
+          }
+          if (this.disposed) {
             if (memory && output.system.at(-1) === memory) output.system.pop();
             if (activity && output.system.at(-1) === activity) output.system.pop();
             return;
@@ -2622,27 +2769,23 @@ export class SessionCoordinator {
           });
         });
       },
-      dispose: async () => {
-        if (this.heartbeat) {
-          clearInterval(this.heartbeat);
-          this.heartbeat = undefined;
-        }
-        await Promise.all([...this.sessions.keys()].map((sessionId) => this.closeSession(sessionId)));
-        await this.closeBridge();
-      },
+      dispose: () => this.dispose(),
     };
   }
 }
 
 const coordinators = new WeakMap<object, SessionCoordinator>();
 
-export function sessionCoordinatorFor(ctx: CoordinatorContext): SessionCoordinator {
+export function sessionCoordinatorFor(
+  ctx: CoordinatorContext,
+  dependencies: SessionCoordinatorDependencies = {},
+): SessionCoordinator {
   if ((typeof ctx.client !== "object" && typeof ctx.client !== "function") || ctx.client === null) {
     throw new ExtensionBindingError();
   }
   const existing = coordinators.get(ctx.client);
-  if (existing) return existing;
-  const coordinator = new SessionCoordinator(ctx);
+  if (existing && !existing.isDisposed()) return existing;
+  const coordinator = new SessionCoordinator(ctx, dependencies);
   coordinators.set(ctx.client, coordinator);
   return coordinator;
 }
@@ -2652,7 +2795,9 @@ export const SessionCoordinatorPlugin = async (ctx: PluginInput): Promise<Hooks>
   try {
     const coordinator = sessionCoordinatorFor(ctx);
     void coordinator.initialize().catch(() => {
-      logPluginLifecycle(ctx.client, "session-coordinator", "warn", "coordination: unavailable");
+      if (!coordinator.isDisposed()) {
+        logPluginLifecycle(ctx.client, "session-coordinator", "warn", "coordination: unavailable");
+      }
     });
     return coordinator.hooks();
   } catch {
