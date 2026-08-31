@@ -440,10 +440,11 @@ This means a skill can contain any number of auxiliary files (reference docs, ex
 ### Resource Sync Engine
 
 The resource sync engine (`packages/ingenium-extension/resource-sync.ts`) provides
-the Git-authoritative projection of skills, agents, plugins, commands, and config
-from the local worktree through the configured MCP stdio transport and
+the Git-authoritative projection of repository Markdown, skills, agents, and
+plugins from the local worktree through the configured MCP stdio transport and
 authenticated API. It supersedes the former `skill-sync.ts` and
-`onboarding-sync.ts`.
+`onboarding-sync.ts`; commands and config are intentionally outside this
+repository-sync lifecycle.
 
 #### Architecture
 
@@ -455,6 +456,11 @@ authenticated API. It supersedes the former `skill-sync.ts` and
     boundary; never overwrite Git automatically
   - Both changed → preserve the Git worktree and require explicit repair
 
+- **Cross-process safety**: An owner-only worktree lock serializes local
+  scan/apply/manifest-save lifecycles. The API tracks a per-project/worktree
+  repository generation and applies expected-generation compare-and-swap; local
+  state advances only after the API confirms the apply.
+
 #### Sync Hooks
 
 The `ResourceSyncPlugin` hooks into OpenCode session events:
@@ -463,6 +469,10 @@ The `ResourceSyncPlugin` hooks into OpenCode session events:
 |-------|--------|----------|
 | `session.created` | Full sync of all resources | None |
 | `session.idle` | Incremental sync (hash mismatch only) | 60s max 1 after a successful reconciliation; failed passes remain eligible for the next idle event |
+
+Lifecycle events are queued per worktree; a pending full sync supersedes a queued
+incremental sync, and a failed incremental reconciliation does not advance the
+success throttle.
 
 Before its first project-provisioning request, the extension performs a bounded
 authenticated API preflight. Transient API unavailability is retried a finite
@@ -504,7 +514,7 @@ unmanaged remote resources are excluded from this initialization contract.
 The presence of this procedure is not a claim that live onboarding has been
 performed.
 
-The dashboard sync log captures this condition and prompts the user to restart OpenCode. Skills, agents, and commands do not require a restart — they are read from disk at session startup from the `.opencode/` directory.
+The dashboard sync log captures this condition and prompts the user to restart OpenCode. Ordinary skill and agent projection does not require a restart; plugin registration and config changes do because OpenCode loads them at startup.
 
 ### Skill Seeds
 

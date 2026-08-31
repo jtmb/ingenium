@@ -253,8 +253,8 @@ router.use((req, res, next) => {
 router.post("/repository/sync", (_req, res) => {
   res.status(409).json({
     error: {
-      code: "REPOSITORY_SYNC_COORDINATION_REQUIRED",
-      message: "Use the coordinated repository synchronization endpoint",
+      code: "REPOSITORY_SYNC_ENDPOINT_REQUIRED",
+      message: "Use the repository synchronization endpoint",
     },
   });
 });

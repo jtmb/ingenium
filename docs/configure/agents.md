@@ -160,6 +160,12 @@ record the unused active slot and concrete dependency or applicability reason in
 >
 > > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 12-agent total.
 
+The orchestrator and Premium writer profiles explicitly grant the top-level MCP
+tools `ingenium_coordination_update`, `ingenium_coordination_claim`, and
+`ingenium_coordination_release`; these are not Bash permissions. The read-only
+Scout profile additionally grants `ingenium_docs_search_semantic` for semantic
+Docs RAG retrieval. All other profile permissions remain deny-by-default.
+
 ---
 
 ## Email MCP Tools

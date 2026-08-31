@@ -65,12 +65,12 @@ the `shared-memory-ingenium` workspace, and the exact worktree. Keep credentials
 in protected ignored files; never put a bearer value in `opencode.json`, shell
 history, prompts, logs, or evidence.
 
-After changing a plugin, MCP entry, config, or protected credential, perform one
-full OpenCode restart from the intended worktree. Restarting only the child MCP
-process is not sufficient for parent-plugin changes. The exact
-`ingenium-coordination-reset reset` command is the documented same-process
-exception for a scoped coordination credential reset; verify its fresh epoch
-before resuming work.
+After changing a plugin, MCP entry, config, or parent binding, perform one full
+OpenCode restart from the intended worktree. Restarting only the child MCP
+process is not sufficient for those changes. Content-only rotation of an
+already-attested general MCP credential is the documented exception: use
+`ingenium-coordination-reset reset`, verify its fresh epoch, and then resume.
+Runtime and repository-sync credentials remain restart-mode.
 
 ### Launch external A and B
 
@@ -211,6 +211,12 @@ ingenium-coordination-reset store --key-file <absolute-protected-key> --bundle-d
 `reset-learning` rotates only the separate seven-scope learning credential; it
 does not replace the general coordination credential. See [API authentication](../security/api-authentication.md)
 for protected-file requirements and failure classes.
+
+The general reset is accepted only when the API attests
+`credentialChangeMode: "live-mcp-reload"` for the existing MCP binding. It
+reconnects the Ingenium MCP client, establishes fresh session/incarnation state,
+recovers the accepted epoch, and replays safe retained coordination operations;
+ambiguous outbox records remain retained rather than being applied blindly.
 
 ## 6. Evidence and cleanup
 

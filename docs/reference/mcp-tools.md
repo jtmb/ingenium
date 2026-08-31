@@ -236,6 +236,24 @@ still add authorized tools and categories dynamically.
 | `ingenium_project_rename` | Renames an existing project. |
 | `ingenium_project_migrate_workspace` | DB-only migration — moves the historical `/workspace` project into `global-default`. Never touches filesystem. Use `dryRun: true` first. |
 
+## REPOSITORY SYNC — Git-authoritative docs and resources
+
+`ingenium_repository_sync` projects a bounded repository manifest through the
+authenticated repository-sync audience. It requires the exact launcher/workspace
+binding and `repository:sync` scope; it does not accept a caller-supplied
+coordination claim proof.
+
+The input requires `project`, a `docsManifest.files` array of at most 256 regular
+non-symlink files, and a nonnegative `expectedGeneration`. The optional
+`resourcesManifest` is version `2` and contains skills, agents, and plugins with
+at most 512 total resources. `dryRun` validates and previews without advancing the
+generation. The operation calls `POST /api/v1/repository/sync`; a stale generation
+returns `409 MANIFEST_GENERATION_CONFLICT` with the current generation.
+
+`/api/v1/docs/repository/sync` and `/api/v1/repository/resources/sync` are not
+apply endpoints; they return `REPOSITORY_SYNC_ENDPOINT_REQUIRED` and direct the
+caller to the repository synchronization endpoint.
+
 ## SKILLS — Guides the AI uses to work (28 tools = 12 core + 16 governance)
 
 | Tool | What it does |
@@ -318,8 +336,8 @@ external processes are outside the guarantee.
 The five coordination tools are project-scoped and use strict snake_case
 inputs. Their catalog authorization is `coordination:read` for
 `ingenium_coordination_status`, `coordination:write` for the other four, and
-the update, claim, and release tools additionally require `repository:sync`.
-All five require the exact launcher/workspace binding. The packaged transport
+the coordination policies require no additional `repository:sync` scope. All
+five require the exact launcher/workspace binding. The packaged transport
 uses the `mcp` audience; runtime activity uses the separate `runtime` audience,
 and repository-authoritative synchronization uses `repository-sync` with its
 restricted route set. The API also verifies the project and derived worktree

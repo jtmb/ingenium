@@ -61,7 +61,10 @@ function writeConfig(apiUrl: string): void {
   }));
 }
 
-function successfulPreflight(audience: "mcp" | "repository-sync" = "mcp"): Response {
+function successfulPreflight(
+  audience: "mcp" | "repository-sync" = "mcp",
+  overrides: Record<string, unknown> = {},
+): Response {
   return Response.json({ data: {
     authenticated: true,
     scopes: audience === "repository-sync" ? ["projects:read", "repository:sync"] : ["projects:read"],
@@ -73,6 +76,8 @@ function successfulPreflight(audience: "mcp" | "repository-sync" = "mcp"): Respo
     launcherWorktree: worktree,
     storageMappingHash: "a".repeat(64),
     restartRequiredOnCredentialChange: true,
+    credentialChangeMode: audience === "mcp" ? "live-mcp-reload" : "restart",
+    ...overrides,
   } });
 }
 
@@ -237,6 +242,69 @@ describe("extension API authentication", () => {
     expect(serialized).not.toContain(token);
     expect(serialized).not.toContain(apiBase);
     expect(serialized).not.toContain("internal diagnostic");
+  });
+
+  it("advertises live MCP reload for protected credential content rotation without returning the credential", async () => {
+    const token = "f".repeat(32);
+    writeFallbackToken(token);
+    const result = await preflightApiAuthentication(
+      "http://localhost:4097/api/v1",
+      worktree,
+      async () => successfulPreflight("mcp", { token }),
+    );
+
+    expect(result).toEqual({
+      authenticated: true,
+      binding: expect.objectContaining({
+        audience: "mcp",
+        credentialChangeMode: "live-mcp-reload",
+        restartRequiredOnCredentialChange: false,
+      }),
+    });
+    expect(JSON.stringify(result)).not.toContain(token);
+  });
+
+  it("rejects a live reload capability when its immutable binding differs from the local binding", async () => {
+    writeFallbackToken("f".repeat(32));
+    const result = await preflightApiAuthentication(
+      "http://localhost:4097/api/v1",
+      worktree,
+      async () => successfulPreflight("mcp", { workspaceId: "different-workspace" }),
+    );
+
+    expect(result).toEqual({
+      authenticated: false,
+      error: "Unable to authenticate with Ingenium API",
+      failure: "not_found",
+    });
+  });
+
+  it.each(["live", "live-reload", true, null])("rejects malformed credential change capability %j", async (credentialChangeMode) => {
+    writeFallbackToken("f".repeat(32));
+    const result = await preflightApiAuthentication(
+      "http://localhost:4097/api/v1",
+      worktree,
+      async () => successfulPreflight("mcp", { credentialChangeMode }),
+    );
+
+    expect(result).toMatchObject({ authenticated: false, failure: "authentication" });
+  });
+
+  it("keeps old preflight responses restart-safe when the capability mode is absent", async () => {
+    writeFallbackToken("f".repeat(32));
+    const result = await preflightApiAuthentication(
+      "http://localhost:4097/api/v1",
+      worktree,
+      async () => successfulPreflight("mcp", { credentialChangeMode: undefined }),
+    );
+
+    expect(result).toEqual({
+      authenticated: true,
+      binding: expect.objectContaining({
+        credentialChangeMode: "restart",
+        restartRequiredOnCredentialChange: true,
+      }),
+    });
   });
 
   it.each(["https://attacker.example/api/v1", "http://attacker.example/api/v1"])(

@@ -17,6 +17,9 @@ const newToken = `ing_${"c".repeat(12)}_${"d".repeat(43)}`;
 const projectId = "00000000-0000-4000-8000-000000000001";
 const organizationId = "00000000-0000-4000-8000-000000000002";
 const servicePrincipalId = "00000000-0000-4000-8000-000000000005";
+const generalMcpScopes = [
+  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+] as const;
 const directories: string[] = [];
 const originalSecretFile = process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
 const originalSecretFd = process.env.INGENIUM_COORDINATION_OWNER_SECRET_FD;
@@ -90,7 +93,7 @@ function requestFixture(options: {
   launcherWorktree?: string;
 } = {}) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const scopes = options.scopes ?? ["coordination:read", "coordination:write", "projects:read", "repository:sync"];
+  const scopes = options.scopes ?? generalMcpScopes;
   let launcherWorktree = "";
   const request = vi.fn(async (input: string | URL | globalThis.Request, init?: RequestInit) => {
     const url = String(input);
@@ -205,7 +208,7 @@ describe("protected coordination reset", () => {
       servicePrincipalId,
       kind: "service",
       audience: "mcp",
-      scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync"],
+      scopes: generalMcpScopes,
       projectId,
       projectIds: [projectId],
       workspaceId: "shared-memory-ingenium",

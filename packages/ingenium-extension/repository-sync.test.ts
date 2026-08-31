@@ -4,15 +4,20 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
+  acquireRepositorySyncLock,
   buildRepositoryManifestV2,
+  drainRepositoryLifecycleQueue,
   loadManifest,
   pushDiskToApi,
   REPOSITORY_MAX_RESOURCE_TOTAL_BYTES,
   RepositorySyncScanError,
   repositorySync,
+  resetIncrementalSyncThrottle,
+  ResourceSyncPlugin,
   saveManifest,
   type SyncManifest,
 } from "./resource-sync.js";
+import { McpBridgeError } from "./mcp-client.js";
 import { OnboardingSyncPlugin } from "./onboarding-sync.js";
 import { resetEnsuredProjects } from "./project-resolver.js";
 import { parseInitProjectArgs } from "./scripts/init-project.js";
@@ -22,6 +27,17 @@ const mockCallMcpTool = vi.hoisted(() => vi.fn());
 vi.mock("./mcp-client.js", () => ({
   callMcpTool: mockCallMcpTool,
   mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+  McpBridgeError: class McpBridgeError extends Error {
+    constructor(
+      readonly failure: string,
+      readonly diagnostic = "",
+      readonly stage?: string,
+      readonly currentRevision?: number,
+      readonly errorCode?: string,
+    ) {
+      super("bridge");
+    }
+  },
 }));
 
 let worktree = "";
@@ -118,6 +134,7 @@ function successfulMcp(): ReturnType<typeof vi.fn> {
 }
 
 afterEach(() => {
+  resetIncrementalSyncThrottle();
   vi.unstubAllGlobals();
   mockCallMcpTool.mockReset();
   resetEnsuredProjects();
@@ -263,6 +280,29 @@ describe("repository-authoritative manifest v2", () => {
     expect(saved.resources.repository.plugins).toEqual({});
   });
 
+  it("retries a generation conflict from the bounded server generation without retrying authentication", async () => {
+    fixture();
+    mockCallMcpTool
+      .mockRejectedValueOnce(new McpBridgeError("revision_conflict", "", "call", 4, "MANIFEST_GENERATION_CONFLICT"))
+      .mockImplementationOnce(async (_worktree: string, _name: string, args: Record<string, unknown>) => ({
+        content: [{ type: "text", text: JSON.stringify({
+          generation: (args.expectedGeneration as number) + 1,
+          manifestHash: "a".repeat(64),
+          docs: { summary: {} },
+          resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+        }) }],
+      }));
+
+    expect((await repositorySync(worktree)).docs.errors).toBe(0);
+    expect(mockCallMcpTool.mock.calls.map(([, , args]) => args.expectedGeneration)).toEqual([0, 4]);
+    expect(loadManifest(worktree, "repository-fixture").generation).toBe(5);
+
+    mockCallMcpTool.mockReset();
+    mockCallMcpTool.mockRejectedValue(new McpBridgeError("authentication", "", "call", undefined, "REPOSITORY_SYNC_AUTHORIZATION_FAILED"));
+    expect((await repositorySync(worktree)).docs.errors).toBe(1);
+    expect(mockCallMcpTool).toHaveBeenCalledOnce();
+  });
+
   it("pushDiskToApi sends the complete allowlisted projection through repository_sync", async () => {
     fixture();
     const mcpCall = successfulMcp();
@@ -370,23 +410,71 @@ describe("repository-authoritative manifest v2", () => {
     expect(loadManifest(worktree, "repository-fixture").generation).toBe(1);
   });
 
-  it("quarantines an uncertain remote apply and retains content-free recovery evidence", async () => {
+  it("retries an uncertain remote apply and retains content-free recovery evidence after exhaustion", async () => {
     fixture();
-    mockCallMcpTool.mockRejectedValueOnce(new Error("connection lost after apply"));
-    const quarantine = vi.fn(async () => undefined);
-    const result = await repositorySync(worktree, { claim: {
-      manifestGeneration: 0,
-      proof: () => ({}),
-      renew: vi.fn(async () => undefined),
-      verify: vi.fn(async () => undefined),
-      quarantine,
-    } });
+    mockCallMcpTool.mockRejectedValue(new McpBridgeError("request_failed"));
+    const result = await repositorySync(worktree);
     expect(result.docs.errors).toBe(1);
-    expect(quarantine).toHaveBeenCalledWith("uncertain_apply");
+    expect(mockCallMcpTool).toHaveBeenCalledTimes(4);
     const recovery = join(worktree, ".opencode", ".ingenium-sync-recovery");
     const evidence = JSON.parse(readFileSync(join(recovery, readdirSync(recovery)[0]!), "utf8"));
     expect(evidence).toMatchObject({ version: 1, reason: "apply_uncertain", generation: 0 });
     expect(JSON.stringify(evidence)).not.toContain("connection lost");
+  });
+
+  it("acquires atomically, refuses a live owner, and recovers only a verified dead owner", () => {
+    fixture();
+    const first = acquireRepositorySyncLock(worktree);
+    expect(first).not.toBeNull();
+    expect(acquireRepositorySyncLock(worktree)).toBeNull();
+
+    const ownerPath = join(worktree, ".opencode", ".ingenium-sync-lock", "owner.json");
+    writeFileSync(ownerPath, JSON.stringify({ pid: 2_147_483_647, token: first!.token }) + "\n", { mode: 0o600 });
+    const recovered = acquireRepositorySyncLock(worktree);
+    expect(recovered).not.toBeNull();
+    expect(recovered!.token).not.toBe(first!.token);
+    recovered!.release();
+    expect(existsSync(join(worktree, ".opencode", ".ingenium-sync-lock"))).toBe(false);
+  });
+
+  it("rejects a symlinked lock path without following it", () => {
+    fixture();
+    const outside = mkdtempSync(join(tmpdir(), "ingenium-sync-lock-outside-"));
+    try {
+      symlinkSync(outside, join(worktree, ".opencode", ".ingenium-sync-lock"), "dir");
+      expect(() => acquireRepositorySyncLock(worktree)).toThrow(RepositorySyncScanError);
+      expect(readdirSync(outside)).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("checks the random ownership token before releasing the lock", () => {
+    fixture();
+    const lock = acquireRepositorySyncLock(worktree)!;
+    writeFileSync(
+      join(worktree, ".opencode", ".ingenium-sync-lock", "owner.json"),
+      JSON.stringify({ pid: process.pid, token: "f".repeat(32) }) + "\n",
+      { mode: 0o600 },
+    );
+
+    expect(() => lock.release()).toThrow("ownership changed");
+    expect(existsSync(join(worktree, ".opencode", ".ingenium-sync-lock"))).toBe(true);
+  });
+
+  it("queues and coalesces lifecycle synchronization without awaiting network work", async () => {
+    fixture();
+    successfulMcp();
+    const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log: vi.fn() } } });
+
+    const first = plugin.event({ event: { type: "session.created" } });
+    const second = plugin.event({ event: { type: "session.created" } });
+    expect(first).toBeUndefined();
+    expect(second).toBeUndefined();
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
+
+    await drainRepositoryLifecycleQueue(worktree);
+    expect(mockCallMcpTool).toHaveBeenCalledOnce();
   });
 
   it("rejects symlink traversal instead of following repository content", () => {

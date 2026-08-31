@@ -91,7 +91,6 @@ export function explicitMcpAuthorizationPolicy(toolName: string, category: strin
   const resource = transportName === "repository_sync" ? "repository"
     : transportName.startsWith("coordination_") ? "coordination"
     : category.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const repositoryCoordination = new Set(["coordination_update", "coordination_claim", "coordination_release"]);
   return {
     action: `${resource}.${permission}`,
     resource,
@@ -99,9 +98,7 @@ export function explicitMcpAuthorizationPolicy(toolName: string, category: strin
     target,
     scopes: [transportName === "repository_sync" ? "repository:sync"
       : resource === "coordination" ? `coordination:${permission === "read" ? "read" : "write"}`
-      : `${resource}:${permission}`,
-      ...(repositoryCoordination.has(transportName) ? ["repository:sync"] : []),
-    ],
+      : `${resource}:${permission}`],
     launcherBinding: UNBOUND.has(transportName) || target === "installation" ? "none" : "required",
   };
 }

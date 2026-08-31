@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +6,6 @@ import { preflightApiAuthentication } from "../api-auth.js";
 import { resolveExtensionBinding } from "../extension-binding.js";
 import { isValidProjectName } from "../project-resolver.js";
 import { repositorySync, type RepositorySyncScope } from "../resource-sync.js";
-import { SessionCoordinator } from "../session-coordinator.js";
 
 const AUTHENTICATION_FAILURE_MESSAGE = "Unable to authenticate with Ingenium API";
 
@@ -95,29 +93,13 @@ export async function runInitProject(args = process.argv.slice(2), worktree = pr
     process.stderr.write(`${AUTHENTICATION_FAILURE_MESSAGE}\n`);
     return 2;
   }
-  const binding = resolveExtensionBinding(resolvedWorktree, {
+  resolveExtensionBinding(resolvedWorktree, {
     purpose: "repository-sync",
     project: options.project,
   });
-  const coordinator = new SessionCoordinator({ worktree: resolvedWorktree, client: undefined }, {
-    binding,
-    disableHeartbeat: true,
-  });
-  const sessionId = `init-project-${randomUUID()}`;
-  try {
-    const result = await coordinator.withRepositoryClaim(
-      sessionId,
-      (claim) => repositorySync(resolvedWorktree, { ...options, claim }),
-    );
-    if (!result) {
-      process.stderr.write("Repository coordination unavailable\n");
-      return 2;
-    }
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    return result.docs.errors + result.skills.errors + result.agents.errors + result.plugins.errors > 0 ? 1 : 0;
-  } finally {
-    await coordinator.closeSession(sessionId);
-  }
+  const result = await repositorySync(resolvedWorktree, options);
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  return result.docs.errors + result.skills.errors + result.agents.errors + result.plugins.errors > 0 ? 1 : 0;
 }
 
 /** Resolve both paths so a package-manager or runtime symlink remains executable. */

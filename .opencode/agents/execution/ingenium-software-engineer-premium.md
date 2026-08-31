@@ -24,6 +24,9 @@ permission:
   ingenium_docs_get_page: allow
   ingenium_docs_list_spaces: allow
   ingenium_docs_get_page_tree: allow
+  "ingenium_coordination_update": allow
+  "ingenium_coordination_claim": allow
+  "ingenium_coordination_release": allow
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow

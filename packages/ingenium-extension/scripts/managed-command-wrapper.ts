@@ -33,6 +33,14 @@ export function decodeManagedArgv(encoded: string): string[] {
   return parsed;
 }
 
+export function decodeManagedRepositoryArgv(encoded: string): string[] {
+  return validateManagedRepositoryArgv(decodeManagedArgv(encoded));
+}
+
+export function decodeManagedBuildArgv(encoded: string): string[] {
+  return validateManagedBuildArgv(decodeManagedArgv(encoded));
+}
+
 function sourceFingerprint(cwd: string): string {
   const env = managedGitEnvironment();
   assertNonExecutableGitConfiguration(cwd, env);
@@ -59,24 +67,40 @@ function isSafeRepositoryPath(value: string): boolean {
     && value.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && segment !== ".git");
 }
 
-export function managedRepositoryArgv(argv: string[]): string[] {
+export function validateManagedRepositoryArgv(argv: string[]): string[] {
   const [operation, ...paths] = argv;
   if (operation === "commit") {
     if (paths.length !== 1 || !isSafeCommitMessage(paths[0]!)) {
       throw new Error("Repository wrapper rejected the command");
     }
+    return argv;
+  }
+  const validPaths = paths.length > 0 && paths.length <= 32
+    && paths.every((path) => ARG.test(path) && isSafeRepositoryPath(path));
+  if (!validPaths || (operation === "mv" && paths.length !== 2)
+    || (operation !== "add" && operation !== "mv" && operation !== "rm")) {
+    throw new Error("Repository wrapper rejected the command");
+  }
+  return argv;
+}
+
+export function validateManagedBuildArgv(argv: string[]): string[] {
+  const valid = (argv.length === 1 && BUILD_SCRIPTS.has(argv[0]!))
+    || (argv.length === 2 && argv[0] === "run" && BUILD_SCRIPTS.has(argv[1]!));
+  if (!valid) throw new Error("Build wrapper rejected the command");
+  return argv;
+}
+
+export function managedRepositoryArgv(argv: string[]): string[] {
+  const [operation, ...paths] = validateManagedRepositoryArgv(argv);
+  if (operation === "commit") {
     return [
       ...GIT_CONFIGURATION,
       ...COMMIT_CONFIGURATION,
       "commit", "--no-verify", "--no-gpg-sign", "--cleanup=verbatim", "-m", paths[0]!,
     ];
   }
-  const validPaths = paths.length > 0 && paths.length <= 32 && paths.every(isSafeRepositoryPath);
-  if (!validPaths || (operation === "mv" && paths.length !== 2)
-    || (operation !== "add" && operation !== "mv" && operation !== "rm")) {
-    throw new Error("Repository wrapper rejected the command");
-  }
-  return [...GIT_CONFIGURATION, operation, "--", ...paths];
+  return [...GIT_CONFIGURATION, operation!, "--", ...paths];
 }
 
 export function managedGitEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -113,10 +137,8 @@ export function managedCommand(kind: "repository" | "build", argv: string[], cwd
     command = GIT;
     commandArgv = ["-C", cwd, ...managedRepositoryArgv(argv)];
   } else {
-    const script = argv[0] === "run" ? argv[1] : argv[0];
-    if (!script || !BUILD_SCRIPTS.has(script)) throw new Error("Build wrapper rejected the command");
     command = "npm";
-    commandArgv = argv;
+    commandArgv = validateManagedBuildArgv(argv);
   }
   const before = kind === "build" ? sourceFingerprint(cwd) : undefined;
   const result = spawnSync(command, commandArgv, { cwd, stdio: "inherit", shell: false, env });
@@ -127,5 +149,8 @@ export function managedCommand(kind: "repository" | "build", argv: string[], cwd
 
 export function runManagedCommandCli(kind: "repository" | "build", argv = process.argv): void {
   if (argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
-  process.exitCode = managedCommand(kind, decodeManagedArgv(argv[2]!));
+  const commandArgv = kind === "repository"
+    ? decodeManagedRepositoryArgv(argv[2]!)
+    : decodeManagedBuildArgv(argv[2]!);
+  process.exitCode = managedCommand(kind, commandArgv);
 }

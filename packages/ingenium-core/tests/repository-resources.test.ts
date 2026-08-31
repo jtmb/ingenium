@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getDb, projects, repositoryResources, resetDbForTest } from "../lib/index.js";
+import { getDb, projects, repositoryResources, repositorySync, resetDbForTest } from "../lib/index.js";
 
 let directory = "";
 let projectId = "";
@@ -94,6 +94,29 @@ afterEach(() => {
 });
 
 describe("repository resource sync", () => {
+  it("applies generation CAS per authenticated worktree identity and reports the bounded current generation", () => {
+    const worktreeId = `worktree-${"a".repeat(64)}`;
+    const input = {
+      docsManifest: { files: [] },
+      resourcesManifest: { version: 2, skills: [], agents: [], plugins: [] },
+      dryRun: false,
+      expectedGeneration: 0,
+      worktreeId,
+    };
+
+    expect(repositorySync.applyRepositorySync(projectId, input)).toMatchObject({ generation: 1, dryRun: false });
+    try {
+      repositorySync.applyRepositorySync(projectId, input);
+      throw new Error("expected generation conflict");
+    } catch (error) {
+      expect(error).toBeInstanceOf(repositorySync.RepositorySyncError);
+      expect(error).toMatchObject({ code: "MANIFEST_GENERATION_CONFLICT", currentGeneration: 1 });
+    }
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH!).prepare(
+      "SELECT generation FROM repository_sync_generations WHERE project_id = ? AND worktree_id = ?",
+    ).get(projectId, worktreeId)).toEqual({ generation: 1 });
+  });
+
   it("imports deterministically, is idempotent, and retains identity through a unique rename", () => {
     const first = repositoryResources.syncRepositoryResources(projectId, manifest());
     expect(first.summary).toMatchObject({ skill: { created: 1 }, agent: { created: 1 }, plugin: { created: 1 } });

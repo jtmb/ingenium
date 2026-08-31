@@ -91,8 +91,17 @@ export interface ApiAuthenticationBinding {
   workspaceId: string;
   launcherWorktree: string;
   storageMappingHash: string;
-  restartRequiredOnCredentialChange: true;
+  /**
+   * Legacy compatibility signal. New clients use credentialChangeMode for
+   * content-only credential rotation while older clients conservatively
+   * restart when this remains true.
+   */
+  restartRequiredOnCredentialChange: boolean;
+  /** Content rotation is live only for an already-attested MCP binding. */
+  credentialChangeMode?: ApiAuthenticationCredentialChangeMode;
 }
+
+export type ApiAuthenticationCredentialChangeMode = "live-mcp-reload" | "restart";
 
 export interface ApiAuthenticationPreflightOptions {
   timeoutMs?: number;
@@ -140,8 +149,44 @@ function authenticationBinding(value: unknown): ApiAuthenticationBinding | undef
     || (data.audience !== "mcp" && data.audience !== "runtime" && data.audience !== "repository-sync")
     || typeof data.workspaceId !== "string" || typeof data.launcherWorktree !== "string"
     || typeof data.storageMappingHash !== "string" || !/^[0-9a-f]{64}$/.test(data.storageMappingHash)
-    || data.restartRequiredOnCredentialChange !== true) return undefined;
-  return data as unknown as ApiAuthenticationBinding;
+    || !data.projectIds.includes(data.projectId)
+    || typeof data.restartRequiredOnCredentialChange !== "boolean") return undefined;
+
+  const hasCredentialChangeMode = Object.prototype.hasOwnProperty.call(data, "credentialChangeMode");
+  let credentialChangeMode: ApiAuthenticationCredentialChangeMode;
+  if (!hasCredentialChangeMode) {
+    if (data.restartRequiredOnCredentialChange !== true) return undefined;
+    credentialChangeMode = "restart";
+  } else {
+    if (data.credentialChangeMode !== "live-mcp-reload" && data.credentialChangeMode !== "restart") return undefined;
+    credentialChangeMode = data.credentialChangeMode;
+    if (credentialChangeMode === "restart" && data.restartRequiredOnCredentialChange !== true) return undefined;
+    if (credentialChangeMode === "live-mcp-reload" && data.audience !== "mcp") return undefined;
+  }
+
+  return {
+    scopes: data.scopes,
+    organizationId: data.organizationId,
+    projectId: data.projectId,
+    projectIds: data.projectIds,
+    audience: data.audience,
+    workspaceId: data.workspaceId,
+    launcherWorktree: data.launcherWorktree,
+    storageMappingHash: data.storageMappingHash,
+    restartRequiredOnCredentialChange: credentialChangeMode === "restart",
+    credentialChangeMode,
+  };
+}
+
+function matchesImmutableBinding(
+  attested: ApiAuthenticationBinding,
+  expected: ExtensionBinding,
+): boolean {
+  return attested.audience === expected.audience
+    && attested.workspaceId === expected.workspaceId
+    && attested.launcherWorktree === expected.launcherWorktree
+    && (expected.projectId === undefined || attested.projectId === expected.projectId)
+    && (expected.storageMappingHash === undefined || attested.storageMappingHash === expected.storageMappingHash);
 }
 
 function sleepFor(milliseconds: number): Promise<void> {
@@ -160,22 +205,25 @@ export async function preflightApiAuthentication(
 ): Promise<ApiAuthenticationPreflightResult> {
   const base = normalizeApiBase(apiBase);
   if (!base) return failedPreflight("invalid_target");
-  let binding: ExtensionBinding;
+  let expectedBinding: ExtensionBinding;
   try {
-    binding = resolveExtensionBinding(worktree ?? process.cwd(), { purpose: options.credentialPurpose });
+    expectedBinding = resolveExtensionBinding(worktree ?? process.cwd(), { purpose: options.credentialPurpose });
   } catch {
     return failedPreflight("invalid_target");
   }
-  if (base !== binding.apiUrl) return failedPreflight("invalid_target");
+  if (base !== expectedBinding.apiUrl) return failedPreflight("invalid_target");
 
   try {
-    const response = await request(`${binding.apiUrl}/auth/preflight`, {
-      headers: apiRequestHeaders(worktree, undefined, { binding }),
+    const response = await request(`${expectedBinding.apiUrl}/auth/preflight`, {
+      headers: apiRequestHeaders(worktree, undefined, { binding: expectedBinding }),
       signal: AbortSignal.timeout(boundedInteger(options.timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS, 1, DEFAULT_PREFLIGHT_TIMEOUT_MS)),
     });
     if (response.status === 200) {
-      const binding = authenticationBinding(await response.json().catch(() => null));
-      return binding ? { authenticated: true, binding } : failedPreflight("authentication");
+      const attestedBinding = authenticationBinding(await response.json().catch(() => null));
+      if (!attestedBinding) return failedPreflight("authentication");
+      return matchesImmutableBinding(attestedBinding, expectedBinding)
+        ? { authenticated: true, binding: attestedBinding }
+        : failedPreflight("not_found");
     }
     if (response.status === 401) return failedPreflight("authentication");
     if (response.status === 403) return failedPreflight("scope");

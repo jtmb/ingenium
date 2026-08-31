@@ -70,7 +70,7 @@ describe("AUTH-102 MCP policy parity", () => {
     expect(byName.get("ingenium_synthesis_cross_project")?.projectScope).toBe("global");
     expect(byName.get("ingenium_coordination_status")?.apiEndpoints).toEqual(["GET /api/v1/coordination/snapshot"]);
     expect(byName.get("ingenium_coordination_status")?.authorization?.scopes).toEqual(["coordination:read"]);
-    expect(byName.get("ingenium_coordination_update")?.authorization?.scopes).toEqual(["coordination:write", "repository:sync"]);
+    expect(byName.get("ingenium_coordination_update")?.authorization?.scopes).toEqual(["coordination:write"]);
     expect(byName.get("ingenium_coordination_handoff")?.authorization?.scopes).toEqual(["coordination:write"]);
     expect(byName.get("ingenium_context_message_retrieve")?.authorization?.target).toBe("private");
     expect(byName.get("ingenium_project_init")?.authorization?.target).toBe("organization");

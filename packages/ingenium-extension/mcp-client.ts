@@ -17,6 +17,8 @@ const MAX_TIMEOUT_MS = 60_000;
 const MAX_STDERR_BYTES = 1_024;
 const TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
 const LEARNING_TOOLS = new Set(["extraction_run", "synthesis_run", "pipeline_event_log", "observe"]);
+export const MCP_LIVE_RELOAD_MIN_TIMEOUT_MS = 5_000;
+export const MCP_LIVE_RELOAD_MAX_TIMEOUT_MS = 300_000;
 
 export type McpBridgeFailure = "authentication" | "timeout" | "rate_limited" | "revision_conflict" | "request_failed";
 export type McpBridgeStage = "connect" | "call" | "close";
@@ -48,6 +50,14 @@ interface McpClient {
 export interface McpToolClient {
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   close(): Promise<void>;
+}
+
+interface OpenCodeMcpClient {
+  mcp?: {
+    disconnect?: (options: { path: { name: "ingenium" }; query?: { directory: string } }) => Promise<unknown>;
+    connect?: (options: { path: { name: "ingenium" }; query?: { directory: string } }) => Promise<unknown>;
+    status?: (options: { query: { directory: string } }) => Promise<unknown>;
+  };
 }
 
 export interface McpBridgeLaunchOptions {
@@ -101,6 +111,39 @@ function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> 
       },
     );
   });
+}
+
+export async function reconnectIngeniumMcp(
+  client: unknown,
+  directory: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<Record<string, unknown>> {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < MCP_LIVE_RELOAD_MIN_TIMEOUT_MS
+    || timeoutMs > MCP_LIVE_RELOAD_MAX_TIMEOUT_MS || !isAbsolute(directory)) {
+    throw new McpBridgeError("request_failed");
+  }
+  const mcp = (client as OpenCodeMcpClient | undefined)?.mcp;
+  if (typeof mcp?.disconnect !== "function" || typeof mcp.connect !== "function" || typeof mcp.status !== "function") {
+    throw new McpBridgeError("request_failed");
+  }
+  const target = { path: { name: "ingenium" as const }, query: { directory: resolve(directory) } };
+  try {
+    await bounded(() => mcp.disconnect!(target), timeoutMs);
+    await bounded(() => mcp.connect!(target), timeoutMs);
+    const response = await bounded(() => mcp.status!({ query: target.query }), timeoutMs);
+    const data = typeof response === "object" && response !== null && "data" in response
+      ? (response as { data?: unknown }).data
+      : response;
+    if (typeof data !== "object" || data === null || Array.isArray(data)
+      || typeof (data as Record<string, unknown>).ingenium !== "object"
+      || (data as Record<string, unknown>).ingenium === null
+      || (data as Record<string, Record<string, unknown>>).ingenium?.status !== "connected") {
+      throw new McpBridgeError("request_failed");
+    }
+    return (data as Record<string, Record<string, unknown>>).ingenium!;
+  } catch (error) {
+    throw error instanceof McpBridgeError ? error : new McpBridgeError("request_failed");
+  }
 }
 
 /** Retain bounded child diagnostics without exposing credentials, URLs, or filesystem topology. */
@@ -241,9 +284,12 @@ function toolFailure(result: unknown): { failure: McpBridgeFailure; currentRevis
       : undefined;
     const errorCode = typeof error?.code === "string" && /^[A-Z][A-Z0-9_]{1,63}$/.test(error.code) ? error.code : undefined;
     if (errorCode === "RATE_LIMITED") return { failure: "rate_limited", errorCode };
-    if (error?.code === "REVISION_CONFLICT" && typeof error.currentRevision === "number"
-      && Number.isSafeInteger(error.currentRevision) && error.currentRevision >= 0) {
-      return { failure: "revision_conflict", currentRevision: error.currentRevision, errorCode };
+    const currentRevision = error?.code === "MANIFEST_GENERATION_CONFLICT"
+      ? (error as { currentGeneration?: unknown }).currentGeneration
+      : error?.currentRevision;
+    if ((error?.code === "REVISION_CONFLICT" || error?.code === "MANIFEST_GENERATION_CONFLICT")
+      && typeof currentRevision === "number" && Number.isSafeInteger(currentRevision) && currentRevision >= 0) {
+      return { failure: "revision_conflict", currentRevision, errorCode };
     }
     return { failure: "request_failed", ...(errorCode ? { errorCode } : {}) };
   } catch {}

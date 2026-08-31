@@ -51,6 +51,11 @@ vi.mock("node:fs", async (importOriginal) => {
 vi.mock("./mcp-client.js", () => ({
   callMcpTool: mockCallMcpTool,
   mcpToolData: (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0]!.text),
+  McpBridgeError: class McpBridgeError extends Error {
+    constructor(readonly failure: string, readonly diagnostic = "", readonly stage?: string, readonly currentRevision?: number, readonly errorCode?: string) {
+      super("bridge");
+    }
+  },
 }));
 
 let worktree = "";
@@ -734,25 +739,17 @@ describe("legacy skill tombstone cleanup", () => {
         manifestHash: "a".repeat(64),
       }) }] };
     });
-    const claim = (manifestGeneration: number) => ({
-      manifestGeneration,
-      proof: () => ({}),
-      renew: vi.fn(async () => undefined),
-      verify: vi.fn(async () => undefined),
-      quarantine: vi.fn(async () => undefined),
-    });
-
-    const docsOnly = await repositorySync(worktree, { scope: "docs", claim: claim(0) });
+    const docsOnly = await repositorySync(worktree, { scope: "docs" });
     expect(docsOnly.docs.errors).toBe(0);
     expect(existsSync(legacyPath)).toBe(true);
-    const result = await repositorySync(worktree, { claim: claim(1) });
+    const result = await repositorySync(worktree);
 
     expect(result.skills.errors).toBe(0);
     expect(mockCallMcpTool).toHaveBeenCalledTimes(2);
     expect(existsSync(legacyPath)).toBe(false);
   });
 
-  it("performs zero cleanup filesystem mutations when repository ownership verification fails", async () => {
+  it("performs zero cleanup filesystem mutations while another process owns the sync lock", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-denied-"));
     createCleanupFixture(worktree, [{ source: "legacy-skill" }]);
     const credentialPath = join(worktree, ".opencode", ".ingenium-repository-sync-credential");
@@ -768,16 +765,11 @@ describe("legacy skill tombstone cleanup", () => {
       rmdir: vi.fn(),
     };
 
-    await expect(repositorySync(worktree, {
-      cleanupFileSystem: fileSystem,
-      claim: {
-        manifestGeneration: 0,
-        proof: () => ({}),
-        renew: vi.fn(async () => undefined),
-        verify: vi.fn(async () => { throw new Error("stale claim"); }),
-        quarantine: vi.fn(async () => undefined),
-      },
-    })).rejects.toThrow("stale claim");
+    const { acquireRepositorySyncLock } = await import("./resource-sync.js");
+    const lock = acquireRepositorySyncLock(worktree);
+    await expect(repositorySync(worktree, { cleanupFileSystem: fileSystem }))
+      .rejects.toThrow("already running");
+    lock?.release();
 
     expect(Object.values(fileSystem).every((operation) => operation.mock.calls.length === 0)).toBe(true);
     expect(existsSync(join(worktree, ".opencode", "skills", "legacy-skill"))).toBe(true);

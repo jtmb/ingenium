@@ -35,7 +35,7 @@ describe("MCP Tool Catalog Parity", () => {
       "ingenium_coordination_release",
     ]) expect(catalog.get(name)?.authorization).toMatchObject({
       permission: "write",
-      scopes: ["coordination:write", "repository:sync"],
+      scopes: ["coordination:write"],
     });
     expect(catalog.get("ingenium_coordination_handoff")?.authorization).toMatchObject({
       permission: "write",
@@ -47,7 +47,7 @@ describe("MCP Tool Catalog Parity", () => {
     expect(catalog.get("ingenium_repository_sync")).toMatchObject({
       category: "Repository Sync",
       projectScope: "per-project",
-      apiEndpoints: ["POST /api/v1/docs/repository/sync", "POST /api/v1/repository/resources/sync"],
+      apiEndpoints: ["POST /api/v1/repository/sync"],
     });
     expect(catalog.get("ingenium_skill_proposal_list")?.description).toContain("Deprecated");
     expect(catalog.get("ingenium_skill_proposal_page")).toMatchObject({

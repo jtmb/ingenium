@@ -140,13 +140,19 @@ The external-worktree path is Git → `@ingenium/extension` resource-sync plugin
 → configured MCP stdio → authenticated API → database. Git is authoritative;
 plugins, CLIs, and agents do not access SQLite or call mutation REST directly.
 Use `/init-project` and its dedicated MCP repository-sync operation for
-repository projection. Do not run `ingenium_skill_sync*` after edits; those are
-admin repair/import tools. The deleted legacy skill-sync command is not part of
-the workflow.
-Rebuild the extension and restart OpenCode after plugin/config changes. Restarting
-only the child MCP process or hot-reloading a tool is insufficient after a
-parent-plugin or protected-credential change; perform one full OpenCode restart
-from the intended worktree.
+repository projection. The operation uses `POST /api/v1/repository/sync` with an
+expected manifest generation; stale generations fail with
+`MANIFEST_GENERATION_CONFLICT`. Do not run `ingenium_skill_sync*` after edits;
+those are admin repair/import tools. The deleted legacy skill-sync command is
+not part of the workflow.
+
+Rebuild the extension and restart OpenCode after plugin/config or parent-binding
+changes. Restarting only the child MCP process is insufficient for those changes.
+Content-only rotation of an already-attested general MCP credential may instead
+use the exact `ingenium-coordination-reset reset` exception: the API must report
+`credentialChangeMode: "live-mcp-reload"`, and the bounded reconnect timeout is
+5,000–300,000 ms. Runtime and repository-sync credentials remain restart-mode;
+the reset never applies to a changed binding or plugin/config identity.
 
 ## Ponytail
 

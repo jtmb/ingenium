@@ -96,8 +96,7 @@ const EXTRACTION_ENDPOINTS = [
 ];
 
 const REPOSITORY_SYNC_ENDPOINTS = [
-  "POST /api/v1/docs/repository/sync",
-  "POST /api/v1/repository/resources/sync",
+  "POST /api/v1/repository/sync",
 ];
 
 const TASKS_ENDPOINTS = [

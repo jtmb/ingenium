@@ -5,10 +5,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   decodeManagedArgv,
+  decodeManagedBuildArgv,
+  decodeManagedRepositoryArgv,
   managedCommand,
   managedGitEnvironment,
   managedRepositoryArgv,
   runManagedCommandCli,
+  validateManagedBuildArgv,
+  validateManagedRepositoryArgv,
 } from "./scripts/managed-command-wrapper.js";
 
 describe("managed command wrappers", () => {
@@ -18,8 +22,15 @@ describe("managed command wrappers", () => {
     expect(decodeManagedArgv(encoded)).toEqual(["add", "src/file.ts"]);
     expect(decodeManagedArgv(Buffer.from(JSON.stringify(["commit", message])).toString("base64url")))
       .toEqual(["commit", message]);
+    expect(decodeManagedRepositoryArgv(encoded)).toEqual(["add", "src/file.ts"]);
+    expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")))
+      .toEqual(["run", "typecheck"]);
     expect(() => decodeManagedArgv(Buffer.from(JSON.stringify(["add", "src/file.ts;rm"])).toString("base64url")))
       .toThrow("Invalid managed command payload");
+    expect(() => decodeManagedRepositoryArgv(Buffer.from(JSON.stringify(["status"])).toString("base64url")))
+      .toThrow("Repository wrapper rejected the command");
+    expect(() => decodeManagedBuildArgv(Buffer.from(JSON.stringify(["run", "test", "--watch"])).toString("base64url")))
+      .toThrow("Build wrapper rejected the command");
     expect(() => managedCommand("repository", ["status"])).toThrow("Repository wrapper rejected the command");
     expect(() => managedCommand("build", ["exec", "arbitrary"])).toThrow("Build wrapper rejected the command");
   });
@@ -41,6 +52,9 @@ describe("managed command wrappers", () => {
       ["add", "--all"],
       ["add", "../outside"],
       ["add", ".git/config"],
+      ["add", "src/file with spaces.ts"],
+      ["add", "src/file.ts;touch-marker"],
+      ["add", "src/control\u007f.ts"],
       ["checkout", "main"],
       ["commit"],
       ["commit", ""],
@@ -56,7 +70,31 @@ describe("managed command wrappers", () => {
       ["rebase", "--exec=payload", "main"],
       ["reset", "--hard"],
       ["tag", "--local-user=attacker", "v1"],
-    ]) expect(() => managedRepositoryArgv(argv)).toThrow("Repository wrapper rejected the command");
+    ]) {
+      expect(() => validateManagedRepositoryArgv(argv)).toThrow("Repository wrapper rejected the command");
+      expect(() => managedRepositoryArgv(argv)).toThrow("Repository wrapper rejected the command");
+    }
+
+    for (const argv of [
+      [],
+      ["run"],
+      ["run", "test", "--watch"],
+      ["run", "pretest"],
+      ["exec", "build"],
+      ["build", "--workspace=outside"],
+      ["test\nmalicious"],
+    ]) expect(() => validateManagedBuildArgv(argv)).toThrow("Build wrapper rejected the command");
+
+    for (const argv of [
+      ["build"],
+      ["typecheck"],
+      ["test"],
+      ["lint"],
+      ["run", "build"],
+      ["run", "typecheck"],
+      ["run", "test"],
+      ["run", "lint"],
+    ]) expect(validateManagedBuildArgv(argv)).toEqual(argv);
   });
 
   it("removes Git execution environment overrides", () => {
@@ -104,13 +142,17 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("stages a literal path without running repository hooks", () => {
+  it("stages a literal path without executing a hook or exposing its inherited sentinel", () => {
     const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    const previousSentinel = process.env.MANAGED_HOOK_SENTINEL;
     try {
       execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
       const marker = join(directory, "hook-ran");
+      const exposure = join(directory, "hook-sentinel");
       const hook = join(directory, ".git", "hooks", "post-index-change");
-      writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+      const sentinel = "post-index-change-private-sentinel";
+      process.env.MANAGED_HOOK_SENTINEL = sentinel;
+      writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nprintf '%s' "$MANAGED_HOOK_SENTINEL" > '${exposure}'\n`);
       chmodSync(hook, 0o700);
       writeFileSync(join(directory, "safe.txt"), "safe\n");
 
@@ -118,20 +160,27 @@ describe("managed command wrappers", () => {
       expect(execFileSync("/usr/bin/git", ["-C", directory, "diff", "--cached", "--name-only"], { encoding: "utf8" }))
         .toBe("safe.txt\n");
       expect(existsSync(marker)).toBe(false);
+      expect(existsSync(exposure)).toBe(false);
     } finally {
+      if (previousSentinel === undefined) delete process.env.MANAGED_HOOK_SENTINEL;
+      else process.env.MANAGED_HOOK_SENTINEL = previousSentinel;
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it("commits the staged index with the exact message without running hooks", () => {
+  it("commits with the exact message without executing a hook or exposing its inherited sentinel", () => {
     const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    const previousSentinel = process.env.MANAGED_HOOK_SENTINEL;
     try {
       execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
       execFileSync("/usr/bin/git", ["-C", directory, "config", "user.name", "Managed Wrapper Test"]);
       execFileSync("/usr/bin/git", ["-C", directory, "config", "user.email", "managed-wrapper@example.invalid"]);
       const marker = join(directory, "hook-ran");
+      const exposure = join(directory, "hook-sentinel");
       const hook = join(directory, ".git", "hooks", "pre-commit");
-      writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+      const sentinel = "pre-commit-private-sentinel";
+      process.env.MANAGED_HOOK_SENTINEL = sentinel;
+      writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nprintf '%s' "$MANAGED_HOOK_SENTINEL" > '${exposure}'\n`);
       chmodSync(hook, 0o700);
       writeFileSync(join(directory, "safe.txt"), "safe\n");
       const message = "chore(checkpoint): preserve runtime and coordination hardening work";
@@ -141,6 +190,51 @@ describe("managed command wrappers", () => {
       expect(execFileSync("/usr/bin/git", ["-C", directory, "log", "-1", "--format=%s"], { encoding: "utf8" }))
         .toBe(`${message}\n`);
       expect(existsSync(marker)).toBe(false);
+      expect(existsSync(exposure)).toBe(false);
+    } finally {
+      if (previousSentinel === undefined) delete process.env.MANAGED_HOOK_SENTINEL;
+      else process.env.MANAGED_HOOK_SENTINEL = previousSentinel;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the native index lock and propagates Git's nonzero status", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      writeFileSync(join(directory, "safe.txt"), "safe\n");
+      const lock = join(directory, ".git", "index.lock");
+      writeFileSync(lock, "competing writer\n");
+
+      expect(managedCommand("repository", ["add", "safe.txt"], directory)).toBe(128);
+      expect(existsSync(lock)).toBe(true);
+      expect(execFileSync("/usr/bin/git", ["-C", directory, "diff", "--cached", "--name-only"], { encoding: "utf8" }))
+        .toBe("");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("allows exactly one managed commit when an executable hook would change the ref", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.name", "Managed Wrapper Test"]);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.email", "managed-wrapper@example.invalid"]);
+      const competingStatus = join(directory, "competing-status");
+      const hook = join(directory, ".git", "hooks", "pre-commit");
+      writeFileSync(hook, `#!/bin/sh\nchmod -x "$0"\n/usr/bin/git commit -m 'competing commit'\nprintf '%s' "$?" > '${competingStatus}'\nexit 0\n`);
+      chmodSync(hook, 0o700);
+      writeFileSync(join(directory, "safe.txt"), "safe\n");
+      const message = "chore: native lock wins";
+
+      expect(managedCommand("repository", ["add", "safe.txt"], directory)).toBe(0);
+      expect(managedCommand("repository", ["commit", message], directory)).toBe(0);
+      expect(existsSync(competingStatus)).toBe(false);
+      expect(execFileSync("/usr/bin/git", ["-C", directory, "rev-list", "--count", "HEAD"], { encoding: "utf8" }))
+        .toBe("1\n");
+      expect(execFileSync("/usr/bin/git", ["-C", directory, "log", "-1", "--format=%s"], { encoding: "utf8" }))
+        .toBe(`${message}\n`);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -156,6 +250,59 @@ describe("managed command wrappers", () => {
       expect(managedCommand("repository", ["commit", "chore: empty index"], directory)).toBe(1);
       expect(() => execFileSync("/usr/bin/git", ["-C", directory, "rev-parse", "--verify", "HEAD"]))
         .toThrow();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("allows ignored build output without changing the source fingerprint", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-build-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      writeFileSync(join(directory, ".gitignore"), "dist/\n");
+      writeFileSync(join(directory, "source.ts"), "export const value = 1;\n");
+      writeFileSync(join(directory, "package.json"), JSON.stringify({
+        scripts: {
+          typecheck: "node -e \"require('node:fs').mkdirSync('dist'); require('node:fs').writeFileSync('dist/output.js', 'built')\"",
+        },
+      }));
+
+      expect(managedCommand("build", ["run", "typecheck"], directory)).toBe(0);
+      expect(readFileSync(join(directory, "source.ts"), "utf8")).toBe("export const value = 1;\n");
+      expect(readFileSync(join(directory, "dist", "output.js"), "utf8")).toBe("built");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a build that changes repository source", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-build-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      writeFileSync(join(directory, "source.ts"), "export const value = 1;\n");
+      writeFileSync(join(directory, "package.json"), JSON.stringify({
+        scripts: {
+          build: "node -e \"require('node:fs').writeFileSync('source.ts', 'export const value = 2;\\n')\"",
+        },
+      }));
+
+      expect(() => managedCommand("build", ["run", "build"], directory))
+        .toThrow("Build wrapper produced source changes");
+      expect(readFileSync(join(directory, "source.ts"), "utf8")).toBe("export const value = 2;\n");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates a real nonzero build result", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-build-"));
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      writeFileSync(join(directory, "package.json"), JSON.stringify({
+        scripts: { lint: "node -e \"process.exit(7)\"" },
+      }));
+
+      expect(managedCommand("build", ["run", "lint"], directory)).toBe(7);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

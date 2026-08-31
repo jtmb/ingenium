@@ -78,10 +78,16 @@ Git-authoritative projection path:
 
 | Direction | Trigger | Mechanism |
 |-----------|---------|-----------|
-| Git worktree → API/DB | `session.created`, `session.idle`, repository sync | Resource sync through MCP stdio and authenticated API |
+| Git worktree → API/DB | `session.created`, `session.idle`, `ingenium_repository_sync` | Resource sync through MCP stdio and authenticated API |
 | API/DB repair → worktree | Explicit administrative repair only | Authenticated API/MCP operation; never automatic external sync |
 | Build/runtime | Extension or plugin change | Rebuild extension and restart OpenCode |
 | Scheduled learning | Every 15 min (API scheduler) | Runs extraction → synthesis; this is separate from resource sync |
+
+The explicit `ingenium_repository_sync` operation projects repository Markdown
+and, when requested, version-2 skills/agents/plugins manifests through
+`POST /api/v1/repository/sync`. It carries an `expectedGeneration` for
+compare-and-swap and has a `dryRun` mode; it does not carry a coordination claim
+proof. Commands and config are excluded from this repository-sync lifecycle.
 
 ### Lineage-proven tombstone cleanup
 

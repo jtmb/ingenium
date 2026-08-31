@@ -392,7 +392,9 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
         client: { app: { log: vi.fn() } },
       }) as { event: (input: unknown) => Promise<void> };
 
-      await expect(hooks.event(OPENCODE_HOOK_MATRIX.sessionCreated)).resolves.toBeUndefined();
+      expect(hooks.event(OPENCODE_HOOK_MATRIX.sessionCreated)).toBeUndefined();
+      const { drainRepositoryLifecycleQueue } = await import("./resource-sync.js");
+      await drainRepositoryLifecycleQueue(worktree);
       expect(mockCallMcpTool).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({
         project: basename(worktree),
       }));
@@ -422,12 +424,13 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
 
     const autoHooks = await applyOpenCode1189V1Server(autoWrapper, wrapperSpecs[0], input) as { event: (input: unknown) => Promise<void> };
     const observerHooks = await applyOpenCode1189V1Server(observerWrapper, wrapperSpecs[1], input) as { event: (input: unknown) => Promise<void> };
-    const resourceHooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], input) as { event: (input: unknown) => Promise<void> };
+    const resourceHooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], input) as { event: (input: unknown) => void };
 
     await expect(autoHooks.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
     await expect(observerHooks.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
-    await expect(resourceHooks.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
-    await Promise.resolve();
+    expect(resourceHooks.event({ event: { type: "session.created" } })).toBeUndefined();
+    const { drainRepositoryLifecycleQueue } = await import("./resource-sync.js");
+    await drainRepositoryLifecycleQueue(input.worktree);
 
     const output = JSON.stringify(log.mock.calls);
     expect(output).toContain("trigger_extraction: request_failed");

@@ -88,10 +88,14 @@ function hasBoundedRepositoryManifests(docsManifest: unknown, resourcesManifest:
   }
 }
 
-function unavailable() {
+function failure(code = "REPOSITORY_SYNC_FAILED", message = "Repository synchronization failed.", currentGeneration?: number) {
   return {
     isError: true as const,
-    content: [{ type: "text" as const, text: JSON.stringify({ error: { code: "REPOSITORY_SYNC_FAILED", message: "Repository synchronization failed." } }) }],
+    content: [{ type: "text" as const, text: JSON.stringify({ error: {
+      code,
+      message,
+      ...(Number.isSafeInteger(currentGeneration) && currentGeneration! >= 0 ? { currentGeneration } : {}),
+    } }) }],
   };
 }
 
@@ -104,18 +108,35 @@ export async function repositorySync(
   docsManifest: unknown,
   resourcesManifest: unknown | undefined,
   expectedGeneration: number,
-  claim: Record<string, unknown>,
   dryRun = false,
 ) {
-  if (!hasBoundedRepositoryManifests(docsManifest, resourcesManifest)) return unavailable();
+  if (!hasBoundedRepositoryManifests(docsManifest, resourcesManifest)) {
+    return failure("INVALID_REPOSITORY_SYNC", "Repository synchronization request is invalid.");
+  }
   try {
-    const applied = await api.post("/repository/sync", {
-      docsManifest, resourcesManifest, expectedGeneration, claim, dryRun,
+    const response = await api.settled.post("/repository/sync", {
+      docsManifest, resourcesManifest, expectedGeneration, dryRun,
     }, { project });
+    if (!response.ok) {
+      const error = isRecord(response.payload) && isRecord(response.payload.error) ? response.payload.error : {};
+      if (response.status === 409 && error.code === "MANIFEST_GENERATION_CONFLICT"
+        && Number.isSafeInteger(error.currentGeneration) && (error.currentGeneration as number) >= 0) {
+        return failure("MANIFEST_GENERATION_CONFLICT", "Repository manifest generation changed.", error.currentGeneration as number);
+      }
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return failure("REPOSITORY_SYNC_AUTHORIZATION_FAILED", "Repository synchronization was not authorized.");
+      }
+      if (response.status === 400 || response.status === 422) {
+        return failure("INVALID_REPOSITORY_SYNC", "Repository synchronization request is invalid.");
+      }
+      if (response.status === 429) return failure("RATE_LIMITED", "Repository synchronization is rate limited.");
+      return failure();
+    }
+    const applied = response;
     if (!isRecord(applied.data) || !isRecord(applied.data.docs)
       || !Number.isSafeInteger(applied.data.generation) || typeof applied.data.manifestHash !== "string"
-      || !/^[0-9a-f]{64}$/.test(applied.data.manifestHash)) return unavailable();
-    const response: Record<string, unknown> = {
+      || !/^[0-9a-f]{64}$/.test(applied.data.manifestHash)) return failure();
+    const output: Record<string, unknown> = {
       project,
       dryRun: applied.data.dryRun === true,
       generation: applied.data.generation,
@@ -124,8 +145,8 @@ export async function repositorySync(
     };
     if (resourcesManifest !== undefined) {
       const resources = applied.data.resources;
-      if (!isRecord(resources) || !isRecord(resources.summary)) return unavailable();
-      response.resources = {
+      if (!isRecord(resources) || !isRecord(resources.summary)) return failure();
+      output.resources = {
         summary: {
           skill: summary(resources.summary.skill, RESOURCE_SUMMARY_KEYS),
           agent: summary(resources.summary.agent, RESOURCE_SUMMARY_KEYS),
@@ -133,8 +154,8 @@ export async function repositorySync(
         },
       };
     }
-    return { content: [{ type: "text" as const, text: JSON.stringify(response) }] };
+    return { content: [{ type: "text" as const, text: JSON.stringify(output) }] };
   } catch {
-    return unavailable();
+    return failure();
   }
 }

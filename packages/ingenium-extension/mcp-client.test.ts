@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   McpBridgeError,
+  MCP_LIVE_RELOAD_MAX_TIMEOUT_MS,
   callMcpTool,
   openMcpToolClient,
   packagedLauncherPath,
   resolveNodeExecutable,
+  reconnectIngeniumMcp,
   sanitizeMcpStderr,
   withMcpClient,
   type McpBridgeLaunchOptions,
@@ -240,6 +242,35 @@ describe("extension MCP client bridge", () => {
     expect(JSON.stringify(error)).not.toContain(SENTINEL_CREDENTIAL);
   });
 
+  it("maps a repository generation conflict to the bounded retry revision", async () => {
+    prepareWorktree();
+    const credentialPath = join(worktree, ".opencode", ".ingenium-repository-sync-credential");
+    writeFileSync(credentialPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    chmodSync(credentialPath, 0o600);
+    const error = await callMcpTool(worktree, "repository_sync", { project: "mcp-client-project" }, {
+      launcherPath: "/package/dist/scripts/mcp-server.js",
+      createTransport: () => ({ stderr: new PassThrough(), close: async () => undefined }),
+      createClient: () => ({
+        connect: async () => undefined,
+        callTool: async () => ({
+          isError: true,
+          content: [{ type: "text", text: JSON.stringify({
+            error: { code: "MANIFEST_GENERATION_CONFLICT", message: SENTINEL_CREDENTIAL, currentGeneration: 9 },
+          }) }],
+        }),
+        close: async () => undefined,
+      }),
+    }).catch((failure) => failure);
+
+    expect(error).toMatchObject({
+      failure: "revision_conflict",
+      stage: "call",
+      currentRevision: 9,
+      errorCode: "MANIFEST_GENERATION_CONFLICT",
+    });
+    expect(JSON.stringify(error)).not.toContain(SENTINEL_CREDENTIAL);
+  });
+
   it("retains only a normalized coordination error code", async () => {
     prepareWorktree();
     const error = await callMcpTool(worktree, "coordination_claim", { project: "mcp-client-project" }, {
@@ -303,5 +334,56 @@ describe("extension MCP client bridge", () => {
     expect(connect).toHaveBeenCalledTimes(1);
     expect(callTool).toHaveBeenCalledTimes(2);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("disconnects, reconnects, and checks only the injected Ingenium MCP server", async () => {
+    const disconnect = vi.fn().mockResolvedValue({});
+    const connect = vi.fn().mockResolvedValue({});
+    const status = vi.fn().mockResolvedValue({ data: { ingenium: { status: "connected" }, retained: { status: "connected" } } });
+
+    await expect(reconnectIngeniumMcp({ mcp: { disconnect, connect, status } }, "/workspace/project", 5_000))
+      .resolves.toEqual({ status: "connected" });
+    expect(disconnect).toHaveBeenCalledWith({ path: { name: "ingenium" }, query: { directory: "/workspace/project" } });
+    expect(connect).toHaveBeenCalledWith({ path: { name: "ingenium" }, query: { directory: "/workspace/project" } });
+    expect(status).toHaveBeenCalledWith({ query: { directory: "/workspace/project" } });
+    expect(JSON.stringify([disconnect.mock.calls, connect.mock.calls])).not.toContain("retained");
+  });
+
+  it.each([4_999, 5_000.5, MCP_LIVE_RELOAD_MAX_TIMEOUT_MS + 1])("rejects invalid live reload timeout %s", async (timeoutMs) => {
+    await expect(reconnectIngeniumMcp({ mcp: {} }, "/workspace/project", timeoutMs))
+      .rejects.toBeInstanceOf(McpBridgeError);
+  });
+
+  it("accepts the maximum timeout and rejects a relative reload directory", async () => {
+    const mcp = {
+      disconnect: vi.fn().mockResolvedValue({}),
+      connect: vi.fn().mockResolvedValue({}),
+      status: vi.fn().mockResolvedValue({ data: { ingenium: { status: "connected" } } }),
+    };
+    await expect(reconnectIngeniumMcp({ mcp }, "/workspace/project", MCP_LIVE_RELOAD_MAX_TIMEOUT_MS)).resolves.toBeDefined();
+    await expect(reconnectIngeniumMcp({ mcp }, "relative/project", 5_000)).rejects.toBeInstanceOf(McpBridgeError);
+  });
+
+  it("returns a sanitized failure when reconnect status omits Ingenium", async () => {
+    const error = await reconnectIngeniumMcp({
+      mcp: {
+        disconnect: vi.fn().mockResolvedValue({}),
+        connect: vi.fn().mockResolvedValue({}),
+        status: vi.fn().mockResolvedValue({ data: { attacker: { detail: SENTINEL_CREDENTIAL } } }),
+      },
+    }, "/workspace/project", 5_000).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(McpBridgeError);
+    expect(JSON.stringify(error)).not.toContain(SENTINEL_CREDENTIAL);
+  });
+
+  it("rejects a non-connected Ingenium status", async () => {
+    await expect(reconnectIngeniumMcp({
+      mcp: {
+        disconnect: vi.fn().mockResolvedValue({}),
+        connect: vi.fn().mockResolvedValue({}),
+        status: vi.fn().mockResolvedValue({ data: { ingenium: { status: "failed", detail: SENTINEL_CREDENTIAL } } }),
+      },
+    }, "/workspace/project", 5_000)).rejects.toBeInstanceOf(McpBridgeError);
   });
 });

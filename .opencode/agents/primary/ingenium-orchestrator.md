@@ -49,6 +49,9 @@ permission:
     "cargo test*": allow
     "cargo check*": allow
     "cargo build*": allow
+  "ingenium_coordination_update": allow
+  "ingenium_coordination_claim": allow
+  "ingenium_coordination_release": allow
   task:
     "*": "deny"
     "ingenium-explore": "allow"

@@ -157,27 +157,21 @@ describe("packaged extension lifecycle MCP boundary", () => {
     vi.stubGlobal("fetch", fetchMock);
     mockCallMcpTool.mockImplementation(async (_worktree: string, name: string, args: Record<string, unknown>) => successfulMcpTool(name, args));
 
-    const { ResourceSyncPlugin } = await import("./resource-sync.js");
+    const { drainRepositoryLifecycleQueue, ResourceSyncPlugin } = await import("./resource-sync.js");
     const { AutoObserverPlugin } = await import("./auto-observer.js");
     const { ObserverPlugin } = await import("./observer.js");
     const log = vi.fn();
 
     const resourceSync = await ResourceSyncPlugin({ worktree, client: { app: { log } } });
     await resourceSync.event({ event: { type: "session.created", properties: { info: { id: "session-resource-sync" } } } });
+    await drainRepositoryLifecycleQueue(worktree);
     const autoObserver = await AutoObserverPlugin({ worktree, client: { app: { log } } });
     await autoObserver.event({ event: { type: "session.idle" } });
     const observer = await ObserverPlugin({ worktree, client: { app: { log } } });
     await observer.event({ event: { type: "session.created", session: { id: "session-1" } } });
 
     expect(mockCallMcpTool.mock.calls.map(([, name]) => name)).toEqual([
-      "coordination_update",
-      "coordination_claim",
-      "coordination_claim",
-      "coordination_claim",
       "repository_sync",
-      "coordination_claim",
-      "coordination_claim",
-      "coordination_claim",
       "extraction_run",
       "pipeline_event_log",
       "pipeline_event_log",
@@ -200,61 +194,34 @@ describe("packaged extension lifecycle MCP boundary", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const log = vi.fn();
     mockCallMcpTool.mockRejectedValue(new Error("Bearer secret-token http://private.example/stack"));
-    const { ResourceSyncPlugin } = await import("./resource-sync.js");
+    const { drainRepositoryLifecycleQueue, ResourceSyncPlugin } = await import("./resource-sync.js");
 
     const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log } } });
     await plugin.event({ event: { type: "session.created", properties: { info: { id: "session-resource-sync" } } } });
+    await drainRepositoryLifecycleQueue(worktree);
 
     const diagnostic = JSON.stringify(log.mock.calls);
-    expect(diagnostic).toContain("coordination: request_failed");
+    expect(diagnostic).toContain("resource_sync: request_failed");
     expect(diagnostic).not.toContain("secret-token");
     expect(diagnostic).not.toContain("private.example");
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
   });
 
-  it("holds the repository claim around the complete session-triggered sync", async () => {
+  it("runs session-triggered sync without creating a coordination session or claim", async () => {
     mockCallMcpTool.mockImplementation(async (_worktree: string, name: string, args: Record<string, unknown>) => successfulMcpTool(name, args));
-    const { ResourceSyncPlugin } = await import("./resource-sync.js");
+    const { drainRepositoryLifecycleQueue, ResourceSyncPlugin } = await import("./resource-sync.js");
     const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log: vi.fn() } } });
 
     await plugin.event({ event: {
       type: "session.created",
       properties: { info: { id: "session-resource-sync" } },
     } });
+    await drainRepositoryLifecycleQueue(worktree);
 
-    expect(mockCallMcpTool.mock.calls.map(([, name]) => name)).toEqual([
-      "coordination_update",
-      "coordination_claim",
-      "coordination_claim",
-      "coordination_claim",
-      "repository_sync",
-      "coordination_claim",
-      "coordination_claim",
-      "coordination_claim",
-    ]);
-    const claimCalls = mockCallMcpTool.mock.calls.filter(([, name]) => name === "coordination_claim");
-    const claim = claimCalls[0]![2];
-    expect(claimCalls.map(([, , args]) => args.action ?? "batch")).toEqual([
-      "batch", "renew", "verify", "renew", "verify", "complete",
-    ]);
-    expect(claim).toEqual(expect.objectContaining({
-      expected_revision: 0,
-      fence: 1,
-      ownership_token: expect.any(String),
-      client_claim_key: expect.any(String),
-      claims: [{ claim: { kind: "reserved", name: "@repository" } }],
-    }));
+    expect(mockCallMcpTool.mock.calls.map(([, name]) => name)).toEqual(["repository_sync"]);
     const sync = mockCallMcpTool.mock.calls.find(([, name]) => name === "repository_sync")![2];
-    expect(sync.claim).toEqual(expect.objectContaining({
-      accepted_epoch: 1,
-      client_claim_key: claim.client_claim_key,
-      expected_revision: expect.any(Number),
-      fence: 1,
-      ownership_token: expect.any(String),
-    }));
-    expect(claim.client_claim_key).not.toBe(claim.ownership_token);
-    expect(mockCallMcpTool.mock.calls.some(([, name]) => name === "coordination_release")).toBe(false);
+    expect(sync).not.toHaveProperty("claim");
   });
 
   it.each([

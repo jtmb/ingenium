@@ -406,7 +406,11 @@ authPreflightRouter.get("/preflight", (req, res) => {
       workspaceId: principal.workspaceId,
       launcherWorktree: principal.launcherWorktree,
       storageMappingHash: principal.storageMappingHash,
+      // Keep the legacy flag conservative for older extensions. New clients
+      // use this mode for content rotation only; binding, config, and plugin
+      // identity changes still require a full OpenCode restart.
       restartRequiredOnCredentialChange: true,
+      credentialChangeMode: principal.audience === "mcp" ? "live-mcp-reload" : "restart",
     } : {}),
   } });
 });

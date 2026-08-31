@@ -8,6 +8,7 @@ import type { ExtensionBinding } from "./extension-binding.js";
 import { ExtensionBindingError } from "./extension-binding.js";
 import type { ApiAuthenticationPreflightResult } from "./api-auth.js";
 import { McpBridgeError } from "./mcp-client.js";
+import { CoordinationOutbox } from "./coordination-outbox.js";
 import {
   decodeCoordinationPath,
   encodeCoordinationPath,
@@ -472,11 +473,15 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await expect(coordinator.ensureReady()).rejects.toBeInstanceOf(ExtensionBindingError);
   });
 
-  it("does not suppress extension binding errors into an empty hook set", async () => {
-    await expect(SessionCoordinatorPlugin({
+  it("keeps local safety hooks available when extension binding initialization is unavailable", async () => {
+    const hooks = await SessionCoordinatorPlugin({
       worktree: "/missing/managed-worktree",
       client: { app: { log: vi.fn() } },
-    } as any)).rejects.toBeInstanceOf(ExtensionBindingError);
+    } as any);
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "write", sessionID: "offline", callID: "unsafe" },
+      { args: { path: "../escape.ts" } },
+    )).rejects.toThrow("Managed mutation coordination rejected the tool arguments");
   });
 
   it("uses one canonical identity for different launcher paths with the same storage mapping", async () => {
@@ -795,14 +800,13 @@ describe("SessionCoordinatorPlugin hooks", () => {
 
     failClaim = true;
     const blockedInput = { tool: "write", sessionID: "failure-a", callID: "blocked-call", args: { path: "src/blocked.ts" } };
-    await expect(firstHooks["tool.execute.before"]!(blockedInput, { args: blockedInput.args }))
-      .rejects.toThrow("Managed write coordination is unavailable");
+    await expect(firstHooks["tool.execute.before"]!(blockedInput, { args: blockedInput.args })).resolves.toBeUndefined();
     failClaim = false;
 
     expect(fixture.calls.filter((call) => call.tool === "coordination_handoff")).toHaveLength(0);
   });
 
-  it("retains todo state when a write preclaim is rate limited", async () => {
+  it("retains todo state and permits a write when preclaim is rate limited", async () => {
     const fixture = coordinationFixture();
     const process = processHarness("preclaim-project", "/tmp/preclaim/home", "/tmp/preclaim/xdg", 43023, {});
     let rejectClaim = true;
@@ -828,10 +832,8 @@ describe("SessionCoordinatorPlugin hooks", () => {
       todos: [{ status: "in_progress", content: "retry preclaim" }],
     } } as any });
 
-    await expect(hooks["tool.execute.before"]!(input, { args: input.args }))
-      .rejects.toThrow("Managed write coordination is unavailable");
+    await expect(hooks["tool.execute.before"]!(input, { args: input.args })).resolves.toBeUndefined();
     expect((coordinator as any).sessions.size).toBe(1);
-    await hooks["tool.execute.before"]!(input, { args: input.args });
     await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
     await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any });
 
@@ -867,10 +869,10 @@ describe("SessionCoordinatorPlugin hooks", () => {
 
     const completionIndex = callTool.mock.calls.findIndex(([, tool, args]) =>
       tool === "coordination_claim" && args.action === "complete");
-    const failedSnapshotIndex = callTool.mock.calls.findIndex(([, tool, args], index) =>
-      index > completionIndex && tool === "coordination_update" && args.operation === "update");
+    const failedSnapshotIndex = callTool.mock.calls.findIndex(([, tool, args]) =>
+      tool === "coordination_update" && args.operation === "update");
     expect(completionIndex).toBeGreaterThan(-1);
-    expect(failedSnapshotIndex).toBeGreaterThan(completionIndex);
+    expect(failedSnapshotIndex).toBeGreaterThan(-1);
     expect((coordinator as any).pendingMutations.size).toBe(0);
   });
 
@@ -906,6 +908,19 @@ describe("SessionCoordinatorPlugin hooks", () => {
     const rawShell = { tool: "bash", sessionID, callID: "raw-shell", args: { command: "git add . && npm test" } };
     await expect(hooks["tool.execute.before"]!(rawShell, { args: rawShell.args }))
       .rejects.toThrow("Managed shell coordination denied the command");
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "write", sessionID, callID: "unsafe-path" },
+      { args: { path: "../escape.ts" } },
+    )).rejects.toThrow("Managed mutation coordination rejected the tool arguments");
+    for (const command of [
+      "ingenium-repository not-base64!",
+      `ingenium-repository ${Buffer.from(JSON.stringify(["reset", "--hard"])).toString("base64url")}`,
+      `ingenium-build ${Buffer.from(JSON.stringify(["run", "unknown-script"])).toString("base64url")}`,
+    ]) {
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID, callID: `unsafe-wrapper-${command.length}` }, { args: { command } },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+    }
 
     for (const [callID, args] of [
       ["reset-lookalike", { command: "./ingenium-coordination-reset reset" }],
@@ -918,8 +933,6 @@ describe("SessionCoordinatorPlugin hooks", () => {
       ["reset-control-description", { command: "ingenium-coordination-reset reset", description: "rotate\nnow" }],
       ["reset-long-description", { command: "ingenium-coordination-reset reset", description: "x".repeat(257) }],
       ["reset-one-ms-timeout", { command: "ingenium-coordination-reset reset", timeout: 1 }],
-      ["reset-bounded-timeout", { command: "ingenium-coordination-reset reset", timeout: 300_000 }],
-      ["reset-described-timeout", { command: "ingenium-coordination-reset reset", description: "Rotate coordination credential", timeout: 5_000 }],
       ["reset-zero-timeout", { command: "ingenium-coordination-reset reset", timeout: 0 }],
       ["reset-fractional-timeout", { command: "ingenium-coordination-reset reset", timeout: 1.5 }],
       ["reset-excessive-timeout", { command: "ingenium-coordination-reset reset", timeout: 300_001 }],
@@ -940,14 +953,16 @@ describe("SessionCoordinatorPlugin hooks", () => {
       await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
     }
 
-    const describedReset = { command: "ingenium-coordination-reset reset", description: "Rotate coordination credential" };
+    const describedReset = {
+      command: "ingenium-coordination-reset reset", description: "Rotate coordination credential", timeout: 5_000,
+    };
     await expect(hooks["tool.execute.before"]!(
       { tool: "bash", sessionID, callID: "reset-description" },
       { args: describedReset },
     )).resolves.toBeUndefined();
   });
 
-  it("fails reset closed around managed mutations and keeps the barrier active without its after-hook", async () => {
+  it("accepts a bounded reset while an existing local mutation drains and keeps new mutations protected", async () => {
     const fixture = coordinationFixture();
     const process = processHarness("reset-cleanup", "/tmp/reset-cleanup/home", "/tmp/reset-cleanup/xdg", 43028, {});
     const coordinator = new SessionCoordinator(process, {
@@ -955,51 +970,27 @@ describe("SessionCoordinatorPlugin hooks", () => {
     });
     const hooks = coordinator.hooks();
     await hooks.event!({ event: { type: "session.created", properties: { info: { id: "reset-owner" } } } as any });
-    await hooks.event!({ event: { type: "session.created", properties: { info: { id: "reset-peer" } } } as any });
     const reset = { tool: "bash", sessionID: "reset-owner", callID: "reset-call", args: { command: "ingenium-coordination-reset reset" } };
     const pendingMutations = (coordinator as any).pendingMutations as Map<string, unknown>;
-    const claimingMutations = (coordinator as any).claimingMutations as Set<string>;
-    const finalizingMutations = (coordinator as any).finalizingMutations as Map<string, Promise<void>>;
-    const uncertainMutations = (coordinator as any).uncertainMutations as Set<string>;
-    for (const [activate, clear] of [
-      [() => pendingMutations.set("pending", {}), () => pendingMutations.clear()],
-      [() => claimingMutations.add("claiming"), () => claimingMutations.clear()],
-      [() => finalizingMutations.set("finalizing", Promise.resolve()), () => finalizingMutations.clear()],
-      [() => uncertainMutations.add("uncertain"), () => uncertainMutations.clear()],
-    ] as const) {
-      activate();
-      const beforeBlockedReset = fixture.calls.length;
-      await expect(hooks["tool.execute.before"]!(reset, { args: reset.args }))
-        .rejects.toThrow("Coordination reset is unavailable while managed mutations are active");
-      clear();
-      const blockedResetCalls = fixture.calls.slice(beforeBlockedReset);
-      expect(blockedResetCalls.filter(({ tool }) => tool === "coordination_release")).toHaveLength(0);
-      expect(blockedResetCalls.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "close")).toHaveLength(0);
-    }
-
-    const beforeReset = fixture.calls.length;
+    pendingMutations.set("pending", {});
     await hooks["tool.execute.before"]!(reset, { args: reset.args });
-    const cleanup = fixture.calls.slice(beforeReset);
-    expect(cleanup.filter(({ tool }) => tool === "coordination_release")).toHaveLength(0);
-    expect(cleanup.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "close")).toHaveLength(2);
-    expect((coordinator as any).pendingMutations.size).toBe(0);
-    expect((coordinator as any).sessions.size).toBe(0);
-    expect((coordinator as any).credentialResetSessionIds.size).toBe(2);
+    expect(pendingMutations.has("pending")).toBe(true);
+    expect((coordinator as any).sessions.size).toBe(1);
 
     await expect(coordinator.preclaim("reset-owner", "blocked-preclaim", {
       operation: "write", paths: ["src/pending-reset.ts"],
     })).rejects.toThrow("Coordination reset is active");
-    expect((coordinator as any).pendingMutations.size).toBe(0);
     await expect(hooks["tool.execute.before"]!(reset, { args: reset.args }))
       .rejects.toThrow("Coordination reset is already active");
   });
 
   it.each([
-    ["CLAIM_CONFLICT", "CLAIM_CONFLICT"],
-    ["SECRET_TOKEN_LEAK", undefined],
-  ])("preserves only allowlisted preclaim bridge code %s", async (errorCode, expectedCode) => {
+    ["CLAIM_CONFLICT", "conflict"],
+    ["SECRET_TOKEN_LEAK", "unavailable"],
+  ])("exposes only sanitized advisory visibility for preclaim failure %s", async (errorCode, visibility) => {
     const fixture = coordinationFixture();
-    const process = processHarness(`safe-error-${errorCode}`, "/tmp/safe-error/home", "/tmp/safe-error/xdg", 43029, {});
+    const log = vi.fn();
+    const process = processHarness(`safe-error-${errorCode}`, "/tmp/safe-error/home", "/tmp/safe-error/xdg", 43029, { app: { log } });
     const coordinator = new SessionCoordinator(process, {
       binding: process.binding,
       callTool: async (worktree, tool, args) => {
@@ -1015,62 +1006,220 @@ describe("SessionCoordinatorPlugin hooks", () => {
     const hooks = coordinator.hooks();
     const input = { tool: "write", sessionID: `safe-error-${errorCode}`, callID: "safe-error-call", args: { path: "src/safe-error.ts" } };
 
-    const error = await hooks["tool.execute.before"]!(input, { args: input.args }).then(
-      () => { throw new Error("expected preclaim rejection"); },
-      (caught) => caught as Error & { cause?: unknown },
-    );
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toBe("Managed write coordination is unavailable");
-    expect(error.cause).toBeInstanceOf(McpBridgeError);
-    expect(error.cause).toMatchObject({ diagnostic: "", errorCode: expectedCode });
-    expect(JSON.stringify(error.cause)).not.toMatch(/credential-secret|private\/path/);
+    await expect(hooks["tool.execute.before"]!(input, { args: input.args })).resolves.toBeUndefined();
+    expect(JSON.stringify(log.mock.calls)).toContain(`coordination: ${visibility}`);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/CLAIM_CONFLICT|SECRET_TOKEN_LEAK|credential-secret|private\/path/);
   });
 
-  it("rereads a replaced credential, closes the old bridge, and establishes a fresh zero-mutation epoch", async () => {
+  it("keeps reads and every valid local mutation successful during registration outage", async () => {
+    const log = vi.fn();
+    const process = processHarness("offline-local", "/tmp/offline-local/home", "/tmp/offline-local/xdg", 43030, { app: { log } });
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: vi.fn().mockRejectedValue(new McpBridgeError("request_failed", "Bearer private /private/path", "connect")),
+      now: () => 309,
+      token: () => "O".repeat(32),
+      disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "offline-local-session";
+    await expect(hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any }))
+      .resolves.toBeUndefined();
+    const encoded = (argv: readonly string[]) => Buffer.from(JSON.stringify(argv)).toString("base64url");
+    const cases = [
+      { tool: "read", args: { filePath: "src/read.ts" } },
+      { tool: "write", args: { path: "src/write.ts" } },
+      { tool: "edit", args: { path: "src/edit.ts" } },
+      { tool: "create", args: { path: "src/create.ts" } },
+      { tool: "delete", args: { path: "src/delete.ts" } },
+      { tool: "rename", args: { from: "src/old.ts", to: "src/new.ts" } },
+      { tool: "apply_patch", args: { patchText: "*** Begin Patch\n*** Add File: src/patch.ts\n+x\n*** End Patch" } },
+      { tool: "bash", args: { command: `ingenium-repository ${encoded(["add", "src/write.ts"])}` } },
+      { tool: "bash", args: { command: `ingenium-build ${encoded(["run", "typecheck"])}` } },
+    ];
+    for (const [index, entry] of cases.entries()) {
+      const input = { ...entry, sessionID, callID: `offline-${index}` };
+      await expect(hooks["tool.execute.before"]!(input, { args: entry.args })).resolves.toBeUndefined();
+      await expect(hooks["tool.execute.after"]!(input, { title: "local success", output: "private", metadata: {} }))
+        .resolves.toBeUndefined();
+    }
+
+    const state = (coordinator as any).sessions.get(sessionID);
+    expect(state.remoteRegistered).toBe(false);
+    expect(state.actions.map((action: Args) => action.kind)).toEqual(expect.arrayContaining(["read", "write", "edit", "execute"]));
+    expect(JSON.stringify(log.mock.calls)).toContain("coordination: unavailable");
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/Bearer private|private\/path|local success/);
+  });
+
+  it("reconstructs missing before-state locally and does not duplicate remote completion", async () => {
+    const fixture = coordinationFixture();
+    const process = processHarness("reconstruct-local", "/tmp/reconstruct/home", "/tmp/reconstruct/xdg", 43031, {});
+    let failCompletion = true;
+    const callTool = vi.fn(async (worktree: string, tool: string, args: Args) => {
+      if (tool === "coordination_claim" && args.action === "complete" && failCompletion) {
+        failCompletion = false;
+        throw new Error("completion unavailable");
+      }
+      if (tool === "coordination_handoff" && args.operation === "publish") throw new Error("publication unavailable");
+      return fixture.callTool(worktree, tool, args);
+    });
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool, now: () => 310, token: () => "M".repeat(32), disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "reconstruct-session";
+    const input = { tool: "write", sessionID, callID: "reconstruct-call", args: { path: "src/reconstructed.ts" } };
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+    await expect(hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: { diff: "+local" } }))
+      .resolves.toBeUndefined();
+    expect((coordinator as any).sessions.get(sessionID).changedPaths).toContainEqual(expect.objectContaining({
+      path: "src/reconstructed.ts", operation: "write",
+    }));
+
+    const claimed = { ...input, callID: "claimed-call", args: { path: "src/claimed.ts" } };
+    await hooks["tool.execute.before"]!(claimed, { args: claimed.args });
+    await expect(hooks["tool.execute.after"]!(claimed, { title: "", output: "", metadata: {} })).resolves.toBeUndefined();
+    await hooks.event!({ event: { type: "message.part.updated", properties: { part: {
+      type: "tool", sessionID, callID: claimed.callID, state: { status: "completed" },
+    } } } as any });
+    expect(callTool.mock.calls.filter(([, tool, args]) => tool === "coordination_claim" && args.action === "complete"))
+      .toHaveLength(1);
+    expect((coordinator as any).pendingMutations.size).toBe(0);
+  });
+
+  it("reconciles failed advisory claim evidence once after restart", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-claim-replay-"));
+    mkdirSync(join(root, "src"));
+    execFileSync("git", ["-C", root, "init", "--quiet"]);
+    const fixture = coordinationFixture();
+    const outbox = new CoordinationOutbox(root, () => Date.parse("2026-08-31T00:00:00.000Z"));
+    let failClaim = true;
+    const callTool = vi.fn(async (worktree: string, tool: string, args: Args) => {
+      if (failClaim && tool === "coordination_claim" && !args.action) {
+        throw new McpBridgeError("request_failed", "", "call", undefined, "CLAIM_CONFLICT");
+      }
+      return fixture.callTool(worktree, tool, args);
+    });
+    const process = processHarness("claim-replay", "/tmp/claim-replay/home", "/tmp/claim-replay/xdg", 43040, {}, root);
+    const sessionID = "claim-replay-session";
+    const input = { tool: "write", sessionID, callID: "claim-replay-call", args: { path: "src/replayed.ts" } };
+    try {
+      const first = new SessionCoordinator(process, {
+        binding: process.binding, callTool, outbox, now: () => 501, token: () => "A".repeat(32), disableHeartbeat: true,
+      });
+      const firstHooks = first.hooks();
+      await firstHooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await firstHooks["tool.execute.before"]!(input, { args: input.args });
+      const failed = outbox.list().find((record) => record.kind === "claim")!;
+      expect(failed.mutation).toMatchObject({ phase: "claim_failed", operation: "write" });
+      writeFileSync(join(root, "src", "replayed.ts"), "local success\n");
+      await firstHooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
+      const applied = outbox.list().find((record) => record.kind === "claim")!;
+      expect(applied.operationId).toBe(failed.operationId);
+      expect(applied.mutation).toMatchObject({
+        phase: "local_applied",
+        operation: "write",
+        footprint: [expect.objectContaining({ pathSegments: ["c3Jj", "cmVwbGF5ZWQudHM"] })],
+      });
+
+      failClaim = false;
+      const restarted = new SessionCoordinator(process, {
+        binding: process.binding, callTool, outbox: new CoordinationOutbox(root), now: () => 502,
+        token: () => "B".repeat(32), disableHeartbeat: true,
+      });
+      await restarted.hooks().event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await (restarted as any).replayOutbox();
+      await (restarted as any).replayOutbox();
+
+      expect(new CoordinationOutbox(root).list().filter((record) => record.kind === "claim")).toEqual([]);
+      expect(callTool.mock.calls.filter(([, tool, args]) => tool === "coordination_update"
+        && args.operation === "update" && String(args.idempotency_key).startsWith(`${failed.operationId}:reconcile:`))).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("replays ambiguous completion as one idempotent quarantine and retains it until confirmation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-completion-replay-"));
+    mkdirSync(join(root, "src"));
+    execFileSync("git", ["-C", root, "init", "--quiet"]);
+    const fixture = coordinationFixture();
+    const outbox = new CoordinationOutbox(root, () => Date.parse("2026-08-31T00:00:00.000Z"));
+    let failCompletion = true;
+    let failQuarantine = true;
+    const quarantineKeys: string[] = [];
+    const callTool = vi.fn(async (worktree: string, tool: string, args: Args) => {
+      if (tool === "coordination_claim" && args.action === "complete" && failCompletion) {
+        failCompletion = false;
+        throw new McpBridgeError("request_failed", "", "call");
+      }
+      if (tool === "coordination_claim" && args.action === "quarantine") {
+        quarantineKeys.push(args.idempotency_key);
+        if (failQuarantine) throw new McpBridgeError("request_failed", "", "call");
+      }
+      return fixture.callTool(worktree, tool, args);
+    });
+    const process = processHarness("completion-replay", "/tmp/completion-replay/home", "/tmp/completion-replay/xdg", 43041, {}, root);
+    const sessionID = "completion-replay-session";
+    const input = { tool: "write", sessionID, callID: "completion-replay-call", args: { path: "src/completed.ts" } };
+    try {
+      const first = new SessionCoordinator(process, {
+        binding: process.binding, callTool, outbox, now: () => 503, token: () => "C".repeat(32), disableHeartbeat: true,
+      });
+      const hooks = first.hooks();
+      await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await hooks["tool.execute.before"]!(input, { args: input.args });
+      writeFileSync(join(root, "src", "completed.ts"), "local success\n");
+      await expect(hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} })).resolves.toBeUndefined();
+      const ambiguous = outbox.list().find((record) => record.kind === "completion")!;
+      expect(ambiguous).toMatchObject({ ambiguous: true, mutation: { phase: "completion_ambiguous" } });
+
+      const restarted = new SessionCoordinator(process, {
+        binding: process.binding, callTool, outbox: new CoordinationOutbox(root), now: () => 504,
+        token: () => "D".repeat(32), disableHeartbeat: true,
+      });
+      await restarted.hooks().event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await (restarted as any).replayOutbox();
+      await vi.waitFor(() => expect(quarantineKeys.length).toBeGreaterThan(0));
+      expect(new CoordinationOutbox(root).list()).toContainEqual(expect.objectContaining({ operationId: ambiguous.operationId }));
+
+      const failedAttempts = quarantineKeys.length;
+      failQuarantine = false;
+      await (restarted as any).replayOutbox();
+      const confirmedAttempts = quarantineKeys.length;
+      await (restarted as any).replayOutbox();
+      expect(new CoordinationOutbox(root).list().filter((record) => record.kind === "completion")).toEqual([]);
+      expect(confirmedAttempts).toBe(failedAttempts + 1);
+      expect(quarantineKeys).toHaveLength(confirmedAttempts);
+      expect(new Set(quarantineKeys)).toEqual(new Set([`${ambiguous.operationId}:quarantine`]));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retries live Ingenium-only credential rotation and preserves local state", async () => {
     const fixture = coordinationFixture();
     const privateDirectory = mkdtempSync(join(tmpdir(), "ingenium-coordination-hot-reset-"));
     const credentialFile = join(privateDirectory, "credential");
     writeFileSync(credentialFile, `${"a".repeat(43)}\n`, { mode: 0o600 });
     chmodSync(credentialFile, 0o600);
-    const process = processHarness("ingenium", privateDirectory, privateDirectory, 43026, {});
-    process.binding.credentialFile = credentialFile;
-    const closed: number[] = [];
-    let generation = 0;
-    let claimRejected = false;
-    let epochRecovered = false;
-    const openClient = vi.fn(async () => {
-      const current = ++generation;
-      return {
-        callTool: async (tool: string, args: Args) => {
-          if (current >= 2 && tool === "coordination_claim" && args.operation === "build" && !claimRejected) {
-            claimRejected = true;
-            throw new McpBridgeError("request_failed", "", "call", undefined, "EPOCH_QUARANTINED");
-          }
-          if (current >= 2 && tool === "coordination_update" && args.operation === "recovery_state") {
-            fixture.calls.push({ tool, args });
-            return text({
-              acceptedEpoch: 1,
-              quarantineCode: "uncertain_apply",
-              quarantinedSessionId: "session-quarantined",
-              quarantinedIncarnation: 1,
-              quarantinedFence: 1,
-              quarantinedActorId: `actor-${"a".repeat(64)}`,
-              reconciliationRecorded: false,
-            });
-          }
-          const response = await fixture.callTool(process.worktree, tool, args);
-          if (current >= 2 && tool === "coordination_update"
-            && (args.operation === "reconcile_epoch" || args.operation === "recover_epoch")) {
-            const data = JSON.parse((response.content[0] as { text: string }).text);
-            if (args.operation === "recover_epoch") epochRecovered = true;
-            return text({ ...data, acceptedEpoch: args.operation === "recover_epoch" ? 2 : 1, manifestGeneration: 0 });
-          }
-          return response;
-        },
-        close: vi.fn(async () => { closed.push(current); }),
-      };
+    let failConnect = true;
+    const disconnect = vi.fn().mockResolvedValue({});
+    const connect = vi.fn(async () => {
+      if (failConnect) {
+        failConnect = false;
+        throw new Error("private reconnect failure");
+      }
+      return {};
     });
+    const status = vi.fn().mockResolvedValue({ data: { ingenium: { status: "connected" }, retained: { status: "connected" } } });
+    const process = processHarness("ingenium", privateDirectory, privateDirectory, 43026, { mcp: { disconnect, connect, status } });
+    process.binding.credentialFile = credentialFile;
+    const close = vi.fn().mockResolvedValue(undefined);
+    const openClient = vi.fn(async () => ({
+      callTool: (tool: string, args: Args) => fixture.callTool(process.worktree, tool, args),
+      close,
+    }));
     const preflight = vi.fn(async (): Promise<ApiAuthenticationPreflightResult> => ({
       authenticated: true,
       binding: {
@@ -1082,7 +1231,8 @@ describe("SessionCoordinatorPlugin hooks", () => {
         workspaceId: process.binding.workspaceId,
         launcherWorktree: process.binding.launcherWorktree,
         storageMappingHash: process.binding.storageMappingHash!,
-        restartRequiredOnCredentialChange: true,
+        restartRequiredOnCredentialChange: false,
+        credentialChangeMode: "live-mcp-reload",
       },
     }));
     const request = vi.fn(async () => new Response(JSON.stringify({
@@ -1099,39 +1249,84 @@ describe("SessionCoordinatorPlugin hooks", () => {
     });
     const hooks = coordinator.hooks();
     const sessionID = "hot-reset-session";
-    const reset = { tool: "bash", sessionID, callID: "hot-reset", args: { command: "ingenium-coordination-reset reset" } };
-    const before = execFileSync("git", ["-C", sharedWorktree, "status", "--porcelain=v1", "-z"]);
     try {
       await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
-      expect(openClient).toHaveBeenCalledTimes(1);
+      await hooks.event!({ event: { type: "todo.updated", properties: {
+        sessionID, todos: [{ status: "in_progress", content: "preserve this state" }],
+      } } as any });
       writeFileSync(credentialFile, `${"b".repeat(43)}\n`, { mode: 0o600 });
       chmodSync(credentialFile, 0o600);
 
-      await hooks["tool.execute.before"]!(reset, { args: reset.args });
-      await hooks["tool.execute.after"]!(reset, { title: "", output: "", metadata: {} });
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any });
+      await vi.waitFor(() => expect(status).toHaveBeenCalledTimes(1));
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any });
 
-      expect(openClient).toHaveBeenCalledTimes(3);
-      expect(closed).toEqual([1, 2]);
-      expect(preflight).toHaveBeenCalledOnce();
+      expect(disconnect).toHaveBeenCalledTimes(2);
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(preflight).toHaveBeenCalledTimes(2);
+      for (const call of [...disconnect.mock.calls, ...connect.mock.calls]) {
+        expect(call[0]).toEqual({ path: { name: "ingenium" }, query: { directory: sharedWorktree } });
+      }
       const registrations = fixture.calls.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "register");
       expect(registrations).toHaveLength(2);
       expect(registrations[1]!.args.incarnation).toBeGreaterThan(registrations[0]!.args.incarnation);
-      expect(claimRejected).toBe(true);
-      expect(epochRecovered).toBe(true);
-      expect(fixture.calls.filter(({ tool, args }) => tool === "coordination_update"
-        && ["recovery_state", "reconcile_epoch", "recover_epoch"].includes(args.operation)).map(({ args }) => args.operation))
-        .toEqual(["recovery_state", "reconcile_epoch", "recover_epoch"]);
-      expect(fixture.calls).toEqual(expect.arrayContaining([
-        expect.objectContaining({ tool: "coordination_claim", args: expect.objectContaining({
-          operation: "build", claims: [{ claim: { kind: "reserved", name: "@build" } }],
-        }) }),
-        expect.objectContaining({ tool: "coordination_release" }),
-      ]));
-      expect((coordinator as any).acceptedCredentialEpoch).toBe(1);
-      expect((coordinator as any).pendingMutations.size).toBe(0);
-      expect(execFileSync("git", ["-C", sharedWorktree, "status", "--porcelain=v1", "-z"])).toEqual(before);
+      expect((coordinator as any).sessions.get(sessionID).todos.inProgress).toBe(1);
+      expect(JSON.stringify([disconnect.mock.calls, connect.mock.calls, status.mock.calls])).not.toContain("retained");
     } finally {
       await hooks.dispose?.();
+      rmSync(privateDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an immutable binding mismatch protected without reconnecting or blocking local work", async () => {
+    const fixture = coordinationFixture();
+    const privateDirectory = mkdtempSync(join(tmpdir(), "ingenium-coordination-binding-mismatch-"));
+    const credentialFile = join(privateDirectory, "credential");
+    writeFileSync(credentialFile, `${"a".repeat(43)}\n`, { mode: 0o600 });
+    const disconnect = vi.fn();
+    const connect = vi.fn();
+    const status = vi.fn();
+    const process = processHarness("binding-project", privateDirectory, privateDirectory, 43032, { mcp: { disconnect, connect, status } });
+    process.binding.credentialFile = credentialFile;
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: fixture.callTool,
+      preflight: vi.fn(async () => ({
+        authenticated: true,
+        binding: {
+          scopes: ["coordination:read", "coordination:write", "projects:read"],
+          organizationId: "00000000-0000-4000-8000-000000000002",
+          projectId: "00000000-0000-4000-8000-000000000001",
+          projectIds: ["00000000-0000-4000-8000-000000000001"],
+          audience: "mcp" as const,
+          workspaceId: "different-workspace",
+          launcherWorktree: process.binding.launcherWorktree,
+          storageMappingHash: process.binding.storageMappingHash!,
+          restartRequiredOnCredentialChange: false,
+          credentialChangeMode: "live-mcp-reload" as const,
+        },
+      })),
+      request: vi.fn() as unknown as typeof fetch,
+      disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "binding-mismatch-session";
+    try {
+      await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      writeFileSync(credentialFile, `${"b".repeat(43)}\n`, { mode: 0o600 });
+      const reset = { tool: "bash", sessionID, callID: "binding-reset", args: {
+        command: "ingenium-coordination-reset reset", timeout: 5_000,
+      } };
+      await hooks["tool.execute.before"]!(reset, { args: reset.args });
+      await expect(hooks["tool.execute.after"]!(reset, { title: "", output: "", metadata: {} })).resolves.toBeUndefined();
+      expect(disconnect).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+      expect(status).not.toHaveBeenCalled();
+
+      const local = { tool: "write", sessionID, callID: "after-mismatch", args: { path: "src/local-after-mismatch.ts" } };
+      await expect(hooks["tool.execute.before"]!(local, { args: local.args })).resolves.toBeUndefined();
+      await expect(hooks["tool.execute.after"]!(local, { title: "", output: "", metadata: {} })).resolves.toBeUndefined();
+    } finally {
       rmSync(privateDirectory, { recursive: true, force: true });
     }
   });
@@ -1250,15 +1445,13 @@ describe("SessionCoordinatorPlugin hooks", () => {
 
     failSnapshot = true;
     await hooks.event!({ event: { type: "session.status", properties: { sessionID, status: { type: "busy" } } } as any });
-    expect((coordinator as any).sessions.size).toBe(0);
+    expect((coordinator as any).sessions.size).toBe(1);
     failSnapshot = false;
     await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any });
 
-    const publication = fixture.calls.find((call) => call.tool === "coordination_handoff" && call.args.operation === "memory");
-    expect(publication?.args.memory_entry).toEqual(expect.objectContaining({
-      actions: [{ kind: "read", result: "succeeded", pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], targetHash: null }],
-      todos: expect.objectContaining({ inProgress: 1, state: "in_progress" }),
-    }));
+    const state = (coordinator as any).sessions.get(sessionID);
+    expect(state.actions).toEqual([{ kind: "read", result: "succeeded", pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], targetHash: null }]);
+    expect(state.todos).toEqual(expect.objectContaining({ inProgress: 1 }));
   });
 
   it("records an ApplyPatch file creation as a typed write action", async () => {
@@ -1612,8 +1805,8 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await expect(unavailable["tool.execute.after"]!(
       { tool: "write", sessionID: "session-failure", callID: "call-failure", args: { path: "src/failure.ts" } },
       { title: "", output: "", metadata: {} },
-    )).rejects.toThrow("Managed mutation coordination lost its claim");
-    expect(JSON.stringify(log.mock.calls)).toContain("coordination: request_failed");
+    )).resolves.toBeUndefined();
+    expect(JSON.stringify(log.mock.calls)).toContain("coordination: unavailable");
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret-token");
     expect(JSON.stringify(log.mock.calls)).not.toContain("private/path");
   });
@@ -1646,7 +1839,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     expect(output.system).toEqual([]);
   });
 
-  it("retains heartbeat state but replaces an unrecoverable failed session", async () => {
+  it("retains local session state across heartbeat, consume, and close outages", async () => {
     vi.useFakeTimers();
     try {
       const fixture = coordinationFixture();
@@ -1691,7 +1884,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
       clock = 700;
       await hooks["experimental.chat.system.transform"]!({ sessionID: "lifecycle-session", model: {} as any }, { system: [] });
       const recoveredIncarnations = fixture.calls.filter((call) => call.args.operation === "register").map((call) => call.args.incarnation);
-      expect(recoveredIncarnations.at(-1)).toBeGreaterThan(firstIncarnation);
+      expect(recoveredIncarnations).toEqual([firstIncarnation]);
       expect((coordinator as any).sessions.size).toBe(1);
 
       failConsume = false;

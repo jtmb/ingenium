@@ -29,7 +29,9 @@ const CREDENTIAL_REFERENCE = ".opencode/.ingenium-mcp-credential";
 const LEARNING_CREDENTIAL_REFERENCE = ".opencode/.ingenium-learning-credential";
 const OWNER_PROVIDER_REFERENCE = ".opencode/.ingenium-coordination-owner-provider.json";
 const OWNER_EMAIL = "bootstrap-admin@localhost";
-const COORDINATION_SCOPES = ["coordination:read", "coordination:write", "projects:read", "repository:sync"] as const;
+const COORDINATION_SCOPES = [
+  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+] as const;
 const LEARNING_SCOPES = [
   "projects:read", "extraction:write", "extraction:execute", "synthesis:write", "synthesis:execute",
   "pipeline:write", "observe:write",

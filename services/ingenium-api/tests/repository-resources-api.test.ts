@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { coordination, getDb, projects, resetDbForTest } from "ingenium-core";
+import { getDb, projects, resetDbForTest } from "ingenium-core";
 import { repositoryRouter } from "../lib/routes/repository.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
@@ -66,7 +66,17 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json({ limit: "2mb" }));
   app.use((req, _res, next) => {
-    (req as any).principal = { kind: "service", ...binding };
+    (req as any).principal = {
+      type: "service",
+      id: "repository-sync-principal",
+      scopes: ["projects:read", "repository:sync"],
+      tokenId: "repository-sync-token",
+      organizationId: "repository-sync-organization",
+      projectId: req.get("x-test-wrong-project") === "1" ? "wrong-project" : projectId,
+      projectIds: [projectId],
+      audience: "repository-sync",
+      ...binding,
+    };
     next();
   });
   app.use("/api/v1/repository", repositoryRouter);
@@ -84,7 +94,7 @@ afterAll(async () => {
 });
 
 describe("repository resources sync API", () => {
-  it("denies unclaimed and stale legacy callers without mutating repository rows", async () => {
+  it("denies the legacy split endpoint without mutating repository rows", async () => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH!);
     const before = db.prepare("SELECT COUNT(*) AS count FROM skills WHERE project_id = ?").get(projectId);
     for (const payload of [
@@ -95,8 +105,8 @@ describe("repository resources sync API", () => {
         status: 409,
         body: {
           error: {
-            code: "REPOSITORY_SYNC_COORDINATION_REQUIRED",
-            message: "Use the coordinated repository synchronization endpoint",
+            code: "REPOSITORY_SYNC_ENDPOINT_REQUIRED",
+            message: "Use the repository synchronization endpoint",
           },
         },
       });
@@ -104,31 +114,8 @@ describe("repository resources sync API", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM skills WHERE project_id = ?").get(projectId)).toEqual(before);
   });
 
-  it("atomically applies one claimed generation and rejects its stale replay", async () => {
-    const worktreeId = coordination.coordinationWorktreeId(binding.workspaceId, binding.storageMappingHash);
-    const ownershipToken = "A".repeat(32);
-    const registered = coordination.registerCoordinationSession(projectId, {
-      worktreeId, sessionId: "repository-sync-session", incarnation: 1, ownershipToken,
-      ttlMs: 300_000, idempotencyKey: "repository-sync-register",
-    });
-    const clientClaimKey = "B".repeat(32);
-    const claimed = coordination.claimCoordinationBatch(projectId, {
-      worktreeId, sessionId: "repository-sync-session", incarnation: 1,
-      expectedRevision: registered.revision, fence: registered.fence, ownershipToken,
-      idempotencyKey: "repository-sync-claim", clientClaimKey, operation: "repository",
-      claims: [{ claim: { kind: "reserved", name: "@repository" } }],
-    });
-    const claim = {
-      worktree_id: worktreeId,
-      session_id: "repository-sync-session",
-      incarnation: 1,
-      expected_revision: claimed.session.revision,
-      fence: claimed.session.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      accepted_epoch: claimed.acceptedEpoch,
-    };
-    const body = { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: [], agents: [], plugins: [] }, dryRun: false, expectedGeneration: 0, claim };
+  it("atomically applies one principal-bound generation and returns its bounded stale generation", async () => {
+    const body = { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: [], agents: [], plugins: [] }, dryRun: false, expectedGeneration: 0 };
     const response = await fetch(`${baseUrl}/api/v1/repository/sync?project=${projectName}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -140,6 +127,17 @@ describe("repository resources sync API", () => {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     expect(stale.status).toBe(409);
-    expect((await stale.json()).error.code).toBe("MANIFEST_GENERATION_CONFLICT");
+    expect((await stale.json()).error).toMatchObject({ code: "MANIFEST_GENERATION_CONFLICT", currentGeneration: 1 });
+  });
+
+  it("rejects a repository-sync principal bound to another project", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/repository/sync?project=${projectName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-wrong-project": "1" },
+      body: JSON.stringify({ docsManifest: { files: [] }, dryRun: true, expectedGeneration: 0 }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: { code: "NOT_FOUND", message: "Resource not found" } });
   });
 });

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockPost = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/client.js", () => ({
-  api: { post: mockPost },
+  api: { settled: { post: mockPost } },
 }));
 
 import {
@@ -16,11 +16,6 @@ const docsManifest = {
   files: [{ path: "docs/index.md", sha256: "a".repeat(64), content: "# Docs\n", fileType: "regular", isSymlink: false }],
 };
 const resourcesManifest = { version: 2, skills: [], agents: [], plugins: [] };
-const claim = {
-  worktree_id: "worktree-main", session_id: "session-main", incarnation: 1, expected_revision: 1,
-  fence: 1, ownership_token: "A".repeat(32), client_claim_key: "B".repeat(32), accepted_epoch: 1,
-};
-
 describe("repository sync MCP tool adapter", () => {
   beforeEach(() => {
     mockPost.mockReset();
@@ -36,11 +31,11 @@ describe("repository sync MCP tool adapter", () => {
         } } },
     });
 
-    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 0, claim, false);
+    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 0, false);
     const output = JSON.parse(result.content[0]!.text);
 
     expect(mockPost.mock.calls).toEqual([
-      ["/repository/sync", { docsManifest, resourcesManifest, expectedGeneration: 0, claim, dryRun: false }, { project: "repository-project" }],
+      ["/repository/sync", { docsManifest, resourcesManifest, expectedGeneration: 0, dryRun: false }, { project: "repository-project" }],
     ]);
     expect(output).toMatchObject({
       project: "repository-project",
@@ -54,7 +49,7 @@ describe("repository sync MCP tool adapter", () => {
   it("stops after a failed docs sync and never exposes transport details", async () => {
     mockPost.mockRejectedValueOnce(new Error("Bearer secret-token"));
 
-    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 0, claim, false);
+    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 0, false);
 
     expect(mockPost).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ isError: true });
@@ -74,12 +69,12 @@ describe("repository sync MCP tool adapter", () => {
       plugins: [],
     };
 
-    const result = await repositorySync("repository-project", docsManifest, oversizedResources, 0, claim, false);
+    const result = await repositorySync("repository-project", docsManifest, oversizedResources, 0, false);
 
     expect(mockPost).not.toHaveBeenCalled();
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0]!.text).toBe(JSON.stringify({
-      error: { code: "REPOSITORY_SYNC_FAILED", message: "Repository synchronization failed." },
+      error: { code: "INVALID_REPOSITORY_SYNC", message: "Repository synchronization request is invalid." },
     }));
     expect(result.content[0]!.text).not.toContain("x".repeat(64));
   });
@@ -93,12 +88,31 @@ describe("repository sync MCP tool adapter", () => {
       skills: [entry],
       agents: [],
       plugins: [],
-    }, 0, claim, false);
+    }, 0, false);
 
     expect(mockPost).not.toHaveBeenCalled();
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0]!.text).toBe(JSON.stringify({
-      error: { code: "REPOSITORY_SYNC_FAILED", message: "Repository synchronization failed." },
+      error: { code: "INVALID_REPOSITORY_SYNC", message: "Repository synchronization request is invalid." },
     }));
+  });
+
+  it("returns only the bounded generation on an API generation conflict", async () => {
+    mockPost.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      payload: { error: { code: "MANIFEST_GENERATION_CONFLICT", message: "hidden", currentGeneration: 7, extra: "hidden" } },
+    });
+
+    const result = await repositorySync("repository-project", docsManifest, resourcesManifest, 3, false);
+
+    expect(result).toMatchObject({ isError: true });
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      error: {
+        code: "MANIFEST_GENERATION_CONFLICT",
+        message: "Repository manifest generation changed.",
+        currentGeneration: 7,
+      },
+    });
   });
 });

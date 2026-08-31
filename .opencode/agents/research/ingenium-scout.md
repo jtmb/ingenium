@@ -10,6 +10,7 @@ permission:
   bash: deny
   playwright_*: deny
   ingenium_docs_search: allow
+  ingenium_docs_search_semantic: allow
   ingenium_docs_get_page: allow
   skill:
     "@local-models": allow

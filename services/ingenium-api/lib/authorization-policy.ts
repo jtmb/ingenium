@@ -46,17 +46,6 @@ const PUBLIC_AUTH_PATHS = new Set([
   "GET /api/v1/auth/invitations/preview", "GET /api/v1/auth/oidc/providers", "HEAD /api/v1/auth/oidc/providers", "POST /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
 ]);
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const REPOSITORY_COORDINATION_ROUTES = new Set([
-  "POST /api/v1/coordination/register",
-  "POST /api/v1/coordination/heartbeat",
-  "POST /api/v1/coordination/close",
-  "POST /api/v1/coordination/claims/batch",
-  "POST /api/v1/coordination/claims/verify",
-  "POST /api/v1/coordination/claims/renew",
-  "POST /api/v1/coordination/claims/quarantine",
-  "POST /api/v1/coordination/claims/complete",
-  "POST /api/v1/coordination/claims/release",
-]);
 
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
@@ -302,13 +291,9 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     return next();
   }
   const servicePreflight = req.method === "GET" && req.path === "/api/v1/auth/preflight";
-  const repositoryCoordination = req.principal.type === "service"
-    && req.principal.audience === "repository-sync"
-    && REPOSITORY_COORDINATION_ROUTES.has(`${req.method} ${req.path}`);
   if (req.principal.type === "service" && req.principal.audience === "repository-sync" && !servicePreflight
     && policy.resource !== "repository" && policy.resource !== "repository-sync" && policy.resource !== "projects"
-    && policy.resource !== "mcp-tools" && policy.resource !== "docs" && policy.resource !== "child-mcp"
-    && !repositoryCoordination) {
+    && policy.resource !== "mcp-tools" && policy.resource !== "docs" && policy.resource !== "child-mcp") {
     throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
   }
   const principal = toAuthorizationPrincipal(req.principal);
@@ -345,9 +330,7 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     const lifecycle = policy.resource === "projects" && policy.permission === "admin" ? projectLifecycleTarget(req) : undefined;
     if (lifecycle) req.authorizedProjectTarget = lifecycle;
     const project = lifecycle ?? requestedProject(req);
-    decision = repositoryCoordination && project
-      ? authorization.requireProjectPermission(principal, project.id, "repository", "execute")
-      : lifecycle
+    decision = lifecycle
       ? authorization.requireProjectLifecyclePermission(principal, lifecycle.id)
       : project
       ? authorization.requireProjectPermission(principal, project.id, policy.resource, policy.permission)

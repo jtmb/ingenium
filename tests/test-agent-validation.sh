@@ -873,6 +873,90 @@ validate_orchestrator_bash_permissions() {
   return 1
 }
 
+validate_coordination_tool_permissions() {
+  local premium_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+  local scout_profile="$REPO_ROOT/.opencode/agents/research/ingenium-scout.md"
+
+  if ! node - "$ORCHESTRATOR" "$premium_profile" "$scout_profile" <<'NODE'
+const fs = require("fs");
+
+const [orchestratorPath, premiumPath, scoutPath] = process.argv.slice(2);
+const expected = new Map([
+  [orchestratorPath, ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"]],
+  [premiumPath, ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"]],
+  [scoutPath, ["ingenium_docs_search_semantic"]],
+]);
+const errors = [];
+
+for (const [profilePath, requiredTools] of expected) {
+  const source = fs.readFileSync(profilePath, "utf8");
+  const match = source.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) {
+    errors.push(`${profilePath} has no readable frontmatter`);
+    continue;
+  }
+
+  const topLevel = new Map();
+  const bash = new Map();
+  let inPermission = false;
+  let inBash = false;
+  for (const line of match[1].split(/\r?\n/)) {
+    if (line === "permission:") {
+      inPermission = true;
+      inBash = false;
+      continue;
+    }
+    if (!inPermission) continue;
+    if (/^[^\s]/.test(line)) {
+      inPermission = false;
+      inBash = false;
+      continue;
+    }
+    if (/^  bash:\s*$/.test(line)) {
+      inBash = true;
+      continue;
+    }
+    if (/^  \S/.test(line)) inBash = false;
+
+    const topLevelMatch = line.match(/^  (?:"([^"]+)"|([A-Za-z0-9_.:-]+)):\s*(allow|deny)\s*$/);
+    if (topLevelMatch) {
+      const name = topLevelMatch[1] ?? topLevelMatch[2];
+      topLevel.set(name, [...(topLevel.get(name) ?? []), topLevelMatch[3]]);
+      continue;
+    }
+    if (inBash) {
+      const bashMatch = line.match(/^    "([^"]+)":\s*(allow|deny)\s*$/);
+      if (bashMatch) bash.set(bashMatch[1], [...(bash.get(bashMatch[1]) ?? []), bashMatch[2]]);
+    }
+  }
+
+  for (const tool of requiredTools) {
+    const grants = topLevel.get(tool) ?? [];
+    if (grants.length !== 1 || grants[0] !== "allow") {
+      errors.push(`${profilePath} must grant ${tool} once at top-level permission`);
+    }
+    if ((bash.get(tool) ?? []).length > 0) {
+      errors.push(`${profilePath} must reject ${tool} under the bash permission block`);
+    }
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: coordination tools use top-level grants, are rejected under bash, and Scout has semantic RAG search");
+NODE
+  then
+    return 0
+  fi
+  return 1
+}
+
+if ! validate_coordination_tool_permissions; then
+  FAILED=1
+fi
+
 # The root config denies questions globally. The orchestrator must retain its
 # explicit profile denial and cannot regain it through its centralized projection.
 validate_orchestrator_question_boundary() {

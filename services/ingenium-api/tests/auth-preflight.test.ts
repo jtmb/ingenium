@@ -11,7 +11,7 @@ import { clearAuthAttemptRateLimit } from "../lib/middleware/auth-rate-limit.js"
 import { authPreflightRouter, publicOidcError } from "../lib/routes/auth-preflight.js";
 import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
-const token = "a".repeat(32);
+const token = "b".repeat(32);
 let server: Server | undefined;
 let baseUrl = "";
 let originalToken: string | undefined;
@@ -29,6 +29,25 @@ beforeEach(async () => {
   app.use(rateLimit);
   app.use(authMiddleware);
   app.use(authorizationMiddleware);
+  app.use((req, _res, next) => {
+    const audience = req.get("x-test-preflight-audience");
+    if (audience === "mcp" || audience === "runtime" || audience === "repository-sync") {
+      req.principal = {
+        type: "service",
+        id: "fixture-preflight-service",
+        scopes: ["projects:read"],
+        tokenId: "fixture-preflight-token-id",
+        organizationId: "organization-id",
+        projectId: "project-id",
+        projectIds: ["project-id"],
+        audience,
+        workspaceId: "workspace-id",
+        launcherWorktree: "/workspace",
+        storageMappingHash: "a".repeat(64),
+      };
+    }
+    next();
+  });
   app.use("/api/v1/auth", authPreflightRouter);
   app.use(errorHandler);
   server = createServer(app);
@@ -61,6 +80,44 @@ describe("extension authentication preflight", () => {
     expect(response.status).toBe(401);
     expect(JSON.stringify(body)).not.toContain(token);
     expect(body.error).toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("advertises targeted live MCP reload for protected credential content rotation", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": "mcp",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      data: {
+        audience: "mcp",
+        credentialChangeMode: "live-mcp-reload",
+        restartRequiredOnCredentialChange: true,
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(token);
+  });
+
+  it.each(["runtime", "repository-sync"] as const)("keeps restart mode for %s credential bindings", async (audience) => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": audience,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: {
+      audience,
+      credentialChangeMode: "restart",
+      restartRequiredOnCredentialChange: true,
+    } });
   });
 });
 

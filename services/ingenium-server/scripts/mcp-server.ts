@@ -208,16 +208,6 @@ const repositoryResourcesManifestParam = z.object({
     context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
   }
 });
-const repositoryClaimProofParam = z.object({
-  worktree_id: z.string().min(1).max(512),
-  session_id: z.string().min(1).max(512),
-  incarnation: z.number().int().positive(),
-  expected_revision: z.number().int().nonnegative(),
-  fence: z.number().int().positive(),
-  ownership_token: z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/),
-  client_claim_key: z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/),
-  accepted_epoch: z.number().int().positive(),
-}).strict();
 const jobVaultItemIdsParam = z.array(z.string().uuid()).max(16).refine(
   (itemIds) => new Set(itemIds).size === itemIds.length,
   "vault_item_ids must be unique",
@@ -310,12 +300,11 @@ server.registerTool(
       docsManifest: repositoryDocsManifestParam,
       resourcesManifest: repositoryResourcesManifestParam.optional(),
       expectedGeneration: z.number().int().nonnegative(),
-      claim: repositoryClaimProofParam,
       dryRun: z.boolean().optional(),
     },
   },
-  wrapLauncherBoundHandler(C("repository_sync"), launcherProject, async ({ project, docsManifest, resourcesManifest, expectedGeneration, claim, dryRun }) =>
-    repositorySync(project, docsManifest, resourcesManifest, expectedGeneration, claim, dryRun)),
+  wrapLauncherBoundHandler(C("repository_sync"), launcherProject, async ({ project, docsManifest, resourcesManifest, expectedGeneration, dryRun }) =>
+    repositorySync(project, docsManifest, resourcesManifest, expectedGeneration, dryRun)),
 );
 
 server.registerTool(

@@ -17,11 +17,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   resolveExtensionProject,
 } from "./project-resolver.js";
-import { ExtensionBindingError, resolveExtensionBinding } from "./extension-binding.js";
+import { resolveExtensionBinding } from "./extension-binding.js";
 import { apiRequestHeaders } from "./api-auth.js";
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
-import { sessionCoordinatorFor, type RepositoryClaimContext } from "./session-coordinator.js";
-import { callMcpTool, mcpToolData } from "./mcp-client.js";
+import { callMcpTool, McpBridgeError, mcpToolData } from "./mcp-client.js";
 
 // Compatibility-only helpers below retain legacy exports; lifecycle hooks use repositorySync via MCP.
 
@@ -886,6 +885,151 @@ function verifiedManifestDirectory(worktree: string, create: boolean): string | 
   }
 }
 
+function fsyncDirectory(directory: string): void {
+  const descriptor = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    if (!fstatSync(descriptor).isDirectory()) throw new RepositorySyncScanError();
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+interface RepositorySyncLockOwner {
+  pid: number;
+  token: string;
+}
+
+export interface RepositorySyncLock extends RepositorySyncLockOwner {
+  release(): void;
+}
+
+export class RepositorySyncLockBusyError extends Error {
+  constructor() {
+    super("Repository synchronization is already running");
+    this.name = "RepositorySyncLockBusyError";
+  }
+}
+
+function privateOwnedDirectory(path: string, parent: string): boolean {
+  try {
+    const stat = lstatSync(path);
+    return stat.isDirectory() && !stat.isSymbolicLink() && (stat.mode & 0o077) === 0
+      && (typeof process.getuid !== "function" || stat.uid === process.getuid())
+      && realpathSync(path) === path && path.startsWith(`${parent}${sep}`);
+  } catch {
+    return false;
+  }
+}
+
+function readLockOwner(worktree: string, directory: string): RepositorySyncLockOwner {
+  if (!privateOwnedDirectory(directory, verifiedManifestDirectory(worktree, false) ?? "")) {
+    throw new RepositorySyncScanError("Repository sync lock is unsafe");
+  }
+  const ownerPath = resolve(directory, "owner.json");
+  const content = readRepositoryRegularText(worktree, ownerPath);
+  if (Buffer.byteLength(content, "utf8") > 256) throw new RepositorySyncScanError("Repository sync lock is unsafe");
+  let value: unknown;
+  try {
+    value = JSON.parse(content);
+  } catch {
+    throw new RepositorySyncScanError("Repository sync lock is unsafe");
+  }
+  if (!repositoryIsRecord(value) || Object.keys(value).sort().join(",") !== "pid,token"
+    || !Number.isSafeInteger(value.pid) || (value.pid as number) <= 0
+    || typeof value.token !== "string" || !/^[a-f0-9]{32}$/.test(value.token)) {
+    throw new RepositorySyncScanError("Repository sync lock is unsafe");
+  }
+  return { pid: value.pid as number, token: value.token };
+}
+
+function processIsVerifiedDead(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+function removeLockDirectory(worktree: string, directory: string, token: string): void {
+  const owner = readLockOwner(worktree, directory);
+  if (owner.token !== token) throw new RepositorySyncScanError("Repository sync lock ownership changed");
+  unlinkSync(resolve(directory, "owner.json"));
+  rmdirSync(directory);
+}
+
+/** Atomically acquire the owner-only cross-process lock without waiting. */
+export function acquireRepositorySyncLock(worktree: string): RepositorySyncLock | null {
+  const parent = verifiedManifestDirectory(worktree, true);
+  if (!parent) throw new RepositorySyncScanError();
+  const lockDirectory = resolve(parent, ".ingenium-sync-lock");
+
+  for (let recoveryAttempt = 0; recoveryAttempt < 2; recoveryAttempt += 1) {
+    const token = randomUUID().replaceAll("-", "");
+    const temporaryDirectory = resolve(parent, `.ingenium-sync-lock.${process.pid}.${token}.tmp`);
+    mkdirSync(temporaryDirectory, { mode: 0o700 });
+    try {
+      if (!privateOwnedDirectory(temporaryDirectory, parent)) throw new RepositorySyncScanError();
+      const ownerPath = resolve(temporaryDirectory, "owner.json");
+      const descriptor = openSync(ownerPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try {
+        writeSync(descriptor, JSON.stringify({ pid: process.pid, token }) + "\n");
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      fsyncDirectory(temporaryDirectory);
+      try {
+        if (existsSync(lockDirectory)) throw Object.assign(new Error("busy"), { code: "EEXIST" });
+        renameSync(temporaryDirectory, lockDirectory);
+        fsyncDirectory(parent);
+      } catch (error) {
+        removeLockDirectory(worktree, temporaryDirectory, token);
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST" && code !== "ENOTEMPTY") throw error;
+
+        const current = readLockOwner(worktree, lockDirectory);
+        if (!processIsVerifiedDead(current.pid)) return null;
+        const staleDirectory = resolve(parent, `.ingenium-sync-lock.${current.pid}.${current.token}.stale`);
+        renameSync(lockDirectory, staleDirectory);
+        const moved = readLockOwner(worktree, staleDirectory);
+        if (moved.pid !== current.pid || moved.token !== current.token) {
+          if (!existsSync(lockDirectory)) renameSync(staleDirectory, lockDirectory);
+          throw new RepositorySyncScanError("Repository sync lock ownership changed");
+        }
+        removeLockDirectory(worktree, staleDirectory, current.token);
+        fsyncDirectory(parent);
+        continue;
+      }
+
+      let released = false;
+      return {
+        pid: process.pid,
+        token,
+        release() {
+          if (released) return;
+          const current = readLockOwner(worktree, lockDirectory);
+          if (current.pid !== process.pid || current.token !== token) {
+            throw new RepositorySyncScanError("Repository sync lock ownership changed");
+          }
+          const releaseDirectory = resolve(parent, `.ingenium-sync-lock.${process.pid}.${token}.release`);
+          renameSync(lockDirectory, releaseDirectory);
+          removeLockDirectory(worktree, releaseDirectory, token);
+          fsyncDirectory(parent);
+          released = true;
+        },
+      };
+    } catch (error) {
+      try {
+        if (existsSync(temporaryDirectory)) removeLockDirectory(worktree, temporaryDirectory, token);
+      } catch {}
+      throw error;
+    }
+  }
+  return null;
+}
+
 export function loadManifest(worktree: string, project: string): SyncManifest {
   try {
     const directory = verifiedManifestDirectory(worktree, false);
@@ -959,6 +1103,7 @@ export function saveManifest(
     // bound to the same verified directory.
     if (verifiedManifestDirectory(worktree, false) !== directory) throw new RepositorySyncScanError();
     renameSync(temporaryPath, manifestPath);
+    fsyncDirectory(directory);
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor);
     try {
@@ -3219,7 +3364,6 @@ export async function repositorySync(
     dryRun?: boolean;
     scope?: RepositorySyncScope;
     project?: string;
-    claim?: RepositoryClaimContext;
     cleanupFileSystem?: Partial<TombstoneCleanupFileSystem>;
   } = {},
 ): Promise<RepositorySyncResult> {
@@ -3229,78 +3373,132 @@ export async function repositorySync(
   const project = resolveExtensionProject(worktree, options.project ?? binding.project);
   _projectCache = project;
   _projectResolved = true;
-  const claim = options.claim;
+  let lock: RepositorySyncLock | null = null;
+  for (let attempt = 0; attempt <= 3; attempt += 1) {
+    lock = acquireRepositorySyncLock(worktree);
+    if (lock) break;
+    if (attempt === 3) throw new RepositorySyncLockBusyError();
+    await repositoryRetryDelay(attempt);
+  }
+  if (!lock) throw new RepositorySyncLockBusyError();
+
+  try {
+    let forcedGeneration: number | undefined;
+    for (let attempt = 0; attempt <= 3; attempt += 1) {
+      try {
+        return await repositorySyncAttempt(worktree, project, options, forcedGeneration);
+      } catch (error) {
+        if (error instanceof RepositorySyncScanError) throw error;
+        if (error instanceof McpBridgeError && error.failure === "revision_conflict"
+          && Number.isSafeInteger(error.currentRevision) && error.currentRevision! >= 0) {
+          forcedGeneration = error.currentRevision;
+        } else if (!isTransientRepositorySyncFailure(error)) {
+          return failedRepositorySyncResult(project, dryRun, scope);
+        }
+        if (attempt === 3) {
+          retainRepositoryRecoveryEvidence(worktree, "apply_uncertain", forcedGeneration ?? 0);
+          return failedRepositorySyncResult(project, dryRun, scope);
+        }
+        await repositoryRetryDelay(attempt);
+      }
+    }
+    return failedRepositorySyncResult(project, dryRun, scope);
+  } finally {
+    lock.release();
+  }
+}
+
+const NON_RETRYABLE_REPOSITORY_SYNC_CODES = new Set([
+  "INVALID_REPOSITORY_SYNC",
+  "REPOSITORY_SYNC_AUTHORIZATION_FAILED",
+  "PROJECT_IDENTITY_REQUIRED",
+  "TOOL_DISABLED",
+]);
+
+function isTransientRepositorySyncFailure(error: unknown): boolean {
+  return error instanceof McpBridgeError
+    && error.failure !== "authentication"
+    && !NON_RETRYABLE_REPOSITORY_SYNC_CODES.has(error.errorCode ?? "");
+}
+
+function repositoryRetryDelay(attempt: number): Promise<void> {
+  const base = 20 * (2 ** Math.min(attempt, 3));
+  const delay = base + Math.floor(Math.random() * base);
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, delay));
+}
+
+function failedRepositorySyncResult(project: string, dryRun: boolean, scope: RepositorySyncScope): RepositorySyncResult {
+  const docs = emptyResult();
+  docs.errors = 1;
+  return {
+    project,
+    dryRun,
+    scope,
+    docs,
+    skills: emptyResult(),
+    agents: emptyResult(),
+    plugins: emptyResult(),
+    restartRequired: false,
+  };
+}
+
+async function repositorySyncAttempt(
+  worktree: string,
+  project: string,
+  options: {
+    dryRun?: boolean;
+    scope?: RepositorySyncScope;
+    cleanupFileSystem?: Partial<TombstoneCleanupFileSystem>;
+  },
+  forcedGeneration?: number,
+): Promise<RepositorySyncResult> {
+  const dryRun = options.dryRun === true;
+  const scope = options.scope ?? "all";
   const manifest = loadManifest(worktree, project);
   const localGeneration = manifest.generation ?? 0;
-  if (claim && localGeneration !== claim.manifestGeneration) {
+  if (forcedGeneration !== undefined && localGeneration !== forcedGeneration) {
     manifest.resources.repository = { docs: {}, skills: {}, agents: {}, plugins: {} };
-    manifest.generation = claim.manifestGeneration;
+    manifest.generation = forcedGeneration;
   }
-  let projection!: RepositoryManifestV2;
+  const expectedGeneration = forcedGeneration ?? localGeneration;
   const docsResult = emptyResult();
   const skillsResult = emptyResult();
   const agentsResult = emptyResult();
   const pluginsResult = emptyResult();
-  let docsConfirmed = false;
-  let resourcesConfirmed = false;
-  let applyStarted = false;
-  let nextGeneration = claim?.manifestGeneration ?? localGeneration;
-
-  try {
-    await claim?.renew();
-    await claim?.verify();
-    if (scope === "all" && claim) cleanupLegacySkillTombstones(worktree, {
-      dryRun,
-      fileSystem: options.cleanupFileSystem,
-    });
-    projection = scope === "all"
-      ? buildRepositoryManifestV2(worktree, manifest)
-      : { version: 2, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
-    applyStarted = true;
-    const response = mcpToolData(await callMcpTool(worktree, "repository_sync", {
-      project,
-      docsManifest: { files: projection.docs },
-      resourcesManifest: scope === "all"
-        ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins }
-        : undefined,
-      dryRun,
-      expectedGeneration: claim?.manifestGeneration ?? localGeneration,
-      claim: claim?.proof(),
-    })) as {
-      docs?: { summary?: Record<string, number> };
-      resources?: { summary?: Record<string, Record<string, number>> };
-      generation?: number;
-      manifestHash?: string;
-    };
-    if (typeof response !== "object" || response === null) throw new Error("Invalid MCP response");
-    const payload = response as {
-      docs?: { summary?: Record<string, number> };
-      resources?: { summary?: Record<string, Record<string, number>> };
-      generation?: number;
-      manifestHash?: string;
-    };
-    if (!Number.isSafeInteger(payload.generation) || payload.generation! < (claim?.manifestGeneration ?? localGeneration)
-      || typeof payload.manifestHash !== "string" || !/^[0-9a-f]{64}$/.test(payload.manifestHash)) {
-      throw new Error("Invalid MCP response");
-    }
-    nextGeneration = payload.generation!;
-    Object.assign(docsResult, resultFromRepositorySummary(payload.docs?.summary));
-    docsConfirmed = true;
-    if (scope === "all") {
-      if (!payload.resources?.summary) throw new Error("Invalid MCP response");
-      Object.assign(skillsResult, resultFromRepositorySummary(payload.resources.summary.skill));
-      Object.assign(agentsResult, resultFromRepositorySummary(payload.resources.summary.agent));
-      Object.assign(pluginsResult, resultFromRepositorySummary(payload.resources.summary.plugin));
-      resourcesConfirmed = true;
-    }
-  } catch (error) {
-    if (!applyStarted) throw error;
-    if (applyStarted && claim) {
-      retainRepositoryRecoveryEvidence(worktree, "apply_uncertain", claim.manifestGeneration);
-      await claim.quarantine("uncertain_apply").catch(() => undefined);
-    }
-    docsResult.errors = 1;
-    return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
+  if (scope === "all") cleanupLegacySkillTombstones(worktree, {
+    dryRun,
+    fileSystem: options.cleanupFileSystem,
+  });
+  const projection = scope === "all"
+    ? buildRepositoryManifestV2(worktree, manifest)
+    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
+  const response = mcpToolData(await callMcpTool(worktree, "repository_sync", {
+    project,
+    docsManifest: { files: projection.docs },
+    resourcesManifest: scope === "all"
+      ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins }
+      : undefined,
+    dryRun,
+    expectedGeneration,
+  }));
+  if (typeof response !== "object" || response === null) throw new Error("Invalid MCP response");
+  const payload = response as {
+    docs?: { summary?: Record<string, number> };
+    resources?: { summary?: Record<string, Record<string, number>> };
+    generation?: number;
+    manifestHash?: string;
+  };
+  const requiredGeneration = dryRun ? expectedGeneration : expectedGeneration + 1;
+  if (payload.generation !== requiredGeneration
+    || typeof payload.manifestHash !== "string" || !/^[0-9a-f]{64}$/.test(payload.manifestHash)) {
+    throw new Error("Invalid MCP response");
+  }
+  Object.assign(docsResult, resultFromRepositorySummary(payload.docs?.summary));
+  if (scope === "all") {
+    if (!payload.resources?.summary) throw new Error("Invalid MCP response");
+    Object.assign(skillsResult, resultFromRepositorySummary(payload.resources.summary.skill));
+    Object.assign(agentsResult, resultFromRepositorySummary(payload.resources.summary.agent));
+    Object.assign(pluginsResult, resultFromRepositorySummary(payload.resources.summary.plugin));
   }
 
   // The baseline advances only after the owning API endpoint confirmed the
@@ -3308,28 +3506,14 @@ export async function repositorySync(
   // keeping skills/agents/plugins eligible for a subsequent reconciliation.
   if (!dryRun) {
     const repository = repositoryBaseline(manifest);
-    if (docsConfirmed) {
-      repository.docs = docsBaseline(projection.docs, repository.docs);
-    }
-    if (resourcesConfirmed) {
+    repository.docs = docsBaseline(projection.docs, repository.docs);
+    if (scope === "all") {
       repository.skills = baselineFromEntries(projection.skills, skillFingerprint);
       repository.agents = baselineFromEntries(projection.agents, agentFingerprint);
       repository.plugins = baselineFromEntries(projection.plugins, pluginFingerprint);
     }
-    if (docsConfirmed || resourcesConfirmed) {
-      manifest.lastFullSync = new Date().toISOString();
-      try {
-        await claim?.renew();
-        await claim?.verify();
-        saveManifest(worktree, manifest, claim ? { expected: localGeneration, next: nextGeneration } : undefined);
-      } catch {
-        if (!claim) throw new RepositorySyncScanError("Repository manifest save failed");
-        retainRepositoryRecoveryEvidence(worktree, "save_rejected", nextGeneration);
-        await claim?.quarantine("uncertain_apply").catch(() => undefined);
-        docsResult.errors += 1;
-        return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
-      }
-    }
+    manifest.lastFullSync = new Date().toISOString();
+    saveManifest(worktree, manifest, { expected: localGeneration, next: requiredGeneration });
   }
 
   return {
@@ -3340,7 +3524,7 @@ export async function repositorySync(
     skills: skillsResult,
     agents: agentsResult,
     plugins: pluginsResult,
-    restartRequired: !dryRun && resourcesConfirmed && (pluginsResult.pushed + pluginsResult.synced + pluginsResult.removed > 0),
+    restartRequired: !dryRun && scope === "all" && (pluginsResult.pushed + pluginsResult.synced + pluginsResult.removed > 0),
   };
 }
 
@@ -3349,8 +3533,8 @@ export async function repositorySync(
  * `/init-project`. Legacy commands/config synchronization is deliberately not
  * invoked from this path.
  */
-export async function fullSync(worktree: string, claim?: RepositoryClaimContext): Promise<FullSyncResult & { restartRequired: boolean }> {
-  const result = await repositorySync(worktree, { claim });
+export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
+  const result = await repositorySync(worktree);
   return {
     docs: result.docs,
     skills: result.skills,
@@ -3368,10 +3552,21 @@ let lastIncrementalSync = 0;
 let incrementalSyncInFlight = false;
 const INCREMENTAL_THROTTLE_MS = 60000;
 
+interface RepositoryLifecycleQueue {
+  running: boolean;
+  fullPending: boolean;
+  incrementalPending: boolean;
+  waiters: Array<() => void>;
+  client: any;
+}
+
+const repositoryLifecycleQueues = new Map<string, RepositoryLifecycleQueue>();
+
 /** Test support: reset the process-wide idle throttle and in-flight guard. */
 export function resetIncrementalSyncThrottle(): void {
   lastIncrementalSync = 0;
   incrementalSyncInFlight = false;
+  repositoryLifecycleQueues.clear();
 }
 
 function hasSyncErrors(result: FullSyncResult): boolean {
@@ -3383,12 +3578,12 @@ function hasSyncErrors(result: FullSyncResult): boolean {
  * Incremental sync — triggered on session.idle.
  * Only syncs items with content hash mismatches, throttled to max 1 per 60s.
  */
-export async function incrementalSync(worktree: string, claim?: RepositoryClaimContext): Promise<FullSyncResult & { restartRequired: boolean } | null> {
+export async function incrementalSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean } | null> {
   const now = Date.now();
   if (incrementalSyncInFlight || now - lastIncrementalSync < INCREMENTAL_THROTTLE_MS) return null;
   incrementalSyncInFlight = true;
   try {
-    const result = await fullSync(worktree, claim);
+    const result = await fullSync(worktree);
     // A failed reconciliation is intentionally eligible for the next idle
     // event. Advancing the throttle here used to turn a startup race into a
     // guaranteed one-minute recovery delay.
@@ -3411,6 +3606,72 @@ function resultSummary(label: string, r: SyncResult): string {
   return parts.length > 0 ? `${label}: ${parts.join(", ")}` : `${label}: no changes`;
 }
 
+function reportLifecycleResult(client: any, result: FullSyncResult & { restartRequired: boolean }): void {
+  const lines: string[] = [
+    resultSummary("docs", result.docs ?? emptyResult()),
+    resultSummary("skills", result.skills),
+    resultSummary("agents", result.agents),
+    resultSummary("plugins", result.plugins),
+  ];
+  if (result.restartRequired) lines.push("⚡ OpenCode restart required (plugin/config changes)");
+  if (hasSyncErrors(result)) {
+    logPluginLifecycle(client, "resource-sync", "warn", "resource_sync: request_failed");
+  }
+  if (lines.some((line) => !line.endsWith("no changes"))) {
+    logPluginLifecycle(client, "resource-sync", "info", lines.join(" | "));
+  }
+}
+
+async function runRepositoryLifecycleQueue(worktree: string, queue: RepositoryLifecycleQueue): Promise<void> {
+  try {
+    while (queue.fullPending || queue.incrementalPending) {
+      const full = queue.fullPending;
+      queue.fullPending = false;
+      if (full) queue.incrementalPending = false;
+      else queue.incrementalPending = false;
+      try {
+        const result = full ? await fullSync(worktree) : await incrementalSync(worktree);
+        if (result) reportLifecycleResult(queue.client, result);
+      } catch {
+        logPluginLifecycle(queue.client, "resource-sync", "warn", "resource_sync: request_failed");
+      }
+    }
+  } finally {
+    queue.running = false;
+    const waiters = queue.waiters.splice(0);
+    waiters.forEach((resolvePromise) => resolvePromise());
+    if (queue.fullPending || queue.incrementalPending) enqueueRepositoryLifecycleSync(worktree, queue.client, "incremental");
+  }
+}
+
+function enqueueRepositoryLifecycleSync(worktree: string, client: any, mode: "full" | "incremental"): void {
+  const queue = repositoryLifecycleQueues.get(worktree) ?? {
+    running: false,
+    fullPending: false,
+    incrementalPending: false,
+    waiters: [],
+    client,
+  };
+  queue.client = client;
+  if (mode === "full") {
+    queue.fullPending = true;
+    queue.incrementalPending = false;
+  } else if (!queue.fullPending) {
+    queue.incrementalPending = true;
+  }
+  repositoryLifecycleQueues.set(worktree, queue);
+  if (queue.running) return;
+  queue.running = true;
+  queueMicrotask(() => { void runRepositoryLifecycleQueue(worktree, queue); });
+}
+
+/** Test support: wait until the process-local lifecycle queue is empty. */
+export async function drainRepositoryLifecycleQueue(worktree: string): Promise<void> {
+  const queue = repositoryLifecycleQueues.get(worktree);
+  if (!queue || (!queue.running && !queue.fullPending && !queue.incrementalPending)) return;
+  await new Promise<void>((resolvePromise) => queue.waiters.push(resolvePromise));
+}
+
 /**
  * ResourceSyncPlugin — unified sync plugin.
  *
@@ -3420,64 +3681,15 @@ function resultSummary(label: string, r: SyncResult): string {
  */
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
-  const managedRuntime = process.env.INGENIUM_MCP_AUDIENCE === "runtime";
-  const managedCoordinator = managedRuntime ? sessionCoordinatorFor(ctx) : undefined;
-  await managedCoordinator?.ensureReady();
-  const coordinatedSync = async <T>(sessionId: unknown, action: (claim: RepositoryClaimContext) => Promise<T>): Promise<T | undefined> => {
-    if (typeof sessionId !== "string") {
-      if (managedRuntime) throw new ExtensionBindingError();
-      throw new ExtensionBindingError();
-    }
-    return (managedCoordinator ?? sessionCoordinatorFor(ctx)).withRepositoryClaim(sessionId, action);
-  };
-  const reportWarning = (operation: "resource_sync", reason: "request_failed") => {
-    logPluginLifecycle(ctx.client, "resource-sync", "warn", `${operation}: ${reason}`);
-  };
 
   return {
-    event: async ({ event }: { event: any }) => {
+    event: ({ event }: { event: any }) => {
       if (event.type === "session.created") {
-        try {
-          const result = await coordinatedSync(event.properties?.info?.id, (claim) => fullSync(worktree, claim));
-          if (!result) return;
-          const lines: string[] = [
-            resultSummary("docs", result.docs ?? emptyResult()),
-            resultSummary("skills", result.skills),
-            resultSummary("agents", result.agents),
-            resultSummary("plugins", result.plugins),
-          ];
-          if (result.restartRequired) {
-            lines.push("⚡ OpenCode restart required (plugin/config changes)");
-          }
-          if (hasSyncErrors(result)) reportWarning("resource_sync", "request_failed");
-          logPluginLifecycle(ctx.client, "resource-sync", "info", lines.join(" | "));
-        } catch {
-          // Non-fatal — sync failures should not break session startup
-          reportWarning("resource_sync", "request_failed");
-        }
+        enqueueRepositoryLifecycleSync(worktree, ctx.client, "full");
       }
 
       if (event.type === "session.idle") {
-        try {
-          const result = await coordinatedSync(event.properties?.sessionID, (claim) => incrementalSync(worktree, claim));
-          if (result) {
-            const lines: string[] = [
-              resultSummary("docs", result.docs ?? emptyResult()),
-              resultSummary("skills", result.skills),
-              resultSummary("agents", result.agents),
-              resultSummary("plugins", result.plugins),
-            ];
-            if (lines.some((l) => !l.endsWith("no changes"))) {
-              if (result.restartRequired) {
-                lines.push("⚡ OpenCode restart required (plugin/config changes)");
-              }
-              if (hasSyncErrors(result)) reportWarning("resource_sync", "request_failed");
-              logPluginLifecycle(ctx.client, "resource-sync", "info", lines.join(" | "));
-            }
-          }
-        } catch {
-          reportWarning("resource_sync", "request_failed");
-        }
+        enqueueRepositoryLifecycleSync(worktree, ctx.client, "incremental");
       }
     },
   };

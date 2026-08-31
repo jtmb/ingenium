@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
+import type { Request } from "express";
 import { Router } from "express";
-import { coordination, repositoryDocs, repositoryResources, repositorySync } from "ingenium-core";
+import { repositoryDocs, repositoryResources, repositorySync } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 /**
@@ -12,35 +15,39 @@ import { requireProject } from "../helpers.js";
  */
 export const repositoryRouter = Router();
 
-function claimProof(value: unknown): repositorySync.RepositorySyncApplyInput["claim"] | undefined {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const proof = value as Record<string, unknown>;
-  if (Object.keys(proof).sort().join(",") !== "accepted_epoch,client_claim_key,expected_revision,fence,incarnation,ownership_token,session_id,worktree_id"
-    || typeof proof.worktree_id !== "string" || typeof proof.session_id !== "string"
-    || !Number.isSafeInteger(proof.incarnation) || !Number.isSafeInteger(proof.expected_revision)
-    || !Number.isSafeInteger(proof.fence) || !Number.isSafeInteger(proof.accepted_epoch)
-    || typeof proof.ownership_token !== "string" || typeof proof.client_claim_key !== "string") return undefined;
-  return {
-    worktreeId: proof.worktree_id,
-    sessionId: proof.session_id,
-    incarnation: proof.incarnation as number,
-    expectedRevision: proof.expected_revision as number,
-    fence: proof.fence as number,
-    ownershipToken: proof.ownership_token,
-    clientClaimKey: proof.client_claim_key,
-    acceptedEpoch: proof.accepted_epoch as number,
-    idempotencyKey: `repository-proof-${proof.expected_revision}`,
-  };
+function boundRepositoryWorktreeId(req: Request, projectId: string): string | null {
+  const principal = req.principal;
+  if (principal?.type !== "service" || principal.audience !== "repository-sync"
+    || principal.projectId !== projectId || !principal.projectIds?.includes(projectId)
+    || !principal.organizationId || !principal.scopes.includes("repository:sync")
+    || typeof principal.workspaceId !== "string" || principal.workspaceId.length === 0 || principal.workspaceId.length > 256
+    || /[\u0000-\u001f\u007f]/.test(principal.workspaceId)
+    || typeof principal.launcherWorktree !== "string" || principal.launcherWorktree.length === 0
+    || principal.launcherWorktree.length > 1024 || !isAbsolute(principal.launcherWorktree)
+    || /[\u0000-\u001f\u007f]/.test(principal.launcherWorktree)
+    || typeof principal.storageMappingHash !== "string" || !/^[a-f0-9]{64}$/.test(principal.storageMappingHash)) {
+    return null;
+  }
+  return `worktree-${createHash("sha256")
+    .update(principal.workspaceId)
+    .update("\0")
+    .update(principal.storageMappingHash)
+    .digest("hex")}`;
 }
 
 repositoryRouter.post("/sync", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const body = req.body;
-  const proof = body && typeof body === "object" && !Array.isArray(body) ? claimProof(body.claim) : undefined;
-  if (!proof || !Number.isSafeInteger(body.expectedGeneration) || body.expectedGeneration < 0
+  const worktreeId = boundRepositoryWorktreeId(req, projectId);
+  if (!worktreeId) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+    return;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)
+    || !Number.isSafeInteger(body.expectedGeneration) || body.expectedGeneration < 0
     || typeof body.dryRun !== "boolean" || !("docsManifest" in body)
-    || !Object.keys(body).every((key) => ["docsManifest", "resourcesManifest", "dryRun", "expectedGeneration", "claim"].includes(key))) {
+    || !Object.keys(body).every((key) => ["docsManifest", "resourcesManifest", "dryRun", "expectedGeneration"].includes(key))) {
     res.status(422).json({ error: { code: "INVALID_REPOSITORY_SYNC", message: "Repository synchronization request is invalid" } });
     return;
   }
@@ -50,13 +57,22 @@ repositoryRouter.post("/sync", (req, res) => {
       resourcesManifest: body.resourcesManifest,
       dryRun: body.dryRun,
       expectedGeneration: body.expectedGeneration,
-      claim: proof,
+      worktreeId,
     });
     res.json({ data: result });
   } catch (error) {
-    if (error instanceof coordination.CoordinationError) {
-      const status = error.code === "INVALID_COORDINATION_INPUT" ? 422 : 409;
-      res.status(status).json({ error: { code: error.code, message: "Repository synchronization claim was rejected" } });
+    if (error instanceof repositorySync.RepositorySyncError) {
+      if (error.code === "MANIFEST_GENERATION_CONFLICT") {
+        res.status(409).json({ error: {
+          code: error.code,
+          message: "Repository manifest generation changed",
+          ...(Number.isSafeInteger(error.currentGeneration) && error.currentGeneration! >= 0
+            ? { currentGeneration: error.currentGeneration }
+            : {}),
+        } });
+        return;
+      }
+      res.status(422).json({ error: { code: error.code, message: "Repository synchronization request is invalid" } });
       return;
     }
     if (error instanceof repositoryResources.RepositoryResourcesManifestError
@@ -71,8 +87,8 @@ repositoryRouter.post("/sync", (req, res) => {
 repositoryRouter.post("/resources/sync", (_req, res) => {
   res.status(409).json({
     error: {
-      code: "REPOSITORY_SYNC_COORDINATION_REQUIRED",
-      message: "Use the coordinated repository synchronization endpoint",
+      code: "REPOSITORY_SYNC_ENDPOINT_REQUIRED",
+      message: "Use the repository synchronization endpoint",
     },
   });
 });

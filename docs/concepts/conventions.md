@@ -42,7 +42,10 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
   `@ingenium/extension` resource-sync → configured MCP stdio → authenticated API
   → database. Runtime consumers never import core, read/write DB files, or call
   mutation REST endpoints directly. Administrative skill sync tools are repair/
-  import operations only; use the API boundary for any such repair.
+  import operations only; use the API boundary for any such repair. Repository
+  synchronization is serialized by an owner-only worktree lock and API
+  generation compare-and-swap; it uses the dedicated `repository-sync` audience,
+  not a caller-supplied coordination claim proof.
 
 ## API-First Frontend
 - Dashboard imports ZERO core/server code. All data via HTTP to API.
