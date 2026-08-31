@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fchownSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { CANONICAL_PLUGIN_SPECS } from "../packages/ingenium-extension/plugin-specs.mjs";
@@ -126,6 +126,16 @@ function writeAtomically(configPath, value) {
   const directory = dirname(configPath);
   const directoryMetadata = statSync(directory);
   if (!directoryMetadata.isDirectory()) throw new Error("Config directory is unavailable");
+  let mode = 0o600;
+  let ownership;
+  try {
+    const metadata = lstatSync(configPath);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error("Config must be a regular non-symlink file");
+    mode = (metadata.mode & 0o777) === 0o660 ? 0o660 : 0o600;
+    ownership = { uid: metadata.uid, gid: metadata.gid };
+  } catch (error) {
+    if (!error || typeof error !== "object" || error.code !== "ENOENT") throw error;
+  }
   // Write a private, exclusive temporary file and rename only after fsync so
   // readers never observe partial JSON or follow a caller-controlled temp link.
   const temporaryPath = resolve(directory, `.${basename(configPath)}.${process.pid}.${randomUUID()}.tmp`);
@@ -140,6 +150,8 @@ function writeAtomically(configPath, value) {
       0o600,
     );
     writeFileSync(descriptor, content, "utf8");
+    if (ownership) fchownSync(descriptor, ownership.uid, ownership.gid);
+    fchmodSync(descriptor, mode);
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;

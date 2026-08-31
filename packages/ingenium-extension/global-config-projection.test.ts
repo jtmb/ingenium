@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @ts-expect-error This deployment-only ESM script intentionally has no TypeScript declaration file.
@@ -136,6 +136,55 @@ describe("container OpenCode global-config projection", () => {
     expect(runtimeEntrypoint).not.toContain('from "ingenium-core"');
     const runtimeOpenCode = readFileSync(new URL("../../scripts/start-runtime-opencode-web.sh", import.meta.url), "utf8");
     expect(runtimeOpenCode).toContain('INGENIUM_STORAGE_MAPPING_HASH="$INGENIUM_STORAGE_MAPPING_HASH"');
+  });
+
+  it("preserves config ownership and shared mode across atomic projection", () => {
+    const configPath = temporaryConfigPath();
+    writeFileSync(configPath, "{}\n", { mode: 0o660 });
+    chmodSync(configPath, 0o660);
+    const processUid = process.getuid?.();
+    const processGid = process.getgid?.();
+    const processGroups = process.getgroups?.();
+    if (processUid === undefined || processGid === undefined || processGroups === undefined) {
+      throw new Error("Ownership regression requires POSIX process identity APIs");
+    }
+    const alternateGid = processGroups.find((gid) => gid !== processGid);
+    const intendedUid = processUid === 0 ? 1 : processUid;
+    const intendedGid = processUid === 0 ? (processGid === 0 ? 1 : 0) : alternateGid;
+    let exercisedCrossIdentity = false;
+
+    if (intendedGid !== undefined) {
+      try {
+        chownSync(configPath, intendedUid, intendedGid);
+        exercisedCrossIdentity = intendedUid !== processUid || intendedGid !== processGid;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      }
+    }
+    if (!exercisedCrossIdentity) chownSync(configPath, processUid, processGid);
+    const before = statSync(configPath);
+
+    projectOpenCodeGlobalConfig(configPath);
+
+    const after = statSync(configPath);
+    expect({ uid: after.uid, gid: after.gid, mode: after.mode & 0o777 }).toEqual({
+      uid: before.uid,
+      gid: before.gid,
+      mode: 0o660,
+    });
+    if (!exercisedCrossIdentity) {
+      expect({ uid: before.uid, gid: before.gid }).toEqual({ uid: processUid, gid: processGid });
+    }
+  });
+
+  it("makes unsupported config modes private", () => {
+    const configPath = temporaryConfigPath();
+    writeFileSync(configPath, "{}\n");
+    chmodSync(configPath, 0o666);
+
+    projectOpenCodeGlobalConfig(configPath);
+
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   it("replaces legacy bootstrap entries, retains unrelated configuration, and never persists an inline bearer", () => {
