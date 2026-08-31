@@ -1215,6 +1215,11 @@ export class SessionCoordinator {
     });
   }
 
+  async initialize(): Promise<void> {
+    await this.ensureReady();
+    await this.reconcile();
+  }
+
   /** Authenticate the runtime capability and bind coordination to its attested identity. */
   async ensureReady(): Promise<void> {
     if (this.binding.purpose !== "runtime") return;
@@ -2646,10 +2651,9 @@ export const SessionCoordinatorPlugin = async (ctx: PluginInput): Promise<Hooks>
   trace({ event: "plugin_start", plugin: "session-coordinator", pid: process.pid });
   try {
     const coordinator = sessionCoordinatorFor(ctx);
-    void coordinator.ensureReady().catch(() => {
+    void coordinator.initialize().catch(() => {
       logPluginLifecycle(ctx.client, "session-coordinator", "warn", "coordination: unavailable");
     });
-    void coordinator.reconcile();
     return coordinator.hooks();
   } catch {
     logPluginLifecycle(ctx.client, "session-coordinator", "warn", "coordination: unavailable");

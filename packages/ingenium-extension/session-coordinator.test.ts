@@ -529,6 +529,59 @@ describe("SessionCoordinatorPlugin hooks", () => {
     ]);
   });
 
+  it("attests a runtime before startup reconciliation", async () => {
+    const status = vi.fn().mockResolvedValue({ data: {} });
+    const runtime = processHarness("runtime-project", "/tmp/runtime/home", "/tmp/runtime/xdg", 43000, {
+      session: { status },
+    });
+    runtime.binding = {
+      ...runtime.binding,
+      projectId: "00000000-0000-4000-8000-000000000001",
+      runtimeId: "00000000-0000-4000-8000-000000000003",
+      audience: "runtime",
+      credentialFile: "/run/ingenium-runtime/capability",
+      purpose: "runtime",
+    };
+    let releasePreflight!: () => void;
+    const preflightGate = new Promise<void>((resolve) => { releasePreflight = resolve; });
+    const preflight = vi.fn(async (): Promise<ApiAuthenticationPreflightResult> => {
+      await preflightGate;
+      return {
+        authenticated: true,
+        binding: {
+          scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"],
+          organizationId: "00000000-0000-4000-8000-000000000002",
+          projectId: runtime.binding.projectId!,
+          projectIds: [runtime.binding.projectId!],
+          audience: "runtime",
+          workspaceId: runtime.binding.workspaceId,
+          launcherWorktree: runtime.binding.launcherWorktree,
+          storageMappingHash: runtime.binding.storageMappingHash!,
+          restartRequiredOnCredentialChange: true,
+        },
+      };
+    });
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      data: { project: { id: runtime.binding.projectId } },
+    }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const coordinator = new SessionCoordinator(runtime, {
+      binding: runtime.binding,
+      preflight,
+      request,
+      callTool: coordinationFixture().callTool,
+      disableHeartbeat: true,
+    });
+
+    const initializing = coordinator.initialize();
+    await Promise.resolve();
+    expect(status).not.toHaveBeenCalled();
+    releasePreflight();
+    await initializing;
+
+    expect(preflight).toHaveBeenCalledOnce();
+    expect(status).toHaveBeenCalledOnce();
+  });
+
   it("retains todo state across a recoverable snapshot publication failure", async () => {
     const fixture = coordinationFixture();
     const process = processHarness("recoverable-project", "/tmp/recoverable/home", "/tmp/recoverable/xdg", 43002, {});
