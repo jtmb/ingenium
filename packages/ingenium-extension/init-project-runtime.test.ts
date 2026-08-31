@@ -1,18 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseInitProjectArgs } from "./scripts/init-project.js";
+import { INIT_PROJECT_VERSION, parseInitProjectArgs } from "./scripts/init-project.js";
 import { resolveExtensionProject } from "./project-resolver.js";
 
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
 const serverRoot = join(repositoryRoot, "services", "ingenium-server");
 const dockerfilePath = join(repositoryRoot, "Dockerfile");
+const runtimeLauncherPath = join(repositoryRoot, "scripts", "run-init-project.sh");
 const tscPath = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 const temporaryDirectories: string[] = [];
 const originalProject = process.env.INGENIUM_PROJECT;
@@ -194,35 +195,59 @@ describe("ingenium-init-project production runtime contract", () => {
   it("publishes the package bin and installs a stable runtime command without node_modules/.bin", () => {
     const packageJson = JSON.parse(readFileSync(join(extensionRoot, "package.json"), "utf8")) as {
       bin?: Record<string, string>;
+      version?: string;
     };
     const dockerfile = readFileSync(dockerfilePath, "utf8");
+    const runtimeLauncher = readFileSync(runtimeLauncherPath, "utf8");
 
     expect(packageJson.bin?.["ingenium-init-project"]).toBe("./dist/scripts/init-project.js");
+    expect(INIT_PROJECT_VERSION).toBe(packageJson.version);
     expect(dockerfile).toContain("/app/packages/ingenium-extension/dist ./packages/ingenium-extension/dist");
     expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project");
     expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project --help");
+    expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project --version");
+    expect(dockerfile).toContain("/app/scripts/run-init-project.sh)\" = \"root:root:555\"");
     expect(dockerfile).not.toContain("/app/node_modules/.bin/ingenium-init-project");
-    for (const pluginPath of extensionPluginPaths) {
-      expect(dockerfile).toContain(`/app/${pluginPath} ./${pluginPath}`);
-    }
-    expect(dockerfile).toContain("/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
-    expect(dockerfile).toContain("/app/packages/ingenium-extension/plugin-specs.mjs ./packages/ingenium-extension/plugin-specs.mjs");
+    expect(dockerfile).toContain("plugin-source-closure.mjs");
+    expect(dockerfile).toContain("/tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension");
+    expect(dockerfile).toContain("smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode");
+    expect(dockerfile).not.toContain("/app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts");
+    expect(dockerfile).not.toContain("/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
     expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(`file://{env:PWD}/${pluginPath}`)).join(",")}]`);
     expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");
+    expect(runtimeLauncher.indexOf("--help|--version)")).toBeLessThan(runtimeLauncher.indexOf("normalize-agent-profiles.sh"));
   });
 
-  it("builds the CLI distribution and executes --help through a runtime symlink", async () => {
+  it("executes help and version without runtime binding or worktree side effects", async () => {
     const distribution = buildCliDistribution();
     const entrypoint = join(distribution, "scripts", "init-project.js");
     const command = createRuntimeSymlink(entrypoint);
+    const worktree = temporaryDirectory("ingenium-init-project-info-");
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      INGENIUM_API_URL: "http://127.0.0.1:1/api/v1",
+      INGENIUM_WORKTREE: worktree,
+      INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/missing-credential",
+      INGENIUM_MCP_AUDIENCE: "repository-sync",
+      INGENIUM_WORKSPACE_ID: "missing-workspace",
+    };
+    delete environment.INGENIUM_MCP_CREDENTIAL;
 
     expect(existsSync(entrypoint)).toBe(true);
-    const result = await executeCli(command, ["--help"], { ...process.env }, true);
+    const before = readdirSync(worktree);
+    const help = await executeCli(command, ["--help"], environment, true);
+    const version = await executeCli(command, ["--version"], environment, true);
+    const invalid = await executeCli(command, ["--help", "--version"], environment, true);
 
-    expect(result.code, result.stderr).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("Usage:");
-    expect(result.stdout).toContain("--project <name>");
+    expect(help.code, help.stderr).toBe(0);
+    expect(help.stderr).toBe("");
+    expect(help.stdout).toContain("Usage:");
+    expect(help.stdout).toContain("--project <name>");
+    expect(version).toEqual({ code: 0, stdout: `${INIT_PROJECT_VERSION}\n`, stderr: "" });
+    expect(invalid.code).toBe(2);
+    expect(invalid.stdout).toBe("");
+    expect(invalid.stderr).toMatch(/cannot be combined with other arguments/);
+    expect(readdirSync(worktree)).toEqual(before);
   });
 
   it("uses --project before INGENIUM_PROJECT and attests it through the packaged MCP launcher", async () => {

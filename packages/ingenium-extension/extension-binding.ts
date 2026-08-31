@@ -1,5 +1,8 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { isValidExtensionProjectName } from "./project-name.js";
+
+export { isValidExtensionProjectName } from "./project-name.js";
 
 const CONFIG_MAX_BYTES = 1024 * 1024;
 const DEFAULT_API_URL = "http://localhost:4097/api/v1";
@@ -77,10 +80,6 @@ function safeString(value: unknown, maximum: number): string | undefined {
     && value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value)
     ? value
     : undefined;
-}
-
-export function isValidExtensionProjectName(value: unknown): value is string {
-  return Boolean(safeString(value, 64)) && value !== "." && value !== ".." && !/[\\/]/.test(value as string);
 }
 
 function normalizedApiUrl(value: unknown): string | undefined {

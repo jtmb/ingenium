@@ -18,6 +18,9 @@ root_opencode_config="${repo_root}/opencode.json"
 runtime_entrypoint="${repo_root}/scripts/runtime-entrypoint.sh"
 vscode_runner="${repo_root}/scripts/start-vscode.sh"
 vscode_theme_manifest="${repo_root}/config/vscode-extensions/ingenium.system-theme-defaults/package.json"
+vscode_theme_validator="${repo_root}/scripts/validate-vscode-theme-manifest.mjs"
+plugin_closure_validator="${repo_root}/packages/ingenium-extension/scripts/plugin-source-closure.mjs"
+plugin_load_smoke="${repo_root}/packages/ingenium-extension/scripts/smoke-opencode-plugin-load.mjs"
 vscode_proxy="${repo_root}/nginx/proxy-vscode.conf"
 vault_secret_root_validator="${repo_root}/scripts/validate-vault-job-secret-root.sh"
 runtime_gateway="${repo_root}/services/ingenium-api/scripts/runtime-gateway.ts"
@@ -79,7 +82,7 @@ reject_path() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_proxy" "$vault_secret_root_validator" "$runtime_gateway" "$protected_token_reader" "$root_entrypoint_validator"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_theme_validator" "$plugin_closure_validator" "$plugin_load_smoke" "$vscode_proxy" "$vault_secret_root_validator" "$runtime_gateway" "$protected_token_reader" "$root_entrypoint_validator"; do
   require_file "$path"
 done
 
@@ -134,16 +137,11 @@ require_literal "$dockerfile" 'builtin_manifest="/usr/local/lib/code-server/lib/
 require_literal "$dockerfile" 'builtin_dir="$(dirname "$builtin_manifest")"'
 require_literal "$dockerfile" 'test -d "/usr/local/lib/code-server/lib/vscode/extensions"'
 require_literal "$dockerfile" 'chmod 0755 "$builtin_dir"'
+require_literal "$dockerfile" 'chmod 0444 "$builtin_manifest"'
 require_literal "$dockerfile" 'runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json'
-require_literal "$dockerfile" 'manifest.name!=="system-theme-defaults"'
-require_literal "$dockerfile" 'manifest.publisher!=="ingenium"'
-require_literal "$dockerfile" 'manifest.version!=="1.0.0"'
-require_literal "$dockerfile" 'configurationDefaults'
-require_literal "$dockerfile" '"window.autoDetectColorScheme":true'
-require_literal "$dockerfile" '"workbench.preferredDarkColorTheme":"Dark Modern"'
-require_literal "$dockerfile" '"workbench.preferredLightColorTheme":"Light Modern"'
-require_literal "$dockerfile" 'forbidden=["main","browser","activationEvents","scripts","dependencies","devDependencies","permissions"]'
-require_literal "$dockerfile" 'fs.readdirSync(require("path").dirname(manifestPath)).sort()'
+require_literal "$dockerfile" 'scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs'
+require_literal "$dockerfile" 'node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest"'
+require_literal "$dockerfile" 'rm /tmp/validate-vscode-theme-manifest.mjs'
 reject_literal "$dockerfile" "ensure-vscode-settings"
 require_literal "$dockerfile" "nginx/proxy-vscode.conf"
 require_literal "$dockerfile" "scripts/generate-dashboard-safe-read-policy.mjs"
@@ -156,13 +154,15 @@ require_literal "$dockerfile" '`/dev/shm` is a container-runtime tmpfs'
 reject_pattern "$dockerfile" 'RUN[[:space:]].*(mkdir|install).*/dev/shm/ingenium-job-secrets'
 reject_literal "$dockerfile" "3002"
 reject_pattern "$dockerfile" '^EXPOSE .*4100'
-# OpenCode loads the configured TypeScript plugins from source paths. Keep the
-# small local dependency closure required by those entrypoints, but do not
-# restore a broad extension-workspace copy to the production image.
-for extension_source in plugin-specs.mjs auto-observer.ts plugins/auto-observer.ts observer.ts plugins/observer.ts resource-sync.ts plugins/resource-sync.ts session-coordinator.ts plugins/session-coordinator.ts skill-sync.ts observer-core.ts project-resolver.ts api-auth.ts; do
-  require_literal "$dockerfile" "COPY --from=builder --chown=root:root /app/packages/ingenium-extension/${extension_source} ./packages/ingenium-extension/${extension_source}"
-done
-require_literal "$dockerfile" "COPY --from=builder --chown=root:root /app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail"
+# OpenCode loads configured TypeScript paths directly. Materialize the derived
+# local graph once instead of maintaining a second import list in this script.
+require_literal "$dockerfile" "node packages/ingenium-extension/scripts/plugin-source-closure.mjs"
+require_literal "$dockerfile" "--materialize /tmp/ingenium-extension-plugin-sources"
+require_literal "$dockerfile" "COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension"
+require_literal "$dockerfile" "COPY --from=builder --chown=root:root /app/packages/ingenium-extension/scripts/smoke-opencode-plugin-load.mjs /tmp/smoke-opencode-plugin-load.mjs"
+require_literal "$dockerfile" "node /tmp/smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode"
+reject_literal "$dockerfile" "/app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts"
+reject_literal "$dockerfile" "/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail"
 reject_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/"
 web_arg_line="$(grep -n -F 'ARG NEXT_PUBLIC_OPENCODE_WEB_URL=' "$dockerfile" | cut -d: -f1)"
 cli_arg_line="$(grep -n -F 'ARG NEXT_PUBLIC_OPENCODE_CLI_URL=' "$dockerfile" | cut -d: -f1)"
@@ -358,6 +358,10 @@ require_literal "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/norma
 require_literal "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
 require_line_before "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/" "COPY --chown=root:root --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
 require_line_before "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/" "/usr/local/bin/ingenium-init-project --help"
+require_literal "$dockerfile" '/app/scripts/run-init-project.sh && \'
+require_literal "$dockerfile" 'test "$(stat -c '\''%U:%G:%a'\'' /app/scripts/run-init-project.sh)" = "root:root:555"'
+require_literal "$dockerfile" '/usr/local/bin/ingenium-init-project --version'
+require_line_before "$dockerfile" "RUN chmod 0555 \\" "/usr/local/bin/ingenium-init-project --help"
 require_literal "$entrypoint" "project-opencode-global-config.mjs"
 require_literal "$root_opencode_config" '"INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential"'
 reject_literal "$root_opencode_config" '"INGENIUM_MCP_CREDENTIAL"'
@@ -530,5 +534,7 @@ GATEWAY_VALIDATE_STATIC_ONLY=1 sh "${repo_root}/scripts/validate-gateway-config.
 sh "${repo_root}/scripts/validate-api-boundary.sh" "$repo_root"
 node --check "$image_provenance_validator"
 node --check "$opencode_global_projector"
-node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const defaults={"window.autoDetectColorScheme":true,"workbench.preferredDarkColorTheme":"Dark Modern","workbench.preferredLightColorTheme":"Light Modern"}; const forbidden=["main","browser","activationEvents","scripts","dependencies","devDependencies","permissions"]; if (manifest.name!=="system-theme-defaults" || manifest.publisher!=="ingenium" || manifest.version!=="1.0.0" || manifest.engines?.vscode!=="^1.131.0" || JSON.stringify(manifest.contributes?.configurationDefaults)!==JSON.stringify(defaults) || forbidden.some((key)=>Object.hasOwn(manifest,key))) process.exit(1);' "$vscode_theme_manifest"
+node "$plugin_closure_validator" --check
+node --check "$plugin_load_smoke"
+node "$vscode_theme_validator" "$vscode_theme_manifest" "1.131.0"
 echo "Deployment static validation passed"

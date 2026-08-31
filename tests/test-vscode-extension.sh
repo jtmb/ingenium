@@ -5,7 +5,6 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 START_SCRIPT="$REPO_ROOT/scripts/start-vscode.sh"
 DOCKERFILE="$REPO_ROOT/Dockerfile"
-THEME_MANIFEST="$REPO_ROOT/config/vscode-extensions/ingenium.system-theme-defaults/package.json"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -33,7 +32,7 @@ reject_pattern() {
 sh -n "$START_SCRIPT"
 require_text 'exec env -i'
 require_text '/bin/sh "$0" --clean-env'
-require_text '"$(id -un)" != "appuser"'
+require_text 'case "$INGENIUM_DEPLOYMENT_MODE:$(id -un)" in'
 require_text 'VSCODE_EXTENSION_FILE="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"'
 require_text 'VSCODE_EXTENSION_ID="sst-dev.opencode@0.0.13"'
 require_text 'VSCODE_EXTENSION_SHA256="e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4"'
@@ -100,12 +99,11 @@ require_file_text "$DOCKERFILE" 'builtin_manifest="/usr/local/lib/code-server/li
 require_file_text "$DOCKERFILE" 'builtin_dir="$(dirname "$builtin_manifest")"'
 require_file_text "$DOCKERFILE" 'test -d "/usr/local/lib/code-server/lib/vscode/extensions"'
 require_file_text "$DOCKERFILE" 'chmod 0755 "$builtin_dir"'
+require_file_text "$DOCKERFILE" 'chmod 0444 "$builtin_manifest"'
 require_file_text "$DOCKERFILE" 'runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json'
-require_file_text "$DOCKERFILE" 'manifest.name!=="system-theme-defaults"'
-require_file_text "$DOCKERFILE" 'manifest.publisher!=="ingenium"'
-require_file_text "$DOCKERFILE" 'manifest.version!=="1.0.0"'
-require_file_text "$DOCKERFILE" 'forbidden=["main","browser","activationEvents","scripts","dependencies","devDependencies","permissions"]'
+require_file_text "$DOCKERFILE" 'scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs'
+require_file_text "$DOCKERFILE" 'node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest"'
 
-node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const defaults={"window.autoDetectColorScheme":true,"workbench.preferredDarkColorTheme":"Dark Modern","workbench.preferredLightColorTheme":"Light Modern"}; const forbidden=["main","browser","activationEvents","scripts","dependencies","devDependencies","permissions"]; if (manifest.name!=="system-theme-defaults" || manifest.publisher!=="ingenium" || manifest.version!=="1.0.0" || manifest.engines?.vscode!=="^1.131.0" || JSON.stringify(manifest.contributes?.configurationDefaults)!==JSON.stringify(defaults) || forbidden.some((key)=>Object.hasOwn(manifest,key))) throw new Error("invalid built-in theme defaults manifest");' "$THEME_MANIFEST"
+node "$REPO_ROOT/tests/test-vscode-theme-manifest.mjs"
 
 printf 'PASS: VS Code extension and built-in theme-default contracts\n'

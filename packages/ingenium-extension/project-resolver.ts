@@ -6,12 +6,11 @@ import {
   type ApiAuthenticationReadinessOptions,
 } from "./api-auth.js";
 import {
-  isValidExtensionProjectName,
   resolveExtensionBinding,
   type ExtensionCredentialPurpose,
 } from "./extension-binding.js";
+import { isValidExtensionProjectName } from "./project-name.js";
 
-const MAX_PROJECT_NAME_LENGTH = 64;
 const ensuredProjects = new Map<string, Promise<string>>();
 
 function apiTimeoutMs(): number {
@@ -41,7 +40,7 @@ export function classifyExtensionProjectFailure(error: unknown): ExtensionProjec
 }
 
 export function isValidProjectName(value: unknown): value is string {
-  return isValidExtensionProjectName(value) && value.length <= MAX_PROJECT_NAME_LENGTH;
+  return isValidExtensionProjectName(value);
 }
 
 function rejectProjectResolution(reason: string): never {

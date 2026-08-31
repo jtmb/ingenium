@@ -23,6 +23,8 @@ RUN npm ci --workspaces --include-workspace-root
 
 COPY . .
 RUN sh scripts/validate-deployment-config.sh
+RUN node packages/ingenium-extension/scripts/plugin-source-closure.mjs \
+      --materialize /tmp/ingenium-extension-plugin-sources
 # These values are intentionally public browser configuration. They must be
 # present before the Next.js build because NEXT_PUBLIC_* values are inlined into
 # the dashboard bundle; setting them only on the running container is too late.
@@ -74,14 +76,17 @@ RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/
     code-server --version | grep -Eq '^4\.131\.0([[:space:]]|$)' && \
     rm /tmp/code-server.tar.gz
 COPY --chown=root:root --chmod=0444 config/vscode-extensions/ingenium.system-theme-defaults/package.json /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
+COPY --chown=root:root --chmod=0444 scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs
 RUN set -eu; \
     builtin_manifest="/usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json"; \
     builtin_dir="$(dirname "$builtin_manifest")"; \
     test -d "/usr/local/lib/code-server/lib/vscode/extensions"; \
     test -d "$builtin_dir"; \
     chmod 0755 "$builtin_dir"; \
+    chmod 0444 "$builtin_manifest"; \
     test "$(stat -c '%U:%G:%a' "$builtin_manifest")" = "root:root:444"; \
-    BUILTIN_MANIFEST="$builtin_manifest" CODE_SERVER_VSCODE_VERSION="$(code-server --version | sed -n 's/.* with Code \([0-9][0-9.]*\)$/\1/p')" node -e 'const fs=require("fs"); const manifestPath=process.env.BUILTIN_MANIFEST; const manifest=JSON.parse(fs.readFileSync(manifestPath,"utf8")); const defaults={"window.autoDetectColorScheme":true,"workbench.preferredDarkColorTheme":"Dark Modern","workbench.preferredLightColorTheme":"Light Modern"}; const runtime=/^(\d+)\.(\d+)\.(\d+)$/.exec(process.env.CODE_SERVER_VSCODE_VERSION ?? ""); const engine=/^\^(\d+)\.(\d+)\.(\d+)$/.exec(manifest.engines?.vscode ?? ""); const atLeast=(actual,minimum)=>actual[0]>minimum[0] || actual[0]===minimum[0] && (actual[1]>minimum[1] || actual[1]===minimum[1] && actual[2]>=minimum[2]); const forbidden=["main","browser","activationEvents","scripts","dependencies","devDependencies","permissions"]; if (manifest.name!=="system-theme-defaults" || manifest.publisher!=="ingenium" || manifest.version!=="1.0.0" || !runtime || !engine || Number(runtime[1])!==Number(engine[1]) || !atLeast(runtime.slice(1).map(Number),engine.slice(1).map(Number)) || JSON.stringify(manifest.contributes?.configurationDefaults)!==JSON.stringify(defaults) || forbidden.some((key)=>Object.hasOwn(manifest,key)) || JSON.stringify(fs.readdirSync(require("path").dirname(manifestPath)).sort())!=="[\"package.json\"]") throw new Error("built-in VS Code theme defaults manifest validation failed");';
+    node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest" "$(code-server --version | sed -n 's/.* with Code \([0-9][0-9.]*\)$/\1/p')"; \
+    rm /tmp/validate-vscode-theme-manifest.mjs
 RUN set -eu; \
     extension_file="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"; \
     install -d -o root -g root -m 0755 /usr/local/share/ingenium/vscode-extensions; \
@@ -164,36 +169,28 @@ COPY --from=builder --chown=root:root /app/services/ingenium-dashboard/.next/sta
 # relying on a workspace node_modules/.bin symlink surviving production pruning.
 COPY --from=builder --chown=root:root /app/packages/ingenium-extension/dist ./packages/ingenium-extension/dist
 COPY --from=builder --chown=root:root /app/packages/ingenium-extension/package.json ./packages/ingenium-extension/package.json
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/plugin-specs.mjs ./packages/ingenium-extension/plugin-specs.mjs
 # Repository sync records these configured source paths verbatim. Preserve the
 # source artifacts beside the runtime CLI instead of substituting dist paths.
-# OpenCode loads these TypeScript entrypoints directly, so retain their explicit
-# local import closure without copying the entire extension workspace.
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/auto-observer.ts ./packages/ingenium-extension/auto-observer.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/plugins/auto-observer.ts ./packages/ingenium-extension/plugins/auto-observer.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/observer.ts ./packages/ingenium-extension/observer.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/plugins/observer.ts ./packages/ingenium-extension/plugins/observer.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/resource-sync.ts ./packages/ingenium-extension/resource-sync.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/plugins/resource-sync.ts ./packages/ingenium-extension/plugins/resource-sync.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/session-coordinator.ts ./packages/ingenium-extension/session-coordinator.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/plugins/session-coordinator.ts ./packages/ingenium-extension/plugins/session-coordinator.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/project-resolver.ts ./packages/ingenium-extension/project-resolver.ts
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/api-auth.ts ./packages/ingenium-extension/api-auth.ts
-# Ponytail is an official immutable local checkout, not an npm dependency. Its
-# CommonJS companions, commands, and skills form the adapter's complete runtime
-# closure and remain outside the worktree .opencode/plugins discovery root.
-COPY --from=builder --chown=root:root /app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail
-# The init wrapper invokes this helper during its build-time smoke check. Copy
-# the helper first with a non-writable executable mode so it is available without
-# widening the runtime copy surface or requiring a privileged repair.
+# OpenCode loads these TypeScript entrypoints directly. The builder derives and
+# validates their complete local graph plus Ponytail's dynamic runtime assets.
+COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension
+COPY --from=builder --chown=root:root /app/packages/ingenium-extension/scripts/smoke-opencode-plugin-load.mjs /tmp/smoke-opencode-plugin-load.mjs
+RUN node /tmp/smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode && \
+    rm /tmp/smoke-opencode-plugin-load.mjs
+# Some configured builders retain checkout modes despite COPY --chmod. Normalize
+# these narrow executable inputs explicitly before the build-time smoke check.
 COPY --chown=root:root --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh
-RUN chmod 0555 /app/packages/ingenium-extension/dist/scripts/init-project.js && \
+RUN chmod 0555 \
+      /app/packages/ingenium-extension/dist/scripts/init-project.js \
+      /app/scripts/normalize-agent-profiles.sh \
+      /app/scripts/project-agent-profiles.mjs \
+      /app/scripts/run-init-project.sh && \
+    test "$(stat -c '%U:%G:%a' /app/scripts/run-init-project.sh)" = "root:root:555" && \
     ln -s /app/scripts/run-init-project.sh /usr/local/bin/ingenium-init-project && \
     test -x /usr/local/bin/ingenium-init-project && \
-    /usr/local/bin/ingenium-init-project --help
+    /usr/local/bin/ingenium-init-project --help && \
+    test "$(/usr/local/bin/ingenium-init-project --version)" = "1.0.0"
 
 # Supervisor and the entrypoint resolve these explicit `/app` paths at runtime;
 # copy only their declared scripts instead of retaining the builder source tree.

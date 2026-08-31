@@ -7,3 +7,10 @@ export const CANONICAL_PLUGIN_SPECS = Object.freeze([
 ]);
 
 export const CANONICAL_PROJECT_PLUGIN_PREFIX = "file://{env:PWD}/";
+
+export const CANONICAL_PLUGIN_RUNTIME_ASSETS = Object.freeze([
+  "plugin-specs.mjs",
+  "ponytail/package.json",
+  "ponytail/.opencode/command",
+  "ponytail/skills",
+]);

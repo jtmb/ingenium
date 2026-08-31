@@ -101,7 +101,8 @@ describe("Ponytail immutable checkout integration", () => {
     expect(packageJson.files).toContain("ponytail/");
     expect(packageJson.dependencies?.["@dietrichgebert/ponytail"]).toBeUndefined();
     expect(packageJson.devDependencies?.["@dietrichgebert/ponytail"]).toBeUndefined();
-    expect(dockerfile).toContain("COPY --from=builder --chown=root:root /app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
+    expect(dockerfile).toContain("COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension");
+    expect(dockerfile).toContain("smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode");
     expect(dockerfile).toContain(projectPluginSpec);
     expect(entrypoint).toContain(projectPluginSpec);
   });

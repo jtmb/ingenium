@@ -2,10 +2,8 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { preflightApiAuthentication } from "../api-auth.js";
-import { resolveExtensionBinding } from "../extension-binding.js";
-import { isValidProjectName } from "../project-resolver.js";
-import { repositorySync, type RepositorySyncScope } from "../resource-sync.js";
+import { isValidExtensionProjectName } from "../project-name.js";
+import type { RepositorySyncScope } from "../resource-sync.js";
 
 const AUTHENTICATION_FAILURE_MESSAGE = "Unable to authenticate with Ingenium API";
 
@@ -19,7 +17,13 @@ export interface InitProjectHelpArgs {
   help: true;
 }
 
-export type ParsedInitProjectArgs = InitProjectArgs | InitProjectHelpArgs;
+export interface InitProjectVersionArgs {
+  version: true;
+}
+
+export type ParsedInitProjectArgs = InitProjectArgs | InitProjectHelpArgs | InitProjectVersionArgs;
+
+export const INIT_PROJECT_VERSION = "1.0.0";
 
 export const INIT_PROJECT_USAGE = `Usage:
   ingenium-init-project --dry-run [--docs-only] [--project <name>]
@@ -32,6 +36,7 @@ Options:
   --project <name>  Use a validated project name instead of INGENIUM_PROJECT
                     or the validated worktree basename.
   --help            Show this help text.
+  --version         Show the package version.
 `;
 
 /** Parse the intentionally small, non-interactive `/init-project` CLI surface. */
@@ -55,12 +60,15 @@ export function parseInitProjectArgs(args: string[]): ParsedInitProjectArgs {
       if (!requestedProject || requestedProject.startsWith("--")) {
         throw new Error("--project requires a project name");
       }
-      if (!isValidProjectName(requestedProject)) throw new Error("--project must be a safe project name");
+      if (!isValidExtensionProjectName(requestedProject)) throw new Error("--project must be a safe project name");
       project = requestedProject;
       index += 1;
     } else if (arg === "--help") {
       if (args.length !== 1) throw new Error("--help cannot be combined with other arguments");
       return { help: true };
+    } else if (arg === "--version") {
+      if (args.length !== 1) throw new Error("--version cannot be combined with other arguments");
+      return { version: true };
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -75,15 +83,24 @@ export async function runInitProject(args = process.argv.slice(2), worktree = pr
     process.stdout.write(INIT_PROJECT_USAGE);
     return 0;
   }
+  if ("version" in options) {
+    process.stdout.write(`${INIT_PROJECT_VERSION}\n`);
+    return 0;
+  }
+  const [authenticationModule, bindingModule, syncModule] = await Promise.all([
+    import("../api-auth.js"),
+    import("../extension-binding.js"),
+    import("../resource-sync.js"),
+  ]);
   const resolvedWorktree = resolve(worktree);
   let apiBase: string;
   try {
-    apiBase = resolveExtensionBinding(resolvedWorktree, { purpose: "repository-sync" }).apiUrl;
+    apiBase = bindingModule.resolveExtensionBinding(resolvedWorktree, { purpose: "repository-sync" }).apiUrl;
   } catch {
     process.stderr.write(`${AUTHENTICATION_FAILURE_MESSAGE}\n`);
     return 2;
   }
-  const authentication = await preflightApiAuthentication(apiBase, resolvedWorktree, fetch, {
+  const authentication = await authenticationModule.preflightApiAuthentication(apiBase, resolvedWorktree, fetch, {
     credentialPurpose: "repository-sync",
   });
   if (!authentication.authenticated) {
@@ -93,11 +110,11 @@ export async function runInitProject(args = process.argv.slice(2), worktree = pr
     process.stderr.write(`${AUTHENTICATION_FAILURE_MESSAGE}\n`);
     return 2;
   }
-  resolveExtensionBinding(resolvedWorktree, {
+  bindingModule.resolveExtensionBinding(resolvedWorktree, {
     purpose: "repository-sync",
     project: options.project,
   });
-  const result = await repositorySync(resolvedWorktree, options);
+  const result = await syncModule.repositorySync(resolvedWorktree, options);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   return result.docs.errors + result.skills.errors + result.agents.errors + result.plugins.errors > 0 ? 1 : 0;
 }

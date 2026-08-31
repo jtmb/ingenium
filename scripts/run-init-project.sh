@@ -4,6 +4,20 @@
 # and an explicit container project identity to the packaged extension CLI.
 set -eu
 
+cli="/app/packages/ingenium-extension/dist/scripts/init-project.js"
+for argument in "$@"; do
+  case "$argument" in
+    --help|--version)
+      exec env -i \
+        PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        HOME="/home/appuser" \
+        XDG_CONFIG_HOME="/home/appuser/.config" \
+        XDG_DATA_HOME="/home/appuser/.local/share" \
+        node "$cli" "$@"
+      ;;
+  esac
+done
+
 worktree="${INGENIUM_WORKTREE:-/workspace}"
 project="${INGENIUM_PROJECT:-global-default}"
 api_url="${INGENIUM_API_URL:-http://localhost:4097/api/v1}"
@@ -25,7 +39,7 @@ if [ "$(id -u)" -eq 0 ]; then
     INGENIUM_MCP_CREDENTIAL_FILE="$credential_file" \
     INGENIUM_MCP_AUDIENCE="repository-sync" \
     INGENIUM_WORKSPACE_ID="$workspace_id" \
-    node /app/packages/ingenium-extension/dist/scripts/init-project.js "$@"
+    node "$cli" "$@"
 fi
 
 exec env -i \
@@ -39,4 +53,4 @@ exec env -i \
   INGENIUM_MCP_CREDENTIAL_FILE="$credential_file" \
   INGENIUM_MCP_AUDIENCE="repository-sync" \
   INGENIUM_WORKSPACE_ID="$workspace_id" \
-  node /app/packages/ingenium-extension/dist/scripts/init-project.js "$@"
+  node "$cli" "$@"
