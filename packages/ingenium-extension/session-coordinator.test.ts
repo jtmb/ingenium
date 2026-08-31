@@ -698,6 +698,44 @@ describe("SessionCoordinatorPlugin hooks", () => {
     ]);
   });
 
+  it("does not report coordination unavailable when startup session status is not ready", async () => {
+    const log = vi.fn();
+    const status = vi.fn().mockRejectedValue(new Error("OpenCode instance is bootstrapping"));
+    const process = processHarness("startup-project", "/tmp/start/home", "/tmp/start/xdg", 43001, {
+      app: { log },
+      session: { status },
+    });
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: coordinationFixture().callTool,
+      disableHeartbeat: true,
+    });
+
+    await coordinator.reconcile();
+
+    expect(status).toHaveBeenCalledOnce();
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("propagates unexpected startup snapshot publication failures", async () => {
+    const status = vi.fn().mockResolvedValue({ data: { "session-existing": { type: "busy" } } });
+    const process = processHarness("startup-project", "/tmp/start/home", "/tmp/start/xdg", 43001, {
+      session: { status },
+    });
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: coordinationFixture().callTool,
+      disableHeartbeat: true,
+    });
+    const publicationError = new Error("snapshot publication failed");
+    const publishSnapshot = vi.spyOn(coordinator as any, "publishSnapshot").mockRejectedValue(publicationError);
+
+    await expect(coordinator.reconcile()).rejects.toBe(publicationError);
+
+    expect(status).toHaveBeenCalledOnce();
+    expect(publishSnapshot).toHaveBeenCalledOnce();
+  });
+
   it("attests a runtime before startup reconciliation", async () => {
     const status = vi.fn().mockResolvedValue({ data: {} });
     const runtime = processHarness("runtime-project", "/tmp/runtime/home", "/tmp/runtime/xdg", 43000, {

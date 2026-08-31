@@ -1764,17 +1764,20 @@ export class SessionCoordinator {
     const status = (this.ctx.client as { session?: { status?: (options: unknown) => Promise<unknown> } } | undefined)
       ?.session?.status;
     if (typeof status !== "function") return;
+    let response: unknown;
     try {
-      const response = await status({ query: { directory: this.ctx.worktree } });
-      if (this.disposed) return;
-      const data = isRecord(response) && isRecord(response.data) ? response.data : undefined;
-      if (data) await Promise.all(Object.entries(data).map(([sessionId, value]) => this.publishSnapshot(sessionId, (state) => {
-        state.status = eventStatus(value) ?? "active";
-        this.applySignals(state, value);
-      })));
+      response = await status({ query: { directory: this.ctx.worktree } });
     } catch {
-      this.warning();
+      // OpenCode can reject this advisory read while an instance is bootstrapping;
+      // subsequent session events still publish authoritative coordination state.
+      return;
     }
+    if (this.disposed) return;
+    const data = isRecord(response) && isRecord(response.data) ? response.data : undefined;
+    if (data) await Promise.all(Object.entries(data).map(([sessionId, value]) => this.publishSnapshot(sessionId, (state) => {
+      state.status = eventStatus(value) ?? "active";
+      this.applySignals(state, value);
+    })));
   }
 
   async closeSession(sessionId: string): Promise<void> {
