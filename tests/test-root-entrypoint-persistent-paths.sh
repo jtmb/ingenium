@@ -34,10 +34,22 @@ helper() {
   sh "$RUN_ROOT/helper.sh" "$@"
 }
 
+symlink_gid() {
+  node -e 'process.stdout.write(String(require("node:fs").lstatSync(process.argv[1]).gid))' "$1"
+}
+
 uid="$(id -u)"
 gid="$(id -g)"
+runtime_gid="$gid"
+for candidate in $(id -G); do
+  if [[ "$candidate" != "$gid" ]]; then
+    runtime_gid="$candidate"
+    break
+  fi
+done
 protected="$RUN_ROOT/protected"
 mkdir -p "$protected"
+chgrp "$runtime_gid" "$protected"
 chmod 0751 "$protected"
 protected_before="$(stat -c '%d:%i:%u:%g:%a' "$protected")"
 
@@ -107,7 +119,11 @@ try {
 NODE
 
 mkdir -p "$RUN_ROOT/package/.config/opencode/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/node_modules/tool" \
-  "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool"
+  "$RUN_ROOT/package/.config/opencode/runtime"
+chgrp "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime"
+chmod 2770 "$RUN_ROOT/package/.config/opencode/runtime"
+mkdir -p "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin" \
+  "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool"
 printf '#!/bin/sh\n' > "$RUN_ROOT/package/.config/opencode/node_modules/tool/cli"
 printf '#!/bin/sh\n' > "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool/cli"
 ln -s ../tool/cli "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool"
@@ -117,6 +133,115 @@ helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660
   || fail 'contained package-manager executable link changed during validation'
 [[ "$(readlink "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/runtime-tool")" == ../runtime-tool/cli ]] \
   || fail 'contained runtime package-manager executable link changed during validation'
+[[ "$(symlink_gid "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/runtime-tool")" == "$runtime_gid" ]] \
+  || fail 'runtime package-manager executable link lost its primary group'
+chgrp "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime"
+
+identity_status=0
+timeout --kill-after=1s 2s sh "$RUN_ROOT/helper.sh" tree "$RUN_ROOT/package/.config" "$((uid + 1))" "$gid" 2770 0660 \
+  || identity_status=$?
+case "$identity_status" in
+  1) printf 'IDENTITY: deterministic exact-UID mismatch rejected\n' ;;
+  124|137) fail 'deterministic exact-UID mismatch validation timed out' ;;
+  *) fail "deterministic exact-UID mismatch returned unexpected status $identity_status" ;;
+esac
+
+race_gid_a="$gid"
+race_gid_b=""
+for candidate in $(id -G); do
+  if [[ "$candidate" != "$race_gid_a" ]]; then
+    race_gid_b="$candidate"
+    break
+  fi
+done
+if [[ -z "$race_gid_b" ]]; then
+  printf 'SKIP: runtime pathname-exchange cross-GID race requires two usable GIDs; id -G: %s\n' "$(id -G)"
+else
+  race_root="$RUN_ROOT/runtime-path-race"
+  race_config="$race_root/package/.config"
+  race_runtime="$race_config/opencode/runtime"
+  race_spare="$race_root/spare"
+  for runtime_root in "$race_runtime" "$race_spare"; do
+    mkdir -p "$runtime_root/node_modules/.bin" "$runtime_root/node_modules/tool"
+    printf '#!/bin/sh\n' > "$runtime_root/node_modules/tool/cli"
+    ln -s ../tool/cli "$runtime_root/node_modules/.bin/tool"
+  done
+  if ! chgrp "$race_gid_a" "$race_runtime" \
+    || ! chgrp "$race_gid_b" "$race_spare" \
+    || ! chgrp -h "$race_gid_b" "$race_runtime/node_modules/.bin/tool" \
+    || ! chgrp -h "$race_gid_a" "$race_spare/node_modules/.bin/tool"; then
+    printf 'SKIP: runtime pathname-exchange cross-GID race could not use declared GIDs %s,%s; id -G: %s\n' \
+      "$race_gid_a" "$race_gid_b" "$(id -G)"
+  else
+    [[ "$(stat -c '%d:%u:%g' "$race_runtime")" == "$(stat -c '%d' "$race_config"):$uid:$race_gid_a" ]] \
+      || fail 'first runtime race root lacks the required device/UID/GID identity'
+    [[ "$(stat -c '%d:%u:%g' "$race_spare")" == "$(stat -c '%d' "$race_config"):$uid:$race_gid_b" ]] \
+      || fail 'second runtime race root lacks the required device/UID/GID identity'
+    [[ "$(symlink_gid "$race_runtime/node_modules/.bin/tool")" == "$race_gid_b" ]] \
+      || fail 'first runtime race link is not cross-mismatched'
+    [[ "$(symlink_gid "$race_spare/node_modules/.bin/tool")" == "$race_gid_a" ]] \
+      || fail 'second runtime race link is not cross-mismatched'
+
+    node - "$RUN_ROOT/helper.sh" "$race_config" "$race_runtime" "$race_spare" "$uid" "$gid" <<'NODE'
+const fs = require("node:fs");
+const { once } = require("node:events");
+const { spawn, spawnSync } = require("node:child_process");
+const [helper, config, runtime, spare, uid, gid] = process.argv.slice(2);
+const swap = `${spare}.swap`;
+
+function invokeHelper() {
+  return spawnSync("timeout", ["--kill-after=1s", "2s", "sh", helper, "tree", config, uid, gid, "2770", "0660"], {
+    stdio: "ignore",
+  }).status;
+}
+
+async function main() {
+  if (invokeHelper() !== 1) throw new Error("first stable cross-GID mismatch was not rejected");
+  fs.renameSync(runtime, swap);
+  fs.renameSync(spare, runtime);
+  fs.renameSync(swap, spare);
+  if (invokeHelper() !== 1) throw new Error("second stable cross-GID mismatch was not rejected");
+
+  const racer = spawn("python3", ["-c", `
+import ctypes
+import os
+import sys
+
+runtime, spare, ready = sys.argv[1:]
+renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+renameat2.restype = ctypes.c_int
+open(ready, "w").close()
+while True:
+    if renameat2(-100, os.fsencode(runtime), -100, os.fsencode(spare), 2) != 0:
+        raise OSError(ctypes.get_errno(), "renameat2 exchange failed")
+  `, runtime, spare, `${spare}.ready`], { stdio: "ignore" });
+  try {
+    for (let attempt = 0; attempt < 100 && !fs.existsSync(`${spare}.ready`); attempt += 1) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+    if (!fs.existsSync(`${spare}.ready`) || racer.exitCode !== null) throw new Error("runtime pathname racer did not start");
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const status = invokeHelper();
+      if (status !== 1) throw new Error(`runtime pathname race helper ${attempt + 1} returned ${status}`);
+    }
+  } finally {
+    if (racer.exitCode === null && racer.signalCode === null) {
+      racer.kill("SIGTERM");
+      await once(racer, "exit");
+    }
+  }
+  if (racer.exitCode === null && racer.signalCode === null) throw new Error("runtime pathname racer was not reaped");
+  process.stdout.write("RACE: 42 cross-GID helper invocations rejected; pathname racer reaped\n");
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
+});
+NODE
+  fi
+fi
 
 ln -s ../../../../../protected "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
 if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
@@ -126,7 +251,15 @@ rm "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
 [[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
   || fail 'escaping package-manager link changed the protected target'
 
+chgrp "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime"
+chgrp "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin"
+chmod 2770 "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin"
 ln -s ../../../../../../protected "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/escape"
+chgrp -h "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/escape"
+[[ "$(symlink_gid "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/escape")" == "$runtime_gid" ]] \
+  || fail 'runtime escape link metadata does not match the runtime GID fixture'
+[[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
+  || fail 'runtime escape link group setup changed the protected target'
 if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
   fail 'escaping runtime package-manager executable link was accepted'
 fi
@@ -134,8 +267,14 @@ rm "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/escape"
 [[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
   || fail 'escaping runtime package-manager link changed the protected target'
 
+chgrp "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime"
+chgrp "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin"
+chmod 2770 "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin"
 mkfifo "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool/fifo"
 ln -s ../runtime-tool/fifo "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/fifo"
+chgrp -h "$runtime_gid" "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/fifo"
+[[ "$(symlink_gid "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/fifo")" == "$runtime_gid" ]] \
+  || fail 'runtime FIFO link metadata does not match the runtime GID fixture'
 fifo_status=0
 timeout 2 sh "$RUN_ROOT/helper.sh" tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660 || fifo_status=$?
 case "$fifo_status" in

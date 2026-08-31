@@ -110,11 +110,27 @@ function validatePackageBinLink(parentDescriptor, name, metadata, rootDevice, re
     : relative === "opencode/runtime/node_modules/.bin" ? "opencode/runtime/node_modules"
     : undefined;
   if (path.basename(target) !== ".config" || modulesRelative === undefined || uid === undefined || gid === undefined
-    || metadata.uid !== uid || metadata.gid !== gid) fail();
+    || metadata.uid !== uid) fail();
 
   const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
   let targetDescriptor;
   try {
+    let linkGid = gid;
+    if (modulesRelative === "opencode/runtime/node_modules") {
+      let runtimeDescriptor;
+      let runtimeRoot;
+      try {
+        runtimeDescriptor = fs.openSync(`/proc/self/fd/${parentDescriptor}/../..`, directoryFlags);
+        runtimeRoot = fs.fstatSync(runtimeDescriptor);
+      } catch {
+        fail();
+      } finally {
+        if (runtimeDescriptor !== undefined) fs.closeSync(runtimeDescriptor);
+      }
+      if (!runtimeRoot.isDirectory() || runtimeRoot.uid !== uid || runtimeRoot.dev !== rootDevice) fail();
+      linkGid = runtimeRoot.gid;
+    }
+    if (metadata.gid !== linkGid) fail();
     const linkTarget = fs.readlinkSync(childPath);
     const modulesRoot = fs.realpathSync(path.join(target, modulesRelative));
     const binMetadata = fs.lstatSync(path.join(modulesRoot, ".bin"));
@@ -133,7 +149,7 @@ function validatePackageBinLink(parentDescriptor, name, metadata, rootDevice, re
       || fs.realpathSync(childPath) !== resolvedTarget) fail();
 
     const linked = fs.lstatSync(childPath);
-    if (!sameObject(metadata, linked) || linked.uid !== uid || linked.gid !== gid) fail();
+    if (!sameObject(metadata, linked) || linked.uid !== uid || linked.gid !== linkGid) fail();
   } catch {
     fail();
   } finally {
