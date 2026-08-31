@@ -16,7 +16,7 @@ const path = require("node:path");
 
 const [operation, target, uidText, gidText, directoryMode, fileMode = "-", excludedName = ""] = process.argv.slice(2);
 const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
-const fileFlags = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+const fileFlags = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK;
 const uid = uidText === "-" ? undefined : Number.parseInt(uidText, 10);
 const gid = gidText === "-" ? undefined : Number.parseInt(gidText, 10);
 
@@ -106,15 +106,17 @@ function isStrictDescendant(parent, child) {
 }
 
 function validatePackageBinLink(parentDescriptor, name, metadata, rootDevice, relative) {
-  const childRelative = relative ? `${relative}/${name}` : name;
-  if (path.basename(target) !== ".config" || !/^opencode\/node_modules\/\.bin\/[^/]+$/.test(childRelative)
-    || uid === undefined || gid === undefined || metadata.uid !== uid || metadata.gid !== gid) fail();
+  const modulesRelative = relative === "opencode/node_modules/.bin" ? "opencode/node_modules"
+    : relative === "opencode/runtime/node_modules/.bin" ? "opencode/runtime/node_modules"
+    : undefined;
+  if (path.basename(target) !== ".config" || modulesRelative === undefined || uid === undefined || gid === undefined
+    || metadata.uid !== uid || metadata.gid !== gid) fail();
 
   const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
   let targetDescriptor;
   try {
     const linkTarget = fs.readlinkSync(childPath);
-    const modulesRoot = fs.realpathSync(path.join(target, "opencode/node_modules"));
+    const modulesRoot = fs.realpathSync(path.join(target, modulesRelative));
     const binMetadata = fs.lstatSync(path.join(modulesRoot, ".bin"));
     if (binMetadata.isSymbolicLink() || !binMetadata.isDirectory() || binMetadata.dev !== rootDevice
       || !sameObject(binMetadata, fs.fstatSync(parentDescriptor))) fail();

@@ -106,12 +106,17 @@ try {
 }
 NODE
 
-mkdir -p "$RUN_ROOT/package/.config/opencode/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/node_modules/tool"
+mkdir -p "$RUN_ROOT/package/.config/opencode/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/node_modules/tool" \
+  "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool"
 printf '#!/bin/sh\n' > "$RUN_ROOT/package/.config/opencode/node_modules/tool/cli"
+printf '#!/bin/sh\n' > "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool/cli"
 ln -s ../tool/cli "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool"
+ln -s ../runtime-tool/cli "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/runtime-tool"
 helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660
 [[ "$(readlink "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool")" == ../tool/cli ]] \
   || fail 'contained package-manager executable link changed during validation'
+[[ "$(readlink "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/runtime-tool")" == ../runtime-tool/cli ]] \
+  || fail 'contained runtime package-manager executable link changed during validation'
 
 ln -s ../../../../../protected "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
 if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
@@ -120,6 +125,26 @@ fi
 rm "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
 [[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
   || fail 'escaping package-manager link changed the protected target'
+
+ln -s ../../../../../../protected "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/escape"
+if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
+  fail 'escaping runtime package-manager executable link was accepted'
+fi
+rm "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/escape"
+[[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
+  || fail 'escaping runtime package-manager link changed the protected target'
+
+mkfifo "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool/fifo"
+ln -s ../runtime-tool/fifo "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/fifo"
+fifo_status=0
+timeout 2 sh "$RUN_ROOT/helper.sh" tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660 || fifo_status=$?
+case "$fifo_status" in
+  1) ;;
+  124) fail 'runtime package-manager FIFO validation timed out' ;;
+  *) fail "runtime package-manager FIFO returned unexpected status $fifo_status" ;;
+esac
+rm "$RUN_ROOT/package/.config/opencode/runtime/node_modules/.bin/fifo" \
+  "$RUN_ROOT/package/.config/opencode/runtime/node_modules/runtime-tool/fifo"
 
 ln -s ../missing/cli "$RUN_ROOT/package/.config/opencode/node_modules/.bin/dangling"
 if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
