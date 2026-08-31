@@ -100,14 +100,55 @@ function applyMetadata(descriptor, modeSpec) {
     || (mode !== undefined && (metadata.mode & 0o7777) !== mode)) fail();
 }
 
+function isStrictDescendant(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function validatePackageBinLink(parentDescriptor, name, metadata, rootDevice, relative) {
+  const childRelative = relative ? `${relative}/${name}` : name;
+  if (path.basename(target) !== ".config" || !/^opencode\/node_modules\/\.bin\/[^/]+$/.test(childRelative)
+    || uid === undefined || gid === undefined || metadata.uid !== uid || metadata.gid !== gid) fail();
+
+  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
+  let targetDescriptor;
+  try {
+    const linkTarget = fs.readlinkSync(childPath);
+    const modulesRoot = fs.realpathSync(path.join(target, "opencode/node_modules"));
+    const binMetadata = fs.lstatSync(path.join(modulesRoot, ".bin"));
+    if (binMetadata.isSymbolicLink() || !binMetadata.isDirectory() || binMetadata.dev !== rootDevice
+      || !sameObject(binMetadata, fs.fstatSync(parentDescriptor))) fail();
+    const lexicalTarget = path.resolve(modulesRoot, ".bin", linkTarget);
+    if (!linkTarget || path.isAbsolute(linkTarget) || !isStrictDescendant(modulesRoot, lexicalTarget)) fail();
+
+    const resolvedTarget = fs.realpathSync(childPath);
+    if (!isStrictDescendant(modulesRoot, resolvedTarget)) fail();
+    const resolvedMetadata = fs.statSync(childPath);
+    targetDescriptor = fs.openSync(resolvedTarget, fileFlags);
+    const opened = fs.fstatSync(targetDescriptor);
+    if (!resolvedMetadata.isFile() || resolvedMetadata.dev !== rootDevice || !opened.isFile()
+      || opened.dev !== rootDevice || !sameObject(resolvedMetadata, opened)
+      || fs.realpathSync(childPath) !== resolvedTarget) fail();
+
+    const linked = fs.lstatSync(childPath);
+    if (!sameObject(metadata, linked) || linked.uid !== uid || linked.gid !== gid) fail();
+  } catch {
+    fail();
+  } finally {
+    if (targetDescriptor !== undefined) fs.closeSync(targetDescriptor);
+  }
+}
+
 function walkTree(descriptor, rootDevice, relative = "") {
   const directoryPath = `/proc/self/fd/${descriptor}`;
   for (const name of fs.readdirSync(directoryPath)) {
     if (!relative && name === excludedName) continue;
     const childPath = `${directoryPath}/${name}`;
     const metadata = fs.lstatSync(childPath);
-    if (metadata.isSymbolicLink() || metadata.dev !== rootDevice) fail();
-    if (metadata.isDirectory()) {
+    if (metadata.dev !== rootDevice) fail();
+    if (metadata.isSymbolicLink()) {
+      validatePackageBinLink(descriptor, name, metadata, rootDevice, relative);
+    } else if (metadata.isDirectory()) {
       const child = openDirectory(descriptor, name, false);
       walkTree(child, rootDevice, relative ? `${relative}/${name}` : name);
       applyMetadata(child, directoryMode);
@@ -146,6 +187,102 @@ applyMetadata(targetDescriptor, directoryMode);
 verifyStillLinked(parent, finalName, targetDescriptor);
 fs.closeSync(targetDescriptor);
 fs.closeSync(parent);
+NODE
+}
+
+remove_verified_stale_socket() {
+  node - "$@" <<'NODE'
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+
+const [target, uidText, gidText] = process.argv.slice(2);
+const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
+const uid = Number.parseInt(uidText, 10);
+const gid = Number.parseInt(gidText, 10);
+
+function fail() {
+  process.stderr.write(`ERROR: stale runtime socket validation failed: ${target}\n`);
+  process.exit(1);
+}
+
+function sameObject(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function openDirectory(parentDescriptor, name) {
+  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
+  const metadata = fs.lstatSync(childPath);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) fail();
+  const descriptor = fs.openSync(childPath, directoryFlags);
+  if (!sameObject(metadata, fs.fstatSync(descriptor))) fail();
+  return descriptor;
+}
+
+function acceptsConnections(socketPath) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: socketPath });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("socket connection timed out"));
+    }, 500);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      socket.destroy();
+      if (error.code === "ECONNREFUSED" || error.code === "ENOENT") resolve(false);
+      else reject(error);
+    });
+  });
+}
+
+function hasKernelOwner(socketPath) {
+  const entries = fs.readFileSync("/proc/net/unix", "utf8").split("\n");
+  return entries.some((entry) => {
+    const fields = entry.trim().split(/\s+/);
+    return fields.length >= 8 && fields.slice(7).join(" ") === socketPath;
+  });
+}
+
+async function main() {
+  if (process.platform !== "linux" || !fs.constants.O_NOFOLLOW || !fs.constants.O_DIRECTORY
+    || !path.isAbsolute(target) || path.resolve(target) !== target || path.basename(target) !== "code-server-ipc.sock"
+    || !Number.isInteger(uid) || !Number.isInteger(gid)) fail();
+
+  const components = target.split("/").filter(Boolean);
+  const finalName = components.pop();
+  let parent = fs.openSync("/", directoryFlags);
+  try {
+    for (const component of components) {
+      const child = openDirectory(parent, component);
+      fs.closeSync(parent);
+      parent = child;
+    }
+
+    const childPath = `/proc/self/fd/${parent}/${finalName}`;
+    let metadata;
+    try {
+      metadata = fs.lstatSync(childPath);
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    if (metadata.isSymbolicLink() || !metadata.isSocket() || metadata.uid !== uid || metadata.gid !== gid) fail();
+    if (await acceptsConnections(target) || hasKernelOwner(target)) fail();
+
+    const current = fs.lstatSync(childPath);
+    if (!sameObject(metadata, current) || !current.isSocket() || current.uid !== uid || current.gid !== gid) fail();
+    fs.unlinkSync(childPath);
+  } finally {
+    fs.closeSync(parent);
+  }
+}
+
+main().catch(fail);
 NODE
 }
 
@@ -523,6 +660,7 @@ setfacl -R -m u:ingenium-api:r-X,u:ingenium-restore:rwX /home/ingenium-opencode/
 setfacl -m d:u:ingenium-api:r-X,d:u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
 secure_persistent_path directory /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700
 secure_persistent_path directory /home/ingenium-vscode/vscode-data/user-data "$VSCODE_UID" "$VSCODE_GID" 0700
+remove_verified_stale_socket /home/ingenium-vscode/vscode-data/user-data/code-server-ipc.sock "$VSCODE_UID" "$VSCODE_GID"
 secure_persistent_path directory /home/ingenium-vscode/vscode-data/extensions "$VSCODE_UID" "$VSCODE_GID" 0700
 secure_persistent_path tree /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700 user-only
 
@@ -589,11 +727,8 @@ runuser -u ingenium-opencode -- env -i \
   XDG_CONFIG_HOME="/home/ingenium-opencode/.config" \
   node /app/scripts/project-opencode-global-config.mjs "$OC_CONFIG"
 
-# OpenCode receives only separately issued scoped credentials. Remove the
-# historical installation-token copy after proving it is the known runtime
-# credential; never overwrite an operator-issued scoped credential.
+# OpenCode receives only separately issued scoped credentials.
 WORKSPACE_OPENCODE_DIR="/workspace/.opencode"
-LEGACY_WORKSPACE_TOKEN_FILE="${WORKSPACE_OPENCODE_DIR}/.ingenium-api-token"
 if [ -L "$WORKSPACE_OPENCODE_DIR" ]; then
   echo "ERROR: OpenCode workspace directory must not be a symbolic link"
   exit 1
@@ -603,14 +738,6 @@ if [ -e "$WORKSPACE_OPENCODE_DIR" ] && [ ! -d "$WORKSPACE_OPENCODE_DIR" ]; then
   exit 1
 fi
 secure_persistent_path directory "$WORKSPACE_OPENCODE_DIR" - - -
-if [ -e "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" ]; then
-  if [ -L "$LEGACY_WORKSPACE_TOKEN_FILE" ] || [ ! -f "$LEGACY_WORKSPACE_TOKEN_FILE" ] \
-    || ! cmp -s "$RUNTIME_API_TOKEN_FILE" "$LEGACY_WORKSPACE_TOKEN_FILE"; then
-    echo "ERROR: legacy OpenCode API token path is unsafe or unrecognized"
-    exit 1
-  fi
-  rm -f "$LEGACY_WORKSPACE_TOKEN_FILE"
-fi
 
 # Project the ordinary chat profile into OpenCode's persistent global directory.
 # The broker is discovered only from the protected image path.

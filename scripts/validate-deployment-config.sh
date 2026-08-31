@@ -286,6 +286,10 @@ reject_literal "$entrypoint" 'rm -rf /dev/shm/ingenium-job-secrets'
 require_literal "$entrypoint" 'OC_AUTH="/home/ingenium-opencode/.local/share/opencode/auth.json"'
 require_literal "$entrypoint" 'secure_persistent_path file "$OC_CONFIG" "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 0660'
 require_literal "$entrypoint" 'secure_persistent_path file "$OC_AUTH" "$OPENCODE_UID" "$OPENCODE_GID" 0600'
+require_literal "$entrypoint" 'validatePackageBinLink(parentDescriptor, name, metadata, rootDevice, relative)'
+require_literal "$entrypoint" 'remove_verified_stale_socket /home/ingenium-vscode/vscode-data/user-data/code-server-ipc.sock "$VSCODE_UID" "$VSCODE_GID"'
+reject_literal "$entrypoint" '.ingenium-api-token'
+reject_literal "$entrypoint" 'cmp -s "$RUNTIME_API_TOKEN_FILE"'
 reject_literal "$env_example" "INGENIUM_API_TOKEN="
 require_literal "$env_example" "INGENIUM_API_TOKEN_FILE=/home/you/.config/ingenium/live-production/installation-api.token"
 require_literal "$env_example" "OPENCODE_SERVER_PASSWORD="

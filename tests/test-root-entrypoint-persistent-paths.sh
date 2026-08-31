@@ -19,8 +19,15 @@ const fs = require("node:fs");
 const [sourcePath, helperPath] = process.argv.slice(2);
 const source = fs.readFileSync(sourcePath, "utf8");
 const boundary = source.indexOf("\nDEPLOYMENT_MODE=");
-if (boundary < 0 || !source.includes("secure_persistent_path()")) process.exit(1);
-fs.writeFileSync(helperPath, `${source.slice(0, boundary)}\nsecure_persistent_path \"$@\"\n`, { mode: 0o700 });
+if (boundary < 0 || !source.includes("secure_persistent_path()") || !source.includes("remove_verified_stale_socket()")) process.exit(1);
+fs.writeFileSync(helperPath, `${source.slice(0, boundary)}
+if [ \"\${1:-}\" = \"--remove-stale-socket\" ]; then
+  shift
+  remove_verified_stale_socket \"$@\"
+else
+  secure_persistent_path \"$@\"
+fi
+`, { mode: 0o700 });
 NODE
 
 helper() {
@@ -99,6 +106,115 @@ try {
 }
 NODE
 
+mkdir -p "$RUN_ROOT/package/.config/opencode/node_modules/.bin" "$RUN_ROOT/package/.config/opencode/node_modules/tool"
+printf '#!/bin/sh\n' > "$RUN_ROOT/package/.config/opencode/node_modules/tool/cli"
+ln -s ../tool/cli "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool"
+helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660
+[[ "$(readlink "$RUN_ROOT/package/.config/opencode/node_modules/.bin/tool")" == ../tool/cli ]] \
+  || fail 'contained package-manager executable link changed during validation'
+
+ln -s ../../../../../protected "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
+if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
+  fail 'escaping package-manager executable link was accepted'
+fi
+rm "$RUN_ROOT/package/.config/opencode/node_modules/.bin/escape"
+[[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
+  || fail 'escaping package-manager link changed the protected target'
+
+ln -s ../missing/cli "$RUN_ROOT/package/.config/opencode/node_modules/.bin/dangling"
+if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
+  fail 'dangling package-manager executable link was accepted'
+fi
+rm "$RUN_ROOT/package/.config/opencode/node_modules/.bin/dangling"
+
+ln -s cycle-b "$RUN_ROOT/package/.config/opencode/node_modules/.bin/cycle-a"
+ln -s cycle-a "$RUN_ROOT/package/.config/opencode/node_modules/.bin/cycle-b"
+if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
+  fail 'cyclic package-manager executable links were accepted'
+fi
+rm "$RUN_ROOT/package/.config/opencode/node_modules/.bin/cycle-a" "$RUN_ROOT/package/.config/opencode/node_modules/.bin/cycle-b"
+
+ln -s /etc/passwd "$RUN_ROOT/package/.config/opencode/node_modules/.bin/absolute"
+if helper tree "$RUN_ROOT/package/.config" "$uid" "$gid" 2770 0660; then
+  fail 'absolute package-manager executable link was accepted'
+fi
+rm "$RUN_ROOT/package/.config/opencode/node_modules/.bin/absolute"
+
+node - "$RUN_ROOT/helper.sh" "$RUN_ROOT/socket/code-server-ipc.sock" "$uid" "$gid" <<'NODE'
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+const { once } = require("node:events");
+const { spawn, spawnSync } = require("node:child_process");
+const [helper, socketPath, uid, gid] = process.argv.slice(2);
+let activeChild;
+
+fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+
+async function createSocket() {
+  const child = spawn(process.execPath, ["-e", `
+    const net = require("node:net");
+    const server = net.createServer();
+    server.listen(process.argv[1], () => process.send("ready"));
+  `, socketPath], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+  await once(child, "message");
+  activeChild = child;
+  return child;
+}
+
+async function leaveStaleSocket(child) {
+  child.kill("SIGKILL");
+  await once(child, "exit");
+  activeChild = undefined;
+}
+
+async function main() {
+  try {
+    const live = await createSocket();
+    const liveResult = spawnSync("sh", [helper, "--remove-stale-socket", socketPath, uid, gid]);
+    if (liveResult.status === 0 || !fs.lstatSync(socketPath).isSocket()) throw new Error("live socket was removed");
+
+    await leaveStaleSocket(live);
+    const staleResult = spawnSync("sh", [helper, "--remove-stale-socket", socketPath, uid, gid]);
+    if (staleResult.status !== 0 || fs.existsSync(socketPath)) throw new Error("stale socket was retained");
+
+    const foreign = await createSocket();
+    await leaveStaleSocket(foreign);
+    const foreignResult = spawnSync("sh", [helper, "--remove-stale-socket", socketPath, String(Number(uid) + 1), gid]);
+    if (foreignResult.status === 0 || !fs.lstatSync(socketPath).isSocket()) throw new Error("foreign socket was removed");
+  } finally {
+    if (activeChild) await leaveStaleSocket(activeChild);
+    if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath);
+  }
+}
+
+main().catch(() => process.exit(1));
+NODE
+
+legacy_dir="$RUN_ROOT/legacy/.opencode"
+legacy_token="$legacy_dir/.ingenium-api-token"
+mkdir -p "$legacy_dir"
+printf 'mismatched legacy residue\n' > "$legacy_token"
+legacy_before="$(stat -c '%d:%i:%u:%g:%a:%s' "$legacy_token")"
+helper directory "$legacy_dir" - - -
+[[ "$(stat -c '%d:%i:%u:%g:%a:%s' "$legacy_token")" == "$legacy_before" ]] \
+  || fail 'mismatched legacy token residue was inspected or changed'
+rm "$legacy_token"
+ln -s "$protected" "$legacy_token"
+helper directory "$legacy_dir" - - -
+[[ -L "$legacy_token" && "$(readlink "$legacy_token")" == "$protected" ]] \
+  || fail 'legacy token symlink residue was inspected or changed'
+[[ "$(stat -c '%d:%i:%u:%g:%a' "$protected")" == "$protected_before" ]] \
+  || fail 'legacy token symlink changed its protected target'
+
+if grep -Fq '.ingenium-api-token' "$ROOT/scripts/docker-entrypoint.sh"; then
+  fail 'root entrypoint still names legacy workspace token residue'
+fi
+grep -Fq '${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE is required}' "$ROOT/scripts/docker-entrypoint.sh" \
+  || fail 'root entrypoint no longer requires the canonical protected token source'
+grep -Fq 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"' "$ROOT/scripts/docker-entrypoint.sh" \
+  || fail 'root entrypoint no longer exports the service-owned canonical token copy'
+
 mkdir -p "$RUN_ROOT/valid"
 helper directory "$RUN_ROOT/valid/config" "$uid" "$gid" 2770
 helper directory "$RUN_ROOT/valid/config/opencode" "$uid" "$gid" 2770
@@ -116,4 +232,4 @@ restart_state="$(stat -c '%u:%g:%a' "$RUN_ROOT/valid/config")|$(stat -c '%u:%g:%
 [[ "$(grep -Fc 'node /app/scripts/validate-root-entrypoint-chain.mjs' "$ROOT/scripts/docker-entrypoint.sh")" -eq 2 ]] \
   || fail 'immutable root chain is not revalidated after persistent setup'
 
-printf 'PASS: persistent path provisioning rejects links, non-directories, escapes, and races while preserving restart metadata\n'
+printf 'PASS: startup helpers preserve canonical-token isolation, accept only contained package links, and remove only verified stale sockets\n'

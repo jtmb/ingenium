@@ -159,9 +159,9 @@ human-facing API limit. Non-loopback requests cannot select that bucket.
   read-only at `/run/ingenium-bootstrap/api-token`. The entrypoint validates it,
   copies it atomically to `/run/ingenium-secrets/api/installation-api-token`, sets
   the consumer directory to `0700` and the token file to `0600` owned by
-  `ingenium-api`, then unsets any inline token before supervisord starts. It
-  removes only a recognized historical `/workspace/.opencode/.ingenium-api-token`;
-  an unsafe or mismatched legacy path stops startup rather than being consumed.
+  `ingenium-api`, then unsets any inline token before supervisord starts. Startup
+  does not inspect, consume, log, or mutate historical workspace token residue;
+  the canonical protected mount is the only installation-token source.
 
 The container's first-start OpenCode config contains only a relative scoped MCP
 credential-file path; OpenCode performs no config-time file interpolation and the
