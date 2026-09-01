@@ -32,7 +32,13 @@ import {
   type HarnessOptions,
   type HarnessOwnershipManifest,
   type OperationalMemoryEntry,
+  type ProtectedLocator,
 } from "./contracts";
+import {
+  RunCredentialLease,
+  createRunCredentialLeaseTransport,
+  type RunCredentialLeaseTransport,
+} from "./credential-lease";
 import { CoordinationFaultProxy, type FaultProxyEvent } from "./fault-proxy";
 import { CANARY_AGENT, CANARY_OPERATIONS, CANARY_TOOL, type CanaryOperation, type CanaryPlan, type CanaryStep } from "./canary-dispatcher";
 import { ExecutionLifecycle } from "./execution-lifecycle";
@@ -81,11 +87,13 @@ export interface HarnessAccess {
   authContent: string;
   binding: StorageBinding;
   runtime: RuntimeBinding;
+  credentials: { coordination: string; repositorySync: string };
 }
 
 export interface HarnessAccessDependencies {
-  read?: (name: HarnessCredentialName, locator: HarnessOptions["coordinationCredential"]) => string;
+  read?: (name: HarnessCredentialName, locator: ProtectedLocator) => string;
   preflight?: typeof preflightHarnessIdentity;
+  leaseTransport?: RunCredentialLeaseTransport;
   request?: typeof fetch;
 }
 
@@ -298,6 +306,7 @@ function coordinationHeaders(token: string, options: HarnessOptions): Record<str
 
 export async function preflightHarnessIdentity(
   options: HarnessOptions,
+  coordinationCredential: ProtectedLocator,
   signal: AbortSignal,
   request: typeof fetch = fetch,
 ): Promise<HarnessIdentity> {
@@ -311,7 +320,7 @@ export async function preflightHarnessIdentity(
       project: options.project,
       workspaceId: options.workspaceId,
       launcherWorktree: options.worktree,
-      credentialFile: options.coordinationCredential.path,
+      credentialFile: coordinationCredential.path,
     },
     runtimeId: options.runtimeId,
     timeoutMs: 15_000,
@@ -339,16 +348,32 @@ export async function preflightHarnessIdentity(
 
 export async function establishHarnessAccess(
   options: HarnessOptions,
+  context: TestRunContext,
+  lease: RunCredentialLease,
   signal: AbortSignal,
   dependencies: HarnessAccessDependencies = {},
 ): Promise<HarnessAccess> {
   const read = dependencies.read ?? ((_name, locator) => readProtectedValue(locator));
-  const coordinationToken = read("coordination-api", options.coordinationCredential);
-  const { binding, runtime } = await (dependencies.preflight ?? preflightHarnessIdentity)(options, signal, dependencies.request);
   const operatorToken = read("operator-api", options.operatorToken);
-  const repositoryToken = read("repository-sync", options.repositoryCredential);
+  await lease.issue(operatorToken, signal);
+  const coordinationCredential = lease.coordinationLocator;
+  const repositoryCredential = lease.repositoryLocator;
+  required(coordinationCredential && repositoryCredential, "Coordination lease omitted a required credential");
+  const coordinationToken = read("coordination-api", coordinationCredential);
+  const repositoryToken = read("repository-sync", repositoryCredential);
+  const { binding, runtime } = await (dependencies.preflight ?? preflightHarnessIdentity)(
+    options, coordinationCredential, signal, dependencies.request,
+  );
   const authContent = read("opencode-auth", options.openCodeAuth);
-  return { coordinationToken, repositoryToken, operatorToken, authContent, binding, runtime };
+  return {
+    coordinationToken,
+    repositoryToken,
+    operatorToken,
+    authContent,
+    binding,
+    runtime,
+    credentials: { coordination: coordinationCredential.path, repositorySync: repositoryCredential.path },
+  };
 }
 
 export function buildExternalConfig(
@@ -489,12 +514,14 @@ async function disconnectRuntimeProvider(
   options: HarnessOptions,
   operatorToken: string,
   runtimeId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   await expectJson(
     `${options.apiUrl}/opencode/auth/${encodeURIComponent(options.providerId)}`,
     { method: "DELETE", headers: headersForControl(operatorToken, runtimeId) },
     [200],
     options.timeoutMs,
+    signal,
   );
 }
 
@@ -1192,21 +1219,20 @@ export async function finishCoordinationCleanup(
 export async function runCoordinationHarness(options: HarnessOptions): Promise<string> {
   const lifecycle = new ExecutionLifecycle();
   lifecycle.start();
-  const originalRevision = (await git(options.worktree, ["rev-parse", "HEAD"], 30_000, lifecycle.signal)).toString("utf8").trim();
-  required(originalRevision === options.expectedRevision, "Git revision does not match --expected-revision");
-  required((await git(options.worktree, ["status", "--porcelain=v1"], 30_000, lifecycle.signal)).byteLength === 0, "Live coordination harness requires a clean worktree");
-
-  const { coordinationToken, repositoryToken, operatorToken, authContent, binding, runtime } = await establishHarnessAccess(options, lifecycle.signal);
-  const secrets = [
-    coordinationToken, repositoryToken, operatorToken, authContent,
-    options.coordinationCredential.path, options.repositoryCredential.path,
-    options.operatorToken.path, options.openCodeAuth.path,
-  ];
   const context = createTestRunContext({ repoRoot: options.worktree, applyEnvironment: false });
+  const lease = new RunCredentialLease(context, options, createRunCredentialLeaseTransport(options));
   const artifactRoot = join(options.worktree, "tests", "artifacts", "test-runs", context.runId);
-  const evidence = new EvidenceStore(options.worktree, artifactRoot, secrets);
+  let evidence: EvidenceStore | undefined;
   const proxyEvents: FaultProxyEvent[] = [];
   const proxy = new CoordinationFaultProxy({ upstream: options.apiUrl, port: context.ports.api, onEvent: (event) => proxyEvents.push(event) });
+  let originalRevision = "";
+  let coordinationToken = "";
+  let repositoryToken = "";
+  let operatorToken = "";
+  let authContent = "";
+  let binding: StorageBinding | undefined;
+  let runtime: RuntimeBinding | undefined;
+  let credentials: HarnessAccess["credentials"] | undefined;
   let externalA: HostOpenCodeProcess | undefined;
   let externalB: HostOpenCodeProcess | undefined;
   let recordA: TestRunProcess | undefined;
@@ -1225,22 +1251,27 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
   const pathRestart = `tests/coordination/${context.runId}-restart.txt`;
   const cleanup = (): Promise<void> => lifecycle.cleanup(async () => {
     const errors: unknown[] = [];
+    const cleanupSignal = AbortSignal.timeout(options.timeoutMs);
     updateTestRunManifest(context.manifestPath, { status: "stopping" });
-    if (runtimeProviderOwnership === "owned") {
-      try {
-        await cleanupRuntimeProvider(runtimeProviderOwnership, () => disconnectRuntimeProvider(options, operatorToken, runtime.id));
-        runtimeProviderOwnership = "none";
-      } catch (error) { errors.push(error); }
-    }
     for (const processRecord of [externalB, externalA]) {
       if (!processRecord) continue;
       try { await stopHostOpenCode(processRecord, context.runNonce); } catch (error) { errors.push(error); }
     }
     try { await proxy.close(); } catch (error) { errors.push(error); }
+    if (runtimeProviderOwnership === "owned" && runtime) {
+      const currentRuntime = runtime;
+      try {
+        await cleanupRuntimeProvider(runtimeProviderOwnership,
+          () => disconnectRuntimeProvider(options, operatorToken, currentRuntime.id, cleanupSignal));
+        runtimeProviderOwnership = "none";
+        lease.setRuntimeProvider(options.providerId, "none");
+      } catch (error) { errors.push(error); }
+    }
+    try { await lease.revokeAndRemove(cleanupSignal); } catch (error) { errors.push(error); }
     if (errors.length === 0) {
       try { await finalizeCoordinationTestRun(context); } catch (error) { errors.push(error); }
     }
-    evidence.write("cleanup.json", {
+    evidence?.write("cleanup.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
       completedAt: new Date().toISOString(),
       externalAStopped: !externalA || externalA.child.exitCode !== null || externalA.child.signalCode !== null,
@@ -1262,6 +1293,17 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
 
   try {
     lifecycle.assertRunning();
+    originalRevision = (await git(options.worktree, ["rev-parse", "HEAD"], 30_000, lifecycle.signal)).toString("utf8").trim();
+    required(originalRevision === options.expectedRevision, "Git revision does not match --expected-revision");
+    required((await git(options.worktree, ["status", "--porcelain=v1"], 30_000, lifecycle.signal)).byteLength === 0,
+      "Live coordination harness requires a clean worktree");
+    const access = await establishHarnessAccess(options, context, lease, lifecycle.signal);
+    ({ coordinationToken, repositoryToken, operatorToken, authContent, binding, runtime, credentials } = access);
+    const activeRuntime = runtime;
+    evidence = new EvidenceStore(options.worktree, artifactRoot, [
+      coordinationToken, repositoryToken, operatorToken, authContent,
+      credentials.coordination, credentials.repositorySync, options.operatorToken.path, options.openCodeAuth.path,
+    ]);
     evidence.write("preflight.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
       checkedAt: new Date().toISOString(),
@@ -1270,7 +1312,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
       workspaceId: binding.workspaceId,
       projectId: binding.projectId,
       storageMappingHash: binding.storageMappingHash,
-      runtime,
+      runtime: activeRuntime,
       model: { agent: CANARY_AGENT, providerId: options.providerId, modelId: options.modelId, variant: options.variant },
       openCodeVersion: options.expectedOpenCodeVersion,
       runtimeOpenCodeVersion: options.expectedRuntimeOpenCodeVersion,
@@ -1283,8 +1325,8 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     const configB = buildExternalConfig(options, proxyApiUrl, binding, "B");
     const preparedA = prepareExternalHome(context.runDir, "external-a", options, configA);
     const preparedB = prepareExternalHome(context.runDir, "external-b", options, configB);
-    externalA = await startHostOpenCode("external-a", context.ports.dashboard, preparedA, options, proxyApiUrl, configA, binding, authContent, context.runNonce, lifecycle.signal);
-    externalB = await startHostOpenCode("external-b", context.ports.fixture, preparedB, options, proxyApiUrl, configB, binding, authContent, context.runNonce, lifecycle.signal);
+    externalA = await startHostOpenCode("external-a", context.ports.dashboard, preparedA, options, credentials, proxyApiUrl, configA, binding, authContent, context.runNonce, lifecycle.signal);
+    externalB = await startHostOpenCode("external-b", context.ports.fixture, preparedB, options, credentials, proxyApiUrl, configB, binding, authContent, context.runNonce, lifecycle.signal);
     recordA = await bindProcess(context, externalA, "dashboard", lifecycle.signal);
     recordB = await bindProcess(context, externalB, "fixture", lifecycle.signal);
     await Promise.all([
@@ -1296,19 +1338,20 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
 
     const apiA = openCodeApi("A", `http://127.0.0.1:${context.ports.dashboard}`, options, lifecycle.signal);
     let apiB = openCodeApi("B", `http://127.0.0.1:${context.ports.fixture}`, options, lifecycle.signal);
-    const apiC = openCodeApi("C", `${options.apiUrl}/opencode`, options, lifecycle.signal, { operatorToken, runtimeId: runtime.id });
+    const apiC = openCodeApi("C", `${options.apiUrl}/opencode`, options, lifecycle.signal, { operatorToken, runtimeId: activeRuntime.id });
     runtimeProviderOwnership = await prepareRuntimeProvider(
-      await readRuntimeProviderCatalog(options, operatorToken, runtime.id, lifecycle.signal),
+      await readRuntimeProviderCatalog(options, operatorToken, activeRuntime.id, lifecycle.signal),
       options.providerId,
-      () => connectRuntimeProvider(options, operatorToken, runtime.id, authContent, lifecycle.signal),
+      () => connectRuntimeProvider(options, operatorToken, activeRuntime.id, authContent, lifecycle.signal),
     );
+    lease.setRuntimeProvider(options.providerId, runtimeProviderOwnership);
     const inspected = await Promise.all([inspectReady(apiA, options, lifecycle.signal), inspectReady(apiB, options, lifecycle.signal), inspectReady(apiC, options, lifecycle.signal)]);
     evidence.write("processes.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
       capturedAt: new Date().toISOString(),
       externalA: { pid: externalA.child.pid, port: externalA.port, homeSha256: sha256(externalA.home) },
       externalB: { pid: externalB.child.pid, port: externalB.port, homeSha256: sha256(externalB.home) },
-      internalC: { runtimeId: runtime.id, imageRevision: runtime.imageRevision, state: runtime.state },
+      internalC: { runtimeId: activeRuntime.id, imageRevision: activeRuntime.imageRevision, state: activeRuntime.state },
       inspections: inspected.map((value, index) => projectOpenCodeInspection((["A", "B", "C"] as const)[index]!, value, options)),
     });
 
@@ -1427,7 +1470,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     turns.push(restartMutation);
     currentRevision = await assertGitCommit(options.worktree, pathRestart, currentRevision, lifecycle.signal);
     lifecycle.assertRunning();
-    externalB = await startHostOpenCode("external-b", context.ports.fixture, preparedB, options, proxyApiUrl, configB, binding, authContent, context.runNonce, lifecycle.signal);
+    externalB = await startHostOpenCode("external-b", context.ports.fixture, preparedB, options, credentials, proxyApiUrl, configB, binding, authContent, context.runNonce, lifecycle.signal);
     recordB = await bindProcess(context, externalB, "fixture", lifecycle.signal);
     await waitForOpenCode(`http://127.0.0.1:${context.ports.fixture}`, options.expectedOpenCodeVersion, lifecycle.signal);
     apiB = openCodeApi("B", `http://127.0.0.1:${context.ports.fixture}`, options, lifecycle.signal);
@@ -1442,10 +1485,12 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     required(duplicate.transformEntryIds.length === 0 && duplicate.tools.length === 0
       && JSON.stringify(JSON.parse(duplicate.responseText.trim())) === JSON.stringify({ noNewMemory: true }), "Restarted B repeated acknowledged memory");
 
-    const identityAfter = await preflightHarnessIdentity(options, lifecycle.signal);
+    const coordinationCredential = lease.coordinationLocator;
+    required(coordinationCredential, "Coordination credential disappeared before final preflight");
+    const identityAfter = await preflightHarnessIdentity(options, coordinationCredential, lifecycle.signal);
     required(JSON.stringify(identityAfter.binding) === JSON.stringify(binding)
-      && identityAfter.runtime.id === runtime.id
-      && identityAfter.runtime.imageRevision === runtime.imageRevision,
+      && identityAfter.runtime.id === activeRuntime.id
+      && identityAfter.runtime.imageRevision === activeRuntime.imageRevision,
     "Protected runtime identity changed during the harness");
     required((await git(options.worktree, ["status", "--porcelain=v1"], 30_000, lifecycle.signal)).byteLength === 0, "Harness left the worktree dirty");
 
@@ -1464,7 +1509,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
       processes: [
         { role: "external-a", pid: externalA.child.pid!, externalId: null, port: externalA.port, startedAt: externalA.startedAt, stoppedAt: null, commandSha256: sha256(`${options.openCodeBinary}\0serve\0${externalA.port}`) },
         { role: "external-b", pid: externalB.child.pid!, externalId: null, port: externalB.port, startedAt: externalB.startedAt, stoppedAt: null, commandSha256: sha256(`${options.openCodeBinary}\0serve\0${externalB.port}`) },
-        { role: "internal-c", pid: null, externalId: runtime.id, port: null, startedAt: context.createdAt, stoppedAt: null, commandSha256: sha256(`${runtime.id}\0${runtime.imageRevision}\0opencode`) },
+        { role: "internal-c", pid: null, externalId: activeRuntime.id, port: null, startedAt: context.createdAt, stoppedAt: null, commandSha256: sha256(`${activeRuntime.id}\0${activeRuntime.imageRevision}\0opencode`) },
       ],
       boundaries: { liveRun: true, applicationSourceMutation: false, tokenBytesRetained: false, runtimeCreated: false },
     };
@@ -1516,7 +1561,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     primaryError = error;
     hasPrimaryError = true;
     lifecycle.abort(error);
-    evidence.write("failure.json", {
+    evidence?.write("failure.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
       failedAt: new Date().toISOString(),
       error: error instanceof Error ? { name: error.name, message: error.message, stackSha256: sha256(error.stack ?? "") } : { name: "Error", message: String(error) },
@@ -1528,7 +1573,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
   } finally {
     signals.forEach((signal) => process.removeListener(signal, signalHandlers.get(signal)!));
     await finishCoordinationCleanup(primaryError, hasPrimaryError, cleanup, (cleanupError) => {
-      evidence.write("cleanup-failure.json", {
+      evidence?.write("cleanup-failure.json", {
         schema: HARNESS_ARTIFACT_SCHEMA,
         failedAt: new Date().toISOString(),
         error: cleanupError instanceof Error

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -29,6 +29,15 @@ import { CoordinationFaultProxy, faultDisposition } from "./fault-proxy";
 import { allowlistedBaseEnvironment, allowlistedCanaryActionEnvironment, prepareExternalHome, runCanaryAction, startHostOpenCode, stopHostOpenCode, waitForOpenCode } from "./process-lifecycle";
 import { CanaryDispatcher, RealCanaryActions, type CanaryPlan, type CanaryRequest } from "./canary-dispatcher";
 import { ExecutionLifecycle } from "./execution-lifecycle";
+import {
+  RunCredentialLease,
+  createRunCredentialLeaseTransport,
+  type IssuedRunCredentialPair,
+  type RunCredentialLeaseTransport,
+} from "./credential-lease";
+import { recoverCoordinationHarnessRun, recoverExactLegacyCredentials } from "./recovery";
+import { runMain } from "./run";
+import type { ContainmentAuditReport } from "../suite-containment-audit";
 import {
   CROSS_READ_PROMPT,
   buildExternalConfig,
@@ -174,8 +183,6 @@ test("retains the primary error when cleanup also fails", async () => {
 
 function fixtureRepository(): {
   root: string;
-  coordination: string;
-  repository: string;
   operator: string;
   auth: string;
   openCode: string;
@@ -183,8 +190,6 @@ function fixtureRepository(): {
   const root = tempRoot("ingenium-coordination-contract-");
   const credentials = join(root, ".credentials");
   mkdirSync(credentials, { mode: 0o700 });
-  const coordination = protectedFile(credentials, ".ingenium-mcp-credential", "c".repeat(32));
-  const repository = protectedFile(credentials, ".ingenium-repository-sync-credential", "r".repeat(32));
   const operator = protectedFile(credentials, "operator", "operator-secret");
   const auth = protectedFile(credentials, "auth", JSON.stringify({ openai: { type: "api", key: "provider-secret" } }));
   const openCode = join(root, "opencode-fixture.mjs");
@@ -218,13 +223,11 @@ if (process.argv[2] === "--version") {
           INGENIUM_API_URL: "http://127.0.0.1:4097/api/v1",
           INGENIUM_PROJECT: "project-one",
           INGENIUM_WORKSPACE_ID: "workspace-one",
-          INGENIUM_MCP_CREDENTIAL_FILE: coordination,
-          INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE: repository,
         },
       },
     },
   }));
-  return { root, coordination, repository, operator, auth, openCode };
+  return { root, operator, auth, openCode };
 }
 
 function validArguments(fixture: ReturnType<typeof fixtureRepository>): string[] {
@@ -236,8 +239,6 @@ function validArguments(fixture: ReturnType<typeof fixtureRepository>): string[]
     "--storage-mapping-hash", "b".repeat(64),
     "--runtime-id", "22222222-2222-4222-8222-222222222222",
     "--expected-revision", "a".repeat(40),
-    "--coordination-credential-file", fixture.coordination,
-    "--repository-credential-file", fixture.repository,
     "--operator-token-file", fixture.operator,
     "--opencode-auth-file", fixture.auth,
     "--opencode-binary", fixture.openCode,
@@ -277,6 +278,70 @@ async function unusedPort(): Promise<number> {
   probe.close();
   await once(probe, "close");
   return port;
+}
+
+function issuedCredentialPair(options: ReturnType<typeof parseHarnessOptions>): IssuedRunCredentialPair {
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  const binding = {
+    projectId: options.projectId,
+    workspaceId: options.workspaceId,
+    launcherWorktree: options.worktree,
+    storageMappingHash: options.storageMappingHash,
+    expiresAt,
+  };
+  return {
+    coordination: {
+      ...binding,
+      id: "33333333-3333-4333-8333-333333333333",
+      audience: "mcp",
+      token: `ing_${"c".repeat(43)}`,
+    },
+    repositorySync: {
+      ...binding,
+      id: "44444444-4444-4444-8444-444444444444",
+      audience: "repository-sync",
+      token: `ing_${"r".repeat(43)}`,
+    },
+  };
+}
+
+async function leaseTestContext(prefix: string) {
+  const context = createTestRunContext({
+    repoRoot: process.cwd(),
+    tempRoot: tempRoot(prefix),
+    ports: { api: await unusedPort(), dashboard: await unusedPort(), fixture: await unusedPort() },
+    applyEnvironment: false,
+  });
+  roots.push(join(process.cwd(), "tests", "artifacts", "test-runs", context.runId));
+  return context;
+}
+
+function emptyContainmentReport(overrides: Partial<ContainmentAuditReport> = {}): ContainmentAuditReport {
+  return {
+    repoRoot: process.cwd(),
+    ports: [],
+    composeOwnership: { classification: "unverified", hostPorts: [], reason: "isolated test" },
+    managedPorts: [],
+    expectedPorts: [],
+    tempEntries: [],
+    unownedTempEntries: [],
+    managedProcesses: [],
+    discoveredProcesses: [],
+    preexistingUnownedProcesses: [],
+    holds: [],
+    telemetryErrors: [],
+    retentionTransitions: [],
+    retentionErrors: [],
+    legacyEvidence: [],
+    informational: [],
+    artifactClassifications: [],
+    artifactResiduals: [],
+    repositoryArtifactScan: true,
+    telemetry: [],
+    process: { activeHandles: 0, rssBytes: 1 },
+    rssLimitBytes: Number.MAX_SAFE_INTEGER,
+    ...overrides,
+  };
 }
 
 async function startSentinelProcess(port: number, runNonce: string): Promise<{ child: ChildProcess; record: TestRunProcess }> {
@@ -336,20 +401,14 @@ test("parses exact CLI/config bindings without accepting secret values", () => {
     expectedOpenCodeVersion: "1.18.25",
     expectedRuntimeOpenCodeVersion: "1.18.9",
   });
-  assert.equal(parsed.coordinationCredential.path, fixture.coordination);
-  assert.equal(parsed.repositoryCredential.path, fixture.repository);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--unknown", "value"], {}), /Unsupported/);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--project", "project-one"], {}), /repeated/);
   const unsafeBinary = validArguments(fixture);
   unsafeBinary[unsafeBinary.indexOf("--opencode-binary") + 1] = "../unsafe";
   assert.throws(() => parseHarnessOptions(unsafeBinary, {}), /openCodeBinary/);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--runtime-revision", "7"], {}), /Unsupported/);
-  const misnamedCoordination = validArguments(fixture);
-  misnamedCoordination[misnamedCoordination.indexOf("--coordination-credential-file") + 1] = fixture.operator;
-  assert.throws(() => parseHarnessOptions(misnamedCoordination, {}), /coordinationCredentialFile must be named/);
-  const misnamedRepository = validArguments(fixture);
-  misnamedRepository[misnamedRepository.indexOf("--repository-credential-file") + 1] = fixture.operator;
-  assert.throws(() => parseHarnessOptions(misnamedRepository, {}), /repositoryCredentialFile must be named/);
+  assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--coordination-credential-file", fixture.operator], {}), /Unsupported/);
+  assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--repository-credential-file", fixture.operator], {}), /Unsupported/);
   const withoutRuntime = validArguments(fixture);
   withoutRuntime.splice(withoutRuntime.indexOf("--runtime-id"), 2);
   assert.throws(() => parseHarnessOptions(withoutRuntime, {}), /runtimeId is required/);
@@ -536,6 +595,7 @@ test("starts external OpenCode with the canonical binary and trusted loopback pr
     port,
     prepared,
     options,
+    { coordination: join(fixture.root, "coordination"), repositorySync: join(fixture.root, "repository") },
     "http://127.0.0.1:45000/api/v1",
     "{}\n",
     { projectId: options.projectId, storageMappingHash: options.storageMappingHash },
@@ -564,8 +624,8 @@ test("rejects malformed or missing OpenCode targets before protected reads", () 
   const parseThenRead = (binary: string, path: string): void => {
     const args = validArguments(fixture);
     args[args.indexOf("--opencode-binary") + 1] = binary;
-    const options = parseHarnessOptions(args, { PATH: path });
-    readProtectedValue(options.coordinationCredential, () => { protectedReads += 1; });
+    parseHarnessOptions(args, { PATH: path });
+    protectedReads += 1;
   };
 
   assert.throws(() => parseThenRead("../opencode", dirname(process.execPath)), /absolute or a bare executable name/);
@@ -589,19 +649,208 @@ test("redacts nested credentials and rejects retained secret patterns", () => {
   assert.throws(() => assertNoSecrets({ value: `Bearer ${secret}` }, [secret]), /secret/);
 });
 
-test("attests one exact runtime preflight before opening control credentials and fails closed on identity drift", async () => {
+test("issues exact live lease requests, persists no token evidence, and cleans each credential once", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  const issued = issuedCredentialPair(options);
+  const requests: Array<{ path: string; method: string; headers: Headers; body?: string }> = [];
+  const request = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const path = new URL(String(input)).pathname;
+    requests.push({ path, method: init.method ?? "GET", headers: new Headers(init.headers), body: String(init.body ?? "") });
+    if (path.endsWith("/coordination-lease")) {
+      return Response.json({ data: {
+        runtimeId: options.runtimeId,
+        expiresAt: issued.coordination!.expiresAt,
+        coordinationCredential: { id: issued.coordination!.id, token: issued.coordination!.token },
+        repositorySyncCredential: { id: issued.repositorySync!.id, token: issued.repositorySync!.token },
+      } }, { status: 201 });
+    }
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
+    return Response.json({ error: { code: "INVALID_TOKEN" } }, { status: 401 });
+  };
+  const context = await leaseTestContext("ingenium-coordination-lease-");
+  const lease = new RunCredentialLease(context, options, createRunCredentialLeaseTransport(options, request as typeof fetch));
+
+  await lease.issue("operator-secret", new AbortController().signal);
+
+  const metadataText = readFileSync(lease.metadataPath, "utf8");
+  assert.equal(metadataText.includes(issued.coordination!.token), false);
+  assert.equal(metadataText.includes(issued.repositorySync!.token), false);
+  assert.equal(lease.snapshot().runId, context.runId);
+  assert.equal(lease.snapshot().runNonce, context.runNonce);
+  assert.equal(lease.snapshot().credentials.length, 2);
+  assert.equal(statSync(lease.coordinationLocator!.path).mode & 0o777, 0o600);
+  assert.equal(statSync(lease.repositoryLocator!.path).mode & 0o777, 0o600);
+  const issueRequest = requests[0]!;
+  assert.equal(issueRequest.path, "/api/v1/auth/coordination-lease");
+  assert.equal(issueRequest.method, "POST");
+  assert.equal(issueRequest.headers.get("authorization"), "Bearer operator-secret");
+  assert.equal(issueRequest.headers.get("x-ingenium-internal-service"), "1");
+  assert.equal(issueRequest.headers.get("x-ingenium-runtime-id"), options.runtimeId);
+  assert.deepEqual(JSON.parse(issueRequest.body!), { runtimeId: options.runtimeId });
+
+  await lease.revokeAndRemove(new AbortController().signal);
+  await lease.revokeAndRemove(new AbortController().signal);
+
+  assert.equal(requests.filter((entry) => entry.method === "DELETE").length, 2);
+  assert.equal(requests.filter((entry) => entry.path.endsWith("/auth/preflight")).length, 2);
+  for (const credential of lease.snapshot().credentials) {
+    assert.equal(credential.revokedAt !== undefined, true);
+    assert.equal(credential.removedAt !== undefined, true);
+    assert.equal(existsSync(credential.path), false);
+  }
+  await finalizeCoordinationTestRun(context);
+});
+
+test("retains redacted metadata and cleans the issued credential after a partial lease response", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  const issued = issuedCredentialPair(options);
+  let revocations = 0;
+  const context = await leaseTestContext("ingenium-coordination-partial-lease-");
+  const lease = new RunCredentialLease(context, options, {
+    async issue() { return { coordination: issued.coordination }; },
+    async revoke() { revocations += 1; },
+    async verifyRevoked() {},
+  });
+
+  await assert.rejects(lease.issue("operator-secret", new AbortController().signal), /partial/);
+  assert.equal(lease.snapshot().credentials.length, 1);
+  assert.equal(readFileSync(lease.metadataPath, "utf8").includes(issued.coordination!.token), false);
+
+  await lease.revokeAndRemove(new AbortController().signal);
+  assert.equal(revocations, 1);
+  await finalizeCoordinationTestRun(context);
+});
+
+test("fails closed when a credential path is replaced or symlinked before cleanup", async () => {
+  for (const replacement of ["inode", "symlink"] as const) {
+    const fixture = fixtureRepository();
+    const options = parseHarnessOptions(validArguments(fixture), {});
+    const context = await leaseTestContext(`ingenium-coordination-${replacement}-lease-`);
+    const lease = new RunCredentialLease(context, options, {
+      async issue() { return issuedCredentialPair(options); },
+      async revoke() {},
+      async verifyRevoked() {},
+    });
+    await lease.issue("operator-secret", new AbortController().signal);
+    const locator = lease.coordinationLocator!;
+    const original = `${locator.path}.original`;
+    const decoy = `${locator.path}.decoy`;
+    renameSync(locator.path, original);
+    writeFileSync(decoy, "replacement", { mode: 0o600 });
+    if (replacement === "inode") writeFileSync(locator.path, "replacement", { mode: 0o600 });
+    else symlinkSync(decoy, locator.path);
+
+    await assert.rejects(lease.revokeAndRemove(new AbortController().signal), (error) =>
+      error instanceof AggregateError
+      && error.errors.some((cause) => cause instanceof Error && /identity changed/i.test(cause.message)));
+    assert.equal(existsSync(locator.path), true);
+    rmSync(locator.path);
+    renameSync(original, locator.path);
+    await lease.revokeAndRemove(new AbortController().signal);
+    await finalizeCoordinationTestRun(context);
+  }
+});
+
+test("recovers a crashed stopping run once and removes its exact credential paths", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  const context = await leaseTestContext("ingenium-coordination-crash-recovery-");
+  const lease = new RunCredentialLease(context, options, {
+    async issue() { return issuedCredentialPair(options); },
+    async revoke() {},
+    async verifyRevoked() {},
+  });
+  await lease.issue("operator-secret", new AbortController().signal);
+  updateTestRunManifest(context.manifestPath, { status: "stopping" });
+  let revocations = 0;
+  const server = createServer((request, response) => {
+    if (request.method === "DELETE") {
+      revocations += 1;
+      response.writeHead(204).end();
+      return;
+    }
+    response.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "INVALID_TOKEN" } }));
+  });
+  servers.push(server);
+  const port = await listen(server);
+  const manifestPath = context.manifestPath;
+
+  await recoverCoordinationHarnessRun(manifestPath, { apiUrl: `http://127.0.0.1:${port}/api/v1` });
+  await recoverCoordinationHarnessRun(manifestPath, { apiUrl: `http://127.0.0.1:${port}/api/v1` });
+
+  assert.equal(revocations, 2);
+  assert.equal(existsSync(manifestPath), false);
+  assert.equal(existsSync(context.runDir), false);
+});
+
+test("recovers only explicitly named legacy credential paths", async () => {
+  const root = tempRoot("ingenium-coordination-legacy-credential-");
+  const coordination = protectedFile(root, ".ingenium-mcp-credential", `ing_${"l".repeat(43)}`);
+  const decoy = protectedFile(root, ".ingenium-repository-sync-credential", `ing_${"d".repeat(43)}`);
+  const requests: string[] = [];
+  await recoverExactLegacyCredentials({
+    apiUrl: "http://127.0.0.1:4097/api/v1",
+    workspaceId: "workspace-one",
+    launcherWorktree: "/exact/worktree",
+    credentials: [{ id: "55555555-5555-4555-8555-555555555555", path: coordination, audience: "mcp" }],
+    request: (async (input, init) => {
+      requests.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+      return new Response(null, { status: init?.method === "DELETE" ? 204 : 401 });
+    }) as typeof fetch,
+  });
+
+  assert.equal(existsSync(coordination), false);
+  assert.equal(existsSync(decoy), true);
+  assert.deepEqual(requests, [
+    "DELETE /api/v1/auth/mcp-credentials/55555555-5555-4555-8555-555555555555",
+    "GET /api/v1/auth/preflight",
+  ]);
+  await assert.rejects(recoverExactLegacyCredentials({
+    apiUrl: "http://127.0.0.1:4097/api/v1",
+    workspaceId: "workspace-one",
+    launcherWorktree: "/exact/worktree",
+    credentials: [{ id: "55555555-5555-4555-8555-555555555555", path: `${root}/*`, audience: "mcp" }],
+  }), /path or identity/);
+});
+
+test("runs strict repository containment after harness cleanup and fails on findings", async () => {
+  const fixture = fixtureRepository();
+  let auditOptions: unknown;
+  const pass = await runMain(validArguments(fixture), {
+    run: async () => "66666666-6666-4666-8666-666666666666",
+    audit: async (options) => {
+      auditOptions = options;
+      return emptyContainmentReport();
+    },
+  });
+  assert.equal(pass?.result, "PASS");
+  assert.deepEqual(auditOptions, {
+    telemetryPaths: [join(fixture.root, "tests", "artifacts", "test-runs", "66666666-6666-4666-8666-666666666666", "runner-telemetry.json")],
+    includeRepositoryTelemetry: true,
+  });
+  await assert.rejects(runMain(validArguments(fixture), {
+    run: async () => "77777777-7777-4777-8777-777777777777",
+    audit: async () => emptyContainmentReport({ holds: ["retained stopping run"] }),
+  }), /Strict containment failed: containment holds/);
+});
+
+test("issues run credentials before preflight and fails closed on identity drift", async () => {
   const fixture = fixtureRepository();
   const runtimeId = "22222222-2222-4222-8222-222222222222";
   const accessOrder: string[] = [];
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  const issued = issuedCredentialPair(options);
   const request = async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
-    assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${"c".repeat(32)}`);
+    assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${issued.coordination!.token}`);
     accessOrder.push(`query:${url.pathname}${url.search}`);
     assert.equal(url.toString(), `http://127.0.0.1:4097/api/v1/auth/preflight?runtime_id=${runtimeId}`);
     return Response.json({ data: {
       authenticated: true,
       scopes: ["projects:read", "coordination:read"],
-      organizationId: "organization-id",
+      organizationId: "88888888-8888-4888-8888-888888888888",
       projectId: "11111111-1111-4111-8111-111111111111",
       projectIds: ["11111111-1111-4111-8111-111111111111"],
       audience: "mcp",
@@ -613,63 +862,51 @@ test("attests one exact runtime preflight before opening control credentials and
       runtime: { id: runtimeId, imageRevision: "a".repeat(40), state: "READY" },
     } });
   };
-  const options = parseHarnessOptions(validArguments(fixture), {});
-  const configuredCredential = join(fixture.root, ".opencode", ".ingenium-mcp-credential");
-  mkdirSync(join(fixture.root, ".opencode"));
-  writeFileSync(configuredCredential, `${"x".repeat(32)}\n`, { mode: 0o660 });
-  chmodSync(configuredCredential, 0o660);
-  const configPath = join(fixture.root, "opencode.json");
-  const config = JSON.parse(readFileSync(configPath, "utf8")) as {
-    mcp: { ingenium: { environment: Record<string, string> } };
+  const transport: RunCredentialLeaseTransport = {
+    async issue() {
+      accessOrder.push("issue:coordination-lease");
+      return issued;
+    },
+    async revoke() {},
+    async verifyRevoked() {},
   };
-  config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
-  writeFileSync(configPath, JSON.stringify(config));
   const signal = new AbortController().signal;
-  const access = await establishHarnessAccess(options, signal, {
-    read(name) {
+  const context = await leaseTestContext("ingenium-coordination-access-");
+  const lease = new RunCredentialLease(context, options, transport);
+  const access = await establishHarnessAccess(options, context, lease, signal, {
+    read(name, locator) {
       accessOrder.push(`open:${name}`);
-      return `${name}-value`;
+      return readProtectedValue(locator);
     },
     request: request as typeof fetch,
   });
   assert.equal(access.runtime.id, runtimeId);
   assert.deepEqual(accessOrder, [
-    "open:coordination-api",
-    `query:/api/v1/auth/preflight?runtime_id=${runtimeId}`,
     "open:operator-api",
+    "issue:coordination-lease",
+    "open:coordination-api",
     "open:repository-sync",
+    `query:/api/v1/auth/preflight?runtime_id=${runtimeId}`,
     "open:opencode-auth",
   ]);
   assert.equal(accessOrder.some((entry) => entry.includes("/runtimes")), false);
-  const failureReads: string[] = [];
-  const queryOffset = accessOrder.length;
-  await assert.rejects(establishHarnessAccess({
+  await lease.revokeAndRemove(signal);
+  await finalizeCoordinationTestRun(context);
+
+  const driftOptions = {
     ...options,
     projectId: "77777777-7777-4777-8777-777777777777",
-  }, signal, {
-    read(name) {
-      failureReads.push(name);
-      return `${name}-value`;
-    },
+  };
+  const driftContext = await leaseTestContext("ingenium-coordination-access-drift-");
+  const driftLease = new RunCredentialLease(driftContext, driftOptions, {
+    ...transport,
+    async issue() { return issuedCredentialPair(driftOptions); },
+  });
+  await assert.rejects(establishHarnessAccess(driftOptions, driftContext, driftLease, signal, {
     request: request as typeof fetch,
   }), /project\/workspace\/storage/);
-  assert.deepEqual(failureReads, ["coordination-api"]);
-  assert.deepEqual(accessOrder.slice(queryOffset), [`query:/api/v1/auth/preflight?runtime_id=${runtimeId}`]);
-  const revisionFailureReads: string[] = [];
-  const revisionQueryOffset = accessOrder.length;
-  await assert.rejects(establishHarnessAccess({
-    ...options,
-    expectedRevision: "c".repeat(40),
-  }, signal, {
-    read(name) {
-      revisionFailureReads.push(name);
-      return `${name}-value`;
-    },
-    request: request as typeof fetch,
-  }), /runtime UUID or image revision/);
-  assert.deepEqual(revisionFailureReads, ["coordination-api"]);
-  assert.deepEqual(accessOrder.slice(revisionQueryOffset), [`query:/api/v1/auth/preflight?runtime_id=${runtimeId}`]);
-  assert.equal(accessOrder.some((entry) => entry.includes("/runtimes")), false);
+  await driftLease.revokeAndRemove(signal);
+  await finalizeCoordinationTestRun(driftContext);
 });
 
 test("validates typed operational memory and rejects duplicates or malformed paths", () => {
@@ -845,13 +1082,15 @@ test("prepares isolated homes without copying credential-bearing files", () => {
 test("generates one fixed default-deny model profile without serializing credential locators", () => {
   const fixture = fixtureRepository();
   const options = parseHarnessOptions(validArguments(fixture), {});
+  const legacyCoordination = join(fixture.root, ".credentials", ".ingenium-mcp-credential");
+  const legacyRepository = join(fixture.root, ".credentials", ".ingenium-repository-sync-credential");
   const serialized = buildExternalConfig(options, "http://127.0.0.1:45000/api/v1", {
     projectId: options.projectId,
     workspaceId: options.workspaceId,
     storageMappingHash: options.storageMappingHash,
   });
-  assert.equal(serialized.includes(fixture.coordination), false);
-  assert.equal(serialized.includes(fixture.repository), false);
+  assert.equal(serialized.includes(legacyCoordination), false);
+  assert.equal(serialized.includes(legacyRepository), false);
   const config = JSON.parse(serialized);
   assert.deepEqual(Object.keys(config.agent), ["coordination-harness-canary"]);
   assert.deepEqual(config.tools, { "*": false, coordination_canary: true });
@@ -891,7 +1130,7 @@ test("rejects every nonallowlisted canary request before side effects and accept
     .requestForCurrentStep(plan.nonce, "mutate_only");
   const attacks: CanaryRequest[] = [
     { ...exact, operation: "observe" },
-    { ...exact, path: fixture.coordination },
+    { ...exact, path: join(fixture.root, ".credentials", ".ingenium-mcp-credential") },
     { ...exact, path: "tests/coordination/undeclared.txt" },
     { ...exact, command: "rm -rf -- tests/coordination" },
     { ...exact, nonce: "44444444-4444-4444-8444-444444444444" },
@@ -986,6 +1225,25 @@ test("aborting during B restart shares cleanup and prevents respawn, open port, 
   assert(child.exitCode !== null || child.signalCode !== null);
   await assert.rejects(fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(500) }));
   assert.equal(readdirSync(root, { recursive: true }).some((entry) => /credential|token/i.test(String(entry))), false);
+});
+
+test("shares one failed cleanup promise and preserves the failed terminal state", async () => {
+  const lifecycle = new ExecutionLifecycle();
+  lifecycle.start();
+  let calls = 0;
+  const first = lifecycle.cleanup(async () => {
+    calls += 1;
+    throw new Error("cleanup failed");
+  });
+  const second = lifecycle.cleanup(async () => {
+    calls += 1;
+  });
+
+  assert.equal(first, second);
+  await assert.rejects(first, /cleanup failed/);
+  assert.equal(calls, 1);
+  assert.equal(lifecycle.signal.aborted, true);
+  assert.equal(lifecycle.state, "failed");
 });
 
 test("aborting a hanging action escalates to KILL, reaps the child, closes its port, and leaves no credential temp", async () => {

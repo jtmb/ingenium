@@ -46,6 +46,35 @@ export interface CreateMcpCredentialInput {
   createdByUserId: string;
 }
 
+export interface ServiceCredentialIdentity {
+  credentialId: string;
+  authenticatedCredentialId: string;
+  servicePrincipalId: string;
+  audience: McpCredentialAudience;
+  organizationId: string;
+  projectId: string;
+  workspaceId: string;
+  launcherWorktree: string;
+  storageMappingHash: string;
+}
+
+export interface CoordinationLeaseCredentials {
+  coordination: McpCredential & { token: string };
+  repositorySync: McpCredential & { token: string };
+}
+
+export const COORDINATION_LEASE_CREDENTIAL_TTL_MS = 15 * 60_000;
+export const COORDINATION_LEASE_SCOPES = [
+  "coordination:read", "coordination:write", "projects:read", "repository:sync",
+] as const;
+export const REPOSITORY_SYNC_SCOPES = ["projects:read", "repository:sync"] as const;
+
+export class CoordinationLeaseUnavailableError extends Error {
+  constructor() {
+    super("Coordination lease runtime is unavailable");
+  }
+}
+
 type CredentialRow = {
   id: string; service_principal_id: string; kind: McpCredentialKind; audience: McpCredentialAudience;
   name: string; token_prefix: string; scopes_json: string; organization_id: string; project_id: string;
@@ -141,11 +170,15 @@ function validateInput(input: CreateMcpCredentialInput): { scopes: string[]; gra
   return { scopes, grants: projectGrants(input) };
 }
 
-export function createMcpCredential(input: CreateMcpCredentialInput): McpCredential & { token: string } {
-  const { scopes, grants } = validateInput(input);
+function newCredentialToken(): { id: string; tokenPrefix: string; token: string } {
   const id = randomUUID();
   const tokenPrefix = `ing_${id.replaceAll("-", "").slice(0, 12)}`;
-  const token = `${tokenPrefix}_${randomBytes(32).toString("base64url")}`;
+  return { id, tokenPrefix, token: `${tokenPrefix}_${randomBytes(32).toString("base64url")}` };
+}
+
+export function createMcpCredential(input: CreateMcpCredentialInput): McpCredential & { token: string } {
+  const { scopes, grants } = validateInput(input);
+  const { id, tokenPrefix, token } = newCredentialToken();
   const created = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
     const servicePrincipalId = input.servicePrincipalId ?? insertServicePrincipal(db, input);
@@ -153,6 +186,98 @@ export function createMcpCredential(input: CreateMcpCredentialInput): McpCredent
   });
   checkpointAfterWrite();
   return { ...created, token };
+}
+
+export function issueCoordinationLeaseCredentials(runtimeId: string, now = new Date()): CoordinationLeaseCredentials {
+  const timestamp = now.toISOString();
+  const coordinationToken = newCredentialToken();
+  const repositoryToken = newCredentialToken();
+  const issued = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const scope = db.prepare(`SELECT runtime.organization_id, runtime.project_id, runtime.owner_user_id,
+      runtime.workspace_id, runtime.absolute_expires_at, workspace.storage_path, workspace.storage_mapping_hash,
+      binding.expires_at AS binding_expires_at, credential.expires_at AS capability_expires_at,
+      credential.service_principal_id
+      FROM runtime_instances runtime
+      JOIN authorized_workspaces workspace
+        ON workspace.id = runtime.workspace_id
+       AND workspace.organization_id = runtime.organization_id
+       AND workspace.project_id = runtime.project_id
+       AND workspace.owner_user_id = runtime.owner_user_id
+       AND workspace.security_epoch = runtime.security_epoch
+       AND workspace.status = 'authorized'
+      JOIN runtime_capability_bindings binding
+        ON binding.runtime_id = runtime.id
+       AND binding.organization_id = runtime.organization_id
+       AND binding.project_id = runtime.project_id
+       AND binding.owner_user_id = runtime.owner_user_id
+       AND binding.workspace_id = runtime.workspace_id
+       AND binding.security_epoch = runtime.security_epoch
+       AND binding.revoked_at IS NULL AND binding.expires_at > ?
+      JOIN mcp_credentials credential
+        ON credential.id = binding.mcp_credential_id
+       AND credential.organization_id = runtime.organization_id
+       AND credential.project_id = runtime.project_id
+       AND credential.workspace_id = runtime.workspace_id
+       AND credential.created_by_user_id = runtime.owner_user_id
+       AND credential.launcher_worktree = workspace.storage_path
+       AND credential.security_epoch = runtime.security_epoch
+       AND credential.kind = 'runtime' AND credential.audience = 'runtime'
+       AND credential.revoked_at IS NULL AND credential.expires_at > ?
+      JOIN service_principals principal
+        ON principal.id = credential.service_principal_id
+       AND principal.organization_id = runtime.organization_id
+       AND principal.security_epoch = runtime.security_epoch
+       AND principal.status = 'active'
+      WHERE runtime.id = ? AND runtime.state IN ('READY', 'IDLE')
+        AND runtime.absolute_expires_at IS NOT NULL AND runtime.absolute_expires_at > ?`)
+      .get(timestamp, timestamp, runtimeId, timestamp) as {
+        organization_id: string; project_id: string; owner_user_id: string; workspace_id: string;
+        absolute_expires_at: string; storage_path: string; storage_mapping_hash: string;
+        binding_expires_at: string; capability_expires_at: string; service_principal_id: string;
+      } | undefined;
+    if (!scope) throw new CoordinationLeaseUnavailableError();
+    const expiresAt = new Date(Math.min(
+      now.getTime() + COORDINATION_LEASE_CREDENTIAL_TTL_MS,
+      Date.parse(scope.absolute_expires_at),
+      Date.parse(scope.binding_expires_at),
+      Date.parse(scope.capability_expires_at),
+    ));
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now.getTime()) {
+      throw new CoordinationLeaseUnavailableError();
+    }
+    const base = {
+      servicePrincipalId: scope.service_principal_id,
+      organizationId: scope.organization_id,
+      projectId: scope.project_id,
+      workspaceId: scope.workspace_id,
+      launcherWorktree: scope.storage_path,
+      expiresAt,
+      createdByUserId: scope.owner_user_id,
+    };
+    const coordination = insertMcpCredential(db, {
+      ...base,
+      kind: "service",
+      audience: "mcp",
+      name: `Coordination lease ${runtimeId}`,
+      scopes: [...COORDINATION_LEASE_SCOPES],
+    }, [...COORDINATION_LEASE_SCOPES], [scope.project_id], coordinationToken.id,
+    coordinationToken.tokenPrefix, coordinationToken.token);
+    const repositorySync = insertMcpCredential(db, {
+      ...base,
+      kind: "repository-sync",
+      audience: "repository-sync",
+      name: `Repository sync lease ${runtimeId}`,
+      scopes: [...REPOSITORY_SYNC_SCOPES],
+    }, [...REPOSITORY_SYNC_SCOPES], [scope.project_id], repositoryToken.id,
+    repositoryToken.tokenPrefix, repositoryToken.token);
+    return { coordination, repositorySync };
+  });
+  checkpointAfterWrite();
+  return {
+    coordination: { ...issued.coordination, token: coordinationToken.token },
+    repositorySync: { ...issued.repositorySync, token: repositoryToken.token },
+  };
 }
 
 function insertServicePrincipal(db: Database.Database, input: CreateMcpCredentialInput): string {
@@ -259,6 +384,41 @@ export function revokeMcpCredential(id: string, userId: string, now = new Date()
   ).run(now.toISOString(), id, userId).changes === 1);
   if (changed) checkpointAfterWrite();
   return changed;
+}
+
+export function revokeOwnMcpCredential(input: ServiceCredentialIdentity, now = new Date()): boolean {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const credential = db.prepare(`SELECT credential.revoked_at
+      FROM mcp_credentials credential
+      JOIN authorized_workspaces workspace
+        ON workspace.id = credential.workspace_id
+       AND workspace.organization_id = credential.organization_id
+       AND workspace.project_id = credential.project_id
+       AND workspace.owner_user_id = credential.created_by_user_id
+       AND workspace.storage_path = credential.launcher_worktree
+       AND workspace.security_epoch = credential.security_epoch
+       AND workspace.status = 'authorized'
+      JOIN service_principals principal
+        ON principal.id = credential.service_principal_id
+       AND principal.organization_id = credential.organization_id
+       AND principal.security_epoch = credential.security_epoch
+       AND principal.status = 'active'
+      WHERE credential.id = ? AND credential.id = ? AND credential.service_principal_id = ?
+        AND credential.audience = ? AND credential.organization_id = ? AND credential.project_id = ?
+        AND credential.workspace_id = ? AND credential.launcher_worktree = ?
+        AND workspace.storage_mapping_hash = ?`)
+      .get(input.credentialId, input.authenticatedCredentialId, input.servicePrincipalId, input.audience,
+        input.organizationId, input.projectId, input.workspaceId, input.launcherWorktree,
+        input.storageMappingHash) as { revoked_at: string | null } | undefined;
+    if (!credential) return { matched: false, changed: false };
+    if (credential.revoked_at) return { matched: true, changed: false };
+    const changed = db.prepare("UPDATE mcp_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+      .run(now.toISOString(), input.credentialId).changes === 1;
+    return { matched: changed, changed };
+  });
+  if (result.changed) checkpointAfterWrite();
+  return result.matched;
 }
 
 export function rotateMcpCredential(id: string, userId: string, expiresAt?: Date): McpCredential & { token: string } {

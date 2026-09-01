@@ -241,7 +241,8 @@ describe("test server lifecycle contracts", () => {
       .toBe(join(context.homeDir, "auth-encryption-key"));
     expect(specs[1]!.env.INGENIUM_API_TOKEN).toBeUndefined();
     expect(specs[1]!.env.INGENIUM_API_TEST_MODE).toBe("1");
-    expect(specs[1]!.env.INGENIUM_API_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
+    expect(specs[1]!.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
+    expect(specs[1]!.env.INGENIUM_API_TOKEN_FILE).toBeUndefined();
     expect(specs[0]!.env.INGENIUM_API_TEST_MODE).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_BACKGROUND_SCHEDULERS).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_SCHEDULERS).toBe("1");
@@ -340,8 +341,10 @@ describe("test server lifecycle contracts", () => {
         expect(spec.env.INGENIUM_API_TOKEN).not.toBe("real-parent-secret");
         if (spec.name === "dashboard") {
           expect(spec.env.INGENIUM_API_TOKEN).toBeUndefined();
-          expect(spec.env.INGENIUM_API_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
+          expect(spec.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE).toBe(getTestRunApiTokenPath(context));
+          expect(spec.env.INGENIUM_API_TOKEN_FILE).toBeUndefined();
         } else {
+          expect(spec.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE).toBeUndefined();
           expect(spec.env.INGENIUM_API_TOKEN_FILE).toBeUndefined();
         }
       }

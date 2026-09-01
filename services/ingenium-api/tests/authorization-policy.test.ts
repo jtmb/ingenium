@@ -34,6 +34,7 @@ describe("AUTH-102 canonical API policy", () => {
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
     ["DELETE", "/api/v1/projects/example/purge", "project", "admin"],
     ["GET", "/api/v1/auth/oidc/providers", "public", "read"],
+    ["POST", "/api/v1/auth/coordination-lease", "private", "write"],
   ] as const)("classifies %s %s", (method, path, target, permission) => {
     expect(policyForRequest({ method, path } as Pick<Request, "method" | "path">)).toMatchObject({ target, permission });
   });
@@ -168,6 +169,49 @@ describe("AUTH-102 canonical API policy", () => {
     authorizationMiddleware(req, {} as Response, next);
 
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("allows only exact attested service credential self-revocation", () => {
+    const credentialId = "11111111-1111-4111-8111-111111111111";
+    const principal = {
+      type: "service",
+      id: "service-id",
+      tokenId: credentialId,
+      scopes: ["coordination:read"],
+      organizationId: "organization-id",
+      projectId: "project-id",
+      projectIds: ["project-id"],
+      audience: "mcp",
+      workspaceId: "workspace-id",
+      launcherWorktree: "/srv/worktree",
+      storageMappingHash: "a".repeat(64),
+    } as const;
+    const exact = {
+      method: "DELETE",
+      path: `/api/v1/auth/mcp-credentials/${credentialId}`,
+      principal,
+      attestedCoordinationIdentity: {
+        credentialId,
+        workspaceId: principal.workspaceId,
+        storageMappingHash: principal.storageMappingHash,
+      },
+    } as unknown as Request;
+    const next = vi.fn();
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+
+    authorizationMiddleware(exact, {} as Response, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    for (const request of [
+      { ...exact, path: "/api/v1/auth/mcp-credentials/foreign" },
+      { ...exact, attestedCoordinationIdentity: undefined },
+      { ...exact, principal: { ...principal, storageMappingHash: "b".repeat(64) } },
+    ] as Request[]) {
+      expect(() => authorizationMiddleware(request, {} as Response, vi.fn())).toThrowError(expect.objectContaining({
+        code: "NOT_FOUND",
+        statusCode: 404,
+      }));
+    }
   });
 
   it("retains the immutable authorized project for post-auth coordination limiting", () => {

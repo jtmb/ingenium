@@ -1026,7 +1026,7 @@ export const opencodeClient = {
     signal?: AbortSignal,
   ): Promise<OpenCodeResult<unknown>> =>
     request<unknown>(`/auth/${pathSegment(providerID)}`, {
-      method: "POST",
+      method: "PUT",
       body,
       query: { directory },
       signal,

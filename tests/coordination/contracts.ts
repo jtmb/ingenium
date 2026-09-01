@@ -16,7 +16,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, delimiter, isAbsolute, join, relative, resolve } from "node:path";
+import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,8 +53,6 @@ export interface HarnessOptions {
   workspaceId: string;
   storageMappingHash: string;
   apiUrl: string;
-  coordinationCredential: ProtectedLocator;
-  repositoryCredential: ProtectedLocator;
   operatorToken: ProtectedLocator;
   openCodeBinary: string;
   openCodeAuth: ProtectedLocator;
@@ -266,8 +264,8 @@ function configuredValue(
 function parseArgs(argv: readonly string[]): Map<string, string> {
   const values = new Map<string, string>();
   const allowed = new Set([
-    "worktree", "project", "project-id", "workspace", "storage-mapping-hash", "api-url", "coordination-credential-file",
-    "repository-credential-file", "operator-token-file", "opencode-binary", "opencode-auth-file",
+    "worktree", "project", "project-id", "workspace", "storage-mapping-hash", "api-url",
+    "operator-token-file", "opencode-binary", "opencode-auth-file",
     "expected-revision", "runtime-id", "timeout-ms", "check",
   ]);
   for (let index = 0; index < argv.length; index += 2) {
@@ -302,26 +300,6 @@ export function parseHarnessOptions(
 
   const configuredApi = configuredValue(args.get("api-url"), environment, "COORDINATION_HARNESS_API_URL", mcp.INGENIUM_API_URL, "apiUrl");
   const resolveFile = (value: string): string => isAbsolute(value) ? resolve(value) : resolve(worktree, value);
-  const coordinationFile = resolveFile(configuredValue(
-    args.get("coordination-credential-file"),
-    environment,
-    "COORDINATION_HARNESS_CREDENTIAL_FILE",
-    mcp.INGENIUM_MCP_CREDENTIAL_FILE,
-    "coordinationCredentialFile",
-  ));
-  if (basename(coordinationFile) !== ".ingenium-mcp-credential") {
-    throw new Error("coordinationCredentialFile must be named .ingenium-mcp-credential");
-  }
-  const repositoryFile = resolveFile(configuredValue(
-    args.get("repository-credential-file"),
-    environment,
-    "COORDINATION_HARNESS_REPOSITORY_CREDENTIAL_FILE",
-    mcp.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE,
-    "repositoryCredentialFile",
-  ));
-  if (basename(repositoryFile) !== ".ingenium-repository-sync-credential") {
-    throw new Error("repositoryCredentialFile must be named .ingenium-repository-sync-credential");
-  }
   const operatorFile = resolveFile(configuredValue(
     args.get("operator-token-file"),
     environment,
@@ -378,8 +356,6 @@ export function parseHarnessOptions(
     workspaceId,
     storageMappingHash,
     apiUrl: apiUrl(configuredApi),
-    coordinationCredential: validateProtectedLocator(coordinationFile, "coordinationCredentialFile"),
-    repositoryCredential: validateProtectedLocator(repositoryFile, "repositoryCredentialFile"),
     operatorToken: validateProtectedLocator(operatorFile, "operatorTokenFile"),
     openCodeBinary,
     openCodeAuth: validateProtectedLocator(authFile, "openCodeAuthFile"),
@@ -403,7 +379,7 @@ export function parseHarnessOptions(
 export function usage(): string {
   return [
     "Usage: npx tsx tests/coordination/run.ts --project NAME --project-id UUID --workspace ID --storage-mapping-hash SHA256 --runtime-id UUID --expected-revision SHA --operator-token-file PATH --opencode-auth-file PATH [options]",
-    "All identity values are required CLI inputs or COORDINATION_HARNESS_* environment variables; credentials remain protected file locators.",
+    "All identity values are required CLI inputs or COORDINATION_HARNESS_* environment variables; operator and OpenCode auth inputs remain protected file locators.",
     "This command performs a live model/runtime run and creates a managed Git commit. It is not a fixture self-test.",
   ].join("\n");
 }

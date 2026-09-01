@@ -31,6 +31,11 @@ export interface CanaryActionRunOptions {
   onSpawn?: (child: ChildProcess) => void;
 }
 
+export interface RunCredentialPaths {
+  coordination: string;
+  repositorySync: string;
+}
+
 export function allowlistedBaseEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(SAFE_ENVIRONMENT_KEYS.flatMap((key) => source[key] === undefined ? [] : [[key, source[key]]])) as NodeJS.ProcessEnv;
 }
@@ -160,6 +165,7 @@ export function writeCanaryPlan(prepared: ReturnType<typeof externalHomePaths>, 
 
 export function canaryActionEnvironment(
   options: HarnessOptions,
+  credentials: RunCredentialPaths,
   binding: { projectId: string; storageMappingHash: string },
   apiUrl: string,
   home: string,
@@ -178,8 +184,8 @@ export function canaryActionEnvironment(
     INGENIUM_WORKTREE: options.worktree,
     INGENIUM_MCP_AUDIENCE: "mcp",
     INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
-    INGENIUM_MCP_CREDENTIAL_FILE: options.coordinationCredential.path,
-    INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE: options.repositoryCredential.path,
+    INGENIUM_MCP_CREDENTIAL_FILE: credentials.coordination,
+    INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE: credentials.repositorySync,
     INGENIUM_TEST_RUN_NONCE: runNonce,
   };
 }
@@ -189,6 +195,7 @@ export async function startHostOpenCode(
   port: number,
   prepared: ReturnType<typeof prepareExternalHome>,
   options: HarnessOptions,
+  credentials: RunCredentialPaths,
   proxyApiUrl: string,
   configContent: string,
   storageBinding: { projectId: string; storageMappingHash: string },
@@ -219,8 +226,8 @@ export async function startHostOpenCode(
     INGENIUM_WORKTREE: options.worktree,
     INGENIUM_MCP_AUDIENCE: "mcp",
     INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
-    INGENIUM_MCP_CREDENTIAL_FILE: options.coordinationCredential.path,
-    INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE: options.repositoryCredential.path,
+    INGENIUM_MCP_CREDENTIAL_FILE: credentials.coordination,
+    INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE: credentials.repositorySync,
     INGENIUM_COORDINATION_TRANSFORM_CAPTURE: "1",
     INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE: prepared.captureFile,
     INGENIUM_COORDINATION_TRACE: "1",

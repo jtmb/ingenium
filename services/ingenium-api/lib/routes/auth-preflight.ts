@@ -12,6 +12,7 @@ const LoginSchema = z.object({ email: z.string().max(320), password: z.string().
 const TokenSchema = z.object({ token: z.string().min(32).max(512) }).strict();
 const PasswordSchema = TokenSchema.extend({ password: z.string().min(12).max(1024) }).strict();
 const RuntimePreflightSchema = z.object({ runtime_id: z.string().uuid() }).strict();
+const CoordinationLeaseSchema = z.object({ runtimeId: z.string().uuid() }).strict();
 const IMAGE_REVISION = /^[0-9a-f]{40}$/;
 const OIDC_TRANSACTION_COOKIE = "__Host-ingenium_oidc_transaction";
 
@@ -342,6 +343,29 @@ authPreflightRouter.post("/mcp-credentials", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.status(201).location(`/api/v1/auth/mcp-credentials/${credential.id}`).json({ data: credential });
 });
+authPreflightRouter.post("/coordination-lease", (req, res) => {
+  if (req.principal?.type !== "compatibility" || req.get("x-ingenium-internal-service") !== "1"
+    || req.headers.cookie !== undefined || req.get("origin") !== undefined) {
+    throw new AppError("Resource not found", "NOT_FOUND", 404);
+  }
+  const input = CoordinationLeaseSchema.parse(req.body);
+  let issued: ReturnType<typeof mcpCredentials.issueCoordinationLeaseCredentials>;
+  try {
+    issued = mcpCredentials.issueCoordinationLeaseCredentials(input.runtimeId);
+  } catch (error) {
+    if (error instanceof mcpCredentials.CoordinationLeaseUnavailableError) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    throw error;
+  }
+  res.set("Cache-Control", "no-store");
+  res.status(201).json({ data: {
+    runtimeId: input.runtimeId,
+    expiresAt: issued.coordination.expiresAt,
+    coordinationCredential: { id: issued.coordination.id, token: issued.coordination.token },
+    repositorySyncCredential: { id: issued.repositorySync.id, token: issued.repositorySync.token },
+  } });
+});
 authPreflightRouter.post("/mcp-credentials/:id/rotate", (req, res) => {
   const principal = requireRecentStepUp(req);
   const input = z.object({ expiresAt: z.string().datetime().optional() }).strict().parse(req.body);
@@ -356,6 +380,28 @@ authPreflightRouter.post("/mcp-credentials/:id/rotate", (req, res) => {
   res.status(201).json({ data: credential });
 });
 authPreflightRouter.delete("/mcp-credentials/:id", (req, res) => {
+  if (req.principal?.type === "service") {
+    const principal = req.principal;
+    const attestation = req.attestedCoordinationIdentity;
+    const revoked = principal.tokenId === req.params.id && principal.id && principal.organizationId
+      && principal.projectId && principal.workspaceId && principal.launcherWorktree && principal.storageMappingHash
+      && attestation?.credentialId === principal.tokenId && attestation.workspaceId === principal.workspaceId
+      && attestation.storageMappingHash === principal.storageMappingHash
+      && mcpCredentials.revokeOwnMcpCredential({
+        credentialId: req.params.id,
+        authenticatedCredentialId: principal.tokenId,
+        servicePrincipalId: principal.id,
+        audience: principal.audience as mcpCredentials.McpCredentialAudience,
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        workspaceId: principal.workspaceId,
+        launcherWorktree: principal.launcherWorktree,
+        storageMappingHash: principal.storageMappingHash,
+      });
+    if (!revoked) throw new AppError("Resource not found", "NOT_FOUND", 404);
+    res.status(204).end();
+    return;
+  }
   if (!mcpCredentials.revokeMcpCredential(req.params.id, requireRecentStepUp(req).id)) {
     throw new AppError("Credential not found", "NOT_FOUND", 404);
   }

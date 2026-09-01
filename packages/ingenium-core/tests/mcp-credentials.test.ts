@@ -10,13 +10,17 @@ import { createOrganization } from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
 import { createServicePrincipal } from "../lib/tools/security-tokens.js";
 import {
+  COORDINATION_LEASE_CREDENTIAL_TTL_MS,
   createMcpCredential,
   incrementServicePrincipalSecurityEpoch,
+  issueCoordinationLeaseCredentials,
   listMcpCredentials,
   resolveMcpCredential,
   revokeMcpCredential,
+  revokeOwnMcpCredential,
   rotateMcpCredential,
 } from "../lib/tools/mcp-credentials.js";
+import { bindRuntimeCapability, createRuntimeInstance, transitionRuntime } from "../lib/tools/runtimes.js";
 
 let directory = "";
 
@@ -53,6 +57,43 @@ function fixture(kind: "service" | "runtime" | "repository-sync" = "service") {
     expiresAt: new Date(Date.now() + 60_000),
     createdByUserId: user.id,
   });
+}
+
+function readyRuntimeFixture() {
+  const capability = fixture("runtime");
+  let runtime = createRuntimeInstance(capability.workspaceId, {
+    cpuMillis: 1_000,
+    memoryBytes: 1_073_741_824,
+    pidsLimit: 256,
+    diskBytes: 2_147_483_648,
+    processLimit: 128,
+  });
+  bindRuntimeCapability(runtime.id, capability.id);
+  const absoluteExpiresAt = new Date(Date.now() + 60_000);
+  runtime = transitionRuntime({
+    id: runtime.id,
+    expectedRevision: runtime.revision,
+    toState: "PROVISIONING",
+    actorType: "manager",
+    actorId: "test",
+    absoluteExpiresAt,
+    idleExpiresAt: absoluteExpiresAt,
+  });
+  runtime = transitionRuntime({
+    id: runtime.id,
+    expectedRevision: runtime.revision,
+    toState: "STARTING",
+    actorType: "manager",
+    actorId: "test",
+  });
+  runtime = transitionRuntime({
+    id: runtime.id,
+    expectedRevision: runtime.revision,
+    toState: "READY",
+    actorType: "system",
+    actorId: "test",
+  });
+  return { capability, runtime };
 }
 
 describe("AUTH-107 MCP credentials", () => {
@@ -188,5 +229,66 @@ describe("AUTH-107 MCP credentials", () => {
     expect((db.prepare("SELECT count(*) AS count FROM service_principals").get() as { count: number }).count).toBe(before + 1);
     expect(() => createMcpCredential({ ...input, name: "invalid generated principal", projectId: randomUUID() })).toThrow();
     expect((db.prepare("SELECT count(*) AS count FROM service_principals").get() as { count: number }).count).toBe(before + 1);
+  });
+
+  it("issues only the fixed short-lived coordination and repository credentials for an exact ready runtime", () => {
+    const { capability, runtime } = readyRuntimeFixture();
+    const before = new Date();
+
+    const issued = issueCoordinationLeaseCredentials(runtime.id, before);
+
+    expect(issued.coordination).toMatchObject({
+      servicePrincipalId: capability.servicePrincipalId,
+      kind: "service",
+      audience: "mcp",
+      scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync"],
+      organizationId: capability.organizationId,
+      projectId: capability.projectId,
+      projectIds: [capability.projectId],
+      workspaceId: capability.workspaceId,
+      launcherWorktree: capability.launcherWorktree,
+      storageMappingHash: capability.storageMappingHash,
+    });
+    expect(issued.repositorySync).toMatchObject({
+      servicePrincipalId: capability.servicePrincipalId,
+      kind: "repository-sync",
+      audience: "repository-sync",
+      scopes: ["projects:read", "repository:sync"],
+      organizationId: capability.organizationId,
+      projectId: capability.projectId,
+      workspaceId: capability.workspaceId,
+      launcherWorktree: capability.launcherWorktree,
+      storageMappingHash: capability.storageMappingHash,
+    });
+    expect(new Date(issued.coordination.expiresAt).getTime() - before.getTime())
+      .toBeLessThanOrEqual(COORDINATION_LEASE_CREDENTIAL_TTL_MS);
+    expect(issued.repositorySync.expiresAt).toBe(issued.coordination.expiresAt);
+    expect(resolveMcpCredential(issued.coordination.token, "mcp")?.id).toBe(issued.coordination.id);
+    expect(resolveMcpCredential(issued.repositorySync.token, "repository-sync")?.id).toBe(issued.repositorySync.id);
+    expect(() => issueCoordinationLeaseCredentials(randomUUID())).toThrow("Coordination lease runtime is unavailable");
+  });
+
+  it("revokes only the exact attested service credential and remains idempotent", () => {
+    const { runtime } = readyRuntimeFixture();
+    const issued = issueCoordinationLeaseCredentials(runtime.id);
+    const exact = {
+      credentialId: issued.coordination.id,
+      authenticatedCredentialId: issued.coordination.id,
+      servicePrincipalId: issued.coordination.servicePrincipalId,
+      audience: issued.coordination.audience,
+      organizationId: issued.coordination.organizationId,
+      projectId: issued.coordination.projectId,
+      workspaceId: issued.coordination.workspaceId,
+      launcherWorktree: issued.coordination.launcherWorktree,
+      storageMappingHash: issued.coordination.storageMappingHash,
+    };
+
+    expect(revokeOwnMcpCredential({ ...exact, authenticatedCredentialId: issued.repositorySync.id })).toBe(false);
+    expect(revokeOwnMcpCredential({ ...exact, storageMappingHash: "f".repeat(64) })).toBe(false);
+    expect(resolveMcpCredential(issued.coordination.token, "mcp")).toBeDefined();
+    expect(revokeOwnMcpCredential(exact)).toBe(true);
+    expect(revokeOwnMcpCredential(exact)).toBe(true);
+    expect(resolveMcpCredential(issued.coordination.token, "mcp")).toBeUndefined();
+    expect(resolveMcpCredential(issued.repositorySync.token, "repository-sync")?.id).toBe(issued.repositorySync.id);
   });
 });

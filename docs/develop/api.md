@@ -45,8 +45,72 @@ separate and documented below:
 |--------|----------|---------|
 | GET | `/api/v1/auth/preflight` | Authenticated capability probe. Scoped credentials receive server-derived scopes, audience, organization/project grants, workspace/worktree binding, and restart guidance. Invalid credentials return `401`, missing scope `403`, and inaccessible bindings `404`; failures never disclose credential or upstream details. |
 | GET/POST | `/api/v1/auth/mcp-credentials` | List redacted metadata or issue a scoped service/runtime/repository-sync credential. Human issuance requires recent step-up; plaintext is returned once. `servicePrincipalId` is optional and omission creates the credential's service principal atomically. |
+| POST | `/api/v1/auth/coordination-lease` | Internal installation-only issuance of the fixed coordination and repository-sync credential pair for one ready/idle runtime. Plaintext is returned once. |
 | POST | `/api/v1/auth/mcp-credentials/:id/rotate` | Issue a replacement and immediately revoke the prior credential. Requires recent step-up; plaintext is returned once. |
-| DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Requires recent step-up. |
+| DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Browser users require recent step-up; an exactly bound service credential may revoke only itself. |
+
+### Internal coordination lease
+
+`POST /api/v1/auth/coordination-lease` is not a browser or general credential
+issuance route. It requires the installation bearer plus
+`X-Ingenium-Internal-Service: 1`; requests carrying a cookie or `Origin` are
+not accepted. The request body is strict and contains exactly one field:
+
+```json
+{
+  "runtimeId": "<runtime-uuid>"
+}
+```
+
+`ownerId`, organization/project/workspace/worktree or storage bindings, scopes,
+time-to-live, and other caller-selected fields are not accepted. The core
+transaction derives the owner, organization, project, workspace, launcher
+worktree/storage path, storage-mapping hash, security epoch, and service
+principal from the requested runtime's matching records. Issuance succeeds only when the runtime is
+`READY` or `IDLE`, its absolute expiry is still valid, its authorized workspace
+and active runtime capability binding agree on every identity field, and the
+runtime capability and service principal are active.
+
+The successful response is `201` with `Cache-Control: no-store`:
+
+```json
+{
+  "data": {
+    "runtimeId": "<runtime-uuid>",
+    "expiresAt": "<effective-utc-timestamp>",
+    "coordinationCredential": {
+      "id": "<credential-id>",
+      "token": "<plaintext-token>"
+    },
+    "repositorySyncCredential": {
+      "id": "<credential-id>",
+      "token": "<plaintext-token>"
+    }
+  }
+}
+```
+
+The pair is fixed: the `mcp` audience uses
+`coordination:read`, `coordination:write`, `projects:read`, and
+`repository:sync`; the `repository-sync` audience uses only `projects:read`
+and `repository:sync`. The effective expiry is the earliest of 15 minutes,
+the runtime absolute expiry, the capability-binding expiry, and the runtime
+credential expiry. The database stores only token hashes; each plaintext token
+appears only in this response.
+
+Malformed or extra request fields return `422 VALIDATION_ERROR`. Missing or
+invalid installation authentication returns `401`; an ineligible, unavailable,
+or inaccessible runtime returns the neutral `404 NOT_FOUND` response. The
+installation bearer cannot list, rotate, or revoke arbitrary MCP credential
+IDs.
+
+The existing `DELETE /api/v1/auth/mcp-credentials/:id` route has two bounded
+authorization paths. A service request must name the authenticated token's own
+ID and carry the matching attested service-principal, audience, organization,
+project grant, workspace, launcher-worktree, and storage-mapping binding; any
+foreign or mismatched ID is the same non-enumerating `404 NOT_FOUND`. A browser
+request retains the existing recent-step-up requirement and returns `204` on
+successful revocation.
 
 ### Local browser authentication
 

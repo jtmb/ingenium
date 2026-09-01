@@ -231,13 +231,11 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
       launcherWorktree,
       storageMappingHash: resolved.storageMappingHash,
     };
-    if (audience === "mcp" || audience === "runtime") {
-      req.attestedCoordinationIdentity = Object.freeze({
-        credentialId: resolved.id,
-        workspaceId: resolved.workspaceId,
-        storageMappingHash: resolved.storageMappingHash,
-      });
-    }
+    req.attestedCoordinationIdentity = Object.freeze({
+      credentialId: resolved.id,
+      workspaceId: resolved.workspaceId,
+      storageMappingHash: resolved.storageMappingHash,
+    });
     next();
     return;
   }

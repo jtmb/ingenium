@@ -81,6 +81,71 @@ step-up; plaintext appears only in the create/rotate response. Restart OpenCode 
 replacing a protected credential file. The project must already exist so
 its immutable UUID can be included in the credential grant.
 
+### Internal coordination lease
+
+`POST /api/v1/auth/coordination-lease` is the internal installation path used by
+the managed coordination harness. It accepts only an installation
+`Authorization: Bearer <token>` together with
+`X-Ingenium-Internal-Service: 1`. Cookie-authenticated or Origin-bearing
+requests are rejected, so this route is not a browser credential-issuance path.
+The body is strict and contains only `{ "runtimeId": "<runtime-uuid>" }`; the
+caller cannot choose the owner, organization, project, workspace, worktree,
+storage mapping, scopes, or lifetime.
+
+The API derives those bindings by joining the requested runtime to its active
+authorized workspace, runtime capability binding, runtime credential, and
+active service principal. The runtime must be `READY` or `IDLE` and have a
+future absolute expiry. The resulting expiry is capped at 15 minutes and at
+the runtime, binding, and capability expiries. One transaction creates exactly
+two credentials: an `mcp` credential with
+`coordination:read`, `coordination:write`, `projects:read`, and
+`repository:sync`, plus a `repository-sync` credential with only
+`projects:read` and `repository:sync`.
+
+The `201` response is `Cache-Control: no-store` and contains the runtime ID,
+shared effective expiry, and one `{ id, token }` object for each credential.
+Token bytes are hashed for storage and are returned as plaintext only in that
+one response. Invalid or extra body fields return `422`; missing/invalid
+installation authentication returns `401`; unavailable or ineligible runtime
+state returns neutral `404 NOT_FOUND`. Installation authentication does not
+grant arbitrary credential listing, rotation, or revocation.
+
+The existing `DELETE /api/v1/auth/mcp-credentials/:id` route permits a service
+principal to revoke only its own currently authenticated credential. The path
+ID must equal the authenticated token ID, and the authenticated and attested
+service identity must agree on audience, service principal, organization,
+project grant, workspace, launcher worktree, and storage-mapping hash. Foreign,
+malformed, or mismatched IDs remain non-enumerating `404 NOT_FOUND`. Browser
+administrators continue to use the existing recent-step-up path and receive
+the unchanged `204` success behavior.
+
+### Coordination harness credential ownership and recovery
+
+The live harness owns its credential files inside the run context's
+`.ingenium` home directory. It creates `.ingenium-mcp-credential` and
+`.ingenium-repository-sync-credential` with no-follow, exclusive creation and
+exact owner-only mode `0600`; the containing directory is mode `0700`. The
+run-owned `coordination-credential-lease.json` redacted/token-free sidecar is
+also mode `0600`, contains binding and file-identity metadata but no token bytes, and is written
+through a temporary file followed by an atomic rename. Evidence JSON is kept
+under `tests/artifacts/test-runs/<run-id>/`, with mode `0700` directories and
+mode `0600` files. Evidence is recursively redacted and rejected if bearer,
+token-like, or configured secret bytes remain.
+
+Cleanup reads each protected file only after checking its exact path, device,
+inode, owner, mode, size, link count, and non-symlink identity. It revokes the
+credential, verifies that subsequent preflight authentication returns `401`,
+then unlinks only that exact file and records the removal. Partial issuance,
+signals, and crashes retain the run manifest/telemetry for recovery; recovery
+is safe to repeat and never deletes a stopping run's evidence until all exact
+process, port, credential, and owned-directory checks pass. Manifestless,
+relocated, malformed, or unowned paths are retained rather than glob-deleted.
+
+The harness runner invokes the built-in strict containment audit after cleanup.
+It fails closed on unresolved telemetry or retention errors, open unowned
+ports, temporary entries, live managed processes, containment holds, stopping
+manifests, non-terminal telemetry, artifact residuals, or an RSS limit breach.
+
 The learning credential is a separate operation-specific `mcp`-audience service
 credential. It has exactly these seven scopes:
 

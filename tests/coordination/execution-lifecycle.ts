@@ -24,6 +24,7 @@ export class ExecutionLifecycle {
 
   cleanup(action: () => Promise<void>): Promise<void> {
     if (this.cleanupPromise) return this.cleanupPromise;
+    this.abort(new Error("Harness cleanup started"));
     this.current = "cleaning";
     this.cleanupPromise = (async () => {
       try {

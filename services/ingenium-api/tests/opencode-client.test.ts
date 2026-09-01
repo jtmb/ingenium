@@ -581,6 +581,18 @@ describe("opencodeClient — method routing", () => {
     expect(init.body).toBe(JSON.stringify({ methodID: "chatgpt-browser", inputs: { tenant: "example" } }));
   });
 
+  it("addAuth() uses the OpenCode credential-set method", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, true));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.addAuth("openai", { type: "api", key: "credential-input" });
+
+    const url = fetchSpy.mock.calls[0][0] as string;
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(url).toContain("/auth/openai");
+    expect(init.method).toBe("PUT");
+  });
+
   it("sendPrompt() calls POST /session/:id/message with parts body", async () => {
     const fetchSpy = vi
       .fn()

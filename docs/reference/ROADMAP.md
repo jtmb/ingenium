@@ -3787,29 +3787,34 @@ protected credential-reset behavior as exercised by the r24 run.
 ## Current coordination/shared-memory acceptance status (2026-09-01)
 
 This append-only status keeps the coordination/shared-memory acceptance explicitly
-**OPEN and RESUMABLE**. Historical markers remain retained as history; no new
-`(work-complete)` marker or `PASS` is recorded.
+**OPEN and RESUMABLE**. The current source implementation has been reviewed
+against the coordination lease, service self-revocation, protected-file, and
+containment contracts, but it is not a commit, deployment, orphan-recovery
+result, or live model/session acceptance result. Historical markers remain
+retained as history; no new `(work-complete)` marker or `PASS` is recorded.
 
-- **Latest failed run:** `7a00d9ff-2214-4e3b-b34f-c166c6e5842e` failed because
-  Ingenium used `POST` while OpenCode 1.18.9 requires `PUT /auth/{providerID}`.
-  The uncommitted verified fix is
-  `services/ingenium-api/lib/opencode-client.ts` plus
-  `services/ingenium-api/tests/opencode-client.test.ts`; API typecheck and
-  `43/43` focused tests passed.
-- **Pending cleanup:** Two run-owned credential records remain pending
-  owner-session revocation. Exact temporary-directory cleanup is blocked by
-  external-path permission.
-- **Historical run:** `c1619811-e0f2-4a8c-b67c-c92751957dc7` has zero process
-  identities and closed ports, but its external manifest cannot be marked
-  recovered. The strict audit therefore remains **FAILED**.
-- No secret values are recorded.
+- **Source implementation/review:** The current source provides the strict
+  `POST /api/v1/auth/coordination-lease` contract, derives all runtime/workspace
+  identity server-side, issues the fixed `mcp` and `repository-sync` pair, and
+  stores only token hashes. The existing credential DELETE route has the exact
+  bound service self-revoke path while preserving browser recent-step-up
+  behavior. The OpenCode 1.18.9 provider-auth method mismatch is also corrected
+  to `PUT` in the current source; deployment proof remains pending.
+- **Harness boundary:** The current coordination harness owns mode-`0600`
+  credential files and a token-free lease sidecar inside each run context,
+  redacts mode-`0600` evidence, verifies exact file/process/port identity, and
+  retains stopping manifests for repeatable crash recovery. Its runner invokes
+  the built-in strict containment audit.
+- **Pending release/evidence:** A scoped commit, rebuilt/restarted deployment
+  and health evidence, orphan/recovery cleanup with a passing strict audit, and
+  actual simultaneous external A/B/internal C model-session evidence remain
+  unproven. No secret values or credential IDs are recorded here.
 
 ### Resumable order
 
-- [ ] Owner revoke
-- [ ] Exact temporary-directory cleanup
-- [ ] Recover the historical marker
-- [ ] Strict audit
-- [ ] QA/security/commit the PUT fix
-- [ ] Deploy the exact head
-- [ ] Live A/B/C acceptance
+- [ ] Create the scoped commit for the reviewed source and canonical docs
+- [ ] Rebuild/restart the exact committed source and retain health evidence
+- [ ] Recover orphaned/stopping runs through exact identity cleanup
+- [ ] Run the built-in strict containment audit and retain its result
+- [ ] Run live external A, external B, and internal C acceptance with actual
+  model/session artifacts, restart replay, cleanup, and evidence reconciliation

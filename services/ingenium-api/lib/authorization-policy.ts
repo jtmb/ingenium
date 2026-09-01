@@ -179,6 +179,25 @@ export function toAuthorizationPrincipal(principal: RequestPrincipal): authoriza
 
 export const authorizationPrincipal = toAuthorizationPrincipal;
 
+function serviceCredentialRevocationId(req: Request): string | undefined {
+  if (req.method !== "DELETE") return undefined;
+  return /^\/api\/v1\/auth\/mcp-credentials\/([^/]+)$/.exec(req.path)?.[1];
+}
+
+function isExactServiceCredentialSelfRevocation(req: Request, credentialId: string): boolean {
+  const principal = req.principal;
+  const attestation = req.attestedCoordinationIdentity;
+  return principal?.type === "service"
+    && credentialId === principal.tokenId
+    && (principal.audience === "mcp" || principal.audience === "runtime" || principal.audience === "repository-sync")
+    && Boolean(principal.id && principal.organizationId && principal.projectId
+      && principal.projectIds?.includes(principal.projectId) && principal.workspaceId && principal.launcherWorktree
+      && principal.storageMappingHash && /^[0-9a-f]{64}$/.test(principal.storageMappingHash)
+      && attestation && attestation.credentialId === principal.tokenId
+      && attestation.workspaceId === principal.workspaceId
+      && attestation.storageMappingHash === principal.storageMappingHash);
+}
+
 function requestedOrganizationId(req: Request, principal: RequestPrincipal): string | undefined {
   const organizationPathId = req.path.startsWith("/api/v1/organizations/") ? req.path.slice("/api/v1/organizations/".length).split("/")[0] : undefined;
   const bodyOrganizationId = req.body && typeof req.body === "object" && typeof (req.body as Record<string, unknown>).organization_id === "string"
@@ -288,6 +307,20 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
   }
   if (req.principal.type === "compatibility") {
     audit(req.principal, policy, "success");
+    return next();
+  }
+  const serviceRevocationId = serviceCredentialRevocationId(req);
+  if (serviceRevocationId && req.principal.type === "service") {
+    if (!isExactServiceCredentialSelfRevocation(req, serviceRevocationId)) {
+      audit(req.principal, policy, "denied");
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    audit(req.principal, policy, "success", {
+      allowed: true,
+      visible: true,
+      organizationId: req.principal.organizationId!,
+      projectId: req.principal.projectId!,
+    });
     return next();
   }
   const servicePreflight = req.method === "GET" && req.path === "/api/v1/auth/preflight";
