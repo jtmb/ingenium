@@ -36,6 +36,7 @@ import {
   establishHarnessAccess,
   finalizeCoordinationTestRun,
   finishCoordinationCleanup,
+  inspectReady,
   parseCrossReadResponse,
 } from "./harness";
 
@@ -66,10 +67,11 @@ function protectedFile(root: string, name: string, value: string): string {
 }
 
 test("finalizes resolved telemetry before deleting the run manifest", async () => {
+  const ports = { api: await unusedPort(), dashboard: await unusedPort(), fixture: await unusedPort() };
   const context = createTestRunContext({
     repoRoot: process.cwd(),
     tempRoot: tempRoot("ingenium-coordination-run-"),
-    ports: { api: 45181, dashboard: 45182, fixture: 45183 },
+    ports,
   });
   roots.push(join(process.cwd(), "tests", "artifacts", "test-runs", context.runId));
 
@@ -354,6 +356,16 @@ test("uses the launched OpenCode binary version for readiness", async () => {
   await waitForOpenCode(`http://127.0.0.1:${port}`, options.expectedOpenCodeVersion, new AbortController().signal, 1_000);
 
   assert.equal(options.expectedOpenCodeVersion, "1.18.25");
+});
+
+test("retains the last exact readiness failure when polling times out", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+
+  await assert.rejects(inspectReady({
+    label: "B",
+    inspect: async () => ({}),
+  } as never, options, new AbortController().signal, 1), /B OpenCode health is invalid/);
 });
 
 test("keeps the canonical OpenCode spawn target after PATH changes", async () => {

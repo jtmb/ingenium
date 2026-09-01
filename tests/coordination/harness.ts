@@ -231,7 +231,13 @@ async function gitFootprint(worktree: string, signal?: AbortSignal): Promise<str
   ]));
 }
 
-async function waitFor<T>(name: string, timeoutMs: number, signal: AbortSignal, read: () => Promise<T | undefined>): Promise<T> {
+async function waitFor<T>(
+  name: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  read: () => Promise<T | undefined>,
+  timeoutError?: () => Error,
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     signal.throwIfAborted();
@@ -242,7 +248,7 @@ async function waitFor<T>(name: string, timeoutMs: number, signal: AbortSignal, 
       signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
     });
   }
-  throw new Error(`Timed out waiting for ${name}`);
+  throw timeoutError?.() ?? new Error(`Timed out waiting for ${name}`);
 }
 
 function coordinationHeaders(token: string, options: HarnessOptions): Record<string, string> {
@@ -476,16 +482,21 @@ function projectOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, op
   };
 }
 
-async function inspectReady(api: OpenCodeApi, options: HarnessOptions, signal: AbortSignal): Promise<JsonRecord> {
-  return waitFor(`${api.label} exact OpenCode/MCP readiness`, 90_000, signal, async () => {
+export async function inspectReady(api: OpenCodeApi, options: HarnessOptions, signal: AbortSignal, timeoutMs = 90_000): Promise<JsonRecord> {
+  let lastError: unknown;
+  return waitFor(`${api.label} exact OpenCode/MCP readiness`, timeoutMs, signal, async () => {
     try {
       const value = await api.inspect();
       assertOpenCodeInspection(api.label, value, options);
       return value;
-    } catch {
+    } catch (error) {
+      lastError = error;
       return undefined;
     }
-  });
+  }, () => new Error(
+    `Timed out waiting for ${api.label} exact OpenCode/MCP readiness: ${lastError instanceof Error ? lastError.message : "unknown readiness failure"}`,
+    { cause: lastError },
+  ));
 }
 
 function extractToolPaths(part: JsonRecord, worktree: string): string[] {
