@@ -7,6 +7,13 @@ import type { HarnessOptions } from "./contracts";
 import { assertCanaryPlan, type CanaryActionContext, type CanaryPlan, type CanaryRequest } from "./canary-dispatcher";
 
 const SAFE_ENVIRONMENT_KEYS = ["LANG", "LC_ALL", "NO_COLOR", "PATH", "SHELL", "TERM", "TZ"] as const;
+const CANARY_ACTION_ENVIRONMENT_KEYS = [
+  "HOME", "INGENIUM_API_URL", "INGENIUM_PROJECT", "INGENIUM_PROJECT_ID", "INGENIUM_WORKSPACE_ID",
+  "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_WORKTREE", "INGENIUM_MCP_AUDIENCE",
+  "INGENIUM_MCP_CREDENTIAL_PURPOSE", "INGENIUM_MCP_CREDENTIAL_FILE", "INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE",
+  "INGENIUM_COORDINATION_TRACE", "INGENIUM_COORDINATION_TRACE_FILE", "INGENIUM_TEST_RUN_NONCE",
+  "INGENIUM_COORDINATION_NODE_EXECUTABLE", "INGENIUM_COORDINATION_NODE_ARGV",
+] as const;
 
 export interface HostOpenCodeProcess {
   label: "external-a" | "external-b";
@@ -26,6 +33,17 @@ export interface CanaryActionRunOptions {
 
 export function allowlistedBaseEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(SAFE_ENVIRONMENT_KEYS.flatMap((key) => source[key] === undefined ? [] : [[key, source[key]]])) as NodeJS.ProcessEnv;
+}
+
+export function allowlistedCanaryActionEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment = allowlistedBaseEnvironment(source);
+  for (const key of CANARY_ACTION_ENVIRONMENT_KEYS) {
+    if (source[key] !== undefined) environment[key] = source[key];
+  }
+  if (environment.INGENIUM_API_URL !== undefined) {
+    environment.INGENIUM_TRUSTED_API_URL = environment.INGENIUM_API_URL;
+  }
+  return environment;
 }
 
 export function externalHomePaths(root: string, label: "external-a" | "external-b") {
@@ -48,20 +66,10 @@ function canaryPluginSource(options: HarnessOptions): string {
   return `import { readFileSync } from "node:fs";
 import { tool } from ${JSON.stringify(plugin)};
 import { CANARY_AGENT, CANARY_OPERATIONS, CANARY_TOOL, CanaryDispatcher, assertCanaryPlan } from ${JSON.stringify(dispatcher)};
-import { allowlistedBaseEnvironment, runCanaryAction } from ${JSON.stringify(lifecycle)};
-
-const requiredEnvironment = [
-  "HOME", "INGENIUM_API_URL", "INGENIUM_PROJECT", "INGENIUM_PROJECT_ID", "INGENIUM_WORKSPACE_ID",
-  "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_WORKTREE", "INGENIUM_MCP_AUDIENCE",
-  "INGENIUM_MCP_CREDENTIAL_PURPOSE", "INGENIUM_MCP_CREDENTIAL_FILE", "INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE",
-  "INGENIUM_COORDINATION_TRACE", "INGENIUM_COORDINATION_TRACE_FILE", "INGENIUM_TEST_RUN_NONCE",
-  "INGENIUM_COORDINATION_NODE_EXECUTABLE", "INGENIUM_COORDINATION_NODE_ARGV",
-];
+import { allowlistedCanaryActionEnvironment, runCanaryAction } from ${JSON.stringify(lifecycle)};
 
 function actionEnvironment() {
-  const environment = allowlistedBaseEnvironment(process.env);
-  for (const key of requiredEnvironment) if (process.env[key] !== undefined) environment[key] = process.env[key];
-  return environment;
+  return allowlistedCanaryActionEnvironment(process.env);
 }
 
 function readPlan() {
@@ -162,6 +170,7 @@ export function canaryActionEnvironment(
     ...allowlistedBaseEnvironment(sourceEnvironment),
     HOME: home,
     INGENIUM_API_URL: apiUrl,
+    INGENIUM_TRUSTED_API_URL: apiUrl,
     INGENIUM_PROJECT: options.project,
     INGENIUM_PROJECT_ID: binding.projectId,
     INGENIUM_WORKSPACE_ID: options.workspaceId,
@@ -202,6 +211,7 @@ export async function startHostOpenCode(
     OPENCODE_CONFIG: prepared.configFile,
     OPENCODE_CONFIG_CONTENT: configContent,
     INGENIUM_API_URL: proxyApiUrl,
+    INGENIUM_TRUSTED_API_URL: proxyApiUrl,
     INGENIUM_PROJECT: options.project,
     INGENIUM_PROJECT_ID: storageBinding.projectId,
     INGENIUM_WORKSPACE_ID: options.workspaceId,

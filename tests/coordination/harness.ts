@@ -367,6 +367,7 @@ export function buildExternalConfig(
     environment: {
       ...environment,
       INGENIUM_API_URL: proxyApiUrl,
+      INGENIUM_TRUSTED_API_URL: proxyApiUrl,
       INGENIUM_PROJECT: options.project,
       INGENIUM_PROJECT_ID: binding.projectId,
       INGENIUM_WORKSPACE_ID: binding.workspaceId,

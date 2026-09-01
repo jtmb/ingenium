@@ -26,7 +26,7 @@ import {
   type OperationalMemoryEntry,
 } from "./contracts";
 import { CoordinationFaultProxy, faultDisposition } from "./fault-proxy";
-import { allowlistedBaseEnvironment, prepareExternalHome, runCanaryAction, startHostOpenCode, stopHostOpenCode, waitForOpenCode } from "./process-lifecycle";
+import { allowlistedBaseEnvironment, allowlistedCanaryActionEnvironment, prepareExternalHome, runCanaryAction, startHostOpenCode, stopHostOpenCode, waitForOpenCode } from "./process-lifecycle";
 import { CanaryDispatcher, RealCanaryActions, type CanaryPlan, type CanaryRequest } from "./canary-dispatcher";
 import { ExecutionLifecycle } from "./execution-lifecycle";
 import {
@@ -190,7 +190,10 @@ import { writeFileSync } from "node:fs";
 if (process.argv[2] === "--version") {
   process.stdout.write("1.18.25\\n");
 } else {
-  writeFileSync(${JSON.stringify(join(root, "spawn-pwd"))}, process.env.PWD ?? "");
+  writeFileSync(${JSON.stringify(join(root, "spawn-environment"))}, JSON.stringify({
+    pwd: process.env.PWD,
+    trustedApiUrl: process.env.INGENIUM_TRUSTED_API_URL,
+  }));
   const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
   createServer((_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
@@ -422,7 +425,7 @@ test("aborts a hanging readiness read at its deadline and observes a late reject
   await new Promise<void>((resolve) => setImmediate(resolve));
 });
 
-test("keeps the canonical OpenCode spawn target after PATH changes", async () => {
+test("starts external OpenCode with the canonical binary and trusted loopback proxy", async () => {
   const fixture = fixtureRepository();
   const args = validArguments(fixture);
   args[args.indexOf("--opencode-binary") + 1] = basename(fixture.openCode);
@@ -444,7 +447,7 @@ test("keeps the canonical OpenCode spawn target after PATH changes", async () =>
     port,
     prepared,
     options,
-    "http://127.0.0.1:4097/api/v1",
+    "http://127.0.0.1:45000/api/v1",
     "{}\n",
     { projectId: options.projectId, storageMappingHash: options.storageMappingHash },
     "{}",
@@ -455,7 +458,10 @@ test("keeps the canonical OpenCode spawn target after PATH changes", async () =>
     await waitForOpenCode(`http://127.0.0.1:${port}`, options.expectedOpenCodeVersion, new AbortController().signal, 2_000);
     assert.equal(processRecord.child.spawnfile, realpathSync(fixture.openCode));
     assert.equal(processRecord.child.exitCode, null);
-    assert.equal(readFileSync(join(fixture.root, "spawn-pwd"), "utf8"), fixture.root);
+    assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, "spawn-environment"), "utf8")), {
+      pwd: fixture.root,
+      trustedApiUrl: "http://127.0.0.1:45000/api/v1",
+    });
   } finally {
     await stopHostOpenCode(processRecord, runNonce);
     if (previousPath === undefined) delete process.env.PATH;
@@ -711,6 +717,22 @@ test("uses an allowlisted child environment and safely stops an owned detached p
   assert(child.exitCode !== null || child.signalCode !== null);
 });
 
+test("pins nested canary API trust to the validated parent URL", () => {
+  const apiUrl = "http://127.0.0.1:45000/api/v1";
+  const environment = allowlistedCanaryActionEnvironment({
+    PATH: "/bin",
+    INGENIUM_API_URL: apiUrl,
+    INGENIUM_TRUSTED_API_URL: "https://ambient-override.example/api/v1",
+    INGENIUM_API_TOKEN: "forbidden",
+    RANDOM_VALUE: "no",
+  });
+
+  assert.equal(environment.INGENIUM_API_URL, apiUrl);
+  assert.equal(environment.INGENIUM_TRUSTED_API_URL, apiUrl);
+  assert.equal(environment.INGENIUM_API_TOKEN, undefined);
+  assert.equal(environment.RANDOM_VALUE, undefined);
+});
+
 test("prepares isolated homes without copying credential-bearing files", () => {
   const fixture = fixtureRepository();
   const options = parseHarnessOptions(validArguments(fixture), {});
@@ -723,6 +745,7 @@ test("prepares isolated homes without copying credential-bearing files", () => {
   assert.equal(existsSync(prepared.planFile), true);
   const plugin = readFileSync(prepared.pluginFile, "utf8");
   assert.match(plugin, /runCanaryAction/);
+  assert.match(plugin, /allowlistedCanaryActionEnvironment\(process\.env\)/);
   assert.match(plugin, /CanaryDispatcher/);
   assert.match(plugin, /\[CANARY_TOOL\]: tool/);
   assert.doesNotMatch(plugin, /coordination-secret|repository-secret|provider-secret/);
@@ -750,6 +773,7 @@ test("generates one fixed default-deny model profile without serializing credent
   assert.equal(config.plugin.at(-1), "file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE, "{env:INGENIUM_MCP_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE, "{env:INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE}");
+  assert.equal(config.mcp.ingenium.environment.INGENIUM_TRUSTED_API_URL, "http://127.0.0.1:45000/api/v1");
   const transformOnly = JSON.parse(buildExternalConfig(options, "http://127.0.0.1:45000/api/v1", {
     projectId: options.projectId,
     workspaceId: options.workspaceId,
