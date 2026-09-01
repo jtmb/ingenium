@@ -670,6 +670,52 @@ describe("COORD-102 coordination API", () => {
     expect(disagreement).toMatchObject({ response: { status: 422 }, body: { error: { code: "INVALID_COORDINATION_INPUT" } } });
   });
 
+  it("returns prior managed completion after response loss", async () => {
+    const session = await register({ idempotency_key: "managed-completion-register" });
+    const clientClaimKey = claimKey("managed-completion-api");
+    const path = "src/managed-completion-api.ts";
+    const claimed = await request("/claims/batch", "POST", {
+      ...lease(session, TOKEN_A, "managed-completion-claim"),
+      client_claim_key: clientClaimKey,
+      operation: "create",
+      claims: [{
+        claim: { kind: "path", path },
+        baseline_sha256: null,
+        current_sha256: null,
+        repository_sha256: null,
+      }],
+    });
+    expect(claimed.response.status).toBe(200);
+    const completionBody = {
+      ...lease(claimed.body.data.session, TOKEN_A, "managed-completion-replay"),
+      client_claim_key: clientClaimKey,
+      accepted_epoch: claimed.body.data.acceptedEpoch,
+      operation_id: claimed.body.data.operationId,
+      operation: "create",
+      footprint: [{
+        path,
+        path_sha256: createHash("sha256").update(path).digest("hex"),
+        before_sha256: null,
+        after_sha256: "a".repeat(64),
+      }],
+    };
+
+    const completed = await request("/claims/complete", "POST", completionBody);
+    const replay = await request("/claims/complete", "POST", completionBody);
+    const changed = await request("/claims/complete", "POST", {
+      ...completionBody,
+      footprint: [{ ...completionBody.footprint[0], after_sha256: "b".repeat(64) }],
+    });
+
+    expect(completed.response.status).toBe(200);
+    expect(completed.body.data.session.revision).toBe(completionBody.expected_revision + 1);
+    expect(replay).toMatchObject({ response: { status: 200 }, body: completed.body });
+    expect(changed).toMatchObject({
+      response: { status: 409 },
+      body: { error: { code: "IDEMPOTENCY_KEY_REUSED" } },
+    });
+  });
+
   it("maps invalid, missing, conflict, expiry, and integrity errors without disclosure", async () => {
     const malformed = await request("/register", "POST", { worktree_id: "only-one-field" });
     expect(malformed).toMatchObject({ response: { status: 422 }, body: { error: { code: "INVALID_COORDINATION_INPUT" } } });

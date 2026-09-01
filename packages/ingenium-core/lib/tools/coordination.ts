@@ -2615,6 +2615,23 @@ export function completeManagedMutation(
   const { ownershipHash, clientClaimKeyHash } = normalizedClaimProof(input);
   const outcome = execTransaction(() => {
     const db = getDb(dbPath());
+    const hash = requestHash({
+      operation: "complete_managed_mutation",
+      projectId,
+      identity: identityForHash(input),
+      expectedRevision: input.expectedRevision,
+      fence: input.fence,
+      ownershipTokenHash: ownershipHash,
+      clientClaimKeyHash,
+      acceptedEpoch: input.acceptedEpoch,
+      operationId: input.operationId,
+      operationKind: input.operation,
+      footprint,
+    });
+    const replay = readReceipt<CoordinationClaimMutationResult>(
+      db, projectId, "complete_managed_mutation", input.idempotencyKey, hash,
+    );
+    if (replay !== undefined) return { mismatch: false as const, result: replay, written: false };
     requireProject(db, projectId);
     const completedAt = now();
     const session = requireActiveLease(db, projectId, input, ownershipHash, completedAt);
@@ -2676,7 +2693,7 @@ export function completeManagedMutation(
         `UPDATE coordination_sessions SET state = 'quarantined', revision = revision + 1, updated_at = ?
          WHERE project_id = ? AND id = ? AND revision = ? AND fence = ? AND state = 'active'`,
       ).run(completedAt, projectId, session.id, session.revision, input.fence);
-      return { mismatch: true as const };
+      return { mismatch: true as const, written: true };
     }
 
     const acceptedPaths = coarseRepository ? actualPaths.keys() : claimedPaths.keys();
@@ -2704,9 +2721,16 @@ export function completeManagedMutation(
       db, projectId, session, input, ownershipHash, completedAt,
       "revision = revision + 1, updated_at = ?", [completedAt],
     );
-    return { mismatch: false as const, result: claimMutationResult(db, projectId, updated, input.acceptedEpoch, completedAt) };
+    const mutation = claimMutationResult(db, projectId, updated, input.acceptedEpoch, completedAt);
+    return {
+      mismatch: false as const,
+      result: writeReceipt(
+        db, projectId, "complete_managed_mutation", input.idempotencyKey, hash, mutation,
+      ),
+      written: true,
+    };
   });
-  checkpointAfterWrite();
+  if (outcome.written) checkpointAfterWrite();
   if (outcome.mismatch) throw new CoordinationError("FOOTPRINT_MISMATCH");
   return outcome.result;
 }

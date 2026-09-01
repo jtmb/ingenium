@@ -1659,6 +1659,86 @@ describe("COORD-101 coordination registry fixtures", () => {
     expect(() => getDb(path)).toThrow(/Migration 107 is in a PARTIAL state/);
   });
 
+  it("replays managed completion without duplicate mutation", () => {
+    const { db, alpha } = setup();
+    const session = register(alpha.id);
+    const clientClaimKey = claimKey("managed-completion-replay");
+    const path = "src/completion-replay.ts";
+    const acceptedHash = "a".repeat(64);
+    const claimed = claimCoordinationBatch(alpha.id, {
+      ...lease(MAIN, session, TOKEN_A, "managed-completion-claim"),
+      clientClaimKey,
+      operation: "create",
+      claims: [{
+        claim: { kind: "path", path },
+        baselineSha256: null,
+        currentSha256: null,
+        repositorySha256: null,
+      }],
+    });
+    const completionInput = {
+      ...lease(MAIN, claimed.session, TOKEN_A, "managed-completion-replay"),
+      clientClaimKey,
+      acceptedEpoch: claimed.acceptedEpoch,
+      operationId: claimed.operationId!,
+      operation: "create" as const,
+      footprint: [{
+        path,
+        pathSha256: createHash("sha256").update(path).digest("hex"),
+        beforeSha256: null,
+        afterSha256: acceptedHash,
+      }],
+    };
+
+    const completed = completeManagedMutation(alpha.id, completionInput);
+    const durableState = () => ({
+      baseline: db.prepare(
+        "SELECT accepted_sha256, accepted_epoch FROM coordination_managed_paths WHERE project_id = ? AND worktree_id = ? AND path = ?",
+      ).get(alpha.id, MAIN.worktreeId, path),
+      baselineCount: db.prepare(
+        "SELECT count(*) AS count FROM coordination_managed_paths WHERE project_id = ? AND worktree_id = ? AND path = ?",
+      ).get(alpha.id, MAIN.worktreeId, path),
+      claim: db.prepare(
+        "SELECT state, released_at FROM coordination_claims WHERE project_id = ? AND client_claim_key_hash = ?",
+      ).get(alpha.id, createHash("sha256").update(clientClaimKey).digest("hex")),
+      operation: db.prepare(
+        "SELECT state FROM coordination_managed_operations WHERE project_id = ? AND id = ?",
+      ).get(alpha.id, claimed.operationId),
+      session: db.prepare("SELECT revision FROM coordination_sessions WHERE project_id = ? AND id = ?")
+        .get(alpha.id, session.id),
+      receiptCount: db.prepare(
+        "SELECT count(*) AS count FROM coordination_mutation_receipts WHERE project_id = ? AND idempotency_key = ?",
+      ).get(alpha.id, completionInput.idempotencyKey),
+    });
+    const afterCompletion = durableState();
+
+    expect(completed.session.revision).toBe(claimed.session.revision + 1);
+    expect(afterCompletion).toEqual({
+      baseline: { accepted_sha256: acceptedHash, accepted_epoch: claimed.acceptedEpoch },
+      baselineCount: { count: 1 },
+      claim: { state: "released", released_at: expect.any(String) },
+      operation: { state: "verified" },
+      session: { revision: claimed.session.revision + 1 },
+      receiptCount: { count: 1 },
+    });
+    expect(completeManagedMutation(alpha.id, completionInput)).toEqual(completed);
+    expect(durableState()).toEqual(afterCompletion);
+    expectCode(() => completeManagedMutation(alpha.id, {
+      ...completionInput,
+      footprint: [{ ...completionInput.footprint[0]!, afterSha256: "b".repeat(64) }],
+    }), "IDEMPOTENCY_KEY_REUSED");
+    expect(durableState()).toEqual(afterCompletion);
+
+    const receipt = db.prepare(
+      "SELECT operation, request_hash, result_json FROM coordination_mutation_receipts WHERE project_id = ? AND idempotency_key = ?",
+    ).get(alpha.id, completionInput.idempotencyKey) as {
+      operation: string; request_hash: string; result_json: string;
+    };
+    expect(receipt.operation).toBe("complete_managed_mutation");
+    expect(JSON.parse(receipt.result_json)).toEqual(completed);
+    expect(JSON.stringify(receipt)).not.toMatch(new RegExp(`${TOKEN_A}|${clientClaimKey}`));
+  });
+
   it("verifies managed baselines and quarantines an unexpected footprint", () => {
     const { db, alpha } = setup();
     const registered = register(alpha.id);

@@ -1435,6 +1435,23 @@ export class SessionCoordinator {
           } else if (record.kind === "completion" && record.mutation?.phase === "completion_ambiguous"
             && record.mutation.remoteClaim) {
             const claim = record.mutation.remoteClaim;
+            const footprint: Array<{
+              path?: string;
+              path_sha256: string;
+              before_sha256: string | null;
+              after_sha256: string | null;
+            }> = [];
+            for (const entry of record.mutation.footprint) {
+              const path = entry.pathSegments === null ? undefined : decodeCoordinationPath(entry.pathSegments);
+              if (entry.pathSegments !== null && path === undefined) return false;
+              footprint.push({
+                ...(path === undefined ? {} : { path }),
+                path_sha256: entry.pathSha256,
+                before_sha256: entry.beforeSha256,
+                after_sha256: entry.afterSha256,
+              });
+            }
+            this.assertActive();
             result = await this.invoke("coordination_claim", {
               project: this.binding.project,
               worktree_id: claim.worktreeId,
@@ -1445,11 +1462,13 @@ export class SessionCoordinator {
               ownership_token: claim.ownershipToken,
               client_claim_key: claim.clientClaimKey,
               accepted_epoch: claim.acceptedEpoch,
-              action: "quarantine",
-              code: "uncertain_apply",
-              idempotency_key: `${record.operationId}:quarantine`,
+              action: "complete",
+              operation_id: claim.remoteOperationId,
+              operation: record.mutation.operation,
+              footprint,
+              idempotency_key: `${claim.remoteOperationId}:complete`,
             });
-            mutation(result.session);
+            this.assertActive();
             if (result.acceptedEpoch !== claim.acceptedEpoch) return false;
           } else if (record.kind === "snapshot") {
             const snapshotRevision = Math.max(state.snapshotRevision ?? 0, record.revision ?? 0) + 1;
@@ -1490,7 +1509,10 @@ export class SessionCoordinator {
           } else {
             return false;
           }
-          if (record.kind !== "completion") this.apply(state, result.session);
+          mutation(result.session);
+          this.assertActive();
+          this.apply(state, result.session);
+          this.assertActive();
           trace({ event: "recover_success", sessionHash: sessionHash(sessionId), mapMember: true, incarnation: state.incarnation });
           return true;
         });
@@ -2123,6 +2145,7 @@ export class SessionCoordinator {
       };
       const result = await this.invoke("coordination_claim", {
         ...this.claimProof(state, pending),
+        idempotency_key: `${pending.operationId}:complete`,
         action: "complete",
         operation_id: pending.operationId,
         operation: pending.operation,
@@ -2164,7 +2187,10 @@ export class SessionCoordinator {
       }
       await this.serialized(sessionId, async (state) => {
         const result = await this.invoke("coordination_claim", {
-          ...this.claimProof(state, pending), action: "quarantine", code: "uncertain_apply",
+          ...this.claimProof(state, pending),
+          idempotency_key: `${pending.operationId}:quarantine`,
+          action: "quarantine",
+          code: "uncertain_apply",
         });
         this.apply(state, result.session);
       });

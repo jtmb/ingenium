@@ -1053,6 +1053,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     const claimCall = fixture.calls.find((call) => call.tool === "coordination_claim")!;
     const quarantineCall = fixture.calls.find((call) => call.tool === "coordination_claim" && call.args.action === "quarantine")!;
     expect(quarantineCall.args.client_claim_key).toBe(claimCall.args.client_claim_key);
+    expect(quarantineCall.args.idempotency_key).toBe("00000000-0000-4000-8000-000000000099:quarantine");
     expect(claimCall.args.client_claim_key).not.toBe(claimCall.args.ownership_token);
     expect(fixture.calls.filter((call) => call.tool === "coordination_claim" && call.args.action === "quarantine")).toHaveLength(1);
     expect(fixture.calls.filter((call) => call.tool === "coordination_handoff")).toHaveLength(0);
@@ -1399,23 +1400,55 @@ describe("SessionCoordinatorPlugin hooks", () => {
     }
   });
 
-  it("replays ambiguous completion as one idempotent quarantine and retains it until confirmation", async () => {
+  it("replays an ambiguous completion with the original payload and removes it after prior success", async () => {
     const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-completion-replay-"));
     mkdirSync(join(root, "src"));
     execFileSync("git", ["-C", root, "init", "--quiet"]);
     const fixture = coordinationFixture();
     const outbox = new CoordinationOutbox(root, () => Date.parse("2026-08-31T00:00:00.000Z"));
-    let failCompletion = true;
-    let failQuarantine = true;
-    const quarantineKeys: string[] = [];
+    let completionResult: Awaited<ReturnType<typeof fixture.callTool>> | undefined;
+    let completionMutations = 0;
+    let priorSuccesses = 0;
+    let rejectCanonicalReplay = true;
+    let captureHeartbeat = false;
+    const completionCalls: Args[] = [];
+    const heartbeatCalls: Args[] = [];
+    const quarantineCalls: Args[] = [];
     const callTool = vi.fn(async (worktree: string, tool: string, args: Args) => {
-      if (tool === "coordination_claim" && args.action === "complete" && failCompletion) {
-        failCompletion = false;
+      if (captureHeartbeat && tool === "coordination_update" && args.operation === "heartbeat") {
+        heartbeatCalls.push(structuredClone(args));
+        const canonical = JSON.parse((completionResult as Args).content[0].text).session;
+        return text({ session: { ...canonical, revision: canonical.revision + 1 } });
+      }
+      if (tool === "coordination_claim" && args.action === "complete") {
+        completionCalls.push(structuredClone(args));
+        if (completionResult) {
+          priorSuccesses += 1;
+          if (rejectCanonicalReplay) {
+            const invalid = structuredClone(completionResult as Args);
+            const payload = JSON.parse(invalid.content[0].text);
+            payload.session.revision = "invalid";
+            invalid.content[0].text = JSON.stringify(payload);
+            return invalid;
+          }
+          return completionResult;
+        }
+        const completed = await fixture.callTool(worktree, tool, args) as Args;
+        const payload = JSON.parse(completed.content[0].text);
+        completionResult = text({
+          ...payload,
+          session: {
+            ...payload.session,
+            snapshotRevision: 7,
+            contextConversationId: "00000000-0000-4000-8000-000000000011",
+            contextRevision: 9,
+          },
+        });
+        completionMutations += 1;
         throw new McpBridgeError("request_failed", "", "call");
       }
       if (tool === "coordination_claim" && args.action === "quarantine") {
-        quarantineKeys.push(args.idempotency_key);
-        if (failQuarantine) throw new McpBridgeError("request_failed", "", "call");
+        quarantineCalls.push(structuredClone(args));
       }
       return fixture.callTool(worktree, tool, args);
     });
@@ -1432,26 +1465,87 @@ describe("SessionCoordinatorPlugin hooks", () => {
       writeFileSync(join(root, "src", "completed.ts"), "local success\n");
       await expect(hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} })).resolves.toBeUndefined();
       const ambiguous = outbox.list().find((record) => record.kind === "completion")!;
-      expect(ambiguous).toMatchObject({ ambiguous: true, mutation: { phase: "completion_ambiguous" } });
+      const remoteOperationId = ambiguous.mutation!.remoteClaim!.remoteOperationId;
+      expect(ambiguous).toMatchObject({
+        ambiguous: true,
+        mutation: {
+          phase: "completion_ambiguous",
+          operation: "write",
+          footprint: [expect.objectContaining({ pathSegments: ["c3Jj", "Y29tcGxldGVkLnRz"] })],
+        },
+      });
+      expect(completionCalls).toHaveLength(1);
+      expect(completionCalls[0]).toMatchObject({
+        action: "complete",
+        operation_id: remoteOperationId,
+        operation: "write",
+        idempotency_key: `${remoteOperationId}:complete`,
+        footprint: [{
+          path: "src/completed.ts",
+          path_sha256: createHash("sha256").update("src/completed.ts").digest("hex"),
+          before_sha256: null,
+          after_sha256: createHash("sha256").update("local success\n").digest("hex"),
+        }],
+      });
 
       const restarted = new SessionCoordinator(process, {
         binding: process.binding, callTool, outbox: new CoordinationOutbox(root), now: () => 504,
         token: () => "D".repeat(32), disableHeartbeat: true,
       });
       await restarted.hooks().event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
-      await (restarted as any).replayOutbox();
-      await vi.waitFor(() => expect(quarantineKeys.length).toBeGreaterThan(0));
+      await vi.waitFor(() => expect((restarted as any).replayingOutbox).toBe(false));
+      expect(priorSuccesses).toBe(1);
       expect(new CoordinationOutbox(root).list()).toContainEqual(expect.objectContaining({ operationId: ambiguous.operationId }));
+      const stateBeforeSuccess = (restarted as any).sessions.get(sessionID);
+      const revisionBeforeSuccess = stateBeforeSuccess.revision;
 
-      const failedAttempts = quarantineKeys.length;
-      failQuarantine = false;
+      rejectCanonicalReplay = false;
+      const canonical = JSON.parse((completionResult as Args).content[0].text).session;
       await (restarted as any).replayOutbox();
-      const confirmedAttempts = quarantineKeys.length;
+      const stateAfterSuccess = (restarted as any).sessions.get(sessionID);
+      const appliedState = {
+        revision: stateAfterSuccess.revision,
+        actorId: stateAfterSuccess.actorId,
+        fence: stateAfterSuccess.fence,
+        snapshotRevision: stateAfterSuccess.snapshotRevision,
+        memoryConversationId: stateAfterSuccess.memoryConversationId,
+        memoryRevision: stateAfterSuccess.memoryRevision,
+      };
+      expect(stateAfterSuccess.revision).toBeGreaterThan(revisionBeforeSuccess);
+      expect(appliedState).toEqual({
+        revision: canonical.revision,
+        actorId: canonical.actorId,
+        fence: canonical.fence,
+        snapshotRevision: 7,
+        memoryConversationId: "00000000-0000-4000-8000-000000000011",
+        memoryRevision: 9,
+      });
       await (restarted as any).replayOutbox();
+      expect({
+        revision: stateAfterSuccess.revision,
+        actorId: stateAfterSuccess.actorId,
+        fence: stateAfterSuccess.fence,
+        snapshotRevision: stateAfterSuccess.snapshotRevision,
+        memoryConversationId: stateAfterSuccess.memoryConversationId,
+        memoryRevision: stateAfterSuccess.memoryRevision,
+      }).toEqual(appliedState);
+
+      captureHeartbeat = true;
+      await expect(restarted.heartbeatSession(sessionID)).resolves.toBe(true);
+
+      expect(completionCalls).toHaveLength(3);
+      expect(completionCalls[1]).toEqual(completionCalls[0]);
+      expect(completionCalls[2]).toEqual(completionCalls[0]);
+      expect(priorSuccesses).toBe(2);
+      expect(completionMutations).toBe(1);
+      expect(fixture.calls.filter(({ tool, args }) => tool === "coordination_claim" && args.action === "complete")).toHaveLength(1);
+      expect(heartbeatCalls).toEqual([expect.objectContaining({
+        expected_revision: canonical.revision,
+        fence: canonical.fence,
+      })]);
+      expect((restarted as any).sessions.get(sessionID).revision).toBe(canonical.revision + 1);
+      expect(quarantineCalls).toEqual([]);
       expect(new CoordinationOutbox(root).list().filter((record) => record.kind === "completion")).toEqual([]);
-      expect(confirmedAttempts).toBe(failedAttempts + 1);
-      expect(quarantineKeys).toHaveLength(confirmedAttempts);
-      expect(new Set(quarantineKeys)).toEqual(new Set([`${ambiguous.operationId}:quarantine`]));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
