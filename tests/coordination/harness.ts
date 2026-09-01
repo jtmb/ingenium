@@ -1216,10 +1216,21 @@ export async function finishCoordinationCleanup(
   }
 }
 
-export async function runCoordinationHarness(options: HarnessOptions): Promise<string> {
+export interface CoordinationRunEvidence {
+  runId: string;
+  telemetryPath: string;
+}
+
+export async function runCoordinationHarness(
+  options: HarnessOptions,
+  reportRunEvidence: (evidence: CoordinationRunEvidence) => void,
+): Promise<string> {
   const lifecycle = new ExecutionLifecycle();
   lifecycle.start();
   const context = createTestRunContext({ repoRoot: options.worktree, applyEnvironment: false });
+  const telemetryPath = context.telemetryPath
+    ?? join(options.worktree, "tests", "artifacts", "test-runs", context.runId, "runner-telemetry.json");
+  reportRunEvidence({ runId: context.runId, telemetryPath });
   const lease = new RunCredentialLease(context, options, createRunCredentialLeaseTransport(options));
   const artifactRoot = join(options.worktree, "tests", "artifacts", "test-runs", context.runId);
   let evidence: EvidenceStore | undefined;

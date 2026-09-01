@@ -989,25 +989,79 @@ test("accepts an exact legacy credential recovery CLI mode", async () => {
   ], { recoverLegacy: async () => {} }), /Exact legacy credential directory/);
 });
 
-test("runs strict repository containment after harness cleanup and fails on findings", async () => {
+test("runner finalization audits exactly once after harness success", async () => {
   const fixture = fixtureRepository();
   let auditOptions: unknown;
+  let auditCalls = 0;
   const pass = await runMain(validArguments(fixture), {
     run: async () => "66666666-6666-4666-8666-666666666666",
     audit: async (options) => {
+      auditCalls += 1;
       auditOptions = options;
       return emptyContainmentReport();
     },
   });
   assert.equal(pass?.result, "PASS");
+  assert.equal(auditCalls, 1);
   assert.deepEqual(auditOptions, {
     telemetryPaths: [join(fixture.root, "tests", "artifacts", "test-runs", "66666666-6666-4666-8666-666666666666", "runner-telemetry.json")],
     includeRepositoryTelemetry: true,
   });
+});
+
+test("runner finalization audits exactly once after harness failure", async () => {
+  const fixture = fixtureRepository();
+  const harnessError = new Error("harness failed after cleanup");
+  const runId = "77777777-7777-4777-8777-777777777777";
+  const telemetryPath = join(fixture.root, "tests", "artifacts", "test-runs", runId, "runner-telemetry.json");
+  let auditCalls = 0;
   await assert.rejects(runMain(validArguments(fixture), {
-    run: async () => "77777777-7777-4777-8777-777777777777",
-    audit: async () => emptyContainmentReport({ holds: ["retained stopping run"] }),
+    run: async (_options, reportRunEvidence) => {
+      reportRunEvidence({ runId, telemetryPath });
+      throw harnessError;
+    },
+    audit: async (options) => {
+      auditCalls += 1;
+      assert.deepEqual(options, { telemetryPaths: [telemetryPath], includeRepositoryTelemetry: true });
+      return emptyContainmentReport();
+    },
+  }), (error) => error === harnessError);
+  assert.equal(auditCalls, 1);
+});
+
+test("runner finalization fails a successful harness on strict audit findings", async () => {
+  const fixture = fixtureRepository();
+  let auditCalls = 0;
+  await assert.rejects(runMain(validArguments(fixture), {
+    run: async () => "88888888-8888-4888-8888-888888888888",
+    audit: async () => {
+      auditCalls += 1;
+      return emptyContainmentReport({ holds: ["retained stopping run"] });
+    },
   }), /Strict containment failed: containment holds/);
+  assert.equal(auditCalls, 1);
+});
+
+test("runner finalization preserves harness failure when audit also fails", async () => {
+  const fixture = fixtureRepository();
+  const harnessError = new Error("primary harness failure");
+  const auditError = new Error("secondary audit failure");
+  const runId = "99999999-9999-4999-8999-999999999999";
+  const telemetryPath = join(fixture.root, "tests", "artifacts", "test-runs", runId, "runner-telemetry.json");
+  let auditCalls = 0;
+  await assert.rejects(runMain(validArguments(fixture), {
+    run: async (_options, reportRunEvidence) => {
+      reportRunEvidence({ runId, telemetryPath });
+      throw harnessError;
+    },
+    audit: async () => {
+      auditCalls += 1;
+      throw auditError;
+    },
+  }), (error) => error === harnessError
+    && (error as Error).message === "primary harness failure"
+    && (error as Error & { containmentAuditError?: unknown }).containmentAuditError === auditError);
+  assert.equal(auditCalls, 1);
 });
 
 test("issues run credentials before preflight and fails closed on identity drift", async () => {
