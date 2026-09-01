@@ -35,7 +35,7 @@ import {
   type IssuedRunCredentialPair,
   type RunCredentialLeaseTransport,
 } from "./credential-lease";
-import { recoverCoordinationHarnessRun, recoverExactLegacyCredentials } from "./recovery";
+import { recoverCoordinationHarnessRun, recoverExactLegacyCredentials, runRecoveryMain } from "./recovery";
 import { runMain } from "./run";
 import type { ContainmentAuditReport } from "../suite-containment-audit";
 import {
@@ -785,34 +785,208 @@ test("recovers a crashed stopping run once and removes its exact credential path
   assert.equal(existsSync(context.runDir), false);
 });
 
-test("recovers only explicitly named legacy credential paths", async () => {
+const LEGACY_BINDING = {
+  organizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  workspaceId: "workspace-one",
+  launcherWorktree: "/exact/worktree",
+  storageMappingHash: "c".repeat(64),
+} as const;
+
+function inactiveLegacyProof(code = "INVALID_TOKEN"): Response {
+  return Response.json({ error: {
+    code,
+    message: "Invalid bearer token",
+    details: null,
+    requestId: "req_1234abcd",
+  } }, { status: 401 });
+}
+
+function activeLegacyProof(
+  audience: "mcp" | "repository-sync",
+  overrides: Record<string, unknown> = {},
+): Response {
+  return Response.json({ data: {
+    authenticated: true,
+    principal: { type: "service", id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    scopes: audience === "mcp"
+      ? ["coordination:read", "coordination:write", "projects:read", "repository:sync"]
+      : ["projects:read", "repository:sync"],
+    ...LEGACY_BINDING,
+    projectIds: [LEGACY_BINDING.projectId],
+    audience,
+    restartRequiredOnCredentialChange: true,
+    credentialChangeMode: audience === "mcp" ? "live-mcp-reload" : "restart",
+    ...overrides,
+  } });
+}
+
+function legacyRecoveryOptions(
+  credentialDirectory: string,
+  credentials: Parameters<typeof recoverExactLegacyCredentials>[0]["credentials"],
+  request: typeof fetch,
+  removeEmptyDirectory = false,
+): Parameters<typeof recoverExactLegacyCredentials>[0] {
+  return {
+    apiUrl: "http://127.0.0.1:4097/api/v1",
+    ...LEGACY_BINDING,
+    credentialDirectory,
+    removeEmptyDirectory,
+    credentials,
+    request,
+  };
+}
+
+test("recovers active and inactive exact legacy credential paths", async () => {
   const root = tempRoot("ingenium-coordination-legacy-credential-");
   const coordination = protectedFile(root, ".ingenium-mcp-credential", `ing_${"l".repeat(43)}`);
   const decoy = protectedFile(root, ".ingenium-repository-sync-credential", `ing_${"d".repeat(43)}`);
   const requests: string[] = [];
-  await recoverExactLegacyCredentials({
-    apiUrl: "http://127.0.0.1:4097/api/v1",
-    workspaceId: "workspace-one",
-    launcherWorktree: "/exact/worktree",
-    credentials: [{ id: "55555555-5555-4555-8555-555555555555", path: coordination, audience: "mcp" }],
-    request: (async (input, init) => {
+  let revoked = false;
+  await recoverExactLegacyCredentials(legacyRecoveryOptions(root, [
+    { id: "55555555-5555-4555-8555-555555555555", path: coordination, audience: "mcp" },
+  ], (async (input, init) => {
       requests.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
-      return new Response(null, { status: init?.method === "DELETE" ? 204 : 401 });
-    }) as typeof fetch,
-  });
+      if (init?.method === "DELETE") {
+        revoked = true;
+        return new Response(null, { status: 204 });
+      }
+      return revoked ? inactiveLegacyProof() : activeLegacyProof("mcp");
+    }) as typeof fetch));
 
   assert.equal(existsSync(coordination), false);
   assert.equal(existsSync(decoy), true);
   assert.deepEqual(requests, [
+    "GET /api/v1/auth/preflight",
     "DELETE /api/v1/auth/mcp-credentials/55555555-5555-4555-8555-555555555555",
     "GET /api/v1/auth/preflight",
   ]);
-  await assert.rejects(recoverExactLegacyCredentials({
+
+  const inactiveRoot = tempRoot("ingenium-coordination-inactive-legacy-credential-");
+  const inactiveCoordination = protectedFile(inactiveRoot, ".ingenium-mcp-credential", `ing_${"i".repeat(43)}`);
+  const inactiveRepository = protectedFile(inactiveRoot, ".ingenium-repository-sync-credential", `ing_${"j".repeat(43)}`);
+  const inactiveRequests: string[] = [];
+  await recoverExactLegacyCredentials(legacyRecoveryOptions(inactiveRoot, [
+      { id: "66666666-6666-4666-8666-666666666666", path: inactiveCoordination, audience: "mcp" },
+      { id: "77777777-7777-4777-8777-777777777777", path: inactiveRepository, audience: "repository-sync" },
+    ], (async (input, init) => {
+      inactiveRequests.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+      return inactiveLegacyProof();
+    }) as typeof fetch, true));
+  assert.equal(existsSync(inactiveRoot), false);
+  assert.deepEqual(inactiveRequests, [
+    "GET /api/v1/auth/preflight",
+    "GET /api/v1/auth/preflight",
+  ]);
+
+  await assert.rejects(recoverExactLegacyCredentials(legacyRecoveryOptions(root, [
+    { id: "55555555-5555-4555-8555-555555555555", path: `${root}/*`, audience: "mcp" },
+  ], fetch)), /directory|path or identity/);
+});
+
+test("rejects bodyless and wrong-code legacy credential inactivity proofs", async () => {
+  for (const [name, response] of [
+    ["bodyless", () => new Response(null, { status: 401 })],
+    ["wrong-code", () => inactiveLegacyProof("UNAUTHORIZED")],
+  ] as const) {
+    for (const stage of ["initial", "after-delete"] as const) {
+      const root = tempRoot(`ingenium-coordination-${name}-${stage}-legacy-credential-`);
+      const credential = protectedFile(root, ".ingenium-mcp-credential", `ing_${"k".repeat(43)}`);
+      let preflights = 0;
+      await assert.rejects(recoverExactLegacyCredentials(legacyRecoveryOptions(root, [
+        { id: "11111111-1111-4111-8111-111111111111", path: credential, audience: "mcp" },
+      ], (async (_input, init) => {
+        if (init?.method === "DELETE") return new Response(null, { status: 204 });
+        preflights += 1;
+        return stage === "after-delete" && preflights === 1 ? activeLegacyProof("mcp") : response();
+      }) as typeof fetch)), /inactive proof/);
+      assert.equal(existsSync(credential), true);
+    }
+  }
+});
+
+test("rejects mismatched active legacy credential bindings before self-delete", async () => {
+  const root = tempRoot("ingenium-coordination-mismatched-legacy-credential-");
+  const credential = protectedFile(root, ".ingenium-mcp-credential", `ing_${"m".repeat(43)}`);
+  let deletes = 0;
+  await assert.rejects(recoverExactLegacyCredentials(legacyRecoveryOptions(root, [
+    { id: "22222222-2222-4222-8222-222222222222", path: credential, audience: "mcp" },
+  ], (async (_input, init) => {
+    if (init?.method === "DELETE") deletes += 1;
+    return activeLegacyProof("mcp", { storageMappingHash: "d".repeat(64) });
+  }) as typeof fetch)), /active binding/);
+  assert.equal(deletes, 0);
+  assert.equal(existsSync(credential), true);
+});
+
+test("rejects a legacy credential directory swap before unlink without mutating either file", async () => {
+  const root = tempRoot("ingenium-coordination-swapped-legacy-directory-");
+  const moved = `${root}-moved`;
+  roots.push(moved);
+  const credential = protectedFile(root, ".ingenium-mcp-credential", `ing_${"n".repeat(43)}`);
+  await assert.rejects(recoverExactLegacyCredentials(legacyRecoveryOptions(root, [
+    { id: "33333333-3333-4333-8333-333333333333", path: credential, audience: "mcp" },
+  ], (async () => {
+    renameSync(root, moved);
+    mkdirSync(root, { mode: 0o700 });
+    protectedFile(root, ".ingenium-mcp-credential", `ing_${"o".repeat(43)}`);
+    return inactiveLegacyProof();
+  }) as typeof fetch)), /directory identity changed/);
+  assert.equal(existsSync(join(moved, ".ingenium-mcp-credential")), true);
+  assert.equal(existsSync(join(root, ".ingenium-mcp-credential")), true);
+});
+
+test("rejects a legacy credential parent swap before unlink without mutating either file", async () => {
+  const root = tempRoot("ingenium-coordination-swapped-legacy-parent-");
+  const parent = join(root, "parent");
+  const movedParent = join(root, "moved-parent");
+  const directory = join(parent, "credentials");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const credential = protectedFile(directory, ".ingenium-mcp-credential", `ing_${"p".repeat(43)}`);
+  await assert.rejects(recoverExactLegacyCredentials(legacyRecoveryOptions(directory, [
+    { id: "44444444-4444-4444-8444-444444444444", path: credential, audience: "mcp" },
+  ], (async () => {
+    renameSync(parent, movedParent);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    protectedFile(directory, ".ingenium-mcp-credential", `ing_${"q".repeat(43)}`);
+    return inactiveLegacyProof();
+  }) as typeof fetch)), /parent directory identity changed/);
+  assert.equal(existsSync(join(movedParent, "credentials", ".ingenium-mcp-credential")), true);
+  assert.equal(existsSync(join(directory, ".ingenium-mcp-credential")), true);
+});
+
+test("accepts an exact legacy credential recovery CLI mode", async () => {
+  const directory = "/tmp/opencode/exact-legacy-credential-directory";
+  let captured: Parameters<typeof recoverExactLegacyCredentials>[0] | undefined;
+  await runRecoveryMain([
+    "--legacy-credential-dir", directory,
+    "--coordination-credential-id", "88888888-8888-4888-8888-888888888888",
+    "--repository-sync-credential-id", "99999999-9999-4999-8999-999999999999",
+    "--organization-id", LEGACY_BINDING.organizationId,
+    "--project-id", LEGACY_BINDING.projectId,
+    "--workspace", "workspace-one",
+    "--launcher-worktree", "/exact/worktree",
+    "--storage-mapping-hash", LEGACY_BINDING.storageMappingHash,
+    "--api-url", "http://127.0.0.1:4097/api/v1",
+  ], {
+    recoverLegacy: async (options) => { captured = options; },
+  });
+
+  assert.deepEqual(captured, {
     apiUrl: "http://127.0.0.1:4097/api/v1",
-    workspaceId: "workspace-one",
-    launcherWorktree: "/exact/worktree",
-    credentials: [{ id: "55555555-5555-4555-8555-555555555555", path: `${root}/*`, audience: "mcp" }],
-  }), /path or identity/);
+    ...LEGACY_BINDING,
+    credentialDirectory: directory,
+    removeEmptyDirectory: true,
+    credentials: [
+      { id: "88888888-8888-4888-8888-888888888888", path: join(directory, ".ingenium-mcp-credential"), audience: "mcp" },
+      { id: "99999999-9999-4999-8999-999999999999", path: join(directory, ".ingenium-repository-sync-credential"), audience: "repository-sync" },
+    ],
+  });
+  await assert.rejects(runRecoveryMain([
+    "--legacy-credential-dir", directory,
+    "--manifest", "/tmp/run-manifest.json",
+    "--api-url", "http://127.0.0.1:4097/api/v1",
+  ], { recoverLegacy: async () => {} }), /Exact legacy credential directory/);
 });
 
 test("runs strict repository containment after harness cleanup and fails on findings", async () => {
