@@ -47,6 +47,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 250;
+const INTERNAL_READINESS_POLL_INTERVAL_MS = 5_000;
 const INTERNAL_CANARY_AGENT = "ingenium-llm-broker";
 const CANARY_TOOL_SYSTEM_PROMPT = `Follow only the current user request. Invoke ${CANARY_TOOL} exactly once with only the supplied nonce and operation. Never invoke any other tool, access files directly, inspect configuration, or reveal credentials.`;
 const TRANSFORM_ONLY_SYSTEM_PROMPT = "Follow only the current user request. Never invoke tools, access files, inspect configuration, or reveal credentials.";
@@ -164,7 +165,7 @@ interface OpenCodeApi {
   messages(sessionId: string): Promise<unknown[]>;
   status(): Promise<Record<string, unknown>>;
   prompt(sessionId: string, text: string): Promise<void>;
-  inspect(): Promise<JsonRecord>;
+  inspect(signal?: AbortSignal): Promise<JsonRecord>;
 }
 
 function record(value: unknown, message: string): JsonRecord {
@@ -235,17 +236,50 @@ async function waitFor<T>(
   name: string,
   timeoutMs: number,
   signal: AbortSignal,
-  read: () => Promise<T | undefined>,
+  read: (readSignal: AbortSignal) => Promise<T | undefined>,
   timeoutError?: () => Error,
+  pollIntervalMs = POLL_INTERVAL_MS,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     signal.throwIfAborted();
-    const value = await read();
+    const remainingMs = deadline - Date.now();
+    const readController = new AbortController();
+    const readSignal = AbortSignal.any([signal, readController.signal]);
+    const readPromise = Promise.resolve().then(() => read(readSignal));
+    void readPromise.catch(() => undefined);
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(readSignal.reason);
+      if (readSignal.aborted) {
+        onAbort();
+        return;
+      }
+      readSignal.addEventListener("abort", onAbort, { once: true });
+    });
+    const deadlinePromise = new Promise<never>((_resolve, reject) => {
+      deadlineTimer = setTimeout(() => {
+        const error = timeoutError?.() ?? new Error(`Timed out waiting for ${name}`);
+        reject(error);
+        readController.abort(error);
+      }, remainingMs);
+    });
+    let value: T | undefined;
+    try {
+      value = await Promise.race([readPromise, deadlinePromise, abortPromise]);
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (onAbort) readSignal.removeEventListener("abort", onAbort);
+    }
     if (value !== undefined) return value;
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, POLL_INTERVAL_MS);
-      signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      const onAbort = (): void => { clearTimeout(timer); reject(signal.reason); };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+      signal.addEventListener("abort", onAbort, { once: true });
     });
   }
   throw timeoutError?.() ?? new Error(`Timed out waiting for ${name}`);
@@ -383,12 +417,12 @@ function openCodeApi(
   const headers = control ? headersForControl(control.operatorToken, control.runtimeId) : { "content-type": "application/json" };
   const directoryQuery = "";
   const prefix = control ? "/sessions" : "/session";
-  const request = (path: string, init: RequestInit = {}, statuses: readonly number[] = [200]) => expectJson(
+  const request = (path: string, init: RequestInit = {}, statuses: readonly number[] = [200], requestSignal = signal) => expectJson(
     `${baseUrl}${path}${path.includes("?") ? "&" : directoryQuery ? "?" : ""}${directoryQuery.replace(/^\?/, "")}`,
     { ...init, headers: { ...headers, ...(init.headers ?? {}) } },
     statuses,
     options.timeoutMs,
-    signal,
+    requestSignal,
   );
   return {
     label,
@@ -422,15 +456,18 @@ function openCodeApi(
         control ? [202] : [200, 202, 204],
       );
     },
-    async inspect() {
+    async inspect(readSignal = signal) {
       if (control) {
         const [health, agents, providers, mcp] = await Promise.all([
-          request("/health"), request("/agents"), request("/providers"), request("/mcp"),
+          request("/health", {}, [200], readSignal), request("/agents", {}, [200], readSignal),
+          request("/providers", {}, [200], readSignal), request("/mcp", {}, [200], readSignal),
         ]);
         return { health, agents, providers, mcp };
       }
       const [health, agents, config, providers, mcp] = await Promise.all([
-        request("/global/health"), request("/agent"), request("/config"), request("/provider"), request("/mcp"),
+        request("/global/health", {}, [200], readSignal), request("/agent", {}, [200], readSignal),
+        request("/config", {}, [200], readSignal), request("/provider", {}, [200], readSignal),
+        request("/mcp", {}, [200], readSignal),
       ]);
       return { health, agents, config, providers, mcp };
     },
@@ -484,9 +521,9 @@ function projectOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, op
 
 export async function inspectReady(api: OpenCodeApi, options: HarnessOptions, signal: AbortSignal, timeoutMs = 90_000): Promise<JsonRecord> {
   let lastError: unknown;
-  return waitFor(`${api.label} exact OpenCode/MCP readiness`, timeoutMs, signal, async () => {
+  return waitFor(`${api.label} exact OpenCode/MCP readiness`, timeoutMs, signal, async (readSignal) => {
     try {
-      const value = await api.inspect();
+      const value = await api.inspect(readSignal);
       assertOpenCodeInspection(api.label, value, options);
       return value;
     } catch (error) {
@@ -496,7 +533,7 @@ export async function inspectReady(api: OpenCodeApi, options: HarnessOptions, si
   }, () => new Error(
     `Timed out waiting for ${api.label} exact OpenCode/MCP readiness: ${lastError instanceof Error ? lastError.message : "unknown readiness failure"}`,
     { cause: lastError },
-  ));
+  ), api.label === "C" ? INTERNAL_READINESS_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
 }
 
 function extractToolPaths(part: JsonRecord, worktree: string): string[] {

@@ -368,6 +368,39 @@ test("retains the last exact readiness failure when polling times out", async ()
   } as never, options, new AbortController().signal, 1), /B OpenCode health is invalid/);
 });
 
+test("paces internal C readiness below the authenticated API rate limit", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  let inspections = 0;
+
+  await assert.rejects(inspectReady({
+    label: "C",
+    inspect: async () => {
+      inspections += 1;
+      return {};
+    },
+  } as never, options, new AbortController().signal, 750), /C OpenCode health is invalid/);
+  assert.equal(inspections, 1);
+});
+
+test("aborts a hanging readiness read at its deadline and observes a late rejection", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  let readSignal: AbortSignal | undefined;
+  let rejectRead: ((error: Error) => void) | undefined;
+
+  await assert.rejects(inspectReady({
+    label: "C",
+    inspect: async (signal: AbortSignal) => new Promise((_resolve, reject) => {
+      readSignal = signal;
+      rejectRead = reject;
+    }),
+  } as never, options, new AbortController().signal, 25), /Timed out waiting for C exact OpenCode\/MCP readiness/);
+  assert.equal(readSignal?.aborted, true);
+  rejectRead?.(new Error("late readiness rejection"));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+});
+
 test("keeps the canonical OpenCode spawn target after PATH changes", async () => {
   const fixture = fixtureRepository();
   const args = validArguments(fixture);
