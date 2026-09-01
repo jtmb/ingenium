@@ -112,10 +112,19 @@ export interface ApiAuthenticationRuntime {
   state: "READY" | "IDLE";
 }
 
+export interface ApiAuthenticationResolverInput {
+  apiUrl?: string;
+  project?: string;
+  workspaceId?: string;
+  launcherWorktree?: string;
+  credentialFile?: string;
+}
+
 export interface ApiAuthenticationPreflightOptions {
   timeoutMs?: number;
   credentialPurpose?: ExtensionCredentialPurpose;
   runtimeId?: string;
+  resolverInput?: Readonly<ApiAuthenticationResolverInput>;
 }
 
 export interface ApiAuthenticationReadinessOptions extends ApiAuthenticationPreflightOptions {
@@ -231,7 +240,14 @@ export async function preflightApiAuthentication(
   if (!base) return failedPreflight("invalid_target");
   let expectedBinding: ExtensionBinding;
   try {
-    expectedBinding = resolveExtensionBinding(worktree ?? process.cwd(), { purpose: options.credentialPurpose });
+    expectedBinding = resolveExtensionBinding(worktree ?? process.cwd(), {
+      purpose: options.credentialPurpose,
+      apiUrl: options.resolverInput?.apiUrl,
+      project: options.resolverInput?.project,
+      workspaceId: options.resolverInput?.workspaceId,
+      launcherWorktree: options.resolverInput?.launcherWorktree,
+      credentialFile: options.resolverInput?.credentialFile,
+    });
   } catch {
     return failedPreflight("invalid_target");
   }

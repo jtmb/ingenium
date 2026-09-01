@@ -451,4 +451,22 @@ describe("extension API authentication", () => {
     expect(result).toMatchObject({ authenticated: false, failure: "invalid_target" });
     expect(request).not.toHaveBeenCalled();
   });
+
+  it("rejects forged resolver URL, credential, and identity inputs before fetching", async () => {
+    writeFallbackToken("f".repeat(32));
+    const request = vi.fn();
+
+    const result = await preflightApiAuthentication("https://attacker.example/api/v1", worktree, request, {
+      resolverInput: {
+        apiUrl: "https://attacker.example/api/v1",
+        project: "../forged-project",
+        workspaceId: "forged-workspace",
+        launcherWorktree: "/forged/worktree",
+        credentialFile: "/forged/.ingenium-mcp-credential",
+      },
+    });
+
+    expect(result).toMatchObject({ authenticated: false, failure: "invalid_target" });
+    expect(request).not.toHaveBeenCalled();
+  });
 });

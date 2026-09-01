@@ -228,6 +228,16 @@ test("attests one exact runtime preflight before opening control credentials and
     } });
   };
   const options = parseHarnessOptions(validArguments(fixture), {});
+  const configuredCredential = join(fixture.root, ".opencode", ".ingenium-mcp-credential");
+  mkdirSync(join(fixture.root, ".opencode"));
+  writeFileSync(configuredCredential, `${"x".repeat(32)}\n`, { mode: 0o660 });
+  chmodSync(configuredCredential, 0o660);
+  const configPath = join(fixture.root, "opencode.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+    mcp: { ingenium: { environment: Record<string, string> } };
+  };
+  config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
+  writeFileSync(configPath, JSON.stringify(config));
   const signal = new AbortController().signal;
   const access = await establishHarnessAccess(options, signal, {
     read(name) {

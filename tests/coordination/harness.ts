@@ -5,7 +5,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { CoordinationOutbox, type CoordinationOutboxRecord } from "../../packages/ingenium-extension/coordination-outbox";
 import { preflightApiAuthentication } from "../../packages/ingenium-extension/api-auth";
-import { resolveExtensionBinding } from "../../packages/ingenium-extension/extension-binding";
 import {
   cleanupTestRun,
   createTestRunContext,
@@ -258,13 +257,18 @@ export async function preflightHarnessIdentity(
   signal: AbortSignal,
   request: typeof fetch = fetch,
 ): Promise<HarnessIdentity> {
-  const local = resolveExtensionBinding(options.worktree);
-  required(local.credentialFile === options.coordinationCredential.path, "Coordination credential locator does not match the extension binding");
   const boundedRequest: typeof fetch = (input, init = {}) => request(input, {
     ...init,
     signal: init.signal ? AbortSignal.any([signal, init.signal]) : signal,
   });
   const result = await preflightApiAuthentication(options.apiUrl, options.worktree, boundedRequest, {
+    resolverInput: {
+      apiUrl: options.apiUrl,
+      project: options.project,
+      workspaceId: options.workspaceId,
+      launcherWorktree: options.worktree,
+      credentialFile: options.coordinationCredential.path,
+    },
     runtimeId: options.runtimeId,
     timeoutMs: 15_000,
   });
