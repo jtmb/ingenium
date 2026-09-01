@@ -3783,3 +3783,33 @@ launch, claim, typed-memory, recovery, privacy, and cleanup boundaries.
 This is a documentation navigation update only; it adds no new completion marker,
 does not change the V1 guarantee, and does not treat the separately recorded
 protected credential-reset behavior as exercised by the r24 run.
+
+## Current coordination/shared-memory acceptance status (2026-09-01)
+
+This append-only status keeps the coordination/shared-memory acceptance explicitly
+**OPEN and RESUMABLE**. Historical markers remain retained as history; no new
+`(work-complete)` marker or `PASS` is recorded.
+
+- **Latest failed run:** `7a00d9ff-2214-4e3b-b34f-c166c6e5842e` failed because
+  Ingenium used `POST` while OpenCode 1.18.9 requires `PUT /auth/{providerID}`.
+  The uncommitted verified fix is
+  `services/ingenium-api/lib/opencode-client.ts` plus
+  `services/ingenium-api/tests/opencode-client.test.ts`; API typecheck and
+  `43/43` focused tests passed.
+- **Pending cleanup:** Two run-owned credential records remain pending
+  owner-session revocation. Exact temporary-directory cleanup is blocked by
+  external-path permission.
+- **Historical run:** `c1619811-e0f2-4a8c-b67c-c92751957dc7` has zero process
+  identities and closed ports, but its external manifest cannot be marked
+  recovered. The strict audit therefore remains **FAILED**.
+- No secret values are recorded.
+
+### Resumable order
+
+- [ ] Owner revoke
+- [ ] Exact temporary-directory cleanup
+- [ ] Recover the historical marker
+- [ ] Strict audit
+- [ ] QA/security/commit the PUT fix
+- [ ] Deploy the exact head
+- [ ] Live A/B/C acceptance
