@@ -8,15 +8,18 @@ import { preflightApiAuthentication } from "../../packages/ingenium-extension/ap
 import {
   cleanupTestRun,
   createTestRunContext,
+  markTestRunRecovered,
   markTestRunProcessCleared,
   readTestRunManifest,
+  readTestRunTelemetry,
   releaseTestRunPortReservations,
   transferTestRunPortOwnership,
   updateTestRunManifest,
   type TestRunContext,
   type TestRunProcess,
 } from "../test-run-context";
-import { inspectProcessIdentity } from "../test-server-lifecycle";
+import { inspectProcessIdentity, waitForPortClosed } from "../test-server-lifecycle";
+import { readProcStat } from "../test-run-process-discovery";
 import {
   HARNESS_ARTIFACT_SCHEMA,
   HARNESS_MANIFEST_SCHEMA,
@@ -844,8 +847,26 @@ async function bindProcess(
   return record;
 }
 
-async function clearProcess(context: TestRunContext, processRecord: HostOpenCodeProcess, record: TestRunProcess): Promise<void> {
+export function assertRecordedProcessExited(record: TestRunProcess): void {
+  const current = inspectProcessIdentity(record.pid);
+  const stat = readProcStat(record.pid);
+  if (!current) {
+    if (!stat || stat.state === "Z") return;
+    throw new Error(`Process identity is ambiguous for ${record.name}; retaining its manifest record`);
+  }
+  const matches = current.runNonce === record.runNonce
+    && current.pidStartTime === record.pidStartTime
+    && current.pgid === record.pgid
+    && current.executable === record.executable
+    && current.groupIdentity === record.groupIdentity;
+  if (matches) throw new Error(`Process ${record.name} (pid ${record.pid}) is still active; retaining its manifest record`);
+  throw new Error(`Process identity changed for ${record.name}; retaining its manifest record`);
+}
+
+async function clearProcessAfterProof(context: TestRunContext, processRecord: HostOpenCodeProcess, record: TestRunProcess): Promise<void> {
   await stopHostOpenCode(processRecord, context.runNonce);
+  assertRecordedProcessExited(record);
+  await waitForPortClosed(record.port);
   markTestRunProcessCleared(context.manifestPath, record);
   const manifest = readTestRunManifest(context.manifestPath);
   updateTestRunManifest(context.manifestPath, { processes: manifest.processes.filter((entry) => entry.pid !== record.pid) });
@@ -944,6 +965,85 @@ function canaryPlan(options: HarnessOptions, role: "A" | "B" | "C", step: Canary
   return { version: 1, role, nonce: randomUUID(), worktree: options.worktree, project: options.project, check: options.check, steps: [step] };
 }
 
+export async function finalizeCoordinationTestRun(context: TestRunContext): Promise<void> {
+  const manifest = readTestRunManifest(context.manifestPath);
+  if (!manifest.telemetryPath) throw new Error("Coordination cleanup requires runner telemetry");
+  const telemetry = readTestRunTelemetry(manifest.telemetryPath, manifest.repoRoot);
+  if (telemetry.runId !== manifest.runId
+    || telemetry.runNonce !== manifest.runNonce
+    || telemetry.repoRoot !== manifest.repoRoot
+    || telemetry.manifestPath !== manifest.manifestPath) {
+    throw new Error("Coordination cleanup telemetry identity does not match the current manifest");
+  }
+  const processKey = (record: TestRunProcess): string => [
+    record.pid, record.pidStartTime, record.pgid, record.executable, record.groupIdentity, record.runNonce,
+  ].join("\0");
+  const processes = new Map<string, TestRunProcess>();
+  for (const record of [
+    ...manifest.processes,
+    ...telemetry.processes
+      .filter((entry) => entry.state === "active" || entry.state === "retained")
+      .map((entry) => entry.record),
+  ]) {
+    processes.set(processKey(record), record);
+  }
+  processes.forEach(assertRecordedProcessExited);
+  const ports = new Set([
+    ...Object.values(manifest.ports),
+    ...(manifest.portReservations ?? []).map((reservation) => reservation.port),
+    ...manifest.processes.map((record) => record.port),
+    ...Object.values(telemetry.ports),
+    ...telemetry.processes.map((entry) => entry.record.port),
+  ]);
+  for (const port of ports) await waitForPortClosed(port);
+  releaseTestRunPortReservations(manifest, { allowMissing: true });
+  updateTestRunManifest(context.manifestPath, { status: "complete", processes: [], portReservations: [] });
+  markTestRunRecovered(context.manifestPath);
+  cleanupTestRun(context.manifestPath);
+}
+
+export function attachCoordinationCleanupFailure(primaryError: unknown, cleanupError: unknown): void {
+  if (!(primaryError instanceof Error)) return;
+  try {
+    Object.defineProperty(primaryError, "cleanupError", {
+      configurable: true,
+      enumerable: false,
+      value: cleanupError,
+    });
+  } catch {}
+}
+
+export async function finishCoordinationCleanup(
+  primaryError: unknown,
+  hasPrimaryError: boolean,
+  cleanup: () => Promise<void>,
+  retain: (cleanupError: unknown) => void,
+): Promise<void> {
+  try {
+    await cleanup();
+  } catch (cleanupError) {
+    let retentionError: unknown;
+    try { retain(cleanupError); } catch (error) { retentionError = error; }
+    if (hasPrimaryError) {
+      attachCoordinationCleanupFailure(primaryError, cleanupError);
+      if (primaryError instanceof Error && retentionError !== undefined) {
+        try {
+          Object.defineProperty(primaryError, "cleanupRetentionError", {
+            configurable: true,
+            enumerable: false,
+            value: retentionError,
+          });
+        } catch {}
+      }
+      return;
+    }
+    if (retentionError !== undefined) {
+      throw new AggregateError([cleanupError, retentionError], "Coordination cleanup and retention failed", { cause: cleanupError });
+    }
+    throw cleanupError;
+  }
+}
+
 export async function runCoordinationHarness(options: HarnessOptions): Promise<string> {
   const lifecycle = new ExecutionLifecycle();
   lifecycle.start();
@@ -980,19 +1080,13 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
   const cleanup = (): Promise<void> => lifecycle.cleanup(async () => {
     const errors: unknown[] = [];
     updateTestRunManifest(context.manifestPath, { status: "stopping" });
-    for (const [processRecord, manifestRecord] of [[externalB, recordB], [externalA, recordA]] as const) {
+    for (const processRecord of [externalB, externalA]) {
       if (!processRecord) continue;
-      try {
-        if (manifestRecord) await clearProcess(context, processRecord, manifestRecord);
-        else await stopHostOpenCode(processRecord, context.runNonce);
-      } catch (error) { errors.push(error); }
+      try { await stopHostOpenCode(processRecord, context.runNonce); } catch (error) { errors.push(error); }
     }
     try { await proxy.close(); } catch (error) { errors.push(error); }
     if (errors.length === 0) {
-      const manifest = readTestRunManifest(context.manifestPath);
-      releaseTestRunPortReservations(manifest, { allowMissing: true });
-      updateTestRunManifest(context.manifestPath, { status: "complete", processes: [], portReservations: [] });
-      cleanupTestRun(context.manifestPath);
+      try { await finalizeCoordinationTestRun(context); } catch (error) { errors.push(error); }
     }
     evidence.write("cleanup.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
@@ -1011,6 +1105,8 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     void cleanup().finally(() => { process.exitCode = 130; });
   }] as const));
   signals.forEach((signal) => process.once(signal, signalHandlers.get(signal)!));
+  let primaryError: unknown;
+  let hasPrimaryError = false;
 
   try {
     lifecycle.assertRunning();
@@ -1165,7 +1261,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     );
 
     const preservedCount = (await apiB.messages(sessionB)).length;
-    await clearProcess(context, externalB, recordB);
+    await clearProcessAfterProof(context, externalB, recordB);
     externalB = undefined;
     recordB = undefined;
     lifecycle.assertRunning();
@@ -1259,6 +1355,8 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     });
     return context.runId;
   } catch (error) {
+    primaryError = error;
+    hasPrimaryError = true;
     lifecycle.abort(error);
     evidence.write("failure.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
@@ -1271,6 +1369,16 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     throw error;
   } finally {
     signals.forEach((signal) => process.removeListener(signal, signalHandlers.get(signal)!));
-    await cleanup();
+    await finishCoordinationCleanup(primaryError, hasPrimaryError, cleanup, (cleanupError) => {
+      evidence.write("cleanup-failure.json", {
+        schema: HARNESS_ARTIFACT_SCHEMA,
+        failedAt: new Date().toISOString(),
+        error: cleanupError instanceof Error
+          ? { name: cleanupError.name, message: cleanupError.message, stackSha256: sha256(cleanupError.stack ?? "") }
+          : { name: "Error", message: String(cleanupError) },
+        primaryErrorRetained: hasPrimaryError,
+        retainedForRecovery: true,
+      });
+    });
   }
 }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -11,10 +12,11 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -175,15 +177,51 @@ export function validateProtectedLocator(value: string, name = "protected file")
   return { path, dev: stat.dev, ino: stat.ino, uid: stat.uid, mode: stat.mode, size: stat.size };
 }
 
-function safeExecutable(value: string): string {
+function canonicalExecutable(path: string): string {
+  let canonical: string;
+  try { canonical = realpathSync(path); } catch { throw new Error("openCodeBinary does not exist"); }
+  const stat = statSync(canonical);
+  if (!stat.isFile()) throw new Error("openCodeBinary is not a regular file");
+  try { accessSync(canonical, constants.X_OK); } catch { throw new Error("openCodeBinary is not executable"); }
+  return canonical;
+}
+
+export function resolveOpenCodeExecutable(value: string, environment: NodeJS.ProcessEnv): string {
   if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error("openCodeBinary is invalid");
-  if (!value.includes("/")) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(value)) throw new Error("openCodeBinary is invalid");
-    return value;
+  if (value.includes("/")) {
+    if (!isAbsolute(value)) throw new Error("openCodeBinary must be absolute or a bare executable name");
+    return canonicalExecutable(value);
   }
-  const path = safeAbsolute(value, "openCodeBinary");
-  try { accessSync(path, constants.X_OK); } catch { throw new Error("openCodeBinary is not executable"); }
-  return path;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(value)) throw new Error("openCodeBinary is invalid");
+  const searchPath = environment.PATH ?? process.env.PATH;
+  if (!searchPath) throw new Error("PATH is required to resolve openCodeBinary");
+  for (const entry of searchPath.split(delimiter)) {
+    if (!entry || !isAbsolute(entry) || resolve(entry) !== entry || /[\u0000-\u001f\u007f]/.test(entry)) {
+      throw new Error("PATH contains an unsafe executable search entry");
+    }
+    const candidate = join(entry, value);
+    try { return canonicalExecutable(candidate); } catch (error) {
+      if ((error as Error).message !== "openCodeBinary does not exist") throw error;
+    }
+  }
+  throw new Error("openCodeBinary was not found in PATH");
+}
+
+function openCodeVersion(binary: string, environment: NodeJS.ProcessEnv): string {
+  let output: string;
+  try {
+    output = execFileSync(binary, ["--version"], {
+      encoding: "utf8",
+      env: { PATH: environment.PATH ?? process.env.PATH ?? "" },
+      maxBuffer: 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10_000,
+    }).trim();
+  } catch {
+    throw new Error("openCodeBinary --version failed");
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(output)) throw new Error("openCodeBinary --version must return an exact version");
+  return output;
 }
 
 function apiUrl(value: string): string {
@@ -312,10 +350,15 @@ export function parseHarnessOptions(
   );
   if (!/^[0-9a-f]{40}$/.test(expectedRevision)) throw new Error("expectedRevision must be a full lowercase Git SHA");
   const manifest = JSON.parse(readFileSync(join(worktree, "package.json"), "utf8")) as { devDependencies?: Record<string, unknown> };
-  const expectedOpenCodeVersion = manifest.devDependencies?.["@opencode-ai/plugin"];
-  if (typeof expectedOpenCodeVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(expectedOpenCodeVersion)) {
+  const pluginVersion = manifest.devDependencies?.["@opencode-ai/plugin"];
+  if (typeof pluginVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(pluginVersion)) {
     throw new Error("root @opencode-ai/plugin must pin an exact OpenCode version");
   }
+  const openCodeBinary = resolveOpenCodeExecutable(
+    args.get("opencode-binary") ?? environment.COORDINATION_HARNESS_OPENCODE_BINARY ?? "opencode",
+    environment,
+  );
+  const expectedOpenCodeVersion = openCodeVersion(openCodeBinary, environment);
   const check = (args.get("check") ?? environment.COORDINATION_HARNESS_CHECK ?? "typecheck") as HarnessCheck;
   if (!["build", "lint", "test", "typecheck"].includes(check)) throw new Error("check must be build, lint, test, or typecheck");
   const runtimeId = configuredValue(args.get("runtime-id"), environment, "COORDINATION_HARNESS_RUNTIME_ID", undefined, "runtimeId");
@@ -331,7 +374,7 @@ export function parseHarnessOptions(
     coordinationCredential: validateProtectedLocator(coordinationFile, "coordinationCredentialFile"),
     repositoryCredential: validateProtectedLocator(repositoryFile, "repositoryCredentialFile"),
     operatorToken: validateProtectedLocator(operatorFile, "operatorTokenFile"),
-    openCodeBinary: safeExecutable(args.get("opencode-binary") ?? environment.COORDINATION_HARNESS_OPENCODE_BINARY ?? "opencode"),
+    openCodeBinary,
     openCodeAuth: validateProtectedLocator(authFile, "openCodeAuthFile"),
     providerId,
     modelId,

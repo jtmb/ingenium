@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
-import { terminateChildProcessHandle } from "../test-server-lifecycle";
+import { createTestRunContext, readTestRunManifest, readTestRunTelemetry, recordTestRunTelemetryFailure, updateTestRunManifest, type TestRunProcess } from "../test-run-context";
+import { inspectProcessIdentity, terminateChildProcessHandle } from "../test-server-lifecycle";
 import {
   COORDINATION_MEMORY_PREFIX,
   HARNESS_MANIFEST_SCHEMA,
@@ -25,7 +26,7 @@ import {
   type OperationalMemoryEntry,
 } from "./contracts";
 import { CoordinationFaultProxy, faultDisposition } from "./fault-proxy";
-import { allowlistedBaseEnvironment, prepareExternalHome, runCanaryAction } from "./process-lifecycle";
+import { allowlistedBaseEnvironment, prepareExternalHome, runCanaryAction, startHostOpenCode, stopHostOpenCode, waitForOpenCode } from "./process-lifecycle";
 import { CanaryDispatcher, RealCanaryActions, type CanaryPlan, type CanaryRequest } from "./canary-dispatcher";
 import { ExecutionLifecycle } from "./execution-lifecycle";
 import {
@@ -33,6 +34,8 @@ import {
   buildExternalConfig,
   crossReadPromptContainsExpected,
   establishHarnessAccess,
+  finalizeCoordinationTestRun,
+  finishCoordinationCleanup,
   parseCrossReadResponse,
 } from "./harness";
 
@@ -62,12 +65,114 @@ function protectedFile(root: string, name: string, value: string): string {
   return path;
 }
 
+test("finalizes resolved telemetry before deleting the run manifest", async () => {
+  const context = createTestRunContext({
+    repoRoot: process.cwd(),
+    tempRoot: tempRoot("ingenium-coordination-run-"),
+    ports: { api: 45181, dashboard: 45182, fixture: 45183 },
+  });
+  roots.push(join(process.cwd(), "tests", "artifacts", "test-runs", context.runId));
+
+  await finalizeCoordinationTestRun(context);
+
+  assert.equal(existsSync(context.manifestPath), false);
+  assert.equal(readTestRunTelemetry(context.telemetryPath!).resolution?.status, "resolved");
+});
+
+test("refuses recovery while a recorded sentinel process and port remain active", async () => {
+  const ports = { api: await unusedPort(), dashboard: await unusedPort(), fixture: await unusedPort() };
+  const context = createTestRunContext({
+    repoRoot: process.cwd(),
+    tempRoot: tempRoot("ingenium-coordination-active-run-"),
+    ports,
+  });
+  roots.push(join(process.cwd(), "tests", "artifacts", "test-runs", context.runId));
+  const { child, record } = await startSentinelProcess(ports.dashboard, context.runNonce);
+  updateTestRunManifest(context.manifestPath, { status: "running", processes: [record] });
+
+  try {
+    await assert.rejects(finalizeCoordinationTestRun(context), /still active/);
+    assert.deepEqual(readTestRunManifest(context.manifestPath).processes, [record]);
+    assert.deepEqual(readTestRunTelemetry(context.telemetryPath!).activeProcesses, [record]);
+  } finally {
+    await terminateChildProcessHandle(child, 5_000, context.runNonce);
+  }
+  await finalizeCoordinationTestRun(context);
+});
+
+test("telemetry-only live sentinel blocks recovery and remains recorded", async () => {
+  const ports = { api: await unusedPort(), dashboard: await unusedPort(), fixture: await unusedPort() };
+  const context = createTestRunContext({
+    repoRoot: process.cwd(),
+    tempRoot: tempRoot("ingenium-coordination-telemetry-active-"),
+    ports,
+  });
+  roots.push(join(process.cwd(), "tests", "artifacts", "test-runs", context.runId));
+  const { child, record } = await startSentinelProcess(ports.dashboard, context.runNonce);
+  recordTestRunTelemetryFailure(context.manifestPath, "telemetry-only sentinel", record);
+  assert.deepEqual(readTestRunManifest(context.manifestPath).processes, []);
+
+  try {
+    await assert.rejects(finalizeCoordinationTestRun(context), /still active/);
+    assert.deepEqual(readTestRunManifest(context.manifestPath).processes, []);
+    const telemetry = readTestRunTelemetry(context.telemetryPath!);
+    assert.deepEqual(telemetry.activeProcesses, [record]);
+    assert.equal(telemetry.processes.find((entry) => entry.record.pid === record.pid)?.state, "retained");
+  } finally {
+    await terminateChildProcessHandle(child, 5_000, context.runNonce);
+  }
+  await finalizeCoordinationTestRun(context);
+});
+
+test("resolved telemetry-only process union permits cleanup", async () => {
+  const ports = { api: await unusedPort(), dashboard: await unusedPort(), fixture: await unusedPort() };
+  const context = createTestRunContext({
+    repoRoot: process.cwd(),
+    tempRoot: tempRoot("ingenium-coordination-telemetry-resolved-"),
+    ports,
+  });
+  roots.push(join(process.cwd(), "tests", "artifacts", "test-runs", context.runId));
+  const { child, record } = await startSentinelProcess(ports.dashboard, context.runNonce);
+  await terminateChildProcessHandle(child, 5_000, context.runNonce);
+  recordTestRunTelemetryFailure(context.manifestPath, "resolved telemetry-only sentinel", record);
+
+  await finalizeCoordinationTestRun(context);
+
+  assert.equal(existsSync(context.manifestPath), false);
+  const telemetry = readTestRunTelemetry(context.telemetryPath!);
+  assert.equal(telemetry.resolution?.status, "resolved");
+  assert.equal(telemetry.processes.find((entry) => entry.record.pid === record.pid)?.state, "cleared");
+});
+
+test("retains the primary error when cleanup also fails", async () => {
+  const primary = new Error("primary run failure");
+  const cleanup = new Error("cleanup proof failure");
+  const retention = new Error("cleanup retention failure");
+
+  await assert.rejects(async () => {
+    try {
+      throw primary;
+    } catch (error) {
+      await finishCoordinationCleanup(error, true, async () => { throw cleanup; }, () => { throw retention; });
+      throw error;
+    }
+  }, (error) => error === primary && (error as Error).message === "primary run failure");
+
+  assert.equal((primary as Error & { cleanupError?: unknown }).cleanupError, cleanup);
+  assert.equal((primary as Error & { cleanupRetentionError?: unknown }).cleanupRetentionError, retention);
+  await assert.rejects(
+    finishCoordinationCleanup(undefined, false, async () => { throw cleanup; }, () => { throw retention; }),
+    (error) => error instanceof AggregateError && error.errors.includes(cleanup) && error.errors.includes(retention),
+  );
+});
+
 function fixtureRepository(): {
   root: string;
   coordination: string;
   repository: string;
   operator: string;
   auth: string;
+  openCode: string;
 } {
   const root = tempRoot("ingenium-coordination-contract-");
   const credentials = join(root, ".credentials");
@@ -76,6 +181,20 @@ function fixtureRepository(): {
   const repository = protectedFile(credentials, ".ingenium-repository-sync-credential", "r".repeat(32));
   const operator = protectedFile(credentials, "operator", "operator-secret");
   const auth = protectedFile(credentials, "auth", JSON.stringify({ openai: { type: "api", key: "provider-secret" } }));
+  const openCode = join(root, "opencode-fixture.mjs");
+  writeFileSync(openCode, `#!/usr/bin/env node
+import { createServer } from "node:http";
+if (process.argv[2] === "--version") {
+  process.stdout.write("1.18.25\\n");
+} else {
+  const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
+  createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ healthy: true, version: "1.18.25" }));
+  }).listen(port, "127.0.0.1");
+}
+`, { mode: 0o700 });
+  chmodSync(openCode, 0o700);
   writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { "@opencode-ai/plugin": "1.18.9" } }));
   writeFileSync(join(root, "opencode.json"), JSON.stringify({
     agent: { "ingenium-software-engineer-premium": { model: "openai/gpt-5.6-sol", variant: "high" } },
@@ -94,7 +213,7 @@ function fixtureRepository(): {
       },
     },
   }));
-  return { root, coordination, repository, operator, auth };
+  return { root, coordination, repository, operator, auth, openCode };
 }
 
 function validArguments(fixture: ReturnType<typeof fixtureRepository>): string[] {
@@ -110,6 +229,7 @@ function validArguments(fixture: ReturnType<typeof fixtureRepository>): string[]
     "--repository-credential-file", fixture.repository,
     "--operator-token-file", fixture.operator,
     "--opencode-auth-file", fixture.auth,
+    "--opencode-binary", fixture.openCode,
   ];
 }
 
@@ -148,6 +268,37 @@ async function unusedPort(): Promise<number> {
   return port;
 }
 
+async function startSentinelProcess(port: number, runNonce: string): Promise<{ child: ChildProcess; record: TestRunProcess }> {
+  const child = spawn(process.execPath, ["-e", `require("node:http").createServer((_q,s)=>s.end("ok")).listen(${port},"127.0.0.1");setInterval(()=>{},1000)`], {
+    detached: process.platform !== "win32",
+    stdio: "ignore",
+    env: { PATH: process.env.PATH ?? "", INGENIUM_TEST_RUN_NONCE: runNonce },
+  });
+  assert(child.pid);
+  let identity: ReturnType<typeof inspectProcessIdentity>;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    identity = inspectProcessIdentity(child.pid);
+    if (identity?.runNonce === runNonce) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert(identity?.runNonce === runNonce);
+  return {
+    child,
+    record: {
+      name: "dashboard",
+      pid: child.pid,
+      port,
+      startedAt: new Date().toISOString(),
+      runNonce,
+      pidStartTime: identity.pidStartTime,
+      pgid: identity.pgid,
+      executable: identity.executable,
+      groupIdentity: identity.groupIdentity,
+      identityState: "bound",
+    },
+  };
+}
+
 test("parses exact CLI/config bindings without accepting secret values", () => {
   const fixture = fixtureRepository();
   const parsed = parseHarnessOptions(validArguments(fixture), {});
@@ -170,13 +321,15 @@ test("parses exact CLI/config bindings without accepting secret values", () => {
     providerId: "openai",
     modelId: "gpt-5.6-sol",
     variant: "high",
-    expectedOpenCodeVersion: "1.18.9",
+    expectedOpenCodeVersion: "1.18.25",
   });
   assert.equal(parsed.coordinationCredential.path, fixture.coordination);
   assert.equal(parsed.repositoryCredential.path, fixture.repository);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--unknown", "value"], {}), /Unsupported/);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--project", "project-one"], {}), /repeated/);
-  assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--opencode-binary", "../unsafe"], {}), /openCodeBinary/);
+  const unsafeBinary = validArguments(fixture);
+  unsafeBinary[unsafeBinary.indexOf("--opencode-binary") + 1] = "../unsafe";
+  assert.throws(() => parseHarnessOptions(unsafeBinary, {}), /openCodeBinary/);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--runtime-revision", "7"], {}), /Unsupported/);
   const withoutRuntime = validArguments(fixture);
   withoutRuntime.splice(withoutRuntime.indexOf("--runtime-id"), 2);
@@ -186,6 +339,77 @@ test("parses exact CLI/config bindings without accepting secret values", () => {
   assert.throws(() => parseHarnessOptions(malformedRuntime, {}), /runtimeId must be a UUID/);
   chmodSync(fixture.operator, 0o644);
   assert.throws(() => parseHarnessOptions(validArguments(fixture), {}), /owner-only/);
+});
+
+test("uses the launched OpenCode binary version for readiness", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  const health = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ healthy: true, version: "1.18.25" }));
+  });
+  servers.push(health);
+  const port = await listen(health);
+
+  await waitForOpenCode(`http://127.0.0.1:${port}`, options.expectedOpenCodeVersion, new AbortController().signal, 1_000);
+
+  assert.equal(options.expectedOpenCodeVersion, "1.18.25");
+});
+
+test("keeps the canonical OpenCode spawn target after PATH changes", async () => {
+  const fixture = fixtureRepository();
+  const args = validArguments(fixture);
+  args[args.indexOf("--opencode-binary") + 1] = basename(fixture.openCode);
+  const nodeDirectory = dirname(process.execPath);
+  const options = parseHarnessOptions(args, { PATH: `${dirname(fixture.openCode)}:${nodeDirectory}` });
+  assert.equal(options.openCodeBinary, realpathSync(fixture.openCode));
+
+  const decoyDirectory = tempRoot("ingenium-coordination-decoy-");
+  const decoy = join(decoyDirectory, basename(fixture.openCode));
+  writeFileSync(decoy, "#!/usr/bin/env node\nprocess.exit(91);\n", { mode: 0o700 });
+  chmodSync(decoy, 0o700);
+  const port = await unusedPort();
+  const prepared = prepareExternalHome(fixture.root, "external-b", options, "{}\n");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${decoyDirectory}:${nodeDirectory}`;
+  const runNonce = "77777777-7777-4777-8777-777777777777";
+  const processRecord = await startHostOpenCode(
+    "external-b",
+    port,
+    prepared,
+    options,
+    "http://127.0.0.1:4097/api/v1",
+    "{}\n",
+    { projectId: options.projectId, storageMappingHash: options.storageMappingHash },
+    "{}",
+    runNonce,
+    new AbortController().signal,
+  );
+  try {
+    await waitForOpenCode(`http://127.0.0.1:${port}`, options.expectedOpenCodeVersion, new AbortController().signal, 2_000);
+    assert.equal(processRecord.child.spawnfile, realpathSync(fixture.openCode));
+    assert.equal(processRecord.child.exitCode, null);
+  } finally {
+    await stopHostOpenCode(processRecord, runNonce);
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
+test("rejects malformed or missing OpenCode targets before protected reads", () => {
+  const fixture = fixtureRepository();
+  let protectedReads = 0;
+  const parseThenRead = (binary: string, path: string): void => {
+    const args = validArguments(fixture);
+    args[args.indexOf("--opencode-binary") + 1] = binary;
+    const options = parseHarnessOptions(args, { PATH: path });
+    readProtectedValue(options.coordinationCredential, () => { protectedReads += 1; });
+  };
+
+  assert.throws(() => parseThenRead("../opencode", dirname(process.execPath)), /absolute or a bare executable name/);
+  assert.throws(() => parseThenRead(join(fixture.root, "missing-opencode"), dirname(process.execPath)), /does not exist/);
+  assert.throws(() => parseThenRead(basename(fixture.openCode), `relative:${dirname(process.execPath)}`), /unsafe executable search entry/);
+  assert.equal(protectedReads, 0);
 });
 
 test("redacts nested credentials and rejects retained secret patterns", () => {
