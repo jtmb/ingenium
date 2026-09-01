@@ -32,12 +32,16 @@ import { ExecutionLifecycle } from "./execution-lifecycle";
 import {
   CROSS_READ_PROMPT,
   buildExternalConfig,
+  cleanupRuntimeProvider,
   crossReadPromptContainsExpected,
   establishHarnessAccess,
   finalizeCoordinationTestRun,
   finishCoordinationCleanup,
   inspectReady,
   parseCrossReadResponse,
+  prepareRuntimeProvider,
+  runtimeProviderConnected,
+  runtimeProviderCredential,
 } from "./harness";
 
 const roots: string[] = [];
@@ -374,12 +378,91 @@ test("attests internal C against the deployed runtime OpenCode pin", async () =>
     inspect: async () => ({
       health: { healthy: true, version: "1.18.9" },
       agents: [{ name: "ingenium-llm-broker", mode: "subagent" }],
-      providers: { connected: ["openai"] },
+      providers: { providers: [{ id: "openai", connected: true }] },
       mcp: { "ingenium-runtime": { status: "connected" } },
     }),
   } as never, options, new AbortController().signal, 100);
 
   assert.equal((inspection.health as { version: string }).version, options.expectedRuntimeOpenCodeVersion);
+});
+
+test("selects only the requested protected provider credential for internal C", () => {
+  const credential = { type: "oauth", refresh: "runtime-refresh-canary" };
+
+  assert.deepEqual(runtimeProviderCredential(JSON.stringify({ openai: credential, other: { type: "api", key: "unused" } }), "openai"), credential);
+  assert.throws(() => runtimeProviderCredential("{}", "openai"), /omitted the requested provider/);
+  assert.throws(() => runtimeProviderCredential("not-json", "openai"), /auth is invalid/);
+});
+
+test("preserves a preexisting internal C provider without auth mutation", async () => {
+  let adds = 0;
+  let deletes = 0;
+  const ownership = await prepareRuntimeProvider(
+    { providers: [{ id: "other", connected: false }, { id: "openai", connected: true }] },
+    "openai",
+    async () => { adds += 1; },
+  );
+  await cleanupRuntimeProvider(ownership, async () => { deletes += 1; });
+
+  assert.equal(runtimeProviderConnected({ providers: [{ id: "openai", connected: true }] }, "openai"), true);
+  assert.equal(ownership, "preexisting");
+  assert.equal(adds, 0);
+  assert.equal(deletes, 0);
+});
+
+test("owns and deletes only a successfully added internal C provider", async () => {
+  let adds = 0;
+  let deletes = 0;
+  const ownership = await prepareRuntimeProvider(
+    { providers: [{ id: "other", connected: true }, { id: "openai", connected: false }] },
+    "openai",
+    async () => { adds += 1; },
+  );
+  await cleanupRuntimeProvider(ownership, async () => { deletes += 1; });
+
+  assert.equal(ownership, "owned");
+  assert.equal(adds, 1);
+  assert.equal(deletes, 1);
+});
+
+test("fails closed on malformed internal C provider catalogs without auth mutation", async () => {
+  const malformed = [
+    { connected: ["openai"] },
+    { providers: [{ id: "openai/unsafe", connected: true }] },
+    { providers: [{ id: "openai", connected: "yes" }] },
+    { providers: [{ id: "other", connected: false }] },
+  ];
+  let adds = 0;
+  let deletes = 0;
+
+  for (const catalog of malformed) {
+    let ownership: "none" | "preexisting" | "owned" = "none";
+    await assert.rejects(async () => {
+      ownership = await prepareRuntimeProvider(catalog, "openai", async () => { adds += 1; });
+    }, /C provider catalog/);
+    await cleanupRuntimeProvider(ownership, async () => { deletes += 1; });
+  }
+
+  assert.equal(adds, 0);
+  assert.equal(deletes, 0);
+});
+
+test("does not own a provider when the runtime add fails", async () => {
+  let ownership: "none" | "preexisting" | "owned" = "none";
+  let adds = 0;
+  let deletes = 0;
+
+  await assert.rejects(async () => {
+    ownership = await prepareRuntimeProvider(
+      { providers: [{ id: "openai", connected: false }] },
+      "openai",
+      async () => { adds += 1; throw new Error("runtime add failed"); },
+    );
+  }, /runtime add failed/);
+  await cleanupRuntimeProvider(ownership, async () => { deletes += 1; });
+
+  assert.equal(adds, 1);
+  assert.equal(deletes, 0);
 });
 
 test("retains the last exact readiness failure when polling times out", async () => {

@@ -1381,6 +1381,14 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid API key is required" } });
     return;
   }
+  if (currentOpenCodeRuntimeTarget()) {
+    const result = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.addAuth(req.params.providerID!, body, directory, signal),
+    );
+    if (isOpenCodeError(result)) sendResult(req, res, result);
+    else res.json({ data: { connected: true } });
+    return;
+  }
   if (body.owner_kind && body.owner_kind !== "installation") {
     res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
     return;
@@ -1428,6 +1436,14 @@ opencodeRouter.delete("/auth/:providerID", async (req, res) => {
   }
   const directory = req.query.directory as string | undefined;
   const providerId = req.params.providerID!;
+  if (currentOpenCodeRuntimeTarget()) {
+    const result = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.deleteAuth(providerId, directory, signal),
+    );
+    if (isOpenCodeError(result) && result.error.status !== 404) sendResult(req, res, result);
+    else res.json({ data: { disconnected: true } });
+    return;
+  }
   const saga = await disconnectNativeProviderCredential(providerId, {
     apply: (key, signal) => opencodeClient.addAuth(providerId, { type: "api", key }, directory, signal),
     remove: (signal) => opencodeClient.deleteAuth(providerId, directory, signal),

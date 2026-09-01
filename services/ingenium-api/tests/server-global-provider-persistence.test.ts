@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { logger, projects, resetDbForTest, settings, vault } from "ingenium-core";
 import { opencodeClient } from "../lib/opencode-client.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
+import { withOpenCodeRuntimeTarget } from "../lib/runtime-opencode-context.js";
 import {
   NATIVE_PROVIDER_MAX_WAITERS,
   NATIVE_PROVIDER_OPERATION_TIMEOUT_MS,
@@ -51,9 +52,10 @@ afterEach(() => {
   else process.env.OPENCODE_SERVER_PASSWORD = originalOpenCodePassword;
 });
 
-async function startRouter(): Promise<{ server: Server; baseUrl: string }> {
+async function startRouter(runtimeTarget = false): Promise<{ server: Server; baseUrl: string }> {
   const app = express();
   app.use(express.json());
+  if (runtimeTarget) app.use((_req, _res, next) => withOpenCodeRuntimeTarget({ baseUrl: "http://runtime.test:4098" }, next));
   app.use("/api/v1/opencode", opencodeRouter);
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -106,8 +108,8 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-async function withRouter<T>(callback: (baseUrl: string) => Promise<T>): Promise<T> {
-  const { server, baseUrl } = await startRouter();
+async function withRouter<T>(callback: (baseUrl: string) => Promise<T>, runtimeTarget = false): Promise<T> {
+  const { server, baseUrl } = await startRouter(runtimeTarget);
   try {
     return await callback(baseUrl);
   } finally {
@@ -304,6 +306,42 @@ describe("server-global provider persistence", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it("connects a runtime-scoped provider without persisting or returning its credential", async () => {
+    const secret = "runtime-only-provider-secret";
+    const addAuth = vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({ key: secret });
+
+    await withRouter(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "api", key: secret }),
+      });
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(JSON.parse(body)).toEqual({ data: { connected: true } });
+      expect(body).not.toContain(secret);
+    }, true);
+
+    expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined, expect.any(AbortSignal));
+    expect(nativeCredential("openai")).toBeUndefined();
+  });
+
+  it("disconnects a runtime-scoped provider without deleting the server-global credential", async () => {
+    const secret = "server-global-provider-secret";
+    expect(storeNativeProviderCredential("openai", secret)).toBe("stored");
+    const remove = vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
+
+    await withRouter(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, { method: "DELETE" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ data: { disconnected: true } });
+    }, true);
+
+    expect(remove).toHaveBeenCalledWith("openai", undefined, expect.any(AbortSignal));
+    expect(nativeCredential("openai")).toBe(secret);
   });
 
   describe("native provider credential saga", () => {

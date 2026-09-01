@@ -49,6 +49,7 @@ const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 250;
 const INTERNAL_READINESS_POLL_INTERVAL_MS = 5_000;
 const INTERNAL_CANARY_AGENT = "ingenium-llm-broker";
+const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CANARY_TOOL_SYSTEM_PROMPT = `Follow only the current user request. Invoke ${CANARY_TOOL} exactly once with only the supplied nonce and operation. Never invoke any other tool, access files directly, inspect configuration, or reveal credentials.`;
 const TRANSFORM_ONLY_SYSTEM_PROMPT = "Follow only the current user request. Never invoke tools, access files, inspect configuration, or reveal credentials.";
 
@@ -408,6 +409,95 @@ function headersForControl(operatorToken: string, runtimeId: string): Record<str
   };
 }
 
+export function runtimeProviderCredential(authContent: string, providerId: string): JsonRecord {
+  let parsed: unknown;
+  try { parsed = JSON.parse(authContent); } catch { throw new Error("Configured OpenCode auth is invalid"); }
+  const auth = record(parsed, "Configured OpenCode auth is invalid");
+  return record(auth[providerId], "Configured OpenCode auth omitted the requested provider");
+}
+
+export function runtimeProviderConnected(value: unknown, providerId: string): boolean {
+  const catalog = record(value, "C provider catalog is invalid");
+  required(Array.isArray(catalog.providers), "C provider catalog omitted its providers array");
+  const seen = new Set<string>();
+  let target: boolean | undefined;
+  for (const value of catalog.providers) {
+    const provider = record(value, "C provider catalog contains an invalid provider entry");
+    required(typeof provider.id === "string" && PROVIDER_ID.test(provider.id), "C provider catalog contains an invalid provider ID");
+    required(typeof provider.connected === "boolean", `C provider catalog has invalid connection state for ${provider.id}`);
+    required(!seen.has(provider.id), `C provider catalog contains duplicate provider ${provider.id}`);
+    seen.add(provider.id);
+    if (provider.id === providerId) target = provider.connected;
+  }
+  required(target !== undefined, `C provider catalog omitted requested provider ${providerId}`);
+  return target;
+}
+
+export async function prepareRuntimeProvider(
+  catalog: unknown,
+  providerId: string,
+  connect: () => Promise<void>,
+): Promise<"preexisting" | "owned"> {
+  if (runtimeProviderConnected(catalog, providerId)) return "preexisting";
+  await connect();
+  return "owned";
+}
+
+export async function cleanupRuntimeProvider(
+  ownership: "none" | "preexisting" | "owned",
+  disconnect: () => Promise<void>,
+): Promise<void> {
+  if (ownership === "owned") await disconnect();
+}
+
+async function readRuntimeProviderCatalog(
+  options: HarnessOptions,
+  operatorToken: string,
+  runtimeId: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return expectJson(
+    `${options.apiUrl}/opencode/providers`,
+    { headers: headersForControl(operatorToken, runtimeId) },
+    [200],
+    options.timeoutMs,
+    signal,
+  );
+}
+
+async function connectRuntimeProvider(
+  options: HarnessOptions,
+  operatorToken: string,
+  runtimeId: string,
+  authContent: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await expectJson(
+    `${options.apiUrl}/opencode/auth/${encodeURIComponent(options.providerId)}`,
+    {
+      method: "POST",
+      headers: headersForControl(operatorToken, runtimeId),
+      body: JSON.stringify(runtimeProviderCredential(authContent, options.providerId)),
+    },
+    [200],
+    options.timeoutMs,
+    signal,
+  );
+}
+
+async function disconnectRuntimeProvider(
+  options: HarnessOptions,
+  operatorToken: string,
+  runtimeId: string,
+): Promise<void> {
+  await expectJson(
+    `${options.apiUrl}/opencode/auth/${encodeURIComponent(options.providerId)}`,
+    { method: "DELETE", headers: headersForControl(operatorToken, runtimeId) },
+    [200],
+    options.timeoutMs,
+  );
+}
+
 function openCodeApi(
   label: "A" | "B" | "C",
   baseUrl: string,
@@ -497,7 +587,10 @@ function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, opt
     required(JSON.stringify(mapping.tools) === JSON.stringify(expectedTools), `${label} canary tool boundary changed`);
   }
   const providers = record(value.providers, `${label} provider catalog is invalid`);
-  required(Array.isArray(providers.connected) && providers.connected.includes(options.providerId), `${label} requested provider is disconnected`);
+  const providerConnected = label === "C"
+    ? runtimeProviderConnected(providers, options.providerId)
+    : Array.isArray(providers.connected) && providers.connected.includes(options.providerId);
+  required(providerConnected, `${label} requested provider is disconnected`);
   const mcp = record(value.mcp, `${label} MCP status is invalid`);
   const expectedMcp = record(mcp[label === "C" ? "ingenium-runtime" : "ingenium"], `${label} Ingenium MCP status is missing`);
   required(expectedMcp.status === "connected", `${label} Ingenium MCP is disconnected`);
@@ -515,7 +608,9 @@ function projectOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, op
     label,
     version: (value.health as JsonRecord).version,
     agent: { name: agent.name, mode: agent.mode, providerId: model.providerID ?? null, modelId: model.modelID ?? null, variant: agent.variant ?? null },
-    providerConnected: (providers.connected as unknown[]).includes(options.providerId),
+    providerConnected: label === "C"
+      ? runtimeProviderConnected(providers, options.providerId)
+      : (providers.connected as unknown[]).includes(options.providerId),
     mcpStatus: mcpEntry.status,
     ...(label === "C" ? {} : { configSha256: sha256(JSON.stringify(value.config)) }),
   };
@@ -1116,6 +1211,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
   let externalB: HostOpenCodeProcess | undefined;
   let recordA: TestRunProcess | undefined;
   let recordB: TestRunProcess | undefined;
+  let runtimeProviderOwnership: "none" | "preexisting" | "owned" = "none";
   const turns: ProjectedTurn[] = [];
   const sessions: SessionRecord[] = [];
   const crossSessionEvidence: CrossSessionEvidence[] = [];
@@ -1130,6 +1226,12 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
   const cleanup = (): Promise<void> => lifecycle.cleanup(async () => {
     const errors: unknown[] = [];
     updateTestRunManifest(context.manifestPath, { status: "stopping" });
+    if (runtimeProviderOwnership === "owned") {
+      try {
+        await cleanupRuntimeProvider(runtimeProviderOwnership, () => disconnectRuntimeProvider(options, operatorToken, runtime.id));
+        runtimeProviderOwnership = "none";
+      } catch (error) { errors.push(error); }
+    }
     for (const processRecord of [externalB, externalA]) {
       if (!processRecord) continue;
       try { await stopHostOpenCode(processRecord, context.runNonce); } catch (error) { errors.push(error); }
@@ -1195,6 +1297,11 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
     const apiA = openCodeApi("A", `http://127.0.0.1:${context.ports.dashboard}`, options, lifecycle.signal);
     let apiB = openCodeApi("B", `http://127.0.0.1:${context.ports.fixture}`, options, lifecycle.signal);
     const apiC = openCodeApi("C", `${options.apiUrl}/opencode`, options, lifecycle.signal, { operatorToken, runtimeId: runtime.id });
+    runtimeProviderOwnership = await prepareRuntimeProvider(
+      await readRuntimeProviderCatalog(options, operatorToken, runtime.id, lifecycle.signal),
+      options.providerId,
+      () => connectRuntimeProvider(options, operatorToken, runtime.id, authContent, lifecycle.signal),
+    );
     const inspected = await Promise.all([inspectReady(apiA, options, lifecycle.signal), inspectReady(apiB, options, lifecycle.signal), inspectReady(apiC, options, lifecycle.signal)]);
     evidence.write("processes.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
