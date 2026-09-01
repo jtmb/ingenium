@@ -1,9 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fchmodSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -112,8 +116,7 @@ function currentUid(): number {
   return process.getuid();
 }
 
-function assertOwnerOnlyDirectory(path: string, parent: string, create = false): void {
-  if (create && !existsSync(path)) mkdirSync(path, { mode: 0o700 });
+function assertOwnerOnlyDirectory(path: string, parent: string): void {
   const metadata = lstatSync(path);
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== currentUid()
     || (metadata.mode & 0o077) !== 0 || realpathSync(path) !== resolve(path) || !pathIsInside(parent, path)) {
@@ -129,7 +132,7 @@ function assertCanonicalOwnedDirectory(path: string): void {
   }
 }
 
-function ensureOwnerOnlyDirectory(path: string, containmentRoot: string): void {
+function ensureOwnerOnlyDirectory(path: string, containmentRoot: string, create = false): void {
   const root = resolve(containmentRoot);
   const target = resolve(path);
   if (!pathIsInside(root, target)) throw new Error("Retention control path escaped its containment root");
@@ -137,8 +140,54 @@ function ensureOwnerOnlyDirectory(path: string, containmentRoot: string): void {
   let cursor = root;
   for (const component of relative(root, target).split(/[\\/]/).filter(Boolean)) {
     cursor = join(cursor, component);
-    assertOwnerOnlyDirectory(cursor, root, true);
-    chmodSync(cursor, 0o700);
+    if (create) {
+      try {
+        mkdirSync(cursor, { mode: 0o700 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+
+    const beforeOpen = lstatSync(cursor);
+    const canonicalRoot = realpathSync(root);
+    const canonicalCursor = realpathSync(cursor);
+    if (!beforeOpen.isDirectory() || beforeOpen.isSymbolicLink() || beforeOpen.uid !== currentUid()
+      || canonicalRoot !== root || canonicalCursor !== cursor || !pathIsInside(canonicalRoot, canonicalCursor)) {
+      throw new Error(`Unsafe retention control directory: ${cursor}`);
+    }
+
+    const descriptor = openSync(
+      cursor,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    try {
+      const opened = fstatSync(descriptor);
+      const openedPath = lstatSync(cursor);
+      if (!opened.isDirectory() || opened.uid !== currentUid()
+        || !openedPath.isDirectory() || openedPath.isSymbolicLink() || openedPath.uid !== currentUid()
+        || opened.dev !== beforeOpen.dev || opened.ino !== beforeOpen.ino
+        || openedPath.dev !== opened.dev || openedPath.ino !== opened.ino
+        || realpathSync(root) !== canonicalRoot || realpathSync(cursor) !== canonicalCursor) {
+        throw new Error(`Unsafe retention control directory: ${cursor}`);
+      }
+
+      fchmodSync(descriptor, 0o700);
+
+      const normalized = fstatSync(descriptor);
+      const normalizedPath = lstatSync(cursor);
+      const normalizedRoot = realpathSync(root);
+      const normalizedCursor = realpathSync(cursor);
+      if (!normalized.isDirectory() || normalized.uid !== currentUid() || (normalized.mode & 0o777) !== 0o700
+        || normalized.dev !== opened.dev || normalized.ino !== opened.ino
+        || !normalizedPath.isDirectory() || normalizedPath.isSymbolicLink() || normalizedPath.uid !== currentUid()
+        || normalizedPath.dev !== normalized.dev || normalizedPath.ino !== normalized.ino
+        || normalizedRoot !== canonicalRoot || normalizedCursor !== canonicalCursor
+        || normalizedCursor !== cursor || !pathIsInside(normalizedRoot, normalizedCursor)) {
+        throw new Error(`Unsafe retention control directory: ${cursor}`);
+      }
+    } finally {
+      closeSync(descriptor);
+    }
   }
 }
 
@@ -234,7 +283,7 @@ export function getTestRunRetentionLockPath(artifactRoot: string, runId: string)
 
 export function ensureTestRunRetentionControlRoot(artifactRoot: string): string {
   const resolvedArtifactRoot = resolve(artifactRoot);
-  ensureOwnerOnlyDirectory(getTestRunRetentionControlRoot(resolvedArtifactRoot), resolvedArtifactRoot);
+  ensureOwnerOnlyDirectory(getTestRunRetentionControlRoot(resolvedArtifactRoot), resolvedArtifactRoot, true);
   return getTestRunRetentionControlRoot(resolvedArtifactRoot);
 }
 
@@ -246,7 +295,7 @@ export function ensureTestRunRetentionSubdirectory(artifactRoot: string, name: s
   }
   const controlRoot = ensureTestRunRetentionControlRoot(artifactRoot);
   const path = join(controlRoot, name);
-  ensureOwnerOnlyDirectory(path, controlRoot);
+  ensureOwnerOnlyDirectory(path, controlRoot, true);
   return path;
 }
 

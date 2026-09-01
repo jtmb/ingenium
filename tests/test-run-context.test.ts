@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -78,6 +78,73 @@ describe("test-run context", () => {
     expect(manifest.portReservations).toHaveLength(3);
     expect(existsSync(getTestRunPortLockPath(manifest.ports.api))).toBe(true);
     expect(JSON.parse(readFileSync(manifest.manifestPath, "utf8")).runId).toBe(manifest.runId);
+  });
+
+  it("normalizes inherited group permissions before validating a new retention root", async () => {
+    const fs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    vi.resetModules();
+    vi.doMock("node:fs", () => ({
+      ...fs,
+      mkdirSync(path: Parameters<typeof fs.mkdirSync>[0], options?: Parameters<typeof fs.mkdirSync>[1]) {
+        const result = fs.mkdirSync(path, options);
+        if (String(path).endsWith("/.retention-control")) fs.chmodSync(path, 0o770);
+        return result;
+      },
+    }));
+
+    try {
+      const retention = await import("./test-run-retention-lock");
+      const artifactRoot = join(testTempRoot(), "artifacts");
+      fs.mkdirSync(artifactRoot);
+
+      const controlRoot = retention.ensureTestRunRetentionControlRoot(artifactRoot);
+
+      expect(fs.lstatSync(controlRoot).mode & 0o777).toBe(0o700);
+    } finally {
+      vi.doUnmock("node:fs");
+      vi.resetModules();
+    }
+  });
+
+  it("rejects a post-open retention-root exchange without chmodding the symlink target", async () => {
+    const fs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const root = testTempRoot();
+    const artifactRoot = join(root, "artifacts");
+    const controlRoot = join(artifactRoot, ".retention-control");
+    const movedControlRoot = join(artifactRoot, ".retention-control-opened");
+    const outsideSentinel = join(root, "outside-sentinel");
+    let exchanged = false;
+    fs.mkdirSync(artifactRoot);
+    fs.mkdirSync(outsideSentinel);
+    fs.chmodSync(outsideSentinel, 0o770);
+
+    vi.resetModules();
+    vi.doMock("node:fs", () => ({
+      ...fs,
+      fchmodSync(
+        descriptor: Parameters<typeof fs.fchmodSync>[0],
+        mode: Parameters<typeof fs.fchmodSync>[1],
+      ) {
+        if (!exchanged) {
+          fs.renameSync(controlRoot, movedControlRoot);
+          fs.symlinkSync(outsideSentinel, controlRoot, "dir");
+          exchanged = true;
+        }
+        return fs.fchmodSync(descriptor, mode);
+      },
+    }));
+
+    try {
+      const retention = await import("./test-run-retention-lock");
+
+      expect(() => retention.ensureTestRunRetentionControlRoot(artifactRoot))
+        .toThrow(/Unsafe retention control directory/);
+      expect(exchanged).toBe(true);
+      expect(fs.lstatSync(outsideSentinel).mode & 0o777).toBe(0o770);
+    } finally {
+      vi.doUnmock("node:fs");
+      vi.resetModules();
+    }
   });
 
   it("builds browser URLs with the manifest-owned project and no fallback", () => {
