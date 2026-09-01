@@ -476,7 +476,8 @@ function openCodeApi(
 
 function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, options: HarnessOptions): void {
   const health = record(value.health, `${label} OpenCode health is invalid`);
-  required(health.healthy === true && health.version === options.expectedOpenCodeVersion, `${label} exact OpenCode version changed`);
+  const expectedVersion = label === "C" ? options.expectedRuntimeOpenCodeVersion : options.expectedOpenCodeVersion;
+  required(health.healthy === true && health.version === expectedVersion, `${label} exact OpenCode version changed`);
   required(Array.isArray(value.agents), `${label} agent catalog is invalid`);
   const agentName = label === "C" ? INTERNAL_CANARY_AGENT : CANARY_AGENT;
   const agent = value.agents.find((entry) => (entry as JsonRecord).name === agentName) as JsonRecord | undefined;
@@ -1169,6 +1170,7 @@ export async function runCoordinationHarness(options: HarnessOptions): Promise<s
       runtime,
       model: { agent: CANARY_AGENT, providerId: options.providerId, modelId: options.modelId, variant: options.variant },
       openCodeVersion: options.expectedOpenCodeVersion,
+      runtimeOpenCodeVersion: options.expectedRuntimeOpenCodeVersion,
     });
     await proxy.start(lifecycle.signal);
     lifecycle.assertRunning();

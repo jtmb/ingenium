@@ -314,6 +314,7 @@ test("parses exact CLI/config bindings without accepting secret values", () => {
     modelId: parsed.modelId,
     variant: parsed.variant,
     expectedOpenCodeVersion: parsed.expectedOpenCodeVersion,
+    expectedRuntimeOpenCodeVersion: parsed.expectedRuntimeOpenCodeVersion,
   }, {
     worktree: fixture.root,
     project: "project-one",
@@ -324,6 +325,7 @@ test("parses exact CLI/config bindings without accepting secret values", () => {
     modelId: "gpt-5.6-sol",
     variant: "high",
     expectedOpenCodeVersion: "1.18.25",
+    expectedRuntimeOpenCodeVersion: "1.18.9",
   });
   assert.equal(parsed.coordinationCredential.path, fixture.coordination);
   assert.equal(parsed.repositoryCredential.path, fixture.repository);
@@ -356,6 +358,23 @@ test("uses the launched OpenCode binary version for readiness", async () => {
   await waitForOpenCode(`http://127.0.0.1:${port}`, options.expectedOpenCodeVersion, new AbortController().signal, 1_000);
 
   assert.equal(options.expectedOpenCodeVersion, "1.18.25");
+});
+
+test("attests internal C against the deployed runtime OpenCode pin", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+
+  const inspection = await inspectReady({
+    label: "C",
+    inspect: async () => ({
+      health: { healthy: true, version: "1.18.9" },
+      agents: [{ name: "ingenium-llm-broker", mode: "subagent" }],
+      providers: { connected: ["openai"] },
+      mcp: { "ingenium-runtime": { status: "connected" } },
+    }),
+  } as never, options, new AbortController().signal, 100);
+
+  assert.equal((inspection.health as { version: string }).version, options.expectedRuntimeOpenCodeVersion);
 });
 
 test("retains the last exact readiness failure when polling times out", async () => {

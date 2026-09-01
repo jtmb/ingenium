@@ -63,6 +63,7 @@ export interface HarnessOptions {
   variant: string;
   expectedRevision: string;
   expectedOpenCodeVersion: string;
+  expectedRuntimeOpenCodeVersion: string;
   runtimeId: string;
   timeoutMs: number;
   check: HarnessCheck;
@@ -381,6 +382,7 @@ export function parseHarnessOptions(
     variant: mapping.variant,
     expectedRevision,
     expectedOpenCodeVersion,
+    expectedRuntimeOpenCodeVersion: pluginVersion,
     runtimeId,
     timeoutMs: parsePositiveInteger(
       args.get("timeout-ms") ?? environment.COORDINATION_HARNESS_TIMEOUT_MS ?? "600000",
