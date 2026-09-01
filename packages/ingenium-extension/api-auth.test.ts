@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { apiRequestHeaders, preflightApiAuthentication, waitForAuthenticatedApiReadiness } from "./api-auth.js";
 
 let worktree = "";
+const runtimeId = "22222222-2222-4222-8222-222222222222";
+const imageRevision = "b".repeat(40);
 
 beforeEach(() => {
   vi.stubEnv("INGENIUM_MCP_CREDENTIAL", undefined);
@@ -262,6 +264,69 @@ describe("extension API authentication", () => {
       }),
     });
     expect(JSON.stringify(result)).not.toContain(token);
+  });
+
+  it("adds exactly one runtime_id query and returns the exact ready runtime assertion", async () => {
+    const token = "f".repeat(32);
+    writeFallbackToken(token);
+    const request = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      expect(parsed.origin + parsed.pathname).toBe("http://localhost:4097/api/v1/auth/preflight");
+      expect([...parsed.searchParams]).toEqual([["runtime_id", runtimeId]]);
+      expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
+      return successfulPreflight("mcp", { runtime: { id: runtimeId, imageRevision, state: "READY" } });
+    });
+
+    const result = await preflightApiAuthentication("http://localhost:4097/api/v1", worktree, request as typeof fetch, { runtimeId });
+
+    expect(result).toMatchObject({
+      authenticated: true,
+      runtime: { id: runtimeId, imageRevision, state: "READY" },
+    });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a malformed local runtime UUID before credential resolution or request", async () => {
+    const request = vi.fn();
+
+    const result = await preflightApiAuthentication("http://localhost:4097/api/v1", worktree, request, { runtimeId: "not-a-uuid" });
+
+    expect(result).toMatchObject({ authenticated: false, failure: "invalid_target" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["wrong ID", { id: "33333333-3333-4333-8333-333333333333", imageRevision, state: "READY" }],
+    ["bad image revision", { id: runtimeId, imageRevision: "not-a-revision", state: "READY" }],
+    ["non-ready state", { id: runtimeId, imageRevision, state: "STARTING" }],
+    ["extra property", { id: runtimeId, imageRevision, state: "IDLE", backend: "private" }],
+  ])("fails closed for a requested runtime with %s assertion", async (_name, runtime) => {
+    writeFallbackToken("f".repeat(32));
+
+    const result = await preflightApiAuthentication(
+      "http://localhost:4097/api/v1",
+      worktree,
+      async () => successfulPreflight("mcp", { runtime }),
+      { runtimeId },
+    );
+
+    expect(result).toMatchObject({ authenticated: false, failure: "not_found" });
+    expect(result.runtime).toBeUndefined();
+  });
+
+  it("keeps a legacy preflight request and result unchanged when runtimeId is omitted", async () => {
+    writeFallbackToken("f".repeat(32));
+    const request = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe("http://localhost:4097/api/v1/auth/preflight");
+      return successfulPreflight("mcp", { runtime: { malformed: true } });
+    });
+
+    const result = await preflightApiAuthentication("http://localhost:4097/api/v1", worktree, request as typeof fetch);
+
+    expect(result.authenticated).toBe(true);
+    expect(result.runtime).toBeUndefined();
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it("rejects a live reload capability when its immutable binding differs from the local binding", async () => {

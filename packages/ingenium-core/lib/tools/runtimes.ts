@@ -325,6 +325,34 @@ export function getRuntimeForWorkspace(workspaceId: string): RuntimeInstance | u
   return row ? runtimeDto(row) : undefined;
 }
 
+export function resolveRuntimePreflightScope(input: {
+  runtimeId: string;
+  organizationId: string;
+  projectId: string;
+  workspaceId: string;
+  storageMappingHash: string;
+}): RuntimeInstance | undefined {
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT runtime.*
+    FROM runtime_instances runtime
+    JOIN authorized_workspaces workspace
+      ON workspace.id = runtime.workspace_id
+     AND workspace.organization_id = runtime.organization_id
+     AND workspace.project_id = runtime.project_id
+     AND workspace.owner_user_id = runtime.owner_user_id
+     AND workspace.security_epoch = runtime.security_epoch
+     AND workspace.status = 'authorized'
+    WHERE runtime.id = ? AND runtime.organization_id = ? AND runtime.project_id = ?
+      AND runtime.workspace_id = ? AND workspace.storage_mapping_hash = ?
+      AND runtime.state IN ('READY', 'IDLE')`).get(
+    input.runtimeId,
+    input.organizationId,
+    input.projectId,
+    input.workspaceId,
+    input.storageMappingHash,
+  ) as RuntimeRow | undefined;
+  return row ? runtimeDto(row) : undefined;
+}
+
 export function listRuntimeInstances(ownerUserId?: string): RuntimeInstance[] {
   const rows = ownerUserId
     ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)

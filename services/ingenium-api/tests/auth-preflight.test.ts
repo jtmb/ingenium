@@ -1,17 +1,26 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { authPreflightReadRateLimit, clearRateLimitEntries, rateLimit } from "../lib/middleware/rate-limit.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
-import { oidcAuthentication } from "ingenium-core";
+import { oidcAuthentication, runtimes } from "ingenium-core";
 import { AppError } from "../lib/middleware/errors.js";
 import { clearAuthAttemptRateLimit } from "../lib/middleware/auth-rate-limit.js";
+import { inspectManagedRuntime } from "../lib/runtime-manager-client.js";
 import { authPreflightRouter, publicOidcError } from "../lib/routes/auth-preflight.js";
 import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
+vi.mock("../lib/runtime-manager-client.js", () => ({ inspectManagedRuntime: vi.fn() }));
+
 const token = "b".repeat(32);
+const organizationId = "11111111-1111-4111-8111-111111111111";
+const projectId = "22222222-2222-4222-8222-222222222222";
+const runtimeId = "33333333-3333-4333-8333-333333333333";
+const credentialId = "44444444-4444-4444-8444-444444444444";
+const servicePrincipalId = "55555555-5555-4555-8555-555555555555";
+const backendId = "c".repeat(64);
 let server: Server | undefined;
 let baseUrl = "";
 let originalToken: string | undefined;
@@ -32,19 +41,27 @@ beforeEach(async () => {
   app.use((req, _res, next) => {
     const audience = req.get("x-test-preflight-audience");
     if (audience === "mcp" || audience === "runtime" || audience === "repository-sync") {
+      const scopes = req.get("x-test-preflight-scopes")?.split(",") ?? ["projects:read"];
       req.principal = {
         type: "service",
-        id: "fixture-preflight-service",
-        scopes: ["projects:read"],
-        tokenId: "fixture-preflight-token-id",
-        organizationId: "organization-id",
-        projectId: "project-id",
-        projectIds: ["project-id"],
+        id: servicePrincipalId,
+        scopes,
+        tokenId: credentialId,
+        organizationId,
+        projectId,
+        projectIds: [projectId],
         audience,
         workspaceId: "workspace-id",
         launcherWorktree: "/workspace",
         storageMappingHash: "a".repeat(64),
       };
+      if ((audience === "mcp" || audience === "runtime") && req.get("x-test-preflight-attestation") !== "missing") {
+        req.attestedCoordinationIdentity = Object.freeze({
+          credentialId,
+          workspaceId: "workspace-id",
+          storageMappingHash: "a".repeat(64),
+        });
+      }
     }
     next();
   });
@@ -57,6 +74,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await closeHttpServer(server!);
   clearRateLimitEntries();
+  vi.restoreAllMocks();
+  vi.mocked(inspectManagedRuntime).mockReset();
   if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
   else process.env.INGENIUM_API_TOKEN = originalToken;
   if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
@@ -83,6 +102,7 @@ describe("extension authentication preflight", () => {
   });
 
   it("advertises targeted live MCP reload for protected credential content rotation", async () => {
+    const runtimeScope = vi.spyOn(runtimes, "resolveRuntimePreflightScope");
     const response = await fetch(`${baseUrl}/api/v1/auth/preflight`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -101,6 +121,8 @@ describe("extension authentication preflight", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain(token);
+    expect(runtimeScope).not.toHaveBeenCalled();
+    expect(inspectManagedRuntime).not.toHaveBeenCalled();
   });
 
   it.each(["runtime", "repository-sync"] as const)("keeps restart mode for %s credential bindings", async (audience) => {
@@ -118,6 +140,207 @@ describe("extension authentication preflight", () => {
       credentialChangeMode: "restart",
       restartRequiredOnCredentialChange: true,
     } });
+  });
+
+  it.each(["READY", "IDLE"] as const)("returns the DB-authorized %s runtime state without exposing manager state", async (state) => {
+    const runtime = {
+      id: runtimeId,
+      organizationId,
+      projectId,
+      workspaceId: "workspace-id",
+      backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      backendContainerId: backendId,
+      state,
+    } as runtimes.RuntimeInstance;
+    const scope = vi.spyOn(runtimes, "resolveRuntimePreflightScope").mockReturnValue(runtime);
+    vi.mocked(inspectManagedRuntime).mockResolvedValue({
+      runtimeId,
+      backendId,
+      backendName: runtime.backendName,
+      imageRevision: "d".repeat(40),
+      state: "running",
+      health: "healthy",
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": "mcp",
+        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ data: {
+      authenticated: true,
+      principal: { type: "service", id: servicePrincipalId },
+      scopes: ["projects:read", "coordination:read"],
+      organizationId,
+      projectId,
+      projectIds: [projectId],
+      audience: "mcp",
+      workspaceId: "workspace-id",
+      launcherWorktree: "/workspace",
+      storageMappingHash: "a".repeat(64),
+      restartRequiredOnCredentialChange: true,
+      credentialChangeMode: "live-mcp-reload",
+      runtime: { id: runtimeId, imageRevision: "d".repeat(40), state },
+    } });
+    expect(JSON.stringify(body)).not.toContain('"running"');
+    expect(scope).toHaveBeenCalledWith({
+      runtimeId,
+      organizationId,
+      projectId,
+      workspaceId: "workspace-id",
+      storageMappingHash: "a".repeat(64),
+    });
+    expect(inspectManagedRuntime).toHaveBeenCalledWith(runtimeId);
+  });
+
+  it.each([
+    `runtime_id=invalid`,
+    `runtime_id=${runtimeId}&runtime_id=${runtimeId}`,
+    `runtime_id=${runtimeId}&workspace_id=workspace-id`,
+  ])("rejects malformed or additional runtime assertions: %s", async (query) => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight?${query}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": "mcp",
+        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+      },
+    });
+
+    expect(response.status).toBe(422);
+    expect((await response.json()).error).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(inspectManagedRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["repository-sync", "projects:read,coordination:read"],
+    ["mcp", "projects:read"],
+    ["runtime", "coordination:read"],
+  ])("requires an MCP/runtime audience and both fixed scopes (%s)", async (audience, scopes) => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": audience,
+        "X-Test-Preflight-Scopes": scopes,
+      },
+    });
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("fails closed when the coordination identity is not attested", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": "mcp",
+        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        "X-Test-Preflight-Attestation": "missing",
+      },
+    });
+
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
+  });
+
+  it.each(["absent", "foreign", "mismatch", "revoked", "epoch", "state"])(
+    "keeps %s runtime resolution indistinguishable",
+    async () => {
+      vi.spyOn(runtimes, "resolveRuntimePreflightScope").mockReturnValue(undefined);
+      const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Ingenium-Internal-Service": "1",
+          "X-Test-Preflight-Audience": "runtime",
+          "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        },
+      });
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error).toMatchObject({
+        code: "NOT_FOUND",
+        message: "Resource not found",
+        details: null,
+      });
+      expect(inspectManagedRuntime).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["runtime identity", { runtimeId: "66666666-6666-4666-8666-666666666666" }],
+    ["backend identity", { backendId: "e".repeat(64) }],
+    ["backend name", { backendName: "ingenium-runtime-foreign" }],
+    ["container state", { state: "exited" }],
+    ["container health", { health: "unhealthy" }],
+    ["image provenance", { imageRevision: "INVALID" }],
+  ])("maps a mismatched %s to service unavailable", async (_label, override) => {
+    const runtime = {
+      id: runtimeId,
+      organizationId,
+      projectId,
+      workspaceId: "workspace-id",
+      backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      backendContainerId: backendId,
+      state: "READY",
+    } as runtimes.RuntimeInstance;
+    vi.spyOn(runtimes, "resolveRuntimePreflightScope").mockReturnValue(runtime);
+    vi.mocked(inspectManagedRuntime).mockResolvedValue({
+      runtimeId,
+      backendId,
+      backendName: runtime.backendName,
+      imageRevision: "d".repeat(40),
+      state: "running",
+      health: "healthy",
+      ...override,
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": "mcp",
+        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toMatchObject({ code: "RUNTIME_MANAGER_UNAVAILABLE" });
+  });
+
+  it("maps Runtime Manager faults to service unavailable", async () => {
+    const runtime = {
+      id: runtimeId,
+      organizationId,
+      projectId,
+      workspaceId: "workspace-id",
+      backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      backendContainerId: backendId,
+      state: "IDLE",
+    } as runtimes.RuntimeInstance;
+    vi.spyOn(runtimes, "resolveRuntimePreflightScope").mockReturnValue(runtime);
+    vi.mocked(inspectManagedRuntime).mockRejectedValue(new Error("manager secret detail"));
+
+    const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Ingenium-Internal-Service": "1",
+        "X-Test-Preflight-Audience": "runtime",
+        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error).toMatchObject({ code: "RUNTIME_MANAGER_UNAVAILABLE", message: "Runtime manager is unavailable" });
+    expect(JSON.stringify(body)).not.toContain("manager secret detail");
   });
 });
 

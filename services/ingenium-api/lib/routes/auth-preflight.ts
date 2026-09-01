@@ -4,12 +4,15 @@ import { authentication, authorization, getDb, identity, invitations, mcpCredent
 import { AppError } from "../middleware/errors.js";
 import { authAttemptRateLimit, enforceOidcRateLimit, oidcStartRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
+import { inspectManagedRuntime } from "../runtime-manager-client.js";
 
 export const authPreflightRouter = Router();
 
 const LoginSchema = z.object({ email: z.string().max(320), password: z.string().max(1024), deviceLabel: z.string().max(128).optional() }).strict();
 const TokenSchema = z.object({ token: z.string().min(32).max(512) }).strict();
 const PasswordSchema = TokenSchema.extend({ password: z.string().min(12).max(1024) }).strict();
+const RuntimePreflightSchema = z.object({ runtime_id: z.string().uuid() }).strict();
+const IMAGE_REVISION = /^[0-9a-f]{40}$/;
 const OIDC_TRANSACTION_COOKIE = "__Host-ingenium_oidc_transaction";
 
 function setSession(res: Response, session: ReturnType<typeof authentication.createSession>): void {
@@ -383,34 +386,77 @@ authPreflightRouter.get("/oidc/callback", async (req, res, next) => {
   } catch (error) { next(publicOidcError(error)); }
 });
 
-authPreflightRouter.get("/preflight", (req, res) => {
-  if (req.principal?.type === "user" && !req.principal.session
-    && !req.principal.scopes.includes("auth:preflight") && !req.principal.scopes.includes("auth:*")) {
-    throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
-  }
-  if (req.principal?.type === "service" && !req.principal.scopes.includes("projects:read")
-    && !req.principal.scopes.includes("projects:*") && !req.principal.scopes.includes("*")) {
-    throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
-  }
-  const principal = req.principal;
-  res.set("Cache-Control", "no-store");
-  res.json({ data: {
-    authenticated: true,
-    ...(principal?.type === "service" ? {
-      principal: { type: principal.type, id: principal.id },
-      scopes: principal.scopes,
+authPreflightRouter.get("/preflight", async (req, res, next) => {
+  try {
+    if (req.principal?.type === "user" && !req.principal.session
+      && !req.principal.scopes.includes("auth:preflight") && !req.principal.scopes.includes("auth:*")) {
+      throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
+    }
+    if (req.principal?.type === "service" && !req.principal.scopes.includes("projects:read")
+      && !req.principal.scopes.includes("projects:*") && !req.principal.scopes.includes("*")) {
+      throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
+    }
+    const principal = req.principal;
+    const data = {
+      authenticated: true,
+      ...(principal?.type === "service" ? {
+        principal: { type: principal.type, id: principal.id },
+        scopes: principal.scopes,
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        projectIds: principal.projectIds ?? (principal.projectId ? [principal.projectId] : []),
+        audience: principal.audience,
+        workspaceId: principal.workspaceId,
+        launcherWorktree: principal.launcherWorktree,
+        storageMappingHash: principal.storageMappingHash,
+        // Keep the legacy flag conservative for older extensions. New clients
+        // use this mode for content rotation only; binding, config, and plugin
+        // identity changes still require a full OpenCode restart.
+        restartRequiredOnCredentialChange: true,
+        credentialChangeMode: principal.audience === "mcp" ? "live-mcp-reload" : "restart",
+      } : {}),
+    };
+    if (Object.keys(req.query).length === 0) {
+      res.set("Cache-Control", "no-store");
+      res.json({ data });
+      return;
+    }
+
+    const { runtime_id: runtimeId } = RuntimePreflightSchema.parse(req.query);
+    if (principal?.type !== "service" || (principal.audience !== "mcp" && principal.audience !== "runtime")
+      || !principal.scopes.includes("projects:read") || !principal.scopes.includes("coordination:read")) {
+      throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
+    }
+    const identity = req.attestedCoordinationIdentity;
+    if (!principal.id || !principal.tokenId || !principal.organizationId || !principal.projectId
+      || !principal.projectIds?.includes(principal.projectId) || !principal.workspaceId || !principal.launcherWorktree
+      || !principal.storageMappingHash || !/^[0-9a-f]{64}$/.test(principal.storageMappingHash)
+      || !identity || identity.credentialId !== principal.tokenId || identity.workspaceId !== principal.workspaceId
+      || identity.storageMappingHash !== principal.storageMappingHash) {
+      throw new AppError("Resource not found", "NOT_FOUND", 404);
+    }
+    const runtime = runtimes.resolveRuntimePreflightScope({
+      runtimeId,
       organizationId: principal.organizationId,
       projectId: principal.projectId,
-      projectIds: principal.projectIds ?? (principal.projectId ? [principal.projectId] : []),
-      audience: principal.audience,
       workspaceId: principal.workspaceId,
-      launcherWorktree: principal.launcherWorktree,
       storageMappingHash: principal.storageMappingHash,
-      // Keep the legacy flag conservative for older extensions. New clients
-      // use this mode for content rotation only; binding, config, and plugin
-      // identity changes still require a full OpenCode restart.
-      restartRequiredOnCredentialChange: true,
-      credentialChangeMode: principal.audience === "mcp" ? "live-mcp-reload" : "restart",
-    } : {}),
-  } });
+    });
+    if (!runtime) throw new AppError("Resource not found", "NOT_FOUND", 404);
+
+    try {
+      const managed = await inspectManagedRuntime(runtime.id);
+      if (managed.runtimeId !== runtime.id || managed.backendId !== runtime.backendContainerId
+        || managed.backendName !== runtime.backendName || managed.state !== "running" || managed.health !== "healthy"
+        || !managed.imageRevision || !IMAGE_REVISION.test(managed.imageRevision)) {
+        throw new Error("Runtime inspection did not match the authorized runtime");
+      }
+      res.set("Cache-Control", "no-store");
+      res.json({ data: { ...data, runtime: { id: runtime.id, imageRevision: managed.imageRevision, state: runtime.state } } });
+    } catch {
+      throw new AppError("Runtime manager is unavailable", "RUNTIME_MANAGER_UNAVAILABLE", 503);
+    }
+  } catch (error) {
+    next(error);
+  }
 });

@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -9,12 +9,22 @@ import {
   validateWorkspaceMapping,
   type RuntimeProvisionRequest,
 } from "../lib/runtime-manager-contract.js";
+import { inspectManagedRuntime } from "../lib/runtime-manager-client.js";
 import { respondWithRuntimeInspect } from "../scripts/runtime-manager.js";
 
 let root = "";
+const originalManagerUrl = process.env.INGENIUM_RUNTIME_MANAGER_URL;
+const originalManagerTokenFile = process.env.INGENIUM_RUNTIME_MANAGER_TOKEN_FILE;
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "ingenium-runtime-manager-")); });
-afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  if (originalManagerUrl === undefined) delete process.env.INGENIUM_RUNTIME_MANAGER_URL;
+  else process.env.INGENIUM_RUNTIME_MANAGER_URL = originalManagerUrl;
+  if (originalManagerTokenFile === undefined) delete process.env.INGENIUM_RUNTIME_MANAGER_TOKEN_FILE;
+  else process.env.INGENIUM_RUNTIME_MANAGER_TOKEN_FILE = originalManagerTokenFile;
+  rmSync(root, { recursive: true, force: true });
+});
 
 function fixture(id: string, hostPath: string, validationPath: string): RuntimeProvisionRequest {
   const runtimeId = id === "one" ? "11111111-1111-4111-8111-111111111111" : "22222222-2222-4222-8222-222222222222";
@@ -42,6 +52,7 @@ function mountInfo(hostPath: string, validationPath: string): string {
 
 describe("AUTH-108 runtime manager contract", () => {
   it("does not commit a response before Docker inspection succeeds", async () => {
+    const runtimeId = "11111111-1111-4111-8111-111111111111";
     const end = vi.fn();
     const writeHead = vi.fn(() => ({ end }));
     const response = { writeHead } as unknown as ServerResponse;
@@ -53,11 +64,62 @@ describe("AUTH-108 runtime manager contract", () => {
 
     await respondWithRuntimeInspect(response, async () => ({
       Id: "a".repeat(64),
-      Name: "/ingenium-runtime-test",
+      Name: `/ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      Config: { Labels: {
+        "com.ingenium.runtime.id": runtimeId,
+        "org.opencontainers.image.revision": "b".repeat(40),
+      } },
       State: { Status: "running", Health: { Status: "healthy" } },
     }));
     expect(writeHead).toHaveBeenCalledWith(200);
     expect(end).toHaveBeenCalledOnce();
+    expect(JSON.parse(end.mock.calls[0]![0])).toEqual({ data: {
+      backendId: "a".repeat(64),
+      backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      runtimeId,
+      imageRevision: "b".repeat(40),
+      state: "running",
+      health: "healthy",
+    } });
+  });
+
+  it.each([undefined, "b".repeat(39), "B".repeat(40)])("rejects invalid OCI image revision provenance (%s)", async (imageRevision) => {
+    const runtimeId = "11111111-1111-4111-8111-111111111111";
+    const writeHead = vi.fn();
+    const response = { writeHead } as unknown as ServerResponse;
+
+    await expect(respondWithRuntimeInspect(response, async () => ({
+      Id: "a".repeat(64),
+      Name: `/ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      Config: { Labels: {
+        "com.ingenium.runtime.id": runtimeId,
+        ...(imageRevision === undefined ? {} : { "org.opencontainers.image.revision": imageRevision }),
+      } },
+      State: { Status: "running", Health: { Status: "healthy" } },
+    }))).rejects.toThrow("Runtime image provenance is invalid");
+    expect(writeHead).not.toHaveBeenCalled();
+  });
+
+  it("validates the complete Runtime Manager inspect identity at the client boundary", async () => {
+    const runtimeId = "11111111-1111-4111-8111-111111111111";
+    const tokenPath = join(root, "manager-token");
+    writeFileSync(tokenPath, "m".repeat(43), { mode: 0o600 });
+    process.env.INGENIUM_RUNTIME_MANAGER_URL = "http://runtime-manager:4088/";
+    process.env.INGENIUM_RUNTIME_MANAGER_TOKEN_FILE = tokenPath;
+    const valid = {
+      backendId: "a".repeat(64),
+      backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
+      runtimeId,
+      imageRevision: "b".repeat(40),
+      state: "running",
+      health: "healthy",
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: valid }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { ...valid, imageRevision: "invalid" } }), { status: 200 }));
+
+    await expect(inspectManagedRuntime(runtimeId)).resolves.toEqual(valid);
+    await expect(inspectManagedRuntime(runtimeId)).rejects.toThrow("Runtime manager response is invalid");
   });
 
   it("rejects workspace symlinks and host-to-validation mapping mismatch", () => {

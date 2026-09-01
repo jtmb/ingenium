@@ -25,6 +25,7 @@ import {
   recordRuntimeActivity,
   recordRuntimeCapabilityActivity,
   recordRuntimeHealth,
+  resolveRuntimePreflightScope,
   resolveRuntimeBrowserSession,
   revokeAuthorizedWorkspace,
   revokeRuntimeCapability,
@@ -158,6 +159,54 @@ describe("AUTH-108 runtime isolation", () => {
     expect(resolveMcpCredential(foreignCredential.token, "mcp")).toBeUndefined();
     revokeRuntimeCapability(foreignRuntime.id);
     expect(resolveMcpCredential(foreignCredential.token, "runtime")).toBeUndefined();
+  });
+
+  it("resolves one ready runtime only for its exact authorized preflight scope", () => {
+    const scope = tenancy("preflight");
+    const workspace = authorizeWorkspace({
+      id: "workspace-preflight",
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      ownerUserId: scope.user.id,
+      storagePath: "/srv/preflight/repository",
+    });
+    let runtime = createRuntimeInstance(workspace.id, limits);
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "PROVISIONING", actorType: "manager", actorId: "manager" });
+    runtime = transitionRuntime({
+      id: runtime.id,
+      expectedRevision: runtime.revision,
+      toState: "STARTING",
+      actorType: "manager",
+      actorId: "manager",
+      backendContainerId: "a".repeat(64),
+    });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "reconciler" });
+    const exact = {
+      runtimeId: runtime.id,
+      organizationId: scope.organizationId,
+      projectId: scope.project.id,
+      workspaceId: workspace.id,
+      storageMappingHash: workspace.storageMappingHash,
+    };
+
+    expect(resolveRuntimePreflightScope(exact)).toMatchObject({ id: runtime.id, state: "READY" });
+    expect(resolveRuntimePreflightScope({ ...exact, runtimeId: "11111111-1111-4111-8111-111111111111" })).toBeUndefined();
+    expect(resolveRuntimePreflightScope({ ...exact, organizationId: "22222222-2222-4222-8222-222222222222" })).toBeUndefined();
+    expect(resolveRuntimePreflightScope({ ...exact, projectId: "33333333-3333-4333-8333-333333333333" })).toBeUndefined();
+    expect(resolveRuntimePreflightScope({ ...exact, workspaceId: "foreign-workspace" })).toBeUndefined();
+    expect(resolveRuntimePreflightScope({ ...exact, storageMappingHash: "b".repeat(64) })).toBeUndefined();
+
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    database.exec("SAVEPOINT revoked_workspace");
+    database.prepare("UPDATE authorized_workspaces SET status = 'revoked' WHERE id = ?").run(workspace.id);
+    expect(resolveRuntimePreflightScope(exact)).toBeUndefined();
+    database.exec("ROLLBACK TO revoked_workspace; RELEASE revoked_workspace");
+    database.exec("SAVEPOINT epoch_mismatch");
+    database.prepare("UPDATE runtime_instances SET security_epoch = security_epoch + 1, revision = revision + 1 WHERE id = ?").run(runtime.id);
+    expect(resolveRuntimePreflightScope(exact)).toBeUndefined();
+    database.exec("ROLLBACK TO epoch_mismatch; RELEASE epoch_mismatch");
+    database.prepare("UPDATE runtime_instances SET state = 'STOPPING', revision = revision + 1 WHERE id = ?").run(runtime.id);
+    expect(resolveRuntimePreflightScope(exact)).toBeUndefined();
   });
 
   it("retains a revoked workspace tombstone while authorizing its canonical storage replacement", () => {

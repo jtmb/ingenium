@@ -146,7 +146,7 @@ describe("AUTH-102 canonical API policy", () => {
     }));
   });
 
-  it.each(["mcp", "repository-sync"] as const)("allows %s service credentials to run exact preflight", (audience) => {
+  it.each(["mcp", "runtime", "repository-sync"] as const)("allows %s service credentials to reach the route-owned preflight contract", (audience) => {
     const req = {
       method: "GET",
       path: "/api/v1/auth/preflight",

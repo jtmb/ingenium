@@ -6,6 +6,8 @@ import {
 } from "./extension-binding.js";
 
 const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const IMAGE_REVISION_PATTERN = /^[0-9a-f]{40}$/;
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 5_000;
 
 /** Startup probes remain deliberately small and finite so plugin loading cannot hang. */
@@ -78,6 +80,7 @@ export interface ApiAuthenticationPreflightResult {
   /** Safe category only; it never contains a status, URL, response body, or credential detail. */
   failure?: ApiAuthenticationFailureKind;
   binding?: ApiAuthenticationBinding;
+  runtime?: ApiAuthenticationRuntime;
 }
 
 export type ApiAuthenticationFailureKind = "authentication" | "scope" | "not_found" | "unavailable" | "invalid_target";
@@ -103,9 +106,16 @@ export interface ApiAuthenticationBinding {
 
 export type ApiAuthenticationCredentialChangeMode = "live-mcp-reload" | "restart";
 
+export interface ApiAuthenticationRuntime {
+  id: string;
+  imageRevision: string;
+  state: "READY" | "IDLE";
+}
+
 export interface ApiAuthenticationPreflightOptions {
   timeoutMs?: number;
   credentialPurpose?: ExtensionCredentialPurpose;
+  runtimeId?: string;
 }
 
 export interface ApiAuthenticationReadinessOptions extends ApiAuthenticationPreflightOptions {
@@ -178,6 +188,19 @@ function authenticationBinding(value: unknown): ApiAuthenticationBinding | undef
   };
 }
 
+function authenticationRuntime(value: unknown): ApiAuthenticationRuntime | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const data = "data" in value && value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : value as Record<string, unknown>;
+  const runtime = data.runtime;
+  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return undefined;
+  const candidate = runtime as Record<string, unknown>;
+  if (Object.keys(candidate).sort().join(",") !== "id,imageRevision,state"
+    || typeof candidate.id !== "string" || !UUID_PATTERN.test(candidate.id)
+    || typeof candidate.imageRevision !== "string" || !IMAGE_REVISION_PATTERN.test(candidate.imageRevision)
+    || (candidate.state !== "READY" && candidate.state !== "IDLE")) return undefined;
+  return candidate as unknown as ApiAuthenticationRuntime;
+}
+
 function matchesImmutableBinding(
   attested: ApiAuthenticationBinding,
   expected: ExtensionBinding,
@@ -203,6 +226,7 @@ export async function preflightApiAuthentication(
   request: typeof fetch = fetch,
   options: ApiAuthenticationPreflightOptions = {},
 ): Promise<ApiAuthenticationPreflightResult> {
+  if (options.runtimeId !== undefined && !UUID_PATTERN.test(options.runtimeId)) return failedPreflight("invalid_target");
   const base = normalizeApiBase(apiBase);
   if (!base) return failedPreflight("invalid_target");
   let expectedBinding: ExtensionBinding;
@@ -214,15 +238,25 @@ export async function preflightApiAuthentication(
   if (base !== expectedBinding.apiUrl) return failedPreflight("invalid_target");
 
   try {
-    const response = await request(`${expectedBinding.apiUrl}/auth/preflight`, {
+    const preflightUrl = new URL(`${expectedBinding.apiUrl}/auth/preflight`);
+    if (options.runtimeId !== undefined) {
+      const query = new URLSearchParams();
+      query.set("runtime_id", options.runtimeId);
+      preflightUrl.search = query.toString();
+    }
+    const response = await request(preflightUrl.toString(), {
       headers: apiRequestHeaders(worktree, undefined, { binding: expectedBinding }),
       signal: AbortSignal.timeout(boundedInteger(options.timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS, 1, DEFAULT_PREFLIGHT_TIMEOUT_MS)),
     });
     if (response.status === 200) {
-      const attestedBinding = authenticationBinding(await response.json().catch(() => null));
+      const payload = await response.json().catch(() => null);
+      const attestedBinding = authenticationBinding(payload);
       if (!attestedBinding) return failedPreflight("authentication");
-      return matchesImmutableBinding(attestedBinding, expectedBinding)
-        ? { authenticated: true, binding: attestedBinding }
+      if (!matchesImmutableBinding(attestedBinding, expectedBinding)) return failedPreflight("not_found");
+      if (options.runtimeId === undefined) return { authenticated: true, binding: attestedBinding };
+      const runtime = authenticationRuntime(payload);
+      return runtime?.id === options.runtimeId
+        ? { authenticated: true, binding: attestedBinding, runtime }
         : failedPreflight("not_found");
     }
     if (response.status === 401) return failedPreflight("authentication");
@@ -259,6 +293,7 @@ export async function waitForAuthenticatedApiReadiness(
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     result = await preflightApiAuthentication(apiBase, worktree, request, {
       credentialPurpose: options.credentialPurpose,
+      runtimeId: options.runtimeId,
       timeoutMs: boundedInteger(
         options.timeoutMs,
         EXTENSION_STARTUP_PREFLIGHT_TIMEOUT_MS,

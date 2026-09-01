@@ -4,9 +4,15 @@ import type { runtimes } from "ingenium-core";
 export interface RuntimeManagerInspect {
   backendId?: string;
   backendName?: string;
+  runtimeId?: string;
+  imageRevision?: string;
   state: string;
   health: string;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA1 = /^[0-9a-f]{40}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface RuntimeProvisionPayload {
   runtime: runtimes.RuntimeInstance;
@@ -57,6 +63,12 @@ async function requestManager(path: string, method = "GET", body?: unknown): Pro
   }
   const result = await response.json() as { data?: RuntimeManagerInspect };
   if (!result.data || typeof result.data.state !== "string" || typeof result.data.health !== "string") {
+    throw new Error("Runtime manager response is invalid");
+  }
+  if (result.data.state !== "absent" && (!result.data.runtimeId || !UUID.test(result.data.runtimeId)
+    || !result.data.backendId || !SHA256.test(result.data.backendId)
+    || result.data.backendName !== `ingenium-runtime-${result.data.runtimeId.replaceAll("-", "")}`
+    || !result.data.imageRevision || !SHA1.test(result.data.imageRevision))) {
     throw new Error("Runtime manager response is invalid");
   }
   return result.data;

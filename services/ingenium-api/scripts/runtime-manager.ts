@@ -13,6 +13,7 @@ const DOCKER_SOCKET = "/var/run/docker.sock";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_DOCKER_RESPONSE_BYTES = 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const IMAGE_REVISION = /^[0-9a-f]{40}$/;
 
 type DockerResponse<T> = { status: number; data: T | null; raw: string };
 type DockerInspect = {
@@ -326,12 +327,20 @@ async function stopRuntime(runtimeId: string): Promise<DockerInspect | null> {
 }
 
 function publicInspect(inspect: DockerInspect | null): object {
-  return inspect ? {
+  if (!inspect) return { state: "absent", health: "absent" };
+  const runtimeId = inspect.Config?.Labels?.["com.ingenium.runtime.id"];
+  const imageRevision = inspect.Config?.Labels?.["org.opencontainers.image.revision"];
+  if (!runtimeId || !UUID.test(runtimeId) || !imageRevision || !IMAGE_REVISION.test(imageRevision)) {
+    throw new Error("Runtime image provenance is invalid");
+  }
+  return {
     backendId: inspect.Id,
     backendName: inspect.Name?.replace(/^\//, ""),
+    runtimeId,
+    imageRevision,
     state: inspect.State?.Status ?? "unknown",
     health: inspect.State?.Health?.Status ?? "unknown",
-  } : { state: "absent", health: "absent" };
+  };
 }
 
 export async function respondWithRuntimeInspect(
@@ -339,7 +348,8 @@ export async function respondWithRuntimeInspect(
   operation: () => Promise<DockerInspect | null>,
 ): Promise<void> {
   const inspect = await operation();
-  response.writeHead(200).end(JSON.stringify({ data: publicInspect(inspect) }));
+  const body = JSON.stringify({ data: publicInspect(inspect) });
+  response.writeHead(200).end(body);
 }
 
 async function readJsonBody(request: import("node:http").IncomingMessage): Promise<unknown> {
