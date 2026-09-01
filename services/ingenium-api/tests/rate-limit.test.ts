@@ -26,6 +26,7 @@ describe("rateLimit — sliding window", () => {
   let authPreflightReadMaxRequests: number;
   let coordinationCredentialMaxRequests: number;
   let coordinationWorkspaceMaxRequests: number;
+  let serviceSafeReadMaxRequests: number;
   let clearRateLimitEntries: () => void;
 
   beforeEach(async () => {
@@ -42,6 +43,7 @@ describe("rateLimit — sliding window", () => {
     authPreflightReadMaxRequests = mod.AUTH_PREFLIGHT_READ_MAX_REQUESTS;
     coordinationCredentialMaxRequests = mod.COORDINATION_CREDENTIAL_MAX_REQUESTS;
     coordinationWorkspaceMaxRequests = mod.COORDINATION_WORKSPACE_MAX_REQUESTS;
+    serviceSafeReadMaxRequests = mod.SERVICE_SAFE_READ_MAX_REQUESTS;
     clearRateLimitEntries = mod.clearRateLimitEntries;
     clearRateLimitEntries();
   });
@@ -139,6 +141,40 @@ describe("rateLimit — sliding window", () => {
       request.attestedCoordinationIdentity = Object.freeze({ credentialId, workspaceId, storageMappingHash });
     }
     return request;
+  }
+
+  function makeServiceRequest(
+    path = "/api/v1/auth/preflight",
+    method = "GET",
+    servicePrincipalId = "service-principal-a",
+    tokenId = "credential-a",
+    ip = "127.0.0.1",
+  ): Partial<Request> {
+    return {
+      ...makeReq(ip),
+      method,
+      path,
+      originalUrl: path,
+      url: path,
+      headers: {
+        authorization: "Bearer ing_candidate-token",
+        "x-ingenium-audience": "mcp",
+        "x-ingenium-workspace": "shared-memory-ingenium",
+        "x-ingenium-launcher-worktree": "/home/example/worktree",
+      },
+      principal: {
+        type: "service",
+        id: servicePrincipalId,
+        scopes: ["coordination:read"],
+        tokenId,
+        organizationId: "organization-a",
+        projectId: "project-a",
+        audience: "mcp",
+        workspaceId: "shared-memory-ingenium",
+        launcherWorktree: "/home/example/worktree",
+        storageMappingHash: "a".repeat(64),
+      },
+    } as Partial<Request>;
   }
 
   function runCoordinationMiddlewareChain(request: Partial<Request>) {
@@ -366,6 +402,158 @@ describe("rateLimit — sliding window", () => {
     rateLimit(makeGatewayReq("172.18.0.9") as Request, response as Response, next);
     expect(next).not.toHaveBeenCalled();
     expect(response.status).toHaveBeenCalledWith(429);
+  });
+
+  it("bounds the retained safe service-read profile without charging the strict socket bucket", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const paths = [
+      "/api/v1/auth/preflight",
+      "/api/v1/mcp-tools",
+      "/api/v1/mcp-tools/ingenium_coordination_update/state",
+      "/api/v1/projects/ingenium/detail",
+    ];
+
+    expect(serviceSafeReadMaxRequests).toBe(100);
+    for (let index = 0; index < serviceSafeReadMaxRequests; index += 1) {
+      expect(runMiddlewareChain(makeServiceRequest(paths[index % paths.length])).next).toHaveBeenCalledOnce();
+    }
+
+    const limited = runMiddlewareChain(makeServiceRequest());
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "100");
+
+    const ordinaryNext = vi.fn();
+    rateLimit(makeReq("127.0.0.1") as Request, makeRes() as Response, ordinaryNext);
+    expect(ordinaryNext).toHaveBeenCalledOnce();
+    expect(strictLimit).toBe(100);
+  });
+
+  it("keeps non-safe routes and every non-GET method on the strict threshold", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const strictRequests = [
+      makeServiceRequest("/api/v1/auth/preflight", "HEAD", "head", "head", "10.3.0.1"),
+      makeServiceRequest("/api/v1/auth/preflight", "POST", "post", "post", "10.3.0.2"),
+      makeServiceRequest("/api/v1/mcp-tools", "PUT", "put", "put", "10.3.0.3"),
+      makeServiceRequest("/api/v1/mcp-tools", "PATCH", "patch", "patch", "10.3.0.4"),
+      makeServiceRequest("/api/v1/mcp-tools", "DELETE", "delete", "delete", "10.3.0.5"),
+      makeServiceRequest("/api/v1/repository/sync", "POST", "sync", "sync", "10.3.0.6"),
+      makeServiceRequest("/api/v1/auth/mcp-credentials/2cfd5806-3280-4dcc-827a-07f4b38bbcb7", "DELETE", "revoke", "revoke", "10.3.0.7"),
+      makeServiceRequest("/api/v1/mcp-tools/report", "GET", "report", "report", "10.3.0.8"),
+      makeServiceRequest("/api/v1/mcp-tools/catalog", "GET", "catalog", "catalog", "10.3.0.9"),
+      makeServiceRequest("/api/v1/unknown", "GET", "unknown", "unknown", "10.3.0.10"),
+      makeServiceRequest("/api/v1/mcp-tools/%2e%2e/state", "GET", "encoded", "encoded", "10.3.0.11"),
+      makeServiceRequest("/api/v1/opencode/sessions/session-a/messages", "GET", "opencode", "opencode", "10.3.0.12"),
+    ];
+
+    for (const request of strictRequests) {
+      for (let index = 0; index < strictLimit; index += 1) {
+        expect(runMiddlewareChain(request).next).toHaveBeenCalledOnce();
+      }
+      const limited = runMiddlewareChain(request);
+      expect(limited.next).not.toHaveBeenCalled();
+      expect(limited.response.status).toHaveBeenCalledWith(429);
+    }
+  });
+
+  it("keys rotated and sibling credentials only by authenticated service principal", () => {
+    const first = makeServiceRequest("/api/v1/mcp-tools", "GET", "stable-service", "credential-a", "10.3.1.1");
+    const sibling = makeServiceRequest("/api/v1/mcp-tools", "GET", "stable-service", "credential-b", "10.3.1.1");
+    first.headers = { ...first.headers, "x-ingenium-runtime-id": "attacker-runtime-a", "x-forwarded-for": "198.51.100.1" };
+    sibling.headers = { ...sibling.headers, "x-ingenium-runtime-id": "attacker-runtime-b", "x-forwarded-for": "198.51.100.2" };
+
+    for (let index = 0; index < serviceSafeReadMaxRequests; index += 1) {
+      expect(runMiddlewareChain(index % 2 === 0 ? first : sibling).next).toHaveBeenCalledOnce();
+    }
+
+    const limited = runMiddlewareChain(sibling);
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(runMiddlewareChain(makeServiceRequest(
+      "/api/v1/mcp-tools", "GET", "different-service", "credential-c", "10.3.1.1",
+    )).next).toHaveBeenCalledOnce();
+  });
+
+  it("bounds aggregate safe service reads per socket IP across identities", () => {
+    for (let index = 0; index < dashboardReadMaxRequests; index += 1) {
+      expect(runMiddlewareChain(makeServiceRequest(
+        "/api/v1/mcp-tools",
+        "GET",
+        `service-${index % 5}`,
+        `credential-${index}`,
+        "10.3.2.1",
+      )).next).toHaveBeenCalledOnce();
+    }
+
+    const limited = runMiddlewareChain(makeServiceRequest(
+      "/api/v1/mcp-tools", "GET", "fresh-service", "fresh-credential", "10.3.2.1",
+    ));
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+    expect(limited.response.set).toHaveBeenCalledWith("X-RateLimit-Limit", "480");
+    expect(runMiddlewareChain(makeServiceRequest(
+      "/api/v1/mcp-tools", "GET", "fresh-service", "fresh-credential", "10.3.2.2",
+    )).next).toHaveBeenCalledOnce();
+  });
+
+  it("charges invalid, revoked, and malformed safe-read authentication to the strict socket bucket", () => {
+    const strictLimit = parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10);
+    const request = makeServiceRequest("/api/v1/mcp-tools", "GET", "untrusted", "untrusted", "10.3.3.1");
+    delete request.principal;
+
+    for (let index = 0; index < strictLimit; index += 1) {
+      request.headers = {
+        authorization: `Bearer attacker-selected-${index}`,
+        "x-ingenium-audience": index % 2 === 0 ? "mcp" : "runtime",
+        "x-ingenium-workspace": `attacker-workspace-${index}`,
+        "x-ingenium-launcher-worktree": `/attacker/${index}`,
+      };
+      const admitted = vi.fn();
+      rateLimit(request as Request, makeRes() as Response, admitted);
+      expect(admitted).toHaveBeenCalledOnce();
+      recordCandidateAuthenticationFailure(new Error("invalid credential"), request as Request, makeRes() as Response, vi.fn());
+    }
+
+    const limited = runMiddlewareChain(request);
+    expect(limited.next).not.toHaveBeenCalled();
+    expect(limited.response.status).toHaveBeenCalledWith(429);
+  });
+
+  it("expires safe service identity and aggregate state after 60 seconds", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+      const request = makeServiceRequest("/api/v1/mcp-tools", "GET", "expiring-service", "credential-a", "10.3.4.1");
+      for (let index = 0; index < serviceSafeReadMaxRequests; index += 1) {
+        expect(runMiddlewareChain(request).next).toHaveBeenCalledOnce();
+      }
+      expect(runMiddlewareChain(request).response.status).toHaveBeenCalledWith(429);
+
+      vi.advanceTimersByTime(60_001);
+      expect(runMiddlewareChain(request).next).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("evicts the oldest safe service identity when the bounded store is full", () => {
+    const first = makeServiceRequest("/api/v1/mcp-tools", "GET", "oldest-service", "credential-a", "10.3.5.1");
+    for (let index = 0; index < serviceSafeReadMaxRequests; index += 1) {
+      expect(runMiddlewareChain(first).next).toHaveBeenCalledOnce();
+    }
+    expect(runMiddlewareChain(first).response.status).toHaveBeenCalledWith(429);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      expect(runMiddlewareChain(makeServiceRequest(
+        "/api/v1/mcp-tools",
+        "GET",
+        `new-service-${index}`,
+        `new-credential-${index}`,
+        `2001:db8::${index.toString(16)}`,
+      )).next).toHaveBeenCalledOnce();
+    }
+
+    expect(runMiddlewareChain(first).next).toHaveBeenCalledOnce();
   });
 
   it("allows the observed safe-read profile plus a 12-read page fanout", () => {

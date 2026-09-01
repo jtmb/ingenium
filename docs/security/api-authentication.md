@@ -438,6 +438,47 @@ and returns stable failure categories rather than headers, endpoint details, or
 response bodies. The route remains protected; loopback callers do not receive
 an authentication bypass.
 
+### Authenticated automation safe-read boundary
+
+The API does not grant a broad header-selected automation bucket. A valid
+authenticated service principal receives the post-authentication safe-read
+allowance only for `GET` requests in this exact union:
+
+- Dashboard policy routes:
+  - `/api/v1/projects/{segment}/detail` — `/api/v1/projects/[^/|]+/detail`
+  - `/api/v1/context/sources/summary`
+  - `/api/v1/context/conversations`
+  - `/api/v1/tasks/{uuid}` — `/api/v1/tasks/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`
+  - `/api/v1/usage/thresholds`
+  - `/api/v1/usage/thresholds/evaluate`
+  - `/api/v1/usage/attention`
+  - `/api/v1/usage/summary`
+  - `/api/v1/usage/events`
+- Service-read additions:
+  - `/api/v1/auth/preflight`
+  - `/api/v1/mcp-tools`
+  - `/api/v1/mcp-tools/{segment}/state` — `/api/v1/mcp-tools/[^/]+/state`
+
+The service bucket is 100 requests/minute per stable, server-resolved
+`servicePrincipalId`; sibling and rotated credentials for that principal share
+one bucket. Every safe candidate also passes the shared 480 requests/minute
+ceiling per normalized socket IP. Invalid, revoked, malformed, or otherwise
+failed candidate authentication is charged to the strict 100 requests/minute
+socket-IP bucket before another authentication attempt. Mutations, unmatched or
+ambiguous paths, OpenCode paths, and non-`GET` methods do not receive this
+allowance and remain strict; separately mounted valid coordination and
+boundary-attested runtime-gateway paths retain their dedicated limiters.
+
+Matching removes query strings and normalizes one trailing slash, but rejects
+encoded path bytes, backslashes, `|`, repeated separators, control characters,
+and dot segments. No caller header selects the service identity or either
+identity bucket: the principal ID is derived by server-side credential
+resolution, and socket accounting does not trust `X-Forwarded-For` or runtime
+identity headers. Each in-memory limiter map is bounded to 10,000 keys by
+expired-entry pruning and oldest-key eviction, without a background interval.
+This is source/policy and focused-test evidence only; deployment and live
+three-window/shared-memory coordination acceptance remain **OPEN**.
+
 ## OAuth callback on port 1455
 
 The host `127.0.0.1:1455` reaches the Nginx callback listener, which forwards

@@ -171,32 +171,73 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 - **Body limit**: `express.json({ limit: "2mb" })` for large skill/plugin uploads
 - **Security**: helmet for security headers (default configuration — no custom CSP), CORS and browser mutation CSRF share the exact `DASHBOARD_ALLOWED_ORIGINS` allowlist, mandatory bearer auth; browser mutations also require the dashboard marker contract
 - **Rate limits**: Independent in-memory sliding-window policies preserve strict
-  handling for mutations and sensitive reads while allowing measured Dashboard
-  read fanout. A valid browser read must pass both the per-IP admission policy
-  before authentication and the per-IP/session policy after authentication:
+  handling for ordinary mutations and sensitive reads while allowing only the
+  source-defined canonical `GET` safe-read candidates. A candidate passes the
+  shared socket-IP admission policy before authentication and then the
+  authenticated service-principal or browser-session policy:
 
   | Limiter | Default | Applies To | Location |
   |---------|---------|------------|----------|
-  | General API | 100 req/min per IP | Mutations, sensitive/expensive reads, unauthenticated reads, and non-browser clients | `lib/middleware/rate-limit.ts` |
-  | Dashboard read admission | 480 req/min per socket IP | Positive canonical `GET` candidates before authentication; bounds aggregate session rotation | `lib/middleware/rate-limit.ts` |
-  | Authenticated Dashboard reads | 480 req/min per IP and session | Safe browser reads after session authentication | `lib/middleware/rate-limit.ts` |
+  | General API | 100 req/min per normalized socket IP | Ordinary mutations, sensitive/expensive reads, unmatched or ambiguous paths, OpenCode paths, non-GET requests, and failed safe-read authentication candidates | `lib/middleware/rate-limit.ts` |
+  | Authenticated automation safe reads | 100 req/min per stable server-resolved `servicePrincipalId` | Valid authenticated service principals on the exact safe-read union below; sibling and rotated credentials for one principal share this bucket | `lib/middleware/rate-limit.ts` |
+  | Safe-read admission | 480 req/min per normalized socket IP | Every positive canonical `GET` candidate before authentication; shared across service principals, credentials, and browser-session rotation | `lib/middleware/rate-limit.ts` |
+  | Authenticated Dashboard reads | 480 req/min per normalized socket IP and session | Safe browser reads after session authentication | `lib/middleware/rate-limit.ts` |
   | Runtime gateway | 10,000 req/min per IP | Boundary-attested private runtime-gateway traffic only | `lib/middleware/rate-limit.ts` |
   | Vault passphrase | 5 req/min per IP | `POST /api/v1/vault/initialize` and `POST /api/v1/vault/unseal` | `lib/routes/vault.ts` |
   | OAuth callback | 20 req/min per IP | `GET /auth/callback` (public, before auth) | `lib/routes/opencode.ts` |
   | OIDC start/callback | 5 req/min per IP/provider and phase | `/api/v1/auth/oidc/start` and `/api/v1/auth/oidc/callback` | `lib/middleware/auth-rate-limit.ts` |
 
+  The exact `isServiceSafeReadCandidate` union is:
+
+  - Dashboard policy routes from `services/ingenium-api/config/dashboard-safe-reads.json`:
+    - `/api/v1/projects/{segment}/detail` — `/api/v1/projects/[^/|]+/detail`
+    - `/api/v1/context/sources/summary`
+    - `/api/v1/context/conversations`
+    - `/api/v1/tasks/{uuid}` — `/api/v1/tasks/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`
+    - `/api/v1/usage/thresholds`
+    - `/api/v1/usage/thresholds/evaluate`
+    - `/api/v1/usage/attention`
+    - `/api/v1/usage/summary`
+    - `/api/v1/usage/events`
+  - Service-read additions from `services/ingenium-api/lib/middleware/rate-limit.ts`:
+    - `/api/v1/auth/preflight`
+    - `/api/v1/mcp-tools`
+    - `/api/v1/mcp-tools/{segment}/state` — `/api/v1/mcp-tools/[^/]+/state`
+
+  Matching uses `normalizeDashboardReadPath`: query strings are removed before
+  matching and one trailing slash is normalized, while percent-encoded path
+  bytes, backslashes, `|`, repeated separators, control characters, and dot
+  segments are rejected. Only `GET` qualifies; `HEAD` and method-override
+  headers do not qualify. No other route receives the safe-read allowance.
+  Ordinary mutations, unmatched/ambiguous paths, OpenCode paths, and every
+  non-`GET` method therefore remain on the strict 100 req/min socket-IP path;
+  invalid, revoked, malformed, or otherwise failed candidate authentication is
+  recorded in that same strict bucket before another authentication attempt.
+  Separately mounted valid coordination and boundary-attested runtime-gateway
+  paths retain their dedicated limiters and are not this safe-read exception.
+
   The authoritative positive policy is
   `services/ingenium-api/config/dashboard-safe-reads.json`. The API reads it
   directly; `scripts/generate-dashboard-safe-read-policy.mjs` deterministically
   generates the Nginx map, and gateway startup/static validation fails if the
-  generated map is stale. HEAD, unmatched, encoded/ambiguous paths and all
-  declared sensitive categories are strict. Candidate authentication failures
-  consume the shared strict IP bucket, so the 101st invalid attempt is rejected
-  before another token/session lookup; valid browser reads do not consume that
-  strict bucket but remain under the shared 480/IP admission ceiling.
+  generated map is stale. The service bucket key is a SHA-256 digest of the
+  server-resolved `servicePrincipalId`; token IDs, runtime IDs, forwarding
+  headers, and other caller headers cannot select either identity bucket. Socket
+  accounting uses the peer socket address rather than `X-Forwarded-For`.
+  Candidate authentication failures consume the shared strict IP bucket, so the
+  101st invalid attempt is rejected before another token/session lookup; valid
+  safe reads do not consume that strict bucket but remain under the shared
+  480/IP admission ceiling.
 
-  The retained 86-state profile contains 329 GETs: 26 match the 9 positive
-  allowlisted templates and 303 remain strict. The maximum observed single-page
+  Each in-memory rate-limiter map is bounded to 10,000 keys. Expired windows are
+  pruned and the oldest keys are evicted synchronously when a map is full; no
+  background interval is used. Rate-limit state remains process-local and resets
+  on restart.
+
+  The retained 86-state Dashboard profile contains 329 GETs: 26 match the 9
+  positive Dashboard templates and 303 remain strict. The service-read additions
+  above are an explicit source rule, not additional entries in that observed
+  Dashboard profile. The maximum observed single-page
   fanout is 12, safely below the strict burst of 60; human-paced acceptance uses
   at least ten seconds between navigations. The retained 303 strict GETs plus
   51 strict non-GETs then average about 25 requests/minute. The largest state
@@ -206,6 +247,10 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
   runtime workspace, Docs space, MCP server/tool, personality, and usage
   breakdown collections intentionally remain strict without changing their
   endpoint behavior.
+
+  This is source/policy and focused-test evidence only. Rebuild/deployment and
+  live three-window/shared-memory coordination acceptance remain **OPEN and
+  RESUMABLE**.
 
   > Rate limit state is in-memory only — resets on process restart. Suitable for single-instance deployments with supervisord restarts. For multi-replica deployments, replace with Redis or an external store.
 

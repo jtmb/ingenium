@@ -3850,3 +3850,62 @@ acceptance remains **OPEN and RESUMABLE**. Repeated retained `401` responses fro
 `/_ingenium/child-mcp-runtime` remain a follow-up requiring endpoint-level
 attribution after the proven C readiness blockers are deployed; no speculative
 scope expansion was made in this remediation.
+
+### Failed Wave 188 live attempt, secure rate-limit remediation, and recovery (2026-09-01)
+
+The single authorized harness invocation against clean, deployed revision
+`61cf9e5be767091aba0fa1e439771e6d9c9b1a48` retained run
+`d5a23535-b4da-4c11-bf01-1ba3b639d417`. External A, external B, and internal C
+all reached provider-connected and MCP-connected readiness, but the run stopped
+before any model turn when internal C's first pre-turn
+`GET /api/v1/opencode/sessions/{session}/messages` read returned
+`429:RATE_LIMITED`. Retained proxy evidence shows that the burst was not C's
+250 ms terminal-message polling: before that first read, the two external
+processes had forwarded 79 eligible service reads (`28` tool-catalog reads, `27`
+authentication preflights, `14` project-detail reads, and `10` tool-state reads),
+alongside strict child-runtime failures and repository-sync mutations. The API's
+pre-authentication `100` requests/minute loopback bucket combined those valid
+service calls with installation runtime-control traffic, then also rejected
+provider disconnect and credential cleanup.
+
+The corrected uncommitted source removes the broad header-selected automation
+candidate and its `1,000` requests/minute token/runtime-keyed bucket. Only
+canonical `GET` requests in the following exact union receive
+post-authentication capacity:
+
+- Dashboard safe-read policy templates: `/api/v1/projects/{segment}/detail`,
+  `/api/v1/context/sources/summary`, `/api/v1/context/conversations`,
+  `/api/v1/tasks/{uuid}`, `/api/v1/usage/thresholds`,
+  `/api/v1/usage/thresholds/evaluate`, `/api/v1/usage/attention`,
+  `/api/v1/usage/summary`, and `/api/v1/usage/events`.
+- Service-read additions: `/api/v1/auth/preflight`, `/api/v1/mcp-tools`, and
+  `/api/v1/mcp-tools/{segment}/state`.
+
+The parameterized templates use the source matchers
+`/api/v1/projects/[^/|]+/detail`,
+`/api/v1/tasks/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`,
+and `/api/v1/mcp-tools/[^/]+/state` against the normalized path. That capacity
+is `100` requests/minute per authenticated stable `servicePrincipalId`, with
+credential rotations and siblings sharing one bucket, plus the existing finite
+`480` requests/minute socket-IP safe-read admission ceiling. Caller headers
+cannot select either key. Compatibility runtime reads, ordinary mutations,
+unmatched/ambiguous paths, OpenCode paths, all non-GET methods, repository sync,
+credential self-revoke, and invalid, revoked, or malformed authentication retain
+the strict `100` requests/minute behavior. Separately mounted valid coordination
+and boundary-attested runtime-gateway paths retain their dedicated limiters.
+Each in-memory limiter map is bounded to 10,000 keys with synchronous expiry
+pruning and oldest-key eviction. The focused rate-limit suite passes all 35 tests,
+including route and method selection, spoofing, mutation thresholds,
+rotation/sibling fanout, aggregate IP admission, expiry, and bounded-store
+eviction.
+
+The harness and strict audit were each invoked exactly once and were not retried.
+Exact recovery disconnected only the run-owned provider, proved both revoked run
+credentials inactive before removing their exact files, cleared the two recorded
+processes, removed the owner-validated temporary run directory, and finalized
+telemetry as `complete` with `resolution.status: resolved`, method
+`explicit-recovery`, no failures, and no active processes. The sole strict audit
+reports no holds or artifact residuals. This remains source-test and containment
+evidence only: no deployment or three-window model/session acceptance occurred,
+so coordination/shared-memory acceptance remains **OPEN and RESUMABLE**. No
+`(work-complete)` marker or rollout `PASS` is recorded.
