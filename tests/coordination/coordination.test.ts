@@ -344,6 +344,12 @@ test("parses exact CLI/config bindings without accepting secret values", () => {
   unsafeBinary[unsafeBinary.indexOf("--opencode-binary") + 1] = "../unsafe";
   assert.throws(() => parseHarnessOptions(unsafeBinary, {}), /openCodeBinary/);
   assert.throws(() => parseHarnessOptions([...validArguments(fixture), "--runtime-revision", "7"], {}), /Unsupported/);
+  const misnamedCoordination = validArguments(fixture);
+  misnamedCoordination[misnamedCoordination.indexOf("--coordination-credential-file") + 1] = fixture.operator;
+  assert.throws(() => parseHarnessOptions(misnamedCoordination, {}), /coordinationCredentialFile must be named/);
+  const misnamedRepository = validArguments(fixture);
+  misnamedRepository[misnamedRepository.indexOf("--repository-credential-file") + 1] = fixture.operator;
+  assert.throws(() => parseHarnessOptions(misnamedRepository, {}), /repositoryCredentialFile must be named/);
   const withoutRuntime = validArguments(fixture);
   withoutRuntime.splice(withoutRuntime.indexOf("--runtime-id"), 2);
   assert.throws(() => parseHarnessOptions(withoutRuntime, {}), /runtimeId is required/);

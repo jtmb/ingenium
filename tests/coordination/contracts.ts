@@ -16,7 +16,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, delimiter, isAbsolute, join, relative, resolve } from "node:path";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -309,6 +309,9 @@ export function parseHarnessOptions(
     mcp.INGENIUM_MCP_CREDENTIAL_FILE,
     "coordinationCredentialFile",
   ));
+  if (basename(coordinationFile) !== ".ingenium-mcp-credential") {
+    throw new Error("coordinationCredentialFile must be named .ingenium-mcp-credential");
+  }
   const repositoryFile = resolveFile(configuredValue(
     args.get("repository-credential-file"),
     environment,
@@ -316,6 +319,9 @@ export function parseHarnessOptions(
     mcp.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE,
     "repositoryCredentialFile",
   ));
+  if (basename(repositoryFile) !== ".ingenium-repository-sync-credential") {
+    throw new Error("repositoryCredentialFile must be named .ingenium-repository-sync-credential");
+  }
   const operatorFile = resolveFile(configuredValue(
     args.get("operator-token-file"),
     environment,
