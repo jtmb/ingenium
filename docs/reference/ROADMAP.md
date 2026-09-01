@@ -3818,3 +3818,35 @@ retained as history; no new `(work-complete)` marker or `PASS` is recorded.
 - [ ] Run the built-in strict containment audit and retain its result
 - [ ] Run live external A, external B, and internal C acceptance with actual
   model/session artifacts, restart replay, cleanup, and evidence reconciliation
+
+### Failed Wave 187 live attempt and source remediation (2026-09-01)
+
+The single authorized harness invocation against deployed revision
+`c82d754e5feafd168f9d75d4a37b3f1a2accb3d4` retained run
+`33f4da71-2488-4d31-8cfa-3cbcb6f8abd3` and stopped before any model turn because
+internal C timed out with its requested provider disconnected. The deployed API
+successfully wrote and later removed the runtime OpenAI auth entry, but OpenCode
+1.18.9 had already initialized and cached the workspace provider instance. The
+harness also expected the nonexistent internal MCP key `ingenium-runtime`; the
+deployed runtime exposes the configured key `ingenium`.
+
+Current uncommitted source disposes the affected exact-runtime OpenCode workspace
+instance before and after runtime-scoped provider auth connect or disconnect. The
+post-mutation disposal runs after failed mutations, its sanitized failure takes
+precedence when mutation and cleanup both fail, and no success response is sent
+before it completes. Deterministic tests recreate a runtime client between the
+first disposal and mutation and prove that the second disposal removes it without
+targeting global or other-runtime clients. Internal C continues to attest the
+canonical MCP key `ingenium`. Focused evidence passes: API typecheck, 44
+OpenCode-client tests, 33 provider-persistence tests, and all 49 coordination
+tests. The global provider persistence saga is unchanged. The runner-owned audit
+was not invoked a second time. Retained cleanup shows both external processes and
+the proxy stopped, temporary state removed, zero cleanup errors, resolved
+telemetry with no active processes or failures, and closed run ports.
+
+This is source-test and cleanup evidence only. No retry, deployment, commit, or
+three-window model/session acceptance occurred, so coordination/shared-memory
+acceptance remains **OPEN and RESUMABLE**. Repeated retained `401` responses from
+`/_ingenium/child-mcp-runtime` remain a follow-up requiring endpoint-level
+attribution after the proven C readiness blockers are deployed; no speculative
+scope expansion was made in this remediation.

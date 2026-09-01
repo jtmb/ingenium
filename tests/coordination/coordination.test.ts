@@ -444,7 +444,7 @@ test("attests internal C against the deployed runtime OpenCode pin", async () =>
       health: { healthy: true, version: "1.18.9" },
       agents: [{ name: "ingenium-llm-broker", mode: "subagent" }],
       providers: { providers: [{ id: "openai", connected: true }] },
-      mcp: { "ingenium-runtime": { status: "connected" } },
+      mcp: { ingenium: { status: "connected" } },
     }),
   } as never, options, new AbortController().signal, 100);
 

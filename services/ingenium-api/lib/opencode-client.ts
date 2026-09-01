@@ -422,6 +422,10 @@ const PROVIDER_CONFIG_RELOAD_ERROR: OpenCodeErrorShape["error"] = {
   code: "PROVIDER_CONFIG_RELOAD_FAILED",
   message: "OpenCode provider configuration reload failed",
 };
+const PROVIDER_INSTANCE_DISPOSE_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_INSTANCE_DISPOSE_FAILED",
+  message: "OpenCode provider instance reset failed",
+};
 const INTEGRATION_KEY_CONNECT_ERROR: OpenCodeErrorShape["error"] = {
   code: "PROVIDER_INTEGRATION_CONNECT_FAILED",
   message: "Provider connection failed",
@@ -441,6 +445,7 @@ const PROVIDER_AUTH_STATUS_ERROR: OpenCodeErrorShape["error"] = {
 
 type SafeProviderOperation =
   | "provider_config_reload"
+  | "provider_instance_dispose"
   | "integration_key_connect"
   | "provider_auth_apply"
   | "provider_auth_remove"
@@ -767,6 +772,18 @@ export const opencodeClient = {
       signal,
       sanitizedUpstreamError: PROVIDER_CONFIG_RELOAD_ERROR,
       safeProviderOperation: "provider_config_reload",
+    }),
+
+  disposeInstance: (
+    directory?: string,
+    signal?: AbortSignal,
+  ): Promise<OpenCodeResult<boolean>> =>
+    request<boolean>("/instance/dispose", {
+      method: "POST",
+      query: { directory },
+      signal,
+      sanitizedUpstreamError: PROVIDER_INSTANCE_DISPOSE_ERROR,
+      safeProviderOperation: "provider_instance_dispose",
     }),
 
   /* ── Sessions ── */

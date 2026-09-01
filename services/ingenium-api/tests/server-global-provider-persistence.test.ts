@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { logger, projects, resetDbForTest, settings, vault } from "ingenium-core";
 import { opencodeClient } from "../lib/opencode-client.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
-import { withOpenCodeRuntimeTarget } from "../lib/runtime-opencode-context.js";
+import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "../lib/runtime-opencode-context.js";
 import {
   NATIVE_PROVIDER_MAX_WAITERS,
   NATIVE_PROVIDER_OPERATION_TIMEOUT_MS,
@@ -287,6 +287,7 @@ describe("server-global provider persistence", () => {
   it("persists a native API-key connection through the vault before calling OpenCode", async () => {
     const { server, baseUrl } = await startRouter();
     const secret = "native-provider-secret";
+    const dispose = vi.spyOn(opencodeClient, "disposeInstance").mockResolvedValue(true);
     const addAuth = vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({ connected: true, key: secret });
 
     try {
@@ -299,6 +300,7 @@ describe("server-global provider persistence", () => {
 
       expect(response.status).toBe(200);
       expect(body).not.toContain(secret);
+      expect(dispose).not.toHaveBeenCalled();
       expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined, expect.any(AbortSignal));
       const stored = vault.listItems(globalProjectId).find((item: any) => item.name === "OpenCode Native Provider API Key: openai") as { id: string } | undefined;
       expect(stored?.id).toBeTruthy();
@@ -310,7 +312,19 @@ describe("server-global provider persistence", () => {
 
   it("connects a runtime-scoped provider without persisting or returning its credential", async () => {
     const secret = "runtime-only-provider-secret";
-    const addAuth = vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({ key: secret });
+    let runtimeClientAlive = true;
+    const operations: string[] = [];
+    const dispose = vi.spyOn(opencodeClient, "disposeInstance").mockImplementation(async () => {
+      operations.push(`dispose:${currentOpenCodeRuntimeTarget()?.baseUrl}`);
+      runtimeClientAlive = false;
+      return true;
+    });
+    const addAuth = vi.spyOn(opencodeClient, "addAuth").mockImplementation(async () => {
+      operations.push(`add:${currentOpenCodeRuntimeTarget()?.baseUrl}`);
+      expect(runtimeClientAlive).toBe(false);
+      runtimeClientAlive = true;
+      return { key: secret };
+    });
 
     await withRouter(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
@@ -325,14 +339,111 @@ describe("server-global provider persistence", () => {
       expect(body).not.toContain(secret);
     }, true);
 
+    expect(dispose).toHaveBeenCalledTimes(2);
+    expect(dispose).toHaveBeenNthCalledWith(1, undefined, expect.any(AbortSignal));
+    expect(dispose).toHaveBeenNthCalledWith(2, undefined, expect.any(AbortSignal));
     expect(addAuth).toHaveBeenCalledWith("openai", { type: "api", key: secret }, undefined, expect.any(AbortSignal));
+    expect(operations).toEqual([
+      "dispose:http://runtime.test:4098",
+      "add:http://runtime.test:4098",
+      "dispose:http://runtime.test:4098",
+    ]);
+    expect(runtimeClientAlive).toBe(false);
     expect(nativeCredential("openai")).toBeUndefined();
+  });
+
+  it("does not mutate runtime-scoped provider auth when cached instance disposal fails", async () => {
+    vi.spyOn(opencodeClient, "disposeInstance").mockResolvedValue(openCodeError("PROVIDER_INSTANCE_DISPOSE_FAILED") as never);
+    const addAuth = vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
+
+    await withRouter(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "api", key: "unapplied-runtime-secret" }),
+      });
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({
+        error: { code: "PROVIDER_INSTANCE_DISPOSE_FAILED", message: "OpenCode request failed." },
+      });
+    }, true);
+
+    expect(addAuth).not.toHaveBeenCalled();
+  });
+
+  it("post-disposes runtime state after a failed provider add", async () => {
+    const operations: string[] = [];
+    const dispose = vi.spyOn(opencodeClient, "disposeInstance").mockImplementation(async () => {
+      operations.push("dispose");
+      return true;
+    });
+    vi.spyOn(opencodeClient, "addAuth").mockImplementation(async () => {
+      operations.push("add");
+      return openCodeError("PROVIDER_AUTH_APPLY_FAILED", "reflected-add-secret");
+    });
+
+    await withRouter(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "api", key: "failed-runtime-secret" }),
+      });
+      const body = await response.text();
+
+      expect(response.status).toBe(502);
+      expect(JSON.parse(body)).toEqual({
+        error: { code: "PROVIDER_AUTH_APPLY_FAILED", message: "OpenCode request failed." },
+      });
+      expect(body).not.toContain("secret");
+    }, true);
+
+    expect(dispose).toHaveBeenCalledTimes(2);
+    expect(operations).toEqual(["dispose", "add", "dispose"]);
+  });
+
+  it("prioritizes a failed post-dispose over a failed runtime provider add", async () => {
+    const dispose = vi.spyOn(opencodeClient, "disposeInstance")
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(openCodeError("PROVIDER_INSTANCE_DISPOSE_FAILED", "reflected-dispose-secret") as never);
+    vi.spyOn(opencodeClient, "addAuth").mockResolvedValue(
+      openCodeError("PROVIDER_AUTH_APPLY_FAILED", "reflected-add-secret") as never,
+    );
+
+    await withRouter(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "api", key: "failed-runtime-secret" }),
+      });
+      const body = await response.text();
+
+      expect(response.status).toBe(502);
+      expect(JSON.parse(body)).toEqual({
+        error: { code: "PROVIDER_INSTANCE_DISPOSE_FAILED", message: "OpenCode request failed." },
+      });
+      expect(body).not.toContain("secret");
+    }, true);
+
+    expect(dispose).toHaveBeenCalledTimes(2);
   });
 
   it("disconnects a runtime-scoped provider without deleting the server-global credential", async () => {
     const secret = "server-global-provider-secret";
     expect(storeNativeProviderCredential("openai", secret)).toBe("stored");
-    const remove = vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
+    let runtimeClientAlive = true;
+    const operations: string[] = [];
+    const dispose = vi.spyOn(opencodeClient, "disposeInstance").mockImplementation(async () => {
+      operations.push(`dispose:${currentOpenCodeRuntimeTarget()?.baseUrl}`);
+      runtimeClientAlive = false;
+      return true;
+    });
+    const remove = vi.spyOn(opencodeClient, "deleteAuth").mockImplementation(async () => {
+      operations.push(`delete:${currentOpenCodeRuntimeTarget()?.baseUrl}`);
+      expect(runtimeClientAlive).toBe(false);
+      runtimeClientAlive = true;
+      return {};
+    });
 
     await withRouter(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, { method: "DELETE" });
@@ -340,8 +451,43 @@ describe("server-global provider persistence", () => {
       expect(await response.json()).toEqual({ data: { disconnected: true } });
     }, true);
 
+    expect(dispose).toHaveBeenCalledTimes(2);
+    expect(dispose).toHaveBeenNthCalledWith(1, undefined, expect.any(AbortSignal));
+    expect(dispose).toHaveBeenNthCalledWith(2, undefined, expect.any(AbortSignal));
     expect(remove).toHaveBeenCalledWith("openai", undefined, expect.any(AbortSignal));
+    expect(operations).toEqual([
+      "dispose:http://runtime.test:4098",
+      "delete:http://runtime.test:4098",
+      "dispose:http://runtime.test:4098",
+    ]);
+    expect(runtimeClientAlive).toBe(false);
     expect(nativeCredential("openai")).toBe(secret);
+  });
+
+  it("post-disposes runtime state after a failed provider delete", async () => {
+    const operations: string[] = [];
+    const dispose = vi.spyOn(opencodeClient, "disposeInstance").mockImplementation(async () => {
+      operations.push("dispose");
+      return true;
+    });
+    vi.spyOn(opencodeClient, "deleteAuth").mockImplementation(async () => {
+      operations.push("delete");
+      return openCodeError("PROVIDER_AUTH_REMOVE_FAILED", "reflected-delete-secret");
+    });
+
+    await withRouter(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/opencode/auth/openai`, { method: "DELETE" });
+      const body = await response.text();
+
+      expect(response.status).toBe(502);
+      expect(JSON.parse(body)).toEqual({
+        error: { code: "PROVIDER_AUTH_REMOVE_FAILED", message: "OpenCode request failed." },
+      });
+      expect(body).not.toContain("secret");
+    }, true);
+
+    expect(dispose).toHaveBeenCalledTimes(2);
+    expect(operations).toEqual(["dispose", "delete", "dispose"]);
   });
 
   describe("native provider credential saga", () => {

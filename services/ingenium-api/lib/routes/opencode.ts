@@ -10,6 +10,7 @@ import {
   opencodeClient,
   buildAuthHeader,
   isOpenCodeError,
+  type OpenCodeResult,
   type SendPromptBody,
 } from "../opencode-client.js";
 import { requireActiveGlobalProject } from "../helpers.js";
@@ -1372,6 +1373,29 @@ opencodeRouter.delete("/integration-attempts/:attemptID", async (req, res) => {
 
 /* ── Auth ── */
 
+async function mutateRuntimeProviderAuth<T>(
+  directory: string | undefined,
+  mutation: (signal: AbortSignal) => Promise<OpenCodeResult<T>>,
+): Promise<OpenCodeResult<T>> {
+  const disposedBeforeMutation = await callOpenCodeWithProviderDeadline((signal) =>
+    opencodeClient.disposeInstance(directory, signal),
+  );
+  if (isOpenCodeError(disposedBeforeMutation)) return disposedBeforeMutation;
+
+  let mutationResult: OpenCodeResult<T>;
+  let disposedAfterMutation: OpenCodeResult<boolean>;
+  try {
+    mutationResult = await callOpenCodeWithProviderDeadline(mutation);
+  } finally {
+    disposedAfterMutation = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.disposeInstance(directory, signal),
+    );
+  }
+
+  // Cache cleanup takes precedence because mutation outcome cannot make a surviving stale client safe.
+  return isOpenCodeError(disposedAfterMutation!) ? disposedAfterMutation! : mutationResult!;
+}
+
 opencodeRouter.post("/auth/:providerID", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
@@ -1382,7 +1406,7 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
     return;
   }
   if (currentOpenCodeRuntimeTarget()) {
-    const result = await callOpenCodeWithProviderDeadline((signal) =>
+    const result = await mutateRuntimeProviderAuth(directory, (signal) =>
       opencodeClient.addAuth(req.params.providerID!, body, directory, signal),
     );
     if (isOpenCodeError(result)) sendResult(req, res, result);
@@ -1437,7 +1461,7 @@ opencodeRouter.delete("/auth/:providerID", async (req, res) => {
   const directory = req.query.directory as string | undefined;
   const providerId = req.params.providerID!;
   if (currentOpenCodeRuntimeTarget()) {
-    const result = await callOpenCodeWithProviderDeadline((signal) =>
+    const result = await mutateRuntimeProviderAuth(directory, (signal) =>
       opencodeClient.deleteAuth(providerId, directory, signal),
     );
     if (isOpenCodeError(result) && result.error.status !== 404) sendResult(req, res, result);

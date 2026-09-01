@@ -619,7 +619,7 @@ function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, opt
     : Array.isArray(providers.connected) && providers.connected.includes(options.providerId);
   required(providerConnected, `${label} requested provider is disconnected`);
   const mcp = record(value.mcp, `${label} MCP status is invalid`);
-  const expectedMcp = record(mcp[label === "C" ? "ingenium-runtime" : "ingenium"], `${label} Ingenium MCP status is missing`);
+  const expectedMcp = record(mcp.ingenium, `${label} Ingenium MCP status is missing`);
   required(expectedMcp.status === "connected", `${label} Ingenium MCP is disconnected`);
 }
 
@@ -630,7 +630,7 @@ function projectOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, op
   const model = agent.model && typeof agent.model === "object" ? agent.model as JsonRecord : {};
   const providers = value.providers as JsonRecord;
   const mcp = value.mcp as JsonRecord;
-  const mcpEntry = mcp[label === "C" ? "ingenium-runtime" : "ingenium"] as JsonRecord;
+  const mcpEntry = mcp.ingenium as JsonRecord;
   return {
     label,
     version: (value.health as JsonRecord).version,

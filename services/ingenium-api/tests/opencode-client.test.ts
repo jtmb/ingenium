@@ -593,6 +593,18 @@ describe("opencodeClient — method routing", () => {
     expect(init.method).toBe("PUT");
   });
 
+  it("disposeInstance() invalidates the selected OpenCode workspace instance", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, true));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.disposeInstance("/workspace");
+
+    const url = fetchSpy.mock.calls[0][0] as string;
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(url).toContain("/instance/dispose?directory=%2Fworkspace");
+    expect(init.method).toBe("POST");
+  });
+
   it("sendPrompt() calls POST /session/:id/message with parts body", async () => {
     const fetchSpy = vi
       .fn()
