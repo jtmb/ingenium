@@ -186,9 +186,11 @@ function fixtureRepository(): {
   const openCode = join(root, "opencode-fixture.mjs");
   writeFileSync(openCode, `#!/usr/bin/env node
 import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
 if (process.argv[2] === "--version") {
   process.stdout.write("1.18.25\\n");
 } else {
+  writeFileSync(${JSON.stringify(join(root, "spawn-pwd"))}, process.env.PWD ?? "");
   const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
   createServer((_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
@@ -453,6 +455,7 @@ test("keeps the canonical OpenCode spawn target after PATH changes", async () =>
     await waitForOpenCode(`http://127.0.0.1:${port}`, options.expectedOpenCodeVersion, new AbortController().signal, 2_000);
     assert.equal(processRecord.child.spawnfile, realpathSync(fixture.openCode));
     assert.equal(processRecord.child.exitCode, null);
+    assert.equal(readFileSync(join(fixture.root, "spawn-pwd"), "utf8"), fixture.root);
   } finally {
     await stopHostOpenCode(processRecord, runNonce);
     if (previousPath === undefined) delete process.env.PATH;

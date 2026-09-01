@@ -196,6 +196,7 @@ export async function startHostOpenCode(
     XDG_CONFIG_HOME: join(prepared.home, ".config"),
     XDG_DATA_HOME: join(prepared.home, ".local", "share"),
     XDG_CACHE_HOME: join(prepared.home, ".cache"),
+    PWD: options.worktree,
     OPENCODE_DISABLE_PROJECT_CONFIG: "1",
     OPENCODE_AUTH_CONTENT: authContent,
     OPENCODE_CONFIG: prepared.configFile,
