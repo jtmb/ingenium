@@ -464,7 +464,7 @@ const errors = [];
 const expected = {
   "browser-agent": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/browser-agent.md"],
   "ingenium-docs": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-docs.md"],
-  "ingenium-qa": ["openai/gpt-5.6-terra", "high", ".opencode/agents/execution/ingenium-qa.md"],
+  "ingenium-qa": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-qa.md"],
   "ingenium-qa-vision": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-qa-vision.md"],
   "ingenium-software-engineer-fast": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-software-engineer-fast.md"],
   "ingenium-software-engineer-premium": ["openai/gpt-5.6-sol", "high", ".opencode/agents/execution/ingenium-software-engineer-premium.md"],
@@ -1415,7 +1415,7 @@ done
 for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
   policy_label="${policy_source#"$REPO_ROOT"/}"
   check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
-    'qa.{0,320}security.{0,320}(once.{0,160}(implementation|wave|review)|wait.{0,200}(finalized|implementation)|post[-[:space:]]+wave)' \
+    'exactly one qa report.{0,120}at most one security report|qa.{0,320}security.{0,320}(once.{0,160}(implementation|wave|review)|wait.{0,200}(finalized|implementation)|post[-[:space:]]+wave)' \
     "bounded QA/security post-wave reporting policy"
   check_policy_pattern "$policy_source" "$policy_label" \
     'minimum targeted regression' \
@@ -2145,10 +2145,10 @@ for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
     'roadmap-marker/TodoWrite reconciliation'
 done
 require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
-  'QA and security each run once per declared review boundary' \
-  'single QA/security boundary'
+  'exactly one QA report and at most one security report' \
+  'single QA/optional-security implementation boundary'
 require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
-  'writer fix triggers only its targeted proving recheck' \
+  'writer remediation receives only its named minimum targeted regression.*proceeds directly to deploy and acceptance' \
   'targeted-only writer recheck'
 require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
   'STOP.*CANCELLED.*only when explicitly requested.*remediation request' \
@@ -2184,7 +2184,7 @@ done
 
 require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'Only an .*in-scope.*BLOCKING.*reopen' 'in-scope blocker-only reopening'
 require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'never auto-dispatch' 'out-of-scope dispatch prohibition'
-require_contract_pattern "$QA_PROFILE" "QA profile" 'targeted QA invocation' 'single targeted QA invocation'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'exactly one QA report.*declared implementation boundary' 'single targeted QA report'
 require_contract_pattern "$QA_PROFILE" "QA profile" 'sole owner.*full E2E.*container suite' 'single full-suite owner'
 require_contract_pattern "$QA_PROFILE" "QA profile" 'never dispatch remediation, Docs, another QA pass' 'no recursive QA/Docs dispatch'
 require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'directly affected canonical documentation or the user explicitly requests' 'conditional documentation scope'
@@ -2198,6 +2198,78 @@ require_contract_pattern "$SECURITY_PROFILE" "security profile" 'history scan ma
 require_contract_pattern "$SECURITY_PROFILE" "security profile" 'confirmed secret exposure.*critical explicit trigger' 'history-scan trigger boundary'
 require_contract_pattern "$SECURITY_PROFILE" "security profile" 'outside scope.*FOLLOW_UP.*immediately exploitable' 'out-of-scope security classification'
 require_contract_pattern "$SECURITY_POLICY" "security policy" 'history scan may run.*once' 'one-time history scan'
+
+# Reviewer policy is intentionally asserted only against the four canonical
+# sources changed by this contract. Other policy copies are outside this task.
+for policy_source in "$ORCHESTRATOR" "$REPO_ROOT/AGENTS.md"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'exactly one QA report and at most one security report' \
+    'one-QA/optional-security implementation boundary'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Security.*only.*predeclare.*changed security surface.*ordinary harness or test changes' \
+    'predeclared changed-security-surface dispatch gate'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Reviewers cannot add acceptance criteria or expand scope|Neither reviewer can add acceptance criteria, expand scope' \
+    'immutable reviewer scope and acceptance criteria'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
+    'strict BLOCKING classification'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'orchestrator cannot promote.*FOLLOW_UP.*INFORMATIONAL.*BLOCKING' \
+    'FOLLOW_UP/INFORMATIONAL promotion prohibition'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Non-exploitable hardening.*test-hygiene suggestions are.*FOLLOW_UP' \
+    'non-exploitable hardening/test-hygiene FOLLOW_UP classification'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'urgency does not waive.*functional tests.*forbids speculative hardening loops' \
+    'urgency functional-test and anti-hardening-loop rule'
+done
+
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'No reviewer rerun is permitted after writer remediation.*named minimum targeted regression.*proceeds directly to deploy and acceptance' \
+  'post-remediation reviewer-rerun prohibition'
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'Do not add acceptance criteria, expand scope' \
+  'immutable reviewer scope and acceptance criteria'
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
+  'strict BLOCKING classification'
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'FOLLOW_UP.*non-exploitable hardening and test-hygiene suggestions|non-exploitable hardening and test-hygiene suggestions.*FOLLOW_UP' \
+  'non-exploitable hardening/test-hygiene FOLLOW_UP classification'
+
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'at most one.*security report per declared implementation boundary' \
+  'optional single security report boundary'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'Ordinary harness or test changes are not a security surface and must not trigger security review' \
+  'ordinary harness/test security-review exclusion'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'add acceptance criteria, or expand scope' \
+  'immutable reviewer scope and acceptance criteria'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
+  'strict BLOCKING classification'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'non-exploitable hardening, test-hygiene.*FOLLOW_UP|FOLLOW_UP.*non-exploitable hardening, test-hygiene' \
+  'non-exploitable hardening/test-hygiene FOLLOW_UP classification'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'No reviewer rerun is permitted after writer remediation.*named minimum targeted regression.*proceeds directly to deploy and acceptance' \
+  'post-remediation reviewer-rerun prohibition'
+
+for policy_source in "$ORCHESTRATOR" "$REPO_ROOT/AGENTS.md" "$QA_PROFILE" "$SECURITY_PROFILE"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  stale_reviewer_exception="$(grep -Ein \
+    '(rerun|re-run).*(unless|when).*(review boundary|security boundary|changed boundary)|(unless|when).*(review boundary|security boundary|changed boundary).*(rerun|re-run)' \
+    "$policy_source" || true)"
+  if [[ -n "$stale_reviewer_exception" ]]; then
+    fail "$policy_label permits a reviewer rerun after remediation: $stale_reviewer_exception"
+    causal_policy_errors=1
+  else
+    pass "$policy_label contains no post-remediation reviewer-rerun exception"
+  fi
+done
 
 # Documentation authority is repository-first. Direct Docs Workspace mutation is
 # an explicit-user-request path, never an automatic post-change/session action.
@@ -2244,11 +2316,11 @@ require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" 
   'source fix.*targeted test.*deploy.*acceptance' \
   'continues the planned feature pipeline after a source fix'
 require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
-  'After a writer fixes an in-scope reviewer blocker.*minimum targeted regression' \
+  'After a writer remediates a reviewer-reported BLOCKING root cause.*minimum targeted regression' \
   'runs only the proving regression'
 require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
-  'Do not rerun QA or security unless.*review boundary' \
-  'prevents a second reviewer chain'
+  'never rerun QA or security.*minimum targeted regression.*proceed directly.*deploy and acceptance' \
+  'prevents reviewer reruns and resumes deploy/acceptance'
 require_contract_pattern "$ORCHESTRATOR" "scenario: unavailable external credential" \
   'required external credential or access.*attempted configured path' \
   'is a permitted ESCALATE_USER boundary'

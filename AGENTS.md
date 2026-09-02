@@ -148,7 +148,7 @@ mapping.
 |---|---|---|---|
 | `browser-agent` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/browser-agent.md` |
 | `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
-| `ingenium-qa` | `openai/gpt-5.6-terra` | `high` | `.opencode/agents/execution/ingenium-qa.md` |
+| `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
 | `ingenium-qa-vision` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa-vision.md` |
 | `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
 | `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
@@ -288,7 +288,7 @@ Use configured protected credentials and already-authorized supported grant path
 
 OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. Return `ESCALATE_USER` in the normal response only when a required external credential or access remains unavailable after the attempted configured path; a destructive or irreversible operation lacks authorization; a mutually exclusive product decision is required; the user requirement is genuinely ambiguous; or bounded diagnosis cannot establish a reproducible root cause.
 
-QA and security each report scope-classified findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a writer fixes an in-scope reviewer blocker, run only the minimum targeted regression for that root cause. Do not rerun QA or security unless the source change in that review boundary requires the reviewer’s originally declared check; never create a recursive reviewer handoff.
+Each declared implementation boundary receives exactly one QA report and at most one security report. Security is dispatched only when the task contract predeclares a changed security surface; ordinary harness or test changes are not a security surface. Reviewers cannot add acceptance criteria or expand scope, have no task-delegation authority, cannot spawn one another, and cannot reopen a closed task. After a writer remediates a reviewer-reported BLOCKING root cause, no reviewer is rerun: run only the named minimum targeted regression, then proceed directly to the declared deploy and acceptance steps. User urgency does not waive declared functional tests, but it forbids speculative hardening loops.
 
 ### Human-Readable Orchestration Communication
 
@@ -348,9 +348,10 @@ Before every phase, enumerate all currently known independent in-scope work
 streams and their dependencies. Dispatch every stream that is currently safe in
 one parallel call, up to the 6-active/3-writer limits; never serialize
 independent, non-overlapping work. Do not manufacture speculative work merely to
-fill capacity. QA, security, and visual review wait for their relevant
-implementation to be finalized, overlapping writers serialize, and Docs runs
-only when canonical documentation is directly affected or explicitly requested.
+fill capacity. QA and visual review wait for their relevant implementation to be
+finalized; security additionally requires a predeclared changed security surface.
+Overlapping writers serialize, and Docs runs only when canonical documentation is
+directly affected or explicitly requested.
 
 ### Writer Tiers and Routing
 
@@ -473,13 +474,13 @@ dependency, so it starts next.”
 Bad: return only `STATUS: writer_done`, raw subagent JSON, or a tool dump without
 explaining what changed, what the evidence proves, and what dependency is next.
 
-Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. A finding is **BLOCKING** only when it is in the user scope and fails acceptance criteria or is immediately exploitable changed code. Only an in-scope BLOCKING finding may reopen implementation. FOLLOW_UP findings are reported separately and never auto-dispatched. Every remediation must name and address the current reproducible root cause, then run the minimum targeted regression; a second failed check alone is never an escalation condition.
+Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. A finding is **BLOCKING** only when it is an in-scope failure of a user-declared acceptance criterion or immediately exploitable changed code. Only an in-scope BLOCKING finding may reopen implementation. The orchestrator cannot promote **FOLLOW_UP** or **INFORMATIONAL** to **BLOCKING**. Non-exploitable hardening and test-hygiene suggestions are **FOLLOW_UP**, reported separately, and never auto-dispatched. Every remediation must name and address the current reproducible root cause, run only its named minimum targeted regression, and then continue directly to deploy and acceptance; a second failed check alone is never an escalation condition.
 
 **STOP** and **CANCELLED** are terminal only when explicitly requested: spawn no new agents and run no QA, Docs, security review, visual gate, or sweep, while preserving resumable state, evidence, and skipped work. A remediation request is never reinterpreted as terminal. Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
 
 ### 🔴 Autonomous Roadmap Completion Contract
 
-Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. QA/security run once per declared boundary; writer fixes trigger only targeted rechecks and never recursive reviewer loops. Before the final response, reconcile roadmap markers and `TodoWrite` with evidence-backed state.
+Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. Each declared implementation boundary receives exactly one QA report and at most one security report, only for a predeclared changed security surface. Writer remediation receives its named targeted regression with no reviewer rerun, then continues to deploy and acceptance. Before the final response, reconcile roadmap markers and `TodoWrite` with evidence-backed state.
 
 Maintain `TodoWrite` and [`docs/reference/ROADMAP.md`](docs/reference/ROADMAP.md)
 markers/checklists continuously as evidence changes, not only at task close.
@@ -501,7 +502,7 @@ prove model/session behavior. A missing artifact is never summarized as proof.
 
 ### Bounded QA, Documentation, and Visual Gates
 
-QA runs targeted checks **once** after an implementation wave and does not trigger QA, Docs, or remediation work. Security is likewise a reporting-only bounded reviewer. `@ingenium-qa` is the single owner of a declared full E2E/container suite; the orchestrator schedules it but does not duplicate it. Neither QA nor security can delegate, spawn the other, or reopen a closed task. After a writer fixes a reviewer-reported in-scope blocker, the orchestrator runs the minimum targeted regression and reruns the original reviewer check only when that fix changes its declared review boundary. Docs runs only for directly affected canonical documentation or an explicit user request, and Docs work never triggers QA/Docs work.
+QA produces exactly one report after an implementation boundary and does not trigger QA, Docs, or remediation work. Security produces at most one report and only for a predeclared changed security surface; ordinary harness or test changes do not trigger it. `@ingenium-qa` is the single owner of a declared full E2E/container suite; the orchestrator schedules it but does not duplicate it. Neither reviewer can add acceptance criteria, expand scope, delegate, spawn the other, or reopen a closed task. After a writer fixes a reviewer-reported in-scope blocker, the orchestrator runs only the named minimum targeted regression, never reruns a reviewer, and proceeds directly to deploy and acceptance. Docs runs only for directly affected canonical documentation or an explicit user request, and Docs work never triggers QA/Docs work.
 
 UI work receives one changed-route visual gate after the final UI change for the route, and one passive full-site desktop/mobile sweep per user-requested UI batch, at 1440x900 and 390x844. A visual failure with a reproducible in-scope root cause receives causal source remediation and the smallest route recheck that proves it; the recheck alone never returns **ESCALATE_USER**. Docs-only and non-UI changes never open or reopen visual gates. PASS evidence includes screenshot, accessibility, network/console, and browser-cleanup confirmation.
 
@@ -835,9 +836,9 @@ For quick reference, here are the non-negotiable rules from above:
 
 ## 🔴 Bounded QA and Documentation Workflow
 
-After an implementation wave, invoke `@ingenium-qa` once for the task contract's targeted checks. Invoke `@ingenium-docs` only when canonical documentation is directly affected or the user explicitly requested it. QA and Docs never recursively trigger QA/Docs work.
+After a declared implementation boundary, invoke `@ingenium-qa` once for the task contract's targeted checks. Invoke security at most once and only for a predeclared changed security surface, never for ordinary harness or test changes. Invoke `@ingenium-docs` only when canonical documentation is directly affected or the user explicitly requested it. Reviewers cannot add acceptance criteria, expand scope, or recursively trigger review or Docs work.
 
-The task contract requires causal remediation rather than a fixed retry limit: name the current reproducible root cause, fix it within scope, and run the minimum targeted regression. Continue declared source fix → targeted test → deploy → acceptance steps automatically. STOP/CANCELLED skips all remaining QA, Docs, security, and visual work while preserving evidence.
+The task contract requires causal remediation rather than a fixed retry limit: name the current reproducible root cause, fix it within scope, and run only the named minimum targeted regression. Never rerun a reviewer after remediation; continue directly through declared deploy and acceptance steps. User urgency does not waive functional tests, but it forbids speculative hardening loops. STOP/CANCELLED skips all remaining QA, Docs, security, and visual work while preserving evidence.
 
 See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrator.md) for the complete finite task contract.
 

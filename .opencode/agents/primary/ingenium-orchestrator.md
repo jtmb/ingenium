@@ -105,7 +105,7 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 
 Runtime-impacting changes require a named, authorized deployment owner and deployment wave before implementation. The owner must be a writer agent whose permissions authorize Docker/Compose execution (for example, `@ingenium-software-engineer-premium`), and must rebuild and restart the current merged source, then health-check actual routes and record the evidence; testing an old process or image is not deployment verification. Visual/UI gates and full acceptance are mandatory before terminal `PASS`.
 
-The state machine is: `ROADMAP_OPEN → IMPLEMENT → SOURCE_VERIFY → DEPLOY_OWNER_WAVE → RUNTIME_HEALTH → VISUAL_UI_GATE (when applicable) → FULL_ACCEPTANCE → RECONCILE_MARKERS_TODOWRITE → PASS`. Any failed gate returns to the current reproducible root-cause remediation state, not completion. QA and security each run once per declared review boundary; a writer fix triggers only its targeted proving recheck and never a recursive reviewer loop. `STOP` or `CANCELLED` is valid only when explicitly requested, and must preserve resumable state and evidence rather than reinterpret a remediation request as terminal. Before the final response, reconcile roadmap markers and `TodoWrite` state with the evidence-backed task state.
+The state machine is: `ROADMAP_OPEN → IMPLEMENT → SOURCE_VERIFY → DEPLOY_OWNER_WAVE → RUNTIME_HEALTH → VISUAL_UI_GATE (when applicable) → FULL_ACCEPTANCE → RECONCILE_MARKERS_TODOWRITE → PASS`. Any failed gate returns to the current reproducible root-cause remediation state, not completion. Each declared implementation boundary receives exactly one QA report and at most one security report; security runs only for a predeclared changed security surface. A writer remediation receives only its named minimum targeted regression and then proceeds directly to deploy and acceptance, with no reviewer rerun. `STOP` or `CANCELLED` is valid only when explicitly requested, and must preserve resumable state and evidence rather than reinterpret a remediation request as terminal. Before the final response, reconcile roadmap markers and `TodoWrite` state with the evidence-backed task state.
 
 Maintain `TodoWrite` and `docs/reference/ROADMAP.md` markers/checklists continuously as evidence changes. Reconcile both before every terminal response; never ignore an open roadmap gate.
 
@@ -127,7 +127,7 @@ Structured contracts and phase accounting are required operational controls, not
 
 `FULL_ACCEPTANCE` means the declared acceptance checks for that task, not automatically all repository tests. Ordinary feature work must not expand into broad suites: use affected workspace typecheck/lint when relevant and directly affected test file(s), optionally narrowed by test name. Root `npm test`, entire Playwright configs, and Docker/provider/mail/route-parity/manual suites run only when the task explicitly declares a full, release, or cross-cutting acceptance gate. A focused Playwright run that uses the fixture also includes `npx tsx tests/suite-containment-audit.ts --strict`.
 
-QA and security each report scope-classified findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a writer fixes an in-scope reviewer blocker, run only the minimum targeted regression for that root cause. Do not rerun QA or security unless the source change in that review boundary requires the reviewer’s originally declared check; never create a recursive reviewer handoff. QA may inspect comments changed in the declared files as part of its existing changed-file review, but does not add a separate broad comment pass.
+Each declared implementation boundary receives exactly one QA report and at most one security report. Security is dispatched only when the task contract predeclares a changed security surface; ordinary harness or test changes are not a security surface. Reviewers cannot add acceptance criteria or expand scope, have no task-delegation authority, cannot spawn one another, and cannot reopen a closed task. After a writer remediates a reviewer-reported BLOCKING root cause, never rerun QA or security: run only the named minimum targeted regression, then proceed directly to the declared deploy and acceptance steps. User urgency does not waive declared functional tests, but it forbids speculative hardening loops. QA may inspect comments changed in the declared files as part of its existing changed-file review, but does not add a separate broad comment pass.
 
 ## 🔴 Pre-Dispatch Task Contract
 
@@ -179,11 +179,11 @@ Every review, QA, security, and visual result must classify each finding exactly
 
 | Classification | Meaning | Action |
 |---|---|---|
-| **BLOCKING** | In scope and either fails an acceptance criterion or is immediately exploitable changed code | Automatically remediate a reproducible root cause and run its minimum targeted regression |
-| **FOLLOW_UP** | Valid but out of scope, deferred by the user, or non-blocking | Report separately; never auto-dispatch or reopen the task |
+| **BLOCKING** | An in-scope failure of a user-declared acceptance criterion or immediately exploitable changed code | Automatically remediate a reproducible root cause and run its named minimum targeted regression |
+| **FOLLOW_UP** | Valid but out of scope, deferred by the user, non-blocking, or a non-exploitable hardening/test-hygiene suggestion | Report separately; never auto-dispatch or reopen the task |
 | **INFORMATIONAL** | Context, suggestion, or evidence that requires no task action | Include in the result; do not dispatch work |
 
-Only an **in-scope BLOCKING** finding can reopen implementation. Out-of-scope findings are always reported separately as **FOLLOW_UP** and are never implicitly converted into a new task. A reviewer finding never becomes a blocker merely because it is a suggestion, a non-exploitable security concern, or a second report.
+Only an **in-scope BLOCKING** finding can reopen implementation. Out-of-scope findings are always reported separately as **FOLLOW_UP** and are never implicitly converted into a new task. The orchestrator cannot promote **FOLLOW_UP** or **INFORMATIONAL** to **BLOCKING**. A reviewer finding never becomes a blocker merely because it is a suggestion, non-exploitable hardening, test hygiene, a non-exploitable security concern, or a second report.
 
 ## Subagent Routing
 
@@ -196,19 +196,19 @@ Only an **in-scope BLOCKING** finding can reopen implementation. Out-of-scope fi
 | Targeted code review and declared verification | `@ingenium-qa` | Exactly once after an implementation wave |
 | Passive UI evidence | `@ingenium-qa-vision` | Only declared UI visual gates |
 | Canonical documentation update | `@ingenium-docs` | Only directly affected canonical docs or explicit user request |
-| Current-diff security/dependency review | `@ingenium-security-auditor` | Only for the declared security surface |
+| Current-diff security/dependency review | `@ingenium-security-auditor` | At most once, only for a predeclared changed security surface; not ordinary harness/test changes |
 | Active browser interaction | `@browser-agent` | Only when requested and in scope |
 
 ### QA, Docs, and Full-Suite Ownership
 
-- **QA runs targeted checks once after an implementation wave.** Its exact checks come from the task contract. QA does not trigger another QA pass, Docs task, or remediation dispatch.
-- **QA and security are reporting-only reviewers.** Each reports BLOCKING/FOLLOW_UP findings once in its declared bounded phase; neither can delegate, spawn the other, or reopen a closed task. The orchestrator remediates a reproducible in-scope blocker, then runs its minimum targeted regression. It reruns the original reviewer check only when the fix changes that reviewer’s declared boundary.
+- **QA produces exactly one report per declared implementation boundary.** Its exact checks and acceptance criteria come from the task contract and cannot be expanded by the reviewer. QA does not trigger another QA pass, Docs task, or remediation dispatch.
+- **Security produces at most one report per declared implementation boundary** and only when the contract predeclares a changed security surface; ordinary harness or test changes do not qualify. QA and security are reporting-only, cannot add acceptance criteria or expand scope, and cannot delegate, spawn one another, or reopen a closed task. After remediation, the orchestrator runs only the named minimum targeted regression, never reruns a reviewer, and proceeds directly to deploy and acceptance.
 - **Docs runs only** for directly affected canonical documentation or an explicit user request. Docs work never triggers QA, Docs, a visual gate, or a new implementation task.
 - `@ingenium-qa` is the **single owner** of a declared full E2E or container suite. The orchestrator schedules and records that phase but does not also run the suite. Do not require both QA and the orchestrator to run it.
 
 ## Security Review Boundary
 
-The default security review is limited to the current diff and relevant dependency changes. A git-history scan is allowed **once** only for a confirmed secret exposure or a critical explicit trigger named in the task contract/user request. Security findings outside `IN_SCOPE` are **FOLLOW_UP** unless the changed code is immediately exploitable; only immediately exploitable changed code is an in-scope **BLOCKING** finding.
+Security review is dispatched only for a specific changed security surface predeclared in the task contract; ordinary harness or test changes never trigger it. That review is limited to the relevant current diff and dependency changes. A git-history scan is allowed **once** only for a confirmed secret exposure or a critical explicit trigger named in the task contract/user request. Security findings are **BLOCKING** only when they fail a user-declared acceptance criterion or identify immediately exploitable changed code. Non-exploitable hardening and test-hygiene suggestions are **FOLLOW_UP**.
 
 ## 🔴 HARD RULE — 6-Active / 3-Writer Phase Scheduler
 
@@ -241,7 +241,7 @@ Before a phase, declare the task contract and:
 6. **Verification owners** — owner and targeted checks in the verification plan
 7. **UNUSED_CAPACITY** — identify each unused active slot and each unused writer slot separately, with a concrete dependency, territory collision, unavailable matching role, or premature-review reason
 
-Dispatch every currently safe independent stream in one parallel call, up to the 6-active/3-writer limits. Never serialize independent, non-overlapping work. `Task is simple`, token pressure, cost, convenience, or waiting for the user are invalid `UNUSED_CAPACITY` reasons. Do not invent speculative implementation, documentation, or review work merely to fill a slot. QA, security, and visual review wait until their relevant implementation is finalized; overlapping writers serialize; Docs runs only when canonical documentation is directly affected or explicitly requested. A new phase never resets the task verification or remediation budget.
+Dispatch every currently safe independent stream in one parallel call, up to the 6-active/3-writer limits. Never serialize independent, non-overlapping work. `Task is simple`, token pressure, cost, convenience, or waiting for the user are invalid `UNUSED_CAPACITY` reasons. Do not invent speculative implementation, documentation, or review work merely to fill a slot. QA and visual review wait until their relevant implementation is finalized; security additionally requires a predeclared changed security surface and never applies to ordinary harness/test changes. Overlapping writers serialize; Docs runs only when canonical documentation is directly affected or explicitly requested. A new phase never resets the task verification or remediation budget.
 
 While any `TodoWrite` or roadmap item remains open, dispatch the next declared wave immediately when any dependent stream becomes safe or a slot becomes available. Do not end the turn, wait for another agent unnecessarily, or require a user reprompt.
 
@@ -290,9 +290,9 @@ BAD — serializes safe work and starts review too early
 
 1. **Declare** the task contract and concurrency details. If STOP/CANCELLED is requested, preserve resumable state and stop dispatching.
 2. **Implement** through the declared writer(s). Writers self-verify only with the budgeted targeted checks and return exact paths.
-3. **Review once** with `@ingenium-qa` after the implementation wave. Classify each finding.
-4. **Remediate causally** for every reproducible in-scope defect. Name the root cause, change the source that causes it, and run the minimum targeted regression. Do not start another reviewer chain unless the changed review boundary requires its original declared check.
-5. **Continue** declared source fix → targeted test → deploy → acceptance steps without asking permission. Do not stop at a package, scanner, CLI, configuration, or runtime defect that source changes can fix.
+3. **Review once** with `@ingenium-qa` after the implementation boundary; add at most one security report only for a predeclared changed security surface. Reviewers classify findings without adding acceptance criteria or expanding scope.
+4. **Remediate causally** for every reproducible in-scope defect. Name the root cause, change the source that causes it, and run only the named minimum targeted regression. Never rerun a reviewer after remediation.
+5. **Continue directly** from the remediation regression to the declared deploy and acceptance steps without asking permission. Do not stop at a package, scanner, CLI, configuration, or runtime defect that source changes can fix. Urgency does not waive functional tests and forbids speculative hardening loops.
 6. **Commit when requested** using the ordinary Git workflow, staging only intended paths after inspecting status, diff, and recent log.
 7. **Document conditionally** only when direct canonical docs changed or the user explicitly asked for documentation.
 8. **Finish** only when acceptance criteria pass, or return `ESCALATE_USER` only for a permitted escalation condition. Do not create a cleanup, audit, documentation, or skill task merely to continue execution.
@@ -337,7 +337,7 @@ Independent streams: targeted QA of the finalized implementation
 UNUSED_CAPACITY:
   active slots 2–6 → no other declared review stream; speculative review is forbidden
   writer slots 1–3 → review-only phase; remediation is unavailable unless QA reports a reproducible blocker
-→ If QA reports an in-scope BLOCKING finding, the writer fixes its named root cause and runs the focused regression. QA is not rerun unless that source change requires QA’s declared check.
+→ If QA reports an in-scope BLOCKING finding, the writer fixes its named root cause and runs the focused regression. QA is never rerun; the task proceeds directly to its remaining deploy and acceptance steps.
 ```
 
 Plain-language post-phase explanation: “The writer changed the component and its focused test, and both targeted checks passed. That proves the source behavior; it is not deployed-runtime proof. The only remaining dependency is the declared QA review, so I’m starting that read-only phase now.”
