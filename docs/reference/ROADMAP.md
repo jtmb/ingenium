@@ -4228,3 +4228,74 @@ both credentials, verified each returned `401`, and removed both protected
 files. Completion-loss, quarantine, recovery, restart replay, and B restart
 remain unproved, so coordination/shared-memory acceptance remains **OPEN and
 RESUMABLE** with no rollout `PASS` or `(work-complete)` marker.
+
+### Wave 196 startup lifecycle lock-contention remediation (2026-09-02)
+
+The sole authorized follow-up invocation ran from clean, deployed revision
+`6770620a96c7ab1e2604d086dd312b9541ff39e2` as
+`2b8d1910-5514-4be9-90b2-ffe5b952015e`, with run nonce
+`c2eb63fc-5a07-4579-afe8-fb70ab53b3ea`. External A, external B, and internal C
+reached simultaneous provider-connected and MCP-connected readiness against the
+same canonical workspace/project/storage binding. Model A created its exact
+run-owned file, passed the managed typecheck, and created preserved commit
+`70c06f22e95110e33570edfc1685668904799649`, whose only change is
+`tests/coordination/2b8d1910-5514-4be9-90b2-ffe5b952015e-a.txt`.
+
+The first dispatch then failed at the post-commit repository projection with the
+bounded `tool_status` diagnostic. Its single tool name, call/session/message
+identity, nonce, and operation matched, but the status was `error`. The local
+manifest remained at generation 11, no current `apply_uncertain` recovery record
+was written, and the retained lock owner was external A. That lock file was
+written during cleanup, so it is not by itself evidence of which process held
+the lock at the earlier child failure.
+
+Source tracing and a focused reproduction exposed the in-scope lifecycle race:
+a `session.idle` event queued while a successful `session.created` full sync was
+in flight immediately launched a redundant second full repository sync because
+the successful full path did not arm the existing 60-second idle throttle. With
+simultaneous external processes, that duplicate projection unnecessarily
+competes with the canary child's explicit post-commit sync for the cross-process
+lock. The minimum uncommitted correction advances the idle throttle only after a
+successful lifecycle full sync; failed full syncs remain immediately eligible
+for reconciliation. The focused regression passes `1/1`, and the extension
+TypeScript check passes. A diagnostic run of the complete repository-sync test
+file passes `24/25`; its sole failure is the canonical repository inventory
+assertion expecting `browser-agent`, outside the changed lifecycle queue path.
+`git diff --check` passes. No second live invocation is authorized or performed.
+
+Cleanup retained zero failures and complete/resolved telemetry. Independent
+checks confirmed PIDs `2440434` and `2440435` absent, ports `53507`-`53509`
+closed, the exact temporary root absent, the artifact directory `0700`, each
+artifact and the managed canary `0600`, and the runtime OpenAI provider
+disconnected. The strict containment audit passes. Completion-loss replay,
+true local-error quarantine/recovery/deduplication, B/C transforms, and B restart
+replay were not reached. Coordination/shared-memory acceptance therefore
+remains **OPEN and RESUMABLE** with no rollout `PASS` or `(work-complete)` marker.
+
+### Wave 197 canonical-worktree lifecycle throttle isolation (2026-09-02)
+
+Security review found that Wave 196's uncommitted startup correction reused the
+legacy process-global incremental completion timestamp. A successful full sync
+for one worktree could therefore suppress a required idle sync for a different
+worktree in the same extension process.
+
+The corrected uncommitted implementation keys completion and in-flight state by
+the real canonical worktree. A successful full or incremental sync throttles
+only that canonical worktree; failed reconciliations remain immediately
+eligible, and distinct worktrees run independently. The existing per-worktree
+lifecycle queue remains serialized and is removed after it drains. Completion
+state is capped at 64 entries, evicts the least-recently-touched entry at the
+bound, and opportunistically removes inactive entries after the existing
+60-second throttle window; canonical in-flight entries are always released in
+the sync's `finally` path. It creates no timers, preserving shutdown behavior
+without an unbounded timer or map leak.
+
+Four focused lifecycle regressions pass: the prior startup full-plus-idle race,
+two distinct worktrees, repeated access through an alias of the same canonical
+worktree, and bounded/stale state plus drained-queue cleanup with no timer
+creation. The extension TypeScript check and `git diff --check` pass. The
+optional complete affected-file run passes `27/28`; its sole failure remains the
+unrelated canonical inventory assertion because the browser-agent profile is
+`0664` while the unchanged scanner admits canonical profiles only at `0644`.
+Browser-agent file mode and repository scanner policy are unchanged. No live
+run, deployment, commit, or delegation is authorized or performed.

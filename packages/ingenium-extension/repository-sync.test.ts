@@ -7,11 +7,13 @@ import {
   acquireRepositorySyncLock,
   buildRepositoryManifestV2,
   drainRepositoryLifecycleQueue,
+  incrementalSync,
   loadManifest,
   pushDiskToApi,
   REPOSITORY_MAX_RESOURCE_TOTAL_BYTES,
   RepositorySyncScanError,
   repositorySync,
+  repositoryLifecycleStateForTest,
   resetIncrementalSyncThrottle,
   ResourceSyncPlugin,
   saveManifest,
@@ -475,6 +477,97 @@ describe("repository-authoritative manifest v2", () => {
 
     await drainRepositoryLifecycleQueue(worktree);
     expect(mockCallMcpTool).toHaveBeenCalledOnce();
+  });
+
+  it("does not repeat a successful startup sync for an idle event queued in flight", async () => {
+    fixture();
+    const successfulCall = successfulMcp();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    mockCallMcpTool.mockImplementation(async (...args) => {
+      await pending;
+      return successfulCall(...args);
+    });
+    const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log: vi.fn() } } });
+
+    plugin.event({ event: { type: "session.created" } });
+    await vi.waitFor(() => expect(mockCallMcpTool).toHaveBeenCalledOnce());
+    plugin.event({ event: { type: "session.idle" } });
+    release();
+
+    await drainRepositoryLifecycleQueue(worktree);
+    expect(mockCallMcpTool).toHaveBeenCalledOnce();
+    expect(repositoryLifecycleStateForTest().lifecycleQueues).toBe(0);
+  });
+
+  it("scopes lifecycle completion throttling to each canonical worktree", async () => {
+    fixture();
+    const firstWorktree = worktree;
+    fixture();
+    const secondWorktree = worktree;
+    successfulMcp();
+    try {
+      const first = await ResourceSyncPlugin({ worktree: firstWorktree, client: { app: { log: vi.fn() } } });
+      const second = await ResourceSyncPlugin({ worktree: secondWorktree, client: { app: { log: vi.fn() } } });
+
+      first.event({ event: { type: "session.created" } });
+      await drainRepositoryLifecycleQueue(firstWorktree);
+      first.event({ event: { type: "session.idle" } });
+      second.event({ event: { type: "session.idle" } });
+      await Promise.all([
+        drainRepositoryLifecycleQueue(firstWorktree),
+        drainRepositoryLifecycleQueue(secondWorktree),
+      ]);
+
+      expect(mockCallMcpTool).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(firstWorktree, { recursive: true, force: true });
+    }
+  });
+
+  it("throttles repeated completed syncs through a canonical-worktree alias", async () => {
+    fixture();
+    successfulMcp();
+    const aliases = mkdtempSync(join(tmpdir(), "ingenium-repository-alias-"));
+    const alias = join(aliases, "worktree");
+    symlinkSync(worktree, alias, "dir");
+    try {
+      const first = await incrementalSync(worktree);
+      const repeated = await incrementalSync(alias);
+
+      expect(first?.docs?.errors).toBe(0);
+      expect(repeated).toBeNull();
+      expect(mockCallMcpTool).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(aliases, { recursive: true, force: true });
+    }
+  });
+
+  it("bounds and evicts stale canonical-worktree completion state without timers", async () => {
+    const roots: string[] = [];
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    successfulMcp();
+    const maximum = repositoryLifecycleStateForTest().maximumIncrementalStates;
+    try {
+      for (let index = 0; index <= maximum; index += 1) {
+        fixture();
+        roots.push(worktree);
+        await incrementalSync(worktree);
+      }
+
+      expect(repositoryLifecycleStateForTest()).toMatchObject({
+        incrementalStates: maximum,
+        lifecycleQueues: 0,
+      });
+      now += 60_000;
+      expect(repositoryLifecycleStateForTest().incrementalStates).toBe(0);
+      expect(timers).not.toHaveBeenCalled();
+    } finally {
+      for (const root of roots) rmSync(root, { recursive: true, force: true });
+      worktree = "";
+    }
   });
 
   it("rejects symlink traversal instead of following repository content", () => {

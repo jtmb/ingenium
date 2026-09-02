@@ -3548,9 +3548,16 @@ export async function fullSync(worktree: string): Promise<FullSyncResult & { res
 
 // 60s throttle to avoid hammering the API on rapid session.idle bursts.
 // The API's scheduled maintenance cycle provides a safety net for anything missed.
-let lastIncrementalSync = 0;
-let incrementalSyncInFlight = false;
 const INCREMENTAL_THROTTLE_MS = 60000;
+const MAX_INCREMENTAL_SYNC_STATES = 64;
+
+interface IncrementalSyncCompletion {
+  completedAt: number;
+  touchedAt: number;
+}
+
+const incrementalSyncCompletions = new Map<string, IncrementalSyncCompletion>();
+const incrementalSyncsInFlight = new Set<string>();
 
 interface RepositoryLifecycleQueue {
   running: boolean;
@@ -3564,9 +3571,50 @@ const repositoryLifecycleQueues = new Map<string, RepositoryLifecycleQueue>();
 
 /** Test support: reset the process-wide idle throttle and in-flight guard. */
 export function resetIncrementalSyncThrottle(): void {
-  lastIncrementalSync = 0;
-  incrementalSyncInFlight = false;
+  incrementalSyncCompletions.clear();
+  incrementalSyncsInFlight.clear();
   repositoryLifecycleQueues.clear();
+}
+
+function pruneIncrementalSyncCompletions(now: number): void {
+  for (const [worktree, state] of incrementalSyncCompletions) {
+    if (now - state.touchedAt >= INCREMENTAL_THROTTLE_MS) incrementalSyncCompletions.delete(worktree);
+  }
+}
+
+function recordIncrementalSyncCompletion(canonicalWorktree: string): void {
+  const now = Date.now();
+  pruneIncrementalSyncCompletions(now);
+  const existing = incrementalSyncCompletions.get(canonicalWorktree);
+  if (existing) {
+    existing.completedAt = now;
+    existing.touchedAt = now;
+    return;
+  }
+
+  if (incrementalSyncCompletions.size >= MAX_INCREMENTAL_SYNC_STATES) {
+    let oldest: [string, IncrementalSyncCompletion] | undefined;
+    for (const entry of incrementalSyncCompletions) {
+      if (!oldest || entry[1].touchedAt < oldest[1].touchedAt) oldest = entry;
+    }
+    if (oldest) incrementalSyncCompletions.delete(oldest[0]);
+  }
+
+  incrementalSyncCompletions.set(canonicalWorktree, { completedAt: now, touchedAt: now });
+}
+
+/** Test support: inspect bounded lifecycle state without exposing its entries. */
+export function repositoryLifecycleStateForTest(): {
+  incrementalStates: number;
+  lifecycleQueues: number;
+  maximumIncrementalStates: number;
+} {
+  pruneIncrementalSyncCompletions(Date.now());
+  return {
+    incrementalStates: incrementalSyncCompletions.size,
+    lifecycleQueues: repositoryLifecycleQueues.size,
+    maximumIncrementalStates: MAX_INCREMENTAL_SYNC_STATES,
+  };
 }
 
 function hasSyncErrors(result: FullSyncResult): boolean {
@@ -3580,17 +3628,21 @@ function hasSyncErrors(result: FullSyncResult): boolean {
  */
 export async function incrementalSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean } | null> {
   const now = Date.now();
-  if (incrementalSyncInFlight || now - lastIncrementalSync < INCREMENTAL_THROTTLE_MS) return null;
-  incrementalSyncInFlight = true;
+  const canonicalWorktree = realpathSync(worktree);
+  pruneIncrementalSyncCompletions(now);
+  const completed = incrementalSyncCompletions.get(canonicalWorktree);
+  if (incrementalSyncsInFlight.has(canonicalWorktree)
+    || (completed !== undefined && now - completed.completedAt < INCREMENTAL_THROTTLE_MS)) return null;
+  incrementalSyncsInFlight.add(canonicalWorktree);
   try {
     const result = await fullSync(worktree);
     // A failed reconciliation is intentionally eligible for the next idle
     // event. Advancing the throttle here used to turn a startup race into a
     // guaranteed one-minute recovery delay.
-    if (!hasSyncErrors(result)) lastIncrementalSync = Date.now();
+    if (!hasSyncErrors(result)) recordIncrementalSyncCompletion(canonicalWorktree);
     return result;
   } finally {
-    incrementalSyncInFlight = false;
+    incrementalSyncsInFlight.delete(canonicalWorktree);
   }
 }
 
@@ -3631,7 +3683,10 @@ async function runRepositoryLifecycleQueue(worktree: string, queue: RepositoryLi
       else queue.incrementalPending = false;
       try {
         const result = full ? await fullSync(worktree) : await incrementalSync(worktree);
-        if (result) reportLifecycleResult(queue.client, result);
+        if (result) {
+          reportLifecycleResult(queue.client, result);
+          if (full && !hasSyncErrors(result)) recordIncrementalSyncCompletion(worktree);
+        }
       } catch {
         logPluginLifecycle(queue.client, "resource-sync", "warn", "resource_sync: request_failed");
       }
@@ -3641,6 +3696,7 @@ async function runRepositoryLifecycleQueue(worktree: string, queue: RepositoryLi
     const waiters = queue.waiters.splice(0);
     waiters.forEach((resolvePromise) => resolvePromise());
     if (queue.fullPending || queue.incrementalPending) enqueueRepositoryLifecycleSync(worktree, queue.client, "incremental");
+    else if (repositoryLifecycleQueues.get(worktree) === queue) repositoryLifecycleQueues.delete(worktree);
   }
 }
 
@@ -3667,7 +3723,7 @@ function enqueueRepositoryLifecycleSync(worktree: string, client: any, mode: "fu
 
 /** Test support: wait until the process-local lifecycle queue is empty. */
 export async function drainRepositoryLifecycleQueue(worktree: string): Promise<void> {
-  const queue = repositoryLifecycleQueues.get(worktree);
+  const queue = repositoryLifecycleQueues.get(realpathSync(worktree));
   if (!queue || (!queue.running && !queue.fullPending && !queue.incrementalPending)) return;
   await new Promise<void>((resolvePromise) => queue.waiters.push(resolvePromise));
 }
@@ -3680,7 +3736,7 @@ export async function drainRepositoryLifecycleQueue(worktree: string): Promise<v
  *   session.idle    → Incremental sync (throttled 1/60s)
  */
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
-  const worktree = ctx.worktree;
+  const worktree = realpathSync(ctx.worktree);
 
   return {
     event: ({ event }: { event: any }) => {
