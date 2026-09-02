@@ -1804,7 +1804,10 @@ test("generates one fixed default-deny model profile without serializing credent
   assert.deepEqual(config.agent["coordination-harness-canary"].tools, { "*": false, coordination_canary: true });
   assert.deepEqual(config.agent["coordination-harness-canary"].permission, { "*": "deny" });
   assert.equal(config.agent["coordination-harness-canary"].maxSteps, 2);
-  assert.equal(config.plugin.at(-1), "file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}");
+  assert.deepEqual(config.plugin, [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}",
+  ]);
   assert.equal(config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE, "{env:INGENIUM_MCP_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE, "{env:INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_TRUSTED_API_URL, "http://127.0.0.1:45000/api/v1");
@@ -1815,7 +1818,9 @@ test("generates one fixed default-deny model profile without serializing credent
   }, "B"));
   assert.deepEqual(transformOnly.tools, { "*": false });
   assert.deepEqual(transformOnly.agent["coordination-harness-canary"].tools, { "*": false });
-  assert.equal(transformOnly.plugin?.includes("file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}") ?? false, false);
+  assert.deepEqual(transformOnly.plugin, [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+  ]);
 });
 
 test("rejects every nonallowlisted canary request before side effects and accepts the exact operation", async () => {

@@ -60,6 +60,8 @@ const INTERNAL_CANARY_AGENT = "ingenium-llm-broker";
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CANARY_TOOL_SYSTEM_PROMPT = `Follow only the current user request. Invoke ${CANARY_TOOL} exactly once with only the supplied nonce and operation. Never invoke any other tool, access files directly, inspect configuration, or reveal credentials.`;
 const TRANSFORM_ONLY_SYSTEM_PROMPT = "Follow only the current user request. Never invoke tools, access files, inspect configuration, or reveal credentials.";
+const SESSION_COORDINATOR_PLUGIN = "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts";
+const CANARY_PLUGIN = "file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -790,10 +792,7 @@ export function buildExternalConfig(
   config.default_agent = CANARY_AGENT;
   config.permission = { "*": "deny" };
   config.tools = { "*": false, ...(canUseCanary ? { [CANARY_TOOL]: true } : {}) };
-  if (canUseCanary) {
-    const plugins = Array.isArray(config.plugin) ? config.plugin : [];
-    config.plugin = [...plugins, "file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}"];
-  }
+  config.plugin = [SESSION_COORDINATOR_PLUGIN, ...(canUseCanary ? [CANARY_PLUGIN] : [])];
   config.agent = {
     [CANARY_AGENT]: {
       mode: "subagent",

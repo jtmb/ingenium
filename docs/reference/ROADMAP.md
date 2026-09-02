@@ -4497,3 +4497,55 @@ audit passes. No completed overlap artifact was retained; completion-loss
 replay, quarantine/recovery/deduplication, later typed-memory views, and B
 restart replay were not reached. Coordination/shared-memory acceptance remains
 **OPEN and RESUMABLE**, with no rollout `PASS` or new `(work-complete)` marker.
+
+### Wave 204 external harness plugin isolation (2026-09-02)
+
+The sole authorized invocation ran from clean, deployed revision
+`3b081cc24b8c77f36942cb0400404349b9c5cbfe` as
+`7f51d900-bc26-4512-bd24-7d82d12395a0`, with run nonce
+`834762bb-ef81-4fde-bfda-b1fb65c0ab4c`. Protected preflight retained the exact
+project, workspace, storage mapping, runtime UUID, image revision,
+`openai/gpt-5.6-sol` high model mapping, external OpenCode `1.18.26`, and
+internal OpenCode `1.18.9`. External A and B and internal C reached provider
+and MCP readiness. Model A completed the fixed edit, typecheck, stage, and
+managed commit; preserved commit
+`4bc7044fd9eb784d5eb53fb3d17e90ab597a38f0` contains only
+`tests/coordination/7f51d900-bc26-4512-bd24-7d82d12395a0-a.txt`.
+
+The run again failed Model A dispatch validation with `tool_status` after the
+managed commit and before the explicit repository projection completed. The
+retained diagnostic proves exactly one expected tool with matching tool,
+session, message, nonce, and operation identities. Registration blocking was
+observed; completion loss was not reached. The bounded foreign-lock wait was
+present in the deployed source, but source tracing identified the remaining
+harness defect: `buildExternalConfig()` copied the root's complete plugin list
+into both external homes. A and transform-only B therefore launched unrelated
+resource-sync, observer, auto-observer, and Ponytail lifecycle work in addition
+to the required session coordinator. Those independent startup and idle
+repository projections contended on the same canonical worktree lock as A's
+single explicit post-commit projection. Retained state records one startup
+manifest advance at `2026-09-02T20:04:05.560Z`, capped proxy traffic, repeated
+lifecycle outbox records, and a terminal parent-A lock; this is harness-created
+contention rather than an acceptance artifact.
+
+The minimum uncommitted correction gives each external role only the plugin it
+requires. A receives session-coordinator plus its nonce-bound canary plugin;
+transform-only B receives session-coordinator alone. The canary child still
+performs the required real repository sync through the dedicated run-owned
+credential and the bounded foreign-lock wait. The focused external-config
+regression passes `1/1`, and the coordination TypeScript project check passes.
+No live retry, deployment, additional commit, delegation, broad suite, or
+reviewer dispatch occurred.
+
+Retained cleanup reports zero failures, provider disconnection, run-access
+removal, stopped external processes and proxy, and removed temporary state.
+Independent checks confirmed PIDs `3607104` and `3607105` absent, ports
+`53075`-`53077` closed, `/tmp/opencode/ingenium-playwright-run-F8yoXU` absent,
+the artifact directory `0700`, every retained artifact and managed canary
+`0600`, and the runtime OpenAI provider disconnected. The run-scoped strict
+containment audit passes; unrelated historical and manifestless telemetry is
+reported as informational and remains untouched. No completed overlap artifact
+was retained. Completion-loss replay, local-error quarantine/recovery/dedupe,
+later typed-memory views, and B restart replay were not reached. Coordination/
+shared-memory acceptance remains **OPEN and RESUMABLE**, with no rollout `PASS`
+or new `(work-complete)` marker.
