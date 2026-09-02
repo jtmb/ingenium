@@ -4187,3 +4187,44 @@ followed by `55/55` passing cases in the complete coordination test file and a
 passing coordination TypeScript project check. This is source-test evidence
 only; no live harness, runtime, lease, deployment, model, provider mutation,
 commit, or repository sync occurred.
+
+### Wave 195 one-shot child repository-sync timeout remediation (2026-09-02)
+
+The sole authorized harness invocation against clean, deployed revision
+`06b32bbeeb66fb8f40afca28ff17a3cbab03e8b1` ran as
+`73424f57-046f-431e-a08a-a71e39171381`. External A, external B, and internal C
+reached simultaneous provider-connected and MCP-connected readiness. Model A
+created its exact run-owned file and completed the managed typecheck, stage, and
+commit. Preserved commit `4682fbbbcdd845929a63e33e3bc259aaa2a9e511`
+contains only
+`tests/coordination/73424f57-046f-431e-a08a-a71e39171381-a.txt`.
+
+The first dispatch then failed with the bounded `tool_status` diagnostic: its
+single tool, name, call/session/message identity, nonce, and operation all
+matched, but the tool status was `error` instead of `completed`. The commit
+completed at `10:53:42Z`, and cleanup completed at `10:53:54Z`. Source review
+identified that the Wave 191 correction gave `repository_sync` a 60-second
+parent bridge timeout while `bridgeEnvironment` continued to launch the child
+MCP process with the generic 10-second `INGENIUM_API_TIMEOUT`. The large child
+API request therefore retained the original deadline and reproduced the same
+approximately twelve-second post-commit failure.
+
+The minimum uncommitted correction now threads the selected bounded bridge
+timeout into the child environment. Repository sync therefore receives 60
+seconds at both layers, while every other short-lived MCP operation retains its
+configured/default timeout. The focused regression captures the actual child
+launch environment, asserts `INGENIUM_API_TIMEOUT=60000`, and passes `1/1`.
+The complete directly affected MCP-client file passes `26/26`, the extension
+TypeScript check passes, and `git diff --check` passes. No live retry is
+authorized or performed.
+
+Cleanup retained zero failures and complete/resolved telemetry. Independent
+checks confirmed both recorded PIDs absent, ports `51845`-`51847` closed, the
+exact temporary root absent, the evidence directory `0700`, each artifact
+`0600`, and the runtime OpenAI provider disconnected. The current strict
+containment audit also passes. Credential inventory remains intentionally
+unavailable to the installation token; the executed lease cleanup self-revoked
+both credentials, verified each returned `401`, and removed both protected
+files. Completion-loss, quarantine, recovery, restart replay, and B restart
+remain unproved, so coordination/shared-memory acceptance remains **OPEN and
+RESUMABLE** with no rollout `PASS` or `(work-complete)` marker.

@@ -168,6 +168,7 @@ function bridgeEnvironment(
   worktree: string,
   requestedProject?: string,
   purpose: ExtensionCredentialPurpose = "general",
+  timeoutMs?: number,
 ): { project: string; environment: Record<string, string> } {
   const binding = resolveExtensionBinding(worktree, { purpose, project: requestedProject });
   const project = resolveExtensionProject(worktree, requestedProject ?? binding.project);
@@ -184,7 +185,7 @@ function bridgeEnvironment(
   const environment: Record<string, string> = {
     INGENIUM_API_URL: apiUrl,
     INGENIUM_API_URL_TRUSTED: "1",
-    INGENIUM_API_TIMEOUT: String(boundedTimeout(process.env.INGENIUM_API_TIMEOUT)),
+    INGENIUM_API_TIMEOUT: String(boundedTimeout(timeoutMs === undefined ? process.env.INGENIUM_API_TIMEOUT : String(timeoutMs))),
     INGENIUM_PROJECT: project,
     INGENIUM_WORKTREE: binding.launcherWorktree,
     INGENIUM_MCP_CREDENTIAL_FILE: childCredentialFile,
@@ -307,6 +308,7 @@ export async function openMcpToolClient(
     worktree,
     dependencies.project,
     dependencies.credentialPurpose,
+    dependencies.timeoutMs,
   );
   const timeoutMs = boundedTimeout(environment.INGENIUM_API_TIMEOUT);
   const transport = (dependencies.createTransport ?? defaultTransport)({
@@ -378,10 +380,9 @@ export async function withMcpClient<T>(
     worktree,
     dependencies.project,
     dependencies.credentialPurpose,
+    dependencies.timeoutMs,
   );
-  const timeoutMs = boundedTimeout(dependencies.timeoutMs === undefined
-    ? environment.INGENIUM_API_TIMEOUT
-    : String(dependencies.timeoutMs));
+  const timeoutMs = boundedTimeout(environment.INGENIUM_API_TIMEOUT);
   const transport = (dependencies.createTransport ?? defaultTransport)({
     command: resolveNodeExecutable(),
     args: [dependencies.launcherPath ?? packagedLauncherPath()],
