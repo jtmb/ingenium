@@ -1,8 +1,13 @@
 import {
+  closeSync,
+  constants,
   existsSync,
+  fchmodSync,
+  fstatSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -20,7 +25,7 @@ import {
   releaseTestRunArtifactLock,
 } from "./test-run-retention-lock";
 
-export const TEST_RUN_MANIFEST_VERSION = 2;
+export const TEST_RUN_MANIFEST_VERSION = 3;
 export const TEST_RUN_TELEMETRY_VERSION = 1;
 export const TEST_RUN_PREEXISTING_PROCESS_BASELINE_VERSION = 1;
 export const TEST_RUN_PREEXISTING_PROCESS_BASELINE_LIMIT = 64;
@@ -39,6 +44,7 @@ const TEST_RUN_PORT_LOCK_VERSION = 1;
 export const TEST_RUN_CREATION_FAILURE_FILENAME = "creation-failure.json";
 const DEVELOPMENT_PORTS = new Set([3000, 4097, 4098, 4099, 4999]);
 export const TEST_RUN_API_TOKEN_FILENAME = "api-token";
+export const COORDINATION_TRACE_ROOT = "/tmp/opencode";
 const TEST_RUN_DASHBOARD_WORKSPACE_ROOT = ".ingenium-dashboard-fixtures";
 
 /**
@@ -128,7 +134,9 @@ export interface TestRunManifest {
   status: "created" | "starting" | "running" | "stopping" | "complete";
   repoRoot: string;
   tempRoot: string;
+  tempRootIdentity: TestRunDirectoryIdentity;
   runDir: string;
+  runDirIdentity: TestRunDirectoryIdentity;
   homeDir: string;
   dbPath: string;
   apiTokenFile?: string;
@@ -202,6 +210,11 @@ export interface CreateTestRunContextOptions {
   applyEnvironment?: boolean;
   /** Test-only failure injection point immediately after mkdtempSync. */
   afterRunDirectoryCreated?: (runDir: string) => void;
+}
+
+export interface TestRunDirectoryIdentity {
+  device: number;
+  inode: number;
 }
 
 let cachedContext: TestRunContext | undefined;
@@ -661,7 +674,110 @@ export function transferTestRunPortOwnership(manifestPath: string, port: number)
   );
 }
 
-function assertApprovedTempRoot(tempRoot: string): string {
+function currentEffectiveUid(): number | undefined {
+  return typeof process.geteuid === "function" ? process.geteuid() : undefined;
+}
+
+function captureDirectoryIdentity(
+  path: string,
+  containmentRoot: string,
+  name: string,
+  requireOwnerOnly: boolean,
+): TestRunDirectoryIdentity {
+  const canonical = assertCanonicalExistingPath(path, containmentRoot, name);
+  const metadata = lstatSync(canonical);
+  const effectiveUid = currentEffectiveUid();
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`${name} must be a real directory`);
+  }
+  if (requireOwnerOnly && effectiveUid !== undefined && metadata.uid !== effectiveUid) {
+    throw new Error(`${name} must be owned by the current effective UID`);
+  }
+  if (requireOwnerOnly && (metadata.mode & 0o777) !== 0o700) {
+    throw new Error(`${name} must have exact mode 0700`);
+  }
+  return { device: metadata.dev, inode: metadata.ino };
+}
+
+function assertDirectoryIdentity(
+  path: string,
+  containmentRoot: string,
+  name: string,
+  expected: TestRunDirectoryIdentity,
+  requireOwnerOnly: boolean,
+): string {
+  const current = captureDirectoryIdentity(path, containmentRoot, name, requireOwnerOnly);
+  if (current.device !== expected.device || current.inode !== expected.inode) {
+    throw new Error(`${name} identity changed`);
+  }
+  return resolve(path);
+}
+
+function validateDirectoryIdentity(value: unknown, name: string): TestRunDirectoryIdentity {
+  if (!value || typeof value !== "object") throw new Error(`Invalid ${name} identity`);
+  const identity = value as Partial<TestRunDirectoryIdentity> & Record<string, unknown>;
+  if (Object.keys(identity).some((key) => key !== "device" && key !== "inode")
+    || !Number.isSafeInteger(identity.device)
+    || !Number.isSafeInteger(identity.inode)
+    || (identity.device as number) < 0
+    || (identity.inode as number) < 0) {
+    throw new Error(`Invalid ${name} identity`);
+  }
+  return { device: identity.device as number, inode: identity.inode as number };
+}
+
+function ensureOwnerOnlyTempRoot(path: string, approvedRoot: string): void {
+  const effectiveUid = currentEffectiveUid();
+  const before = lstatSync(path);
+  if (!before.isDirectory() || before.isSymbolicLink()
+    || realpathSync(path) !== path
+    || dirname(path) !== approvedRoot) {
+    throw new Error(`Unsafe test-run temp root: ${path}`);
+  }
+  if (effectiveUid !== undefined && before.uid !== effectiveUid) {
+    throw new Error("Test-run temp root must be owned by the current effective UID");
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    const openedPath = lstatSync(path);
+    if (!opened.isDirectory()
+      || (effectiveUid !== undefined && opened.uid !== effectiveUid)
+      || !openedPath.isDirectory()
+      || openedPath.isSymbolicLink()
+      || (effectiveUid !== undefined && openedPath.uid !== effectiveUid)
+      || opened.dev !== before.dev
+      || opened.ino !== before.ino
+      || openedPath.dev !== opened.dev
+      || openedPath.ino !== opened.ino
+      || realpathSync(path) !== path) {
+      throw new Error(`Unsafe test-run temp root: ${path}`);
+    }
+
+    fchmodSync(descriptor, 0o700);
+
+    const normalized = fstatSync(descriptor);
+    const normalizedPath = lstatSync(path);
+    if (!normalized.isDirectory()
+      || (effectiveUid !== undefined && normalized.uid !== effectiveUid)
+      || (normalized.mode & 0o777) !== 0o700
+      || normalized.dev !== opened.dev
+      || normalized.ino !== opened.ino
+      || !normalizedPath.isDirectory()
+      || normalizedPath.isSymbolicLink()
+      || (effectiveUid !== undefined && normalizedPath.uid !== effectiveUid)
+      || normalizedPath.dev !== normalized.dev
+      || normalizedPath.ino !== normalized.ino
+      || realpathSync(path) !== path
+      || realpathSync(dirname(path)) !== approvedRoot) {
+      throw new Error(`Unsafe test-run temp root: ${path}`);
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function assertApprovedTempRoot(tempRoot: string): { path: string; identity: TestRunDirectoryIdentity } {
   const approvedRoot = getApprovedTempRoot();
   const resolvedTempRoot = resolve(tempRoot);
   if (!pathIsInside(approvedRoot, resolvedTempRoot)) {
@@ -680,7 +796,36 @@ function assertApprovedTempRoot(tempRoot: string): string {
   if (!pathIsInside(approvedRoot, canonicalTempRoot)) {
     throw new Error(`Refusing to use a temp root outside the approved root: ${tempRoot}`);
   }
-  return canonicalTempRoot;
+  return {
+    path: canonicalTempRoot,
+    identity: captureDirectoryIdentity(
+      canonicalTempRoot,
+      approvedRoot,
+      "test-run temp root",
+      canonicalTempRoot !== approvedRoot,
+    ),
+  };
+}
+
+function prepareApprovedTempRoot(tempRoot: string): { path: string; identity: TestRunDirectoryIdentity } {
+  const approvedRoot = getApprovedTempRoot();
+  const resolvedTempRoot = resolve(tempRoot);
+  if (!pathIsInside(approvedRoot, resolvedTempRoot)) {
+    throw new Error(`Refusing to use a temp root outside the approved root: ${tempRoot}`);
+  }
+  assertNoSymlinkedAncestors(resolvedTempRoot, approvedRoot, "test-run temp root");
+  if (!existsSync(resolvedTempRoot)) {
+    if (resolvedTempRoot === approvedRoot || dirname(resolvedTempRoot) !== approvedRoot) {
+      throw new Error(`Refusing to create a temp root outside the canonical approved root: ${tempRoot}`);
+    }
+    try {
+      mkdirSync(resolvedTempRoot, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  if (resolvedTempRoot !== approvedRoot) ensureOwnerOnlyTempRoot(resolvedTempRoot, approvedRoot);
+  return assertApprovedTempRoot(resolvedTempRoot);
 }
 
 function approvedRootForPath(path: string, approvedRoots: readonly string[]): string | undefined {
@@ -733,8 +878,20 @@ function assertSafeRunDirectory(manifest: TestRunManifest, approvedRoot = getApp
   if (!pathIsInside(approvedRoot, manifest.tempRoot)) {
     throw new Error("Refusing to clean a test run outside the canonical approved temp root");
   }
-  const tempRoot = assertCanonicalExistingPath(manifest.tempRoot, approvedRoot, "test-run temp root");
-  const runDir = assertCanonicalExistingPath(manifest.runDir, approvedRoot, "test-run directory");
+  const tempRoot = assertDirectoryIdentity(
+    manifest.tempRoot,
+    approvedRoot,
+    "test-run temp root",
+    manifest.tempRootIdentity,
+    resolve(manifest.tempRoot) !== approvedRoot,
+  );
+  const runDir = assertDirectoryIdentity(
+    manifest.runDir,
+    tempRoot,
+    "test-run directory",
+    manifest.runDirIdentity,
+    true,
+  );
   const manifestPath = assertCanonicalExistingPath(manifest.manifestPath, approvedRoot, "test-run manifest");
   if (tempRoot !== resolve(manifest.tempRoot) || !pathIsInside(approvedRoot, tempRoot)) {
     throw new Error("Refusing to clean a test run outside the canonical approved temp root");
@@ -1193,37 +1350,35 @@ function writeRunnerTelemetryUnlocked(manifest: TestRunManifest, now = new Date(
   writeOwnedJson(telemetryPath, telemetry, artifactRoot, "runner telemetry");
 }
 
-interface TestRunDirectoryIdentity {
-  device: number;
-  inode: number;
-}
-
-function captureRunDirectoryIdentity(runDir: string): TestRunDirectoryIdentity {
-  const stat = lstatSync(runDir);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error("Test-run directory is not a canonical directory");
-  }
-  return { device: stat.dev, inode: stat.ino };
-}
-
 function assertAllocatedRunDirectory(
   runDir: string,
   tempRoot: string,
-  identity: TestRunDirectoryIdentity,
+  tempRootIdentity: TestRunDirectoryIdentity,
+  runDirIdentity: TestRunDirectoryIdentity,
 ): void {
+  const approvedRoot = getApprovedTempRoot();
   const resolvedRunDir = resolve(runDir);
   if (resolvedRunDir !== runDir
     || !basename(runDir).startsWith(TEST_RUN_TEMP_PREFIX)
+    || dirname(runDir) !== tempRoot
     || !pathIsInside(tempRoot, runDir)) {
     throw new Error("Refusing to remove an unowned allocated test-run directory");
   }
-  assertNoSymlinkedAncestors(runDir, getApprovedTempRoot(), "test-run directory");
-  const stat = lstatSync(runDir);
-  if (!stat.isDirectory() || stat.isSymbolicLink()
-    || stat.dev !== identity.device
-    || stat.ino !== identity.inode
-    || realpathSync(runDir) !== runDir
-    || realpathSync(dirname(runDir)) !== tempRoot) {
+  const canonicalTempRoot = assertDirectoryIdentity(
+    tempRoot,
+    approvedRoot,
+    "test-run temp root",
+    tempRootIdentity,
+    tempRoot !== approvedRoot,
+  );
+  const canonicalRunDir = assertDirectoryIdentity(
+    runDir,
+    canonicalTempRoot,
+    "test-run directory",
+    runDirIdentity,
+    true,
+  );
+  if (canonicalRunDir !== runDir || dirname(canonicalRunDir) !== canonicalTempRoot) {
     throw new Error("Refusing to remove a relocated allocated test-run directory");
   }
 }
@@ -1231,11 +1386,19 @@ function assertAllocatedRunDirectory(
 function rollbackAllocatedRunDirectory(
   runDir: string,
   tempRoot: string,
-  identity: TestRunDirectoryIdentity,
+  tempRootIdentity: TestRunDirectoryIdentity,
+  runDirIdentity: TestRunDirectoryIdentity,
 ): void {
-  assertAllocatedRunDirectory(runDir, tempRoot, identity);
+  assertAllocatedRunDirectory(runDir, tempRoot, tempRootIdentity, runDirIdentity);
   rmSync(runDir, { recursive: true, force: true });
   if (existsSync(runDir)) throw new Error("Allocated test-run directory was not removed");
+  assertDirectoryIdentity(
+    tempRoot,
+    getApprovedTempRoot(),
+    "test-run temp root",
+    tempRootIdentity,
+    tempRoot !== getApprovedTempRoot(),
+  );
 }
 
 function errorMessage(value: unknown): string {
@@ -1442,8 +1605,9 @@ export function markTestRunRecovered(
 export function createTestRunContext(options: CreateTestRunContextOptions = {}): TestRunContext {
   const now = options.now ?? (() => new Date());
   const repoRoot = getCanonicalRepoRoot(options.repoRoot ?? process.env.INGENIUM_PLAYWRIGHT_REPO_ROOT ?? process.cwd());
-  const tempRoot = assertApprovedTempRoot(resolve(options.tempRoot ?? getApprovedTempRoot()));
-  assertNoSymlinkedAncestors(tempRoot, getApprovedTempRoot(), "test-run temp root");
+  const preparedTempRoot = prepareApprovedTempRoot(resolve(options.tempRoot ?? getApprovedTempRoot()));
+  const tempRoot = preparedTempRoot.path;
+  const tempRootIdentity = preparedTempRoot.identity;
 
   // Complete all caller/environment configuration validation before allocating
   // a run directory. A malformed port configuration must not leave behind a
@@ -1469,9 +1633,9 @@ export function createTestRunContext(options: CreateTestRunContextOptions = {}):
     runDirPath = mkdtempSync(join(tempRoot, TEST_RUN_TEMP_PREFIX));
     assertNoSymlinkedAncestors(runDirPath, getApprovedTempRoot(), "test-run directory");
     runDir = assertCanonicalExistingPath(runDirPath, getApprovedTempRoot(), "test-run directory");
-    runDirectoryIdentity = captureRunDirectoryIdentity(runDir);
+    runDirectoryIdentity = captureDirectoryIdentity(runDir, tempRoot, "test-run directory", true);
     options.afterRunDirectoryCreated?.(runDir);
-    assertAllocatedRunDirectory(runDir, tempRoot, runDirectoryIdentity);
+    assertAllocatedRunDirectory(runDir, tempRoot, tempRootIdentity, runDirectoryIdentity);
 
     const homeDir = join(runDir, ".ingenium");
     mkdirSync(homeDir, { recursive: true });
@@ -1494,7 +1658,9 @@ export function createTestRunContext(options: CreateTestRunContextOptions = {}):
       status: "created",
       repoRoot,
       tempRoot,
+      tempRootIdentity,
       runDir,
+      runDirIdentity: runDirectoryIdentity,
       homeDir,
       dbPath: join(homeDir, "data.db"),
       apiTokenFile: join(homeDir, TEST_RUN_API_TOKEN_FILENAME),
@@ -1534,7 +1700,7 @@ export function createTestRunContext(options: CreateTestRunContextOptions = {}):
       }
       if (runDir !== undefined && runDirectoryIdentity !== undefined) {
         try {
-          rollbackAllocatedRunDirectory(runDir, tempRoot, runDirectoryIdentity);
+          rollbackAllocatedRunDirectory(runDir, tempRoot, tempRootIdentity, runDirectoryIdentity);
         } catch (rollbackError) {
           cleanupError = rollbackError;
         }
@@ -1598,7 +1764,9 @@ function parseManifest(value: string, approvedRoot = getApprovedTempRoot()): Tes
     "status",
     "repoRoot",
     "tempRoot",
+    "tempRootIdentity",
     "runDir",
+    "runDirIdentity",
     "homeDir",
     "dbPath",
     "apiTokenFile",
@@ -1624,7 +1792,9 @@ function parseManifest(value: string, approvedRoot = getApprovedTempRoot()): Tes
     || !["created", "starting", "running", "stopping", "complete"].includes(manifest.status ?? "")
     || typeof manifest.repoRoot !== "string"
     || typeof manifest.tempRoot !== "string"
+    || !manifest.tempRootIdentity
     || typeof manifest.runDir !== "string"
+    || !manifest.runDirIdentity
     || typeof manifest.homeDir !== "string"
     || typeof manifest.dbPath !== "string"
     || (manifest.apiTokenFile !== undefined && typeof manifest.apiTokenFile !== "string")
@@ -1635,6 +1805,8 @@ function parseManifest(value: string, approvedRoot = getApprovedTempRoot()): Tes
   ) {
     throw new Error("Incomplete test-run manifest");
   }
+  manifest.tempRootIdentity = validateDirectoryIdentity(manifest.tempRootIdentity, "test-run temp root");
+  manifest.runDirIdentity = validateDirectoryIdentity(manifest.runDirIdentity, "test-run directory");
   for (const [name, value] of Object.entries({
     repoRoot: manifest.repoRoot,
     tempRoot: manifest.tempRoot,
@@ -1815,7 +1987,12 @@ export function cleanupTestRun(manifestPath: string): void {
       rmSync(dashboardWorkspace, { recursive: true, force: true });
     }
     releaseTestRunPortReservations(manifest, { allowMissing: true });
-    rmSync(manifest.runDir, { recursive: true, force: true });
+    rollbackAllocatedRunDirectory(
+      manifest.runDir,
+      manifest.tempRoot,
+      manifest.tempRootIdentity,
+      manifest.runDirIdentity,
+    );
     const environment = {
       [TEST_RUN_MANIFEST_ENV]: manifest.manifestPath,
       [TEST_RUN_NONCE_ENV]: manifest.runNonce,
@@ -1852,7 +2029,7 @@ export interface StaleRunCleanupResult {
 export function cleanupStaleTestRuns(
   options: { root?: string; now?: number; staleAfterMs?: number; excludeRunId?: string } = {},
 ): StaleRunCleanupResult {
-  const root = assertApprovedTempRoot(resolve(options.root ?? getApprovedTempRoot()));
+  const root = assertApprovedTempRoot(resolve(options.root ?? getApprovedTempRoot())).path;
   const now = options.now ?? Date.now();
   const staleAfterMs = options.staleAfterMs ?? TEST_RUN_STALE_AFTER_MS;
   const result: StaleRunCleanupResult = { inspected: 0, cleaned: [], skipped: [] };

@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -78,6 +78,78 @@ describe("test-run context", () => {
     expect(manifest.portReservations).toHaveLength(3);
     expect(existsSync(getTestRunPortLockPath(manifest.ports.api))).toBe(true);
     expect(JSON.parse(readFileSync(manifest.manifestPath, "utf8")).runId).toBe(manifest.runId);
+  });
+
+  it("safely creates an absent owner-only temp root and captures stable directory identities", () => {
+    const root = join(getApprovedTempRoot(), `ingenium-private-run-${randomUUID()}`);
+    ownedRoots.push(root);
+
+    const context = createTestRunContext({
+      repoRoot: process.cwd(),
+      tempRoot: root,
+      ports: { api: 45201, dashboard: 45202, fixture: 45203 },
+    });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+    const parent = lstatSync(root);
+    const run = lstatSync(context.runDir);
+
+    expect(parent.mode & 0o777).toBe(0o700);
+    expect(run.mode & 0o777).toBe(0o700);
+    expect(context.tempRootIdentity).toEqual({ device: parent.dev, inode: parent.ino });
+    expect(context.runDirIdentity).toEqual({ device: run.dev, inode: run.ino });
+    if (typeof process.geteuid === "function") {
+      expect(parent.uid).toBe(process.geteuid());
+      expect(run.uid).toBe(process.geteuid());
+    }
+    expect(context.telemetryPath).toBe(join(getTestRunArtifactRoot(process.cwd()), context.runId, "runner-telemetry.json"));
+
+    cleanupTestRun(context.manifestPath);
+    expect(existsSync(root)).toBe(true);
+  });
+
+  it("normalizes an owner-controlled private temp-root mode before use", () => {
+    const root = testTempRoot();
+    chmodSync(root, 0o755);
+
+    const context = createTestRunContext({
+      tempRoot: root,
+      ports: { api: 45204, dashboard: 45205, fixture: 45206 },
+    });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+
+    expect(existsSync(root)).toBe(true);
+    expect(lstatSync(root).mode & 0o777).toBe(0o700);
+    cleanupTestRun(context.manifestPath);
+  });
+
+  it("rejects a private temp root not owned by the effective UID where supported", () => {
+    if (typeof process.geteuid !== "function") return;
+    const root = testTempRoot();
+    const effectiveUid = process.geteuid();
+    const uid = vi.spyOn(process, "geteuid").mockReturnValue(effectiveUid + 1);
+    try {
+      expect(() => createTestRunContext({
+        tempRoot: root,
+        ports: { api: 45207, dashboard: 45208, fixture: 45209 },
+      })).toThrow(/current effective UID/);
+      expect(existsSync(root)).toBe(true);
+      expect(readdirSync(root)).toEqual([]);
+    } finally {
+      uid.mockRestore();
+    }
+  });
+
+  it("rejects a non-directory private temp root without replacing or deleting it", () => {
+    const root = join(getApprovedTempRoot(), `ingenium-private-file-${randomUUID()}`);
+    ownedRoots.push(root);
+    writeFileSync(root, "keep", { mode: 0o600 });
+
+    expect(() => createTestRunContext({
+      tempRoot: root,
+      ports: { api: 45219, dashboard: 45220, fixture: 45221 },
+    })).toThrow(/Unsafe test-run temp root|real directory/);
+
+    expect(readFileSync(root, "utf8")).toBe("keep");
   });
 
   it("normalizes inherited group permissions before validating a new retention root", async () => {
@@ -334,6 +406,61 @@ describe("test-run context", () => {
     expect(readFileSync(sibling, "utf8")).toBe("keep me");
   });
 
+  it("refuses cleanup when the captured run directory inode is substituted", () => {
+    const root = testTempRoot();
+    const context = createTestRunContext({ tempRoot: root, ports: { api: 45210, dashboard: 45211, fixture: 45212 } });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+    const originalManifest = readFileSync(context.manifestPath, "utf8");
+    const movedRunDir = `${context.runDir}-moved`;
+    const replacementRunDir = `${context.runDir}-replacement`;
+    renameSync(context.runDir, movedRunDir);
+    mkdirSync(context.runDir, { mode: 0o700 });
+    writeFileSync(context.manifestPath, originalManifest, { mode: 0o600 });
+
+    expect(() => cleanupTestRun(context.manifestPath)).toThrow(/test-run directory identity changed/);
+    expect(existsSync(movedRunDir)).toBe(true);
+    expect(existsSync(context.runDir)).toBe(true);
+
+    renameSync(context.runDir, replacementRunDir);
+    renameSync(movedRunDir, context.runDir);
+    cleanupTestRun(context.manifestPath);
+    expect(existsSync(replacementRunDir)).toBe(true);
+  });
+
+  it("refuses cleanup when the captured private temp-root inode is substituted", () => {
+    const root = testTempRoot();
+    const context = createTestRunContext({ tempRoot: root, ports: { api: 45213, dashboard: 45214, fixture: 45215 } });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+    const originalManifest = readFileSync(context.manifestPath, "utf8");
+    const movedRoot = `${root}-moved`;
+    const replacementRoot = `${root}-replacement`;
+    ownedRoots.push(replacementRoot);
+    renameSync(root, movedRoot);
+    mkdirSync(root, { mode: 0o700 });
+    mkdirSync(context.runDir, { mode: 0o700 });
+    writeFileSync(context.manifestPath, originalManifest, { mode: 0o600 });
+
+    expect(() => cleanupTestRun(context.manifestPath)).toThrow(/test-run temp root identity changed/);
+    expect(existsSync(join(movedRoot, context.runDir.split("/").pop()!))).toBe(true);
+    expect(existsSync(context.runDir)).toBe(true);
+
+    renameSync(root, replacementRoot);
+    renameSync(movedRoot, root);
+    cleanupTestRun(context.manifestPath);
+  });
+
+  it("refuses cleanup while the captured run directory is not owner-only", () => {
+    const context = createTestRunContext({ tempRoot: testTempRoot(), ports: { api: 45216, dashboard: 45217, fixture: 45218 } });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+    chmodSync(context.runDir, 0o755);
+
+    expect(() => cleanupTestRun(context.manifestPath)).toThrow(/exact mode 0700/);
+    expect(existsSync(context.runDir)).toBe(true);
+
+    chmodSync(context.runDir, 0o700);
+    cleanupTestRun(context.manifestPath);
+  });
+
   it("resolves created telemetry before deleting its manifest", () => {
     const context = createTestRunContext({ tempRoot: testTempRoot(), ports: { api: 45116, dashboard: 45117, fixture: 45118 } });
     telemetryRoots.push(dirname(context.telemetryPath!));
@@ -463,9 +590,9 @@ describe("test-run context", () => {
       ports: { api: 45191, dashboard: 45192, fixture: 45193 },
       afterRunDirectoryCreated: (runDir) => {
         allocatedRunDir = runDir;
-        chmodSync(runDir, 0o500);
+        throw new Error("filesystem bootstrap failed");
       },
-    })).toThrow(/home directory|EACCES|permission denied/i);
+    })).toThrow(/filesystem bootstrap failed/i);
 
     expect(readdirSync(root)).toEqual([]);
     const diagnosticDirectories = existsSync(telemetryRoot)
@@ -478,7 +605,7 @@ describe("test-run context", () => {
           try {
             const diagnostic = JSON.parse(readFileSync(path, "utf8")) as { runDir?: string; error?: string };
             return diagnostic.runDir === allocatedRunDir
-              && /home directory|EACCES|permission denied/i.test(diagnostic.error ?? "");
+              && /filesystem bootstrap failed/i.test(diagnostic.error ?? "");
           } catch {
             return false;
           }
@@ -492,8 +619,40 @@ describe("test-run context", () => {
       cleanup: string;
     };
     expect(diagnostic).toMatchObject({ version: 1, cleanup: "removed" });
-    expect(diagnostic.error).toMatch(/home directory|EACCES|permission denied/i);
+    expect(diagnostic.error).toMatch(/filesystem bootstrap failed/i);
     telemetryRoots.push(diagnosticDirectory);
+  });
+
+  it("refuses rollback after the captured temp-root directory is substituted", () => {
+    const root = testTempRoot();
+    const movedRoot = `${root}-moved`;
+    ownedRoots.push(movedRoot);
+    const telemetryRoot = getTestRunArtifactRoot(process.cwd());
+    let allocatedRunDir = "";
+
+    expect(() => createTestRunContext({
+      tempRoot: root,
+      ports: { api: 45194, dashboard: 45195, fixture: 45199 },
+      afterRunDirectoryCreated: (runDir) => {
+        allocatedRunDir = runDir;
+        renameSync(root, movedRoot);
+        mkdirSync(root, { mode: 0o700 });
+      },
+    })).toThrow(/temp root identity changed/i);
+
+    expect(existsSync(join(movedRoot, allocatedRunDir.split("/").pop()!))).toBe(true);
+    expect(existsSync(root)).toBe(true);
+    const diagnosticDirectories = readdirSync(telemetryRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(telemetryRoot, entry.name))
+      .filter((directory) => {
+        const path = join(directory, TEST_RUN_CREATION_FAILURE_FILENAME);
+        if (!existsSync(path)) return false;
+        const diagnostic = JSON.parse(readFileSync(path, "utf8")) as { runDir?: string; cleanupError?: string };
+        return diagnostic.runDir === allocatedRunDir && /temp root identity changed/i.test(diagnostic.cleanupError ?? "");
+      });
+    expect(diagnosticDirectories.length).toBeGreaterThan(0);
+    telemetryRoots.push(...diagnosticDirectories);
   });
 
   it("retains diagnostics without deleting a replacement at the allocated path", () => {
@@ -509,9 +668,9 @@ describe("test-run context", () => {
         movedRunDir = `${runDir}-moved`;
         replacedRunDir = runDir;
         renameSync(runDir, movedRunDir);
-        mkdirSync(runDir);
+        mkdirSync(runDir, { mode: 0o700 });
       },
-    })).toThrow(/relocated allocated test-run directory/);
+    })).toThrow(/test-run directory identity changed/);
 
     expect(existsSync(movedRunDir)).toBe(true);
     expect(existsSync(replacedRunDir)).toBe(true);
@@ -525,7 +684,7 @@ describe("test-run context", () => {
           try {
             const diagnostic = JSON.parse(readFileSync(path, "utf8")) as { runDir?: string; cleanupError?: string };
             return diagnostic.runDir === replacedRunDir
-              && /relocated allocated test-run directory/i.test(diagnostic.cleanupError ?? "");
+              && /test-run directory identity changed/i.test(diagnostic.cleanupError ?? "");
           } catch {
             return false;
           }
@@ -538,7 +697,7 @@ describe("test-run context", () => {
       cleanupError?: string;
     };
     expect(diagnostic.cleanup).toBe("retained");
-    expect(diagnostic.cleanupError).toMatch(/relocated allocated test-run directory/);
+    expect(diagnostic.cleanupError).toMatch(/test-run directory identity changed/);
     telemetryRoots.push(diagnosticDirectory);
   });
 
@@ -569,7 +728,7 @@ describe("test-run context", () => {
     const root = testTempRoot();
     const real = join(root, "real-temp");
     const linked = join(root, "linked-temp");
-    mkdirSync(real);
+    mkdirSync(real, { mode: 0o700 });
     symlinkSync(real, linked);
 
     expect(() => createTestRunContext({ tempRoot: linked })).toThrow(/symlinked temp root|symlinked ancestor/);

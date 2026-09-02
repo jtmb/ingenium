@@ -6,6 +6,7 @@ import { join, relative } from "node:path";
 import { CoordinationOutbox, type CoordinationOutboxRecord } from "../../packages/ingenium-extension/coordination-outbox";
 import { preflightApiAuthentication } from "../../packages/ingenium-extension/api-auth";
 import {
+  COORDINATION_TRACE_ROOT,
   cleanupTestRun,
   createTestRunContext,
   markTestRunRecovered,
@@ -1597,6 +1598,7 @@ export async function finishCoordinationCleanup(
 export interface CoordinationRunEvidence {
   runId: string;
   telemetryPath: string;
+  manifestPath: string;
 }
 
 export interface CoordinationHarnessDependencies {
@@ -1610,10 +1612,14 @@ export async function runCoordinationHarness(
 ): Promise<string> {
   const lifecycle = new ExecutionLifecycle();
   lifecycle.start();
-  const context = createTestRunContext({ repoRoot: options.worktree, applyEnvironment: false });
+  const context = createTestRunContext({
+    repoRoot: options.worktree,
+    tempRoot: COORDINATION_TRACE_ROOT,
+    applyEnvironment: false,
+  });
   const telemetryPath = context.telemetryPath
     ?? join(options.worktree, "tests", "artifacts", "test-runs", context.runId, "runner-telemetry.json");
-  reportRunEvidence({ runId: context.runId, telemetryPath });
+  reportRunEvidence({ runId: context.runId, telemetryPath, manifestPath: context.manifestPath });
   const lease = new RunCredentialLease(context, options, createRunCredentialLeaseTransport(options));
   const artifactRoot = join(options.worktree, "tests", "artifacts", "test-runs", context.runId);
   const evidence = new EvidenceStore(options.worktree, artifactRoot, [options.operatorToken.path, options.openCodeAuth.path]);

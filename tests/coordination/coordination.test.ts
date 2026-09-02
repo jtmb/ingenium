@@ -1108,16 +1108,16 @@ test("real harness bounds 10000 hostile cleanup failures without retaining senti
   const options = parseHarnessOptions(args, {});
   sentinels.push(options.providerId, options.modelId, options.runtimeId, options.openCodeAuth.path);
   let runId = "";
-  let telemetryPath = "";
+  let manifestPath = "";
   let tempRoot = "";
   let harnessError: unknown;
   try {
     await runCoordinationHarness(options, (run) => {
       runId = run.runId;
-      telemetryPath = run.telemetryPath;
-      const telemetry = JSON.parse(readFileSync(telemetryPath, "utf8"));
-      tempRoot = dirname(telemetry.manifestPath);
-      sentinels.push(runId, telemetry.runNonce, telemetry.manifestPath);
+      manifestPath = run.manifestPath;
+      tempRoot = dirname(manifestPath);
+      const manifest = readTestRunManifest(manifestPath);
+      sentinels.push(runId, manifest.runNonce, manifest.manifestPath);
     }, { cleanupOperations });
   } catch (error) {
     harnessError = error;
@@ -1158,8 +1158,11 @@ test("real harness bounds 10000 hostile cleanup failures without retaining senti
     }
     assert.equal(statSync(artifact).mode & 0o777, 0o700);
     assert.equal(statSync(tempRoot).mode & 0o777, 0o700);
+    assert.equal(dirname(tempRoot), "/tmp/opencode");
   } finally {
-    if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
+    if (manifestPath && existsSync(manifestPath)) {
+      await finalizeCoordinationTestRun(readTestRunManifest(manifestPath));
+    }
   }
 });
 
@@ -1478,7 +1481,7 @@ test("runner finalization audits exactly once after harness failure", async () =
   let auditCalls = 0;
   await assert.rejects(runMain(validArguments(fixture), {
     run: async (_options, reportRunEvidence) => {
-      reportRunEvidence({ runId, telemetryPath });
+      reportRunEvidence({ runId, telemetryPath, manifestPath: "/tmp/opencode/ingenium-playwright-run-finalization/run-manifest.json" });
       throw harnessError;
     },
     audit: async (options) => {
@@ -1512,7 +1515,7 @@ test("runner finalization preserves harness failure when audit also fails", asyn
   let auditCalls = 0;
   await assert.rejects(runMain(validArguments(fixture), {
     run: async (_options, reportRunEvidence) => {
-      reportRunEvidence({ runId, telemetryPath });
+      reportRunEvidence({ runId, telemetryPath, manifestPath: "/tmp/opencode/ingenium-playwright-run-finalization/run-manifest.json" });
       throw harnessError;
     },
     audit: async () => {

@@ -4299,3 +4299,81 @@ unrelated canonical inventory assertion because the browser-agent profile is
 `0664` while the unchanged scanner admits canonical profiles only at `0644`.
 Browser-agent file mode and repository scanner policy are unchanged. No live
 run, deployment, commit, or delegation is authorized or performed.
+
+### Wave 198 managed-hook trace-root remediation (2026-09-02)
+
+The sole authorized invocation ran from clean, deployed revision
+`382f7410616ed2d2d8772675c6519245a0d8aac5` as
+`14b1834b-c9d4-4bb1-b5e9-93088fe1d422`, with run nonce
+`6d7b1795-6840-4b24-b62a-14ab08b58f0c`. External A and B used OpenCode
+`1.18.26`, internal C used `1.18.9`, and all three overlapped on real
+`openai/gpt-5.6-sol` turns against the canonical workspace identity. Model A's
+managed edit, typecheck, stage, commit, and repository-sync path created
+preserved commit `d16101c`, whose only change is
+`tests/coordination/14b1834b-c9d4-4bb1-b5e9-93088fe1d422-a.txt`.
+
+The run then failed the immediate managed-path assertion because A's retained
+trace contained neither required `tool.execute.before` nor
+`tool.execute.after` evidence. Source tracing established the exact cause:
+`runCoordinationHarness` allocated its run below `/tmp/ingenium-playwright-*`,
+while `session-coordinator` intentionally discards diagnostic writes outside
+`/tmp/opencode/`. The canary child received the configured trace path and the
+managed commands completed, but every hook trace write failed that root guard.
+The minimum uncommitted correction allocates coordination harness runs below
+the existing `/tmp/opencode` trace root; production coordinator trace security
+and command behavior are unchanged. The focused real-harness early-failure
+regression now asserts the compatible root and passes `1/1`; the coordination
+TypeScript project check and `git diff --check` also pass. The live invocation
+allowance is exhausted, so no retry was performed.
+
+Retained cleanup reports zero failures, provider disconnection, run-access
+removal, stopped external processes and proxy, and removed temporary state.
+Independent checks confirmed PIDs `2638548` and `2638549` absent, ports
+`44489`-`44491` closed, `/tmp/ingenium-playwright-run-uZ3mqp` absent, the
+artifact directory `0700`, every retained artifact `0600`, and the runtime
+OpenAI provider disconnected. The strict containment audit passes. Completion-
+loss replay, true local-error quarantine/recovery/deduplication, later B/C
+typed-memory views, and B restart replay were not reached. Coordination/shared-
+memory acceptance therefore remains **OPEN and RESUMABLE** with no rollout
+`PASS` or `(work-complete)` marker.
+
+### Wave 199 trace-root ownership and identity-bound cleanup hardening (2026-09-02)
+
+Follow-up review reproduced two blockers in Wave 198's uncommitted trace-root
+correction. The existing `/tmp/opencode` directory could have permissive mode,
+and the hostile-cleanup regression still derived a directory from telemetry and
+removed it recursively without the run's captured filesystem identity.
+
+The test-run manifest is now version 3 and persists the parent and unique run
+directory device/inode identities. Before a private temp root such as the
+unchanged `/tmp/opencode` allowlist is used, the lifecycle requires one exact
+canonical real directory directly below the canonical operating-system temp
+root. An absent directory is created atomically. An existing real directory
+owned by the current effective UID is opened with `O_DIRECTORY|O_NOFOLLOW` and
+normalized through that descriptor to exact mode `0700`; pre-open, opened,
+path, and post-normalization identities must agree. Wrong ownership, wrong
+type, symlink, relocation, or post-open substitution fails closed without
+deletion.
+
+The parent identity is captured before atomic `mkdtemp` allocation and checked
+again immediately afterward. The run directory must be its canonical direct
+child, retain its captured device/inode, belong to the effective UID when that
+check is available, and have exact mode `0700`. Bootstrap rollback and normal
+test-run cleanup both revalidate the captured parent and run identities before
+recursive removal, then verify the parent identity remains unchanged; replaced
+paths are retained rather than deleted. The coordination regression now receives
+the manifest path directly and calls the identity-checked finalizer in `finally`,
+so an earlier assertion cannot bypass cleanup and telemetry no longer supplies
+a raw deletion target. Runner telemetry remains under the repository artifact
+root, separate from `/tmp/opencode`.
+
+Ten focused current-source adversarial cases pass for absent safe creation,
+mode normalization, effective-UID mismatch where supported, non-directory and
+symlink rejection, stable captured identities, parent/run substitution, run
+inode mismatch, and cleanup mode enforcement. The complete coordination file
+passes `55/55`; the coordination TypeScript project check and
+`git diff --check` pass. The current `/tmp/opencode` is a real owner-controlled
+`0700` directory. No live harness retry, deployment, commit, or delegation occurred.
+These are source-test results only, so coordination/shared-memory acceptance
+remains **OPEN and RESUMABLE** with no rollout `PASS` or new `(work-complete)`
+marker.
