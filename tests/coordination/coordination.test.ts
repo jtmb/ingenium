@@ -11,6 +11,7 @@ import { inspectProcessIdentity, terminateChildProcessHandle } from "../test-ser
 import {
   COORDINATION_MEMORY_PREFIX,
   HARNESS_MANIFEST_SCHEMA,
+  PROXY_EVENT_SCHEMA,
   EvidenceStore,
   assertNoSecrets,
   assertOperationalMemoryEntry,
@@ -25,7 +26,7 @@ import {
   type HarnessOwnershipManifest,
   type OperationalMemoryEntry,
 } from "./contracts";
-import { CoordinationFaultProxy, faultDisposition } from "./fault-proxy";
+import { CoordinationFaultProxy, faultDisposition, type FaultProxyEvent } from "./fault-proxy";
 import { allowlistedBaseEnvironment, allowlistedCanaryActionEnvironment, prepareExternalHome, runCanaryAction, startHostOpenCode, stopHostOpenCode, waitForOpenCode } from "./process-lifecycle";
 import { CanaryDispatcher, RealCanaryActions, type CanaryPlan, type CanaryRequest } from "./canary-dispatcher";
 import { ExecutionLifecycle } from "./execution-lifecycle";
@@ -40,6 +41,8 @@ import { runMain } from "./run";
 import type { ContainmentAuditReport } from "../suite-containment-audit";
 import {
   CROSS_READ_PROMPT,
+  DispatchTurnValidationError,
+  assertDispatchTurn,
   buildExternalConfig,
   cleanupRuntimeProvider,
   crossReadPromptContainsExpected,
@@ -49,8 +52,11 @@ import {
   inspectReady,
   parseCrossReadResponse,
   prepareRuntimeProvider,
+  dispatchFailureDiagnostic,
   runtimeProviderConnected,
   runtimeProviderCredential,
+  writeHarnessFailureEvidence,
+  type ProjectedTurn,
 } from "./harness";
 
 const roots: string[] = [];
@@ -179,6 +185,159 @@ test("retains the primary error when cleanup also fails", async () => {
     finishCoordinationCleanup(undefined, false, async () => { throw cleanup; }, () => { throw retention; }),
     (error) => error instanceof AggregateError && error.errors.includes(cleanup) && error.errors.includes(retention),
   );
+});
+
+test("production failure writer persists only bounded nonsecret diagnostics with owner-only permissions", () => {
+  const sentinel = {
+    nonce: "SENTINEL_NONCE_VALUE",
+    provider: "SENTINEL_PROVIDER_VALUE",
+    auth: "SENTINEL_AUTH_VALUE",
+    freeForm: "SENTINEL_FREE_FORM_VALUE",
+    nestedKey: "SENTINEL_NESTED_OBJECT_KEY",
+    nestedValue: "SENTINEL_NESTED_OBJECT_VALUE",
+    id: "SENTINEL_ID_VALUE",
+    path: "SENTINEL_PATH_VALUE",
+    outputHash: "SENTINEL_OUTPUT_HASH_VALUE",
+    argument: "SENTINEL_ARGUMENT_VALUE",
+    url: "SENTINEL_URL_VALUE",
+  };
+  const hostile = sentinel.freeForm.repeat(50_000);
+  const turn = {
+    label: "A",
+    name: "registration-outage-mutation",
+    sessionIdHash: sentinel.auth,
+    acceptedAt: sentinel.freeForm,
+    completedAt: hostile,
+    durationMs: Number.MAX_SAFE_INTEGER,
+    model: { providerId: sentinel.provider, modelId: { [sentinel.nestedKey]: sentinel.nestedValue } },
+    finish: hostile,
+    tools: [{
+      partId: sentinel.auth,
+      name: "coordination_canary",
+      status: "error",
+      callId: sentinel.auth,
+      sessionId: sentinel.auth,
+      messageId: sentinel.freeForm,
+      nonce: sentinel.nonce,
+      operation: "mutate_commit_sync",
+      paths: [hostile],
+      commandSha256: sentinel.auth,
+      outputSha256: sentinel.provider,
+      outputBytes: Number.MAX_SAFE_INTEGER,
+      markerObserved: true,
+    }],
+    promptSha256: sentinel.auth,
+    responseSha256: sentinel.provider,
+    responseBytes: Number.MAX_SAFE_INTEGER,
+    transformEntryIds: [sentinel.auth],
+    transformLinks: [{ [sentinel.nestedKey]: { value: sentinel.nestedValue } }],
+    responseText: hostile,
+  } as unknown as ProjectedTurn;
+  let error: unknown;
+  try {
+    assertDispatchTurn(turn, {
+      status: "completed",
+      sessionId: sentinel.auth,
+      nonce: sentinel.nonce,
+      operation: "mutate_commit_sync",
+    });
+  } catch (value) {
+    error = value;
+  }
+
+  assert(error instanceof DispatchTurnValidationError);
+  const diagnostic = dispatchFailureDiagnostic(error);
+  assert(diagnostic);
+  assert.deepEqual(diagnostic, {
+    type: "dispatch_turn_validation",
+    field: "tool_status",
+    toolCount: 1,
+    exactlyOneTool: true,
+    toolNameMatches: true,
+    toolStatusMatches: false,
+    toolCallIdentityPresent: true,
+    sessionIdentityMatches: true,
+    messageIdentityPresent: true,
+    nonceMatches: true,
+    operationMatches: true,
+  });
+  assert.equal(dispatchFailureDiagnostic(new Error("unrelated")), null);
+  const serialized = JSON.stringify(diagnostic);
+  assert(serialized.length <= 512);
+  assert(Object.values(diagnostic).every((value) => ["string", "number", "boolean"].includes(typeof value)));
+  for (const value of Object.values(sentinel)) assert.equal(serialized.includes(value), false);
+
+  let countError: unknown;
+  try {
+    assertDispatchTurn({ ...turn, tools: Array(10_000).fill(turn.tools[0]) }, {
+      status: "completed",
+      sessionId: sentinel.auth,
+      nonce: sentinel.nonce,
+      operation: "mutate_commit_sync",
+    });
+  } catch (value) {
+    countError = value;
+  }
+  const countDiagnostic = dispatchFailureDiagnostic(countError);
+  assert.equal(countDiagnostic?.field, "tool_count");
+  assert.equal(countDiagnostic?.toolCount, 2);
+  assert(JSON.stringify(countDiagnostic).length <= 512);
+
+  error.name = sentinel.provider;
+  error.message = hostile;
+  error.stack = `${sentinel.auth}\n${hostile}`;
+  Object.assign(error, {
+    arguments: [sentinel.argument],
+    provider: { [sentinel.nestedKey]: sentinel.nestedValue },
+    url: sentinel.url,
+  });
+  Object.assign(error.diagnostic as unknown as Record<string, unknown>, {
+    type: sentinel.provider,
+    toolCount: Number.MAX_SAFE_INTEGER,
+    toolNameMatches: { [sentinel.nestedKey]: sentinel.nestedValue },
+    toolStatusMatches: sentinel.auth,
+  });
+  const proxyEvents: FaultProxyEvent[] = Array.from({ length: 10_000 }, (_, index) => ({
+    schema: PROXY_EVENT_SCHEMA,
+    id: sentinel.id,
+    startedAt: sentinel.url,
+    completedAt: sentinel.freeForm,
+    phase: "fail_registration",
+    method: sentinel.auth,
+    pathname: hostile,
+    requestBytes: Number.MAX_SAFE_INTEGER,
+    requestSha256: sentinel.outputHash,
+    disposition: index % 2 === 0 ? "blocked" : "response_lost",
+    upstreamStatus: Number.MAX_SAFE_INTEGER,
+    upstreamResponseBytes: Number.MAX_SAFE_INTEGER,
+    upstreamResponseSha256: sentinel.provider,
+  }));
+  const fixture = fixtureRepository();
+  const artifact = join(fixture.root, "tests", "artifacts", "test-runs", "11111111-1111-4111-8111-111111111111");
+  const store = new EvidenceStore(fixture.root, artifact, []);
+  writeHarnessFailureEvidence(store, "execution", error, proxyEvents);
+  const failurePath = join(artifact, "failure.json");
+  const persisted = readFileSync(failurePath, "utf8");
+  assert.deepEqual(JSON.parse(persisted), {
+    schemaVersion: 1,
+    phase: "execution",
+    failureCode: "dispatch_validation",
+    diagnostic: {
+      ...diagnostic,
+      toolCount: 2,
+      toolNameMatches: false,
+      toolStatusMatches: false,
+    },
+    proxyEventCount: 255,
+    proxyEventCountCapped: true,
+    blockedObserved: true,
+    responseLostObserved: true,
+  });
+  assert(Buffer.byteLength(persisted, "utf8") <= 512);
+  assert.deepEqual(readdirSync(artifact), ["failure.json"]);
+  assert.equal(statSync(artifact).mode & 0o777, 0o700);
+  assert.equal(statSync(failurePath).mode & 0o777, 0o600);
+  for (const value of Object.values(sentinel)) assert.equal(persisted.includes(value), false);
 });
 
 function fixtureRepository(): {

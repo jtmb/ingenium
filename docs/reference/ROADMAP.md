@@ -4005,3 +4005,67 @@ This is source-test and cleanup evidence only. The parser remediation is not
 committed or deployed, no model turn/restart replay was retained, and no retry
 occurred. Coordination/shared-memory acceptance therefore remains **OPEN and
 RESUMABLE**, with no rollout `PASS` or `(work-complete)` marker.
+
+### Wave 190D deployment proof and failed Wave 191 one-shot gate (2026-09-02)
+
+The Wave 190 repository-sync parser remediation was committed and deployed as
+`40aed400d077ffc7400831c00afeaa99b514c804`. Canonical API health and runtime
+health reported that source/image revision. A deployed exact-size parser canary
+returned `200` for the 2,119,065-byte manifest, malformed JSON returned `400`,
+and a declared 2,119,066-byte body returned `413`. Focused source evidence also
+passed 10 API repository-sync tests, 18 Core repository-sync tests, both affected
+typechecks, and `git diff --check`.
+
+The next authorized harness invocation ran exactly once from that clean/deployed
+revision as `e394e9ca-e36f-4063-915a-7fc99b3f0324`. Real external A, external B,
+and internal C reached readiness. During the registration outage, Model A
+completed its run-owned local edit, typecheck, managed commit, and repository
+sync; the 2,119,065-byte sync met one bounded generation-conflict `409`, retried,
+and returned `200`. Preserved managed commit
+`fe0fdb2c6b4aebf8174b48b118f5b459efd50be0` contains only
+`tests/coordination/e394e9ca-e36f-4063-915a-7fc99b3f0324-a.txt`.
+
+The run then failed its first projected tool-turn validation with
+`Model A registration-outage-mutation tool-call identity or nonce binding
+changed`. The failure artifact retained no projected turns, so it cannot identify
+which of the eight combined checks failed. Completion-loss, quarantine, recovery,
+restart replay, and B restart were not reached; this is not full three-window
+acceptance. Cleanup retained zero errors, stopped A/B and the fault proxy, removed
+the exact temporary root, revoked and removed both run-issued credentials, and
+removed the run-owned runtime provider credential. Independent checks found both
+recorded PIDs absent and ports 55379-55381 reusable. The runtime later reached its
+normal idle stop. The built-in strict audit ran once after the failed harness and
+was not retried; no separate audit report was retained.
+
+Security review reproduced that the first uncommitted diagnostic remediation
+would have attached an unrestricted projected turn to `failure.json`, including
+plaintext nonce/model fields and unbounded nested values. That unsafe projection
+has been removed before commit. The minimum replacement retains no raw turn and
+persists only a flat fixed-schema dispatch diagnostic: one developer-owned type,
+one allowlisted mismatch field, a `0|1|2` capped tool count, and boolean match or
+presence facts. It contains no model text, nonce, provider/auth value, path, ID,
+argument, output, URL, hash, array, nested value, or input-owned object key. The
+existing evidence boundary continues to create the run directory as `0700` and
+the failure artifact as `0600`. Focused hostile-input, bounded-size, exact-field,
+and permission coverage passes 1/1; the full coordination file passes 50/50;
+the coordination TypeScript check and `git diff --check` pass. No live retry was
+performed or remains authorized under this one-shot boundary. Coordination/
+shared-memory acceptance remains **OPEN and RESUMABLE**, with no rollout `PASS`
+or `(work-complete)` marker.
+
+A follow-up production-path review reproduced that the harness catch still wrote
+raw error messages, stack hashes, and raw proxy-event arrays alongside that safe
+diagnostic. The current uncommitted correction routes the actual catch through a
+single production failure writer. `failure.json` now contains only numeric schema
+version `1`; developer-owned phase and failure-code enums; the reconstructed,
+allowlisted dispatch diagnostic when present; a proxy-event count capped at 255;
+and blocked/response-lost booleans. Error text, stack material, event strings,
+paths, IDs, hashes, status values, and nested objects are not projected. Compact
+UTF-8 serialization is limited to 512 bytes before the owner-only atomic write;
+an over-limit invariant selects a deterministic minimal `artifact_limit` fallback.
+The focused regression invokes this exact production writer with oversized hostile
+error text, mutated nested diagnostic values, and 10,000 hostile proxy events. The
+focused writer regression passes 1/1, the full coordination file passes 50/50,
+and the coordination TypeScript check passes. `git diff --check` follows this
+evidence update as the final source gate. Cleanup telemetry outside `failure.json`
+is unchanged. No live run, deployment, or commit is authorized.

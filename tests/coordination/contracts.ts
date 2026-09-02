@@ -537,13 +537,29 @@ export class EvidenceStore {
   }
 
   write(name: string, value: unknown): void {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$/.test(name)) throw new Error("Evidence filename is invalid");
+    this.writeSerialized(name, `${JSON.stringify(this.safe(value), null, 2)}\n`);
+  }
+
+  writeBounded(name: string, value: unknown, maxBytes: number, fallback: unknown): void {
+    if (!Number.isInteger(maxBytes) || maxBytes < 1) throw new Error("Evidence byte limit is invalid");
+    let serialized = `${JSON.stringify(this.safe(value))}\n`;
+    if (Buffer.byteLength(serialized, "utf8") > maxBytes) serialized = `${JSON.stringify(this.safe(fallback))}\n`;
+    if (Buffer.byteLength(serialized, "utf8") > maxBytes) throw new Error("Bounded evidence fallback exceeded its byte limit");
+    this.writeSerialized(name, serialized);
+  }
+
+  private safe(value: unknown): unknown {
     const safe = redactEvidence(value, this.secrets);
     assertNoSecrets(safe, this.secrets);
+    return safe;
+  }
+
+  private writeSerialized(name: string, serialized: string): void {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$/.test(name)) throw new Error("Evidence filename is invalid");
     const destination = join(this.root, name);
     const temporary = join(this.root, `.${name}.${process.pid}.tmp`);
     try {
-      writeFileSync(temporary, `${JSON.stringify(safe, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+      writeFileSync(temporary, serialized, { mode: 0o600, flag: "wx" });
       renameSync(temporary, destination);
       chmodSync(destination, 0o600);
     } catch (error) {

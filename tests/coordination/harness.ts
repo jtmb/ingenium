@@ -121,7 +121,7 @@ interface ProjectedTool {
   markerObserved: boolean;
 }
 
-interface ProjectedTurn {
+export interface ProjectedTurn {
   label: "A" | "B" | "C";
   name: string;
   sessionIdHash: string;
@@ -137,6 +137,133 @@ interface ProjectedTurn {
   transformEntryIds: string[];
   transformLinks: Array<{ captureIndex: number; captureSha256: string; entryIds: string[] }>;
   responseText: string;
+}
+
+export type DispatchMismatchField =
+  | "tool_count"
+  | "tool_name"
+  | "tool_status"
+  | "tool_call_identity"
+  | "session_identity"
+  | "message_identity"
+  | "nonce_binding"
+  | "operation_binding";
+
+const DISPATCH_MISMATCH_FIELDS = new Set<DispatchMismatchField>([
+  "tool_count", "tool_name", "tool_status", "tool_call_identity", "session_identity", "message_identity", "nonce_binding", "operation_binding",
+]);
+
+export interface DispatchFailureDiagnostic {
+  type: "dispatch_turn_validation";
+  field: DispatchMismatchField;
+  toolCount: 0 | 1 | 2;
+  exactlyOneTool: boolean;
+  toolNameMatches: boolean;
+  toolStatusMatches: boolean;
+  toolCallIdentityPresent: boolean;
+  sessionIdentityMatches: boolean;
+  messageIdentityPresent: boolean;
+  nonceMatches: boolean;
+  operationMatches: boolean;
+}
+
+export class DispatchTurnValidationError extends Error {
+  constructor(readonly diagnostic: DispatchFailureDiagnostic) {
+    super(`Model A dispatch validation failed: ${diagnostic.field}`);
+    this.name = "DispatchTurnValidationError";
+  }
+}
+
+export function dispatchFailureDiagnostic(error: unknown): DispatchFailureDiagnostic | null {
+  if (!(error instanceof DispatchTurnValidationError) || !DISPATCH_MISMATCH_FIELDS.has(error.diagnostic.field)) return null;
+  const diagnostic = error.diagnostic;
+  return {
+    type: "dispatch_turn_validation",
+    field: diagnostic.field,
+    toolCount: diagnostic.toolCount === 0 ? 0 : diagnostic.toolCount === 1 ? 1 : 2,
+    exactlyOneTool: diagnostic.exactlyOneTool === true,
+    toolNameMatches: diagnostic.toolNameMatches === true,
+    toolStatusMatches: diagnostic.toolStatusMatches === true,
+    toolCallIdentityPresent: diagnostic.toolCallIdentityPresent === true,
+    sessionIdentityMatches: diagnostic.sessionIdentityMatches === true,
+    messageIdentityPresent: diagnostic.messageIdentityPresent === true,
+    nonceMatches: diagnostic.nonceMatches === true,
+    operationMatches: diagnostic.operationMatches === true,
+  };
+}
+
+export type HarnessFailurePhase = "setup" | "readiness" | "execution" | "finalization" | "unknown";
+type HarnessFailureCode = "dispatch_validation" | "harness_failure" | "artifact_limit";
+
+const HARNESS_FAILURE_PHASES = new Set<HarnessFailurePhase>(["setup", "readiness", "execution", "finalization", "unknown"]);
+const FAILURE_ARTIFACT_MAX_BYTES = 512;
+const FAILURE_ARTIFACT_FALLBACK = {
+  schemaVersion: 1,
+  phase: "unknown",
+  failureCode: "artifact_limit",
+  diagnostic: null,
+  proxyEventCount: 0,
+  proxyEventCountCapped: true,
+  blockedObserved: false,
+  responseLostObserved: false,
+} as const satisfies {
+  schemaVersion: 1;
+  phase: HarnessFailurePhase;
+  failureCode: HarnessFailureCode;
+  diagnostic: null;
+  proxyEventCount: 0;
+  proxyEventCountCapped: true;
+  blockedObserved: false;
+  responseLostObserved: false;
+};
+
+export function writeHarnessFailureEvidence(
+  evidence: EvidenceStore,
+  phase: HarnessFailurePhase,
+  error: unknown,
+  proxyEvents: readonly FaultProxyEvent[],
+): void {
+  const diagnostic = dispatchFailureDiagnostic(error);
+  evidence.writeBounded("failure.json", {
+    schemaVersion: 1,
+    phase: HARNESS_FAILURE_PHASES.has(phase) ? phase : "unknown",
+    failureCode: diagnostic ? "dispatch_validation" : "harness_failure",
+    diagnostic,
+    proxyEventCount: Math.min(proxyEvents.length, 255),
+    proxyEventCountCapped: proxyEvents.length > 255,
+    blockedObserved: proxyEvents.some((event) => event.disposition === "blocked"),
+    responseLostObserved: proxyEvents.some((event) => event.disposition === "response_lost"),
+  }, FAILURE_ARTIFACT_MAX_BYTES, FAILURE_ARTIFACT_FALLBACK);
+}
+
+export function assertDispatchTurn(
+  turn: ProjectedTurn,
+  expected: { status: "completed" | "error"; sessionId: string; nonce: string; operation: CanaryOperation },
+): void {
+  const tool = turn.tools[0];
+  const invalid = (field: DispatchMismatchField): never => {
+    throw new DispatchTurnValidationError({
+      type: "dispatch_turn_validation",
+      field,
+      toolCount: turn.tools.length === 0 ? 0 : turn.tools.length === 1 ? 1 : 2,
+      exactlyOneTool: turn.tools.length === 1,
+      toolNameMatches: tool?.name === CANARY_TOOL,
+      toolStatusMatches: tool?.status === expected.status,
+      toolCallIdentityPresent: typeof tool?.callId === "string" && tool.callId.length > 0,
+      sessionIdentityMatches: tool?.sessionId === expected.sessionId,
+      messageIdentityPresent: tool !== undefined && tool.messageId !== null,
+      nonceMatches: tool?.nonce === expected.nonce,
+      operationMatches: tool?.operation === expected.operation,
+    });
+  };
+  if (turn.tools.length !== 1) invalid("tool_count");
+  if (tool!.name !== CANARY_TOOL) invalid("tool_name");
+  if (tool!.status !== expected.status) invalid("tool_status");
+  if (tool!.callId.length === 0) invalid("tool_call_identity");
+  if (tool!.sessionId !== expected.sessionId) invalid("session_identity");
+  if (tool!.messageId === null) invalid("message_identity");
+  if (tool!.nonce !== expected.nonce) invalid("nonce_binding");
+  if (tool!.operation !== expected.operation) invalid("operation_binding");
 }
 
 interface CrossReadResult {
@@ -953,12 +1080,8 @@ async function runDispatchTurn(
   const step = plan.steps[0]!;
   writeCanaryPlan(prepared, plan);
   const turn = await runTurn(api, sessionId, name, dispatchPrompt(plan), options, step.marker ?? "", signal, captureFile);
-  required(turn.tools.length === 1, `Model A ${name} did not invoke exactly one tool`);
+  assertDispatchTurn(turn, { status: expectedStatus, sessionId, nonce: plan.nonce, operation: step.operation });
   const tool = turn.tools[0]!;
-  required(tool.name === CANARY_TOOL && tool.status === expectedStatus && tool.callId.length > 0
-    && tool.sessionId === sessionId && tool.messageId !== null
-    && tool.nonce === plan.nonce && tool.operation === step.operation,
-  `Model A ${name} tool-call identity or nonce binding changed`);
   if (expectedStatus === "completed") {
     required((step.path === null || tool.paths.includes(step.path))
       && (step.marker === null || tool.markerObserved), `Model A ${name} result is not linked to the exact side effect`);
@@ -1301,6 +1424,7 @@ export async function runCoordinationHarness(
   signals.forEach((signal) => process.once(signal, signalHandlers.get(signal)!));
   let primaryError: unknown;
   let hasPrimaryError = false;
+  let failurePhase: HarnessFailurePhase = "setup";
 
   try {
     lifecycle.assertRunning();
@@ -1328,6 +1452,7 @@ export async function runCoordinationHarness(
       openCodeVersion: options.expectedOpenCodeVersion,
       runtimeOpenCodeVersion: options.expectedRuntimeOpenCodeVersion,
     });
+    failurePhase = "readiness";
     await proxy.start(lifecycle.signal);
     lifecycle.assertRunning();
     transferTestRunPortOwnership(context.manifestPath, context.ports.api);
@@ -1366,6 +1491,7 @@ export async function runCoordinationHarness(
       inspections: inspected.map((value, index) => projectOpenCodeInspection((["A", "B", "C"] as const)[index]!, value, options)),
     });
 
+    failurePhase = "execution";
     const [sessionA, sessionB, sessionC] = await Promise.all([
       apiA.createSession(`coordination-${context.runId}-A`),
       apiB.createSession(`coordination-${context.runId}-B`),
@@ -1496,6 +1622,7 @@ export async function runCoordinationHarness(
     required(duplicate.transformEntryIds.length === 0 && duplicate.tools.length === 0
       && JSON.stringify(JSON.parse(duplicate.responseText.trim())) === JSON.stringify({ noNewMemory: true }), "Restarted B repeated acknowledged memory");
 
+    failurePhase = "finalization";
     const coordinationCredential = lease.coordinationLocator;
     required(coordinationCredential, "Coordination credential disappeared before final preflight");
     const identityAfter = await preflightHarnessIdentity(options, coordinationCredential, lifecycle.signal);
@@ -1572,14 +1699,7 @@ export async function runCoordinationHarness(
     primaryError = error;
     hasPrimaryError = true;
     lifecycle.abort(error);
-    evidence?.write("failure.json", {
-      schema: HARNESS_ARTIFACT_SCHEMA,
-      failedAt: new Date().toISOString(),
-      error: error instanceof Error ? { name: error.name, message: error.message, stackSha256: sha256(error.stack ?? "") } : { name: "Error", message: String(error) },
-      turns,
-      proxyEvents,
-      retainedForRecovery: true,
-    });
+    if (evidence) writeHarnessFailureEvidence(evidence, failurePhase, error, proxyEvents);
     throw error;
   } finally {
     signals.forEach((signal) => process.removeListener(signal, signalHandlers.get(signal)!));
