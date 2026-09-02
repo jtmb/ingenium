@@ -12,6 +12,8 @@ const GIT_CONFIGURATION = [
 const COMMIT_CONFIGURATION = [
   "-c", "commit.gpgSign=false",
   "-c", "credential.helper=",
+  "-c", "user.name=Ingenium Managed Command",
+  "-c", "user.email=managed-command@ingenium.invalid",
 ];
 const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
 

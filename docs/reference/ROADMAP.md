@@ -3909,3 +3909,35 @@ reports no holds or artifact residuals. This remains source-test and containment
 evidence only: no deployment or three-window model/session acceptance occurred,
 so coordination/shared-memory acceptance remains **OPEN and RESUMABLE**. No
 `(work-complete)` marker or rollout `PASS` is recorded.
+
+### Failed Wave 189 live attempt and managed-commit remediation (2026-09-01)
+
+The next single authorized harness invocation against clean, deployed revision
+`8902156ff62b5575f08f07161c6272676bcff917` retained run
+`b047535e-2c2c-4564-a169-05826b0e565f`. External A, external B, and internal C
+all reached provider-connected and MCP-connected readiness. Model A then edited
+and staged its exact run-owned file during the registration-outage mutation, but
+its managed commit failed before the first turn could be retained. The wrapper
+intentionally ignores global and system Git configuration, while this checkout
+had no repository-local `user.name` or `user.email`; the existing successful
+commit test masked that boundary by configuring both values locally.
+
+The minimum uncommitted source fix gives managed commits the deterministic
+non-user identity `Ingenium Managed Command <managed-command@ingenium.invalid>`
+through command-scoped Git configuration. Global/system configuration, hooks,
+credential helpers, signing, editors, pagers, prompts, and inherited `GIT_*`
+overrides remain disabled. The focused regression now commits successfully from
+a repository with no local identity. All 13 managed-wrapper tests and the
+extension typecheck pass; the harness and its built-in strict audit were not
+retried.
+
+Retained cleanup reports zero errors, both external processes and the proxy
+stopped, temporary state removed, complete/resolved telemetry, and no active
+processes. Independent checks found neither recorded PID nor listeners on the
+three run ports, and the runtime reports the run-owned OpenAI provider
+disconnected. The protected installation credential correctly cannot list MCP
+credentials (`401`), so lease revocation remains evidenced by the successful
+`revokeAndRemove` cleanup path rather than an unauthorized inventory query. The
+failed run's exact staged file was removed. No deployment, commit, retry, or
+three-window acceptance occurred; coordination/shared-memory acceptance remains
+**OPEN and RESUMABLE**, with no rollout `PASS` or `(work-complete)` marker.

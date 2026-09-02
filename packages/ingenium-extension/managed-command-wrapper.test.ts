@@ -45,6 +45,7 @@ describe("managed command wrappers", () => {
     expect(managedRepositoryArgv(["commit", "chore(checkpoint): preserve runtime and coordination hardening work"])).toEqual([
       "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
       "-c", "commit.gpgSign=false", "-c", "credential.helper=",
+      "-c", "user.name=Ingenium Managed Command", "-c", "user.email=managed-command@ingenium.invalid",
       "commit", "--no-verify", "--no-gpg-sign", "--cleanup=verbatim", "-m",
       "chore(checkpoint): preserve runtime and coordination hardening work",
     ]);
@@ -173,8 +174,6 @@ describe("managed command wrappers", () => {
     const previousSentinel = process.env.MANAGED_HOOK_SENTINEL;
     try {
       execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
-      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.name", "Managed Wrapper Test"]);
-      execFileSync("/usr/bin/git", ["-C", directory, "config", "user.email", "managed-wrapper@example.invalid"]);
       const marker = join(directory, "hook-ran");
       const exposure = join(directory, "hook-sentinel");
       const hook = join(directory, ".git", "hooks", "pre-commit");
