@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -31,6 +31,7 @@ import { allowlistedBaseEnvironment, allowlistedCanaryActionEnvironment, prepare
 import { CanaryDispatcher, RealCanaryActions, type CanaryPlan, type CanaryRequest } from "./canary-dispatcher";
 import { ExecutionLifecycle } from "./execution-lifecycle";
 import {
+  CoordinationLeaseRequestError,
   RunCredentialLease,
   createRunCredentialLeaseTransport,
   type IssuedRunCredentialPair,
@@ -55,6 +56,8 @@ import {
   dispatchFailureDiagnostic,
   runtimeProviderConnected,
   runtimeProviderCredential,
+  HarnessRuntimeReadinessError,
+  runCoordinationHarness,
   writeHarnessFailureEvidence,
   type ProjectedTurn,
 } from "./harness";
@@ -464,6 +467,50 @@ function issuedCredentialPair(options: ReturnType<typeof parseHarnessOptions>): 
   };
 }
 
+function initializeFixtureGit(fixture: ReturnType<typeof fixtureRepository>): string {
+  writeFileSync(join(fixture.root, ".gitignore"), "tests/artifacts/\n");
+  execFileSync("git", ["-C", fixture.root, "init", "--quiet"]);
+  execFileSync("git", ["-C", fixture.root, "add", "."]);
+  execFileSync("git", ["-C", fixture.root, "-c", "user.name=Coordination Test", "-c", "user.email=coordination@example.invalid", "commit", "--quiet", "-m", "fixture"]);
+  return execFileSync("git", ["-C", fixture.root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+}
+
+function runtimeWorkspacePayload(options: ReturnType<typeof parseHarnessOptions>): unknown {
+  return { data: [{
+    id: options.workspaceId,
+    projectId: options.projectId,
+    storagePath: options.worktree,
+    storageMappingHash: options.storageMappingHash,
+    status: "authorized",
+  }] };
+}
+
+function runtimeStatusPayload(
+  options: ReturnType<typeof parseHarnessOptions>,
+  state: "STARTING" | "READY" | "IDLE" | "STOPPING" | "STOPPED",
+): unknown {
+  const backendName = `ingenium-runtime-${options.runtimeId.replaceAll("-", "")}`;
+  return { data: {
+    runtime: { id: options.runtimeId, workspaceId: options.workspaceId, projectId: options.projectId, backendName, state },
+    backend: {
+      runtimeId: options.runtimeId,
+      backendName,
+      imageRevision: options.expectedRevision,
+      state: state === "STOPPED" ? "exited" : "running",
+      health: state === "READY" || state === "IDLE" ? "healthy" : "starting",
+    },
+  } };
+}
+
+function runtimeStartPayload(options: ReturnType<typeof parseHarnessOptions>): unknown {
+  return { data: {
+    id: options.runtimeId,
+    workspaceId: options.workspaceId,
+    projectId: options.projectId,
+    state: "STARTING",
+  } };
+}
+
 async function leaseTestContext(prefix: string) {
   const context = createTestRunContext({
     repoRoot: process.cwd(),
@@ -861,6 +908,261 @@ test("issues exact live lease requests, persists no token evidence, and cleans e
   await finalizeCoordinationTestRun(context);
 });
 
+test("retains bounded evidence when credential lease fails before access", async () => {
+  const fixture = fixtureRepository();
+  const revision = initializeFixtureGit(fixture);
+  const requests: string[] = [];
+  let options: ReturnType<typeof parseHarnessOptions>;
+  const server = createServer((request, response) => {
+    const path = new URL(request.url!, "http://127.0.0.1").pathname;
+    requests.push(`${request.method} ${path}`);
+    const payload = path === "/api/v1/runtimes/workspaces" ? runtimeWorkspacePayload(options)
+      : path === `/api/v1/runtimes/${options.runtimeId}` ? runtimeStatusPayload(options, "READY")
+      : { error: { code: "NOT_FOUND" } };
+    const status = path === "/api/v1/auth/coordination-lease" ? 404 : 200;
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify(payload));
+  });
+  servers.push(server);
+  const port = await listen(server);
+  const args = validArguments(fixture);
+  args[args.indexOf("--expected-revision") + 1] = revision;
+  args.push("--api-url", `http://127.0.0.1:${port}/api/v1`);
+  options = parseHarnessOptions(args, {});
+  let runId = "";
+
+  await assert.rejects(
+    runCoordinationHarness(options, (run) => { runId = run.runId; }),
+    (error: unknown) => error instanceof CoordinationLeaseRequestError && error.status === 404,
+  );
+
+  const artifact = join(fixture.root, "tests", "artifacts", "test-runs", runId);
+  const failurePath = join(artifact, "failure.json");
+  const persisted = readFileSync(failurePath, "utf8");
+  assert.deepEqual(JSON.parse(persisted), {
+    schemaVersion: 1,
+    phase: "setup",
+    failureCode: "credential_lease",
+    diagnostic: { type: "credential_lease_response", status: 404 },
+    proxyEventCount: 0,
+    proxyEventCountCapped: false,
+    blockedObserved: false,
+    responseLostObserved: false,
+  });
+  assert(Buffer.byteLength(persisted, "utf8") <= 512);
+  assert.equal(statSync(failurePath).mode & 0o777, 0o600);
+  assert(existsSync(join(artifact, "cleanup.json")));
+  assert.deepEqual(requests, [
+    "GET /api/v1/runtimes/workspaces",
+    `GET /api/v1/runtimes/${options.runtimeId}`,
+    "POST /api/v1/auth/coordination-lease",
+  ]);
+});
+
+test("waits for stopping runtime, starts it once, and leases only after exact readiness", async () => {
+  const fixture = fixtureRepository();
+  const revision = initializeFixtureGit(fixture);
+  const requests: string[] = [];
+  const states = ["STOPPING", "STOPPED", "STARTING", "READY"] as const;
+  let statusReads = 0;
+  let options: ReturnType<typeof parseHarnessOptions>;
+  const server = createServer((request, response) => {
+    const path = new URL(request.url!, "http://127.0.0.1").pathname;
+    requests.push(`${request.method} ${path}`);
+    let status = 200;
+    let payload: unknown;
+    if (path === "/api/v1/runtimes/workspaces") payload = runtimeWorkspacePayload(options);
+    else if (path === `/api/v1/runtimes/${options.runtimeId}`) {
+      payload = runtimeStatusPayload(options, states[Math.min(statusReads++, states.length - 1)]!);
+    } else if (path === "/api/v1/runtimes" && request.method === "POST") {
+      assert.equal(states[Math.min(statusReads - 1, states.length - 1)], "STOPPED");
+      status = 202;
+      payload = runtimeStartPayload(options);
+    } else if (path === "/api/v1/auth/coordination-lease") {
+      assert.equal(statusReads, states.length);
+      status = 404;
+      payload = { error: { code: "NOT_FOUND" } };
+    } else {
+      status = 404;
+      payload = { error: { code: "NOT_FOUND" } };
+    }
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify(payload));
+  });
+  servers.push(server);
+  const port = await listen(server);
+  const args = validArguments(fixture);
+  args[args.indexOf("--expected-revision") + 1] = revision;
+  args.push("--api-url", `http://127.0.0.1:${port}/api/v1`);
+  options = parseHarnessOptions(args, {});
+
+  await assert.rejects(
+    runCoordinationHarness(options, () => undefined),
+    (error: unknown) => error instanceof CoordinationLeaseRequestError && error.status === 404,
+  );
+
+  assert.deepEqual(requests, [
+    "GET /api/v1/runtimes/workspaces",
+    `GET /api/v1/runtimes/${options.runtimeId}`,
+    `GET /api/v1/runtimes/${options.runtimeId}`,
+    "POST /api/v1/runtimes",
+    `GET /api/v1/runtimes/${options.runtimeId}`,
+    `GET /api/v1/runtimes/${options.runtimeId}`,
+    "POST /api/v1/auth/coordination-lease",
+  ]);
+});
+
+test("bounds runtime transition failure without issuing a lease", async () => {
+  const fixture = fixtureRepository();
+  const revision = initializeFixtureGit(fixture);
+  const requests: string[] = [];
+  let options: ReturnType<typeof parseHarnessOptions>;
+  const server = createServer((request, response) => {
+    const path = new URL(request.url!, "http://127.0.0.1").pathname;
+    requests.push(`${request.method} ${path}`);
+    const payload = path === "/api/v1/runtimes/workspaces"
+      ? runtimeWorkspacePayload(options) : runtimeStatusPayload(options, "STARTING");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(payload));
+  });
+  servers.push(server);
+  const port = await listen(server);
+  const args = validArguments(fixture);
+  args[args.indexOf("--expected-revision") + 1] = revision;
+  args.push("--api-url", `http://127.0.0.1:${port}/api/v1`);
+  options = parseHarnessOptions(args, {});
+  options.timeoutMs = 25;
+
+  await assert.rejects(
+    runCoordinationHarness(options, () => undefined),
+    (error: unknown) => error instanceof HarnessRuntimeReadinessError && error.code === "RUNTIME_READINESS_TIMEOUT",
+  );
+  assert.equal(requests.includes("POST /api/v1/runtimes"), false);
+  assert.equal(requests.includes("POST /api/v1/auth/coordination-lease"), false);
+});
+
+test("retains only fixed bounded evidence for a hostile early runtime response", async () => {
+  const fixture = fixtureRepository();
+  const revision = initializeFixtureGit(fixture);
+  const sentinel = `Bearer ing_${"s".repeat(48)} https://hostile.invalid provider-secret`;
+  const server = createServer((_request, response) => {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: sentinel, message: sentinel.repeat(2_000) } }));
+  });
+  servers.push(server);
+  const port = await listen(server);
+  const args = validArguments(fixture);
+  args[args.indexOf("--expected-revision") + 1] = revision;
+  args.push("--api-url", `http://127.0.0.1:${port}/api/v1`);
+  const options = parseHarnessOptions(args, {});
+  let runId = "";
+
+  await assert.rejects(
+    runCoordinationHarness(options, (run) => { runId = run.runId; }),
+    (error: unknown) => error instanceof HarnessRuntimeReadinessError && error.code === "RUNTIME_WORKSPACE_UNAVAILABLE",
+  );
+
+  const artifact = join(fixture.root, "tests", "artifacts", "test-runs", runId);
+  for (const name of ["failure.json", "cleanup.json"]) {
+    const path = join(artifact, name);
+    const persisted = readFileSync(path, "utf8");
+    assert(Buffer.byteLength(persisted, "utf8") <= 512);
+    assert.equal(persisted.includes(sentinel), false);
+    assert.equal(persisted.includes("operator-secret"), false);
+    assert.equal(persisted.includes("provider-secret"), false);
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+  }
+  assert.equal(statSync(artifact).mode & 0o777, 0o700);
+});
+
+test("real harness bounds 10000 hostile cleanup failures without retaining sentinels", async () => {
+  const fixture = fixtureRepository();
+  const revision = initializeFixtureGit(fixture);
+  const responseSentinel = "hostile-runtime-response";
+  const sentinels = [
+    `ing_${"t".repeat(48)}`,
+    "provider-private-value",
+    "model-private-value",
+    fixture.operator,
+    "11111111-1111-4111-8111-111111111111",
+    "hostile-output-value",
+    responseSentinel,
+    "operator-secret",
+    "provider-secret",
+  ];
+  const cleanupOperations = Array.from({ length: 10_000 }, (_, index) => () => {
+    const error = new Error(`${sentinels[index % sentinels.length]} ${sentinels.join(" ")}`);
+    error.stack = sentinels.join("\n");
+    Object.assign(error, { response: { body: sentinels }, model: sentinels, provider: sentinels, output: sentinels });
+    throw error;
+  });
+  const server = createServer((_request, response) => {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: responseSentinel, message: sentinels.join(" ") } }));
+  });
+  servers.push(server);
+  const port = await listen(server);
+  const args = validArguments(fixture);
+  args[args.indexOf("--expected-revision") + 1] = revision;
+  args.push("--api-url", `http://127.0.0.1:${port}/api/v1`);
+  const options = parseHarnessOptions(args, {});
+  sentinels.push(options.providerId, options.modelId, options.runtimeId, options.openCodeAuth.path);
+  let runId = "";
+  let telemetryPath = "";
+  let tempRoot = "";
+  let harnessError: unknown;
+  try {
+    await runCoordinationHarness(options, (run) => {
+      runId = run.runId;
+      telemetryPath = run.telemetryPath;
+      const telemetry = JSON.parse(readFileSync(telemetryPath, "utf8"));
+      tempRoot = dirname(telemetry.manifestPath);
+      sentinels.push(runId, telemetry.runNonce, telemetry.manifestPath);
+    }, { cleanupOperations });
+  } catch (error) {
+    harnessError = error;
+  }
+
+  try {
+    assert(harnessError instanceof HarnessRuntimeReadinessError);
+    assert.equal(harnessError.code, "RUNTIME_WORKSPACE_UNAVAILABLE");
+    const cleanupError = (harnessError as Error & { cleanupError?: unknown }).cleanupError;
+    assert(cleanupError instanceof AggregateError);
+    assert.equal(cleanupError.errors.length, 10_000);
+    const artifact = join(fixture.root, "tests", "artifacts", "test-runs", runId);
+    const expected = {
+      "failure.json": {
+        maxBytes: 512,
+        value: { schemaVersion: 1, phase: "setup", failureCode: "harness_failure", diagnostic: null,
+          proxyEventCount: 0, proxyEventCountCapped: false, blockedObserved: false, responseLostObserved: false },
+      },
+      "cleanup.json": {
+        maxBytes: 512,
+        value: { schemaVersion: 1, status: "failed", externalAStopped: true, externalBStopped: true,
+          proxyStopped: true, runtimeProviderDisconnected: true, runAccessRemoved: true,
+          tempRemoved: false, failureCount: 255, failureCountCapped: true, failedStages: ["test_run_finalize"] },
+      },
+      "cleanup-failure.json": {
+        maxBytes: 256,
+        value: { schemaVersion: 1, stage: "cleanup_finalization", code: "cleanup_failed",
+          primaryErrorRetained: true, retainedForRecovery: true, failureCount: 255, failureCountCapped: true },
+      },
+    } as const;
+    for (const [name, contract] of Object.entries(expected)) {
+      const path = join(artifact, name);
+      const persisted = readFileSync(path, "utf8");
+      assert.deepEqual(JSON.parse(persisted), contract.value);
+      assert(Buffer.byteLength(persisted, "utf8") <= contract.maxBytes);
+      for (const sentinel of sentinels) assert.equal(persisted.includes(sentinel), false);
+      assert.equal(statSync(path).mode & 0o777, 0o600);
+    }
+    assert.equal(statSync(artifact).mode & 0o777, 0o700);
+    assert.equal(statSync(tempRoot).mode & 0o777, 0o700);
+  } finally {
+    if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("retains redacted metadata and cleans the issued credential after a partial lease response", async () => {
   const fixture = fixtureRepository();
   const options = parseHarnessOptions(validArguments(fixture), {});
@@ -1223,16 +1525,25 @@ test("runner finalization preserves harness failure when audit also fails", asyn
   assert.equal(auditCalls, 1);
 });
 
-test("issues run credentials before preflight and fails closed on identity drift", async () => {
+test("ensures exact runtime before credentials and fails closed on protected identity drift", async () => {
   const fixture = fixtureRepository();
   const runtimeId = "22222222-2222-4222-8222-222222222222";
   const accessOrder: string[] = [];
   const options = parseHarnessOptions(validArguments(fixture), {});
+  let runtimeOptions = options;
   const issued = issuedCredentialPair(options);
   const request = async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
-    assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${issued.coordination!.token}`);
     accessOrder.push(`query:${url.pathname}${url.search}`);
+    if (url.pathname === "/api/v1/runtimes/workspaces") {
+      assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer operator-secret");
+      return Response.json(runtimeWorkspacePayload(runtimeOptions));
+    }
+    if (url.pathname === `/api/v1/runtimes/${runtimeId}`) {
+      assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer operator-secret");
+      return Response.json(runtimeStatusPayload(runtimeOptions, "READY"));
+    }
+    assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${issued.coordination!.token}`);
     assert.equal(url.toString(), `http://127.0.0.1:4097/api/v1/auth/preflight?runtime_id=${runtimeId}`);
     return Response.json({ data: {
       authenticated: true,
@@ -1270,13 +1581,14 @@ test("issues run credentials before preflight and fails closed on identity drift
   assert.equal(access.runtime.id, runtimeId);
   assert.deepEqual(accessOrder, [
     "open:operator-api",
+    "open:opencode-auth",
+    "query:/api/v1/runtimes/workspaces",
+    `query:/api/v1/runtimes/${runtimeId}`,
     "issue:coordination-lease",
     "open:coordination-api",
     "open:repository-sync",
     `query:/api/v1/auth/preflight?runtime_id=${runtimeId}`,
-    "open:opencode-auth",
   ]);
-  assert.equal(accessOrder.some((entry) => entry.includes("/runtimes")), false);
   await lease.revokeAndRemove(signal);
   await finalizeCoordinationTestRun(context);
 
@@ -1285,6 +1597,7 @@ test("issues run credentials before preflight and fails closed on identity drift
     projectId: "77777777-7777-4777-8777-777777777777",
   };
   const driftContext = await leaseTestContext("ingenium-coordination-access-drift-");
+  runtimeOptions = driftOptions;
   const driftLease = new RunCredentialLease(driftContext, driftOptions, {
     ...transport,
     async issue() { return issuedCredentialPair(driftOptions); },
@@ -1335,9 +1648,12 @@ test("writes only redacted, owner-only evidence inside the run artifact boundary
   const artifact = join(fixture.root, "tests", "artifacts", "test-runs", "11111111-1111-4111-8111-111111111111");
   const store = new EvidenceStore(fixture.root, artifact, ["configured-private-value"]);
   store.write("result.json", { token: "configured-private-value", value: "safe" });
+  store.protect("late-protected-value");
+  store.write("late-protected.json", { token: "late-protected-value" });
   const path = join(artifact, "result.json");
   assert.equal(statSync(path).mode & 0o777, 0o600);
   assert.equal(JSON.parse(readFileSync(path, "utf8")).token, "<redacted>");
+  assert.equal(JSON.parse(readFileSync(join(artifact, "late-protected.json"), "utf8")).token, "<redacted>");
   assert.throws(() => new EvidenceStore(fixture.root, join(fixture.root, "outside"), []), /escaped/);
 });
 

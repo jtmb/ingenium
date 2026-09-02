@@ -99,6 +99,13 @@ export interface RunCredentialLeaseMetadata {
   runtimeProvider?: { providerId: string; ownership: "preexisting" | "owned" };
 }
 
+export class CoordinationLeaseRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`/auth/coordination-lease returned ${status}`);
+    this.name = "CoordinationLeaseRequestError";
+  }
+}
+
 function required(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
@@ -274,7 +281,7 @@ export function createRunCredentialLeaseTransport(
         },
         body: JSON.stringify({ runtimeId }),
       }, signal);
-      required(response.status === 201, `/auth/coordination-lease returned ${response.status}`);
+      if (response.status !== 201) throw new CoordinationLeaseRequestError(response.status);
       const envelope = exactRecord(await response.json(), ["data"], "Coordination lease response is invalid");
       const data = exactRecord(envelope.data,
         ["runtimeId", "expiresAt", "coordinationCredential", "repositorySyncCredential"],

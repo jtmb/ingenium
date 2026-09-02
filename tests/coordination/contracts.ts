@@ -525,8 +525,9 @@ export function assertOwnershipManifest(value: unknown): asserts value is Harnes
 
 export class EvidenceStore {
   readonly root: string;
+  private readonly protectedValues: string[];
 
-  constructor(repoRoot: string, artifactRoot: string, private readonly secrets: readonly string[]) {
+  constructor(repoRoot: string, artifactRoot: string, secrets: readonly string[]) {
     const repo = realpathSync(repoRoot);
     const resolved = resolve(artifactRoot);
     if (!pathIsInside(join(repo, "tests", "artifacts", "test-runs"), resolved)) throw new Error("Evidence root escaped test-runs");
@@ -534,6 +535,13 @@ export class EvidenceStore {
     chmodSync(resolved, 0o700);
     if (realpathSync(resolved) !== resolved || lstatSync(resolved).isSymbolicLink()) throw new Error("Evidence root is unsafe");
     this.root = resolved;
+    this.protectedValues = [...new Set(secrets.filter(Boolean))];
+  }
+
+  protect(...values: readonly string[]): void {
+    for (const value of values) {
+      if (value && !this.protectedValues.includes(value)) this.protectedValues.push(value);
+    }
   }
 
   write(name: string, value: unknown): void {
@@ -549,8 +557,8 @@ export class EvidenceStore {
   }
 
   private safe(value: unknown): unknown {
-    const safe = redactEvidence(value, this.secrets);
-    assertNoSecrets(safe, this.secrets);
+    const safe = redactEvidence(value, this.protectedValues);
+    assertNoSecrets(safe, this.protectedValues);
     return safe;
   }
 

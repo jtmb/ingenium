@@ -4103,3 +4103,87 @@ The harness invocation limit is exhausted and no retry occurred. Completion-loss
 quarantine, recovery, restart replay, and B restart remain unproved, so
 coordination/shared-memory acceptance remains **OPEN and RESUMABLE** with no
 rollout `PASS` or `(work-complete)` marker.
+
+### Wave 192 stopped-runtime preflight and retained failure evidence (2026-09-02)
+
+The next and only authorized harness invocation ran from a clean checkout and
+deployed image revision `167348ba442e0526158bc617da7c02181f486b0d` as run
+`85fd720f-207f-40a5-908c-ab5e940653b5`. Credential acquisition stopped during
+setup when `POST /api/v1/auth/coordination-lease` returned the intentionally
+concealed `404`. The authenticated control-plane record showed runtime
+`ce1ebd95-3f8c-4d60-87e8-aa0174c2f6d0` had reached `STOPPED` at
+`2026-09-02T08:19:52.078Z`, immediately after its idle expiry, despite an
+earlier healthy Docker process observation. No run credentials, OpenCode
+processes, model turns, source edits, checks, resource sync, or managed commit
+were created, and the invocation limit is exhausted without a retry.
+
+Complete/resolved runner telemetry retained no processes or failures. An
+independent strict containment audit passed; the temporary run root was absent;
+and ports `44510`-`44512` were closed. Explicitly labeled post-run
+reconciliation artifacts retain the bounded `404` and cleanup facts without
+representing them as harness-generated evidence. The source defect was that the
+harness initialized its evidence store only after credential acquisition, so
+this setup failure could not write `failure.json` or `cleanup.json`. The
+uncommitted correction initializes the bounded store before preflight and
+classifies only the safe lease-response status, with a focused real-harness
+regression. That regression passes `1/1`, the coordination TypeScript project
+typecheck passes, and `git diff --check` passes. Full A/B/C model, memory,
+outage, recovery, and restart evidence was not reached;
+coordination/shared-memory acceptance remains **OPEN and RESUMABLE** with no
+rollout `PASS` or `(work-complete)` marker.
+
+### Wave 193 causal runtime readiness and cleanup evidence hardening (2026-09-02)
+
+The uncommitted harness correction now uses the existing authenticated
+installation runtime APIs before credential issuance. It verifies the exact
+authorized workspace/project/canonical-worktree/storage-hash binding, polls the
+configured runtime and managed backend with the existing bounded readiness
+primitive, waits for `STOPPING` to reach `STOPPED`, issues one idempotent start
+for a restartable inactive state, and accepts only healthy `READY`/`IDLE` at the
+expected image revision and backend identity. The credential lease and its
+protected preflight remain strictly after that gate. Runtime idle policy,
+credential-lease `404` concealment, and model-run retry behavior are unchanged.
+
+Known operator, OpenCode-auth, and issued run-credential values are registered
+with the evidence store before the first applicable artifact write. Cleanup
+artifacts no longer persist arbitrary error messages, stacks, response bodies,
+model/provider values, or proxy strings: `cleanup.json` and
+`cleanup-failure.json` now contain only fixed developer-owned enums, booleans,
+deduplicated allowlisted stages, and counts capped at 255. Both artifacts have
+hard UTF-8 byte limits and deterministic safe fallbacks while the separately
+bounded/redacted runner telemetry remains unchanged.
+
+Seven focused real-harness, cleanup, and evidence-store regressions pass for
+already-ready ordering, `STOPPING`/`STOPPED` start and ready ordering, no lease
+before readiness, bounded transition failure, hostile early responses, dynamic
+protected-value registration, and 10,000 hostile cleanup failures with no
+sentinel retention and owner-only `0700`/`0600` permissions. The complete
+coordination test file passes `55/55`, and the coordination TypeScript project
+check and `git diff --check` pass. This is source-test evidence only: no live
+harness, runtime, deployment, model session, provider mutation, managed commit,
+or repository sync was authorized, and coordination/shared-memory acceptance
+remains **OPEN and RESUMABLE**.
+
+### Wave 194 real-finally hostile cleanup acceptance (2026-09-02)
+
+The remaining cleanup-evidence security gap is closed in source without a live
+run. `runCoordinationHarness` now accepts an optional cleanup-operation
+dependency whose production default is empty; runtime readiness, lease ordering,
+and every production cleanup operation remain unchanged. The focused regression
+drives the real harness through an early hostile runtime response and its actual
+catch/finally path while 10,000 injected cleanup operations fail with the run
+nonce, provider, auth, model, protected path, run/runtime ID, response, and
+output sentinels in messages, stacks, and nested fields.
+
+The original runtime-readiness error remains primary and retains an attached
+10,000-entry cleanup aggregate. Actual `failure.json`, `cleanup.json`, and
+`cleanup-failure.json` match deterministic fixed schemas, retain none of the
+sentinels, and stay within respective hard UTF-8 bounds of 512, 512, and 256
+bytes. Both the artifact directory and retained temporary run directory are
+`0700`; each artifact is `0600`. The test also exposed and corrected a field-name
+interaction with generic credential redaction by using the neutral fixed boolean
+`runAccessRemoved`. The focused real-harness regression passes `1/1`. This is
+followed by `55/55` passing cases in the complete coordination test file and a
+passing coordination TypeScript project check. This is source-test evidence
+only; no live harness, runtime, lease, deployment, model, provider mutation,
+commit, or repository sync occurred.

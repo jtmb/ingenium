@@ -35,6 +35,7 @@ import {
   type ProtectedLocator,
 } from "./contracts";
 import {
+  CoordinationLeaseRequestError,
   RunCredentialLease,
   createRunCredentialLeaseTransport,
   type RunCredentialLeaseTransport,
@@ -73,6 +74,28 @@ interface RuntimeBinding {
   state: "READY" | "IDLE";
 }
 
+const HARNESS_RUNTIME_STATES = new Set([
+  "ABSENT", "PROVISIONING", "STARTING", "READY", "IDLE", "STOPPING", "STOPPED", "FAILED", "REVOKED",
+] as const);
+type HarnessRuntimeState = "ABSENT" | "PROVISIONING" | "STARTING" | "READY" | "IDLE" | "STOPPING" | "STOPPED" | "FAILED" | "REVOKED";
+type HarnessRuntimeReadinessCode =
+  | "RUNTIME_BINDING_MISMATCH"
+  | "RUNTIME_READINESS_TIMEOUT"
+  | "RUNTIME_REVOKED"
+  | "RUNTIME_START_INVALID"
+  | "RUNTIME_START_UNAVAILABLE"
+  | "RUNTIME_STATUS_INVALID"
+  | "RUNTIME_STATUS_UNAVAILABLE"
+  | "RUNTIME_WORKSPACE_INVALID"
+  | "RUNTIME_WORKSPACE_UNAVAILABLE";
+
+export class HarnessRuntimeReadinessError extends Error {
+  constructor(readonly code: HarnessRuntimeReadinessCode) {
+    super(code);
+    this.name = "HarnessRuntimeReadinessError";
+  }
+}
+
 interface HarnessIdentity {
   binding: StorageBinding;
   runtime: RuntimeBinding;
@@ -95,6 +118,8 @@ export interface HarnessAccessDependencies {
   preflight?: typeof preflightHarnessIdentity;
   leaseTransport?: RunCredentialLeaseTransport;
   request?: typeof fetch;
+  runtimeReadinessTimeoutMs?: number;
+  protect?: (...values: readonly string[]) => void;
 }
 
 interface SessionRecord {
@@ -193,10 +218,24 @@ export function dispatchFailureDiagnostic(error: unknown): DispatchFailureDiagno
 }
 
 export type HarnessFailurePhase = "setup" | "readiness" | "execution" | "finalization" | "unknown";
-type HarnessFailureCode = "dispatch_validation" | "harness_failure" | "artifact_limit";
+type HarnessFailureCode = "credential_lease" | "dispatch_validation" | "harness_failure" | "artifact_limit";
 
 const HARNESS_FAILURE_PHASES = new Set<HarnessFailurePhase>(["setup", "readiness", "execution", "finalization", "unknown"]);
 const FAILURE_ARTIFACT_MAX_BYTES = 512;
+const CLEANUP_ARTIFACT_MAX_BYTES = 512;
+const CLEANUP_FAILURE_ARTIFACT_MAX_BYTES = 256;
+export type HarnessCleanupStage =
+  | "credential_revoke_remove"
+  | "external_a_stop"
+  | "external_b_stop"
+  | "proxy_stop"
+  | "runtime_provider_disconnect"
+  | "telemetry_stopping"
+  | "test_run_finalize";
+const HARNESS_CLEANUP_STAGES = new Set<HarnessCleanupStage>([
+  "credential_revoke_remove", "external_a_stop", "external_b_stop", "proxy_stop",
+  "runtime_provider_disconnect", "telemetry_stopping", "test_run_finalize",
+]);
 const FAILURE_ARTIFACT_FALLBACK = {
   schemaVersion: 1,
   phase: "unknown",
@@ -217,17 +256,98 @@ const FAILURE_ARTIFACT_FALLBACK = {
   responseLostObserved: false;
 };
 
+const CLEANUP_ARTIFACT_FALLBACK = {
+  schemaVersion: 1,
+  status: "failed",
+  externalAStopped: false,
+  externalBStopped: false,
+  proxyStopped: false,
+  runtimeProviderDisconnected: false,
+  runAccessRemoved: false,
+  tempRemoved: false,
+  failureCount: 255,
+  failureCountCapped: true,
+  failedStages: [],
+} as const;
+
+const CLEANUP_FAILURE_ARTIFACT_FALLBACK = {
+  schemaVersion: 1,
+  stage: "cleanup_finalization",
+  code: "cleanup_failed",
+  primaryErrorRetained: false,
+  retainedForRecovery: true,
+  failureCount: 255,
+  failureCountCapped: true,
+} as const;
+
+function cappedCount(value: number): { count: number; capped: boolean } {
+  const normalized = Number.isSafeInteger(value) && value >= 0 ? value : 255;
+  return { count: Math.min(normalized, 255), capped: normalized > 255 };
+}
+
+export function writeHarnessCleanupEvidence(
+  evidence: EvidenceStore,
+  state: {
+    externalAStopped: boolean;
+    externalBStopped: boolean;
+    proxyStopped: boolean;
+    runtimeProviderDisconnected: boolean;
+    runAccessRemoved: boolean;
+    tempRemoved: boolean;
+  },
+  failureCount: number,
+  failedStages: readonly HarnessCleanupStage[],
+): void {
+  const failures = cappedCount(failureCount);
+  const stages = [...new Set(failedStages.filter((stage) => HARNESS_CLEANUP_STAGES.has(stage)))].slice(0, HARNESS_CLEANUP_STAGES.size);
+  evidence.writeBounded("cleanup.json", {
+    schemaVersion: 1,
+    status: failures.count === 0 ? "complete" : "failed",
+    externalAStopped: state.externalAStopped === true,
+    externalBStopped: state.externalBStopped === true,
+    proxyStopped: state.proxyStopped === true,
+    runtimeProviderDisconnected: state.runtimeProviderDisconnected === true,
+    runAccessRemoved: state.runAccessRemoved === true,
+    tempRemoved: state.tempRemoved === true,
+    failureCount: failures.count,
+    failureCountCapped: failures.capped,
+    failedStages: stages,
+  }, CLEANUP_ARTIFACT_MAX_BYTES, CLEANUP_ARTIFACT_FALLBACK);
+}
+
+export function writeHarnessCleanupFailureEvidence(
+  evidence: EvidenceStore,
+  cleanupError: unknown,
+  primaryErrorRetained: boolean,
+): void {
+  const failures = cappedCount(cleanupError instanceof AggregateError && Array.isArray(cleanupError.errors)
+    ? cleanupError.errors.length : 1);
+  evidence.writeBounded("cleanup-failure.json", {
+    schemaVersion: 1,
+    stage: "cleanup_finalization",
+    code: "cleanup_failed",
+    primaryErrorRetained: primaryErrorRetained === true,
+    retainedForRecovery: true,
+    failureCount: failures.count,
+    failureCountCapped: failures.capped,
+  }, CLEANUP_FAILURE_ARTIFACT_MAX_BYTES, CLEANUP_FAILURE_ARTIFACT_FALLBACK);
+}
+
 export function writeHarnessFailureEvidence(
   evidence: EvidenceStore,
   phase: HarnessFailurePhase,
   error: unknown,
   proxyEvents: readonly FaultProxyEvent[],
 ): void {
-  const diagnostic = dispatchFailureDiagnostic(error);
+  const dispatchDiagnostic = dispatchFailureDiagnostic(error);
+  const leaseDiagnostic = error instanceof CoordinationLeaseRequestError
+    ? { type: "credential_lease_response" as const, status: error.status }
+    : null;
+  const diagnostic = dispatchDiagnostic ?? leaseDiagnostic;
   evidence.writeBounded("failure.json", {
     schemaVersion: 1,
     phase: HARNESS_FAILURE_PHASES.has(phase) ? phase : "unknown",
-    failureCode: diagnostic ? "dispatch_validation" : "harness_failure",
+    failureCode: dispatchDiagnostic ? "dispatch_validation" : leaseDiagnostic ? "credential_lease" : "harness_failure",
     diagnostic,
     proxyEventCount: Math.min(proxyEvents.length, 255),
     proxyEventCountCapped: proxyEvents.length > 255,
@@ -431,6 +551,136 @@ function coordinationHeaders(token: string, options: HarnessOptions): Record<str
   };
 }
 
+function operatorRuntimeHeaders(token: string, options: HarnessOptions): Record<string, string> {
+  return {
+    accept: "application/json",
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "x-ingenium-internal-service": "1",
+    "x-ingenium-runtime-id": options.runtimeId,
+  };
+}
+
+async function runtimeApiValue(
+  options: HarnessOptions,
+  operatorToken: string,
+  path: string,
+  method: "GET" | "POST",
+  body: unknown,
+  expectedStatus: number,
+  unavailableCode: HarnessRuntimeReadinessCode,
+  invalidCode: HarnessRuntimeReadinessCode,
+  signal: AbortSignal,
+  request: typeof fetch,
+): Promise<unknown> {
+  signal.throwIfAborted();
+  let response: Response;
+  try {
+    response = await request(`${options.apiUrl}${path}`, {
+      method,
+      headers: operatorRuntimeHeaders(operatorToken, options),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    });
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    throw new HarnessRuntimeReadinessError(unavailableCode);
+  }
+  if (response.status !== expectedStatus) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new HarnessRuntimeReadinessError(unavailableCode);
+  }
+  try {
+    return unwrap(await response.json());
+  } catch {
+    throw new HarnessRuntimeReadinessError(invalidCode);
+  }
+}
+
+function runtimeRecord(value: unknown, code: HarnessRuntimeReadinessCode): JsonRecord {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new HarnessRuntimeReadinessError(code);
+  return value as JsonRecord;
+}
+
+async function assertHarnessWorkspaceBinding(
+  options: HarnessOptions,
+  operatorToken: string,
+  signal: AbortSignal,
+  request: typeof fetch,
+): Promise<void> {
+  const value = await runtimeApiValue(options, operatorToken, "/runtimes/workspaces", "GET", undefined, 200,
+    "RUNTIME_WORKSPACE_UNAVAILABLE", "RUNTIME_WORKSPACE_INVALID", signal, request);
+  if (!Array.isArray(value)) throw new HarnessRuntimeReadinessError("RUNTIME_WORKSPACE_INVALID");
+  const workspace = value.find((candidate) => runtimeRecord(candidate, "RUNTIME_WORKSPACE_INVALID").id === options.workspaceId);
+  const binding = runtimeRecord(workspace, "RUNTIME_BINDING_MISMATCH");
+  if (binding.projectId !== options.projectId || binding.storagePath !== options.worktree
+    || binding.storageMappingHash !== options.storageMappingHash || binding.status !== "authorized") {
+    throw new HarnessRuntimeReadinessError("RUNTIME_BINDING_MISMATCH");
+  }
+}
+
+function projectHarnessRuntimeStatus(value: unknown, options: HarnessOptions): { state: HarnessRuntimeState; ready?: RuntimeBinding } {
+  const payload = runtimeRecord(value, "RUNTIME_STATUS_INVALID");
+  const runtime = runtimeRecord(payload.runtime, "RUNTIME_STATUS_INVALID");
+  const backend = runtimeRecord(payload.backend, "RUNTIME_STATUS_INVALID");
+  const state = runtime.state;
+  if (typeof state !== "string" || !HARNESS_RUNTIME_STATES.has(state as HarnessRuntimeState)) {
+    throw new HarnessRuntimeReadinessError("RUNTIME_STATUS_INVALID");
+  }
+  if (runtime.id !== options.runtimeId || runtime.workspaceId !== options.workspaceId || runtime.projectId !== options.projectId
+    || runtime.backendName !== `ingenium-runtime-${options.runtimeId.replaceAll("-", "")}`) {
+    throw new HarnessRuntimeReadinessError("RUNTIME_BINDING_MISMATCH");
+  }
+  const backendAbsent = backend.state === "absent";
+  if (!backendAbsent && (backend.runtimeId !== options.runtimeId || backend.backendName !== runtime.backendName
+    || backend.imageRevision !== options.expectedRevision)) {
+    throw new HarnessRuntimeReadinessError("RUNTIME_BINDING_MISMATCH");
+  }
+  const typedState = state as HarnessRuntimeState;
+  if ((typedState === "READY" || typedState === "IDLE") && !backendAbsent
+    && backend.state === "running" && backend.health === "healthy") {
+    return { state: typedState, ready: { id: options.runtimeId, imageRevision: options.expectedRevision, state: typedState } };
+  }
+  return { state: typedState };
+}
+
+async function startHarnessRuntime(
+  options: HarnessOptions,
+  operatorToken: string,
+  signal: AbortSignal,
+  request: typeof fetch,
+): Promise<void> {
+  const value = await runtimeApiValue(options, operatorToken, "/runtimes", "POST", { workspaceId: options.workspaceId }, 202,
+    "RUNTIME_START_UNAVAILABLE", "RUNTIME_START_INVALID", signal, request);
+  const runtime = runtimeRecord(value, "RUNTIME_START_INVALID");
+  if (runtime.id !== options.runtimeId || runtime.workspaceId !== options.workspaceId || runtime.projectId !== options.projectId) {
+    throw new HarnessRuntimeReadinessError("RUNTIME_BINDING_MISMATCH");
+  }
+}
+
+export async function ensureHarnessRuntimeReady(
+  options: HarnessOptions,
+  operatorToken: string,
+  signal: AbortSignal,
+  request: typeof fetch = fetch,
+  timeoutMs = Math.min(options.timeoutMs, 90_000),
+): Promise<RuntimeBinding> {
+  await assertHarnessWorkspaceBinding(options, operatorToken, signal, request);
+  let startAttempted = false;
+  return waitFor("exact harness runtime readiness", timeoutMs, signal, async (readSignal) => {
+    const value = await runtimeApiValue(options, operatorToken, `/runtimes/${encodeURIComponent(options.runtimeId)}`, "GET", undefined, 200,
+      "RUNTIME_STATUS_UNAVAILABLE", "RUNTIME_STATUS_INVALID", readSignal, request);
+    const status = projectHarnessRuntimeStatus(value, options);
+    if (status.ready) return status.ready;
+    if (status.state === "REVOKED") throw new HarnessRuntimeReadinessError("RUNTIME_REVOKED");
+    if (["ABSENT", "FAILED", "STOPPED"].includes(status.state) && !startAttempted) {
+      await startHarnessRuntime(options, operatorToken, readSignal, request);
+      startAttempted = true;
+    }
+    return undefined;
+  }, () => new HarnessRuntimeReadinessError("RUNTIME_READINESS_TIMEOUT"));
+}
+
 export async function preflightHarnessIdentity(
   options: HarnessOptions,
   coordinationCredential: ProtectedLocator,
@@ -482,16 +732,21 @@ export async function establishHarnessAccess(
 ): Promise<HarnessAccess> {
   const read = dependencies.read ?? ((_name, locator) => readProtectedValue(locator));
   const operatorToken = read("operator-api", options.operatorToken);
+  dependencies.protect?.(operatorToken);
+  const authContent = read("opencode-auth", options.openCodeAuth);
+  dependencies.protect?.(authContent);
+  await ensureHarnessRuntimeReady(options, operatorToken, signal, dependencies.request,
+    dependencies.runtimeReadinessTimeoutMs ?? Math.min(options.timeoutMs, 90_000));
   await lease.issue(operatorToken, signal);
   const coordinationCredential = lease.coordinationLocator;
   const repositoryCredential = lease.repositoryLocator;
   required(coordinationCredential && repositoryCredential, "Coordination lease omitted a required credential");
   const coordinationToken = read("coordination-api", coordinationCredential);
   const repositoryToken = read("repository-sync", repositoryCredential);
+  dependencies.protect?.(coordinationToken, repositoryToken, coordinationCredential.path, repositoryCredential.path);
   const { binding, runtime } = await (dependencies.preflight ?? preflightHarnessIdentity)(
     options, coordinationCredential, signal, dependencies.request,
   );
-  const authContent = read("opencode-auth", options.openCodeAuth);
   return {
     coordinationToken,
     repositoryToken,
@@ -1344,9 +1599,14 @@ export interface CoordinationRunEvidence {
   telemetryPath: string;
 }
 
+export interface CoordinationHarnessDependencies {
+  cleanupOperations?: readonly (() => void | Promise<void>)[];
+}
+
 export async function runCoordinationHarness(
   options: HarnessOptions,
   reportRunEvidence: (evidence: CoordinationRunEvidence) => void,
+  dependencies: CoordinationHarnessDependencies = {},
 ): Promise<string> {
   const lifecycle = new ExecutionLifecycle();
   lifecycle.start();
@@ -1356,7 +1616,7 @@ export async function runCoordinationHarness(
   reportRunEvidence({ runId: context.runId, telemetryPath });
   const lease = new RunCredentialLease(context, options, createRunCredentialLeaseTransport(options));
   const artifactRoot = join(options.worktree, "tests", "artifacts", "test-runs", context.runId);
-  let evidence: EvidenceStore | undefined;
+  const evidence = new EvidenceStore(options.worktree, artifactRoot, [options.operatorToken.path, options.openCodeAuth.path]);
   const proxyEvents: FaultProxyEvent[] = [];
   const proxy = new CoordinationFaultProxy({ upstream: options.apiUrl, port: context.ports.api, onEvent: (event) => proxyEvents.push(event) });
   let originalRevision = "";
@@ -1384,37 +1644,43 @@ export async function runCoordinationHarness(
   const pathFailure = `tests/coordination/${context.runId}-local-failure.txt`;
   const pathRestart = `tests/coordination/${context.runId}-restart.txt`;
   const cleanup = (): Promise<void> => lifecycle.cleanup(async () => {
-    const errors: unknown[] = [];
+    const failures: Array<{ stage: HarnessCleanupStage; error: unknown }> = [];
+    const attempt = async (stage: HarnessCleanupStage, operation: () => void | Promise<void>): Promise<void> => {
+      try { await operation(); } catch (error) { failures.push({ stage, error }); }
+    };
     const cleanupSignal = AbortSignal.timeout(options.timeoutMs);
-    updateTestRunManifest(context.manifestPath, { status: "stopping" });
-    for (const processRecord of [externalB, externalA]) {
+    await attempt("telemetry_stopping", () => { updateTestRunManifest(context.manifestPath, { status: "stopping" }); });
+    for (const [processRecord, stage] of [[externalB, "external_b_stop"], [externalA, "external_a_stop"]] as const) {
       if (!processRecord) continue;
-      try { await stopHostOpenCode(processRecord, context.runNonce); } catch (error) { errors.push(error); }
+      await attempt(stage, () => stopHostOpenCode(processRecord, context.runNonce));
     }
-    try { await proxy.close(); } catch (error) { errors.push(error); }
+    await attempt("proxy_stop", () => proxy.close());
     if (runtimeProviderOwnership === "owned" && runtime) {
       const currentRuntime = runtime;
-      try {
+      await attempt("runtime_provider_disconnect", async () => {
         await cleanupRuntimeProvider(runtimeProviderOwnership,
           () => disconnectRuntimeProvider(options, operatorToken, currentRuntime.id, cleanupSignal));
         runtimeProviderOwnership = "none";
         lease.setRuntimeProvider(options.providerId, "none");
-      } catch (error) { errors.push(error); }
+      });
     }
-    try { await lease.revokeAndRemove(cleanupSignal); } catch (error) { errors.push(error); }
-    if (errors.length === 0) {
-      try { await finalizeCoordinationTestRun(context); } catch (error) { errors.push(error); }
+    await attempt("credential_revoke_remove", () => lease.revokeAndRemove(cleanupSignal));
+    for (const operation of dependencies.cleanupOperations ?? []) {
+      await attempt("test_run_finalize", operation);
     }
-    evidence?.write("cleanup.json", {
-      schema: HARNESS_ARTIFACT_SCHEMA,
-      completedAt: new Date().toISOString(),
+    if (failures.length === 0) {
+      await attempt("test_run_finalize", () => finalizeCoordinationTestRun(context));
+    }
+    const failedStages = failures.map((failure) => failure.stage);
+    writeHarnessCleanupEvidence(evidence, {
       externalAStopped: !externalA || externalA.child.exitCode !== null || externalA.child.signalCode !== null,
       externalBStopped: !externalB || externalB.child.exitCode !== null || externalB.child.signalCode !== null,
-      proxyStopped: true,
+      proxyStopped: !failedStages.includes("proxy_stop"),
+      runtimeProviderDisconnected: runtimeProviderOwnership !== "owned",
+      runAccessRemoved: !failedStages.includes("credential_revoke_remove"),
       tempRemoved: !existsSync(context.runDir),
-      errors: errors.map((error) => error instanceof Error ? error.message : String(error)),
-    });
-    if (errors.length > 0) throw new AggregateError(errors, "Coordination harness cleanup failed");
+    }, failures.length, failedStages);
+    if (failures.length > 0) throw new AggregateError(failures.map((failure) => failure.error), "Coordination harness cleanup failed");
   });
   const signals = ["SIGINT", "SIGTERM"] as const;
   const signalHandlers = new Map(signals.map((signal) => [signal, () => {
@@ -1432,13 +1698,11 @@ export async function runCoordinationHarness(
     required(originalRevision === options.expectedRevision, "Git revision does not match --expected-revision");
     required((await git(options.worktree, ["status", "--porcelain=v1"], 30_000, lifecycle.signal)).byteLength === 0,
       "Live coordination harness requires a clean worktree");
-    const access = await establishHarnessAccess(options, context, lease, lifecycle.signal);
+    const access = await establishHarnessAccess(options, context, lease, lifecycle.signal, {
+      protect: (...values) => evidence.protect(...values),
+    });
     ({ coordinationToken, repositoryToken, operatorToken, authContent, binding, runtime, credentials } = access);
     const activeRuntime = runtime;
-    evidence = new EvidenceStore(options.worktree, artifactRoot, [
-      coordinationToken, repositoryToken, operatorToken, authContent,
-      credentials.coordination, credentials.repositorySync, options.operatorToken.path, options.openCodeAuth.path,
-    ]);
     evidence.write("preflight.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
       checkedAt: new Date().toISOString(),
@@ -1704,15 +1968,7 @@ export async function runCoordinationHarness(
   } finally {
     signals.forEach((signal) => process.removeListener(signal, signalHandlers.get(signal)!));
     await finishCoordinationCleanup(primaryError, hasPrimaryError, cleanup, (cleanupError) => {
-      evidence?.write("cleanup-failure.json", {
-        schema: HARNESS_ARTIFACT_SCHEMA,
-        failedAt: new Date().toISOString(),
-        error: cleanupError instanceof Error
-          ? { name: cleanupError.name, message: cleanupError.message, stackSha256: sha256(cleanupError.stack ?? "") }
-          : { name: "Error", message: String(cleanupError) },
-        primaryErrorRetained: hasPrimaryError,
-        retainedForRecovery: true,
-      });
+      writeHarnessCleanupFailureEvidence(evidence, cleanupError, hasPrimaryError);
     });
   }
 }
