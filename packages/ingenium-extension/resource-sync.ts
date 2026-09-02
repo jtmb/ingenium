@@ -911,6 +911,9 @@ export class RepositorySyncLockBusyError extends Error {
   }
 }
 
+const REPOSITORY_SYNC_LOCK_WAIT_MS = 60_000;
+const REPOSITORY_SYNC_LOCK_RETRY_MS = 100;
+
 function privateOwnedDirectory(path: string, parent: string): boolean {
   try {
     const stat = lstatSync(path);
@@ -1028,6 +1031,31 @@ export function acquireRepositorySyncLock(worktree: string): RepositorySyncLock 
     }
   }
   return null;
+}
+
+function repositorySyncLockOwnerPid(worktree: string): number | undefined {
+  const parent = verifiedManifestDirectory(worktree, false);
+  if (!parent) throw new RepositorySyncScanError();
+  const directory = resolve(parent, ".ingenium-sync-lock");
+  if (!existsSync(directory)) return undefined;
+  try {
+    return readLockOwner(worktree, directory).pid;
+  } catch (error) {
+    if (!existsSync(directory)) return undefined;
+    throw error;
+  }
+}
+
+async function waitForRepositorySyncLock(worktree: string): Promise<RepositorySyncLock> {
+  const deadline = Date.now() + REPOSITORY_SYNC_LOCK_WAIT_MS;
+  while (true) {
+    const lock = acquireRepositorySyncLock(worktree);
+    if (lock) return lock;
+    const ownerPid = repositorySyncLockOwnerPid(worktree);
+    if (ownerPid === process.pid || Date.now() >= deadline) throw new RepositorySyncLockBusyError();
+    if (ownerPid === undefined) continue;
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, REPOSITORY_SYNC_LOCK_RETRY_MS));
+  }
 }
 
 export function loadManifest(worktree: string, project: string): SyncManifest {
@@ -3373,14 +3401,7 @@ export async function repositorySync(
   const project = resolveExtensionProject(worktree, options.project ?? binding.project);
   _projectCache = project;
   _projectResolved = true;
-  let lock: RepositorySyncLock | null = null;
-  for (let attempt = 0; attempt <= 3; attempt += 1) {
-    lock = acquireRepositorySyncLock(worktree);
-    if (lock) break;
-    if (attempt === 3) throw new RepositorySyncLockBusyError();
-    await repositoryRetryDelay(attempt);
-  }
-  if (!lock) throw new RepositorySyncLockBusyError();
+  const lock = await waitForRepositorySyncLock(worktree);
 
   try {
     let forcedGeneration: number | undefined;

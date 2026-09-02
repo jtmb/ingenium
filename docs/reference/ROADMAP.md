@@ -4451,3 +4451,49 @@ promote findings, add acceptance criteria, or expand scope. The exact
 absent, so no mutation occurred. Full live external A, external B, and internal
 C acceptance remains **OPEN and RESUMABLE**, with no rollout `PASS` or new
 `(work-complete)` marker.
+
+### Wave 203 cross-process repository lock arbitration (2026-09-02)
+
+The sole authorized invocation ran from clean, deployed revision
+`45287a30109b1860b7758ffe06781db60ccd7811` as
+`37da5b48-7e06-4979-8ac0-9c5911db0407`, with run nonce
+`0dea82d5-41ea-4489-aa4a-dd383261348e`. External A and B used OpenCode
+`1.18.26`, internal C used `1.18.9`, and all three reached provider and MCP
+readiness against the canonical workspace identity. Model A completed its
+managed edit, typecheck, stage, and commit; preserved commit
+`a6db9e3af0d6605920ffaffdb1c284b04111903e` contains only
+`tests/coordination/37da5b48-7e06-4979-8ac0-9c5911db0407-a.txt`.
+
+The run then failed Model A dispatch validation with `tool_status` because its
+repository projection did not complete. The retained diagnostic proves the
+expected tool, session, message, nonce, and operation identities and proves
+registration blocking was observed; completion loss was not reached. Source
+and durable-state reconciliation identified the immediate cause: each real
+OpenCode process can enqueue repository lifecycle synchronization for the same
+canonical worktree, but an explicit repository projection abandoned a live
+foreign process lock after four acquisition attempts separated by only
+20-159 millisecond delays. The managed
+commit therefore succeeded while its post-commit projection ended before an
+MCP apply/recovery artifact could be produced. The retained manifest remained
+at the earlier startup generation, and no new apply-recovery artifact exists.
+
+The minimum uncommitted correction gives a verified live foreign lock a bounded
+60-second acquisition window. Same-process re-entry still fails immediately,
+and the existing owner-only directory, random ownership token, stale-owner
+process check, atomic rename, and identity-checked release remain unchanged. A
+focused real-child-process regression holds the lock in another live process,
+then proves repository projection resumes after that process exits and invokes
+MCP exactly once. That regression passes `1/1`; the extension TypeScript check
+passes. No live retry, deployment, additional commit, delegation, broad suite,
+or reviewer dispatch occurred.
+
+Retained cleanup reports zero failures, provider disconnection, run-access
+removal, stopped external processes and proxy, and removed temporary state.
+Independent checks confirmed PIDs `3446208` and `3446209` absent, ports
+`42137`-`42139` closed, `/tmp/opencode/ingenium-playwright-run-ulBi1h` absent,
+the artifact directory `0700`, every retained artifact and managed canary
+`0600`, and the runtime OpenAI provider disconnected. The strict containment
+audit passes. No completed overlap artifact was retained; completion-loss
+replay, quarantine/recovery/deduplication, later typed-memory views, and B
+restart replay were not reached. Coordination/shared-memory acceptance remains
+**OPEN and RESUMABLE**, with no rollout `PASS` or new `(work-complete)` marker.

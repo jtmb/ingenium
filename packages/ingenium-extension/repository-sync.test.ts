@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -437,6 +438,29 @@ describe("repository-authoritative manifest v2", () => {
     expect(recovered!.token).not.toBe(first!.token);
     recovered!.release();
     expect(existsSync(join(worktree, ".opencode", ".ingenium-sync-lock"))).toBe(false);
+  });
+
+  it("waits for a foreign live lock before running the repository projection", async () => {
+    fixture();
+    successfulMcp();
+    const lock = acquireRepositorySyncLock(worktree)!;
+    const blocker = spawn(process.execPath, ["-e", "setTimeout(() => {}, 150)"], { stdio: "ignore" });
+    const exited = new Promise<void>((resolvePromise) => blocker.once("exit", () => resolvePromise()));
+    writeFileSync(
+      join(worktree, ".opencode", ".ingenium-sync-lock", "owner.json"),
+      JSON.stringify({ pid: blocker.pid, token: lock.token }) + "\n",
+      { mode: 0o600 },
+    );
+
+    try {
+      const result = await repositorySync(worktree);
+
+      expect(result.docs.errors).toBe(0);
+      expect(mockCallMcpTool).toHaveBeenCalledOnce();
+    } finally {
+      if (blocker.exitCode === null) blocker.kill();
+      await exited;
+    }
   });
 
   it("rejects a symlinked lock path without following it", () => {
