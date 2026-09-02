@@ -4377,3 +4377,77 @@ passes `55/55`; the coordination TypeScript project check and
 These are source-test results only, so coordination/shared-memory acceptance
 remains **OPEN and RESUMABLE** with no rollout `PASS` or new `(work-complete)`
 marker.
+
+### Wave 200 owner-controlled coordination-outbox mode remediation (2026-09-02)
+
+The sole authorized invocation ran from clean, deployed revision
+`1e413493fa3bcc5a067c36c04db27e833885ec67` as
+`b4ce2629-2580-4b1f-99e6-b2b5e17bb9f5`, with run nonce
+`09013351-c18c-47ad-a6d2-f188b19b9685`. External A and B used OpenCode
+`1.18.26`, internal C used `1.18.9`, and all three real
+`openai/gpt-5.6-sol` turns overlapped from `2026-09-02T15:43:39.360Z` through
+`2026-09-02T15:44:48.527Z` against the canonical workspace identity. Model A
+completed the fixed managed edit, check, commit, and repository-sync command
+sequence. Its retained trace passed the required managed before/after hook
+assertion, and preserved commit `7c01d8c4c1795c78fa1970a5c93db09270ef4d4c`
+contains only
+`tests/coordination/b4ce2629-2580-4b1f-99e6-b2b5e17bb9f5-a.txt`.
+
+The run then failed when the harness first inspected the local coordination
+outbox for the registration-outage `local_applied` record. The repository's
+real current-owner `.opencode/protected-runtime-index` directory had mode
+`0775`. `CoordinationOutbox` requested mode `0700` through recursive directory
+creation, which does not change an existing directory, and then rejected the
+unchanged mode as `Coordination outbox is unavailable`.
+
+The minimum uncommitted correction normalizes an existing real current-owner
+protected index and outbox directory to exact mode `0700` through an
+`O_DIRECTORY|O_NOFOLLOW` descriptor. Canonical parent/path, owner, type, and
+device/inode identities are checked before and after normalization; wrong
+ownership, wrong type, symlink, relocation, or substitution continues to fail
+closed. The directly affected outbox test file passes `8/8`, including the new
+`0775` regression; the extension TypeScript check and `git diff --check` pass.
+No live retry, deployment, additional commit, or delegation occurred.
+
+Retained cleanup reports zero failures, provider disconnection, run-access
+removal, stopped external processes and proxy, and removed temporary state.
+Independent checks confirmed PIDs `2883601` and `2883602` absent, ports
+`53762`-`53764` closed, `/tmp/opencode/ingenium-playwright-run-Kr1nm5` absent,
+the artifact directory `0700`, every retained artifact and the managed canary
+`0600`, and the runtime OpenAI provider disconnected. The strict containment
+audit passes. Outbox replay, completion-loss replay, true local-error
+quarantine/recovery/deduplication, later typed-memory views, and B restart replay
+were not reached. Coordination/shared-memory acceptance therefore remains
+**OPEN and RESUMABLE** with no rollout `PASS` or new `(work-complete)` marker.
+
+### Wave 201 least-privilege outbox and coordination-audit residual handling (2026-09-02)
+
+The current outbox hardening normalizes existing owner-controlled protected-index
+and outbox directories to exact mode `0700` through an
+`O_DIRECTORY|O_NOFOLLOW` descriptor. Restrictive modes, wrong ownership or type,
+symlinks, and identity substitution fail closed without adding permissions;
+adversarial coverage records those boundaries.
+
+Suite containment now uses strict `lstat`-only detection for undeclared
+`coordination-audit-<UUID>.json` sidecars, retains matching residuals as unowned
+evidence, and never reads, follows, moves, or auto-deletes them. The exact
+`coordination-audit-b4ce2629-2580-4b1f-99e6-b2b5e17bb9f5.json` sidecar was
+absent at operational validation, so no mutation or relocation occurred. Source
+and live acceptance remain **OPEN and RESUMABLE**, with no rollout `PASS` or new
+`(work-complete)` marker.
+
+### Wave 202 descriptor-open residual scan and finite-review policy (2026-09-02)
+
+The coordination-audit residual scanner now incrementally reads an opened
+directory descriptor with `O_DIRECTORY|O_NOFOLLOW`, applies hard entry, match,
+and error caps, and fails closed on root-identity or metadata substitution. The
+affected tests pass `67/67`; agent validation is **PASS**.
+
+The finite-review policy permits exactly one QA report and at most one security
+report per implementation boundary, with security limited to a predeclared
+changed security surface. Reviewers are not rerun after remediation and cannot
+promote findings, add acceptance criteria, or expand scope. The exact
+`coordination-audit-b4ce2629-2580-4b1f-99e6-b2b5e17bb9f5.json` sidecar was
+absent, so no mutation occurred. Full live external A, external B, and internal
+C acceptance remains **OPEN and RESUMABLE**, with no rollout `PASS` or new
+`(work-complete)` marker.

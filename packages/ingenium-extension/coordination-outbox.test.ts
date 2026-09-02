@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  type Stats,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -12,12 +13,55 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COORDINATION_OUTBOX_MAX_RECORD_BYTES,
   COORDINATION_OUTBOX_MAX_RECORDS,
   CoordinationOutbox,
 } from "./coordination-outbox.js";
+
+type StatFault = (subject: string | number, stat: Stats) => Stats;
+
+const fsFaults = vi.hoisted(() => ({
+  lstat: undefined as StatFault | undefined,
+  fstat: undefined as StatFault | undefined,
+  rejectFchmod: false,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    lstatSync(path: string) {
+      const stat = actual.lstatSync(path);
+      return fsFaults.lstat?.(path, stat) ?? stat;
+    },
+    fstatSync(descriptor: number) {
+      const stat = actual.fstatSync(descriptor);
+      return fsFaults.fstat?.(descriptor, stat) ?? stat;
+    },
+    fchmodSync(descriptor: number, mode: number) {
+      if (fsFaults.rejectFchmod) throw new Error("unexpected fchmod");
+      actual.fchmodSync(descriptor, mode);
+    },
+  };
+});
+
+afterEach(() => {
+  fsFaults.lstat = undefined;
+  fsFaults.fstat = undefined;
+  fsFaults.rejectFchmod = false;
+});
+
+function withStatValue(stat: Stats, property: "ino" | "uid", value: number): Stats {
+  return new Proxy(stat, {
+    get(target, key) {
+      if (key === property) return value;
+      const current = Reflect.get(target, key, target) as unknown;
+      return typeof current === "function" ? current.bind(target) : current;
+    },
+  });
+}
 
 function worktree(): string {
   const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-outbox-"));
@@ -26,6 +70,114 @@ function worktree(): string {
 }
 
 describe("protected coordination outbox", () => {
+  it("normalizes an existing owner-controlled protected index before creating the outbox", () => {
+    const root = worktree();
+    const protectedIndex = join(root, ".opencode", "protected-runtime-index");
+    try {
+      mkdirSync(protectedIndex, { mode: 0o775 });
+      chmodSync(protectedIndex, 0o775);
+
+      const outbox = new CoordinationOutbox(root);
+
+      expect(lstatSync(protectedIndex).mode & 0o777).toBe(0o700);
+      expect(lstatSync(outbox.directory).mode & 0o777).toBe(0o700);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not chmod directories that are already exactly owner-only", () => {
+    const root = worktree();
+    const protectedIndex = join(root, ".opencode", "protected-runtime-index");
+    const outbox = join(protectedIndex, "coordination-outbox");
+    try {
+      mkdirSync(outbox, { mode: 0o700, recursive: true });
+      fsFaults.rejectFchmod = true;
+
+      expect(() => new CoordinationOutbox(root)).not.toThrow();
+    } finally {
+      fsFaults.rejectFchmod = false;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([0o500, 0o600, 0o300])("rejects restrictive protected-index mode %o without adding owner permissions", (mode) => {
+    const root = worktree();
+    const protectedIndex = join(root, ".opencode", "protected-runtime-index");
+    try {
+      mkdirSync(protectedIndex, { mode });
+      chmodSync(protectedIndex, mode);
+
+      expect(() => new CoordinationOutbox(root)).toThrow("Coordination outbox is unavailable");
+      expect(lstatSync(protectedIndex).mode & 0o777).toBe(mode);
+    } finally {
+      chmodSync(protectedIndex, 0o700);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a symlinked outbox without traversing it", () => {
+    const root = worktree();
+    const outside = mkdtempSync(join(tmpdir(), "ingenium-coordination-outbox-outside-"));
+    const protectedIndex = join(root, ".opencode", "protected-runtime-index");
+    try {
+      mkdirSync(protectedIndex, { mode: 0o700 });
+      symlinkSync(outside, join(protectedIndex, "coordination-outbox"));
+
+      expect(() => new CoordinationOutbox(root)).toThrow("Coordination outbox is unavailable");
+      expect(readdirSync(outside)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects mocked foreign ownership without changing mode", () => {
+    const root = worktree();
+    const protectedIndex = join(root, ".opencode", "protected-runtime-index");
+    try {
+      mkdirSync(protectedIndex, { mode: 0o775 });
+      chmodSync(protectedIndex, 0o775);
+      const uid = typeof process.geteuid === "function" ? process.geteuid() : process.getuid?.();
+      if (uid === undefined) return;
+      fsFaults.lstat = (path, stat) => path === protectedIndex ? withStatValue(stat, "uid", uid + 1) : stat;
+
+      expect(() => new CoordinationOutbox(root)).toThrow("Coordination outbox is unavailable");
+      fsFaults.lstat = undefined;
+      expect(lstatSync(protectedIndex).mode & 0o777).toBe(0o775);
+    } finally {
+      fsFaults.lstat = undefined;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["path", "descriptor"] as const)("rejects mocked %s identity substitution without changing mode", (subject) => {
+    const root = worktree();
+    const protectedIndex = join(root, ".opencode", "protected-runtime-index");
+    let protectedIndexStats = 0;
+    try {
+      mkdirSync(protectedIndex, { mode: 0o775 });
+      chmodSync(protectedIndex, 0o775);
+      if (subject === "path") {
+        fsFaults.lstat = (path, stat) => {
+          if (path !== protectedIndex || ++protectedIndexStats !== 2) return stat;
+          return withStatValue(stat, "ino", stat.ino + 1);
+        };
+      } else {
+        fsFaults.fstat = (_descriptor, stat) => withStatValue(stat, "ino", stat.ino + 1);
+      }
+
+      expect(() => new CoordinationOutbox(root)).toThrow("Coordination outbox is unavailable");
+      fsFaults.lstat = undefined;
+      fsFaults.fstat = undefined;
+      expect(lstatSync(protectedIndex).mode & 0o777).toBe(0o775);
+    } finally {
+      fsFaults.lstat = undefined;
+      fsFaults.fstat = undefined;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("atomically coalesces exact snapshot keys without retaining sensitive input", () => {
     const root = worktree();
     try {

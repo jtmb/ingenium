@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -15,7 +16,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export const COORDINATION_OUTBOX_MAX_RECORD_BYTES = 16 * 1024;
 export const COORDINATION_OUTBOX_MAX_RECORDS = 128;
@@ -193,6 +194,7 @@ function validRecord(value: unknown): value is CoordinationOutboxRecord {
 }
 
 function owner(): number | undefined {
+  if (typeof process.geteuid === "function") return process.geteuid();
   return typeof process.getuid === "function" ? process.getuid() : undefined;
 }
 
@@ -205,6 +207,52 @@ function assertDirectory(path: string, mode?: number): void {
   }
 }
 
+function ensurePrivateDirectory(path: string, parent: string): void {
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  const canonicalParent = realpathSync(parent);
+  const beforeParent = lstatSync(parent);
+  const before = lstatSync(path);
+  const uid = owner();
+  if (canonicalParent !== resolve(parent) || !beforeParent.isDirectory() || beforeParent.isSymbolicLink()
+    || dirname(resolve(path)) !== canonicalParent || !before.isDirectory() || before.isSymbolicLink()
+    || realpathSync(path) !== resolve(path) || (uid !== undefined && before.uid !== uid)
+    || (before.mode & 0o700) !== 0o700) {
+    throw new Error("Coordination outbox is unavailable");
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    const openedPath = lstatSync(path);
+    const openedMode = opened.mode & 0o777;
+    if (!opened.isDirectory() || (uid !== undefined && opened.uid !== uid)
+      || !openedPath.isDirectory() || openedPath.isSymbolicLink()
+      || opened.dev !== before.dev || opened.ino !== before.ino
+      || openedPath.dev !== opened.dev || openedPath.ino !== opened.ino
+      || (openedMode & 0o700) !== 0o700 || (openedPath.mode & 0o777) !== openedMode) {
+      throw new Error("Coordination outbox is unavailable");
+    }
+    if (openedMode !== 0o700) fchmodSync(descriptor, 0o700);
+    const normalized = fstatSync(descriptor);
+    const normalizedPath = lstatSync(path);
+    const normalizedParent = lstatSync(parent);
+    if (!normalized.isDirectory() || (normalized.mode & 0o777) !== 0o700
+      || (uid !== undefined && normalized.uid !== uid)
+      || normalized.dev !== opened.dev || normalized.ino !== opened.ino
+      || !normalizedPath.isDirectory() || normalizedPath.isSymbolicLink()
+      || normalizedPath.dev !== normalized.dev || normalizedPath.ino !== normalized.ino
+      || normalizedParent.dev !== beforeParent.dev || normalizedParent.ino !== beforeParent.ino
+      || realpathSync(parent) !== canonicalParent || realpathSync(path) !== resolve(path)) {
+      throw new Error("Coordination outbox is unavailable");
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export class CoordinationOutbox {
   readonly directory: string;
 
@@ -214,11 +262,9 @@ export class CoordinationOutbox {
     mkdirSync(opencode, { mode: 0o700, recursive: true });
     assertDirectory(opencode);
     const protectedIndex = join(opencode, "protected-runtime-index");
-    mkdirSync(protectedIndex, { mode: 0o700, recursive: true });
-    assertDirectory(protectedIndex, 0o700);
+    ensurePrivateDirectory(protectedIndex, opencode);
     this.directory = join(protectedIndex, "coordination-outbox");
-    mkdirSync(this.directory, { mode: 0o700, recursive: true });
-    assertDirectory(this.directory, 0o700);
+    ensurePrivateDirectory(this.directory, protectedIndex);
   }
 
   private path(key: string): string {

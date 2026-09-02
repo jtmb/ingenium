@@ -1,15 +1,23 @@
 import { connect } from "node:net";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
+  openSync,
+  opendirSync,
   readdirSync,
   realpathSync,
   rmSync,
+  type BigIntStats,
+  type Dir,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   TEST_RUN_MANIFEST_ENV,
   TEST_RUN_TELEMETRY_ENV,
+  COORDINATION_TRACE_ROOT,
   getCanonicalRepoRoot,
   getContainmentAuditTempRoots,
   getTestRunArtifactRoot,
@@ -45,6 +53,10 @@ import {
 const DEFAULT_PORTS = [3000, 4097, 1455, 4098, 4099, 4999];
 const DEFAULT_TEMP_PREFIX = "ingenium-playwright-";
 const DEFAULT_RSS_LIMIT = 512 * 1024 * 1024;
+const COORDINATION_AUDIT_FILENAME = /^coordination-audit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
+const COORDINATION_TRACE_MAX_ENTRIES = 4_096;
+const COORDINATION_TRACE_MAX_MATCHES = 128;
+const COORDINATION_TRACE_MAX_ERRORS = 32;
 // A missing manifest can only be treated as retained historical evidence after
 // a full stale-run interval. Fresh evidence remains a strict recovery failure.
 const HISTORICAL_INERT_EVIDENCE_AFTER_MS = 60 * 60 * 1_000;
@@ -127,6 +139,7 @@ export interface ContainmentAuditReport {
   tempEntries: string[];
   /** Manifestless temp evidence is retained and reported, never deleted. */
   unownedTempEntries: string[];
+  coordinationTraceScan?: CoordinationTraceScanReport;
   managedProcesses: ManagedProcessState[];
   discoveredProcesses: DiscoveredProcessState[];
   preexistingUnownedProcesses: PreexistingUnownedProcessState[];
@@ -162,6 +175,50 @@ export interface ContainmentAuditOptions {
   composeOwnership?: ComposeOwnershipReport;
   /** Test seam for port classification without opening real listeners. */
   portProbe?: (port: number) => Promise<boolean>;
+  /** Test seam for bounded scanner and race coverage. */
+  coordinationTraceScan?: CoordinationTraceScanOptions;
+}
+
+export type CoordinationTraceScanErrorKind =
+  | "unsupported-platform"
+  | "root-open-failed"
+  | "root-metadata-invalid"
+  | "scan-hook-failed"
+  | "directory-open-failed"
+  | "directory-read-failed"
+  | "child-lstat-failed"
+  | "child-type-invalid"
+  | "directory-close-failed"
+  | "descriptor-close-failed"
+  | "root-validation-failed";
+
+export interface CoordinationTraceScanError {
+  kind: CoordinationTraceScanErrorKind;
+  name?: string;
+}
+
+export interface CoordinationTraceScanReport {
+  rootPath: string;
+  rootPresent: boolean;
+  rootUnsafe: boolean;
+  rootChanged: boolean;
+  inspectedEntries: number;
+  matchingNames: string[];
+  residuals: string[];
+  errors: CoordinationTraceScanError[];
+  entryOverflow: boolean;
+  matchingOverflow: boolean;
+  errorOverflow: boolean;
+}
+
+export interface CoordinationTraceScanOptions {
+  /** Test-only path override; production always uses COORDINATION_TRACE_ROOT. */
+  rootPath?: string;
+  maxEntries?: number;
+  maxMatches?: number;
+  maxErrors?: number;
+  afterRootOpened?: (descriptor: number) => void;
+  afterDirectoryOpened?: (directory: Dir, descriptor: number) => void;
 }
 
 interface TelemetryManifestCheck {
@@ -307,6 +364,164 @@ function auditTemp(resolvedManifestPaths: Set<string> = new Set()): {
     }
   }
   return { manifestBacked: [...new Set(manifestBacked)], manifestless: [...new Set(manifestless)] };
+}
+
+function boundedScanCap(value: number | undefined, maximum: number): number {
+  return Number.isInteger(value) && value !== undefined && value >= 0
+    ? Math.min(value, maximum)
+    : maximum;
+}
+
+function sameCoordinationTraceRoot(opened: BigIntStats, current: BigIntStats): boolean {
+  return current.isDirectory()
+    && !current.isSymbolicLink()
+    && current.dev === opened.dev
+    && current.ino === opened.ino
+    && current.mode === opened.mode
+    && current.uid === opened.uid;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+export function scanCoordinationTraceResiduals(
+  options: CoordinationTraceScanOptions = {},
+): CoordinationTraceScanReport {
+  const rootPath = options.rootPath ?? COORDINATION_TRACE_ROOT;
+  const maxEntries = boundedScanCap(options.maxEntries, COORDINATION_TRACE_MAX_ENTRIES);
+  const maxMatches = boundedScanCap(options.maxMatches, COORDINATION_TRACE_MAX_MATCHES);
+  const maxErrors = boundedScanCap(options.maxErrors, COORDINATION_TRACE_MAX_ERRORS);
+  const report: CoordinationTraceScanReport = {
+    rootPath,
+    rootPresent: false,
+    rootUnsafe: false,
+    rootChanged: false,
+    inspectedEntries: 0,
+    matchingNames: [],
+    residuals: [],
+    errors: [],
+    entryOverflow: false,
+    matchingOverflow: false,
+    errorOverflow: false,
+  };
+  const recordError = (kind: CoordinationTraceScanErrorKind, name?: string): void => {
+    if (report.errors.length >= maxErrors) {
+      report.errorOverflow = true;
+      return;
+    }
+    report.errors.push({ kind, ...(name === undefined ? {} : { name }) });
+  };
+
+  if (process.platform !== "linux"
+    || typeof constants.O_DIRECTORY !== "number"
+    || typeof constants.O_NOFOLLOW !== "number"
+    || typeof process.geteuid !== "function") {
+    report.rootUnsafe = true;
+    recordError("unsupported-platform");
+    return report;
+  }
+
+  const euid = BigInt(process.geteuid());
+  let descriptor: number;
+  try {
+    descriptor = openSync(
+      rootPath,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    report.rootPresent = true;
+  } catch (error) {
+    if (isMissingPathError(error)) return report;
+    report.rootUnsafe = true;
+    recordError("root-open-failed");
+    return report;
+  }
+
+  let directory: Dir | undefined;
+  let opened: BigIntStats | undefined;
+  try {
+    try {
+      opened = fstatSync(descriptor, { bigint: true });
+      if (!opened.isDirectory() || opened.uid !== euid || (opened.mode & 0o777n) !== 0o700n) {
+        report.rootUnsafe = true;
+        recordError("root-metadata-invalid");
+      }
+    } catch {
+      report.rootUnsafe = true;
+      recordError("root-metadata-invalid");
+    }
+
+    if (!report.rootUnsafe && opened) {
+      try {
+        options.afterRootOpened?.(descriptor);
+        directory = opendirSync(`/proc/self/fd/${descriptor}`);
+        options.afterDirectoryOpened?.(directory, descriptor);
+      } catch {
+        recordError(directory ? "scan-hook-failed" : "directory-open-failed");
+      }
+
+      while (directory && report.errors.every(({ kind }) => kind !== "scan-hook-failed")) {
+        let entry;
+        try {
+          entry = directory.readSync();
+        } catch {
+          recordError("directory-read-failed");
+          break;
+        }
+        if (!entry) break;
+        if (report.inspectedEntries >= maxEntries) {
+          report.entryOverflow = true;
+          break;
+        }
+        report.inspectedEntries += 1;
+        if (!COORDINATION_AUDIT_FILENAME.test(entry.name)) continue;
+        if (report.matchingNames.length >= maxMatches) {
+          report.matchingOverflow = true;
+          continue;
+        }
+        report.matchingNames.push(entry.name);
+        try {
+          const metadata = lstatSync(`/proc/self/fd/${descriptor}/${entry.name}`);
+          if (metadata.isFile() || metadata.isSymbolicLink()) {
+            report.residuals.push(join(rootPath, entry.name));
+          } else {
+            recordError("child-type-invalid", entry.name);
+          }
+        } catch {
+          recordError("child-lstat-failed", entry.name);
+        }
+      }
+    }
+
+    if (opened) {
+      try {
+        const descriptorAfterScan = fstatSync(descriptor, { bigint: true });
+        const rootAfterScan = lstatSync(rootPath, { bigint: true });
+        if (!sameCoordinationTraceRoot(opened, descriptorAfterScan)
+          || !sameCoordinationTraceRoot(opened, rootAfterScan)) {
+          report.rootChanged = true;
+          recordError("root-validation-failed");
+        }
+      } catch {
+        report.rootChanged = true;
+        recordError("root-validation-failed");
+      }
+    }
+  } finally {
+    if (directory) {
+      try {
+        directory.closeSync();
+      } catch {
+        recordError("directory-close-failed");
+      }
+    }
+    try {
+      closeSync(descriptor);
+    } catch {
+      recordError("descriptor-close-failed");
+    }
+  }
+  return report;
 }
 
 function auditProcesses(): { activeHandles: number; rssBytes: number } {
@@ -646,6 +861,10 @@ function pathIsInside(parent: string, child: string): boolean {
   return fromParent === "" || (!fromParent.startsWith("..") && !isAbsolute(fromParent));
 }
 
+function isCoordinationTraceResidualPath(path: string): boolean {
+  return dirname(path) === COORDINATION_TRACE_ROOT && COORDINATION_AUDIT_FILENAME.test(basename(path));
+}
+
 function discoveredProcessState(candidate: RepositoryProcessCandidate): DiscoveredProcessState {
   return {
     pid: candidate.pid,
@@ -907,6 +1126,9 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
         .filter((path) => !selectedTempDirectories.has(resolve(path))),
     }
     : discoveredTempAudit;
+  const coordinationTraceScan = scanCoordinationTraceResiduals(options.coordinationTraceScan);
+  const coordinationTraceResiduals = coordinationTraceScan.residuals;
+  const unownedTempEntries = [...new Set([...tempAudit.manifestless, ...coordinationTraceResiduals])];
   const rssLimit = Number(process.env.INGENIUM_AUDIT_RSS_LIMIT ?? DEFAULT_RSS_LIMIT);
   const selectedManifestPath = options.manifestPath ?? process.env[TEST_RUN_MANIFEST_ENV];
   const telemetryReport = telemetry.map((entry) => {
@@ -947,7 +1169,8 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     managedPorts: [...managedPorts],
     expectedPorts: [...parseExpectedPorts()],
     tempEntries: tempAudit.manifestBacked,
-    unownedTempEntries: tempAudit.manifestless,
+    unownedTempEntries,
+    coordinationTraceScan,
     managedProcesses,
     discoveredProcesses,
     preexistingUnownedProcesses,
@@ -962,6 +1185,8 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
       ...preexistingUnownedProcesses.map((candidate) =>
         `pre-existing unowned candidate retained: ${candidate.pid} listening on ${candidate.listeningPorts.join(",")}`),
       ...tempAudit.manifestless.map((path) => `manifestless temp evidence retained (unowned, not deleted): ${path}`),
+      ...coordinationTraceResiduals.map((path) =>
+        `coordination trace residual retained as unowned temp (not read, followed, moved, or deleted): ${path}`),
       ...retentionTransitions,
     ],
     artifactClassifications,
@@ -1000,6 +1225,23 @@ export function strictFailures(report: ContainmentAuditReport, manifestError?: s
     .map((state) => state.port);
   if (openPorts.length > 0) failures.push(`listening ports: ${openPorts.join(", ")}`);
   if (report.tempEntries.length > 0) failures.push(`temp entries: ${report.tempEntries.join(", ")}`);
+  if (report.coordinationTraceScan) {
+    const scan = report.coordinationTraceScan;
+    if (scan.rootUnsafe) failures.push("coordination trace scan: root is unsafe");
+    if (scan.rootChanged) failures.push("coordination trace scan: root changed during inspection");
+    if (scan.entryOverflow) failures.push("coordination trace scan: entry inspection limit exceeded");
+    if (scan.matchingOverflow) failures.push("coordination trace scan: matching-name report limit exceeded");
+    if (scan.errorOverflow) failures.push("coordination trace scan: error report limit exceeded");
+    if (scan.errors.length > 0) {
+      failures.push(`coordination trace scan errors: ${scan.errors
+        .map(({ kind, name }) => name ? `${kind}:${name}` : kind)
+        .join(", ")}`);
+    }
+  }
+  const coordinationTraceResiduals = report.unownedTempEntries.filter(isCoordinationTraceResidualPath);
+  if (coordinationTraceResiduals.length > 0) {
+    failures.push(`unowned temp residuals (coordination trace, retained and untouched): ${coordinationTraceResiduals.join(", ")}`);
+  }
   const badProcesses = report.managedProcesses.filter((process) => process.state !== "exited");
   if (badProcesses.length > 0) {
     failures.push(`managed processes: ${badProcesses.map((process) => `${process.name}:${process.pid}:${process.state}`).join(", ")}`);

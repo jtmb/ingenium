@@ -1,7 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  type Dir,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +24,7 @@ import {
   TEST_RUN_TELEMETRY_ENV,
   createTestRunContext,
   cleanupTestRun,
+  COORDINATION_TRACE_ROOT,
   getTestRunArtifactRoot,
   readTestRunManifest,
   readTestRunTelemetry,
@@ -31,6 +45,7 @@ import {
   inspectOwnedMisplacedTestResults,
   removeOwnedMisplacedTestResults,
   historicalOnlyListenerPorts,
+  scanCoordinationTraceResiduals,
   strictFailures,
 } from "./suite-containment-audit";
 
@@ -39,6 +54,7 @@ const servers: Server[] = [];
 const children: ChildProcess[] = [];
 const temporaryRepositories: string[] = [];
 const temporaryManifestlessEvidence: string[] = [];
+const coordinationTraceEntries: string[] = [];
 const testComposeOwnership = {
   classification: "unverified" as const,
   hostPorts: [3000, 4097, 1455],
@@ -158,8 +174,25 @@ afterEach(async () => {
   for (const path of temporaryManifestlessEvidence.splice(0)) {
     rmSync(path, { recursive: true, force: true });
   }
+  for (const path of coordinationTraceEntries.splice(0)) {
+    rmSync(path, { force: true });
+  }
   resetTestRunContextForTests();
 });
+
+function coordinationTraceEntry(name: string): string {
+  mkdirSync(COORDINATION_TRACE_ROOT, { recursive: true, mode: 0o700 });
+  const path = join(COORDINATION_TRACE_ROOT, name);
+  coordinationTraceEntries.push(path);
+  return path;
+}
+
+function temporaryCoordinationTraceRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-trace-audit-"));
+  temporaryRepositories.push(root);
+  chmodSync(root, 0o700);
+  return root;
+}
 
 function temporaryRepository(): string {
   const repository = mkdtempSync(join(tmpdir(), "ingenium-containment-audit-"));
@@ -794,6 +827,248 @@ describe("suite containment audit", () => {
       `manifestless temp evidence retained (unowned, not deleted): ${evidence}`,
     );
     expect(existsSync(evidence)).toBe(true);
+  });
+
+  describe.runIf(process.platform === "linux")("coordination trace residual scanner", () => {
+    it("stops at a low entry cap and makes overflow fail strict containment", async () => {
+      const rootPath = temporaryCoordinationTraceRoot();
+      for (let index = 0; index < 3; index += 1) {
+        writeFileSync(join(rootPath, `unmatched-${index}.txt`), "untouched\n");
+      }
+
+      const report = await auditContainment({
+        manifestPath: "",
+        telemetryPaths: [],
+        includeRepositoryTelemetry: false,
+        portProbe: async () => false,
+        coordinationTraceScan: { rootPath, maxEntries: 2 },
+      });
+
+      expect(report.coordinationTraceScan).toMatchObject({
+        inspectedEntries: 2,
+        entryOverflow: true,
+      });
+      expect(strictFailures(report)).toContain("coordination trace scan: entry inspection limit exceeded");
+    });
+
+    it("caps retained matching names and residuals while making report overflow fail strict containment", async () => {
+      const rootPath = temporaryCoordinationTraceRoot();
+      for (let index = 0; index < 4; index += 1) {
+        writeFileSync(join(rootPath, `coordination-audit-${randomUUID()}.json`), `untouched-${index}\n`);
+      }
+
+      const report = await auditContainment({
+        manifestPath: "",
+        telemetryPaths: [],
+        includeRepositoryTelemetry: false,
+        portProbe: async () => false,
+        coordinationTraceScan: { rootPath, maxEntries: 8, maxMatches: 2 },
+      });
+
+      expect(report.coordinationTraceScan?.matchingNames).toHaveLength(2);
+      expect(report.coordinationTraceScan?.residuals).toHaveLength(2);
+      expect(report.coordinationTraceScan?.matchingOverflow).toBe(true);
+      expect(strictFailures(report)).toContain("coordination trace scan: matching-name report limit exceeded");
+    });
+
+    it("caps retained scanner errors and makes error overflow fail strict containment", async () => {
+      const rootPath = temporaryCoordinationTraceRoot();
+      for (let index = 0; index < 3; index += 1) {
+        mkdirSync(join(rootPath, `coordination-audit-${randomUUID()}.json`));
+      }
+
+      const report = await auditContainment({
+        manifestPath: "",
+        telemetryPaths: [],
+        includeRepositoryTelemetry: false,
+        portProbe: async () => false,
+        coordinationTraceScan: { rootPath, maxEntries: 8, maxMatches: 8, maxErrors: 1 },
+      });
+
+      expect(report.coordinationTraceScan?.errors).toHaveLength(1);
+      expect(report.coordinationTraceScan?.errorOverflow).toBe(true);
+      expect(strictFailures(report)).toContain("coordination trace scan: error report limit exceeded");
+    });
+
+    it("keeps enumeration on the opened directory when the root is replaced", () => {
+      const parent = temporaryCoordinationTraceRoot();
+      const rootPath = join(parent, "opencode");
+      const openedPath = join(parent, "opened-root");
+      const replacementPath = join(parent, "replacement-root");
+      const openedName = `coordination-audit-${randomUUID()}.json`;
+      const replacementName = `coordination-audit-${randomUUID()}.json`;
+      mkdirSync(rootPath, { mode: 0o700 });
+      mkdirSync(replacementPath, { mode: 0o700 });
+      writeFileSync(join(rootPath, openedName), "opened root\n", { mode: 0o600 });
+      writeFileSync(join(replacementPath, replacementName), "replacement root\n", { mode: 0o600 });
+
+      const scan = scanCoordinationTraceResiduals({
+        rootPath,
+        afterRootOpened: () => {
+          renameSync(rootPath, openedPath);
+          symlinkSync(replacementPath, rootPath);
+        },
+      });
+
+      expect(scan.matchingNames).toContain(openedName);
+      expect(scan.matchingNames).not.toContain(replacementName);
+      expect(scan.rootChanged).toBe(true);
+      expect(scan.errors).toContainEqual({ kind: "root-validation-failed" });
+      expect(readFileSync(join(openedPath, openedName), "utf8")).toBe("opened root\n");
+      expect(readFileSync(join(replacementPath, replacementName), "utf8")).toBe("replacement root\n");
+    });
+
+    it("rejects a symlink root and reports a matching symlink child without following it", () => {
+      const parent = temporaryCoordinationTraceRoot();
+      const targetRoot = join(parent, "target-root");
+      const symlinkRoot = join(parent, "symlink-root");
+      mkdirSync(targetRoot, { mode: 0o700 });
+      symlinkSync(targetRoot, symlinkRoot);
+
+      const unsafeRootScan = scanCoordinationTraceResiduals({ rootPath: symlinkRoot });
+      expect(unsafeRootScan).toMatchObject({ rootUnsafe: true, rootPresent: false });
+      expect(unsafeRootScan.errors).toEqual([{ kind: "root-open-failed" }]);
+
+      const rootPath = join(parent, "real-root");
+      const childName = `coordination-audit-${randomUUID()}.json`;
+      mkdirSync(rootPath, { mode: 0o700 });
+      symlinkSync(targetRoot, join(rootPath, childName));
+
+      const childScan = scanCoordinationTraceResiduals({ rootPath });
+      expect(childScan.residuals).toEqual([join(rootPath, childName)]);
+      expect(childScan.errors).toEqual([]);
+      expect(lstatSync(join(rootPath, childName)).isSymbolicLink()).toBe(true);
+    });
+
+    it("accepts matching regular files, ignores malformed names, and rejects a regular root", () => {
+      const parent = temporaryCoordinationTraceRoot();
+      const rootPath = join(parent, "real-root");
+      const matchingName = `coordination-audit-${randomUUID()}.json`;
+      const malformedName = `coordination-audit-${randomUUID().replaceAll("-", "")}.json`;
+      mkdirSync(rootPath, { mode: 0o700 });
+      writeFileSync(join(rootPath, matchingName), "matching\n", { mode: 0o600 });
+      writeFileSync(join(rootPath, malformedName), "malformed\n", { mode: 0o600 });
+
+      const scan = scanCoordinationTraceResiduals({ rootPath });
+      expect(scan.residuals).toEqual([join(rootPath, matchingName)]);
+      expect(scan.matchingNames).toEqual([matchingName]);
+
+      chmodSync(rootPath, 0o755);
+      const permissiveRootScan = scanCoordinationTraceResiduals({ rootPath });
+      expect(permissiveRootScan.rootUnsafe).toBe(true);
+      expect(permissiveRootScan.errors).toEqual([{ kind: "root-metadata-invalid" }]);
+
+      const regularRoot = join(parent, "regular-root");
+      writeFileSync(regularRoot, "not a directory\n", { mode: 0o600 });
+      const regularRootScan = scanCoordinationTraceResiduals({ rootPath: regularRoot });
+      expect(regularRootScan.rootUnsafe).toBe(true);
+      expect(regularRootScan.errors).toEqual([{ kind: "root-open-failed" }]);
+    });
+
+    it("closes the directory and descriptor on success, error, root replacement, and overflow", () => {
+      for (const scenario of ["success", "error", "root-swap", "overflow"] as const) {
+        const parent = temporaryCoordinationTraceRoot();
+        const rootPath = join(parent, "opencode");
+        const openedPath = join(parent, "opened-root");
+        const replacementPath = join(parent, "replacement-root");
+        mkdirSync(rootPath, { mode: 0o700 });
+        if (scenario === "root-swap") mkdirSync(replacementPath, { mode: 0o700 });
+        if (scenario === "overflow") {
+          writeFileSync(join(rootPath, "first.txt"), "first\n");
+          writeFileSync(join(rootPath, "second.txt"), "second\n");
+        }
+        let directory: Dir | undefined;
+        let descriptor: number | undefined;
+
+        const scan = scanCoordinationTraceResiduals({
+          rootPath,
+          ...(scenario === "overflow" ? { maxEntries: 1 } : {}),
+          ...(scenario === "root-swap" ? {
+            afterRootOpened: () => {
+              renameSync(rootPath, openedPath);
+              symlinkSync(replacementPath, rootPath);
+            },
+          } : {}),
+          afterDirectoryOpened: (openedDirectory, openedDescriptor) => {
+            directory = openedDirectory;
+            descriptor = openedDescriptor;
+            if (scenario === "error") throw new Error("sensitive scanner seam detail");
+          },
+        });
+
+        expect(() => directory?.readSync(), scenario).toThrow();
+        expect(() => fstatSync(descriptor!), scenario).toThrow(expect.objectContaining({ code: "EBADF" }));
+        if (scenario === "success") expect(scan.errors).toEqual([]);
+        if (scenario === "error") {
+          expect(scan.errors).toEqual([{ kind: "scan-hook-failed" }]);
+          expect(JSON.stringify(scan)).not.toContain("sensitive scanner seam detail");
+        }
+        if (scenario === "root-swap") expect(scan.rootChanged).toBe(true);
+        if (scenario === "overflow") expect(scan.entryOverflow).toBe(true);
+      }
+    });
+  });
+
+  it("reports matching regular coordination trace files as untouched unowned temp evidence", async () => {
+    const path = coordinationTraceEntry(`coordination-audit-${randomUUID()}.json`);
+    writeFileSync(path, "coordination audit payload\n", { mode: 0o600 });
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(report.unownedTempEntries).toContain(path);
+    expect(report.informational).toContain(
+      `coordination trace residual retained as unowned temp (not read, followed, moved, or deleted): ${path}`,
+    );
+    expect(readFileSync(path, "utf8")).toBe("coordination audit payload\n");
+  });
+
+  it("reports matching coordination trace symlinks with lstat semantics without following them", async () => {
+    const path = coordinationTraceEntry(`coordination-audit-${randomUUID()}.json`);
+    symlinkSync(join(COORDINATION_TRACE_ROOT, `missing-${randomUUID()}.json`), path);
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(report.unownedTempEntries).toContain(path);
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+  });
+
+  it("ignores malformed and nonmatching coordination trace names", async () => {
+    const malformed = coordinationTraceEntry(`coordination-audit-${randomUUID().replaceAll("-", "")}.json`);
+    const nonmatching = coordinationTraceEntry(`coordination-audit-${randomUUID()}.txt`);
+    writeFileSync(malformed, "malformed name\n", { mode: 0o600 });
+    writeFileSync(nonmatching, "nonmatching name\n", { mode: 0o600 });
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(report.unownedTempEntries).not.toContain(malformed);
+    expect(report.unownedTempEntries).not.toContain(nonmatching);
+  });
+
+  it("fails strict containment for matching coordination trace residuals", async () => {
+    const path = coordinationTraceEntry(`coordination-audit-${randomUUID()}.json`);
+    writeFileSync(path, "strict residual\n", { mode: 0o600 });
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(strictFailures(report).some((failure) => failure.startsWith("unowned temp residuals")
+      && failure.includes(path))).toBe(true);
+    expect(lstatSync(path).isFile()).toBe(true);
   });
 
   it("preserves unowned evidence in a historical temp root when TMPDIR changes", async () => {
