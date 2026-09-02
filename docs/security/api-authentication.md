@@ -431,6 +431,49 @@ Other management routes remain bearer-protected; a missing installation token
 therefore still returns `503 API_AUTH_NOT_CONFIGURED` instead of enabling an
 unauthenticated management path.
 
+### Repository-sync ingress boundary
+
+`POST /api/v1/repository/sync` is a project-authorized management route, not an
+authentication exception. A repository-sync service credential must carry the
+`repository-sync` audience and the exact `projects:read` and `repository:sync`
+scope set, together with its bound organization, project, workspace, launcher
+worktree, and storage mapping. Express selects the hardened ingress only for
+the exact query-free path `/api/v1/repository/sync` and method `POST`; query
+parameters such as `project` remain valid, while encoded, ambiguous, near,
+trailing-slash, and other-method paths do not select it.
+
+The content-type gate runs before the global JSON and URL-encoded parsers. It
+accepts only `application/json` with no charset or an optional UTF-8 charset,
+and only absent or `identity` content encoding. `Transfer-Encoding` and
+`Content-Transfer-Encoding` are rejected. Any missing/unsupported media,
+charset, or encoding returns a sanitized `415 UNSUPPORTED_MEDIA_TYPE` without
+body parsing or slot acquisition.
+
+Once the gate passes, the ordinary 2 MiB JSON parser is bypassed. The strict
+rate-limit/authentication/authorization chain runs before one process-wide
+cap-1 ingress slot; only then does exactly one narrow JSON parser admit the
+request. The parser limit is 4 MiB (4,194,304 bytes), which is also the
+decompressed bound because compressed bodies are rejected. A concurrent request
+gets sanitized `429 RATE_LIMITED` with `Retry-After: 1`. Release is idempotent
+across parser errors, response `finish`, response `close`, and aborted uploads.
+
+Before canonical map/sort/join hashing, Core performs an allocation-light walk
+without serializing or copying the untrusted structure. It bounds depth at 16,
+visited nodes at 196,608, object/array entries at 512, keys/paths/bounded
+string-array values at 512 characters, documentation at 256 files and
+1,500 KiB aggregate (512 KiB per file), resources at 512 items and 1,500 KiB
+aggregate, resource text/records at 256 KiB, the resource envelope at
+1,536,768 bytes, and the estimated canonical envelope at 4 MiB.
+
+Parser and ingress failures use generic, body-free errors: `400` for malformed,
+incomplete, or structurally over-limit input, `413 PAYLOAD_TOO_LARGE` for the
+4 MiB parser bound, `415 UNSUPPORTED_MEDIA_TYPE` for the pre-parser media
+gate, and `429 RATE_LIMITED` for rate or cap-1 rejection. These responses do
+not echo submitted content, paths, credentials, or parser internals. The
+ordinary 2 MiB parser remains in force for near paths, including the legacy
+`/api/v1/repository/resources/sync` route, and for all other non-exact methods
+and paths.
+
 The extraction engine reaches `GET /api/v1/opencode/messages` through an
 API-owned internal client. That client loads the same protected runtime token
 only while creating the loopback request, sends it only as the bearer header,

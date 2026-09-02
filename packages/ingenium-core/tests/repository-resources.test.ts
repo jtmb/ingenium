@@ -117,6 +117,57 @@ describe("repository resource sync", () => {
     ).get(projectId, worktreeId)).toEqual({ generation: 1 });
   });
 
+  it("accepts a combined projection above 2 MiB after structural preflight", () => {
+    const content = "x".repeat(450_000);
+    const docsManifest = {
+      files: Array.from({ length: 3 }, (_, index) => ({
+        path: `docs/large-${index}.md`, content,
+        sha256: createHash("sha256").update(content).digest("hex"),
+        fileType: "regular", isSymlink: false,
+      })),
+    };
+    const source = "x".repeat(200_000);
+    const plugins = Array.from({ length: 4 }, (_, index) => {
+      const semantic = {
+        path: `.opencode/plugins/large-${index}.ts`, name: `large-${index}`, source,
+        fileType: "regular" as const, isSymlink: false as const, enabled: true, order: index, options: {},
+      };
+      return { identity: `plugin:large-${index}`, sha256: hash(semantic), ...semantic };
+    });
+    const input = {
+      docsManifest,
+      resourcesManifest: { version: 2, skills: [], agents: [], plugins },
+      dryRun: true,
+      expectedGeneration: 0,
+      worktreeId: `worktree-${"b".repeat(64)}`,
+    };
+
+    expect(Buffer.byteLength(JSON.stringify(input))).toBeGreaterThan(2 * 1024 * 1024);
+    expect(repositorySync.applyRepositorySync(projectId, input)).toMatchObject({ dryRun: true, generation: 0 });
+  });
+
+  it("rejects deep, high-cardinality, overlong, and aggregate-heavy structures before canonicalization", () => {
+    let nested: Record<string, unknown> = {};
+    for (let depth = 0; depth < 18; depth += 1) nested = { nested };
+    const candidates = [
+      { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: Array(513).fill(null), agents: [], plugins: [] } },
+      { docsManifest: { files: [{ path: "x".repeat(513), content: "", sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
+      { docsManifest: { files: [{ path: "docs/large.md", content: "x".repeat(512 * 1024 + 1), sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
+      { docsManifest: { files: Array.from({ length: 4 }, (_, index) => ({ path: `docs/${index}.md`, content: "x".repeat(400 * 1024) })) } },
+      { docsManifest: { files: [] }, resourcesManifest: {
+        version: 2, skills: [], agents: [],
+        plugins: Array.from({ length: 7 }, (_, index) => ({ source: "x".repeat(240 * 1024), path: `.opencode/plugins/${index}.ts` })),
+      } },
+      { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: [], agents: [], plugins: [], nested } },
+    ];
+
+    for (const candidate of candidates) {
+      expect(() => repositorySync.assertRepositorySyncStructure(candidate)).toThrow(expect.objectContaining({
+        code: "REPOSITORY_SYNC_STRUCTURE_LIMIT",
+      }));
+    }
+  });
+
   it("imports deterministically, is idempotent, and retains identity through a unique rename", () => {
     const first = repositoryResources.syncRepositoryResources(projectId, manifest());
     expect(first.summary).toMatchObject({ skill: { created: 1 }, agent: { created: 1 }, plugin: { created: 1 } });

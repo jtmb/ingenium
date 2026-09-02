@@ -168,7 +168,7 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 ## Configuration
 
 - **Ports**: public bearer boundary `4097`; private Express listener `4096` in Docker (configurable via `INGENIUM_API_PORT`)
-- **Body limit**: `express.json({ limit: "2mb" })` for large skill/plugin uploads
+- **Body limits**: The ordinary API JSON parser uses `express.json({ limit: "2mb" })` (2 MiB). The exact normalized `POST /api/v1/repository/sync` path is gated before the global parsers and, after the rate-limit/authentication/authorization chain, uses one 4 MiB JSON parser; see [Repository synchronization](#repository-synchronization) below.
 - **Security**: helmet for security headers (default configuration — no custom CSP), CORS and browser mutation CSRF share the exact `DASHBOARD_ALLOWED_ORIGINS` allowlist, mandatory bearer auth; browser mutations also require the dashboard marker contract
 - **Rate limits**: Independent in-memory sliding-window policies preserve strict
   handling for ordinary mutations and sensitive reads while allowing only the
@@ -1073,7 +1073,78 @@ The manifest is caller-supplied data: the API does not walk or open repository
 paths. Entries are limited to normalized regular `docs/**/*.md` files with
 matching SHA-256 hashes and size/secret-content validation. A dry run returns
 the planned operations without mutation; apply archives only previously
-managed documents missing from the complete manifest.
+managed documents missing from the complete manifest. This docs-only route is
+not the combined repository-sync ingress and retains the ordinary 2 MiB global
+JSON parser behavior.
+
+### Repository synchronization
+
+The combined repository projection uses the exact normalized
+`POST /api/v1/repository/sync?project=<project>` route. Express selects the
+ingress only when the method is `POST` and its query-free `req.path` is exactly
+`/api/v1/repository/sync`; query parameters remain valid. Encoded, ambiguous,
+near, or trailing-slash paths and other methods do not select this exception.
+
+The request body contains exactly these top-level fields:
+
+```json
+{
+  "docsManifest": { "files": [] },
+  "resourcesManifest": {
+    "version": 2,
+    "skills": [],
+    "agents": [],
+    "plugins": []
+  },
+  "dryRun": true,
+  "expectedGeneration": 0
+}
+```
+
+`docsManifest`, `dryRun`, and the non-negative safe-integer
+`expectedGeneration` are required; `resourcesManifest` is optional for a
+documentation-only projection. Apply advances the project/worktree repository
+generation atomically; a stale generation returns `409
+MANIFEST_GENERATION_CONFLICT`. The route is project-authorized and the
+repository-sync service audience is limited to `projects:read` and
+`repository:sync`.
+
+#### Ingress order and body limits
+
+Before either global body parser, the exact route must have `Content-Type:
+application/json` with no charset or an optional UTF-8 charset. The media gate
+also permits only absent or `identity` `Content-Encoding` and rejects any
+`Transfer-Encoding` or `Content-Transfer-Encoding`. Missing/unsupported media,
+charset, or encoding returns sanitized `415 UNSUPPORTED_MEDIA_TYPE` without
+parsing or acquiring the ingress slot.
+
+After the pre-authentication and strict rate-limit stages, bearer
+authentication, authenticated-read handling, CSRF middleware, and project
+authorization complete, one process-wide cap-1 ingress slot admits the request
+to exactly one narrow JSON parser. Its `4 * 1024 * 1024` limit is a 4 MiB
+(4,194,304-byte) parsed/decompressed bound; compressed bodies are rejected
+instead of being decompressed. A concurrent exact-route request returns
+sanitized `429 RATE_LIMITED` with `Retry-After: 1` before invoking a parser.
+Slot release is idempotent: parser errors release immediately, while response
+`finish`/`close` release the normal and aborted-upload paths only once.
+
+Core performs an allocation-light structural walk before canonical map/sort/join
+hashing. It does not serialize or copy the untrusted structure during this
+preflight. The limits are depth 16, 196,608 visited nodes, 512 own entries per
+object/array, 512-character object keys/paths/bounded string-array values,
+at most 256 documentation files (each at most 512 KiB and 1,500 KiB in
+aggregate), at most 512 resource items (1,500 KiB in aggregate), 256 KiB
+resource text/record fields, a 1,536,768-byte resource envelope, and a 4 MiB
+estimated canonical envelope. Structural-limit failures return sanitized
+`400 INVALID_REPOSITORY_SYNC`.
+
+Known body failures are sanitized and do not reflect submitted content or
+internal parser details: malformed JSON is `400 MALFORMED_JSON`, incomplete or
+invalid body framing is `400 INVALID_REQUEST_BODY`, an over-limit body is
+`413 PAYLOAD_TOO_LARGE`, unsupported media/encoding is `415
+UNSUPPORTED_MEDIA_TYPE`, and a busy ingress slot or rate limiter is `429
+RATE_LIMITED`. Semantic envelope or manifest validation remains `422
+INVALID_REPOSITORY_SYNC`.
 
 ### Repository Resource Sync
 
@@ -1081,7 +1152,7 @@ All routes prefixed with `/api/v1/repository`.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/resources/sync?project=<project>` | Preview or atomically apply the repository-authoritative v2 manifest for skills, agents, and plugins. Use `{ manifest, dryRun? }`; invalid manifests return `422 INVALID_REPOSITORY_RESOURCES_MANIFEST`. |
+| POST | `/resources/sync?project=<project>` | Retired near path. Returns `409 REPOSITORY_SYNC_ENDPOINT_REQUIRED`; use `/api/v1/repository/sync` for the combined docs/resources request. |
 
 The v2 resource manifest accepts exactly `skills`, `agents`, and `plugins`.
 Each item carries stable identity, normalized path, and SHA-256 of its full
@@ -1091,6 +1162,9 @@ order, enabled state, and options. The immutable `ingenium-llm-broker` cannot
 be imported. Missing entries archive/remove only resources previously recorded
 as repository-managed; manual, unmanaged, and system resources are untouched.
 Commands and project/global configuration are deliberately excluded.
+This legacy near path, like other non-exact paths and methods, retains the
+ordinary 2 MiB global JSON parser and does not use the 4 MiB repository-sync
+ingress.
 
 ### `ingenium-init-project` CLI contract
 

@@ -79,6 +79,11 @@ import { configureEmailRuntimeForApi } from "../lib/email-runtime.js";
 import { recoverServerGlobalProviderMetadata } from "../lib/server-global-provider-persistence.js";
 import { runtimeOpenCodeContext } from "../lib/runtime-opencode-context.js";
 import { startRuntimeReconciler } from "../lib/runtime-reconciler.js";
+import {
+  createRepositorySyncIngress,
+  isExactRepositorySyncRequest,
+  repositorySyncContentTypeGate,
+} from "../lib/middleware/repository-sync-ingress.js";
 
 configureEmailRuntimeForApi();
 
@@ -134,10 +139,13 @@ app.set("trust proxy", false);
 app.use(helmet());
 // Keep preflight on the authenticated path so CORS cannot create a public API route.
 app.use(cors({ origin: [...config.dashboardOrigins], preflightContinue: true }));
-// 2mb JSON limit accommodates skill content, email bodies, and plugin source files
-// without opening the door to oversized payload attacks. The attachment endpoint
-// uses a separate, larger limit via MAX_ATTACHMENT_SIZE.
-app.use(express.json({ limit: "2mb" }));
+app.use(repositorySyncContentTypeGate);
+// Repository projections contain the bounded docs and resource manifests in one
+// request, so they need a narrow ceiling above the default API body limit.
+const defaultJsonParser = express.json({ limit: "2mb" });
+app.use((req, res, next) => isExactRepositorySyncRequest(req)
+  ? next()
+  : defaultJsonParser(req, res, next));
 // MAX_ATTACHMENT_SIZE (from ingenium-core) sets the body parser limit for file uploads;
 // converting bytes → MB for the human-readable `limit` string passed to urlencoded.
 app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
@@ -149,6 +157,7 @@ app.use(authenticatedReadRateLimit);
 app.use(csrfMiddleware);
 app.use(authorizationMiddleware);
 app.use(recordCoordinationAttestationFailure);
+app.use(createRepositorySyncIngress());
 
 // OpenAI redirects the browser to localhost:1455/auth/callback. The Nginx
 // listener on that port proxies only this exact GET path. authMiddleware owns

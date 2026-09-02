@@ -62,6 +62,10 @@ repositoryRouter.post("/sync", (req, res) => {
     res.json({ data: result });
   } catch (error) {
     if (error instanceof repositorySync.RepositorySyncError) {
+      if (error.code === "REPOSITORY_SYNC_STRUCTURE_LIMIT") {
+        res.status(400).json({ error: { code: "INVALID_REPOSITORY_SYNC", message: "Repository synchronization request is invalid" } });
+        return;
+      }
       if (error.code === "MANIFEST_GENERATION_CONFLICT") {
         res.status(409).json({ error: {
           code: error.code,

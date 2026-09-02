@@ -28,28 +28,38 @@ export class AppError extends Error {
 }
 
 /**
- * `express.json()` delegates malformed request bodies to the terminal error
- * handler. Treat its known parse error as a client error instead of letting it
+ * `express.json()` delegates rejected request bodies to the terminal error
+ * handler. Treat its known client errors explicitly instead of letting them
  * fall through to the generic 500 response. The raw `body` property that
  * body-parser attaches is deliberately never read or logged here.
  */
-function isMalformedJsonError(err: Error): boolean {
+function bodyParserClientError(err: Error): { status: 400 | 413; code: string; message: string } | null {
   const parseError = err as Error & {
     type?: unknown;
     status?: unknown;
     statusCode?: unknown;
   };
   const status = parseError.status ?? parseError.statusCode;
-  return err instanceof SyntaxError
-    && parseError.type === "entity.parse.failed"
-    && status === 400;
+  if (err instanceof SyntaxError && parseError.type === "entity.parse.failed" && status === 400) {
+    return { status: 400, code: "MALFORMED_JSON", message: "Malformed JSON request body" };
+  }
+  if (parseError.type === "entity.too.large" && status === 413) {
+    return { status: 413, code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds the allowed size" };
+  }
+  if ((parseError.type === "request.aborted" || parseError.type === "request.size.invalid") && status === 400) {
+    return { status: 400, code: "INVALID_REQUEST_BODY", message: "Request body is incomplete or invalid" };
+  }
+  if (parseError.type === "encoding.unsupported" && status === 415) {
+    return { status: 400, code: "INVALID_REQUEST_BODY", message: "Request body encoding is unsupported" };
+  }
+  return null;
 }
 
 /**
  * Express error-handling middleware (4-arg signature required by Express 4).
  *
  * Handles four tiers of errors:
- * 1. Malformed JSON  → 400 without reflecting the submitted body
+ * 1. Rejected request body → sanitized 400/413 without reflecting submitted data
  * 2. AppError        → structured response with caller-chosen status/code
  * 3. ZodError        → 422 with field-level validation details
  * 4. Everything else → 500 with logged stack trace (never leaks internals to client)
@@ -66,11 +76,12 @@ export function errorHandler(
 ): void {
   const requestId = `req_${randomUUID().slice(0, 8)}`;
 
-  if (isMalformedJsonError(err)) {
-    res.status(400).json({
+  const parserError = bodyParserClientError(err);
+  if (parserError) {
+    res.status(parserError.status).json({
       error: {
-        code: "MALFORMED_JSON",
-        message: "Malformed JSON request body",
+        code: parserError.code,
+        message: parserError.message,
         details: null,
         requestId,
       },

@@ -3941,3 +3941,67 @@ credentials (`401`), so lease revocation remains evidenced by the successful
 failed run's exact staged file was removed. No deployment, commit, retry, or
 three-window acceptance occurred; coordination/shared-memory acceptance remains
 **OPEN and RESUMABLE**, with no rollout `PASS` or `(work-complete)` marker.
+
+### Failed Wave 190 live attempt and repository-sync parser remediation (2026-09-02)
+
+The next single authorized harness invocation against clean, deployed revision
+`bc64601515dd213a4c8e462c94a11214080d1acb` retained run
+`4f630aba-dc91-4c9e-8ed1-459ef97f237f`. External A, external B, and internal C
+all reached provider-connected and MCP-connected readiness. Model A completed
+its exact run-owned edit, typecheck, stage, and managed commit with the fixed
+command-scoped identity. Commit `c66676c58ad0b0e1463b68e4a20c3ca8111642d9`
+contains only `tests/coordination/4f630aba-dc91-4c9e-8ed1-459ef97f237f-a.txt`;
+the repository-local configuration file and normalized local configuration
+hashes remained unchanged.
+
+The first model turn could not be retained because its combined repository
+projection was 2,110,558 bytes, above the global Express JSON parser's 2 MiB
+(2,097,152-byte) limit. The API logged `PayloadTooLargeError: request entity too
+large`, returned `500` for the rejected synchronization, and later retries met
+the strict `429` limit. Before either global body parser, the hardened uncommitted
+remediation selects only normalized exact `POST /api/v1/repository/sync` and
+requires unencoded `application/json` with an optional UTF-8 charset. Query
+parameters remain valid; missing, form, multipart, text, unsupported charset,
+content encoding, content-transfer encoding, and HTTP transfer encoding receive
+sanitized `415` without invoking a body parser or acquiring the ingress slot.
+Encoded, ambiguous, near paths and other methods do not select this exception.
+After the existing strict rate limit, authentication, and authorization chain,
+one global cap-1 ingress slot admits the exact route to one JSON parser with a
+4 MiB (4,194,304-byte) parsed/decompressed bound; concurrent requests get
+sanitized `429` with `Retry-After: 1`. The idempotent slot release covers
+parser error, response finish, response close, and aborted uploads. Every
+other path and method retains its existing JSON and URL-encoded parser behavior,
+including the ordinary 2 MiB JSON limit for near paths and the legacy resource
+sync route.
+
+Before the repository manifests reach canonical map/sort/join hashing, Core now
+performs allocation-light traversal with bounded depth, nodes, entries, paths,
+strings, nested records, per-file content, docs aggregate content, resource
+aggregate bytes, and overall canonical bytes. The bounds derive from the
+existing docs/resource manifest constants and do not serialize or copy the
+untrusted structure. Known malformed, aborted, size-mismatch, and oversized
+parser failures return sanitized `400` or `413` instead of `500`. Focused
+evidence passes 18 Core repository tests, 10 API
+repository tests, and both affected typechecks. It covers a valid combined
+projection above 2 MiB, exact and over-limit bodies, malformed JSON, unsupported
+media and encodings, deep and high-cardinality input, near paths and methods,
+one parser execution, concurrent rejection, and exact single-slot release after
+success, parser error, and abort. Parser counters prove that large and compressed
+form bodies are rejected before JSON, URL-encoded, or repository parsing; a
+subsequent held request proves they did not acquire the semaphore.
+
+The harness cleanup reports zero errors, both external processes and the proxy
+stopped, temporary state removed, and complete/resolved telemetry with no active
+processes or failures. Independent checks found neither recorded PID, confirmed
+ports 49094-49096 were free, and confirmed the run-owned OpenAI provider was
+disconnected. The successful `revokeAndRemove` cleanup path and absent run
+directory remain the evidence for credential revocation and file removal; no
+unauthorized credential inventory was attempted. `run.ts` invoked its built-in
+strict audit exactly once after cleanup and it was not retried, but the failed
+run preserves the primary harness error and retained no separate audit report;
+the independent cleanup checks are not represented as a substitute audit pass.
+
+This is source-test and cleanup evidence only. The parser remediation is not
+committed or deployed, no model turn/restart replay was retained, and no retry
+occurred. Coordination/shared-memory acceptance therefore remains **OPEN and
+RESUMABLE**, with no rollout `PASS` or `(work-complete)` marker.
