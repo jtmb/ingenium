@@ -4069,3 +4069,37 @@ focused writer regression passes 1/1, the full coordination file passes 50/50,
 and the coordination TypeScript check passes. `git diff --check` follows this
 evidence update as the final source gate. Cleanup telemetry outside `failure.json`
 is unchanged. No live run, deployment, or commit is authorized.
+
+### Wave 191 one-shot diagnostic and source remediation (2026-09-02)
+
+The safe production failure writer was committed and deployed as
+`520ba528d23b2f6cd7016c61db5e3ddc6e584a65`. The only authorized follow-up
+harness invocation ran as `14e5cda3-b401-4ff0-974d-dcabdee92595`. External A,
+external B, and internal C reached simultaneous readiness. Model A created the
+run-owned file, completed the typecheck, and preserved managed commit
+`ac4a6f2e238b3e5ac1e4d5b98295345b3a7f2516`, which contains only
+`tests/coordination/14e5cda3-b401-4ff0-974d-dcabdee92595-a.txt`.
+
+The turn failed with the bounded `tool_status` diagnostic after that commit.
+The commit completed at `07:04:23Z`; cleanup began about twelve seconds later;
+the repository-sync bridge has a generic ten-second timeout; the forwarded
+server request still returned success; and the local repository manifest did
+not advance after its earlier `07:03:42Z` lifecycle sync. This establishes the
+causal boundary: the large repository synchronization outlived the generic MCP
+bridge timeout after its server-side apply, so the canary tool projected an
+error despite the applied sync. The uncommitted source correction gives only
+`repository_sync` the existing bounded 60-second maximum while retaining the
+ten-second default for all other short-lived MCP operations, with a focused
+delayed-call regression. The focused regression passes 1/1, the directly
+affected MCP-client file passes 26/26, the extension typecheck passes, and
+`git diff --check` passes.
+
+Cleanup retained zero errors. Its executed `revokeAndRemove` path self-revoked
+both run credentials, verified each credential returned `401`, removed both
+exact protected files, stopped A/B and the fault proxy, removed temporary state,
+and finalized complete/resolved telemetry. Recorded PIDs were absent, ports
+54647-54649 were reusable, and the run-owned provider credential was absent.
+The harness invocation limit is exhausted and no retry occurred. Completion-loss,
+quarantine, recovery, restart replay, and B restart remain unproved, so
+coordination/shared-memory acceptance remains **OPEN and RESUMABLE** with no
+rollout `PASS` or `(work-complete)` marker.

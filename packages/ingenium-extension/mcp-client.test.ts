@@ -195,6 +195,27 @@ describe("extension MCP client bridge", () => {
     expect(launch!.env.INGENIUM_MCP_CREDENTIAL).toBeUndefined();
   });
 
+  it("allows repository synchronization to outlive the generic API timeout", async () => {
+    prepareWorktree();
+    process.env.INGENIUM_API_TIMEOUT = "1";
+    const credentialPath = join(worktree, ".opencode", ".ingenium-repository-sync-credential");
+    writeFileSync(credentialPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    chmodSync(credentialPath, 0o600);
+
+    await expect(callMcpTool(worktree, "repository_sync", { project: "mcp-client-project" }, {
+      launcherPath: "/package/dist/scripts/mcp-server.js",
+      createTransport: () => ({ stderr: new PassThrough(), close: async () => undefined }),
+      createClient: () => ({
+        connect: async () => undefined,
+        callTool: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return { content: [{ type: "text", text: "{}" }] };
+        },
+        close: async () => undefined,
+      }),
+    })).resolves.toBeDefined();
+  });
+
   it("preserves a fixed rate-limit failure without exposing the tool payload", async () => {
     prepareWorktree();
     const client = {

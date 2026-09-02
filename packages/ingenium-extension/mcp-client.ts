@@ -14,6 +14,7 @@ import { resolveExtensionProject } from "./project-resolver.js";
 const DEFAULT_API_URL = "http://localhost:4097/api/v1";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
+const REPOSITORY_SYNC_TIMEOUT_MS = MAX_TIMEOUT_MS;
 const MAX_STDERR_BYTES = 1_024;
 const TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
 const LEARNING_TOOLS = new Set(["extraction_run", "synthesis_run", "pipeline_event_log", "observe"]);
@@ -75,6 +76,7 @@ export interface McpBridgeDependencies {
   createClient?: () => McpClient;
   project?: string;
   credentialPurpose?: ExtensionCredentialPurpose;
+  timeoutMs?: number;
 }
 
 function boundedTimeout(value: string | undefined): number {
@@ -377,7 +379,9 @@ export async function withMcpClient<T>(
     dependencies.project,
     dependencies.credentialPurpose,
   );
-  const timeoutMs = boundedTimeout(environment.INGENIUM_API_TIMEOUT);
+  const timeoutMs = boundedTimeout(dependencies.timeoutMs === undefined
+    ? environment.INGENIUM_API_TIMEOUT
+    : String(dependencies.timeoutMs));
   const transport = (dependencies.createTransport ?? defaultTransport)({
     command: resolveNodeExecutable(),
     args: [dependencies.launcherPath ?? packagedLauncherPath()],
@@ -448,7 +452,12 @@ export async function callMcpTool(
     const failure = toolFailure(result);
     if (failure) throw new McpBridgeError(failure.failure, "", undefined, failure.currentRevision, failure.errorCode);
     return result;
-  }, { ...dependencies, project, credentialPurpose });
+  }, {
+    ...dependencies,
+    project,
+    credentialPurpose,
+    timeoutMs: name === "repository_sync" ? REPOSITORY_SYNC_TIMEOUT_MS : dependencies.timeoutMs,
+  });
 }
 
 /** Extract the only supported text response shape from a bridged MCP tool call. */
