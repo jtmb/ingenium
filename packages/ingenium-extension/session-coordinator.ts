@@ -34,6 +34,12 @@ import {
   decodeManagedRepositoryArgv,
 } from "./scripts/managed-command-wrapper.js";
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
+import {
+  enrollManagedRecoveryParent,
+  persistManagedRecoveryJournal,
+  type ManagedRecoveryJournalInput,
+} from "./tui-recovery.js";
+import type { RedactedRestartHandoff } from "./replacement-first-restart.js";
 
 const SESSION_TTL_MS = 60_000;
 const HEARTBEAT_MS = 20_000;
@@ -1198,6 +1204,15 @@ export class SessionCoordinator {
     if (payload?.data?.project?.id !== attested.projectId || payload.data.project.name !== this.binding.project) {
       throw new ExtensionBindingError();
     }
+    const current = this.sessions.values().next().value as SessionState | undefined;
+    enrollManagedRecoveryParent(this.binding, attested, current
+      ? this.recoveryHandoff(current)
+      : {
+          status: "active",
+          taskHash: null,
+          todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" },
+          nextWork: { kind: "none", referenceHash: null },
+        });
     return attested;
   }
 
@@ -1420,6 +1435,17 @@ export class SessionCoordinator {
   /** Authenticate the runtime capability and bind coordination to its attested identity. */
   async ensureReady(): Promise<void> {
     if (this.disposed) return;
+    if (this.binding.purpose === "general") {
+      if (!this.attestation) {
+        const pending = this.attestGeneralBinding().then(() => undefined).catch((error) => {
+          if (!this.disposed) this.attestation = undefined;
+          throw error instanceof ExtensionBindingError ? error : new ExtensionBindingError();
+        });
+        this.attestation = pending;
+      }
+      await this.attestation;
+      return;
+    }
     if (this.binding.purpose !== "runtime") return;
     if (!this.attestation) {
       const pending = (async () => {
@@ -2021,6 +2047,7 @@ export class SessionCoordinator {
     if (this.disposed) return false;
     const local = this.localSession(sessionId);
     update(local);
+    persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(local, local.status));
     const snapshotRevision = (local.snapshotRevision ?? 0) + 1;
     local.snapshotRevision = snapshotRevision;
     try {
@@ -2512,34 +2539,35 @@ export class SessionCoordinator {
   private async recordSuccessfulTool(sessionId: string, tool: string, args: unknown, knownPath?: string): Promise<void> {
     if (this.disposed) return;
     const state = this.localSession(sessionId);
-      const normalizedTool = tool.toLowerCase();
-      const path = knownPath ?? (isRecord(args) ? relativeToolPath(this.ctx.worktree, args.filePath ?? args.path) : undefined);
-      const patchOperation = path && normalizedTool === "apply_patch"
-        ? state.changedPaths.find((entry) => entry.path === path)?.operation
-        : undefined;
-      const kind: OperationalAction["kind"] = normalizedTool === "read" ? "read"
-        : normalizedTool === "grep" || normalizedTool === "glob" ? "search"
-          : normalizedTool === "write" ? "write"
-            : normalizedTool === "edit" ? "edit"
-              : patchOperation ?? "execute";
-      const encoded = path ? encodeCoordinationPath(path) : undefined;
-      const action: OperationalAction = {
-        kind,
-        result: "succeeded",
-        pathSegments: encoded ?? null,
-        targetHash: encoded ? null : targetHash(normalizedTool, args),
+    const normalizedTool = tool.toLowerCase();
+    const path = knownPath ?? (isRecord(args) ? relativeToolPath(this.ctx.worktree, args.filePath ?? args.path) : undefined);
+    const patchOperation = path && normalizedTool === "apply_patch"
+      ? state.changedPaths.find((entry) => entry.path === path)?.operation
+      : undefined;
+    const kind: OperationalAction["kind"] = normalizedTool === "read" ? "read"
+      : normalizedTool === "grep" || normalizedTool === "glob" ? "search"
+        : normalizedTool === "write" ? "write"
+          : normalizedTool === "edit" ? "edit"
+            : patchOperation ?? "execute";
+    const encoded = path ? encodeCoordinationPath(path) : undefined;
+    const action: OperationalAction = {
+      kind,
+      result: "succeeded",
+      pathSegments: encoded ?? null,
+      targetHash: encoded ? null : targetHash(normalizedTool, args),
+    };
+    state.actions = [...state.actions, action].slice(-64);
+    const classifiedCheck = checkKind(normalizedTool, args);
+    if (classifiedCheck) {
+      const check: OperationalCheck = {
+        kind: classifiedCheck,
+        result: "passed",
+        targetHash: targetHash(normalizedTool, args),
       };
-      state.actions = [...state.actions, action].slice(-64);
-      const classifiedCheck = checkKind(normalizedTool, args);
-      if (classifiedCheck) {
-        const check: OperationalCheck = {
-          kind: classifiedCheck,
-          result: "passed",
-          targetHash: targetHash(normalizedTool, args),
-        };
-        state.checks = [...state.checks, check].slice(-32);
-      }
-      state.memoryDirty = true;
+      state.checks = [...state.checks, check].slice(-32);
+    }
+    state.memoryDirty = true;
+    persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(state, state.status));
   }
 
   private nextWork(state: SessionState): OperationalEntry["nextWork"] {
@@ -2560,6 +2588,26 @@ export class SessionCoordinator {
     return { kind: "none", referenceHash: null };
   }
 
+  private recoveryHandoff(state: SessionState, status: RedactedRestartHandoff["status"] = state.status): RedactedRestartHandoff {
+    const total = state.todos.pending + state.todos.inProgress + state.todos.completed + state.todos.cancelled;
+    return {
+      status,
+      taskHash: state.currentTaskId?.slice(5) ?? null,
+      todos: { total, ...state.todos, state: operationalTodoState(state.todos) },
+      nextWork: this.nextWork(state),
+    };
+  }
+
+  private recoveryJournal(state: SessionState, status: RedactedRestartHandoff["status"]): ManagedRecoveryJournalInput {
+    return {
+      ...this.recoveryHandoff(state, status),
+      changedPathSegments: state.changedPaths
+        .map((entry) => encodeCoordinationPath(entry.path))
+        .filter((entry): entry is string[] => entry !== undefined),
+      checks: state.checks.map((check) => ({ ...check })),
+    };
+  }
+
   private async publishMemory(
     sessionId: string,
     status: OperationalEntry["status"],
@@ -2568,6 +2616,7 @@ export class SessionCoordinator {
     try {
       return await this.serialized(sessionId, async (state) => {
         if (!state.memoryDirty) return false;
+        persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(state, status));
         const changedPaths = state.changedPaths.map(({ path, ...entry }) => {
           const pathSegments = encodeCoordinationPath(path);
           if (!pathSegments) throw new Error("invalid coordination path");

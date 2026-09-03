@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeManagedArgv,
@@ -20,12 +21,21 @@ import {
   validateManagedRepositoryArgv,
 } from "./scripts/managed-command-wrapper.js";
 import type {
+  RedactedRestartHandoff,
   ReplacementFirstRestartDependencies,
   ReplacementFirstRestartEvidence,
   ReplacementFirstRestartRequest,
   RestartProcessIdentity,
 } from "./replacement-first-restart.js";
+import { CoordinationOutbox } from "./coordination-outbox.js";
 import {
+  commitManagedRecoveryReplacement,
+  parseLegacyRecoveryOwnerPayload,
+  prepareManagedRecoveryReplacement,
+  readManagedRecoveryEnrollment,
+} from "./tui-recovery.js";
+import {
+  parseListeningLoopbackPorts,
   runProductionRestartAdapter,
   type ProductionRestartAdapterDependencies,
   type ProductionRestartBinding,
@@ -33,6 +43,118 @@ import {
 } from "./scripts/production-restart.js";
 
 const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toString("hex").slice(0, 64);
+const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+const recoverySource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "tui-recovery.ts")).href;
+const tsxLoader = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/tsx/dist/loader.mjs")).href;
+
+function recoveryProcessIdentity(pid: number, nonceSha256: string): RestartProcessIdentity {
+  const source = readFileSync(`/proc/${pid}/stat`, "utf8");
+  const fields = source.slice(source.lastIndexOf(")") + 1).trim().split(/\s+/);
+  const executable = realpathSync(readlinkSync(`/proc/${pid}/exe`));
+  return {
+    pid,
+    startTimeTicks: Number(fields[19]),
+    executableSha256: sha256(readFileSync(executable)),
+    nonceSha256,
+  };
+}
+
+function recoveryIdentitySha256(identity: RestartProcessIdentity): string {
+  return sha256(JSON.stringify({
+    pid: identity.pid,
+    startTimeTicks: identity.startTimeTicks,
+    executableSha256: identity.executableSha256,
+    nonceSha256: identity.nonceSha256,
+  }));
+}
+
+function writePrivateJson(path: string, value: unknown): void {
+  writeFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
+}
+
+function recoveryPaths(worktree: string): { state: string; journal: string } {
+  const directory = join(dirname(new CoordinationOutbox(worktree).directory), "tui-recovery");
+  mkdirSync(directory, { mode: 0o700 });
+  return { state: join(directory, "state.json"), journal: join(directory, "journal.json") };
+}
+
+function recoveryHandoff(): RedactedRestartHandoff {
+  return {
+    status: "working",
+    taskHash: sha256("recovery-task"),
+    todos: { total: 3, pending: 1, inProgress: 1, completed: 1, cancelled: 0, state: "mixed" },
+    nextWork: { kind: "continue_task", referenceHash: sha256("recovery-next-work") },
+  };
+}
+
+function startRecoveryProcess(worktree: string, nonce?: string): ChildProcess {
+  return spawn(process.execPath, ["--input-type=module", "--eval", "setTimeout(() => process.exit(0), 10000)"], {
+    cwd: worktree,
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      ...(nonce ? { INGENIUM_RESTART_NONCE: nonce } : {}),
+    },
+    stdio: "ignore",
+  });
+}
+
+function recoveryPayload(worktree: string, parent: RestartProcessIdentity & { port: number; dataHome: string }): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    worktree,
+    binding: {
+      project: "tui-recovery-test",
+      projectId: "00000000-0000-4000-8000-000000000001",
+      workspaceId: "recovery-workspace",
+      launcherWorktree: worktree,
+      storageMappingHash: sha256("recovery-storage"),
+    },
+    parent,
+    handoff: recoveryHandoff(),
+  };
+}
+
+function startRecoveryOwner(worktree: string, nonce: string, payload: unknown, resultPath: string): ChildProcess {
+  const script = `
+    import { writeFileSync } from "node:fs";
+    import { runDetachedRecoveryOwner } from ${JSON.stringify(recoverySource)};
+    try {
+      await runDetachedRecoveryOwner(${JSON.stringify(Buffer.from(JSON.stringify(payload)).toString("base64url"))});
+      writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({ completed: true }) + "\\n", { mode: 0o600 });
+    } catch (error) {
+      writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({ error: error instanceof Error ? error.message : String(error) }) + "\\n", { mode: 0o600 });
+    }
+  `;
+  return spawn(process.execPath, ["--import", tsxLoader, "--input-type=module", "--eval", script], {
+    cwd: worktree,
+    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", INGENIUM_RECOVERY_OWNER_NONCE: nonce },
+    stdio: "ignore",
+  });
+}
+
+async function waitForRecoveryState(path: string, predicate: (value: Record<string, any>) => boolean): Promise<Record<string, any>> {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    if (existsSync(path)) {
+      const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, any>;
+      if (predicate(value)) return value;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  throw new Error("Recovery state did not reach the expected phase");
+}
+
+async function stopRecoveryProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+  await Promise.race([
+    new Promise<void>((resolvePromise) => child.once("exit", () => resolvePromise())),
+    new Promise<void>((resolvePromise) => setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      resolvePromise();
+    }, 1_000)),
+  ]);
+}
 
 function replacementRequest(worktree: string): ReplacementFirstRestartRequest {
   const oldDataHome = join(worktree, "old-data");
@@ -84,6 +206,208 @@ function encodedRestart(request: ReplacementFirstRestartRequest | Record<string,
 }
 
 describe("managed command wrappers", () => {
+  it("autonomous-recovery rejects payload extras and incoherent enrollment metadata", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-autonomous-recovery-coherence-"));
+    const nonce = "p".repeat(43);
+    const parent = startRecoveryProcess(worktree, nonce);
+    try {
+      if (parent.pid === undefined) throw new Error("Recovery parent did not start");
+      const dataHome = join(worktree, "data-home");
+      mkdirSync(dataHome, { mode: 0o700 });
+      const parentIdentity = { ...recoveryProcessIdentity(parent.pid, sha256(nonce)), port: 42001, dataHome };
+      const payload = recoveryPayload(worktree, parentIdentity);
+      const encoded = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+      expect(parseLegacyRecoveryOwnerPayload(encoded(payload))).toEqual(payload);
+      for (const invalid of [
+        { ...payload, sessionId: "raw-session" },
+        { ...payload, token: "raw-token" },
+        { ...payload, command: ["opencode"] },
+        { ...payload, changedPaths: ["secret/path"] },
+        { ...payload, handoff: { ...(payload.handoff as object), todoItems: [{ content: "raw todo" }] } },
+        { ...payload, handoff: { ...(payload.handoff as object), nextWork: { kind: "continue_task", referenceHash: sha256("next"), command: "run" } } },
+      ]) expect(() => parseLegacyRecoveryOwnerPayload(encoded(invalid))).toThrow();
+
+      const paths = recoveryPaths(worktree);
+      const ownerNonce = "o".repeat(43);
+      const activeParent = {
+        ...parentIdentity,
+        worktree,
+        project: "tui-recovery-test",
+        projectId: "00000000-0000-4000-8000-000000000001",
+        workspaceId: "recovery-workspace",
+        storageMappingHash: sha256("recovery-storage"),
+      };
+      const state = {
+        schemaVersion: 1,
+        owner: recoveryProcessIdentity(process.pid, sha256(ownerNonce)),
+        fence: 2,
+        generation: 2,
+        phase: "enrolled",
+        activeParent,
+        replacement: null,
+        updatedAt: new Date().toISOString(),
+      };
+      const handoff = recoveryHandoff();
+      const journal = {
+        schemaVersion: 1,
+        ...handoff,
+        changedPathSegments: [],
+        checks: [],
+        fence: 2,
+        generation: 2,
+        phase: "enrolled",
+        transactionSha256: null,
+        replacementIdentitySha256: null,
+        boundIdentitySha256: recoveryIdentitySha256(activeParent),
+        updatedAt: new Date().toISOString(),
+      };
+      writePrivateJson(paths.state, state);
+      writePrivateJson(paths.journal, journal);
+      expect(readManagedRecoveryEnrollment(worktree)?.handoff).toEqual(handoff);
+      for (const mutation of [
+        { fence: 3 },
+        { phase: "replacement_prepared" },
+        { generation: 3 },
+        { transactionSha256: sha256("stale-transaction") },
+        { replacementIdentitySha256: sha256("stale-replacement") },
+        { boundIdentitySha256: sha256("stale-parent") },
+      ]) {
+        writePrivateJson(paths.journal, { ...journal, ...mutation });
+        expect(readManagedRecoveryEnrollment(worktree)).toBeUndefined();
+      }
+    } finally {
+      await stopRecoveryProcess(parent);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("autonomous-recovery exits promptly when its exact enrolled legacy parent dies", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-autonomous-recovery-parent-exit-"));
+    const legacy = startRecoveryProcess(worktree);
+    let owner: ChildProcess | undefined;
+    try {
+      if (legacy.pid === undefined) throw new Error("Legacy parent did not start");
+      const dataHome = join(worktree, "data-home");
+      mkdirSync(dataHome, { mode: 0o700 });
+      const payload = recoveryPayload(worktree, {
+        ...recoveryProcessIdentity(legacy.pid, "0".repeat(64)),
+        port: 42001,
+        dataHome,
+      });
+      const paths = recoveryPaths(worktree);
+      const resultPath = join(worktree, "owner-result.json");
+      owner = startRecoveryOwner(worktree, "o".repeat(43), payload, resultPath);
+      if (owner.pid === undefined) throw new Error("Recovery owner did not start");
+      await waitForRecoveryState(paths.state, (state) => state.phase === "enrolled" && state.owner?.pid === owner!.pid);
+      await stopRecoveryProcess(legacy);
+      const result = await waitForRecoveryState(resultPath, (value) => value.completed === true);
+      expect(result).toEqual({ completed: true });
+    } finally {
+      if (owner) await stopRecoveryProcess(owner);
+      await stopRecoveryProcess(legacy);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("autonomous-recovery rolls back a dead candidate and adopts its relaunched successor", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-autonomous-recovery-relaunch-"));
+    const legacy = startRecoveryProcess(worktree);
+    let owner: ChildProcess | undefined;
+    let failedReplacement: ChildProcess | undefined;
+    let successor: ChildProcess | undefined;
+    const priorOwnerNonce = process.env.INGENIUM_RECOVERY_OWNER_NONCE;
+    const priorOwnerPid = process.env.INGENIUM_RECOVERY_OWNER_PID;
+    const priorOwnerStart = process.env.INGENIUM_RECOVERY_OWNER_START_TICKS;
+    try {
+      if (legacy.pid === undefined) throw new Error("Legacy parent did not start");
+      const dataHome = join(worktree, "data-home");
+      mkdirSync(dataHome, { mode: 0o700 });
+      const legacyIdentity = recoveryProcessIdentity(legacy.pid, "0".repeat(64));
+      const payload = recoveryPayload(worktree, { ...legacyIdentity, port: 42001, dataHome });
+      const paths = recoveryPaths(worktree);
+      owner = startRecoveryOwner(worktree, "o".repeat(43), payload, join(worktree, "owner-result.json"));
+      if (owner.pid === undefined) throw new Error("Recovery owner did not start");
+      const enrolled = await waitForRecoveryState(paths.state, (state) => state.phase === "enrolled" && state.owner?.pid === owner!.pid);
+      process.env.INGENIUM_RECOVERY_OWNER_NONCE = "o".repeat(43);
+      process.env.INGENIUM_RECOVERY_OWNER_PID = String(owner.pid);
+      process.env.INGENIUM_RECOVERY_OWNER_START_TICKS = String(enrolled.owner.startTimeTicks);
+
+      owner.kill("SIGSTOP");
+      const failedNonce = "f".repeat(43);
+      failedReplacement = startRecoveryProcess(worktree, failedNonce);
+      if (failedReplacement.pid === undefined) throw new Error("Prepared replacement did not start");
+      const firstTransaction = sha256("failed-prepared-replacement");
+      const firstPrepare = prepareManagedRecoveryReplacement(
+        worktree,
+        legacyIdentity,
+        recoveryProcessIdentity(failedReplacement.pid, sha256(failedNonce)),
+        43001,
+        dataHome,
+        "successor-session",
+        sha256(JSON.stringify(recoveryHandoff())),
+        firstTransaction,
+        new AbortController().signal,
+      );
+      await waitForRecoveryState(paths.state, (state) => state.phase === "replacement_prepared");
+      await stopRecoveryProcess(failedReplacement);
+      owner.kill("SIGCONT");
+      await expect(firstPrepare).rejects.toThrow("TUI recovery owner changed");
+      await waitForRecoveryState(paths.state, (state) => state.phase === "enrolled" && state.replacement === null);
+
+      const successorNonce = "s".repeat(43);
+      successor = startRecoveryProcess(worktree, successorNonce);
+      if (successor.pid === undefined) throw new Error("Successor did not start");
+      const successorIdentity = recoveryProcessIdentity(successor.pid, sha256(successorNonce));
+      const transaction = sha256("relaunch-transaction");
+      await prepareManagedRecoveryReplacement(
+        worktree,
+        legacyIdentity,
+        successorIdentity,
+        43002,
+        dataHome,
+        "successor-session",
+        sha256(JSON.stringify(recoveryHandoff())),
+        transaction,
+        new AbortController().signal,
+      );
+      commitManagedRecoveryReplacement(worktree, transaction);
+      const adopted = await waitForRecoveryState(
+        paths.state,
+        (state) => state.phase === "enrolled" && state.activeParent?.pid === successor!.pid,
+      );
+      expect(adopted.replacement).toBeNull();
+      expect(readFileSync(paths.state, "utf8")).not.toContain("successor-session");
+      expect(readFileSync(paths.journal, "utf8")).not.toContain("successor-session");
+      expect(() => process.kill(legacy.pid!, 0)).toThrow();
+      expect(readManagedRecoveryEnrollment(worktree)?.handoff).toEqual(recoveryHandoff());
+    } finally {
+      if (priorOwnerNonce === undefined) delete process.env.INGENIUM_RECOVERY_OWNER_NONCE;
+      else process.env.INGENIUM_RECOVERY_OWNER_NONCE = priorOwnerNonce;
+      if (priorOwnerPid === undefined) delete process.env.INGENIUM_RECOVERY_OWNER_PID;
+      else process.env.INGENIUM_RECOVERY_OWNER_PID = priorOwnerPid;
+      if (priorOwnerStart === undefined) delete process.env.INGENIUM_RECOVERY_OWNER_START_TICKS;
+      else process.env.INGENIUM_RECOVERY_OWNER_START_TICKS = priorOwnerStart;
+      if (owner?.pid) owner.kill("SIGCONT");
+      if (owner) await stopRecoveryProcess(owner);
+      if (failedReplacement) await stopRecoveryProcess(failedReplacement);
+      if (successor) await stopRecoveryProcess(successor);
+      await stopRecoveryProcess(legacy);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("discovers listening loopback servers without depending on transient client sockets", () => {
+    const table = [
+      "sl local_address rem_address st",
+      "0: 0100007F:EAD5 00000000:0000 0A",
+      "1: 0100007F:EAD5 0100007F:1234 01",
+      "2: 00000000:1001 00000000:0000 0A",
+      "3: 00000000000000000000000001000000:1002 00000000000000000000000000000000:0000 0A",
+    ].join("\n");
+
+    expect(parseListeningLoopbackPorts(table)).toEqual([60117, 4098]);
+  });
+
   it("decodes bounded argv without a shell and rejects unsupported commands", () => {
     const encoded = Buffer.from(JSON.stringify(["add", "src/file.ts"])).toString("base64url");
     const message = "chore(checkpoint): preserve runtime and coordination hardening work";
@@ -237,7 +561,8 @@ describe("managed command wrappers", () => {
       const dependencies: ProductionRestartAdapterDependencies<string> = {
         canonicalWorktree: () => { calls.push("worktree"); return worktree; },
         resolveBinding: async () => { calls.push("resolve-binding"); return binding; },
-        readParentCandidates: () => { calls.push("read-parent"); return [parent]; },
+        readParentCandidates: () => { calls.push("read-parent"); return []; },
+        enrollParentCandidate: async () => { calls.push("enroll-parent"); return parent; },
         attestParentProcess: () => { calls.push("attest-parent"); return true; },
         prepareReplacement: async () => {
           calls.push("prepare");
@@ -275,7 +600,7 @@ describe("managed command wrappers", () => {
         replacementIdentitySha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
       expect(calls).toEqual([
-        "worktree", "resolve-binding", "read-parent", "attest-parent", "prepare", "binding", "identity:old", "publish",
+        "worktree", "resolve-binding", "read-parent", "enroll-parent", "attest-parent", "prepare", "binding", "identity:old", "publish",
         "persist:handoff_published", "launch", "identity:replacement", "persist:replacement_started", "health",
         "persist:replacement_healthy", "session", "persist:session_created", "memory-ack",
         "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged", "binding",
@@ -364,7 +689,7 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("orders replacement-first restart success through terminal idle before retiring the revalidated old process", async () => {
+  it("autonomous-recovery keeps one verified successor session through acknowledgement and retirement", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-first-"));
     try {
       const request = replacementRequest(worktree);
@@ -386,11 +711,13 @@ describe("managed command wrappers", () => {
           calls.push("session");
           return { status: "created", transactionSha256, session: "raw-session-id" };
         },
-        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
+        acknowledgeTypedMemory: async (_identity, session, handoffSha256, transactionSha256) => {
+          expect(session).toBe("raw-session-id");
           calls.push("memory-ack");
           return { status: "acknowledged", handoffSha256, transactionSha256 };
         },
-        awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => {
+        awaitTerminalIdleAcknowledgement: async (_identity, session, handoffSha256, transactionSha256) => {
+          expect(session).toBe("raw-session-id");
           calls.push("terminal-idle");
           return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
         },
@@ -871,12 +1198,15 @@ describe("managed command wrappers", () => {
   it("routes each package bin through an explicit wrapper kind", () => {
     const manifest = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
       bin: Record<string, string>;
+      scripts: { build: string };
     };
     expect(manifest.bin).toMatchObject({
       "ingenium-repository": "./dist/scripts/repository-command.js",
       "ingenium-build": "./dist/scripts/build-command.js",
     });
     expect(manifest.bin["ingenium-repository"]).not.toBe(manifest.bin["ingenium-build"]);
+    expect(manifest.scripts.build).toContain("test -f dist/scripts/production-restart.js");
+    expect(manifest.scripts.build).toMatch(/chmod 0555 [^&]+dist\/scripts\/production-restart\.js/);
 
     expect(() => runManagedCommandCli("repository", ["node", "repository-command", Buffer.from(JSON.stringify(["status"])).toString("base64url")]))
       .toThrow("Repository wrapper rejected the command");

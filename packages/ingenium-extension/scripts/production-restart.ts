@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -17,8 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   preflightApiAuthentication,
@@ -27,6 +26,7 @@ import {
   coordinationCredentialPurpose,
   resolveExtensionBinding,
 } from "../extension-binding.js";
+import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
   decodeReplacementFirstRestartRequest,
   runReplacementFirstRestart,
@@ -36,14 +36,30 @@ import {
   type ReplacementFirstRestartResult,
   type RestartProcessIdentity,
 } from "../replacement-first-restart.js";
+import {
+  abortManagedRecoveryReplacement,
+  bootstrapLegacyRecoveryOwner,
+  commitManagedRecoveryReplacement,
+  prepareManagedRecoveryReplacement,
+  readManagedRecoveryEnrollment,
+} from "../tui-recovery.js";
 
-const OPENCODE = "/usr/local/bin/opencode";
-const OPENCODE_VERSION = "1.18.9";
 const MAX_STATE_BYTES = 64 * 1024;
 const MAX_AUTH_BYTES = 1024 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
+const UNNONCED_PARENT_SHA256 = "0".repeat(64);
+const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
+  handoffMs: 5_000,
+  launchMs: 30_000,
+  identityMs: 5_000,
+  healthMs: 60_000,
+  sessionMs: 10_000,
+  memoryAckMs: 120_000,
+  terminalIdleMs: 120_000,
+  retirementMs: 10_000,
+};
 
 export type ProductionRestartBinding = ReplacementFirstRestartRequest["binding"] & {
   apiUrl: string;
@@ -69,7 +85,11 @@ export interface PreparedProductionReplacement<Session> {
 export interface ProductionRestartAdapterDependencies<Session> {
   canonicalWorktree(): string;
   resolveBinding(worktree: string): Promise<ProductionRestartBinding>;
-  readParentCandidates(worktree: string): ProductionRestartParentCandidate[];
+  readParentCandidates(worktree: string): Promise<ProductionRestartParentCandidate[]> | ProductionRestartParentCandidate[];
+  enrollParentCandidate?(
+    worktree: string,
+    binding: ProductionRestartBinding,
+  ): Promise<ProductionRestartParentCandidate | undefined>;
   attestParentProcess(parent: ProductionRestartParentCandidate): Promise<boolean> | boolean;
   prepareReplacement(input: {
     worktree: string;
@@ -85,17 +105,36 @@ interface ReplacementSession {
   transactionSha256: string;
 }
 
+interface RestartHandoffPublisher {
+  client: McpToolClient;
+  identity: {
+    project: string;
+    worktree_id: string;
+    session_id: string;
+    incarnation: number;
+  };
+  ownershipToken: string;
+  revision: number;
+  fence: number;
+}
+
 interface ProductionPreparedState {
   child?: ChildProcess;
   captureFile: string;
   evidenceFile: string;
+  executable: string;
   expectedExecutableSha256: string;
+  expectedVersion: string;
+  healthEvidenceFile: string;
+  handoffPublisher?: RestartHandoffPublisher;
   logDescriptor: number;
   nonce: string;
   parentStateSha256: string;
   port: number;
   reservation: Server;
   runDirectory: string;
+  scoutEvidenceFile: string;
+  traceFile: string;
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
@@ -190,6 +229,19 @@ function writePrivateFile(path: string, value: string): void {
   }
 }
 
+function writePrivateNewFile(path: string, value: string): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    writeFileSync(descriptor, value, "utf8");
+    fsyncSync(descriptor);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  const directory = openSync(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { fsyncSync(directory); } finally { closeSync(directory); }
+}
+
 function writePrivateBuffer(path: string, value: Buffer): void {
   let descriptor: number | undefined;
   try {
@@ -212,6 +264,16 @@ function stateDirectory(worktree: string): string {
   return restart;
 }
 
+function createStateDirectory(worktree: string): string {
+  const opencode = join(worktree, ".opencode");
+  const protectedIndex = join(opencode, "protected-runtime-index");
+  const restart = join(protectedIndex, "production-restart");
+  assertOwnedDirectory(opencode);
+  assertPrivateDirectory(protectedIndex);
+  ensurePrivateDirectory(restart);
+  return restart;
+}
+
 function stateCandidate(value: unknown): ProductionRestartParentCandidate | undefined {
   if (!hasExactKeys(value, ["binding", "oldProcess", "oldPort", "oldDataHome", "handoff", "timeouts"])
     || !hasExactKeys(value.binding, ["projectId", "workspaceId", "launcherWorktree", "storageMappingHash", "audience"])
@@ -220,7 +282,13 @@ function stateCandidate(value: unknown): ProductionRestartParentCandidate | unde
 }
 
 export function readProtectedProductionRestartState(worktree: string): ProductionRestartParentCandidate[] {
-  const serialized = readPrivateFile(join(stateDirectory(worktree), "state.json"), MAX_STATE_BYTES).toString("utf8");
+  let serialized: string;
+  try {
+    serialized = readPrivateFile(join(stateDirectory(worktree), "state.json"), MAX_STATE_BYTES).toString("utf8");
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return [];
+    throw error;
+  }
   let parsed: unknown;
   try { parsed = JSON.parse(serialized); } catch { throw new Error("Production restart state is unavailable"); }
   if (!hasExactKeys(parsed, ["schemaVersion", "parentCandidates"]) || parsed.schemaVersion !== 1
@@ -278,7 +346,11 @@ export async function runProductionRestartAdapter<Session>(
 ): Promise<ReplacementFirstRestartResult> {
   const worktree = dependencies.canonicalWorktree();
   const binding = await dependencies.resolveBinding(worktree);
-  const candidates = dependencies.readParentCandidates(worktree);
+  let candidates = await dependencies.readParentCandidates(worktree);
+  if (candidates.length === 0 && dependencies.enrollParentCandidate) {
+    const enrolled = await dependencies.enrollParentCandidate(worktree, binding);
+    if (enrolled) candidates = [enrolled];
+  }
   if (candidates.length !== 1) throw new Error("Production restart parent identity is absent or ambiguous");
   const parent = validateParentCandidate(candidates[0]!, worktree);
   if (!bindingsMatch(parent.binding, binding)) throw new Error("Production restart parent binding changed");
@@ -304,14 +376,17 @@ export async function runProductionRestartAdapter<Session>(
   }
 }
 
-function procStat(pid: number): { startTimeTicks: number } | undefined {
+function procStat(pid: number): { parentPid: number; startTimeTicks: number } | undefined {
   try {
     const source = readFileSync(`/proc/${pid}/stat`, "utf8");
     const closeParen = source.lastIndexOf(")");
     if (closeParen < 1) return undefined;
     const fields = source.slice(closeParen + 1).trim().split(/\s+/);
+    const parentPid = Number(fields[1]);
     const startTimeTicks = Number(fields[19]);
-    return Number.isSafeInteger(startTimeTicks) && startTimeTicks > 0 ? { startTimeTicks } : undefined;
+    return Number.isSafeInteger(parentPid) && parentPid >= 0 && Number.isSafeInteger(startTimeTicks) && startTimeTicks > 0
+      ? { parentPid, startTimeTicks }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -344,13 +419,20 @@ function inspectProcessIdentity(pid: number, nonceSha256: string, requireProcess
   }
 }
 
+function inspectExpectedProcessIdentity(identity: RestartProcessIdentity): RestartProcessIdentity | undefined {
+  if (identity.nonceSha256 === UNNONCED_PARENT_SHA256) {
+    if (processEnvironment(identity.pid)?.INGENIUM_RESTART_NONCE) return undefined;
+    return inspectProcessIdentity(identity.pid, UNNONCED_PARENT_SHA256, false);
+  }
+  return inspectProcessIdentity(identity.pid, identity.nonceSha256, true);
+}
+
 function identitiesMatch(left: RestartProcessIdentity | undefined, right: RestartProcessIdentity): boolean {
   return left !== undefined && left.pid === right.pid && left.startTimeTicks === right.startTimeTicks
     && left.executableSha256 === right.executableSha256 && left.nonceSha256 === right.nonceSha256;
 }
 
-function currentAuthFile(): string {
-  const dataHome = process.env.XDG_DATA_HOME ?? join(process.env.HOME ?? homedir(), ".local", "share");
+function currentAuthFile(dataHome: string): string {
   return join(dataHome, "opencode", "auth.json");
 }
 
@@ -392,6 +474,117 @@ async function jsonRequest(url: string, init: RequestInit, signal: AbortSignal):
   return { status: response.status, value: await response.json().catch(() => null) };
 }
 
+function processExecutable(pid: number): string | undefined {
+  try {
+    return realpathSync(readlinkSync(`/proc/${pid}/exe`));
+  } catch {
+    return undefined;
+  }
+}
+
+function processWorkingDirectory(pid: number): string | undefined {
+  try {
+    return realpathSync(readlinkSync(`/proc/${pid}/cwd`));
+  } catch {
+    return undefined;
+  }
+}
+
+function processCommandLine(pid: number): string[] | undefined {
+  try {
+    const argv = readFileSync(`/proc/${pid}/cmdline`).toString("utf8").split("\0").filter(Boolean);
+    return argv.length > 0 ? argv : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionIdFromCommandLine(argv: string[]): string | undefined {
+  const sessions: string[] = [];
+  for (let index = 1; index < argv.length; index += 1) {
+    if (argv[index] === "-s" || argv[index] === "--session") {
+      if (index + 1 < argv.length) sessions.push(argv[index + 1]!);
+      index += 1;
+    } else if (argv[index]!.startsWith("--session=")) {
+      sessions.push(argv[index]!.slice("--session=".length));
+    }
+  }
+  return sessions.length === 1 && SAFE_SESSION_ID.test(sessions[0]!) ? sessions[0] : undefined;
+}
+
+function isProcessAncestor(pid: number): boolean {
+  let current = process.ppid;
+  for (let depth = 0; depth < 32 && current > 1; depth += 1) {
+    if (current === pid) return true;
+    const stat = procStat(current);
+    if (!stat || stat.parentPid === current) return false;
+    current = stat.parentPid;
+  }
+  return false;
+}
+
+function parentDataHome(pid: number): string | undefined {
+  const environment = processEnvironment(pid);
+  const home = environment?.HOME;
+  const candidate = environment?.XDG_DATA_HOME ?? (home ? join(home, ".local", "share") : undefined);
+  if (!candidate || resolve(candidate) !== candidate) return undefined;
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return undefined;
+  }
+}
+
+function discoverInteractiveParent(worktree: string): { identity: RestartProcessIdentity; sessionId: string; dataHome: string } | undefined {
+  const matches: Array<{ identity: RestartProcessIdentity; sessionId: string; dataHome: string }> = [];
+  let pid = process.ppid;
+  for (let depth = 0; depth < 32 && pid > 1; depth += 1) {
+    const stat = procStat(pid);
+    if (!stat) break;
+    const executable = processExecutable(pid);
+    const argv = processCommandLine(pid);
+    const sessionId = argv ? sessionIdFromCommandLine(argv) : undefined;
+    if (executable && basename(executable) === "opencode" && sessionId && processWorkingDirectory(pid) === worktree) {
+      const environment = processEnvironment(pid);
+      const nonce = environment?.INGENIUM_RESTART_NONCE;
+      const nonceSha256 = nonce ? hash(nonce) : UNNONCED_PARENT_SHA256;
+      const identity = inspectProcessIdentity(pid, nonceSha256, Boolean(nonce));
+      const dataHome = parentDataHome(pid);
+      if (identity && dataHome) matches.push({ identity, sessionId, dataHome });
+    }
+    if (stat.parentPid === pid) break;
+    pid = stat.parentPid;
+  }
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function isLoopbackAddress(encoded: string): boolean {
+  return /^[0-9A-F]{6}7F$/i.test(encoded)
+    || encoded.toUpperCase() === "00000000000000000000000001000000"
+    || /^0000000000000000FFFF0000[0-9A-F]{6}7F$/i.test(encoded);
+}
+
+export function parseListeningLoopbackPorts(source: string): number[] {
+  const ports = new Set<number>();
+  for (const line of source.trim().split(/\r?\n/).slice(1)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 4 || fields[3] !== "0A") continue;
+    const local = fields[1]!;
+    const separator = local.lastIndexOf(":");
+    const port = Number.parseInt(local.slice(separator + 1), 16);
+    if (separator > 0 && isLoopbackAddress(local.slice(0, separator)) && port >= 1024 && port <= 65535) ports.add(port);
+  }
+  return [...ports];
+}
+
+function listeningLoopbackPorts(): number[] {
+  const ports = new Set<number>();
+  for (const table of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    try { for (const port of parseListeningLoopbackPorts(readFileSync(table, "utf8"))) ports.add(port); } catch { continue; }
+  }
+  return [...ports];
+}
+
 function messageList(value: unknown): unknown[] | undefined {
   const data = isRecord(value) && Object.hasOwn(value, "data") ? value.data : value;
   return Array.isArray(data) ? data : undefined;
@@ -400,6 +593,128 @@ function messageList(value: unknown): unknown[] | undefined {
 function responseRecord(value: unknown): Record<string, unknown> | undefined {
   const data = isRecord(value) && Object.hasOwn(value, "data") ? value.data : value;
   return isRecord(data) ? data : undefined;
+}
+
+function handoffTodoState(counts: Omit<RedactedRestartHandoff["todos"], "total" | "state">): RedactedRestartHandoff["todos"]["state"] {
+  const populated = [counts.pending, counts.inProgress, counts.completed, counts.cancelled].filter((count) => count > 0).length;
+  if (populated === 0) return "none";
+  if (populated > 1) return "mixed";
+  if (counts.pending > 0) return "pending";
+  if (counts.inProgress > 0) return "in_progress";
+  if (counts.completed > 0) return "complete";
+  return "cancelled";
+}
+
+function redactedHandoffFromSession(messages: unknown, status: unknown, sessionId: string): RedactedRestartHandoff | undefined {
+  const list = messageList(messages);
+  if (!list) return undefined;
+  let todos: unknown[] = [];
+  for (const message of [...list].reverse()) {
+    if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+    const part = [...message.parts].reverse().find((entry) => isRecord(entry) && entry.type === "tool"
+      && entry.tool === "todowrite" && isRecord(entry.state) && entry.state.status === "completed"
+      && isRecord(entry.state.input) && Array.isArray(entry.state.input.todos));
+    if (isRecord(part) && isRecord(part.state) && isRecord(part.state.input)) {
+      todos = part.state.input.todos as unknown[];
+      break;
+    }
+  }
+  const counts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
+  for (const todo of todos) {
+    if (!isRecord(todo) || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status as string)) return undefined;
+    if (todo.status === "in_progress") counts.inProgress += 1;
+    else counts[todo.status as "pending" | "completed" | "cancelled"] += 1;
+  }
+  const current = responseRecord(status)?.[sessionId];
+  const rawStatus = isRecord(current) ? current.type ?? current.status : current;
+  const open = counts.pending > 0 || counts.inProgress > 0;
+  const operationalStatus = rawStatus === "idle" ? "idle"
+    : rawStatus === "busy" || rawStatus === "retry" || rawStatus === "working" || open ? "working" : "active";
+  return {
+    status: operationalStatus,
+    taskHash: null,
+    todos: { total: todos.length, ...counts, state: handoffTodoState(counts) },
+    nextWork: { kind: open ? "continue_task" : "none", referenceHash: null },
+  };
+}
+
+async function readLiveParentHandoff(
+  port: number,
+  sessionId: string,
+  worktree: string,
+): Promise<RedactedRestartHandoff | undefined> {
+  const signal = AbortSignal.timeout(5_000);
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const [health, session, messages, status] = await Promise.all([
+      jsonRequest(`${baseUrl}/global/health`, {}, signal),
+      jsonRequest(`${baseUrl}/session/${encodeURIComponent(sessionId)}`, {}, signal),
+      jsonRequest(`${baseUrl}/session/${encodeURIComponent(sessionId)}/message`, {}, signal),
+      jsonRequest(`${baseUrl}/session/status`, {}, signal),
+    ]);
+    const healthValue = responseRecord(health.value);
+    const sessionValue = responseRecord(session.value);
+    if (health.status !== 200 || healthValue?.healthy !== true || typeof healthValue.version !== "string"
+      || session.status !== 200 || sessionValue?.id !== sessionId || sessionValue.directory !== worktree
+      || messages.status !== 200 || status.status !== 200) return undefined;
+    return redactedHandoffFromSession(messages.value, status.value, sessionId);
+  } catch {
+    return undefined;
+  }
+}
+
+async function enrollRunningProductionParent(
+  worktree: string,
+  binding: ProductionRestartBinding,
+): Promise<ProductionRestartParentCandidate | undefined> {
+  const discovered = discoverInteractiveParent(worktree);
+  if (!discovered) return undefined;
+  const matches: Array<{ port: number; handoff: RedactedRestartHandoff }> = [];
+  for (const port of listeningLoopbackPorts()) {
+    const handoff = await readLiveParentHandoff(port, discovered.sessionId, worktree);
+    if (handoff) matches.push({ port, handoff });
+  }
+  if (matches.length !== 1) return undefined;
+  const parent: ProductionRestartParentCandidate = {
+    binding: {
+      projectId: binding.projectId,
+      workspaceId: binding.workspaceId,
+      launcherWorktree: binding.launcherWorktree,
+      storageMappingHash: binding.storageMappingHash,
+      audience: "mcp",
+    },
+    oldProcess: discovered.identity,
+    oldPort: matches[0]!.port,
+    oldDataHome: discovered.dataHome,
+    handoff: matches[0]!.handoff,
+    timeouts: DEFAULT_TIMEOUTS,
+  };
+  validateParentCandidate(parent, worktree);
+  await bootstrapLegacyRecoveryOwner(worktree, {
+    project: binding.project,
+    projectId: binding.projectId,
+    workspaceId: binding.workspaceId,
+    launcherWorktree: binding.launcherWorktree,
+    storageMappingHash: binding.storageMappingHash,
+  }, {
+    ...parent.oldProcess,
+    port: parent.oldPort,
+    dataHome: parent.oldDataHome,
+  }, parent.handoff);
+  const root = createStateDirectory(worktree);
+  writePrivateNewFile(join(root, "state.json"), `${JSON.stringify({ schemaVersion: 1, parentCandidates: [parent] })}\n`);
+  return readProtectedProductionRestartState(worktree)[0];
+}
+
+async function attestProductionParent(parent: ProductionRestartParentCandidate): Promise<boolean> {
+  if (!identitiesMatch(inspectExpectedProcessIdentity(parent.oldProcess), parent.oldProcess)) return false;
+  if (parent.oldProcess.nonceSha256 !== UNNONCED_PARENT_SHA256) return true;
+  const argv = processCommandLine(parent.oldProcess.pid);
+  const sessionId = argv ? sessionIdFromCommandLine(argv) : undefined;
+  return isProcessAncestor(parent.oldProcess.pid) && processWorkingDirectory(parent.oldProcess.pid) === parent.binding.launcherWorktree
+    && parentDataHome(parent.oldProcess.pid) === parent.oldDataHome && sessionId !== undefined
+    && listeningLoopbackPorts().includes(parent.oldPort)
+    && await readLiveParentHandoff(parent.oldPort, sessionId, parent.binding.launcherWorktree) !== undefined;
 }
 
 function hasCapturedHandoff(path: string, expectedSha256: string, offset: number): boolean {
@@ -448,10 +763,93 @@ function sessionIds(value: unknown): Set<string> | undefined {
   return ids.every((id) => typeof id === "string" && SAFE_SESSION_ID.test(id)) ? new Set(ids as string[]) : undefined;
 }
 
-function hasSuccessfulTerminalAssistant(value: unknown, initialMessageCount: number, expectedText: string): boolean {
+function hasScoutCapabilities(value: unknown): boolean {
+  const scout = messageList(value)?.find((entry) => isRecord(entry) && entry.name === "ingenium-scout");
+  if (!isRecord(scout)) return false;
+  const permissions = scout.permission;
+  if (!Array.isArray(permissions)) return false;
+  const required = ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"];
+  return required.every((permission) => permissions.some((rule: unknown) => isRecord(rule) && rule.permission === permission
+    && rule.pattern === "*" && rule.action === "allow"));
+}
+
+function restartPublisherMutation(value: unknown): { revision: number; fence: number } {
+  if (!isRecord(value) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0
+    || !Number.isSafeInteger(value.fence) || (value.fence as number) < 1) {
+    throw new Error("Production restart handoff publication failed");
+  }
+  return { revision: value.revision as number, fence: value.fence as number };
+}
+
+async function publishRestartHandoff(
+  worktree: string,
+  binding: ProductionRestartBinding,
+  handoff: RedactedRestartHandoff,
+): Promise<RestartHandoffPublisher> {
+  const client = await openMcpToolClient(worktree, { project: binding.project, credentialPurpose: "general" });
+  const identity = {
+    project: binding.project,
+    worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
+    session_id: `session-${hash(randomBytes(32))}`,
+    incarnation: Date.now(),
+  };
+  const ownershipToken = randomBytes(32).toString("base64url");
+  try {
+    const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
+      ...identity,
+      operation: "register",
+      ownership_token: ownershipToken,
+      ttl_ms: 60_000,
+      idempotency_key: randomUUID(),
+    })));
+    const registeredSession = restartPublisherMutation(registered?.session);
+    const published = responseRecord(mcpToolData(await client.callTool("coordination_handoff", {
+      ...identity,
+      operation: "memory",
+      ownership_token: ownershipToken,
+      expected_revision: registeredSession.revision,
+      fence: registeredSession.fence,
+      idempotency_key: randomUUID(),
+      memory_entry: {
+        status: handoff.status,
+        actions: [],
+        checks: [],
+        todos: handoff.todos,
+        currentTaskId: handoff.taskHash === null ? null : `task-${handoff.taskHash}`,
+        changedPaths: [],
+        nextWork: handoff.nextWork,
+      },
+    })));
+    const publishedSession = restartPublisherMutation(published?.session);
+    return { client, identity, ownershipToken, ...publishedSession };
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function closeRestartHandoffPublisher(publisher: RestartHandoffPublisher): Promise<void> {
+  await publisher.client.callTool("coordination_update", {
+    ...publisher.identity,
+    operation: "close",
+    ownership_token: publisher.ownershipToken,
+    expected_revision: publisher.revision,
+    fence: publisher.fence,
+    idempotency_key: randomUUID(),
+  }).catch(() => undefined);
+  await publisher.client.close().catch(() => undefined);
+}
+
+function hasSuccessfulTerminalAssistant(
+  value: unknown,
+  initialMessageCount: number,
+  expectedText: string,
+  expectedAgent: string,
+): boolean {
   return messageList(value)?.slice(initialMessageCount).some((message) => {
     if (!isRecord(message) || !isRecord(message.info) || message.info.role !== "assistant"
-      || message.info.finish !== "stop" || message.info.error !== undefined || !Array.isArray(message.parts)) return false;
+      || message.info.mode !== expectedAgent || message.info.finish !== "stop"
+      || message.info.error !== undefined || !Array.isArray(message.parts)) return false;
     const text = message.parts.filter((part) => isRecord(part) && part.type === "text" && typeof part.text === "string")
       .map((part) => (part as Record<string, unknown>).text as string).join("").trim();
     return text === expectedText;
@@ -459,7 +857,7 @@ function hasSuccessfulTerminalAssistant(value: unknown, initialMessageCount: num
 }
 
 async function terminate(identity: RestartProcessIdentity, role: "old" | "replacement", signal: AbortSignal): Promise<void> {
-  if (!identitiesMatch(inspectProcessIdentity(identity.pid, identity.nonceSha256, true), identity)) {
+  if (!identitiesMatch(inspectExpectedProcessIdentity(identity), identity)) {
     throw new Error(`${role} process identity changed before signal`);
   }
   try {
@@ -473,7 +871,7 @@ async function terminate(identity: RestartProcessIdentity, role: "old" | "replac
 
 function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.ProcessEnv {
   return {
-    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
     PWD: state.worktree,
     HOME: home,
     XDG_CONFIG_HOME: join(home, ".config"),
@@ -489,10 +887,14 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
     INGENIUM_WORKTREE: state.worktree,
     INGENIUM_MCP_AUDIENCE: "mcp",
     INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
-    INGENIUM_MCP_CREDENTIAL_FILE: state.binding.credentialFile,
     INGENIUM_COORDINATION_TRANSFORM_CAPTURE: "1",
     INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE: state.captureFile,
+    INGENIUM_COORDINATION_TRACE_FILE: state.traceFile,
     INGENIUM_RESTART_NONCE: state.nonce,
+    INGENIUM_RECOVERY_OWNER_NONCE: process.env.INGENIUM_RECOVERY_OWNER_NONCE,
+    INGENIUM_RECOVERY_OWNER_PID: process.env.INGENIUM_RECOVERY_OWNER_PID,
+    INGENIUM_RECOVERY_OWNER_START_TICKS: process.env.INGENIUM_RECOVERY_OWNER_START_TICKS,
+    INGENIUM_OPENCODE_PORT: String(state.port),
   };
 }
 
@@ -511,7 +913,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
     },
     revalidateProcessIdentity: async (identity, _role, signal) => {
       signal.throwIfAborted();
-      return identitiesMatch(inspectProcessIdentity(identity.pid, identity.nonceSha256, true), identity);
+      return identitiesMatch(inspectExpectedProcessIdentity(identity), identity);
     },
     persistHandoff: async (handoff, handoffSha256, signal) => {
       signal.throwIfAborted();
@@ -520,7 +922,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
     launchReplacement: async (input, signal) => {
       signal.throwIfAborted();
       await closeServer(state.reservation);
-      const child = spawn(OPENCODE, ["serve", "--hostname", "127.0.0.1", "--port", String(state.port)], {
+      const child = spawn(state.executable, ["serve", "--hostname", "127.0.0.1", "--port", String(state.port)], {
         cwd: state.worktree,
         detached: true,
         env: safeEnvironment(state, join(state.runDirectory, "home")),
@@ -550,16 +952,59 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       }
     },
     verifyReplacementHealth: async (_identity, _port, signal) => {
-      while (true) {
-        signal.throwIfAborted();
-        try {
-          const response = await jsonRequest(`${baseUrl}/global/health`, {}, signal);
-          const value = responseRecord(response.value);
-          if (response.status === 200 && value?.healthy === true && value.version === OPENCODE_VERSION) return;
-        } catch (error) {
-          if (signal.aborted) throw error;
+      let diagnostic = {
+        schemaVersion: 1,
+        stage: "health_request",
+        healthStatus: null as number | null,
+        healthReady: false,
+        agentStatus: null as number | null,
+        scoutCapabilities: false,
+      };
+      try {
+        while (true) {
+          signal.throwIfAborted();
+          try {
+            diagnostic = { ...diagnostic, stage: "health_request" };
+            // OpenCode can accept a request before startup completes, so each probe must be shorter than the phase budget.
+            const response = await jsonRequest(
+              `${baseUrl}/global/health`,
+              {},
+              AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
+            );
+            const value = responseRecord(response.value);
+            const healthReady = response.status === 200 && value?.healthy === true && value.version === state.expectedVersion;
+            diagnostic = { ...diagnostic, stage: "health_response", healthStatus: response.status, healthReady };
+            if (healthReady) {
+              diagnostic = { ...diagnostic, stage: "agent_request" };
+              const agents = await jsonRequest(
+                `${baseUrl}/agent`,
+                {},
+                AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+              );
+              const scoutCapabilities = agents.status === 200 && hasScoutCapabilities(agents.value);
+              diagnostic = { ...diagnostic, stage: "agent_response", agentStatus: agents.status, scoutCapabilities };
+              if (scoutCapabilities) {
+                writePrivateFile(state.healthEvidenceFile, `${JSON.stringify({ ...diagnostic, result: "passed" })}\n`);
+                writePrivateFile(state.scoutEvidenceFile, `${JSON.stringify({
+                  schemaVersion: 1,
+                  agent: "ingenium-scout",
+                  capabilities: ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"],
+                  runtimeVersion: state.expectedVersion,
+                })}\n`);
+                return;
+              }
+            }
+          } catch (error) {
+            if (signal.aborted) throw error;
+          }
+          await wait(100, signal);
         }
-        await wait(100, signal);
+      } catch (error) {
+        writePrivateFile(state.healthEvidenceFile, `${JSON.stringify({
+          ...diagnostic,
+          result: signal.aborted ? "timed_out" : "request_failed",
+        })}\n`);
+        throw error;
       }
     },
     createReplacementSession: async (_identity, _port, transactionSha256, signal) => {
@@ -596,7 +1041,10 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       const prompted = await jsonRequest(`${baseUrl}/session/${encodeURIComponent(session.id)}/prompt_async`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ parts: [{ type: "text", text: `Return only ${expectedText}. Do not use tools.` }] }),
+        body: JSON.stringify({
+          agent: "ingenium-scout",
+          parts: [{ type: "text", text: `Return only ${expectedText}. Do not use tools.` }],
+        }),
       }, signal);
       if (![200, 202, 204].includes(prompted.status)) throw new Error("Replacement acknowledgement prompt failed");
       while (true) {
@@ -614,17 +1062,48 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
         signal.throwIfAborted();
         const messagesResponse = await jsonRequest(`${baseUrl}/session/${encodeURIComponent(session.id)}/message`, {}, signal);
         const messages = messageList(messagesResponse.value);
-        const terminal = hasSuccessfulTerminalAssistant(messagesResponse.value, session.initialMessageCount, expectedText);
+        const terminal = hasSuccessfulTerminalAssistant(
+          messagesResponse.value,
+          session.initialMessageCount,
+          expectedText,
+          "ingenium-scout",
+        );
         if (terminal) {
           const statusResponse = await jsonRequest(`${baseUrl}/session/status`, {}, signal);
           const statuses = responseRecord(statusResponse.value);
           const current = statuses?.[session.id];
-          if (statusResponse.status === 200 && isRecord(current) && (current.type === "idle" || current.status === "idle")) {
+          if (statusResponse.status === 200 && statuses
+            && (current === undefined || (isRecord(current) && (current.type === "idle" || current.status === "idle")))) {
             return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
           }
         }
         await wait(100, signal);
       }
+    },
+    prepareRecoveryOwner: async (identity, session, handoffSha256, transactionSha256, signal) => {
+      await prepareManagedRecoveryReplacement(
+        state.worktree,
+        state.parent.oldProcess,
+        identity,
+        state.port,
+        join(state.runDirectory, "home"),
+        session.id,
+        handoffSha256,
+        transactionSha256,
+        signal,
+      );
+      return {
+        status: "ready",
+        transactionSha256,
+        replacementIdentitySha256: hash(JSON.stringify(identity)),
+      };
+    },
+    commitRecoveryOwner: async (transactionSha256, signal) => {
+      signal.throwIfAborted();
+      commitManagedRecoveryReplacement(state.worktree, transactionSha256);
+    },
+    abortRecoveryOwner: (transactionSha256) => {
+      abortManagedRecoveryReplacement(state.worktree, transactionSha256);
     },
     retireOldProcess: (identity, signal) => terminate(identity, "old", signal),
     stopReplacement: (identity, signal) => terminate(identity, "replacement", signal),
@@ -663,12 +1142,24 @@ async function prepareProductionReplacement(input: {
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
 }): Promise<PreparedProductionReplacement<ReplacementSession>> {
-  const executable = realpathSync(OPENCODE);
-  if (executable !== OPENCODE) throw new Error("Production OpenCode executable is not canonical");
+  const executable = processExecutable(input.parent.oldProcess.pid);
+  if (!executable || basename(executable) !== "opencode") throw new Error("Production OpenCode executable is unavailable");
   const expectedExecutableSha256 = hash(readFileSync(executable));
-  const currentParent = inspectProcessIdentity(input.parent.oldProcess.pid, input.parent.oldProcess.nonceSha256, true);
+  if (expectedExecutableSha256 !== input.parent.oldProcess.executableSha256) {
+    throw new Error("Production OpenCode executable changed");
+  }
+  const expectedVersion = execFileSync(executable, ["--version"], {
+    encoding: "utf8",
+    timeout: 5_000,
+    env: { HOME: process.env.HOME, PATH: "/usr/local/bin:/usr/bin:/bin" },
+  }).trim();
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(expectedVersion)) {
+    throw new Error("Production OpenCode version is invalid");
+  }
+  const currentParent = inspectExpectedProcessIdentity(input.parent.oldProcess);
   if (!identitiesMatch(currentParent, input.parent.oldProcess)) throw new Error("Production restart parent identity changed");
-  const root = stateDirectory(input.worktree);
+  const root = createStateDirectory(input.worktree);
+  writePrivateFile(join(root, "state.json"), `${JSON.stringify({ schemaVersion: 1, parentCandidates: [input.parent] })}\n`);
   const parentStateSha256 = hash(readPrivateFile(join(root, "state.json"), MAX_STATE_BYTES));
   const runtimeRoot = "/tmp/opencode";
   assertOwnedDirectory(runtimeRoot);
@@ -684,12 +1175,16 @@ async function prepareProductionReplacement(input: {
     join(home, ".local", "state"),
     join(home, ".cache"),
   ]) ensurePrivateDirectory(directory);
-  const authSource = readPrivateFile(currentAuthFile(), MAX_AUTH_BYTES);
+  const authSource = readPrivateFile(currentAuthFile(input.parent.oldDataHome), MAX_AUTH_BYTES);
   const authDestination = join(home, ".local", "share", "opencode", "auth.json");
   writePrivateBuffer(authDestination, authSource);
   const captureFile = join(runDirectory, "coordination-capture.jsonl");
   writePrivateFile(captureFile, "\n");
+  const traceFile = join(runDirectory, "coordination-trace.jsonl");
+  writePrivateFile(traceFile, "\n");
   const evidenceFile = join(runDirectory, "evidence.json");
+  const healthEvidenceFile = join(runDirectory, "health-gate.json");
+  const scoutEvidenceFile = join(runDirectory, "scout-capabilities.json");
   const logFile = join(runDirectory, "opencode.log");
   const logDescriptor = openSync(logFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   const reservation = await reservePort();
@@ -702,17 +1197,29 @@ async function prepareProductionReplacement(input: {
   const state: ProductionPreparedState = {
     captureFile,
     evidenceFile,
+    executable,
     expectedExecutableSha256,
+    expectedVersion,
+    healthEvidenceFile,
     logDescriptor,
     nonce,
     parentStateSha256,
     port: reservation.port,
     reservation: reservation.server,
     runDirectory,
+    scoutEvidenceFile,
+    traceFile,
     worktree: input.worktree,
     binding: input.binding,
     parent: input.parent,
   };
+  try {
+    state.handoffPublisher = await publishRestartHandoff(input.worktree, input.binding, input.parent.handoff);
+  } catch (error) {
+    await closeServer(reservation.server);
+    closeSync(logDescriptor);
+    throw error;
+  }
   return {
     replacement: {
       port: reservation.port,
@@ -721,6 +1228,7 @@ async function prepareProductionReplacement(input: {
     },
     dependencies: productionDependencies(state),
     release: async () => {
+      if (state.handoffPublisher) await closeRestartHandoffPublisher(state.handoffPublisher);
       await closeServer(reservation.server);
       closeSync(logDescriptor);
     },
@@ -731,11 +1239,19 @@ export function productionRestartDependencies(): ProductionRestartAdapterDepende
   return {
     canonicalWorktree: () => realpathSync(resolve(process.cwd())),
     resolveBinding: resolveProductionBinding,
-    readParentCandidates: readProtectedProductionRestartState,
-    attestParentProcess: (parent) => identitiesMatch(
-      inspectProcessIdentity(parent.oldProcess.pid, parent.oldProcess.nonceSha256, true),
-      parent.oldProcess,
-    ),
+    readParentCandidates: (worktree) => {
+      const managed = readManagedRecoveryEnrollment(worktree);
+      return managed ? [{
+        binding: { ...managed.binding, audience: "mcp" },
+        oldProcess: managed.parent,
+        oldPort: managed.parent.port,
+        oldDataHome: managed.parent.dataHome,
+        handoff: managed.handoff,
+        timeouts: DEFAULT_TIMEOUTS,
+      }] : readProtectedProductionRestartState(worktree);
+    },
+    enrollParentCandidate: enrollRunningProductionParent,
+    attestParentProcess: attestProductionParent,
     prepareReplacement: prepareProductionReplacement,
   };
 }

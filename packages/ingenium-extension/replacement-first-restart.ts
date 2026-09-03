@@ -75,6 +75,7 @@ export type ReplacementFirstRestartPhase =
   | "session_created"
   | "typed_memory_acknowledged"
   | "terminal_idle_acknowledged"
+  | "recovery_owner_ready"
   | "retirement_committed"
   | "old_parent_retired";
 
@@ -146,6 +147,15 @@ export interface ReplacementFirstRestartDependencies<Session> {
     transactionSha256: string;
     assistantResult: "completed";
   }>;
+  prepareRecoveryOwner?(
+    identity: RestartProcessIdentity,
+    session: Session,
+    handoffSha256: string,
+    transactionSha256: string,
+    signal: AbortSignal,
+  ): Promise<{ status: "ready"; transactionSha256: string; replacementIdentitySha256: string }>;
+  commitRecoveryOwner?(transactionSha256: string, signal: AbortSignal): Promise<void>;
+  abortRecoveryOwner?(transactionSha256: string): Promise<void> | void;
   retireOldProcess(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
   stopReplacement(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
   persistEvidence(evidence: ReplacementFirstRestartEvidence): void | Promise<void>;
@@ -230,7 +240,7 @@ function todoState(todos: RedactedRestartHandoff["todos"]): RedactedRestartHando
   return "cancelled";
 }
 
-function redactedHandoff(value: unknown): RedactedRestartHandoff {
+export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHandoff {
   if (!hasExactKeys(value, ["status", "taskHash", "todos", "nextWork"])
     || !["active", "working", "idle", "completed", "error"].includes(value.status as string)
     || !hasExactKeys(value.todos, ["total", "pending", "inProgress", "completed", "cancelled", "state"])
@@ -319,7 +329,7 @@ export function decodeReplacementFirstRestartRequest(
       dataHome: replacementDataHome,
       expectedIdentity: replacementIdentity,
     },
-    handoff: redactedHandoff(parsed.handoff),
+    handoff: parseRedactedRestartHandoff(parsed.handoff),
     timeouts: timeouts(parsed.timeouts),
   };
 }
@@ -440,6 +450,16 @@ export async function runReplacementFirstRestart<Session>(
     terminalIdleAcknowledged = true;
     await persist("terminal_idle_acknowledged");
 
+    if (dependencies.prepareRecoveryOwner) {
+      const owner = await bounded("recovery owner", request.timeouts.identityMs, (signal) =>
+        dependencies.prepareRecoveryOwner!(replacement!, session, handoffDigest, transactionDigest, signal));
+      if (owner.status !== "ready" || owner.transactionSha256 !== transactionDigest
+        || owner.replacementIdentitySha256 !== identitySha256(replacement)) {
+        throw new Error("Recovery owner acknowledgement is invalid");
+      }
+      await persist("recovery_owner_ready");
+    }
+
     const bindingStillCurrent = await bounded("restart binding", request.timeouts.identityMs, (signal) =>
       dependencies.revalidateBinding(request.binding, request.worktree, signal));
     const oldStillCurrent = await bounded("old process identity", request.timeouts.identityMs, (signal) =>
@@ -449,15 +469,19 @@ export async function runReplacementFirstRestart<Session>(
     if (!bindingStillCurrent || !oldStillCurrent || !replacementStillCurrent) {
       throw new Error("Binding or process identity changed before retirement");
     }
-    await persist("retirement_committed", true);
+    if (dependencies.commitRecoveryOwner) {
+      await bounded("recovery owner commit", request.timeouts.identityMs, (signal) =>
+        dependencies.commitRecoveryOwner!(transactionDigest, signal));
+    }
     retirementCommitted = true;
+    await persist("retirement_committed", true);
     await bounded("old process retirement", request.timeouts.retirementMs, (signal) =>
       dependencies.retireOldProcess(request.oldProcess, signal));
     oldParentRetired = true;
     await persist("old_parent_retired");
     return { handoffSha256: handoffDigest, replacementIdentitySha256: identitySha256(replacement) };
   } catch (error) {
-    if (oldParentRetired && replacement) {
+    if (retirementCommitted && replacement) {
       try {
         await dependencies.persistEvidence({
           phase: "committed_recovery",
@@ -465,7 +489,7 @@ export async function runReplacementFirstRestart<Session>(
           handoffSha256: handoffDigest,
           replacementIdentitySha256: identitySha256(replacement),
           retirementCommitted: true,
-          oldParentRetired: true,
+          oldParentRetired,
           replacementStopped: false,
         });
       } catch {}
@@ -475,7 +499,8 @@ export async function runReplacementFirstRestart<Session>(
         recoveryState: "retirement_committed",
       };
     }
-    if (!terminalIdleAcknowledged && replacement) {
+    if (!retirementCommitted && replacement) {
+      try { await dependencies.abortRecoveryOwner?.(createHash("sha256").update(handoffDigest).update("\0").update(identitySha256(replacement)).digest("hex")); } catch {}
       try {
         const replacementIsCurrent = await bounded("replacement cleanup identity", request.timeouts.identityMs, (signal) =>
           dependencies.revalidateProcessIdentity(replacement!, "replacement", signal));
