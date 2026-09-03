@@ -46,6 +46,18 @@ Every orchestration phase must declare:
 5. **Verification owner and plan** — targeted checks, owner, phase number, and declared execution sequence
 6. **`UNUSED_CAPACITY`** — unused active and writer slots with concrete reasons for every underfilled phase
 
+### Exact-two Todo allocation
+
+Before every phase, enumerate the independent, dependency-ready `TodoWrite`
+items and select up to three concurrently. Each selected Todo receives exactly
+one pair of exactly two agents in one parallel call: one, two, or three selected
+Todos use 2, 4, or 6 agents. If fewer than three are eligible, leave the
+remaining capacity unused; never invent a Todo or add a third agent. Pair
+members have distinct, non-overlapping responsibilities. Preserve the maximum
+of three permission-derived writers, exclusive writer territories, dependency
+ordering, and review gates; QA, security, and visual review Todos wait for
+their declared prerequisites.
+
 ### Git and GitHub workflow
 
 Manual and user-created commits are valid and never block continued work. Before
@@ -58,50 +70,56 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 
 ## Safe Parallelism Examples
 
-### ✅ Safe — Underfilled implementation phase with explicit capacity
+### ✅ Safe — Two selected Todos with explicit capacity
 
 ```text
-Phase: "Implement auth + email + dashboard widgets" — Wave 1 (5 active, 3 writers; W=3, read-only ceiling=3)
-  @ingenium-software-engineer-premium → packages/ingenium-core/auth/     (writer)
-  @ingenium-software-engineer-premium → services/ingenium-api/email/    (writer)
-  @ingenium-software-engineer-fast    → services/ingenium-dashboard/components/ (writer)
-  @ingenium-explore                   → scoped pattern search (non-writer)
-  @ingenium-scout                     → scoped context retrieval (non-writer)
+Phase: "Implement auth + email" — Wave 1 (4 active, 2 pairs, 2 writers; W=2, read-only ceiling=4)
+  Pair "auth boundary":
+    @ingenium-software-engineer-premium → packages/ingenium-core/auth/ (writer)
+    @ingenium-explore                   → scoped auth-pattern search (non-writer)
+  Pair "email boundary":
+    @ingenium-software-engineer-fast → services/ingenium-api/email/ (writer)
+    @ingenium-scout                  → scoped email-contract context (non-writer)
 
 UNUSED_CAPACITY:
-  active slots: 1 → QA, security, and applicable visual review wait for the finalized implementation and its declared verification; no third independent read-only stream is in scope
-  writer slots: 0 → all three writer slots have separate, non-overlapping territories
+  active slots: 2 → no third dependency-ready Todo is in scope; QA, security, and applicable visual review wait for finalized implementation and verification
+  writer slots: 1 → no third non-overlapping writer territory is declared
 ```
 
-Active: 5, Writers: 3, Read-only: 2 of 3. Non-overlapping territories; the remaining slot is intentionally unused. ✅
+Active: 4, Writers: 2, Read-only: 2 of 4. Each selected Todo has exactly two agents and the remaining capacity is intentionally unused. ✅
 
-### ✅ Safe — Docs and Browser are permission-derived writers, underfilled by dependency
+### ✅ Safe — Three selected Todos use all six active slots
 
 ```text
-Phase: "Implementation + direct documentation + browser automation" — Wave 1 (5 active, 3 writers; W=3, read-only ceiling=3)
-  @ingenium-software-engineer-fast → dashboard/       (writer)
-  @ingenium-docs                   → docs/            (writer)
-  @browser-agent                   → browser-recipes/ (writer)
-  @ingenium-explore                → scoped search    (non-writer)
-  @ingenium-scout                  → scoped context   (non-writer)
+Phase: "Implementation + direct documentation + browser automation" — Wave 1 (6 active, 3 pairs, 3 writers; W=3, read-only ceiling=3)
+  Pair "dashboard implementation":
+    @ingenium-software-engineer-fast → dashboard/ (writer)
+    @ingenium-explore                → scoped dashboard search (non-writer)
+  Pair "direct documentation":
+    @ingenium-docs  → docs/ (writer)
+    @ingenium-scout → scoped documentation context (non-writer)
+  Pair "browser automation":
+    @browser-agent    → browser-recipes/ (writer)
+    @ingenium-explore → separate scoped browser search (non-writer; separate invocation)
 
-UNUSED_CAPACITY:
-  active slots: 1 → QA and the applicable visual gate are post-wave dependencies; security review is not applicable to this non-security change, and no additional independent read-only territory is declared
-  writer slots: 0 → all three writer slots have separate, non-overlapping territories
+UNUSED_CAPACITY: none
 ```
 
-Active: 5, Writers: 3, Read-only: 2 of 3. Docs and Browser count because their permission blocks allow `edit`/`write`; QA, security, and visual review run in the shared post-wave phase. ✅
+Active: 6, Writers: 3, Read-only: 3 of 3. Docs and Browser count because their permission blocks allow `edit`/`write`; each selected Todo still has exactly two agents. ✅
 
-### ✅ Safe — Shared post-wave review
+### ✅ Safe — Shared post-wave review in two pairs
 
 ```text
-Phase: "Finalized UI and auth review" — Wave 2 (3 active, 0 writers; W=0, read-only ceiling=6)
-  @ingenium-qa               → finalized behavior checks (non-writer)
-  @ingenium-security-auditor → finalized auth diff/dependency review (non-writer)
-  @ingenium-qa-vision        → finalized UI route review (non-writer)
+Phase: "Finalized UI and auth review" — Wave 2 (4 active, 2 pairs, 0 writers; W=0, read-only ceiling=6)
+  Pair "finalized behavior/security review":
+    @ingenium-qa               → finalized behavior checks (non-writer)
+    @ingenium-security-auditor → finalized auth diff/dependency review (non-writer)
+  Pair "finalized UI/evidence review":
+    @ingenium-qa-vision → finalized UI route review (non-writer)
+    @ingenium-explore   → finalized route-boundary cross-check (non-writer)
 
 UNUSED_CAPACITY:
-  active slots: 3 → these are the only applicable independent review streams for the finalized change; no speculative reviewer or research work is added
+  active slots: 2 → these are the only two applicable review Todos for the finalized change; no speculative reviewer or research work is added
   writer slots: 3 → implementation territories are complete, and no directly affected Docs or Browser territory is declared for this phase
 ```
 
@@ -109,8 +127,8 @@ The shared review phase is valid only after the implementation boundary and fina
 
 ## Bounded Gates
 
-- QA, security, and applicable visual QA share one post-wave phase when their finalized, independent checks are safe to run together. They report scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave, have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff.
-- QA runs targeted checks once after an implementation wave and never schedules QA/Docs work.
+- QA, security, and applicable visual QA share one post-wave phase when their finalized, independent checks are safe to run together. Each implementation boundary receives exactly one QA report and, only when the task contract predeclares a changed security surface, at most one eligible security report; applicable visual QA follows the final UI boundary. Reviewers have no task-delegation authority, cannot spawn one another, and cannot reopen a closed task. After an in-scope reviewer-reported blocker is remediated, run only the named minimum targeted regression, then proceed directly to deployment and acceptance; never rerun QA, security, visual QA, or any other reviewer, and never create a recursive reviewer handoff.
+- QA produces exactly one report after each declared implementation boundary, using the contract-defined targeted checks, and never schedules QA/Docs work.
 - Docs runs only for directly affected canonical documentation or an explicit user request; Docs never schedules QA/Docs work.
 - `@ingenium-qa` solely owns a declared full E2E/container suite.
 - UI work gets one changed-route visual gate after its final UI change and one batch sweep per user-requested UI batch. A reproducible visual defect receives causal remediation and the smallest proving recheck; that recheck alone is not ESCALATE_USER.

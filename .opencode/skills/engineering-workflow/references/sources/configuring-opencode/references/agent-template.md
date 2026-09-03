@@ -27,12 +27,36 @@ permission:
   task: allow|deny  (or specific subagent: allow)
   playwright_*: allow|deny
   # --- Skill permissions ---
+  # Use literal skill directory names, not @mention syntax.
   skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "@mcp-tooling": allow
-    "*": deny
+    "*": allow
 ---
+```
+
+`@skill-name` is reserved for Required Skills lists and inline prose. A
+`permission.skill` key is the actual canonical directory name, without `@`.
+The supported canonical names, in repository order, are
+`development-conventions`, `devops-conventions`, `database-conventions`,
+`engineering-workflow`, `mcp-tooling`, `local-models`, `security-audit`,
+`documentation`, `self-learning`, and `skill-maintenance`.
+
+The current user-facing policy is the universal block above. For a deliberate
+narrow policy, put the wildcard first and literal exceptions after it:
+
+```yaml
+permission:
+  skill:
+    "*": deny
+    "development-conventions": allow
+    "engineering-workflow": allow
+```
+
+The hidden `ingenium-llm-broker` is the exception and remains:
+
+```yaml
+permission:
+  skill:
+    "*": deny
 ```
 
 ### Role-Specific Templates
@@ -62,13 +86,7 @@ permission:
     "ingenium-security-auditor": allow
   playwright_*: deny
   skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "@engineering-workflow": allow
-    "@local-models": allow
-    "@skill-maintenance": allow
-    "@mcp-tooling": allow
-    "*": deny
+    "*": allow
 ```
 
 **Software Engineer** (writes code, runs builds):
@@ -81,11 +99,7 @@ permission:
   grep: allow
   webfetch: allow
   skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "@engineering-workflow": allow
-    "@mcp-tooling": allow
-    "*": deny
+    "*": allow
 ```
 
 **Read-Only Agent** (reviewer, explore, security):
@@ -97,7 +111,5 @@ permission:
   bash: deny
   edit: deny
   skill:
-    "@development-conventions": allow
-    "@mcp-tooling": deny
-    "*": deny
+    "*": allow
 ```

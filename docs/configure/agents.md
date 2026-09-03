@@ -7,9 +7,9 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 ## Overview
 
-**12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly).
+**12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. Every user-facing active agent, including built-in Plan, can load all repository skills and their `references/` material; this is separate from tool grants. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly) and is excluded from that loading surface.
 
-Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the deliberate analysis exception: root `opencode.json` grants it `read`, `glob`, `grep`, and `question`, while `edit`, `write`, and `bash` remain denied. Custom agents may not use interactive questions. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
+Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the deliberate analysis exception: root `opencode.json` grants it `read`, `glob`, `grep`, `question`, and the read-only `ingenium_coordination_status` tool, while `edit`, `write`, `bash`, and coordination mutation tools remain denied. Plan also has the universal skill-loading surface. Custom agents may not use interactive questions. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
 ### Verification scope
 
@@ -54,7 +54,10 @@ The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents 
 - **`hidden: true`** — Prevents agents from appearing in non-Chat selectors where appropriate.
 - **Provider from Settings** — Providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
-Agent frontmatter metadata is persisted with the agent record. The internal
+Agent frontmatter metadata is persisted with the agent record. A root mapping such
+as `prompt: "{file:.opencode/agents/...}"` loads the Markdown prompt body; its YAML
+frontmatter is not imported as a second `agent.<name>` mapping and cannot override
+the root model, variant, or effective tool grants. The internal
 `ingenium-llm-broker` is an API-owned, reserved profile: disk-only copies are
 never imported, and sync accepts an API row only when it matches the complete
 static canonical template before rewriting the one canonical disk profile.
@@ -78,7 +81,7 @@ protected `ingenium-llm-broker` intentionally has no root mapping.
 |---|---|---|---|
 | `browser-agent` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/browser-agent.md` |
 | `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
-| `ingenium-qa` | `openai/gpt-5.6-terra` | `high` | `.opencode/agents/execution/ingenium-qa.md` |
+| `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
 | `ingenium-qa-vision` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa-vision.md` |
 | `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
 | `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
@@ -94,6 +97,15 @@ each wave is independently bounded by the 6-active/3-writer policy. The
 `UNUSED_CAPACITY` notes are part of each underfilled phase declaration; they
 are not a request to create work merely to reach six active agents.
 
+Todo allocation is pair-based. Before each dispatch, enumerate the independent,
+dependency-ready `TodoWrite` items, select up to three concurrently, and assign
+exactly one pair of exactly two agents to each selected Todo in one parallel
+call. One, two, or three selected Todos therefore use 2, 4, or 6 agents. If
+fewer than three are eligible, leave the remaining capacity unused; never invent
+a Todo or add a third agent. Pair members have distinct responsibilities, while
+the three-writer maximum, exclusive territories, dependency order, and
+QA/security/visual review gates remain in force.
+
 ```mermaid
 flowchart TB
     subgraph User
@@ -102,19 +114,31 @@ flowchart TB
 
     REQ --> ORCH["⚡ @ingenium-orchestrator<br/><i>Coordination Agent</i><br/>Delegates, never writes directly"]
 
-    subgraph Wave1["Dispatch Wave 1 — 4 active, 2 writers (W=2; read-only ceiling=4)"]
+    subgraph Wave1["Dispatch Wave 1 — 4 active, 2 pairs, 2 writers (W=2; read-only ceiling=4)"]
+        T1["Selected Todo A<br/>implementation"]
         FAST["⚡ ingenium-software-engineer-fast<br/>Routine isolated work · writer"]
-        PREM["💎 ingenium-software-engineer-premium<br/>Critical and complex work · writer"]
         EXPLORE["🔬 ingenium-explore · research"]
+        T2["Selected Todo B<br/>critical implementation"]
+        PREM["💎 ingenium-software-engineer-premium<br/>Critical and complex work · writer"]
         SCOUT["🔎 ingenium-scout · docs RAG"]
+        T1 --> FAST
+        T1 --> EXPLORE
+        T2 --> PREM
+        T2 --> SCOUT
         W1CAP["UNUSED_CAPACITY<br/>active slots: 2 — reviewers and directly affected docs wait for finalized implementation<br/>writer slots: 1 — no third non-overlapping writer territory is declared"]
     end
 
-    subgraph Wave2["Post-wave review + docs — 4 active, 1 writer when all apply (W=1; read-only ceiling=5)"]
+    subgraph Wave2["Post-wave review + docs — 4 active, 2 pairs, 1 writer when all apply (W=1; read-only ceiling=5)"]
+        T3["Selected Todo C<br/>behavior/security review"]
         QA["🔍 ingenium-qa · one targeted review"]
         SECURITY["🛡️ ingenium-security-auditor · current-diff review"]
+        T4["Selected Todo D<br/>UI/documentation review"]
         VISION["👁️ ingenium-qa-vision · applicable UI review"]
         DOCS["📝 ingenium-docs · directly affected docs only · writer"]
+        T3 --> QA
+        T3 --> SECURITY
+        T4 --> VISION
+        T4 --> DOCS
         W2CAP["UNUSED_CAPACITY<br/>active slots: 2 — no additional independent review or research stream is in scope<br/>writer slots: 2 — only the directly affected Docs territory is ready"]
     end
 
@@ -134,37 +158,74 @@ The orchestrator communicates in four stages:
 3. **Interpreted phase result** — explain what completed, what changed, which checks ran and their outcomes, the finding classification, and the next dependency. If work remains open, immediately continue to the next eligible phase rather than asking for a reprompt or returning raw agent/tool output.
 4. **Human-readable terminal summary** — report status, changed files, verification execution count, findings or remaining work, and Markdown links or repository paths to retained proof. Distinguish source-test, deployed-runtime, and model/session evidence.
 
-The Wave 2 example assumes directly affected documentation plus applicable QA,
-security, and UI review. If a review is blocked or not applicable, omit it and
-record the unused active slot and concrete dependency or applicability reason in
+The Wave 2 example uses two selected Todos, so its four agents are two complete
+pairs. It assumes directly affected documentation plus applicable QA, security,
+and UI review. If a review is blocked or not applicable, omit that Todo/pair and
+record the unused active slots and concrete dependency or applicability reason in
 `UNUSED_CAPACITY`; do not split safe independent reviewers or manufacture work.
 
 ## Agent Table
 
 | Agent | Type | Mode | Skills Allowed |
 |-------|------|------|----------------|
-| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions`, `ponytail` |
-| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | `ponytail` |
-| **ingenium-explore** | Subagent | Research and exploration | `local-models`, `ponytail` |
-| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models`, `mcp-tooling`, `documentation`, `ponytail` |
-| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `ponytail` |
-| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All 10 canonical skills, plus `ponytail` |
-| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All 10 canonical skills, plus `ponytail` |
-| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All 10 canonical skills, plus `ponytail` |
-| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All 10 canonical skills, plus `ponytail` |
-| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All 10 canonical skills, plus `ponytail` |
-| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `ponytail` |
-| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — |
+| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | All repository skills/references |
+| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | All repository skills/references |
+| **ingenium-explore** | Subagent | Research and exploration | All repository skills/references |
+| **ingenium-scout** | Subagent | Research + Docs RAG | All repository skills/references |
+| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | All repository skills/references |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All repository skills/references |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All repository skills/references |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All repository skills/references |
+| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All repository skills/references |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All repository skills/references |
+| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | All repository skills/references |
+| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — (excluded) |
 
 > **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
 >
 > > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 12-agent total.
 
+### Skill permission policy
+
+The current root `opencode.json` grants every user-facing agent the universal
+skill permission:
+
+```yaml
+permission:
+  skill:
+    "*": allow
+```
+
+The same all-skill loading surface is available to built-in Plan. It is a
+repository skill/reference capability, not a tool grant. The resolved recovery
+policy is **all skills plus status only** for coordination: Plan's exact
+root-level tool allowance is `read`, `glob`, `grep`, `question`, and the
+read-only `ingenium_coordination_status`; it has no file-mutation, shell, or
+coordination mutation authority. Root mappings and mapped profiles must remain
+semantically aligned, but profile frontmatter is not a second runtime
+configuration source.
+
+`@skill-name` is mention syntax for Required Skills sections and inline prose;
+it is not a `permission.skill` key. If a narrow policy is documented, use the
+actual canonical directory names without `@`, and put the wildcard first so
+specific rules follow it. The hidden `ingenium-llm-broker` is the exception:
+its skill permission is `{"*": "deny"}` and it has no tool allowances. See
+[the skill taxonomy](../reference/skill-taxonomy.md) for the canonical names
+and legacy mapping.
+
 The orchestrator and Premium writer profiles explicitly grant the top-level MCP
 tools `ingenium_coordination_update`, `ingenium_coordination_claim`, and
 `ingenium_coordination_release`; these are not Bash permissions. The read-only
 Scout profile additionally grants `ingenium_docs_search_semantic` for semantic
-Docs RAG retrieval. All other profile permissions remain deny-by-default.
+Docs RAG retrieval. `ingenium_coordination_handoff` is a mixed publish/read/
+acknowledge/consume tool and is write-classified as a whole. The broader
+recovery protocol therefore performs handoff or typed-memory reads with
+`read` or `memory_read` from an authorized coordination-capable session; that
+tool is not part of Plan's grant. A stale API/root-level `allow` expectation
+must not widen Plan's surface. Epoch `recovery_state`, `reconcile_epoch`, and
+`recover_epoch` remain operations on `ingenium_coordination_update`; they are not
+Plan permissions. All other tool and MCP profile permissions remain
+deny-by-default.
 
 ### Effective role matrix
 
@@ -173,7 +234,7 @@ explicitly:
 
 | Profile | `read` | `glob` | `grep` | `question` | `edit`/`write` | `bash` | Effective role |
 |---|---|---|---|---|---|---|---|
-| Plan | allow | allow | allow | allow | deny | deny | Planning only; these four capabilities are the complete Plan allowance |
+| Plan | allow | allow | allow | allow | deny | deny | Planning only; all repository skills/references plus generic inspection tools and read-only `ingenium_coordination_status`; no handoff tool |
 | `browser-agent` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-docs` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-fast` | allow | allow | allow | deny | allow | allow | Intentional writer |
@@ -226,9 +287,12 @@ When admitted, deployment maps only those named operations to fixed executable
 argv arrays and starts them with `shell: false`. Its child environment removes
 inherited `COMPOSE_*`, `DOCKER_*`, `npm_*`, `NODE_OPTIONS`, and `PATH` values,
 then supplies the fixed runtime `PATH` (`<node-runtime>:/usr/local/bin:/usr/bin:/bin`).
-Changing an agent profile, plugin, MCP entry, OpenCode config, or parent binding
-requires a full parent OpenCode restart; restarting only the child MCP process
-is insufficient because existing sessions retain their previous permissions.
+Changing an agent profile, its prompt-file frontmatter, plugin, MCP entry, OpenCode
+config, or parent binding requires a full parent OpenCode restart; restarting only
+the child MCP process is insufficient because existing sessions retain their
+previous prompt, profile, skill surface, and permissions. After restart, verify
+the exact root mapping and mapped profile rather than inferring parity from the
+Markdown file alone.
 
 ---
 
@@ -313,14 +377,15 @@ completed and been verified. Writer tiers:
 | **Docs** | `ingenium-docs` | Documentation and skill-system work |
 | **Browser** | `browser-agent` | Browser automation and self-healing site interaction |
 
-Example underfilled implementation phase: **5 active, 3 writers** (`W = 3`,
-read-only ceiling `6 - W = 3`) — Fast owns `dashboard/`, Docs owns directly
-affected `docs/`, Browser owns browser recipes, and Explore/Scout handle scoped
-research. `UNUSED_CAPACITY` declares one unused active slot because QA,
-security, and applicable visual review wait for the finalized implementation
-and its verification; writer slots unused: 0 because all three territories are
-separate and in scope. QA, security, and visual review then share the post-wave
-phase when their checks are applicable and safe.
+Example underfilled implementation phase: **4 active, 2 pairs, 2 writers**
+(`W = 2`, read-only ceiling `6 - W = 4`) — the dashboard Todo pairs Fast with
+Explore, and the directly affected documentation Todo pairs Docs with Scout.
+`UNUSED_CAPACITY` declares two unused active slots because no third
+dependency-ready Todo is in scope and QA, security, and applicable visual review
+wait for finalized implementation and verification; one writer slot remains
+unused because no third non-overlapping writer territory is declared. QA,
+security, and visual review then share the post-wave phase when their checks are
+applicable and safe.
 
 ### Finite Task and Phase Declaration
 
@@ -333,9 +398,10 @@ independent checks are safe to run together. Each runs once per implementation
 wave, Docs runs only for directly affected canonical docs or explicit user
 request, and no reviewer recursively triggers QA/Docs work. If a reviewer is
 blocked or not applicable, declare its unused slot and concrete reason in
-`UNUSED_CAPACITY`. After a writer fixes a reviewer-reported in-scope blocker,
-run the minimum targeted regression; rerun the original reviewer check only when
-the source change affects that reviewer’s declared boundary. UI gets one
+`UNUSED_CAPACITY`. After a writer fixes a reviewer-reported in-scope BLOCKING
+root cause, run only the named minimum targeted regression; never rerun QA,
+security, or any other reviewer. Proceed directly to the declared deploy and
+acceptance steps. UI gets one
 changed-route gate after final UI change and one sweep per user-requested UI
 batch; reproducible visual failures receive causal remediation and their
 smallest proving recheck. Docs/non-UI work never opens visual gates. Security
@@ -350,14 +416,17 @@ as terminal.
 
 Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. Before the final response, reconcile roadmap markers and `TodoWrite`.
 
-QA and security may report scope-classified BLOCKING/FOLLOW_UP findings once per their declared bounded phase. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. The orchestrator remediates a reproducible in-scope blocker and runs its minimum targeted regression; it does not create another reviewer chain unless the changed review boundary requires the original declared check.
+QA and security may report scope-classified BLOCKING/FOLLOW_UP findings once per their declared bounded phase. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a reviewer-reported BLOCKING remediation, the orchestrator runs only the named minimum targeted regression, never reruns QA, security, or any other reviewer, and proceeds directly to deploy and acceptance.
 
 ### Restart Required for Agent Profile and Configuration Changes
 
-Adding or changing an agent profile (`.opencode/agents/*.md`), plugin, or
-OpenCode configuration requires a full parent OpenCode restart before the change
-is loaded. Restarting only the child MCP process is insufficient; current
-sessions retain their previous profile/configuration until the parent restarts.
+Adding or changing an agent profile (`.opencode/agents/*.md`), repository
+skill/reference loading, root agent mapping, plugin, MCP entry, or OpenCode
+configuration requires a **full parent OpenCode restart** before the change is
+loaded. Restarting only the child MCP process is insufficient: existing parent
+sessions retain their previously loaded profile, mapping, skill surface, and
+permissions. After the parent restarts, verify the exact mapped profile and
+root-effective grants before resuming recovery.
 
 ### Profile file safety
 
@@ -377,7 +446,7 @@ Full details for each agent are available in the agent definition files at `.ope
 |----------|--------|-------|------|
 | Model-dependent (configurable) | All agents | 12 | Configurable via `opencode.json` agent mappings |
 
-**Model configuration**: Agent model mappings live in `opencode.json` under the `"agent"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. When agents are created or updated via MCP tools, the model field is persisted to `opencode.json`, not the `.md` file.
+**Model configuration**: Agent model mappings live in `opencode.json` under the `"agent"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. When agents are created or updated via MCP tools, the model field is persisted to `opencode.json`, not the `.md` file. A `{file:...}` prompt reference loads the profile body; its frontmatter does not become a second root mapping.
 
 ---
 

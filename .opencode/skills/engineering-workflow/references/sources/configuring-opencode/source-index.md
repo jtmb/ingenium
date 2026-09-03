@@ -20,7 +20,7 @@ description: "OpenCode agent configuration conventions — frontmatter structure
 Agent model and variant assignments are configured centrally in the repository
 `opencode.json`. The current topology is 12 agents: Orchestrator and Premium
 use GPT-5.6 Terra; Docs, Vision, Fast, and Scout use GPT-5.6 Luna; QA uses
-GPT-5.6 Terra (`xhigh`); Explore uses GPT-5.6 Sol (`medium`); Chat and Browser
+GPT-5.6 Luna (`max`); Explore uses GPT-5.6 Sol (`medium`); Chat and Browser
 use DeepSeek V4 Flash (Chat has `high`, Browser has no variant); Security uses
 GPT-5.6 Sol (`high`); and the hidden LLM broker is unmapped. Do not add a
 conflicting `model:` declaration to a profile template.
@@ -29,7 +29,7 @@ conflicting `model:` declaration to a profile template.
 
 ### 🔴 Every Agent MUST Use `@skill-name` References
 
-In Required Skills sections and any inline prose that references a skill, use the `@` prefix so OpenCode can resolve the skill:
+In Required Skills sections and any inline prose that references a skill, use the `@` prefix so OpenCode can resolve the skill. This is mention syntax, not a `permission.skill` key:
 
 ```markdown
 # ✅ CORRECT — OpenCode resolves the skill reference
@@ -45,6 +45,22 @@ This applies to:
 - Pattern encoding tables that reference skill names
 - Cross-reference sections in skills
 
+`permission.skill` uses the literal skill directory name without `@`. The
+currently supported canonical names, in repository order, are:
+
+```text
+development-conventions
+devops-conventions
+database-conventions
+engineering-workflow
+mcp-tooling
+local-models
+security-audit
+documentation
+self-learning
+skill-maintenance
+```
+
 ### 🔴 Any Agent with `@development-conventions` MUST Also Have `@devops-conventions` and `@mcp-tooling`
 
 These three skills form the minimum viable set for any agent that writes or reviews code. If `@development-conventions` is in the Required Skills list, `@devops-conventions` (CLI toolkit, Docker) and `@mcp-tooling` (browser automation) must also be present.
@@ -56,18 +72,15 @@ Every agent definition must include a `permission` block that explicitly allows 
 ```yaml
 ---
 permission:
-  # Tool permissions
-  read: allow
-  edit: allow
-  bash: allow
-  glob: allow
-  grep: allow
-  # Skill permissions — deny all except listed
-  skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "@mcp-tooling": allow
-    "*": deny
+   # Tool permissions
+   read: allow
+   edit: allow
+   bash: allow
+   glob: allow
+   grep: allow
+   # Skill permissions use literal skill names, not @mentions.
+   skill:
+     "*": allow
 ---
 ```
 
@@ -83,19 +96,38 @@ Tool permissions MUST match the agent's role:
 | **Explore / Search** | read, glob, grep — NO edit, NO write, NO bash |
 | **Researcher** | read, webfetch, websearch, skill — NO edit, NO write |
 
-### 🔴 Default-Deny Skill Permissions
+### 🔴 Current Skill Permission Policy
 
-Use `"*": "deny"` as the catch-all in the `skill:` block and explicitly allow only the skills the agent needs:
+Root `opencode.json` is authoritative for the active runtime policy. All
+user-facing agents use the universal skill permission:
 
 ```yaml
 permission:
   skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "*": deny
+    "*": allow
 ```
 
-This prevents agents from loading skills they shouldn't have access to.
+Do not write per-skill `@name` keys or put a wildcard after specific rules in
+an example. If a deliberately narrow policy is ever documented, use literal
+canonical names and put the default wildcard first so later specific rules
+can override it:
+
+```yaml
+permission:
+  skill:
+    "*": deny
+    "development-conventions": allow
+    "engineering-workflow": allow
+```
+
+The hidden `ingenium-llm-broker` is the exception. It remains wildcard-denied
+with no tool allowances:
+
+```yaml
+permission:
+  skill:
+    "*": deny
+```
 
 ## Reference Files
 

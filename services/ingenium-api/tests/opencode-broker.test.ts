@@ -592,9 +592,16 @@ describe("ingenium-llm-broker permission contract", () => {
     const rootConfig = JSON.parse(readFileSync(
       new URL("../../../opencode.json", import.meta.url),
       "utf8",
-    )) as { permission?: Record<string, string> };
-    // The normal root profile is permissive; the broker's explicit wildcard
-    // deny must remain a stricter agent-level boundary.
-    expect(rootConfig.permission?.["*"]).toBe("allow");
+    )) as {
+      permission?: Record<string, string>;
+      agent?: Record<string, { permission?: Record<string, unknown> }>;
+    };
+    expect(rootConfig.permission).toEqual({ "*": "deny", question: "deny" });
+    expect(rootConfig.agent?.["ingenium-orchestrator"]?.permission).toMatchObject({
+      "*": "deny",
+      read: "allow",
+      question: "deny",
+    });
+    expect(rootConfig.agent).not.toHaveProperty(LLM_BROKER_AGENT);
   });
 });

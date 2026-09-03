@@ -68,7 +68,7 @@ permission:
     "@mcp-tooling": allow
     "@local-models": allow
     "@ponytail": allow
-    "*": deny
+    "*": allow
 ---
 
 # Visual QA

@@ -20,6 +20,15 @@ a quota. Underfilled active slots (`6 - A`) and writer slots (`3 - W`) require
 concrete dependency, territory, or applicability reasons, and work must not be
 manufactured to fill them.
 
+Before each phase, enumerate the independent, dependency-ready `TodoWrite` items
+and select up to three concurrently. Every selected Todo receives exactly one
+pair of exactly two agents in one parallel call: one, two, or three selected
+Todos use 2, 4, or 6 agents. If fewer than three are eligible, leave the
+remaining capacity unused; never invent a Todo or add a third agent. Pair
+members have distinct, non-overlapping responsibilities, and dependency order,
+the three-writer maximum, exclusive territories, and QA/security/visual review
+gates remain in force.
+
 ## Git and GitHub Workflow
 
 Manual and user-created commits are valid and never block continued work. Before
@@ -51,14 +60,17 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and declared deployment autonomously. Compile, test, package, scanner, configuration, and runtime defects with a concrete reproducible root cause are fixed and reverified automatically. Never ask permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work already within scope. Only Plan mode may use interactive decision questions; orchestration never invokes the `question` tool. Return `ESCALATE_USER` in the normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
 After implementation and its declared verification, independent applicable QA,
-security, and visual QA reviews share one post-wave phase when safe. They report
-scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave, have
-no task-delegation authority, cannot spawn the other, and cannot reopen a closed
+security, and visual QA reviews share one post-wave phase when safe. Each
+implementation boundary receives exactly one QA report and, only when the task
+contract predeclares a changed security surface, at most one eligible security
+report; applicable visual QA follows the final UI boundary. Reviewers have no
+task-delegation authority, cannot spawn one another, and cannot reopen a closed
 task. If a reviewer is blocked or not applicable, declare its unused slot and
-concrete reason. After an in-scope reviewer blocker is fixed, run only the
-minimum targeted regression. Rerun the original reviewer check only when the
-fix changes that reviewer’s declared boundary; never create a recursive
-reviewer handoff.
+concrete reason. After an in-scope reviewer blocker is fixed, run only the named
+minimum targeted regression, then proceed directly to the declared deploy and
+acceptance steps; never rerun QA, security, visual QA, or any other reviewer,
+even when the remediation changes the reviewer’s declared boundary, and never
+create a recursive reviewer handoff.
 
 User-facing communication starts with a plain-language introduction, presents
 the structured contract, interprets each phase result in human terms, and ends

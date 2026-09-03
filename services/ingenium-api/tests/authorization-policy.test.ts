@@ -28,6 +28,7 @@ describe("AUTH-102 canonical API policy", () => {
     ["POST", "/api/v1/runtimes/gateway/validate", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/gateway/activity", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/activity", "runtime-capability", "write"],
+    ["POST", "/api/v1/coordination/memory/read", "project", "read"],
     ["POST", "/api/v1/coordination/epoch/recover", "project", "write"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
@@ -37,6 +38,19 @@ describe("AUTH-102 canonical API policy", () => {
     ["POST", "/api/v1/auth/coordination-lease", "private", "write"],
   ] as const)("classifies %s %s", (method, path, target, permission) => {
     expect(policyForRequest({ method, path } as Pick<Request, "method" | "path">)).toMatchObject({ target, permission });
+  });
+
+  it.each([
+    "/api/v1/coordination/memory/publish",
+    "/api/v1/coordination/memory/ack",
+    "/api/v1/coordination/handoffs/publish",
+    "/api/v1/coordination/handoffs/read",
+    "/api/v1/coordination/handoffs/ack",
+  ])("keeps POST %s classified as a project write", (path) => {
+    expect(policyForRequest({ method: "POST", path } as Pick<Request, "method" | "path">)).toMatchObject({
+      target: "project",
+      permission: "write",
+    });
   });
 
   it("fails closed for a route without an explicit family policy", () => {

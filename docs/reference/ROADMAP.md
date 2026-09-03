@@ -121,12 +121,22 @@ protocol above; the placeholder is not a live marker:
 ## Operating model
 
 Execution is synchronous: at most **6 active agents**, comprising at most **3
-permission-derived writers** and at most **3 nonwriters**. Writers have exclusive
-territories; territory overlap is zero. Independent work runs in barrier subwaves:
-all tasks in a subwave finish and verify before dependent tasks start. The
+permission-derived writers** and a dynamic read-only ceiling of **`6 - W`**
+nonwriters, where `W` is the number of active writers in that phase. Writers have
+exclusive territories; territory overlap is zero. Independent work runs in barrier
+subwaves: all tasks in a subwave finish and verify before dependent tasks start. The
 open-roadmap rule applies: while a roadmap task or TodoWrite item is open, the
 orchestrator immediately dispatches the next declared phase and does not end the turn with a progress or completion response. Only `PASS`, `ESCALATE_USER`, an
 explicit `STOP`, or an explicit `CANCELLED` ends execution.
+
+Todo allocation is also bounded: before each phase, enumerate independent,
+dependency-ready `TodoWrite` items and select up to three concurrently. Every
+selected Todo receives exactly one pair of exactly two agents in one parallel
+call, so one, two, or three selected Todos use 2, 4, or 6 agents. If fewer than
+three are eligible, leave the remaining capacity unused; never invent a Todo or
+add a third agent. Pair members have distinct, non-overlapping responsibilities,
+and the three-writer maximum, exclusive territories, dependency order, and
+QA/security/visual review gates remain in force.
 
 Safe defaults are mandatory: grounding is off; task references are metadata-only;
 events come from a trusted catalog; MCP verification is fixture-first; usage
@@ -169,7 +179,7 @@ P0 DOC-100
   -> P2 MCP-101..103, CTX-101, TASK-101..102, JOB-101, USAGE-101, VAULT-101, RESTORE-101
   -> P3 JOB-102, MCP-104..105, USAGE-102, VAULT-102, RESTORE-102
   -> P4 MCP-106
-  -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106
+   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100
   -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
   -> P5 UI-102 -> CHAT-101
   -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
@@ -183,10 +193,27 @@ P0 DOC-100
 ```
 
 The C0-C6 coordination lane is an implementation-gated barrier chain;
-`REL-100` also depends on `COORD-106`, `UI-102`, `CHAT-101`, and `VSCODE-102`.
+`COORD-RESET-100` is the post-C6 protected-credential recovery barrier, and
+`RECOVERY-100` depends on both `COORD-106` and `COORD-RESET-100`.
+`REL-100` also depends on `AUTH-111`, `COORD-106`, `UI-102`, `UI-103`,
+`CHAT-101`, `VSCODE-102`, and `VSCODE-103`.
 The A0-A11 authentication lane is a strict barrier chain. No later tenancy,
 runtime, or enforcement task may start until its predecessor's migration,
 preservation, security, and deployment evidence is complete.
+
+The compressed lane arrows are supplemented by these direct contract
+cross-edges and barrier prerequisites:
+
+- `CTX-100 -> CHAT-100 -> CTX-101`.
+- `TASK-100 + CTX-100 -> TASK-101`; `TASK-100 + CHAT-100 + CTX-100 -> TASK-102`.
+- `JOB-100 -> VAULT-100`; `JOB-101 -> VAULT-101` and `JOB-101 -> RESTORE-101`.
+- `TASK-102 -> COORD-100`.
+- `UI-102 + CHAT-100 + CTX-101 -> CHAT-101`; `UI-102 -> VSCODE-101`.
+- `AUTH-111 + COORD-106 -> COORD-RESET-100`; `COORD-RESET-100 + COORD-106 -> RECOVERY-100`.
+- `AUTH-111 + UI-103 + VSCODE-103 -> REL-100`.
+- `AUTH-111 + RESTORE-101 -> RESTORE-103`; `AUTH-111 + RESTORE-103 -> OIDC-100`.
+- `AUTH-111 + AUTH-108 + AUTH-109 + RESTORE-103 -> RUNTIME-100`.
+- `AUTH-111 + F0c -> TELEMETRY-100`; `RESTORE-103 + OIDC-100 + RUNTIME-100 + TELEMETRY-100 -> AUTH-112`.
 
 ### Program gates
 
@@ -1063,10 +1090,11 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   inspect links/commands/policy wording and browser cleanup, remediate only a
   reproducible in-scope root cause with its minimum proving regression, then
   reconcile markers/TodoWrite and every evidence placeholder.
-- **Causal remediation rule:** Name the first failing release boundary, fix only
-  that root cause within scope, rerun the smallest proving check (and the
-  originally declared review only when its boundary changed), then repeat final
-  reconciliation; a failed check alone is never escalation.
+- **Causal remediation rule:** Name the first failing release boundary and fix
+  only that root cause within scope. After a reviewer-reported BLOCKING
+  remediation, run only the named minimum targeted regression; never rerun QA,
+  security, or any other reviewer; proceed directly to deploy and acceptance.
+  A failed check alone is never escalation.
 - **Finding classification:** Failed security, isolation, preservation,
   deployment/health, runtime, visual/accessibility, fixture/containment, link,
   or final-reconciliation acceptance is `BLOCKING`; unrelated product/docs drift
@@ -1078,14 +1106,19 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   migration-preservation, security, visual, documentation, and final-reconcile
   evidence in the live marker log.
 
-Each phase is a barrier. Standard allocation is **3 writers / 3 nonwriters**:
-writers are `@ingenium-docs` (docs territory), `@ingenium-software-engineer-fast`
-(one declared implementation territory), and
-`@ingenium-software-engineer-premium` (one declared integration/deployment
-territory); nonwriters are `@ingenium-qa`, `@ingenium-security-auditor`, and
-`@ingenium-explore`. If fewer territories exist, unused slots remain empty; never
-exceed 3 writers or 3 nonwriters. QA/security report once per declared boundary and
-never dispatch follow-up work.
+Each phase is a barrier. Every phase declares its active count `A`, writer count
+`W`, and read-only ceiling `6 - W`. Before dispatch, enumerate independent,
+dependency-ready `TodoWrite` items and select up to three concurrently; each
+selected Todo is exactly one pair of exactly two agents, producing 2, 4, or 6
+agents for one, two, or three selected Todos. If fewer than three are eligible,
+unused capacity remains empty rather than being filled speculatively. Pair
+members have distinct, non-overlapping responsibilities. A common full
+allocation is **3 writers / 3 nonwriters** (six agents) only when those agents
+form three complete Todo pairs with separate writer territories; otherwise do
+not exceed 3 writers or the phase's dynamic `6 - W` read-only ceiling. QA,
+security, and visual review pairs wait for their declared prerequisites and report
+once per declared boundary. The per-task `Phase/counts` entries below remain
+role envelopes; this policy does not rewrite them or the append-only marker log.
 
 ## Execution contracts
 
@@ -1776,6 +1809,28 @@ never dispatch follow-up work.
 - **Causal remediation rule:** Name the first failing coordination boundary, remediate only that root cause, redeploy, and rerun the smallest proving acceptance check.
 - **Finding classification:** A failed V1 guarantee, sensitive leak, write bypass, unsafe outage path, or unclean deployment is `BLOCKING`; separate-worktree mode and dashboard/audit enhancements are `FOLLOW_UP`; operational traces are `INFORMATIONAL`.
 
+#### RECOVERY-100 — Plan/MCP chat-loss recovery and resumable handoff
+
+- **IN_SCOPE:** Define and verify the fail-closed recovery path when a Plan/chat turn, parent OpenCode process, MCP child, or selected runtime ends before its outcome is known; recover from the intended canonical worktree using Plan's all-skill loading surface, exact tool allowance (`read`, `glob`, `grep`, `question`, and read-only `ingenium_coordination_status`), authorized handoff/memory reads, exact-path inspection, typed operational memory, and roadmap/TodoWrite reconciliation; require a full parent restart after plugin, MCP, configuration, prompt/profile, or parent-binding changes; preserve separate source, deployed-canary, and actual model/session evidence.
+- **OUT_OF_SCOPE:** New MCP tools, credential-reset implementation, password recovery, automatic transcript or Docs Workspace export, broad documentation cleanup, database/file deletion as recovery, bypassing coordination, and claiming a prior incomplete canary as successful.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** COORD-106, COORD-RESET-100.
+- **Acceptance:** A lost or partial chat turn resumes from the same authorized project, workspace, storage mapping, and canonical worktree without guessing stale session, lease, fence, claim, or ownership values; Plan has universal skill/reference loading and is limited to `read`, `glob`, `grep`, `question`, and the read-only `ingenium_coordination_status` tool; handoff or typed-memory reads use `ingenium_coordination_handoff` with `read` or `memory_read` only from an authorized coordination-capable session; MCP recovery reads return typed actions, changed paths, checks/results, task/todo/status/next-work, and current revision; unavailable MCP, mismatched binding/audience, stopped runtime, stale proof, dirty footprint, or quarantined epoch blocks mutation; content-only general-credential rotation uses the exact live-MCP-reload exception, while runtime/repository-sync credential or binding changes require a full parent restart; a real MCP canary and actual model/session restart replay are retained before completion.
+- **STOP_CONDITION:** `PASS` only after source/permission checks, deployed rebuild/restart and health, real MCP recovery canary, actual model/session replay, bounded QA/security review, cleanup, and roadmap/TodoWrite reconciliation; otherwise continue in scope or use a permitted escalation.
+- **Escalation:** Only unavailable required protected access after the configured path was attempted, unauthorized destructive recovery, a mutually exclusive product decision, genuine recovery-contract ambiguity, or a reproducible root cause that remains unreproduced after bounded diagnosis.
+- **Verification owner:** `@ingenium-qa`.
+- **Security owner:** `@ingenium-security-auditor` for the predeclared credential, permission, evidence, and recovery-boundary surface.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Rollback/safety:** Treat an unknown outcome as unresolved, stop writers before recovery, preserve the worktree and first failure, use only identity-checked run-owned cleanup, never print or persist secrets/transcripts, never clear foreign/live/uncertain claims, and never add a completion marker from source tests alone.
+- **Tests:** Plan all-skill and exact-tool permission matrix; MCP project/workspace/worktree/audience preflight; typed-memory and handoff reads; stale/expired/quarantined/outage fail-closed cases; exact parent-restart and live-MCP-reload mode cases; real MCP transport canary; actual model/session recovery and restart-replay artifacts; redaction, cleanup, and marker reconciliation checks.
+- **Docs:** `docs/usage/multi-session.md` and this roadmap only, unless verified shipped behavior directly changes another canonical reference.
+- **Exclusive writer territory:** Premium owns recovery/runtime/MCP implementation and acceptance harnesses; Docs owns `docs/reference/ROADMAP.md` and `docs/usage/multi-session.md`; no overlapping writer territory.
+- **Phase/counts:** C7; 2 writers / 3 nonwriters (`A=5`, `W=2`, read-only ceiling `6 - W = 4`); premium owns implementation/deployment, Docs owns directly affected guidance, and QA/security/explore share the finalized review phase.
+- **UNUSED_CAPACITY:** Active slot 6 remains unused because this boundary has no visual/UI review; writer slot 3 remains unused because no third non-overlapping territory is in scope.
+- **Verification plan:** Start from the retained first-failure state, use Plan-only inspection to establish the exact worktree and typed recovery state, perform only the authorized MCP recovery, rebuild/restart the merged source, verify health and the real transport, run the bounded actual-session replay once, inspect redaction and owned cleanup, then reconcile evidence and markers; remediate only a reproducible in-scope root cause and rerun its smallest proving check.
+- **Causal remediation rule:** Fix the earliest proven boundary—parent permission loading, MCP binding/credential mode, runtime readiness, typed-memory recovery, or restart replay—and never retry a mutation merely because chat output was lost.
+- **Finding classification:** Any mutation after an unknown outcome, stale/foreign recovery acceptance, secret/evidence leak, missing real MCP or model/session proof, or false completion is `BLOCKING`; stronger automation, transcript export, or separate-worktree recovery is `FOLLOW_UP`; retained bounded provenance is `INFORMATIONAL`.
+
 #### UI-100 — Shared native Select primitive
 
 - **IN_SCOPE:** Create one accessible shared native `<select>` primitive for dashboard forms, with the repository's required hover/cursor styling, label/id association, disabled/loading/error states, keyboard behavior, and a testable API; inventory every current native-select consumer for the migration lane.
@@ -1921,7 +1976,7 @@ never dispatch follow-up work.
 - **IN_SCOPE:** Run the declared roadmap acceptance across contracts, barriers, safety defaults, deployment, accessibility, links, markers, and repository diff.
 - **OUT_OF_SCOPE:** New feature work, unrelated cleanup, Docs Workspace writes, and real credentials in default gates.
 - **Owner:** Release/QA owner.
-- **Dependencies:** MCP-106, JOB-102, USAGE-102, VAULT-102, RESTORE-102, CTX-101, TASK-102, COORD-106, UI-102, CHAT-101, VSCODE-102.
+- **Dependencies:** AUTH-111, MCP-106, JOB-102, USAGE-102, VAULT-102, RESTORE-102, CTX-101, TASK-102, COORD-106, UI-102, UI-103, CHAT-101, VSCODE-102, VSCODE-103.
 - **Acceptance:** All scoped contracts pass with evidence; no active markers; clean targeted diff; safe defaults and operator boundaries remain true.
 - **STOP_CONDITION:** `PASS` only after full evidence and reconciliation; explicit user `STOP`/`CANCELLED` remains terminal.
 - **Escalation:** Only the permitted five escalation conditions after bounded diagnosis.
@@ -1931,7 +1986,7 @@ never dispatch follow-up work.
 - **Tests:** Targeted contract suites, deployed health/routes, fixture-first gates, visual/accessibility, links, marker parser, and diff check.
 - **Docs:** Verify all directly affected canonical docs; no broad regeneration.
 - **Exclusive writer territory:** Release evidence and no source overlap.
-- **Phase/counts:** P5; 1 writer / 3 nonwriters; barrier after all implementation waves.
+- **Phase/counts:** P6; 1 writer / 3 nonwriters; barrier after all implementation waves.
 - **Verification plan:** Execute checks once in dependency order, remediate reproducible in-scope roots, rerun only affected checks, reconcile markers/TodoWrite.
 - **Causal remediation rule:** Every fix names the current reproducible root cause and proves it with the minimum targeted regression.
 - **Finding classification:** Failed acceptance is `BLOCKING`; unrelated drift is `FOLLOW_UP`; evidence context is `INFORMATIONAL`.
@@ -1951,7 +2006,7 @@ never dispatch follow-up work.
 - **Tests:** Markdown structure, links, commands, archive hash/cmp, and `git diff --check`.
 - **Docs:** Only the directly affected canonical files identified by REL-100; never Docs Workspace.
 - **Exclusive writer territory:** Named `docs/**/*.md` files only; no overlap with implementation writers.
-- **Phase/counts:** P6; 1 writer / 0 nonwriters; final documentation barrier.
+- **Phase/counts:** P7; 1 writer / 0 nonwriters; final documentation barrier.
 - **Verification plan:** Read source-verified behavior, patch targeted sections, run affected checks once, and verify no unrelated docs changed.
 - **Causal remediation rule:** Fix the named documentation root cause and rerun only its affected check; do not paper over source defects.
 - **Finding classification:** Incorrect in-scope canonical content is `BLOCKING`; unrelated drift is `FOLLOW_UP`; context is `INFORMATIONAL`.
@@ -3588,29 +3643,54 @@ No `(work-complete)` marker is appended for `COORD-103`–`COORD-106`.
 - **OUT_OF_SCOPE:** Password rotation, plaintext-secret persistence or output,
   broad authentication changes, global configuration, shell/curl exemptions,
   unrelated dirty changes, and clearing foreign, live, or uncertain claims.
-- **Owner / deployment / verification:** `ingenium-software-engineer-premium`
-  works directly as the sole writer and owns targeted verification and deployment.
-- **Acceptance / STOP_CONDITION:** PASS only after source tests, actual protected
-  access restoration, same-process broken-binding recovery with a fresh accepted
-  epoch and zero-mutation `@build` claim/release, restored plugin configuration,
-  deployment health/provenance, synthesis, visual-gate reconciliation, exact
-  commit, browser handoff readiness, and TodoWrite/roadmap reconciliation.
+- **Owner:** `@ingenium-software-engineer-premium`.
+- **Dependencies:** `AUTH-111` and `COORD-106`; both are required before the
+  post-C6 protected-credential recovery barrier can start.
+- **Acceptance:** Source tests, actual protected access restoration, same-process
+  broken-binding recovery with a fresh accepted epoch and zero-mutation `@build`
+  claim/release, restored plugin configuration, deployment health/provenance,
+  synthesis, visual-gate reconciliation, exact commit, browser handoff readiness,
+  and TodoWrite/roadmap reconciliation all pass.
+- **STOP_CONDITION:** `PASS` only after every acceptance item and applicable
+  source, runtime, deployment, synthesis, browser, and reconciliation gate passes;
+  explicit user `STOP`/`CANCELLED` is terminal; otherwise continue in scope or use
+  only the permitted escalation rule.
 - **Escalation:** Only unavailable configured access, an unauthorized irreversible
   operation, a mutually exclusive product decision, genuine ambiguity, or a root
   cause that remains unreproducible after bounded diagnosis.
+- **Verification owner:** `@ingenium-software-engineer-premium` owns the declared
+  focused source, runtime, deployment, synthesis, and handoff verification; no
+  separate subagent is assigned to this single-writer barrier.
+- **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Secret values never enter argv, environment values, logs,
   output, source, retained evidence, or Git. Credential replacement uses a
   contained no-follow path, same-directory mode-`0600` temporary file, fsync,
   rename, and rollback. Reconnection never clears foreign/live claims or uncertain
   footprints; concurrent reset has one winner.
-- **Tests / docs:** Focused Extension and API contracts cover missing/revoked
-  recovery, owner/step-up and identity/scope rejection, path/mode/symlink and
-  interruption rollback, exact exemption negatives, old token/epoch denial,
-  same-process reconnect, no-source-mutation, and unchanged fail-closed behavior.
-  Update only this roadmap and directly affected security/operations guidance.
-- **Phase/counts / territory:** One active writer, no subagents; exclusive
-  Extension reset/coordinator, focused auth contract, root plugin entry, affected
-  docs/tests, deployment evidence, and exact staging territory.
+- **Tests:** Focused Extension and API contracts cover missing/revoked recovery,
+  owner/step-up and identity/scope rejection, path/mode/symlink and interruption
+  rollback, exact exemption negatives, old token/epoch denial, same-process
+  reconnect, no-source-mutation, and unchanged fail-closed behavior.
+- **Docs:** Update only this roadmap and directly affected security/operations
+  guidance; never mutate Docs Workspace pages.
+- **Exclusive writer territory:** Extension reset/coordinator, focused auth
+  contract, root plugin entry, affected docs/tests, deployment evidence, and exact
+  staging territory; no overlapping writer or unrelated dirty-file changes.
+- **Phase/counts:** `C6R` post-`COORD-106` protected-credential recovery barrier;
+  1 writer / 0 nonwriters; no subagents or overlapping writer territory.
+- **Verification plan:** Run source/focused tests, protected owner access
+  restoration, same-process reset/reconnect and fresh-epoch checks, deployment
+  health/provenance, synthesis, visual-gate reconciliation, exact scoped commit,
+  browser handoff, and TodoWrite/roadmap reconciliation in dependency order; fix
+  only reproducible in-scope causes and rerun only the minimum proving regression.
+- **Causal remediation rule:** Fix the earliest proven reset, authentication,
+  binding, epoch, plugin-configuration, or deployment boundary; do not broaden
+  authentication or bypass the reset-only exemption, and do not patch downstream
+  symptoms.
+- **Finding classification:** Failed protected recovery, unsafe secret handling,
+  incorrect exemption, stale-epoch acceptance, or missing required gate is
+  `BLOCKING`; unrelated authentication or documentation drift is `FOLLOW_UP`;
+  retained evidence and bounded status context are `INFORMATIONAL`.
 
 ### Work started and bootstrap deadlock root cause
 
@@ -4549,3 +4629,373 @@ was retained. Completion-loss replay, local-error quarantine/recovery/dedupe,
 later typed-memory views, and B restart replay were not reached. Coordination/
 shared-memory acceptance remains **OPEN and RESUMABLE**, with no rollout `PASS`
 or new `(work-complete)` marker.
+
+### Plan/MCP recovery work opened (2026-09-02)
+
+`RECOVERY-100` is now the declared follow-up for chat-loss and parent-session
+recovery. Its acceptance remains **OPEN and RESUMABLE**: source inspection at
+revision `af5d725febf409d35795f60db1e0f05e23397336` is bounded source evidence,
+not deployment or model/session proof. The current protected-file consistency
+work covering a mode-`0400` credential becoming exact mode-`0600` is retained as
+source/test evidence only and remains started/incomplete; no deployed health,
+parent restart, real MCP recovery canary, QA/security report, actual
+model/session replay, or completion marker is inferred from that evidence.
+
+- [x] Define the Plan-only inspection and authorized MCP recovery sequence.
+- [x] Retain commit `af5d725` and the mode-`0400` to mode-`0600` credential
+  source/test remediation without treating focused source coverage as runtime
+  acceptance.
+- [ ] Verify the source and permission gates: Plan retains universal
+  skill/reference loading and remains limited to `read`, `glob`, `grep`,
+  `question`, and read-only `ingenium_coordination_status`; only content-only
+  general-MCP rotation uses the attested `live-MCP-reload` exception;
+  runtime/repository-sync credential or binding changes require a full parent
+  restart.
+- [ ] Rebuild and restart the parent OpenCode process from the current merged
+  source after any required plugin, MCP, configuration, or parent-binding
+  change, and retain the source revision and parent-restart evidence.
+- [ ] Verify deployed health and the actual MCP recovery canary against the
+  exact project, workspace, storage mapping, canonical worktree, audience, and
+  credential binding; retain typed actions, changed paths, checks/results,
+  current revision, task/todo/status/next-work, and fail-closed evidence for
+  unavailable or mismatched MCP, stopped runtime, stale proof, dirty footprint,
+  and quarantined epoch.
+- [ ] Retain exactly one bounded QA report and one bounded security report for
+  the predeclared recovery boundary, with each finding classified.
+- [ ] Retain actual model/session evidence from lost-turn recovery and parent
+  restart replay across external A, external B, and internal C; do not infer
+  this gate from source, a deployed canary, or a file-only/native-fork result.
+- [ ] Verify redaction, fail-closed behavior, and identity-checked run-owned
+  cleanup: preserve the first failure and bounded checksums/privacy results,
+  expose no secrets or transcript content, and use no broad deletion or claim
+  clearing.
+- [ ] Reconcile TodoWrite separately from the append-only marker log, confirm
+  this single `work-started` marker remains the only RECOVERY-100 marker until
+  every gate passes, and record non-empty acceptance evidence before any
+  matching `work-complete` marker.
+
+No `(work-complete)` marker is appended for `RECOVERY-100`.
+<!-- (work-started) RECOVERY-100 2026-09-02T20:07:00Z ingenium-docs -->
+Evidence RECOVERY-100: The content-free diagnosis isolated `credential_install:existing_target` as the current failure boundary. The current remediation is namespace-safe quarantine/restore; it remains unverified pending a runtime result. RECOVERY-100 remains work-started/incomplete, with no runtime success or `(work-complete)` marker claimed.
+Evidence RECOVERY-100: The patched generated reset still fails at `credential_install`. The source/test safety remediation is complete but unexecuted; this remains source/test evidence only, with no MCP or runtime pass claimed. The next causal step is bounded diagnosis of the content-free `credential_install` substage. The formal `work-started` marker remains the only RECOVERY-100 marker; no `(work-complete)` marker is recorded.
+
+### RECOVERY-100 six-boundary audit (2026-09-03)
+
+This append-only audit records the six distinct recovery boundaries identified
+by the current source and retained failure evidence. It does not add a
+completion marker: `RECOVERY-100` remains **OPEN and RESUMABLE**, and source
+inspection/tests do not substitute for deployed or actual model/session proof.
+
+1. **Plan all-skill/tools and parent loading.** The root
+   [`opencode.json`](../../opencode.json) denies `question` by default and gives
+   built-in Plan universal skill/reference loading plus `read`, `glob`, `grep`,
+   `question`, and read-only `ingenium_coordination_status`; custom agent
+   mappings deny `question`. Handoff or typed-memory reads remain authorized
+   `ingenium_coordination_handoff` `read`/`memory_read` operations, not Plan
+   grants. This is source/config evidence only. A full parent restart and
+   post-restart verification of the exact mapping, profile path, and effective
+   grants remain required.
+2. **Premium mapping loss.** The same root mapping owns the Premium model,
+   variant, prompt/profile path, and permissions; the profile is not a second
+   model source. A source read cannot prove what an existing parent session
+   retained after a mapping/profile change. The restart and effective-grant
+   check therefore remain an explicit recovery gate.
+3. **`credential_install` safety and the existing-target boundary.**
+   [`coordination-reset.ts`](../../packages/ingenium-extension/coordination-reset.ts)
+   fail-closes ancestor, existing-target, temporary-create/write, rename,
+   directory-sync, readback, and rollback stages, including regular-file,
+   owner, mode-`0600`, no-follow, link-count, and identity checks. Focused
+   [`coordination-reset.test.ts`](../../packages/ingenium-extension/coordination-reset.test.ts)
+   cases cover symlinked ancestors/targets, FIFO targets, hard-linked targets,
+   and interrupted rollback. Retained evidence still identifies
+   `credential_install:existing_target` as the current failure boundary; the
+   remediation remains unexecuted in a live reset and no runtime pass is
+   claimed.
+4. **Generated/package CLI bootstrap.** The package-owned
+   [`scripts/coordination-reset.ts`](../../packages/ingenium-extension/scripts/coordination-reset.ts)
+   entrypoint calls the reset runner, the package `bin` points to
+   `dist/scripts/coordination-reset.js`, and the package build asserts that
+   output exists. This proves source/package wiring only; installed invocation
+   by the restarted target parent remains unverified.
+5. **Post-reset MCP status authorization.**
+   [`mcp-client.ts`](../../packages/ingenium-extension/mcp-client.ts) requires
+   disconnect, connect, and status on the exact `ingenium` key, resolves the
+   bound directory, and accepts recovery only when the returned status is
+   `connected`. A denied, malformed, or mismatched status remains a bounded
+   failure rather than a healthy recovery result. No retained live artifact
+   proves an authorized post-reset status canary, so this gate remains open.
+6. **Documentation/Ponytail skill loading.** The Docs profile grants
+   `@ponytail`, but skill/reference loading is separate from tool permissions.
+   The direct `.opencode/skills/ponytail/SKILL.md` path is absent, while the
+   package's embedded
+   [`ponytail/skills/ponytail/SKILL.md`](../../packages/ingenium-extension/ponytail/skills/ponytail/SKILL.md)
+   exists. The resulting read-denial boundary must be resolved by verifying the
+   loaded skill/reference surface after a full parent restart; profile grants
+   alone are not proof of successful loading.
+
+No new `PASS` or `(work-complete)` marker is recorded. The formal
+`work-started` marker above remains the only `RECOVERY-100` marker until the
+source/permission, parent-restart, deployed health, MCP canary, actual
+model/session replay, bounded review, cleanup, and TodoWrite/roadmap gates pass.
+
+### RECOVERY-100 failure node and source-remediation evidence (2026-09-03)
+
+This append-only node records the earliest proven failure boundary without
+converting source inspection into runtime acceptance:
+
+- **Failure node:** The content-free reset diagnosis reaches
+  `credential_install:existing_target` and stops before a fresh credential can
+  produce an authorized post-reset MCP status. The retained result identifies
+  the failing substage, but does not establish a deeper filesystem cause.
+- **Root-cause boundary:** The first actionable boundary is therefore the
+  existing-target credential-install check. The namespace-safe quarantine/restore
+  path and the staged regular-file, owner, mode-`0600`, no-follow, link-count, and
+  identity checks in
+  [`coordination-reset.ts`](../../packages/ingenium-extension/coordination-reset.ts)
+  are the named source remediation. Focused cases in
+  [`coordination-reset.test.ts`](../../packages/ingenium-extension/coordination-reset.test.ts)
+  cover symlinked ancestors/targets, FIFO targets, hard-linked targets, and
+  interrupted rollback; those cases remain source/test evidence, not a live
+  reset result.
+- **Permission/profile remediation evidence:** The root
+  [`opencode.json`](../../opencode.json) now gives Plan universal
+  `skill: {"*": "allow"}` loading plus `read`, `glob`, `grep`, `question`, and
+  read-only `ingenium_coordination_status`. Root/profile mappings retain
+  semantic parity for permissions, while `prompt: "{file:...}"` loads prompt
+  content and does not import Markdown frontmatter as a second root mapping.
+  The hidden broker remains unmapped and wildcard-denied. The corresponding
+  [`projectOpenCodeGlobalConfig()` projection](../../scripts/project-opencode-global-config.mjs)
+  and [`resource-sync` agent import](../../packages/ingenium-extension/resource-sync.ts)
+  preserve root-authoritative runtime models and do not reintroduce model
+  metadata from Markdown profiles.
+- **Evidence limit:** These source/config/profile checks and the retained
+  mode-`0400` to mode-`0600` remediation do not prove a rebuilt parent, a fresh
+  parent-loaded permission surface, deployed health, an authorized MCP recovery
+  canary, or actual model/session behavior. No runtime `PASS` is claimed.
+
+The six audit boundaries above remain independently open where marked:
+parent/profile loading, Premium mapping retention, the live existing-target
+reset, installed/package CLI invocation, post-reset status authorization, and
+post-restart skill/reference loading. The original connection-closure canary,
+deployed health, real MCP recovery transport, external A/external B/internal C
+lost-turn and restart replay, bounded QA/security reports, redaction and
+identity-checked cleanup, and separate TodoWrite/roadmap reconciliation also
+remain required gates. No new `PASS` or `(work-complete)` marker is added.
+
+### RECOVERY-100 validator contradiction and stale root-allow failure node (2026-09-03)
+
+This append-only node records a validation failure and the resolved policy; it
+does not convert documentation or source inspection into runtime acceptance.
+
+- **Failure node:** A recovery validation pass combined a contradictory Plan
+  expectation with a stale API/root-level `allow` expectation. The result
+  treated Plan's universal skill/reference loading surface as if it granted the
+  mixed handoff tool, rather than distinguishing skill loading from tool
+  permissions and tool classification.
+- **Resolved policy:** Plan is **all skills plus status only** for coordination.
+  It may load all repository skills and references, and its exact tools remain
+  `read`, `glob`, `grep`, `question`, and read-only
+  `ingenium_coordination_status`. No API/root-level allow expectation may widen
+  that surface.
+- **Handoff boundary:** `ingenium_coordination_handoff` combines publish, read,
+  acknowledge, and consume operations, so it is write-classified as a whole.
+  Handoff and typed-memory reads therefore run in an authorized
+  coordination-capable session, not in Plan.
+- **Evidence limit:** This node documents the validator contradiction and
+  policy resolution only. `RECOVERY-100` remains **OPEN and RESUMABLE**; no
+  runtime, model/session, or `(work-complete)` claim is recorded.
+
+## Roadmap marker reconciliation ledger (2026-09-03)
+
+This append-only ledger classifies retained marker anomalies without deleting,
+reordering, rewriting, or treating them as new live work. The exact live-marker
+grammar remains limited to `(work-started)` and `(work-complete)` comments under a
+`Work marker log` heading; `TodoWrite` remains separate.
+
+- **Invalid/noncanonical syntax:** the protocol examples use the literal
+  `TASK-ID` placeholder and are documentation examples, not live markers. The
+  `roadmap:supersede` comment for `VAULT-101` is retained reconciliation metadata,
+  not a valid work marker. The `source-verified`, `blocked`, and `source-fixed`
+  comments in the `COORD-RESET-100` record are retained status evidence, not valid
+  work markers.
+- **Outside approved marker heading:** the `COORD-RESET-100` start/completion
+  comments and its retained status comments are inside the protected-reset
+  narrative rather than a `Work marker log` heading. The `RECOVERY-100`
+  `(work-started)` comment is under `Plan/MCP recovery work opened`, also outside
+  an approved marker heading. These records remain in place and are not relocated
+  or duplicated.
+- **Duplicate:** `VAULT-101` has two retained `(work-complete)` comments; its
+  reconciliation note identifies the later timestamp as authoritative, but both
+  comments remain immutable. `COORD-RESET-100` also repeats the noncanonical
+  `source-verified` and `blocked` status kinds; they remain status evidence only.
+- **Out-of-order:** `VAULT-101` has a completion timestamp of
+  `2026-08-02T02:41:27Z` after its `2026-08-03T00:06:18Z` start and before its
+  later completion. `AUTH-109` starts before the AUTH-100–108 barrier markers;
+  `OIDC-100` starts before its declared `RESTORE-103` predecessor; and
+  `COORD-103`–`COORD-106` starts are recorded in one sequence without predecessor
+  completion markers despite the C0–C6 barrier chain. Within the reset narrative,
+  the later `2026-08-27T14:32:35Z` and `2026-08-27T14:36:00Z` status timestamps
+  also regress behind the preceding `17:44:21Z` status record. These historical
+  order defects are recorded only.
+
+No ledger entry changes task state, creates a completion claim, or authorizes
+cleanup. `RECOVERY-100` remains **OPEN and RESUMABLE**; its existing retained
+`(work-started)` comment remains the only recovery marker and no `(work-complete)`
+marker is added.
+
+### RECOVERY-100 final review blocker and bootstrap-rotation check restoration (2026-09-03)
+
+The retained final QA/security evidence identifies a blocker: a mode-`0640`
+target was accepted while otherwise valid, showing that strict owner/mode
+enforcement was not preserved after the one-time bootstrap rotation. The causal
+remediation restores the strict owner and exact-mode checks on the post-rotation
+path. This is source/remediation evidence only; it makes no deployed-runtime,
+actual model/session, completion, or new-marker claim.
+
+Narrow marker readback remains unchanged: the existing `(work-started)` comment
+is the only `RECOVERY-100` marker, and no `(work-complete)` marker is added.
+
+### RECOVERY-100 current source-remediation state before verification (2026-09-03)
+
+The current source-remediation state is recorded before the verification wave
+executes:
+
+- **Strict target owner/mode fix:** The post-rotation existing-target path now
+  restores strict owner and exact-mode enforcement after final review identified
+  acceptance of a mode-`0640` target. This is remediation state only; no check,
+  commit, or runtime pass is claimed.
+- **Plan/root parity and test corrections:** Plan's universal skill/reference
+  loading and exact read-only tool surface remain distinct from the
+  root-authoritative mapping. The validator expectations and associated test
+  corrections were aligned to that boundary. No test pass is claimed before
+  retained execution evidence arrives.
+- **Final reviews:** The retained final reviews identified one blocker—the
+  post-rotation owner/mode acceptance gap above—and the named remediation is in
+  place. No additional review result or completion evidence is inferred.
+- **Browser-terminal verification wave:** The browser-terminal verification wave
+  has started and remains pending evidence for deployed health, real MCP recovery,
+  and actual model/session replay as applicable. Source, review, and test notes
+  do not substitute for those artifacts.
+
+RECOVERY-100 remains **OPEN and RESUMABLE**. No check, commit, deployed-runtime,
+MCP, model/session, or `(work-complete)` pass is claimed pending the retained
+verification evidence; the existing `(work-started)` comment remains the only
+RECOVERY-100 marker.
+
+### RECOVERY-100 verification-wave reconciliation (2026-09-03)
+
+This append-only node reconciles the current verification wave. The entries below
+are **SOURCE/STATIC** or **DIAGNOSTIC** evidence only; none is deployed-runtime,
+production-restart, MCP-canary, browser-canary, or actual model/session proof.
+
+- **SOURCE/STATIC — corrected scheduler contract:** The orchestrator contract now
+  assigns exactly two agents to each selected Todo, selects at most three
+  independent dependency-ready Todos, and therefore uses 2, 4, or 6 agents for
+  one, two, or three Todos. It does not add a third agent to a Todo or invent work
+  to fill capacity. The source is recorded in the
+  [`orchestrator` profile](../../.opencode/agents/primary/ingenium-orchestrator.md)
+  and the scheduler assertions in
+  [`test-agent-validation.sh`](../../tests/test-agent-validation.sh).
+- **SOURCE/STATIC — scheduler/QA boundary and shell-denied executable checks:**
+  The source policy keeps implementation verification separate from QA: QA starts
+  only after the implementation boundary is final, returns one bounded report,
+  and cannot delegate, remediate, or trigger another review. The managed hook and
+  wrapper source deny raw or malformed shell commands before execution, use
+  `shell: false`, allow only fixed executable/argv operations, and reject
+  executable Git configuration; the related wrapper and coordinator coverage is
+  source/static evidence, not a test-pass claim. See the
+  [`QA profile`](../../.opencode/agents/execution/ingenium-qa.md),
+  [`session-coordinator.ts`](../../packages/ingenium-extension/session-coordinator.ts),
+  and [`managed-command-wrapper.test.ts`](../../packages/ingenium-extension/managed-command-wrapper.test.ts).
+- **SOURCE/STATIC — replacement-first harness change:** The harness source now
+  orders typed handoff publication, replacement location or launch, replacement
+  health, session creation, handoff acknowledgement, and only then retirement of
+  the old parent. The focused source fixture retains the last safe phase on health
+  or retirement failure. No live replacement/restart artifact is retained from
+  this wave. See [`replacement-first.ts`](../../tests/coordination/replacement-first.ts)
+  and its [`coordination.test.ts`](../../tests/coordination/coordination.test.ts)
+  coverage.
+- **DIAGNOSTIC — production restart boundary:** Before this wave, no production
+  restart primitive was available to rebuild and restart the current merged
+  source. A fixed deployment mapping visible in source is not a deployed
+  primitive, does not retroactively establish that capability, and cannot replace
+  health evidence from the rebuilt target.
+- **DIAGNOSTIC — ranked MCP causes:** The highest-confidence observed boundary is
+  `credential_install:existing_target`; the retained content-free result stops
+  there before authorized post-reset status. The next-ranked possibility is the
+  underlying existing-target filesystem predicate (regular-file, owner, mode,
+  link-count, or identity state), which is not yet decomposed into a proven cause.
+  Post-reset rename/readback/rollback and MCP reconnect/status authorization are
+  downstream, unreached candidates rather than findings. No deeper cause or MCP
+  success is claimed; see [`coordination-reset.ts`](../../packages/ingenium-extension/coordination-reset.ts)
+  and [`mcp-client.ts`](../../packages/ingenium-extension/mcp-client.ts).
+- **DIAGNOSTIC — browser managed-mutation boundary:** The browser failure root is
+  at `managedMutation()` in
+  [`session-coordinator.ts`](../../packages/ingenium-extension/session-coordinator.ts):
+  tool arguments are classified or rejected in the coordinator's execution hooks
+  before the managed operation can proceed. Restarting alone cannot change that
+  source-level decision; the current source must be rebuilt and exercised by the
+  browser canary.
+
+#### Pending RECOVERY-100 gates
+
+- [ ] **Focused tests:** Run the declared scheduler/QA-boundary, shell-denial and
+  executable-configuration, replacement-first, MCP reset/status, and browser
+  managed-mutation checks; retain the first actionable failure and do not infer a
+  pass from source presence.
+- [ ] **Security review:** Retain exactly one bounded current-diff/dependency
+  review for the predeclared credential, permission, evidence, and recovery
+  surface, with each finding classified.
+- [ ] **Fresh parent and deployed health:** Obtain the authorized production
+  restart primitive, rebuild the current merged source, start a fresh parent, and
+  verify the loaded mapping/profile/skill surface, effective grants, and actual
+  health. A child-MCP restart alone is insufficient.
+- [ ] **MCP canary:** Run the real MCP recovery transport after the fresh parent
+  gate, verify the exact project/workspace/worktree/storage/audience/credential
+  binding and connected post-reset status, and retain typed recovery evidence.
+- [ ] **Browser canary:** Exercise the deployed browser path against the rebuilt
+  source, including the `managedMutation` decision and shell-denied executable
+  cases, with bounded console/network and owned-cleanup evidence.
+- [ ] **A/B/C acceptance:** Run simultaneous external A, external B, and internal
+  C sessions against one canonical identity and retain actual model/session proof
+  for typed actions, changed paths, checks/results, task/todo/status/next-work,
+  lost-turn recovery, and parent restart replay.
+
+No `(work-complete)` marker is appended. The existing `(work-started)` marker
+remains the only RECOVERY-100 marker until every pending gate passes.
+
+### RECOVERY-100 terminal reconciliation (2026-09-03)
+
+The scheduler pair policy is now aligned across source, documentation, and
+validators, and one bounded QA report is retained. The source/static checks
+explicitly recorded as passing remain source/static evidence only. The focused
+shell checks remain unexecuted, and no executable-test pass was produced. The
+replacement-first harness, production-neutral coordinator, fixed managed
+operation, process/session adapter, recorded QA/security blockers, and their
+causal remediations are source/static evidence only. Browser admission
+QA/security findings and the TOCTOU/shell-alias remediations are likewise
+source/static evidence only.
+
+The MCP cause remains unresolved between a stale parent and the credential
+target; the real canary is still pending. The two attempted paths have the same
+explicit outcome:
+
+- **Raw focused shell commands:** denied with exactly
+  `Managed shell coordination denied the command`.
+- **Existing encoded/managed `ingenium-build` attempt:** also denied by the
+  currently loaded parent with exactly
+  `Managed shell coordination denied the command`.
+
+The current parent cannot load the newly added admission before a restart, so no
+live replacement can start from this session. No parent restart, MCP/browser
+canary, or model/session evidence occurred.
+
+Pending category: **execution-admission**.
+
+- [ ] execution-admission: An externally authorized full parent launch/restart
+  must load current source before focused regressions and MCP/browser canaries.
+
+Resumable next step: an externally authorized full parent launch/restart loading
+the current source, then run the named focused regressions and canaries. No
+deployed-runtime, model/session, or `PASS` proof is recorded. RECOVERY-100
+remains **OPEN and RESUMABLE**; no `(work-complete)` marker is added.

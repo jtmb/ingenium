@@ -59,11 +59,12 @@ describe("MCP tool state API", () => {
       principal: { type: "user", id: owner.userId, scopes: ["user:*"], session: { id: "browser-session" } },
     } as any, project.id);
 
-    expect(catalog.size).toBe(231);
+    expect(catalog.size).toBe(232);
     expect(catalog.has("ingenium_coordination_handoff")).toBe(true);
+    expect(catalog.has("ingenium_coordination_memory_read")).toBe(true);
     expect(catalog.has("ingenium_context_get")).toBe(false);
     expect(catalog.has("ingenium_context_message_retrieve")).toBe(false);
-    expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "project")).toHaveLength(150);
+    expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "project")).toHaveLength(151);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "installation")).toHaveLength(32);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "organization")).toHaveLength(49);
     expect(Array.from(catalog.values()).some((tool) => tool.authorization?.target === "private")).toBe(false);
@@ -72,9 +73,9 @@ describe("MCP tool state API", () => {
     const response = await fetch(`${baseUrl}/mcp-tools?project=${project.name}&include_categories=true`);
     const body = await response.json();
     expect(response.status).toBe(200);
-    expect(body.total).toBe(231);
+    expect(body.total).toBe(232);
     expect(body.data).toHaveLength(27);
-    expect(body.counts).toEqual({ visibleTools: 231, visibleCategories: 27 });
+    expect(body.counts).toEqual({ visibleTools: 232, visibleCategories: 27 });
     expect(body.counts).not.toHaveProperty("canonicalTools");
     expect(body.counts).not.toHaveProperty("hiddenTools");
     expect(body.counts).not.toHaveProperty("canonicalCategories");
@@ -98,12 +99,12 @@ describe("MCP tool state API", () => {
     const authorizedNames = new Set(catalog.keys());
     const excludedNames = Array.from(mcpToolStates.getAllTools(project.id).keys()).filter((name) => !authorizedNames.has(name));
     expect(reportResponse.status).toBe(200);
-    expect(report.total).toBe(231);
-    expect(report.data.tools).toHaveLength(231);
+    expect(report.total).toBe(232);
+    expect(report.data.tools).toHaveLength(232);
     expect(report.data.catalog).toEqual({
       status: "conformant",
       issues: [],
-      authorizedVisibleExpected: { toolCount: 231, categoryCount: 27 },
+      authorizedVisibleExpected: { toolCount: 232, categoryCount: 27 },
     });
     expect(report.data.tools.every((tool: { name: string }) => authorizedNames.has(tool.name))).toBe(true);
     expect(excludedNames.some((name) => JSON.stringify(report).includes(name))).toBe(false);

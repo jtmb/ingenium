@@ -61,11 +61,22 @@ For a phase with `A` active agents, `W` permission-derived writers, and `R` read
 
 Every phase declaration must state `A`, `W`, and the read-only ceiling. If the phase is underfilled, its `UNUSED_CAPACITY` entry must state the unused active slots (`6 - A`) and writer slots (`3 - W`) with a concrete dependency, territory, or applicability reason. Every phase must stay at **≤6 active subagents and ≤3 permission-derived writers**; reserve exclusive territories and serialize overlaps.
 
-Valid full example: one phase with Fast, Docs, and Browser writers plus QA, Explore, and QA Vision read-only agents is **6 active / 3 writers** (`W = 3`, read-only ceiling `6 - W = 3`). A phase declaration must state those counts before dispatch.
+Valid full example: three independent selected Todos, each assigned one writer and one distinct scoped read-only partner, use **6 active / 3 writers** (`W = 3`, read-only ceiling `6 - W = 3`). A phase declaration must state those counts and pair assignments before dispatch; QA, security, and visual review pairs wait for their declared prerequisites.
+
+### 🔴 Exact-two Todo Allocation
+
+Before every phase, enumerate the independent, dependency-ready `TodoWrite`
+items and select up to three concurrently. Each selected Todo receives exactly
+one pair of exactly two agents in one parallel call: one, two, or three selected
+Todos use 2, 4, or 6 agents. If fewer than three are eligible, leave the
+remaining capacity unused; never invent a Todo or add a third agent. Pair
+members have distinct, non-overlapping responsibilities, and the three-writer
+maximum, exclusive territories, dependency order, and QA/security/visual review
+gates remain in force.
 
 ### 🔴 Shared Post-Wave Reviewer Phase
 
-After an implementation wave is finalized and its declared source verification is complete, schedule one post-wave phase for all independent, applicable read-only reviews that are safe to run together. `@ingenium-qa`, `@ingenium-security-auditor`, and `@ingenium-qa-vision` for an applicable UI change share that phase rather than being split for convenience. QA and security still wait for the relevant implementation boundary; visual QA waits for the final UI change. If a reviewer is blocked or not applicable, leave it out, record its unused active slot and the concrete dependency or applicability reason in `UNUSED_CAPACITY`, and do not manufacture substitute work. Each reviewer reports once per implementation wave and cannot recursively schedule another reviewer.
+After an implementation wave is finalized and its declared source verification is complete, schedule one post-wave phase for all independent, applicable read-only reviews that are safe to run together. `@ingenium-qa`, `@ingenium-security-auditor`, and `@ingenium-qa-vision` for an applicable UI change share that phase rather than being split for convenience. Each implementation boundary receives exactly one QA report and, only when the task contract predeclares a changed security surface, at most one eligible security report; visual QA waits for the final UI change. Reviewers have no task-delegation authority, cannot spawn one another, and cannot reopen a closed task. If a reviewer is blocked or not applicable, leave it out, record its unused active slot and the concrete dependency or applicability reason in `UNUSED_CAPACITY`, and do not manufacture substitute work. After a reviewer reports an in-scope BLOCKING finding and the writer remediates its named root cause, run only the named minimum targeted regression, then proceed directly to the declared deploy and acceptance steps; do not rerun any reviewer.
 
 ### Phase Declaration Protocol
 
@@ -75,12 +86,13 @@ Every task and phase declaration must record:
 2. **Writer count** — total writers (max 3)
 3. **Exclusive territories** — file/directory ownership per writer; zero overlap
 4. **Dependencies** — serialization order for writers sharing territories across waves
-5. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
-6. **`IN_SCOPE` and `OUT_OF_SCOPE` boundaries** — permitted work and excluded follow-up
-7. **Acceptance criteria and `STOP_CONDITION`** — observable completion and terminal outcomes
-8. **Verification and escalation rules** — targeted checks, bounded diagnosis, and the five permitted escalation conditions
-9. **Independent work streams** — every currently safe in-scope stream and its dependencies
-10. **`UNUSED_CAPACITY`** — unused active and writer slots, with concrete reasons whenever the phase is underfilled
+5. **Todo pair allocation** — selected dependency-ready Todos and exactly one pair of exactly two agents per selected Todo
+6. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
+7. **`IN_SCOPE` and `OUT_OF_SCOPE` boundaries** — permitted work and excluded follow-up
+8. **Acceptance criteria and `STOP_CONDITION`** — observable completion and terminal outcomes
+9. **Verification and escalation rules** — targeted checks, bounded diagnosis, and the five permitted escalation conditions
+10. **Independent work streams** — every currently safe in-scope stream and its dependencies
+11. **`UNUSED_CAPACITY`** — unused active and writer slots, with concrete reasons whenever the phase is underfilled
 
 ### User-Facing Communication
 

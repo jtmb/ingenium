@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
 import {
   decodeManagedArgv,
   decodeManagedBuildArgv,
@@ -12,11 +13,75 @@ import {
   managedBuildExecution,
   managedCommand,
   managedGitEnvironment,
+  managedReplacementFirstRestart,
   managedRepositoryArgv,
   runManagedCommandCli,
   validateManagedBuildArgv,
   validateManagedRepositoryArgv,
 } from "./scripts/managed-command-wrapper.js";
+import type {
+  ReplacementFirstRestartDependencies,
+  ReplacementFirstRestartEvidence,
+  ReplacementFirstRestartRequest,
+  RestartProcessIdentity,
+} from "./replacement-first-restart.js";
+import {
+  runProductionRestartAdapter,
+  type ProductionRestartAdapterDependencies,
+  type ProductionRestartBinding,
+  type ProductionRestartParentCandidate,
+} from "./scripts/production-restart.js";
+
+const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toString("hex").slice(0, 64);
+
+function replacementRequest(worktree: string): ReplacementFirstRestartRequest {
+  const oldDataHome = join(worktree, "old-data");
+  mkdirSync(oldDataHome);
+  return {
+    schemaVersion: 1,
+    worktree,
+    binding: {
+      projectId: "00000000-0000-4000-8000-000000000001",
+      workspaceId: "workspace-production",
+      launcherWorktree: worktree,
+      storageMappingHash: hash("a"),
+      audience: "mcp",
+    },
+    oldProcess: {
+      pid: 1001,
+      startTimeTicks: 2001,
+      executableSha256: hash("b"),
+      nonceSha256: hash("c"),
+    },
+    oldPort: 4100,
+    oldDataHome,
+    replacement: {
+      port: 5100,
+      dataHome: join(worktree, "replacement-data"),
+      expectedIdentity: { executableSha256: hash("b"), nonceSha256: hash("d") },
+    },
+    handoff: {
+      status: "working",
+      taskHash: hash("e"),
+      todos: { total: 2, pending: 1, inProgress: 1, completed: 0, cancelled: 0, state: "mixed" },
+      nextWork: { kind: "continue_task", referenceHash: hash("f") },
+    },
+    timeouts: {
+      handoffMs: 1_000,
+      launchMs: 1_000,
+      identityMs: 1_000,
+      healthMs: 1_000,
+      sessionMs: 1_000,
+      memoryAckMs: 1_000,
+      terminalIdleMs: 1_000,
+      retirementMs: 1_000,
+    },
+  };
+}
+
+function encodedRestart(request: ReplacementFirstRestartRequest | Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify(request)).toString("base64url");
+}
 
 describe("managed command wrappers", () => {
   it("decodes bounded argv without a shell and rejects unsupported commands", () => {
@@ -122,6 +187,11 @@ describe("managed command wrappers", () => {
       .toEqual({ command: "/usr/bin/docker", argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "restart", "ingenium"] });
     expect(managedBuildExecution(["deployment", "health"]))
       .toEqual({ command: "/usr/bin/curl", argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] });
+    expect(managedBuildExecution(["deployment", "production-restart"]))
+      .toEqual({
+        command: process.execPath,
+        argv: [join(dirname(fileURLToPath(import.meta.url)), "scripts", "production-restart.js")],
+      });
     expect(managedBuildExecution(["run", "typecheck"]))
       .toEqual({ command: `${dirname(process.execPath)}/npm`, argv: ["run", "typecheck"] });
     expect(managedBuildExecution(["agent-validation"]))
@@ -132,10 +202,448 @@ describe("managed command wrappers", () => {
       ["deployment", "compose-down"],
       ["deployment", "compose-up", "--remove-orphans"],
       ["deployment", "health", "https://attacker.invalid"],
+      ["deployment", "production-restart", "payload"],
       ["deployment", "mcp-status;touch-marker"],
     ]) {
       expect(isManagedDeploymentArgv(argv)).toBe(false);
       expect(() => managedBuildExecution(argv)).toThrow("Build wrapper rejected the command");
+    }
+  });
+
+  it("derives the fixed production restart request and preserves replacement-first ordering", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-adapter-"));
+    try {
+      const request = replacementRequest(worktree);
+      const binding: ProductionRestartBinding = {
+        ...request.binding,
+        apiUrl: "http://127.0.0.1:4097/api/v1",
+        project: "production-project",
+        credentialFile: join(worktree, ".opencode", ".ingenium-mcp-credential"),
+      };
+      const parent: ProductionRestartParentCandidate = {
+        binding: request.binding,
+        oldProcess: request.oldProcess,
+        oldPort: request.oldPort,
+        oldDataHome: request.oldDataHome,
+        handoff: request.handoff,
+        timeouts: request.timeouts,
+      };
+      const replacement: RestartProcessIdentity = {
+        pid: 1002,
+        startTimeTicks: 2002,
+        ...request.replacement.expectedIdentity,
+      };
+      const calls: string[] = [];
+      const dependencies: ProductionRestartAdapterDependencies<string> = {
+        canonicalWorktree: () => { calls.push("worktree"); return worktree; },
+        resolveBinding: async () => { calls.push("resolve-binding"); return binding; },
+        readParentCandidates: () => { calls.push("read-parent"); return [parent]; },
+        attestParentProcess: () => { calls.push("attest-parent"); return true; },
+        prepareReplacement: async () => {
+          calls.push("prepare");
+          return {
+            replacement: request.replacement,
+            dependencies: {
+              revalidateBinding: async () => { calls.push("binding"); return true; },
+              revalidateProcessIdentity: async (_identity, role) => { calls.push(`identity:${role}`); return true; },
+              persistHandoff: async () => { calls.push("publish"); },
+              launchReplacement: async (input) => { calls.push("launch"); input.bindProvisionalIdentity(replacement); return replacement; },
+              verifyReplacementHealth: async () => { calls.push("health"); },
+              createReplacementSession: async (_identity, _port, transactionSha256) => {
+                calls.push("session");
+                return { status: "created", transactionSha256, session: "fresh-session" };
+              },
+              acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
+                calls.push("memory-ack");
+                return { status: "acknowledged", handoffSha256, transactionSha256 };
+              },
+              awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => {
+                calls.push("terminal-idle");
+                return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
+              },
+              retireOldProcess: async () => { calls.push("retire-old"); },
+              stopReplacement: async () => { calls.push("stop-replacement"); },
+              persistEvidence: (entry) => { calls.push(`persist:${entry.phase}`); },
+            },
+            release: () => { calls.push("release"); },
+          };
+        },
+      };
+
+      await expect(runProductionRestartAdapter(dependencies)).resolves.toEqual({
+        handoffSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        replacementIdentitySha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      expect(calls).toEqual([
+        "worktree", "resolve-binding", "read-parent", "attest-parent", "prepare", "binding", "identity:old", "publish",
+        "persist:handoff_published", "launch", "identity:replacement", "persist:replacement_started", "health",
+        "persist:replacement_healthy", "session", "persist:session_created", "memory-ack",
+        "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged", "binding",
+        "identity:old", "identity:replacement", "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
+      ]);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects absent, ambiguous, or unattested production restart parents before launch", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-adapter-failure-"));
+    try {
+      const request = replacementRequest(worktree);
+      request.oldProcess.pid = process.pid;
+      const binding: ProductionRestartBinding = {
+        ...request.binding,
+        apiUrl: "http://127.0.0.1:4097/api/v1",
+        project: "production-project",
+        credentialFile: join(worktree, ".opencode", ".ingenium-mcp-credential"),
+      };
+      const parent: ProductionRestartParentCandidate = {
+        binding: request.binding,
+        oldProcess: request.oldProcess,
+        oldPort: request.oldPort,
+        oldDataHome: request.oldDataHome,
+        handoff: request.handoff,
+        timeouts: request.timeouts,
+      };
+      const replacement: RestartProcessIdentity = {
+        pid: process.pid + 1,
+        startTimeTicks: 2102,
+        ...request.replacement.expectedIdentity,
+      };
+      let retired = false;
+      let stopped: RestartProcessIdentity | undefined;
+      let released = false;
+      let prepared = 0;
+      const base = (parentCandidates: ProductionRestartParentCandidate[]): ProductionRestartAdapterDependencies<object> => ({
+        canonicalWorktree: () => worktree,
+        resolveBinding: async () => binding,
+        readParentCandidates: () => parentCandidates,
+        attestParentProcess: (candidate) => candidate.oldProcess.nonceSha256 !== hash("sentinel"),
+        prepareReplacement: async () => {
+          prepared += 1;
+          return {
+            replacement: request.replacement,
+            dependencies: {
+              revalidateBinding: async () => true,
+              revalidateProcessIdentity: async () => true,
+              persistHandoff: async () => {},
+              launchReplacement: async (input) => { input.bindProvisionalIdentity(replacement); return replacement; },
+              verifyReplacementHealth: async () => {},
+              createReplacementSession: async (_identity, _port, transactionSha256) => ({
+                status: "created", transactionSha256, session: {},
+              }),
+              acknowledgeTypedMemory: async () => { throw new Error("typed memory acknowledgement failed"); },
+              awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
+                status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
+              }),
+              retireOldProcess: async () => { retired = true; },
+              stopReplacement: async (identity) => { stopped = identity; },
+              persistEvidence: async () => {},
+            },
+            release: () => { released = true; },
+          };
+        },
+      });
+
+      await expect(runProductionRestartAdapter(base([])))
+        .rejects.toThrow("parent identity is absent or ambiguous");
+      await expect(runProductionRestartAdapter(base([parent, parent])))
+        .rejects.toThrow("parent identity is absent or ambiguous");
+      const forged = { ...parent, oldProcess: { ...parent.oldProcess, nonceSha256: hash("sentinel") } };
+      await expect(runProductionRestartAdapter(base([forged])))
+        .rejects.toThrow("parent launcher nonce is invalid");
+      expect(prepared).toBe(0);
+      await expect(runProductionRestartAdapter(base([parent])))
+        .rejects.toThrow("typed memory acknowledgement failed");
+      expect(retired).toBe(false);
+      expect(stopped).toEqual(replacement);
+      expect(released).toBe(true);
+      expect(() => process.kill(process.pid, 0)).not.toThrow();
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("orders replacement-first restart success through terminal idle before retiring the revalidated old process", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-first-"));
+    try {
+      const request = replacementRequest(worktree);
+      const replacement: RestartProcessIdentity = {
+        pid: 1002,
+        startTimeTicks: 2002,
+        executableSha256: request.replacement.expectedIdentity.executableSha256,
+        nonceSha256: request.replacement.expectedIdentity.nonceSha256,
+      };
+      const calls: string[] = [];
+      const evidence: ReplacementFirstRestartEvidence[] = [];
+      const dependencies: ReplacementFirstRestartDependencies<string> = {
+        revalidateBinding: async () => { calls.push("binding"); return true; },
+        revalidateProcessIdentity: async (_identity, role) => { calls.push(`identity:${role}`); return true; },
+        persistHandoff: async () => { calls.push("publish"); },
+        launchReplacement: async (input) => { calls.push("launch"); input.bindProvisionalIdentity(replacement); return replacement; },
+        verifyReplacementHealth: async () => { calls.push("health"); },
+        createReplacementSession: async (_identity, _port, transactionSha256) => {
+          calls.push("session");
+          return { status: "created", transactionSha256, session: "raw-session-id" };
+        },
+        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
+          calls.push("memory-ack");
+          return { status: "acknowledged", handoffSha256, transactionSha256 };
+        },
+        awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => {
+          calls.push("terminal-idle");
+          return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
+        },
+        retireOldProcess: async () => { calls.push("retire-old"); },
+        stopReplacement: async () => { calls.push("stop-replacement"); },
+        persistEvidence: (entry) => { calls.push(`persist:${entry.phase}`); evidence.push(entry); },
+      };
+
+      const result = await managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree);
+
+      expect(calls).toEqual([
+        "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
+        "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
+        "memory-ack", "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged",
+        "binding", "identity:old", "identity:replacement", "persist:retirement_committed", "retire-old", "persist:old_parent_retired",
+      ]);
+      expect(evidence.at(-1)).toMatchObject({ phase: "old_parent_retired", oldParentRetired: true, replacementStopped: false });
+      expect(result).toEqual({
+        handoffSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        replacementIdentitySha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      expect(JSON.stringify(evidence)).not.toContain("raw-session-id");
+      expect(JSON.stringify(evidence)).not.toContain('"pid"');
+
+      await expect(managedReplacementFirstRestart([JSON.stringify(request)], dependencies, worktree))
+        .rejects.toThrow("Replacement-first restart payload is invalid");
+      await expect(managedReplacementFirstRestart([encodedRestart({ ...request, rawSessionId: "secret-session" })], dependencies, worktree))
+        .rejects.toThrow("Replacement-first restart payload is invalid");
+      await expect(managedReplacementFirstRestart([encodedRestart({ ...request, worktree: `${worktree}/.` })], dependencies, worktree))
+        .rejects.toThrow("worktree must be a canonical absolute path");
+      await expect(managedReplacementFirstRestart([encodedRestart({
+        ...request,
+        replacement: { ...request.replacement, port: request.oldPort },
+      })], dependencies, worktree)).rejects.toThrow("port and data home must be distinct");
+      await expect(managedReplacementFirstRestart([encodedRestart({
+        ...request,
+        replacement: { ...request.replacement, dataHome: join(request.oldDataHome, "nested") },
+      })], dependencies, worktree)).rejects.toThrow("port and data home must be distinct");
+      await expect(managedReplacementFirstRestart([encodedRestart(request), encodedRestart(request)], dependencies, worktree))
+        .rejects.toThrow("requires one encoded payload");
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the old process active and stops only the re-attested replacement on restart pre-idle-ack failure", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-first-failure-"));
+    try {
+      const request = replacementRequest(worktree);
+      const replacement: RestartProcessIdentity = {
+        pid: 1102,
+        startTimeTicks: 2102,
+        executableSha256: request.replacement.expectedIdentity.executableSha256,
+        nonceSha256: request.replacement.expectedIdentity.nonceSha256,
+      };
+      const calls: string[] = [];
+      const evidence: ReplacementFirstRestartEvidence[] = [];
+      const dependencies: ReplacementFirstRestartDependencies<object> = {
+        revalidateBinding: async () => { calls.push("binding"); return true; },
+        revalidateProcessIdentity: async (_identity, role) => { calls.push(`identity:${role}`); return true; },
+        persistHandoff: async () => { calls.push("publish"); },
+        launchReplacement: async (input) => { calls.push("launch"); input.bindProvisionalIdentity(replacement); return replacement; },
+        verifyReplacementHealth: async () => { calls.push("health"); },
+        createReplacementSession: async (_identity, _port, transactionSha256) => {
+          calls.push("session");
+          return { status: "created", transactionSha256, session: {} };
+        },
+        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
+          calls.push("memory-ack");
+          return { status: "acknowledged", handoffSha256, transactionSha256 };
+        },
+        awaitTerminalIdleAcknowledgement: async () => { calls.push("terminal-idle"); throw new Error("idle acknowledgement failed"); },
+        retireOldProcess: async () => { calls.push("retire-old"); },
+        stopReplacement: async (identity) => {
+          expect(identity).toEqual(replacement);
+          calls.push("stop-replacement");
+        },
+        persistEvidence: (entry) => { calls.push(`persist:${entry.phase}`); evidence.push(entry); },
+      };
+
+      await expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree))
+        .rejects.toThrow("idle acknowledgement failed");
+
+      expect(calls).toEqual([
+        "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
+        "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
+        "memory-ack", "persist:typed_memory_acknowledged", "terminal-idle", "identity:replacement",
+        "stop-replacement", "persist:failed",
+      ]);
+      expect(calls).not.toContain("retire-old");
+      expect(evidence.at(-1)).toMatchObject({
+        phase: "failed",
+        lastCompletedPhase: "typed_memory_acknowledged",
+        oldParentRetired: false,
+        replacementStopped: true,
+      });
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("stops the provisionally bound replacement when restart launch attestation times out", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-launch-timeout-"));
+    vi.useFakeTimers();
+    try {
+      const request = replacementRequest(worktree);
+      const replacement: RestartProcessIdentity = {
+        pid: 1202,
+        startTimeTicks: 2202,
+        ...request.replacement.expectedIdentity,
+      };
+      let stopped: RestartProcessIdentity | undefined;
+      const dependencies: ReplacementFirstRestartDependencies<object> = {
+        revalidateBinding: async () => true,
+        revalidateProcessIdentity: async () => true,
+        persistHandoff: async () => {},
+        launchReplacement: async (input) => {
+          input.bindProvisionalIdentity(replacement);
+          return await new Promise<RestartProcessIdentity>(() => {});
+        },
+        verifyReplacementHealth: async () => {},
+        createReplacementSession: async (_identity, _port, transactionSha256) => ({
+          status: "created", transactionSha256, session: {},
+        }),
+        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
+          status: "acknowledged", handoffSha256, transactionSha256,
+        }),
+        awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
+          status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
+        }),
+        retireOldProcess: async () => {},
+        stopReplacement: async (identity) => { stopped = identity; },
+        persistEvidence: async () => {},
+      };
+
+      const assertion = expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree))
+        .rejects.toThrow("replacement launch timed out");
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(request.timeouts.launchMs + 1);
+      await assertion;
+      expect(stopped).toEqual(replacement);
+    } finally {
+      vi.useRealTimers();
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed or reused restart sessions, stale acknowledgements, and failed assistants before retirement", async () => {
+    for (const variant of ["malformed", "reused", "stale-ack", "failed-assistant"] as const) {
+      const worktree = mkdtempSync(join(tmpdir(), `ingenium-replacement-session-${variant}-`));
+      try {
+        const request = replacementRequest(worktree);
+        const replacement: RestartProcessIdentity = {
+          pid: 1302,
+          startTimeTicks: 2302,
+          ...request.replacement.expectedIdentity,
+        };
+        let retired = false;
+        let stopped = false;
+        const dependencies: ReplacementFirstRestartDependencies<object> = {
+          revalidateBinding: async () => true,
+          revalidateProcessIdentity: async () => true,
+          persistHandoff: async () => {},
+          launchReplacement: async (input) => { input.bindProvisionalIdentity(replacement); return replacement; },
+          verifyReplacementHealth: async () => {},
+          createReplacementSession: async (_identity, _port, transactionSha256) => {
+            if (variant === "malformed") return {} as any;
+            if (variant === "reused") return { status: "reused", transactionSha256, session: {} } as any;
+            return { status: "created", transactionSha256, session: {} };
+          },
+          acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
+            status: "acknowledged",
+            handoffSha256,
+            transactionSha256: variant === "stale-ack" ? hash("stale") : transactionSha256,
+          }),
+          awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
+            status: "idle",
+            handoffSha256,
+            transactionSha256,
+            assistantResult: variant === "failed-assistant" ? "error" : "completed",
+          } as any),
+          retireOldProcess: async () => { retired = true; },
+          stopReplacement: async () => { stopped = true; },
+          persistEvidence: async () => {},
+        };
+        const expected = variant === "malformed" || variant === "reused"
+          ? "Replacement session creation is invalid"
+          : variant === "stale-ack" ? "Typed memory acknowledgement is invalid" : "Terminal idle acknowledgement is invalid";
+
+        await expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree)).rejects.toThrow(expected);
+        expect(retired).toBe(false);
+        expect(stopped).toBe(true);
+      } finally {
+        rmSync(worktree, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("returns committed restart recovery when evidence persistence fails after the old process exits", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-committed-recovery-"));
+    try {
+      const request = replacementRequest(worktree);
+      const replacement: RestartProcessIdentity = {
+        pid: 1402,
+        startTimeTicks: 2402,
+        ...request.replacement.expectedIdentity,
+      };
+      const evidence: ReplacementFirstRestartEvidence[] = [];
+      let retired = false;
+      let stopped = false;
+      const dependencies: ReplacementFirstRestartDependencies<object> = {
+        revalidateBinding: async () => true,
+        revalidateProcessIdentity: async () => true,
+        persistHandoff: async () => {},
+        launchReplacement: async (input) => { input.bindProvisionalIdentity(replacement); return replacement; },
+        verifyReplacementHealth: async () => {},
+        createReplacementSession: async (_identity, _port, transactionSha256) => ({
+          status: "created", transactionSha256, session: {},
+        }),
+        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
+          status: "acknowledged", handoffSha256, transactionSha256,
+        }),
+        awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
+          status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
+        }),
+        retireOldProcess: async () => { retired = true; },
+        stopReplacement: async () => { stopped = true; },
+        persistEvidence: async (entry) => {
+          evidence.push(entry);
+          if (entry.phase === "old_parent_retired") throw new Error("evidence unavailable");
+        },
+      };
+
+      await expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree)).resolves.toEqual({
+        handoffSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        replacementIdentitySha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        recoveryState: "retirement_committed",
+      });
+      expect(retired).toBe(true);
+      expect(stopped).toBe(false);
+      expect(evidence.find((entry) => entry.phase === "retirement_committed")).toMatchObject({
+        retirementCommitted: true,
+        oldParentRetired: false,
+      });
+      expect(evidence.at(-1)).toMatchObject({
+        phase: "committed_recovery",
+        lastCompletedPhase: "retirement_committed",
+        retirementCommitted: true,
+        oldParentRetired: true,
+      });
+      expect(evidence.some((entry) => entry.phase === "failed")).toBe(false);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
     }
   });
 

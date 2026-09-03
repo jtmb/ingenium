@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionBinding } from "./extension-binding.js";
@@ -29,7 +29,11 @@ type OperationalMemoryFixture = Args & {
 };
 const sharedWorktree = mkdtempSync(join(tmpdir(), "ingenium-coordination-worktree-"));
 mkdirSync(join(sharedWorktree, "src"));
+const browserWrapperPath = ".opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh";
+mkdirSync(join(sharedWorktree, ".opencode/skills/mcp-tooling/references/dev-browser"), { recursive: true });
+writeFileSync(join(sharedWorktree, browserWrapperPath), "#!/bin/bash\n");
 execFileSync("git", ["-C", sharedWorktree, "init", "--quiet"]);
+commitBrowserWrapper(sharedWorktree);
 
 afterAll(() => rmSync(sharedWorktree, { recursive: true, force: true }));
 
@@ -39,6 +43,16 @@ function text(data: unknown) {
 
 function opaqueSessionId(value: string): string {
   return `session-${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function browserWrapperCommand(script: string): string {
+  return `${browserWrapperPath} <<'EOF'\n${script}\nEOF`;
+}
+
+function commitBrowserWrapper(worktree: string): void {
+  execFileSync("git", ["-C", worktree, "add", "--", browserWrapperPath]);
+  execFileSync("git", ["-C", worktree, "-c", "user.name=Browser Wrapper Test", "-c", "user.email=browser-wrapper@example.invalid",
+    "commit", "--quiet", "-m", "browser wrapper fixture"]);
 }
 
 function coordinationBlock(output: string[], label: "COORDINATION_MEMORY_V2" | "COORDINATION_ACTIVITY_V1"): string | undefined {
@@ -1250,6 +1264,184 @@ describe("SessionCoordinatorPlugin hooks", () => {
     )).resolves.toBeUndefined();
   });
 
+  it("admits only the canonical browser wrapper for trusted browser-agent evidence", async () => {
+    const fixture = coordinationFixture();
+    const evidence = { sessionID: "browser-session", callID: "browser-call", tool: "bash", args: {}, agent: "browser-agent" };
+    const process = processHarness("browser-project", "/tmp/browser/home", "/tmp/browser/xdg", 43028, {});
+    const runtimeClient = trustedOpenCodeClient(process.worktree, evidence);
+    process.client = runtimeClient;
+    const hooks = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, now: () => 307, token: () => "B".repeat(32), disableHeartbeat: true,
+    }).hooks();
+    const command = browserWrapperCommand("console.log(JSON.stringify(await browser.listPages()));");
+    evidence.tool = "shell";
+    evidence.callID = "browser-shell-alias";
+    evidence.args = { command };
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "shell", sessionID: evidence.sessionID, callID: evidence.callID }, { args: evidence.args },
+    )).rejects.toThrow("Managed shell coordination denied the command");
+    expect(runtimeClient.session.get).not.toHaveBeenCalled();
+
+    evidence.callID = "browser-alias-evidence";
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID }, { args: evidence.args },
+    )).rejects.toThrow("Managed shell coordination denied the command");
+    expect(runtimeClient.session.get).toHaveBeenCalledTimes(1);
+    expect(runtimeClient.session.messages).toHaveBeenCalledTimes(1);
+    runtimeClient.session.get.mockClear();
+    runtimeClient.session.messages.mockClear();
+
+    evidence.tool = "bash";
+    evidence.callID = "browser-call";
+    evidence.args = { command };
+    const input = { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID, args: evidence.args };
+
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: evidence.sessionID } } } as any });
+    await expect(hooks["tool.execute.before"]!(input, { args: input.args })).resolves.toBeUndefined();
+    await expect(hooks["tool.execute.after"]!(input, { title: "", output: "[]", metadata: {} })).resolves.toBeUndefined();
+    expect(runtimeClient.session.get).toHaveBeenCalledTimes(1);
+    expect(runtimeClient.session.messages).toHaveBeenCalledTimes(1);
+    expect(fixture.calls.some(({ tool }) => tool === "coordination_claim")).toBe(false);
+
+    for (const agent of ["ingenium-software-engineer-fast", "ingenium-software-engineer-premium", "ingenium-qa"]) {
+      evidence.agent = agent;
+      evidence.callID = `browser-denied-${agent}`;
+      evidence.args = { command };
+      const denied = { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID, args: evidence.args };
+      await expect(hooks["tool.execute.before"]!(denied, { args: denied.args }))
+        .rejects.toThrow("Managed shell coordination denied the command");
+    }
+
+    const unavailableIdentity = processHarness("browser-no-identity", "/tmp/browser-no-identity/home", "/tmp/browser-no-identity/xdg", 43030, {});
+    const unavailableHooks = new SessionCoordinator(unavailableIdentity, {
+      binding: unavailableIdentity.binding, disableHeartbeat: true,
+    }).hooks();
+    await expect(unavailableHooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: "browser-no-identity", callID: "browser-no-identity" }, { args: { command } },
+    )).rejects.toThrow("Managed shell coordination denied the command");
+
+    evidence.agent = "browser-agent";
+    for (const candidate of [
+      `./${command}`,
+      `${join(process.worktree, browserWrapperPath)} <<'EOF'\nconsole.log(1);\nEOF`,
+      `bash ${command}`,
+      `${browserWrapperPath.replace("dev-browser/", "dev-browser/../dev-browser/")} <<'EOF'\nconsole.log(1);\nEOF`,
+      `${command} && npm test`,
+      `${command} > browser.log`,
+      `${command} $(npm test)`,
+      `npm test; ${command}`,
+      `${browserWrapperPath} < browser-script.js`,
+      `node browser-script.js | ${browserWrapperPath}`,
+      `${browserWrapperPath} <<'EOF'\nconsole.log(1);\nEOF\nnpm test\nEOF`,
+    ]) {
+      evidence.callID = `browser-malformed-${candidate.length}`;
+      evidence.args = { command: candidate };
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID }, { args: evidence.args },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+    }
+    for (const args of [
+      { command, environment: { PATH: "/tmp" } },
+      { command, workdir: `${process.worktree}/.` },
+      { command, workdir: "/tmp" },
+    ]) {
+      evidence.callID = `browser-args-${JSON.stringify(args).length}`;
+      evidence.args = args;
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID }, { args },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+    }
+  });
+
+  it("rejects a symlink at the canonical browser wrapper path", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-browser-wrapper-symlink-"));
+    try {
+      execFileSync("git", ["-C", directory, "init", "--quiet"]);
+      mkdirSync(join(directory, ".opencode/skills/mcp-tooling/references/dev-browser"), { recursive: true });
+      writeFileSync(join(directory, "wrapper-target.sh"), "#!/bin/bash\n");
+      symlinkSync(join(directory, "wrapper-target.sh"), join(directory, browserWrapperPath));
+      const evidence = {
+        sessionID: "browser-symlink-session", callID: "browser-symlink-call", tool: "bash",
+        args: { command: browserWrapperCommand("console.log(1);") }, agent: "browser-agent",
+      };
+      const process = processHarness("browser-symlink-project", "/tmp/browser-symlink/home", "/tmp/browser-symlink/xdg", 43029, {}, directory);
+      const runtimeClient = trustedOpenCodeClient(directory, evidence);
+      process.client = runtimeClient;
+      const hooks = new SessionCoordinator(process, { binding: process.binding, disableHeartbeat: true }).hooks();
+
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID }, { args: evidence.args },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+      expect(runtimeClient.session.get).not.toHaveBeenCalled();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("executes the verified browser wrapper bytes after its pathname is swapped", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-browser-wrapper-swap-"));
+    try {
+      execFileSync("git", ["-C", directory, "init", "--quiet"]);
+      mkdirSync(join(directory, ".opencode/skills/mcp-tooling/references/dev-browser"), { recursive: true });
+      const wrapper = join(directory, browserWrapperPath);
+      writeFileSync(wrapper, "#!/bin/bash\n/usr/bin/printf '%s' \"$1\"\n");
+      commitBrowserWrapper(directory);
+      const fixture = coordinationFixture();
+      const evidence = {
+        sessionID: "browser-swap-session", callID: "browser-swap-call", tool: "bash",
+        args: { command: browserWrapperCommand("console.log(1);") }, agent: "browser-agent",
+      };
+      const process = processHarness("browser-swap-project", "/tmp/browser-swap/home", "/tmp/browser-swap/xdg", 43031, {}, directory);
+      const runtimeClient = trustedOpenCodeClient(directory, evidence);
+      process.client = runtimeClient;
+      const hooks = new SessionCoordinator(process, {
+        binding: process.binding, callTool: fixture.callTool, disableHeartbeat: true,
+      }).hooks();
+      const input = { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID, args: evidence.args };
+      const output = { args: input.args };
+
+      await hooks.event!({ event: { type: "session.created", properties: { info: { id: evidence.sessionID } } } as any });
+      await expect(hooks["tool.execute.before"]!(input, output)).resolves.toBeUndefined();
+      expect(output.args.command).not.toContain(browserWrapperPath);
+      renameSync(wrapper, `${wrapper}.verified`);
+      writeFileSync(wrapper, "#!/bin/bash\n/usr/bin/printf compromised\n");
+      expect(execFileSync("/bin/bash", ["-c", output.args.command], { encoding: "utf8" })).toBe("console.log(1);");
+      await expect(hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} })).resolves.toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a changed regular browser wrapper and a hardlinked wrapper", async () => {
+    for (const variant of ["changed", "hardlink"] as const) {
+      const directory = mkdtempSync(join(tmpdir(), `ingenium-browser-wrapper-${variant}-`));
+      try {
+        execFileSync("git", ["-C", directory, "init", "--quiet"]);
+        mkdirSync(join(directory, ".opencode/skills/mcp-tooling/references/dev-browser"), { recursive: true });
+        const wrapper = join(directory, browserWrapperPath);
+        writeFileSync(wrapper, "#!/bin/bash\n/usr/bin/printf trusted\n");
+        commitBrowserWrapper(directory);
+        if (variant === "changed") writeFileSync(wrapper, "#!/bin/bash\n/usr/bin/printf compromised\n");
+        else linkSync(wrapper, `${wrapper}.alias`);
+        const evidence = {
+          sessionID: `browser-${variant}-session`, callID: `browser-${variant}-call`, tool: "bash",
+          args: { command: browserWrapperCommand("console.log(1);") }, agent: "browser-agent",
+        };
+        const process = processHarness(`browser-${variant}-project`, `/tmp/browser-${variant}/home`, `/tmp/browser-${variant}/xdg`, 43032, {}, directory);
+        const runtimeClient = trustedOpenCodeClient(directory, evidence);
+        process.client = runtimeClient;
+        const hooks = new SessionCoordinator(process, { binding: process.binding, disableHeartbeat: true }).hooks();
+
+        await expect(hooks["tool.execute.before"]!(
+          { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID }, { args: evidence.args },
+        )).rejects.toThrow("Managed shell coordination denied the command");
+        expect(runtimeClient.session.get).not.toHaveBeenCalled();
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("trusteddeployment admits fixed operations only for trusted Premium runtime evidence", async () => {
     const fixture = coordinationFixture();
     const evidence = { sessionID: "deployment-session", callID: "", tool: "bash", args: {}, agent: "" };
@@ -1475,7 +1667,6 @@ describe("SessionCoordinatorPlugin hooks", () => {
       { tool: "rename", args: { from: "src/old.ts", to: "src/new.ts" } },
       { tool: "apply_patch", args: { patchText: "*** Begin Patch\n*** Add File: src/patch.ts\n+x\n*** End Patch" } },
       { tool: "bash", args: { command: `ingenium-repository ${encoded(["add", "src/write.ts"])}` } },
-      { tool: "bash", args: { command: `ingenium-build ${encoded(["run", "typecheck"])}` } },
     ];
     for (const [index, entry] of cases.entries()) {
       const input = { ...entry, sessionID, callID: `offline-${index}` };
@@ -1483,6 +1674,10 @@ describe("SessionCoordinatorPlugin hooks", () => {
       await expect(hooks["tool.execute.after"]!(input, { title: "local success", output: "private", metadata: {} }))
         .resolves.toBeUndefined();
     }
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID, callID: "offline-build" },
+      { args: { command: `ingenium-build ${encoded(["run", "typecheck"])}` } },
+    )).rejects.toThrow("Managed shell coordination denied the command");
 
     const state = (coordinator as any).sessions.get(sessionID);
     expect(state.remoteRegistered).toBe(false);

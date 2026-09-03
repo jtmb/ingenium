@@ -25,7 +25,7 @@ permission:
     "@local-models": allow
     "@skill-maintenance": allow
     "@ponytail": allow
-    "*": deny
+    "*": allow
 ---
 
 # Browser Agent — Web Automation & Site Interaction

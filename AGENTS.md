@@ -16,7 +16,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 |---------|-------------|
 | [🔴 HARD RULEs](#-hard-rules-summary) | Non-negotiable rules |
 | [Repository Structure](#repository-structure) | Package and service layout |
-| [🔴 Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) | 6-active/3-writer concurrency, writer tiers, phase declarations |
+| [🔴 Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) | Paired Todo scheduling, 6-active/3-writer concurrency, writer tiers, phase declarations |
 | [Database Isolation](#-mandatory--database-isolation) | DB access boundaries |
 | [Docker Deployment](#docker-deployment) | Ports, volumes, health |
 | [Testing](#testing) | Test commands |
@@ -114,24 +114,24 @@ services/
 
 ## Agent Table
 
-**12 agents total: 2 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference. The hidden `ingenium-llm-broker` is a system-internal agent reserved for the LLM broker (never invoked directly, not listed as modeled). The `browser-agent` handles web automation and self-healing site interaction.
+**12 agents total: 2 primary + 10 subagents.** Every user-facing active agent is documented as able to load all repository skills and their `references/` material; this loading surface is separate from file, shell, MCP, and delegation grants. The hidden `ingenium-llm-broker` is a system-internal agent reserved for the LLM broker (never invoked directly, not listed as modeled), and is deliberately excluded from repository skill/reference loading. The `browser-agent` handles web automation and self-healing site interaction.
 
 > **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown agent profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment. See [`opencode.json`](./opencode.json).
 
 | Agent | Type | Mode | Skills Allowed |
 |-------|------|------|----------------|
-| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions`, `ponytail` |
-| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | `ponytail` |
-| **ingenium-explore** | Subagent | Research and exploration | `local-models`, `ponytail` |
-| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models`, `mcp-tooling`, `documentation`, `ponytail` |
-| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `ponytail` |
-| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All 10 canonical skills, plus `ponytail` |
-| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All 10 canonical skills, plus `ponytail` |
-| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All 10 canonical skills, plus `ponytail` |
-| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All 10 canonical skills, plus `ponytail` |
-| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All 10 canonical skills, plus `ponytail` |
-| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `ponytail` |
-| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`enabled: true`, `hidden: true`), immutable, wildcard-denied with no tool allowances | — |
+| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | All repository skills/references |
+| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | All repository skills/references |
+| **ingenium-explore** | Subagent | Research and exploration | All repository skills/references |
+| **ingenium-scout** | Subagent | Research + Docs RAG | All repository skills/references |
+| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | All repository skills/references |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All repository skills/references |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All repository skills/references |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All repository skills/references |
+| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All repository skills/references |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All repository skills/references |
+| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | All repository skills/references |
+| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`enabled: true`, `hidden: true`), immutable, wildcard-denied with no tool allowances | — (excluded) |
 
 > Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. Archived profiles at `.opencode/archive/agents/`.
 >
@@ -157,6 +157,49 @@ mapping.
 | `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
 | `ingenium-chat` | `deepseek/deepseek-v4-flash` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
 | `ingenium-security-auditor` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/security/ingenium-security-auditor.md` |
+
+### Root-effective grants and repository skill loading
+
+OpenCode computes a session's effective grants from the root `opencode.json`
+defaults plus the exact `agent.<name>` mapping and the mapped profile. An explicit
+agent rule overrides the inherited root rule; an omitted rule inherits the root
+default. The root mapping also selects the model, variant, and profile path, so an
+agent label alone does not prove which permissions are active. Inspect the exact
+case-sensitive mapping, prompt/profile path, and resulting permission object when
+recovering a lost session.
+
+Root/profile semantic parity has two separate checks. The root mapping is the
+runtime authority for effective tool grants, model, variant, and the prompt-file
+reference; the mapped Markdown profile carries the corresponding public metadata
+and permission declaration. A `prompt: "{file:...}"` entry loads the file's
+prompt body. Its YAML frontmatter is not imported as a second root agent mapping
+and cannot override the root model, variant, or effective grants. Keep the root
+mapping and profile declaration aligned, but do not treat profile frontmatter as
+a second runtime configuration source.
+
+Repository skill/reference loading is a separate documented capability: every
+user-facing active agent, including built-in Plan and the hidden Chat-page agent,
+may load every repository skill and its `references/` files. For custom profiles,
+the root mapping and profile permission blocks express this universal surface as
+`skill: {"*": "allow"}`. It does not grant `edit`, `write`, `bash`, MCP,
+delegation, or interactive-question access by itself.
+
+Built-in Plan has that all-skill loading surface plus the exact tool allowance
+`read`, `glob`, `grep`, `question`, and the read-only
+`ingenium_coordination_status`. The status tool reads durable status for an exact
+session identity; Plan has no coordination update, claim, release, or handoff
+grant. The hidden immutable `ingenium-llm-broker` remains excluded from both
+skill/reference loading and all tools; do not broaden it to repair a user-facing
+read denial.
+
+The root-effective question boundary is explicit: root `question: deny` is
+overridden only by built-in Plan's `question: allow`; custom agents retain
+`question: deny`. Plan's file mutation and shell grants remain denied. Handoff and
+typed-memory reads use `ingenium_coordination_handoff` with the `read` or
+`memory_read` operation from an authorized coordination-capable session; that
+combined publish/read tool is not part of Plan's grant. Epoch `recovery_state`,
+`reconcile_epoch`, and `recover_epoch` remain operations on
+`ingenium_coordination_update`, not Plan permissions.
 
 ### TodoWrite ownership
 
@@ -344,14 +387,37 @@ all six active slots for read-only agents. The phase still has a maximum of six
 active subagents and three writers, and every unused active or writer slot must
 remain explicitly justified under `UNUSED_CAPACITY`.
 
-Before every phase, enumerate all currently known independent in-scope work
-streams and their dependencies. Dispatch every stream that is currently safe in
-one parallel call, up to the 6-active/3-writer limits; never serialize
-independent, non-overlapping work. Do not manufacture speculative work merely to
-fill capacity. QA and visual review wait for their relevant implementation to be
-finalized; security additionally requires a predeclared changed security surface.
-Overlapping writers serialize, and Docs runs only when canonical documentation is
-directly affected or explicitly requested.
+Before every phase, enumerate all currently known independent, in-scope
+`TodoWrite` items and their dependencies. Select up to three independent,
+dependency-ready Todos and dispatch exactly one pair of exactly two agents for
+each selected Todo in one parallel call. One, two, or three eligible Todos
+therefore use 2, 4, or 6 agents respectively. Do not invent work or add a third
+agent to a Todo. QA and visual review wait for their relevant implementation to
+be finalized; security additionally requires a predeclared changed security
+surface. Pair members must have non-overlapping responsibilities, and all
+writer-territory, writer-count, and dependency rules remain in force. Overlapping
+writers serialize, and Docs runs only when canonical documentation is directly
+affected or explicitly requested.
+
+### TodoWrite Allocation
+
+Every active `TodoWrite` item is handled by exactly one pair of exactly two agents.
+The pair is the complete agent assignment for that Todo: pair members must have
+non-overlapping responsibilities, and no third agent may be assigned to or added
+to that Todo.
+
+Run up to three independent, dependency-ready Todos concurrently. Each selected
+Todo contributes one pair, so a phase uses at most three pairs and six active
+agents. If only one or two eligible Todos exist, use only one or two pairs (2 or
+4 agents); do not invent work or pad capacity. A dependent review Todo is not
+eligible until its implementation is finalized. A pair may be phase-gated by a
+dependency, but the gated member is not replaced by a third agent. Permission-
+derived writer accounting, exclusive writer territories, the three-writer
+maximum, and all review-timing rules remain in force.
+
+Before dispatch, record each Todo's pair, each member's distinct responsibility,
+and any dependency. Preserve dependency safety and never start a review before
+its implementation is final.
 
 ### Writer Tiers and Routing
 
@@ -370,47 +436,66 @@ The non-writer agents are `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`
 
 ### Scheduling Examples
 
-The following implementation phase uses **5 active, 3 permission-derived
-writers**. Slot 6 remains unused because QA must wait for the relevant
-implementation to be finalized.
+Each example assigns the same Todo to both members of its pair. A dependent
+review is a separate Todo and is scheduled only after the relevant implementation
+is finalized.
 
 ```text
-Phase: "Dashboard implementation, direct docs, and browser work"
-Independent streams: dashboard implementation; direct docs; browser recipes; pattern search; context retrieval; post-wave QA (dependent)
-  @ingenium-software-engineer-fast → dashboard/components/ (writer)
-  @ingenium-docs                   → docs/              (writer)
-  @browser-agent                   → browser recipes/   (writer)
-  @ingenium-explore                → search patterns    (non-writer)
-  @ingenium-scout                  → retrieve context   (non-writer)
+GOOD — one eligible Todo (2 active, 1 pair, 1 writer)
+Independent TodoWrite items: validation-message implementation
+  Pair "validation-message implementation":
+    @ingenium-software-engineer-fast → ValidationMessage.tsx + focused test (writer; exclusive territory)
+    @ingenium-explore                → inventory existing validation patterns (read-only; separate responsibility)
 UNUSED_CAPACITY:
-  active slot 6 → reserved for post-wave QA; premature until relevant implementation is finalized
-  writer slots → none
+  active slots 3–6 → no other eligible Todo; the QA Todo depends on final implementation
+  writer slots 2–3 → no other eligible writer territory
 
-Phase: "Full independent implementation and finalized review" (6 active, 3 writers)
-Independent streams: extension implementation; report API; directly affected report docs; finalized CLI QA; finalized auth security review; finalized dashboard visual review
-  @ingenium-software-engineer-fast    → extension/       (writer)
-  @ingenium-software-engineer-premium → report API/      (writer)
-  @ingenium-docs                      → report docs/     (writer)
-  @ingenium-qa                        → finalized CLI    (non-writer)
-  @ingenium-security-auditor          → finalized auth   (non-writer)
-  @ingenium-qa-vision                 → finalized UI     (non-writer)
+GOOD — two eligible Todos (4 active, 2 pairs, 2 writers)
+Independent TodoWrite items: extension implementation; report API
+  Pair "extension implementation":
+    @ingenium-software-engineer-fast → extension/ (writer; exclusive territory)
+    @ingenium-explore                → inspect extension call sites (read-only; separate responsibility)
+  Pair "report API":
+    @ingenium-software-engineer-premium → API routes (writer; exclusive territory)
+    @ingenium-scout                     → retrieve the existing API contract (read-only; separate responsibility)
+UNUSED_CAPACITY:
+  active slots 5–6 → only two dependency-ready Todos exist; no speculative third Todo
+  writer slot 3 → no third eligible writer territory
+
+GOOD — three eligible Todos (6 active, 3 pairs, 3 writers)
+Independent TodoWrite items: extension implementation; report API; directly affected report docs
+  Pair "extension implementation":
+    @ingenium-software-engineer-fast → extension/ (writer; exclusive territory)
+    @ingenium-explore                → inspect extension call sites (read-only; separate responsibility)
+  Pair "report API":
+    @ingenium-software-engineer-premium → API routes (writer; exclusive territory)
+    @ingenium-scout                     → retrieve the existing API contract (read-only; separate responsibility)
+  Pair "directly affected report docs":
+    @ingenium-docs    → canonical report docs (writer; exclusive territory)
+    @ingenium-explore → inventory links and commands (read-only; separate responsibility; separate invocation)
 UNUSED_CAPACITY: none
 
-Phase: "Independent finalized reviews and research" (6 active, 0 writers)
-Independent streams: two independent code searches; decision retrieval; finalized QA; finalized security review; finalized visual review
-  @ingenium-explore          → dashboard search   (non-writer)
-  @ingenium-explore          → API search         (non-writer)
-  @ingenium-scout            → decision retrieval (non-writer)
-  @ingenium-qa               → finalized QA       (non-writer)
-  @ingenium-security-auditor → finalized security (non-writer)
-  @ingenium-qa-vision        → finalized visual   (non-writer)
+GOOD — three finalized/research Todos (6 active, 0 writers, 3 pairs)
+Independent TodoWrite items: dashboard search; API search; finalized dashboard visual review
+  Pair "dashboard search":
+    @ingenium-explore → inspect dashboard sources (read-only; search responsibility)
+    @ingenium-scout   → retrieve related decisions (read-only; context responsibility)
+  Pair "API search":
+    @ingenium-explore → inspect API routes (read-only; search responsibility; separate invocation)
+    @ingenium-qa      → check the declared API contract (read-only; verification responsibility)
+  Pair "finalized dashboard visual review":
+    @ingenium-qa-vision → collect visual evidence (read-only; visual responsibility)
+    @ingenium-explore   → inspect the finalized route boundary (read-only; source responsibility; separate invocation)
 UNUSED_CAPACITY:
   active slots → none
   writer slots 1–3 → read-only phase; no implementation or remediation stream is eligible
 
 BAD:
-  Dispatch one writer and defer safe, non-overlapping Docs or research streams
-  for convenience, or fill an active slot with QA before its implementation is finalized.
+  Run one agent on a Todo while its ready pair member is omitted, assign agents
+  from different pairs to one Todo, add a third agent to a Todo, dispatch four
+  or six agents across four or six Todos, invent work to fill a pair, or start
+  QA/visual/security review before the relevant dependency and security-surface
+  requirements are satisfied.
 ```
 
 No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
@@ -426,12 +511,13 @@ Every task and phase MUST declare before dispatch:
 5. **Verification plan** — targeted checks, deployment/acceptance steps, bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for each remediation
 6. **Escalation rule** — evidence for one of the five permitted `ESCALATE_USER` conditions only
 7. **Independent work streams** — every currently known in-scope stream and its dependencies
-8. **Active count** — total subagents to spawn (max 6)
-9. **Writer count** — total writers (max 3)
-10. **Exclusive territories** — file/directory ownership per writer; zero overlap
-11. **Dependencies** — serialization order for writers sharing territories across waves
-12. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
-13. **UNUSED_CAPACITY** — each unused active slot and writer slot, separately justified by a concrete dependency, territory collision, unavailable matching role, or premature-review reason
+8. **Todo pair allocation** — exactly one named pair of exactly two agents per active Todo, with non-overlapping responsibilities
+9. **Active count** — two agents per concurrently dispatched Todo, with no more than three pairs and six active agents
+10. **Writer count** — total permission-derived writers (max 3)
+11. **Exclusive territories** — file/directory ownership per writer; zero overlap
+12. **Dependencies** — serialization order for writers sharing territories across waves and review timing for dependent Todos
+13. **Verification owner and checks** — targeted owner and checks for source fix → targeted test → deploy → acceptance
+14. **UNUSED_CAPACITY** — each unused active slot and writer slot, separately justified by a concrete dependency, territory collision, unavailable matching role, or premature-review reason
 
 `Task is simple`, token pressure, cost, convenience, and waiting for the user are
 invalid `UNUSED_CAPACITY` reasons. While any roadmap or `TodoWrite` item remains
@@ -441,8 +527,9 @@ or a slot becomes safe; never wait for a user reprompt.
 #### Human-readable contract example
 
 Good introduction: “I’ll correct the isolated validation message and its focused
-test so users receive the intended guidance. One writer will make the change,
-then a targeted quality assurance (QA) review will verify the finalized result.”
+test so users receive the intended guidance. One exactly-two-agent pair will own
+the implementation Todo: the writer changes the files and a read-only partner
+checks the existing patterns; the separate QA Todo will wait for finalization.”
 
 ```text
 Task: Correct dashboard validation message
@@ -454,17 +541,40 @@ Deployment owner: N/A
 Verification plan: focused test, then one targeted QA review
 Escalation rule: the five permitted conditions only, with retained evidence
 
-Phase: "Validation message" (1 active, 1 writer)
-Independent work streams: implementation; QA depends on finalized implementation
-Active count: 1
+TodoWrite items:
+  - validation-message implementation (dependency-ready)
+  - targeted QA review (blocked until validation-message implementation is final)
+
+Phase: "Validation message" — Wave 1 (2 active, 1 writer)
+Active TodoWrite items: validation-message implementation
+Independent work streams: implementation; validation-pattern inventory (same Todo pair, non-overlapping responsibilities)
+Todo pair:
+  @ingenium-software-engineer-fast → ValidationMessage.tsx + focused test (writer; exclusive territory)
+  @ingenium-explore                → existing validation patterns outside that territory (read-only)
+Active count: 2
 Writer count: 1
 Exclusive territories: writer owns ValidationMessage.tsx and its focused test
-Dependencies: QA follows the finalized writer result
-Verification owner and checks: writer runs the focused test; QA reviews once
+Dependencies: targeted QA Todo waits for the finalized writer result
+Verification owner and checks: writer runs the focused test; the paired researcher checks existing patterns
 UNUSED_CAPACITY:
-  active slots 2–6 → no other eligible in-scope stream; QA is premature
+  active slots 3–6 → no other eligible Todo; targeted QA is premature
   writer slots 2–3 → no independent non-overlapping writer territory exists
 ```
+
+Verification phase 2 — Wave 2 (2 active, 0 writers)
+Active TodoWrite items: targeted QA review
+Independent work streams: targeted QA; acceptance-evidence cross-check (same Todo pair, non-overlapping responsibilities)
+Todo pair:
+  @ingenium-qa    → targeted review and declared focused test once (read-only)
+  @ingenium-scout → cross-check the acceptance evidence (read-only)
+Active count: 2
+Writer count: 0
+Dependencies: the implementation Todo is final before this review Todo starts
+Verification owner and checks: QA runs once; Scout independently checks the declared evidence
+UNUSED_CAPACITY:
+  active slots 3–6 → no other eligible Todo; speculative review is forbidden
+  writer slots 1–3 → review-only phase; remediation is unavailable unless QA reports a reproducible blocker
+→ If QA reports an in-scope BLOCKING finding, the original implementation pair fixes its named root cause and runs the focused regression. QA is never rerun; the task proceeds directly to its remaining deploy and acceptance steps.
 
 Good post-phase explanation: “The component and focused test changed, and the
 focused source check passed. That is source-test evidence, not deployed-runtime
@@ -510,7 +620,15 @@ All screenshots from visual QA gates must be saved under `tests/artifacts/visual
 
 ### Restart Required for Agent Profile and Configuration Changes
 
-Adding or changing an agent profile (`.opencode/agents/*.md`) or OpenCode configuration requires restarting OpenCode before the change is loaded. Current sessions retain their previously loaded profile/configuration until they restart.
+Adding or changing an agent profile (`.opencode/agents/*.md`), repository
+skill/reference loading, root agent mapping, plugin, MCP entry, or OpenCode
+configuration requires a **full parent OpenCode restart** before the change is
+loaded. Restarting only the child MCP process is insufficient: existing parent
+sessions retain their previously loaded profile, mapping, skill surface, and
+permissions. A prompt-file reference or its frontmatter is part of that loaded
+parent configuration; frontmatter is not a second root mapping. After the parent
+restarts, verify the exact mapped profile and root-effective grants before
+resuming recovery.
 
 After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result means stop and reconfigure the visual-QA path; it is not a pass.
 

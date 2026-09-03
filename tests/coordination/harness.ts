@@ -52,6 +52,7 @@ import {
   writeCanaryPlan,
   type HostOpenCodeProcess,
 } from "./process-lifecycle";
+import { continueWithReplacementFirst, type ReplacementContinuationEvidence } from "./replacement-first";
 
 const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 250;
@@ -1867,26 +1868,106 @@ export async function runCoordinationHarness(
       projectCrossSessionEvidence(cAmbiguousRead, "cross-read-recovered", sessionC, memoryAmbiguousLink),
     );
 
-    const preservedCount = (await apiB.messages(sessionB)).length;
-    await clearProcessAfterProof(context, externalB, recordB);
+    required(externalB && recordB, "Original B parent process evidence is unavailable");
+    const oldExternalB = externalB;
+    const oldRecordB = recordB;
+    let bRestartRead: CrossReadResult | undefined;
+    let memoryRestart: OperationalMemoryEntry[] = [];
+    let memoryRestartLink: ProjectedTurn["transformLinks"][number] | undefined;
+    let replacementSessionId: string | undefined;
+    let preservedReplacementMessages = 0;
+    const continuation = await continueWithReplacementFirst({
+      publishTypedHandoff: async () => {
+        lifecycle.assertRunning();
+        const restartMutation = await runDispatchTurn(apiA, sessionA, "restart-handoff", canaryPlan(options, "A", {
+          operation: "mutate_commit_sync", slot: "restart", path: pathRestart, marker: markerRestart,
+        }), options, lifecycle.signal, preparedA, preparedA.captureFile);
+        turns.push(restartMutation);
+        currentRevision = await assertGitCommit(options.worktree, pathRestart, currentRevision, lifecycle.signal);
+      },
+      launchReplacement: async () => {
+        lifecycle.assertRunning();
+        replacementSessionId = await apiB.createSession(`coordination-${context.runId}-B-replacement`);
+        preservedReplacementMessages = (await apiB.messages(replacementSessionId)).length;
+        return { api: apiB, sessionId: replacementSessionId };
+      },
+      verifyReplacementHealth: async (replacement) => {
+        await inspectReady(replacement.api, options, lifecycle.signal);
+        await replacement.api.messages(replacement.sessionId);
+      },
+      createReplacementSession: async (replacement) => {
+        sessions.push({ label: "B", id: replacement.sessionId, idHash: sha256(replacement.sessionId), createdAt: new Date().toISOString(), model: {
+          providerId: options.providerId, modelId: options.modelId, variant: options.variant, agent: CANARY_AGENT,
+        } });
+        return replacement.sessionId;
+      },
+      acknowledgeHandoff: async (replacement, replacementSession) => {
+        bRestartRead = await runCrossReadTurn(
+          replacement.api, replacementSession, "restart-replay", options, lifecycle.signal, preparedB.captureFile,
+        );
+        turns.push(bRestartRead.turn);
+        preservedReplacementMessages = (await replacement.api.messages(replacementSession)).length;
+        memoryRestart = newestMemoryForPath(preparedB.captureFile, pathRestart);
+        memoryRestartLink = validateCrossReadResults([bRestartRead], memoryRestart, pathRestart);
+        required(bRestartRead.entry.currentTaskId !== null, "Restart handoff omitted its typed task identity");
+        required(bRestartRead.entry.actionKinds.includes("write")
+          && bRestartRead.entry.checkResults.some((check) => check.result === "passed")
+          && bRestartRead.entry.nextWork.kind !== "none",
+        "Restart handoff omitted typed action, check, or next-work state");
+        return bRestartRead.entry;
+      },
+      retireOldParent: () => clearProcessAfterProof(context, oldExternalB, oldRecordB),
+      persistEvidence: (state: ReplacementContinuationEvidence) => evidence.write("restart.json", {
+        schema: HARNESS_ARTIFACT_SCHEMA,
+        ...state,
+        workspace: {
+          project: options.project,
+          projectId: binding.projectId,
+          workspaceId: binding.workspaceId,
+          storageMappingHash: binding.storageMappingHash,
+          canonicalWorktree: options.worktree,
+        },
+        oldParent: { pid: oldExternalB.child.pid, port: oldExternalB.port, sessionIdHash: sha256(sessionB) },
+        replacement: replacementSessionId ? { sessionIdHash: sha256(replacementSessionId) } : null,
+      }),
+    });
     externalB = undefined;
     recordB = undefined;
+    required(bRestartRead && memoryRestartLink,
+      "Replacement continuation omitted verified state");
+    const verifiedRestartRead = bRestartRead as CrossReadResult;
+    const verifiedRestartLink = memoryRestartLink as ProjectedTurn["transformLinks"][number];
+    const activeSessionB = continuation.session;
     lifecycle.assertRunning();
-    const restartMutation = await runDispatchTurn(apiA, sessionA, "restart-handoff", canaryPlan(options, "A", { operation: "mutate_commit_sync", slot: "restart", path: pathRestart, marker: markerRestart }), options, lifecycle.signal, preparedA, preparedA.captureFile);
-    turns.push(restartMutation);
-    currentRevision = await assertGitCommit(options.worktree, pathRestart, currentRevision, lifecycle.signal);
-    lifecycle.assertRunning();
-    externalB = await startHostOpenCode("external-b", context.ports.fixture, preparedB, options, credentials, proxyApiUrl, configB, binding, authContent, context.runNonce, lifecycle.signal);
+    externalB = await startHostOpenCode(
+      "external-b", context.ports.fixture, preparedB, options, credentials, proxyApiUrl, configB, binding,
+      authContent, context.runNonce, lifecycle.signal,
+    );
     recordB = await bindProcess(context, externalB, "fixture", lifecycle.signal);
     await waitForOpenCode(`http://127.0.0.1:${context.ports.fixture}`, options.expectedOpenCodeVersion, lifecycle.signal);
     apiB = openCodeApi("B", `http://127.0.0.1:${context.ports.fixture}`, options, lifecycle.signal);
-    required((await apiB.messages(sessionB)).length >= preservedCount, "B session messages were not preserved across restart");
-    const bRestartRead = await runCrossReadTurn(apiB, sessionB, "restart-replay", options, lifecycle.signal, preparedB.captureFile);
-    turns.push(bRestartRead.turn);
-    const memoryRestart = newestMemoryForPath(preparedB.captureFile, pathRestart);
-    const memoryRestartLink = validateCrossReadResults([bRestartRead], memoryRestart, pathRestart);
-    crossSessionEvidence.push(projectCrossSessionEvidence(bRestartRead, "restart-replay", sessionB, memoryRestartLink));
-    const duplicate = await runTurn(apiB, sessionB, "restart-dedupe", "Return only {\"noNewMemory\":true} if no COORDINATION_MEMORY_V2 block is injected. Do not use tools or files.", options, "", lifecycle.signal, preparedB.captureFile);
+    await inspectReady(apiB, options, lifecycle.signal);
+    required((await apiB.messages(activeSessionB)).length >= preservedReplacementMessages,
+      "Replacement session was not located after parent restart");
+    evidence.write("restart.json", {
+      schema: HARNESS_ARTIFACT_SCHEMA,
+      phase: "replacement_parent_healthy",
+      lastCompletedPhase: "old_parent_retired",
+      replacementLocated: true,
+      oldParentRetired: true,
+      handoff: continuation.handoff,
+      workspace: {
+        project: options.project,
+        projectId: binding.projectId,
+        workspaceId: binding.workspaceId,
+        storageMappingHash: binding.storageMappingHash,
+        canonicalWorktree: options.worktree,
+      },
+      oldParent: { pid: oldExternalB.child.pid, port: oldExternalB.port, sessionIdHash: sha256(sessionB) },
+      replacement: { pid: externalB.child.pid, port: externalB.port, sessionIdHash: sha256(activeSessionB) },
+    });
+    crossSessionEvidence.push(projectCrossSessionEvidence(verifiedRestartRead, "restart-replay", activeSessionB, verifiedRestartLink));
+    const duplicate = await runTurn(apiB, activeSessionB, "restart-dedupe", "Return only {\"noNewMemory\":true} if no COORDINATION_MEMORY_V2 block is injected. Do not use tools or files.", options, "", lifecycle.signal, preparedB.captureFile);
     turns.push(duplicate);
     required(duplicate.transformEntryIds.length === 0 && duplicate.tools.length === 0
       && JSON.stringify(JSON.parse(duplicate.responseText.trim())) === JSON.stringify({ noNewMemory: true }), "Restarted B repeated acknowledged memory");
@@ -1912,7 +1993,7 @@ export async function runCoordinationHarness(
       revision: currentRevision,
       project: options.project,
       workspaceId: options.workspaceId,
-      ports: { proxy: context.ports.api, externalA: context.ports.dashboard, externalB: context.ports.fixture, internalC: 4098 },
+      ports: { proxy: context.ports.api, externalA: context.ports.dashboard, externalB: externalB.port, internalC: 4098 },
       processes: [
         { role: "external-a", pid: externalA.child.pid!, externalId: null, port: externalA.port, startedAt: externalA.startedAt, stoppedAt: null, commandSha256: sha256(`${options.openCodeBinary}\0serve\0${externalA.port}`) },
         { role: "external-b", pid: externalB.child.pid!, externalId: null, port: externalB.port, startedAt: externalB.startedAt, stoppedAt: null, commandSha256: sha256(`${options.openCodeBinary}\0serve\0${externalB.port}`) },
@@ -1948,7 +2029,18 @@ export async function runCoordinationHarness(
       paths: [pathA, pathAmbiguous, pathRestart],
       entries: [...memoryA, ...memoryRestart],
       crossRead: crossSessionEvidence,
-      restart: { sessionIdHash: sha256(sessionB), preservedMessages: preservedCount, replayedPath: pathRestart, duplicateToolCount: duplicate.tools.length },
+      restart: {
+        oldSessionIdHash: sha256(sessionB),
+        replacementSessionIdHash: sha256(activeSessionB),
+        replacementFirst: true,
+        replayedPath: pathRestart,
+        status: continuation.handoff.status,
+        todoState: continuation.handoff.todoState,
+        todoCounts: continuation.handoff.todoCounts,
+        currentTaskId: continuation.handoff.currentTaskId,
+        nextWork: continuation.handoff.nextWork,
+        duplicateToolCount: duplicate.tools.length,
+      },
     });
     evidence.write("recovery.json", { schema: HARNESS_ARTIFACT_SCHEMA, recovery });
     evidence.write("result.json", {

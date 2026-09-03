@@ -150,7 +150,7 @@ permission:
   # Skills
   skill:
     "@ponytail": allow
-    "*": deny
+    "*": allow
 ---
 
 # Ingenium Chat Agent

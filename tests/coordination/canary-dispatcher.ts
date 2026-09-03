@@ -216,14 +216,14 @@ export class RealCanaryActions implements CanaryActions {
 
     if (step.operation === "fail_local") {
       const patchText = `*** Begin Patch\n*** Add File: ${step.path}\n+${step.marker}\n*** End Patch`;
-      await coordinatedMutation(this.hooks, context, "apply_patch", { patchText }, () => {
+      await coordinatedMutation(this.hooks, context, "apply_patch", { patchText, currentTaskId: this.plan.nonce }, () => {
         throw new Error("Injected local canary failure");
       });
     }
 
     if (step.operation === "mutate_only" || step.operation === "mutate_commit_sync") {
       const patchText = `*** Begin Patch\n*** Add File: ${step.path}\n+${step.marker}\n*** End Patch`;
-      await coordinatedMutation(this.hooks, context, "apply_patch", { patchText }, () => {
+      await coordinatedMutation(this.hooks, context, "apply_patch", { patchText, currentTaskId: this.plan.nonce }, () => {
         const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
         try { writeFileSync(descriptor, `${step.marker}\n`, "utf8"); } finally { closeSync(descriptor); }
       });

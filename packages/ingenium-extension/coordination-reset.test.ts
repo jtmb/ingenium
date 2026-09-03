@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CoordinationResetError,
   installCoordinationCredentialAtomically,
@@ -10,13 +13,16 @@ import {
   readProtectedOwnerSecret,
   resetCoordinationCredential,
   resetLearningCredential,
+  runCoordinationResetCli,
 } from "./coordination-reset.js";
 
 const oldToken = `ing_${"a".repeat(12)}_${"b".repeat(43)}`;
 const newToken = `ing_${"c".repeat(12)}_${"d".repeat(43)}`;
+const allowedInstallFailures = ["credential_install"] as const;
 const projectId = "00000000-0000-4000-8000-000000000001";
 const organizationId = "00000000-0000-4000-8000-000000000002";
 const servicePrincipalId = "00000000-0000-4000-8000-000000000005";
+const coordinationResetModule = fileURLToPath(new URL("./coordination-reset.ts", import.meta.url));
 const generalMcpScopes = [
   "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
 ] as const;
@@ -160,9 +166,34 @@ function requestFixture(options: {
   return { request, calls };
 }
 
+function expectContentFreeInstallFailure(error: unknown, forbidden: readonly string[]): void {
+  expect(error).toBeInstanceOf(CoordinationResetError);
+  const resetError = error as CoordinationResetError;
+  expect(allowedInstallFailures).toContain(resetError.failure);
+  expect(resetError.failure).toBe("credential_install");
+  expect(resetError.name).toBe("CoordinationResetError");
+  expect(resetError.message).toBe("Coordination credential reset failed");
+  expect(Object.prototype.propertyIsEnumerable.call(resetError, "substage")).toBe(false);
+  expect(Object.keys(resetError).sort()).toEqual(["failure", "name"]);
+  for (const property of ["cause", "path", "token", "rawError", "mode", "uid"]) {
+    expect(resetError).not.toHaveProperty(property);
+  }
+  const surface = [resetError.name, resetError.message, resetError.failure, JSON.stringify(resetError), resetError.stack ?? ""]
+    .join("\n");
+  for (const value of forbidden) expect(surface).not.toContain(value);
+}
+
+function expectNoCredentialQuarantine(worktree: string): void {
+  expect(readdirSync(join(worktree, ".opencode")).filter((entry) => entry !== ".ingenium-mcp-credential")).toEqual([]);
+}
+
 describe("protected coordination reset", () => {
-  it("uses owner login and recent step-up, installs a minimum-scope binding, and revokes the prior value", async () => {
+  it.each([
+    ["0400", 0o400],
+    ["0600", 0o600],
+  ] as const)("rotates an existing current-user-owned %s credential to the mocked issued value with exact 0600 mode", async (_label, mode) => {
     const { worktree, credential } = fixture();
+    chmodSync(credential, mode);
     const { request, calls } = requestFixture({ launcherWorktree: worktree });
 
     await expect(resetCoordinationCredential(worktree, {
@@ -382,11 +413,216 @@ describe("protected coordination reset", () => {
     expect(readFileSync(outside, "utf8")).toBe(`${oldToken}\n`);
 
     const interrupted = fixture();
-    expect(() => installCoordinationCredentialAtomically(interrupted.worktree, newToken, {
-      afterRename: () => { throw new Error("interrupt"); },
-    })).toThrow(CoordinationResetError);
-    expect(readFileSync(interrupted.credential, "utf8")).toBe(`${oldToken}\n`);
-    expect(statSync(interrupted.credential).mode & 0o777).toBe(0o600);
+    const before = {
+      content: readFileSync(interrupted.credential, "utf8"),
+      mode: statSync(interrupted.credential).mode & 0o777,
+    };
+    const uid = String(process.getuid?.() ?? "unknown");
+    const rawError = `post-replacement failure path=${interrupted.credential} token=${newToken} mode=0644 uid=${uid}`;
+    let failure: unknown;
+    try {
+      installCoordinationCredentialAtomically(interrupted.worktree, newToken, {
+        afterRename: () => { throw new Error(rawError); },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expectContentFreeInstallFailure(failure, [interrupted.credential, oldToken, newToken, rawError, "mode=0644", `uid=${uid}`]);
+    expect(readFileSync(interrupted.credential, "utf8")).toBe(before.content);
+    expect(statSync(interrupted.credential).mode & 0o777).toBe(before.mode);
+  });
+
+  it.each([
+    ["0640", 0o640],
+    ["owner-unreadable (0240)", 0o240],
+  ] as const)("rejects an existing credential with %s mode without changing it", (_label, mode) => {
+    const { worktree, credential } = fixture();
+    chmodSync(credential, mode);
+
+    expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
+    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    expect(statSync(credential).mode & 0o777).toBe(mode);
+    expectNoCredentialQuarantine(worktree);
+  });
+
+  it("rejects a foreign-owned credential without changing it", () => {
+    const { worktree, credential } = fixture();
+    if (typeof process.geteuid !== "function") return;
+
+    const unixProcess = process as typeof process & { geteuid(): number };
+    const currentUid = unixProcess.geteuid();
+    const foreignOwner = vi.spyOn(unixProcess, "geteuid").mockReturnValue(currentUid + 1);
+    try {
+      expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
+    } finally {
+      foreignOwner.mockRestore();
+    }
+
+    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    expect(statSync(credential).mode & 0o777).toBe(0o600);
+    expectNoCredentialQuarantine(worktree);
+  });
+
+  it("redacts an invalid-mode fixture failure without exposing install details", () => {
+    const { worktree, credential } = fixture();
+    chmodSync(credential, 0o640);
+    let failure: unknown;
+    try {
+      installCoordinationCredentialAtomically(worktree, newToken);
+    } catch (error) {
+      failure = error;
+    }
+
+    expectContentFreeInstallFailure(failure, [credential, oldToken, newToken, "mode=0640", "0640"]);
+    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    expect(statSync(credential).mode & 0o777).toBe(0o640);
+  });
+
+  it("quarantines an unreadable owner-only single-link target and installs exact 0600 without reading its old bytes", () => {
+    const { worktree, credential } = fixture();
+    chmodSync(credential, 0o200);
+    expect(statSync(credential).nlink).toBe(1);
+    expect(statSync(credential).mode & 0o777).toBe(0o200);
+
+    expect(() => installCoordinationCredentialAtomically(worktree, newToken)).not.toThrow();
+
+    expect(readFileSync(credential, "utf8")).toBe(`${newToken}\n`);
+    expect(statSync(credential).mode & 0o777).toBe(0o600);
+    expectNoCredentialQuarantine(worktree);
+  });
+
+  it("restores the exact old target after a failure following legacy-target quarantine", () => {
+    const { worktree, credential } = fixture();
+    const oldBytes = readFileSync(credential);
+    chmodSync(credential, 0o200);
+    const before = statSync(credential);
+    let afterRename = false;
+    let failure: unknown;
+    try {
+      installCoordinationCredentialAtomically(worktree, newToken, {
+        afterRename: () => {
+          afterRename = true;
+          throw new Error("injected post-quarantine failure");
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(afterRename).toBe(true);
+    expect(failure).toMatchObject({ failure: "credential_install", substage: "rollback" });
+    const restored = statSync(credential);
+    expect(restored.dev).toBe(before.dev);
+    expect(restored.ino).toBe(before.ino);
+    expect(restored.nlink).toBe(before.nlink);
+    expect(restored.mode & 0o777).toBe(before.mode & 0o777);
+    chmodSync(credential, 0o600);
+    expect(readFileSync(credential)).toEqual(oldBytes);
+    chmodSync(credential, before.mode & 0o777);
+    expectNoCredentialQuarantine(worktree);
+  });
+
+  it("rejects a symlinked .opencode ancestor without changing the outside credential", () => {
+    const { worktree } = fixture(false);
+    const outside = mkdtempSync(join(tmpdir(), "ingenium-coordination-reset-outside-"));
+    directories.push(outside);
+    const outsideCredential = join(outside, ".ingenium-mcp-credential");
+    writeFileSync(outsideCredential, `${oldToken}\n`, { mode: 0o600 });
+    rmSync(join(worktree, ".opencode"), { recursive: true });
+    symlinkSync(outside, join(worktree, ".opencode"), "dir");
+
+    expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
+    expect(readFileSync(outsideCredential, "utf8")).toBe(`${oldToken}\n`);
+  });
+
+  it("rejects a FIFO credential target without blocking", () => {
+    const { worktree, credential } = fixture(false);
+    execFileSync("mkfifo", [credential], { timeout: 1_000 });
+    const result = execFileSync(process.execPath, [
+      "--experimental-strip-types",
+      "--input-type=module",
+      "--eval",
+      `import { CoordinationResetError, installCoordinationCredentialAtomically } from ${JSON.stringify(coordinationResetModule)};
+try {
+  installCoordinationCredentialAtomically(${JSON.stringify(worktree)}, ${JSON.stringify(newToken)});
+  process.stdout.write("completed");
+} catch (error) {
+  process.stdout.write(error instanceof CoordinationResetError ? error.failure : "unexpected");
+}`,
+    ], { encoding: "utf8", timeout: 1_000 });
+
+    expect(result).toBe("credential_install");
+  });
+
+  it("rejects a Unix socket credential target without changing it", async () => {
+    const { worktree, credential } = fixture(false);
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(credential, () => resolve());
+    });
+
+    try {
+      expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
+      expect(lstatSync(credential).isSocket()).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+      rmSync(credential, { force: true });
+    }
+  });
+
+  it("rejects a hard-linked credential target without replacing either link", () => {
+    const { worktree, credential } = fixture();
+    const mirror = join(worktree, "credential-mirror");
+    linkSync(credential, mirror);
+    const before = readFileSync(credential);
+
+    expect(statSync(credential).nlink).toBe(2);
+    expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
+    expect(readFileSync(credential)).toEqual(before);
+    expect(readFileSync(mirror)).toEqual(before);
+    expect(statSync(credential).ino).toBe(statSync(mirror).ino);
+    expectNoCredentialQuarantine(worktree);
+  });
+
+  it.each([
+    ["group-writable", 0o720],
+    ["world-writable", 0o702],
+  ] as const)("fails closed for a %s .opencode parent", (_label, mode) => {
+    const { worktree, credential } = fixture();
+    chmodSync(join(worktree, ".opencode"), mode);
+
+    expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
+    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    expect(statSync(credential).mode & 0o777).toBe(0o600);
+    expect(statSync(join(worktree, ".opencode")).mode & 0o777).toBe(mode);
+  });
+
+  it("keeps the install substage non-enumerable and emits only allowlisted CLI diagnostics", async () => {
+    const { worktree, credential } = fixture();
+    chmodSync(credential, 0o640);
+    execFileSync("/usr/bin/git", ["-C", worktree, "init", "--quiet"], { timeout: 1_000 });
+    const { request } = requestFixture({ launcherWorktree: worktree });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as typeof process.stdout.write);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((() => true) as typeof process.stderr.write);
+    const originalCwd = process.cwd();
+    const originalFetch = globalThis.fetch;
+    try {
+      process.chdir(worktree);
+      globalThis.fetch = request;
+      await expect(runCoordinationResetCli(["reset"])).resolves.toBe(1);
+    } finally {
+      process.chdir(originalCwd);
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledTimes(1);
+    expect(stderr).toHaveBeenCalledWith("coordination reset: failed (credential_install:existing_target)\n");
+    expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join(""))
+      .toMatch(/^coordination reset: failed \(credential_install:(?:ancestor|existing_target|temporary_create|temporary_write|rename|directory_sync|readback|rollback)\)\n$/);
   });
 
   it("allows one concurrent reset winner", async () => {

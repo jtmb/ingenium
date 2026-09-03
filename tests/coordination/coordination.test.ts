@@ -38,6 +38,7 @@ import {
   type RunCredentialLeaseTransport,
 } from "./credential-lease";
 import { recoverCoordinationHarnessRun, recoverExactLegacyCredentials, runRecoveryMain } from "./recovery";
+import { continueWithReplacementFirst, type ReplacementContinuationEvidence } from "./replacement-first";
 import { runMain } from "./run";
 import type { ContainmentAuditReport } from "../suite-containment-audit";
 import {
@@ -1872,7 +1873,10 @@ test("turns an injected local action failure into the managed error path without
   };
   const calls: string[] = [];
   const hooks = {
-    "tool.execute.before": async () => { calls.push("claim"); },
+    "tool.execute.before": async (_input: unknown, output: { args: Record<string, unknown> }) => {
+      assert.equal(output.args.currentTaskId, plan.nonce);
+      calls.push("claim");
+    },
     event: async ({ event }: { event: { type: string; properties: { part: { state: { status: string } } } } }) => {
       assert.equal(event.type, "message.part.updated");
       assert.equal(event.properties.part.state.status, "error");
@@ -1899,6 +1903,67 @@ test("rejects a protected credential replacement race after descriptor open", ()
     renameSync(path, displaced);
     protectedFile(root, "token", "replacement-secret");
   }), /identity changed during read/);
+});
+
+test("continues replacement-first and retains the last safe phase without retiring on failed health", async () => {
+  const handoff = memoryEntry();
+  const calls: string[] = [];
+  const evidence: ReplacementContinuationEvidence[] = [];
+  const continued = await continueWithReplacementFirst({
+    publishTypedHandoff: async () => { calls.push("publish"); },
+    locateReplacement: async () => { calls.push("locate"); return undefined; },
+    launchReplacement: async () => { calls.push("launch"); return { id: "replacement" }; },
+    verifyReplacementHealth: async () => { calls.push("health"); },
+    createReplacementSession: async () => { calls.push("session"); return "replacement-session"; },
+    acknowledgeHandoff: async () => { calls.push("ack"); return handoff; },
+    retireOldParent: async () => {
+      assert.equal(calls.at(-1), "ack");
+      calls.push("retire");
+    },
+    persistEvidence: (entry) => { evidence.push(entry); },
+  });
+  assert.deepEqual(calls, ["publish", "locate", "launch", "health", "session", "ack", "retire"]);
+  assert.equal(continued.handoff, handoff);
+  assert.deepEqual(evidence.map((entry) => entry.phase), [
+    "handoff_published", "replacement_started", "replacement_healthy", "handoff_acknowledged", "old_parent_retired",
+  ]);
+
+  let retired = false;
+  const failedEvidence: ReplacementContinuationEvidence[] = [];
+  await assert.rejects(continueWithReplacementFirst({
+    publishTypedHandoff: async () => {},
+    launchReplacement: async () => ({ id: "unhealthy" }),
+    verifyReplacementHealth: async () => { throw new Error("not ready"); },
+    createReplacementSession: async () => "unreachable",
+    acknowledgeHandoff: async () => handoff,
+    retireOldParent: async () => { retired = true; },
+    persistEvidence: (entry) => { failedEvidence.push(entry); },
+  }), /not ready/);
+  assert.equal(retired, false);
+  assert.deepEqual(failedEvidence.at(-1), {
+    phase: "failed",
+    lastCompletedPhase: "replacement_started",
+    replacementLocated: true,
+    oldParentRetired: false,
+  });
+
+  const retirementFailureEvidence: ReplacementContinuationEvidence[] = [];
+  await assert.rejects(continueWithReplacementFirst({
+    publishTypedHandoff: async () => {},
+    launchReplacement: async () => ({ id: "healthy" }),
+    verifyReplacementHealth: async () => {},
+    createReplacementSession: async () => "replacement-session",
+    acknowledgeHandoff: async () => handoff,
+    retireOldParent: async () => { throw new Error("retirement failed"); },
+    persistEvidence: (entry) => { retirementFailureEvidence.push(entry); },
+  }), /retirement failed/);
+  assert.deepEqual(retirementFailureEvidence.at(-1), {
+    phase: "failed",
+    lastCompletedPhase: "handoff_acknowledged",
+    replacementLocated: true,
+    oldParentRetired: false,
+    handoff,
+  });
 });
 
 test("aborting during B restart shares cleanup and prevents respawn, open port, or copied credential", async () => {

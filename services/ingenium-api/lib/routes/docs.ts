@@ -216,6 +216,14 @@ function organizationId(req: any, res: any): string | null {
     res.status(400).json({ error: { code: "BAD_REQUEST", message: "organization_id is required" } });
     return null;
   }
+  if (req.authorizedProjectId && requestPrincipal.type === "service"
+    && requestPrincipal.scopes.includes("documentation:read")) {
+    if (principal.organizationId !== target) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+      return null;
+    }
+    return target;
+  }
   const decision = authorization.requireOrganizationPermission(principal, target, "docs", req.authorizationPolicy?.permission ?? "read");
   if (!decision.allowed) {
     res.status(decision.visible ? 403 : 404).json({ error: { code: decision.visible ? "FORBIDDEN" : "NOT_FOUND", message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found" } });

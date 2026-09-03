@@ -39,7 +39,7 @@ permission:
     "@self-learning": allow
     "@skill-maintenance": allow
     "@ponytail": allow
-    "*": deny
+    "*": allow
 ---
 
 # Principal Software Engineer — Implementation & Technical Leadership

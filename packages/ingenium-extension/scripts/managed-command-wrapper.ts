@@ -1,18 +1,26 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  decodeReplacementFirstRestartRequest,
+  runReplacementFirstRestart,
+  type ReplacementFirstRestartDependencies,
+  type ReplacementFirstRestartResult,
+} from "../replacement-first-restart.js";
 
 const ARG = /^[A-Za-z0-9_@%+=:,./-]{1,512}$/;
 const BUILD_SCRIPTS = new Set(["build", "typecheck", "test", "lint"]);
 const EXTENSION_TEST_FILES = new Set(["managed-command-wrapper.test.ts", "session-coordinator.test.ts"]);
-const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health"]);
+const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart"]);
 const GIT = "/usr/bin/git";
 const RUNTIME_BIN = dirname(process.execPath);
 const NPM = `${RUNTIME_BIN}/npm`;
 const OPENCODE = "/usr/local/bin/opencode";
 const DOCKER = "/usr/bin/docker";
 const CURL = "/usr/bin/curl";
+const PRODUCTION_RESTART = resolve(dirname(fileURLToPath(import.meta.url)), "production-restart.js");
 const GIT_CONFIGURATION = [
   "-c", "core.fsmonitor=false",
   "-c", "core.hooksPath=/dev/null",
@@ -49,6 +57,17 @@ export function decodeManagedRepositoryArgv(encoded: string): string[] {
 
 export function decodeManagedBuildArgv(encoded: string): string[] {
   return validateManagedBuildArgv(decodeManagedArgv(encoded));
+}
+
+export async function managedReplacementFirstRestart<Session>(
+  argv: readonly unknown[],
+  dependencies: ReplacementFirstRestartDependencies<Session>,
+  worktree = process.cwd(),
+): Promise<ReplacementFirstRestartResult> {
+  if (argv.length !== 1 || typeof argv[0] !== "string") {
+    throw new Error("Managed replacement-first restart requires one encoded payload");
+  }
+  return runReplacementFirstRestart(decodeReplacementFirstRestartRequest(argv[0], worktree), dependencies);
 }
 
 function sourceFingerprint(cwd: string): string {
@@ -131,6 +150,8 @@ export function managedBuildExecution(argv: string[]): { command: string; argv: 
       return { command: DOCKER, argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "restart", "ingenium"] };
     case "health":
       return { command: CURL, argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] };
+    case "production-restart":
+      return { command: process.execPath, argv: [PRODUCTION_RESTART] };
     default:
       throw new Error("Build wrapper rejected the command");
   }

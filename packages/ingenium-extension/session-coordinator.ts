@@ -45,6 +45,9 @@ const MAX_DIFF_COUNT = 1_000_000;
 const TRACE_ROOT = "/tmp/opencode/";
 const MAX_RESET_DESCRIPTION_BYTES = 256;
 const DEPLOYMENT_OWNER_AGENT = "ingenium-software-engineer-premium";
+const BROWSER_AGENT = "browser-agent";
+const BROWSER_WRAPPER_PATH = ".opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh";
+const BROWSER_WRAPPER_DELIMITER = "EOF";
 const PRECLAIM_ERROR_CODES = new Set([
   "BASELINE_MISMATCH",
   "CLAIM_CONFLICT",
@@ -489,6 +492,52 @@ function isTrustedManagedWrapperArgs(worktree: string, args: Record<string, unkn
     && (args.timeout as number) <= MCP_LIVE_RELOAD_MAX_TIMEOUT_MS);
 }
 
+function boundBrowserWrapperCommand(worktree: string, args: unknown): string | undefined {
+  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return undefined;
+  let descriptor: number | undefined;
+  try {
+    const root = resolve(worktree);
+    if (realpathSync(root) !== root || (args.workdir !== undefined && args.workdir !== root)) return undefined;
+    const wrapper = resolve(root, BROWSER_WRAPPER_PATH);
+    const before = lstatSync(wrapper);
+    const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+      || (owner !== undefined && before.uid !== owner) || realpathSync(wrapper) !== wrapper) return undefined;
+
+    const prefix = `${BROWSER_WRAPPER_PATH} <<'${BROWSER_WRAPPER_DELIMITER}'\n`;
+    const suffix = `\n${BROWSER_WRAPPER_DELIMITER}`;
+    if (!args.command.startsWith(prefix) || !args.command.endsWith(suffix)) return undefined;
+    const script = args.command.slice(prefix.length, -suffix.length);
+    if (script.length < 1 || Buffer.byteLength(script, "utf8") > MAX_COORDINATION_TRANSFORM_BYTES
+      || script.split("\n").includes(BROWSER_WRAPPER_DELIMITER)
+      || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(script)) return undefined;
+
+    descriptor = openSync(wrapper, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino
+      || (owner !== undefined && opened.uid !== owner) || opened.size < 1
+      || opened.size > MAX_COORDINATION_TRANSFORM_BYTES) return undefined;
+    const bytes = readFileSync(descriptor);
+    const after = lstatSync(wrapper);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1 || after.dev !== opened.dev || after.ino !== opened.ino
+      || after.size !== opened.size || (owner !== undefined && after.uid !== owner)
+      || createHash("sha256").update(git(root, ["show", `HEAD:${BROWSER_WRAPPER_PATH}`])).digest("hex") !== digest) return undefined;
+    const encodedWrapper = bytes.toString("base64");
+    const encodedScript = Buffer.from(script, "utf8").toString("base64");
+    return `/usr/bin/printf '%s' '${encodedWrapper}' | /usr/bin/base64 --decode | /bin/bash -s -- "$(/usr/bin/printf '%s' '${encodedScript}' | /usr/bin/base64 --decode)"`;
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function isBoundBrowserWrapperRequest(worktree: string, args: unknown): boolean {
+  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
+  return /^\/usr\/bin\/printf '%s' '[A-Za-z0-9+/]+={0,2}' \| \/usr\/bin\/base64 --decode \| \/bin\/bash -s -- "\$\(\/usr\/bin\/printf '%s' '[A-Za-z0-9+/]+={0,2}' \| \/usr\/bin\/base64 --decode\)"$/.test(args.command);
+}
+
 function isManagedBuildRequest(worktree: string, args: unknown): boolean {
   if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
   const wrapper = /^ingenium-build ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
@@ -506,6 +555,7 @@ function managedMutation(
   toolValue: string,
   args: unknown,
   deploymentOwner = false,
+  browserAgent = false,
 ): ManagedMutationDescriptor | undefined {
   const tool = toolValue.toLowerCase().replace(/[.-]/g, "_");
   if (!isRecord(args)) return undefined;
@@ -539,6 +589,9 @@ function managedMutation(
   }
   if (tool === "bash" || tool === "shell") {
     if (typeof args.command !== "string") return undefined;
+    if (browserAgent && isBoundBrowserWrapperRequest(worktree, args)) {
+      return { operation: "build", paths: [], readOnly: true };
+    }
     if (isTrustedResetCommand(args)) {
       return {
         operation: "build", paths: [], readOnly: true, coordinationReset: true,
@@ -1148,7 +1201,13 @@ export class SessionCoordinator {
     return attested;
   }
 
-  private async hasTrustedDeploymentCall(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
+  private async hasTrustedAgentCall(
+    sessionId: string,
+    callId: string,
+    tool: string,
+    args: unknown,
+    agent: string,
+  ): Promise<boolean> {
     if (!isRecord(this.ctx.client) || !isRecord(this.ctx.client.session)
       || typeof this.ctx.client.session.get !== "function" || typeof this.ctx.client.session.messages !== "function") return false;
     try {
@@ -1165,11 +1224,11 @@ export class SessionCoordinator {
       const parents = new Map(messages.map((entry) => [(entry.info as Record<string, unknown>).id, entry.info as Record<string, unknown>]));
       return messages.some((entry) => {
         const info = entry.info as Record<string, unknown>;
-        if (info.role !== "assistant" || info.sessionID !== sessionId || info.mode !== DEPLOYMENT_OWNER_AGENT
+        if (info.role !== "assistant" || info.sessionID !== sessionId || info.mode !== agent
           || typeof info.parentID !== "string"
           || !Array.isArray(entry.parts)) return false;
         const parent = parents.get(info.parentID);
-        if (!parent || parent.role !== "user" || parent.sessionID !== sessionId || parent.agent !== DEPLOYMENT_OWNER_AGENT) return false;
+        if (!parent || parent.role !== "user" || parent.sessionID !== sessionId || parent.agent !== agent) return false;
         return entry.parts.some((part) => isRecord(part) && part.type === "tool" && part.sessionID === sessionId
           && part.messageID === info.id && part.callID === callId && part.tool === tool && isRecord(part.state)
           && (part.state.status === "pending" || part.state.status === "running")
@@ -1181,7 +1240,8 @@ export class SessionCoordinator {
   }
 
   private async isAuthorizedDeploymentOwner(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
-    if (this.binding.purpose !== "general" || !await this.hasTrustedDeploymentCall(sessionId, callId, tool, args)) return false;
+    if (this.binding.purpose !== "general"
+      || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, DEPLOYMENT_OWNER_AGENT)) return false;
     try {
       return await this.attestGeneralBinding() !== undefined;
     } catch {
@@ -2652,10 +2712,15 @@ export class SessionCoordinator {
       },
       "tool.execute.before": async ({ tool, sessionID, callID }, output) => {
         if (this.disposed) return;
+        const boundBrowserCommand = tool === "bash" ? boundBrowserWrapperCommand(this.ctx.worktree, output.args) : undefined;
+        const browserAgent = boundBrowserCommand !== undefined
+          ? await this.hasTrustedAgentCall(sessionID, callID, tool, output.args, BROWSER_AGENT)
+          : false;
+        if (browserAgent && isRecord(output.args)) output.args.command = boundBrowserCommand;
         const deploymentOwner = isManagedBuildRequest(this.ctx.worktree, output.args)
           ? await this.isAuthorizedDeploymentOwner(sessionID, callID, tool, output.args)
           : false;
-        const descriptor = managedMutation(this.ctx.worktree, tool, output.args, deploymentOwner);
+        const descriptor = managedMutation(this.ctx.worktree, tool, output.args, deploymentOwner, browserAgent);
         if (!descriptor) {
           if (isManagedMutationTool(tool)) throw new Error("Managed mutation coordination rejected the tool arguments");
           return;
@@ -2696,7 +2761,13 @@ export class SessionCoordinator {
       "tool.execute.after": async ({ tool, sessionID, callID, args }, result) => {
         if (this.disposed) return;
         const deploymentOwner = this.pendingMutations.get(this.pendingKey(sessionID, callID))?.deploymentOwner === true;
-        const descriptor = managedMutation(this.ctx.worktree, tool, args, deploymentOwner);
+        const descriptor = managedMutation(
+          this.ctx.worktree,
+          tool,
+          args,
+          deploymentOwner,
+          isBoundBrowserWrapperRequest(this.ctx.worktree, args),
+        );
         if (descriptor?.readOnly) {
           if (descriptor.coordinationReset) {
             await this.reconnectAfterCredentialReset(sessionID, descriptor.reloadTimeoutMs ?? 10_000);

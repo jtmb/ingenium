@@ -23,7 +23,7 @@ const CHILD_MCP_POLICY: McpAuthorizationPolicy = {
 const READ = new Set([
   "setting_get", "skill_list", "skill_load", "skill_search", "skill_list_archived", "skill_versions", "skill_lineage_list", "skill_proposal_list", "skill_proposal_page", "skill_proposal_counts", "skill_proposal_get",
   "observation_search", "observation_list", "observation_stats", "observation_get", "personality", "personality_traits", "synthesis_status",
-  "task_list", "task_next", "task_search", "task_activity", "task_board_config_get", "task_notifications", "task_get", "task_comments_list", "task_links_list", "task_tree", "coordination_status",
+  "task_list", "task_next", "task_search", "task_activity", "task_board_config_get", "task_notifications", "task_get", "task_comments_list", "task_links_list", "task_tree", "coordination_status", "coordination_memory_read",
   "plan_search", "plan_list", "context_get", "context_batch_get", "context_conversation_get", "context_conversation_list", "context_message_list", "context_message_search", "context_message_retrieve", "context_message_batch_retrieve", "context_checkpoint_list", "context_checkpoint_get", "context_checkpoint_maintenance_preview", "context_checkpoint_audit_list",
   "project_list", "project_list_archived", "project_detail", "plugin_list", "plugin_get", "plugin_source", "command_list", "command_get", "config_get", "server_list", "mcp_report_get", "agent_list", "agent_get",
   "logs_list", "logs_sources", "email_list", "email_search", "email_read", "email_folders", "email_accounts", "email_patterns", "email_watch_status", "email_summarize", "email_sync_status", "email_attachment_get",

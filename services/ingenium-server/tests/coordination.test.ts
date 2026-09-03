@@ -370,6 +370,15 @@ describe("coordination MCP transport adapters", () => {
     expect(mockApi.post).toHaveBeenLastCalledWith("/coordination/memory/read", { ...lease, limit: 8 }, { project: PROJECT });
     expect(text(read)).toEqual(window);
 
+    mockApi.post.mockResolvedValueOnce(success(window));
+    const dedicatedRead = await coordination.coordinationMemoryRead("bound-project", { ...lease, limit: 8 });
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      "/coordination/memory/read",
+      { ...lease, limit: 8 },
+      { project: "bound-project" },
+    );
+    expect(text(dedicatedRead)).toEqual(window);
+
     mockApi.post.mockResolvedValueOnce(success({ session }));
     const acknowledged = await coordination.coordinationHandoff(PROJECT, "memory_ack", { ...lease, through_revision: 1 });
     expect(mockApi.post).toHaveBeenLastCalledWith("/coordination/memory/ack", {
@@ -566,11 +575,36 @@ describe("coordination MCP transport adapters", () => {
     });
   });
 
-  it("registers exactly the five coordination transport tools", () => {
+  it("registers the dedicated read-only memory schema without mixed operations", () => {
     const source = readFileSync(fileURLToPath(new URL("../scripts/mcp-server.ts", import.meta.url)), "utf8");
-    const names = [...source.matchAll(/server\.registerTool\(\s*"(coordination_[a-z]+)"/g)].map((match) => match[1]);
+    const start = source.indexOf('server.registerTool(\n  "coordination_memory_read"');
+    const end = source.indexOf("server.registerTool(", start + 1);
+    const registration = source.slice(start, end);
+    const schemaKeys = [...registration.matchAll(/^      ([a-z_]+):/gm)].map((match) => match[1]);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(schemaKeys).toEqual([
+      "project",
+      "worktree_id",
+      "session_id",
+      "incarnation",
+      "expected_revision",
+      "fence",
+      "ownership_token",
+      "idempotency_key",
+      "limit",
+    ]);
+    expect(registration).toContain("limit: z.number().int().min(1).max(8).optional()");
+    expect(registration).toContain('wrapHandler(C("coordination_memory_read")');
+    expect(registration).not.toMatch(/\b(?:operation|publish|ack|update|claim|release|memory_entry)\s*:/);
+  });
+
+  it("registers exactly the six coordination transport tools", () => {
+    const source = readFileSync(fileURLToPath(new URL("../scripts/mcp-server.ts", import.meta.url)), "utf8");
+    const names = [...source.matchAll(/server\.registerTool\(\s*"(coordination_[a-z_]+)"/g)].map((match) => match[1]);
     expect(names).toEqual([
       "coordination_status",
+      "coordination_memory_read",
       "coordination_update",
       "coordination_claim",
       "coordination_release",

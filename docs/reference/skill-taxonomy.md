@@ -96,20 +96,53 @@ source indexes are never cleanup targets.
 
 ## Agent Allowlist Mapping
 
-When updating agent `permission.skill` allowlists, use this exact mapping:
+The `@` prefix is required for a skill mention in Required Skills prose, but it
+is not part of a `permission.skill` key. Current user-facing agents use the
+universal policy below; the mapping is retained for narrow-policy migrations
+from legacy names.
 
-| Legacy @ref | Replace With |
-|-------------|-------------|
-| `@debugging-patterns` | `@engineering-workflow` |
-| `@configuring-opencode` | `@engineering-workflow` |
-| `@agent-workflow-patterns` | `@engineering-workflow` |
-| `@agent-execution-quality` | `@engineering-workflow` |
-| `@github-cli` | `@devops-conventions` |
-| `@git-history-hygiene` | `@devops-conventions` |
-| `@browsing-the-web` | `@mcp-tooling` |
-| `@docs-workspace` | `@documentation` |
-| `@local-persistence` | `@skill-maintenance` |
-| `@sqlite-wal-safety` | `@database-conventions` |
+```yaml
+permission:
+  skill:
+    "*": allow
+```
+
+If a deliberately narrow policy is needed, put the wildcard first and use the
+actual canonical directory names for later exceptions. Never put `@`-prefixed
+mentions in this block or put the wildcard last:
+
+```yaml
+permission:
+  skill:
+    "*": deny
+    "development-conventions": allow
+    "engineering-workflow": allow
+```
+
+The hidden `ingenium-llm-broker` is the exception and remains wildcard-denied
+with no tool allowances:
+
+```yaml
+permission:
+  skill:
+    "*": deny
+```
+
+Use this exact legacy-to-canonical mapping when a narrow `permission.skill`
+block is being migrated:
+
+| Legacy mention | Replacement mention | `permission.skill` key |
+|---------------|--------------------|----------------------|
+| `@debugging-patterns` | `@engineering-workflow` | `engineering-workflow` |
+| `@configuring-opencode` | `@engineering-workflow` | `engineering-workflow` |
+| `@agent-workflow-patterns` | `@engineering-workflow` | `engineering-workflow` |
+| `@agent-execution-quality` | `@engineering-workflow` | `engineering-workflow` |
+| `@github-cli` | `@devops-conventions` | `devops-conventions` |
+| `@git-history-hygiene` | `@devops-conventions` | `devops-conventions` |
+| `@browsing-the-web` | `@mcp-tooling` | `mcp-tooling` |
+| `@docs-workspace` | `@documentation` | `documentation` |
+| `@local-persistence` | `@skill-maintenance` | `skill-maintenance` |
+| `@sqlite-wal-safety` | `@database-conventions` | `database-conventions` |
 
 ---
 

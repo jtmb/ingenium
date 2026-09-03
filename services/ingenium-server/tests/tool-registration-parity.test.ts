@@ -186,6 +186,8 @@ describe("MCP server registration conformance", () => {
     const comparison = assertCurrentRegistrationConformance();
 
     expect(new Set(comparison.actualCanonicalNames)).toEqual(new Set(comparison.expectedCanonicalNames));
+    expect(comparison.actualCanonicalNames).toContain("ingenium_coordination_memory_read");
+    expect(comparison.expectedCanonicalNames).toContain("ingenium_coordination_memory_read");
   });
 
   it("requires a literal registration name and ignores calls after restoration", () => {

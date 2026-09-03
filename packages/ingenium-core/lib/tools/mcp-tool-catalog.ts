@@ -1043,8 +1043,9 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: TASKS_ENDPOINTS,
   },
 
-  // ── Task Coordination (5) ─────────────────────────────
+  // ── Task Coordination (6) ─────────────────────────────
   { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["GET /api/v1/coordination/snapshot"] },
+  { name: "ingenium_coordination_memory_read", category: "Tasks", description: "Read typed operational coordination memory updates for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/memory/read"] },
   { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot or renew its attested runtime activity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/runtimes/activity", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
   { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/batch"] },
   { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/release"] },

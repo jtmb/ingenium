@@ -99,6 +99,12 @@ export interface CoordinationHandoffInput {
   memory_entry?: Record<string, unknown>;
 }
 
+export type CoordinationMemoryReadInput = Pick<
+  CoordinationHandoffInput,
+  "worktree_id" | "session_id" | "incarnation" | "expected_revision" | "fence"
+  | "ownership_token" | "idempotency_key" | "limit"
+>;
+
 interface ApiResponse {
   ok: boolean;
   status: number;
@@ -700,6 +706,13 @@ export async function coordinationStatus(
     () => api.settled.getCoordinationSnapshot(project, worktreeId, sessionId, incarnation, ownershipToken),
     projectStatusResponse,
   );
+}
+
+export async function coordinationMemoryRead(
+  project: string,
+  input: CoordinationMemoryReadInput,
+): Promise<ToolResult> {
+  return coordinationHandoff(project, "memory_read", input);
 }
 
 /** Dispatch one coordination session operation to its exact API route and method. */

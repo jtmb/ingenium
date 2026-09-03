@@ -19,12 +19,16 @@ through one Ingenium project and canonical worktree:
 
 ## Current acceptance status
 
-The permission/deployment policy below is finalized, but its current runtime
-acceptance remains open. The original MCP connection-closure/runtime canary
-remains unverified: it is not accepted until the full parent OpenCode restart
-described below is completed and the canary is rerun. This guide does not claim
-that connection-closure is fixed, and no runtime canary has yet passed for this
-policy. The retained
+The permission/deployment policy below is finalized, but `RECOVERY-100` runtime
+acceptance remains open. The retained source inspection at commit
+`af5d725febf409d35795f60db1e0f05e23397336` and the current mode-`0400` to
+mode-`0600` credential source/test remediation are source-only evidence; they do
+not prove parent rebuild/restart, deployed health, a real MCP canary, QA or
+security review, or actual model/session replay. The original MCP
+connection-closure/runtime canary remains unverified: it is not accepted until
+the full parent OpenCode restart described below is completed and the canary is
+rerun. This guide does not claim that connection-closure is fixed, and no
+runtime canary has yet passed for this policy. The retained
 [COORD-106 r24 evidence bundle](../evidence/multi-session/coord106-r24/README.md)
 is historical coordination evidence; it does not prove either condition or
 replace current runtime acceptance.
@@ -37,10 +41,12 @@ acceptance or mix runtime versions between windows.
 ## Security boundary for managed execution
 
 See the [effective role matrix](../configure/agents.md#effective-role-matrix) for
-the complete permissions. In this workflow, Plan has only `read`, `glob`, `grep`,
-and `question`; intentional writer profiles retain `edit`/`write` rights, while
-read-only profiles do not. Bounded Bash or MCP access on a read-only profile is
-not file-mutation or deployment authority.
+the complete permissions. In this workflow, Plan is **all skills plus status
+only** for coordination: it has the universal repository skill/reference
+loading surface and only `read`, `glob`, `grep`, `question`, and the read-only
+`ingenium_coordination_status` tool. Intentional writer profiles retain
+`edit`/`write` rights, while read-only profiles do not. Bounded Bash or MCP
+access on a read-only profile is not file-mutation or deployment authority.
 
 - A non-Premium managed `ingenium-build` request fails closed in the
   pre-execution hook, before the wrapper can spawn `npm` or run a repository
@@ -58,6 +64,27 @@ not file-mutation or deployment authority.
   They map to fixed argv arrays, use `shell: false`, and sanitize inherited
   `COMPOSE_*`, `DOCKER_*`, `npm_*`, `NODE_OPTIONS`, and `PATH` values before
   setting the fixed runtime `PATH`.
+
+### Plan and recovery read surface
+
+The built-in Plan mapping has the universal `skill: {"*": "allow"}` loading
+surface, but that does not grant tools. Its exact root-level tool allowance is
+`read`, `glob`, `grep`, `question`, and `ingenium_coordination_status`: all
+repository skills/references are loadable, but the coordination surface is
+status-only. It cannot invoke `ingenium_coordination_update`,
+`ingenium_coordination_claim`, `ingenium_coordination_release`, or
+`ingenium_coordination_handoff`.
+
+The exact coordination reads used by recovery are `ingenium_coordination_status`
+for the durable session/claim snapshot and, from an authorized
+coordination-capable session, `ingenium_coordination_handoff` with `read` or
+`memory_read`. Those handoff operations do not advance their receiver cursors,
+but the combined tool also publishes, acknowledges, and consumes data and is
+therefore write-classified as a whole, not a Plan permission. A stale
+API/root-level `allow` expectation must not widen this boundary. Epoch
+`recovery_state`, `reconcile_epoch`, and `recover_epoch` remain operations on
+`ingenium_coordination_update`; reconciliation and recovery are authorized
+recovery actions, not Plan read access.
 
 ## 1. Establish one identity
 
@@ -94,9 +121,18 @@ the `shared-memory-ingenium` workspace, and the exact worktree. Keep credentials
 in protected ignored files; never put a bearer value in `opencode.json`, shell
 history, prompts, logs, or evidence.
 
+The root `opencode.json` mapping is authoritative for each agent's model, variant,
+permission object, and `prompt: "{file:...}"` reference. The referenced Markdown
+file supplies prompt content and its public profile metadata; its YAML frontmatter
+is not imported as a second root agent mapping and cannot override the root model,
+variant, or effective grants. Keep the root mapping and profile declaration in
+semantic parity.
+
 After changing an agent profile, plugin, MCP entry, config, or parent binding,
 perform one full parent OpenCode restart from the intended worktree. Restarting
-only the child MCP process is not sufficient for those changes. Content-only rotation of an
+only the child MCP process is not sufficient for those changes: existing parent
+sessions retain their previously loaded prompt, profile, skill surface, and
+permissions. Content-only rotation of an
 already-attested general MCP credential is the documented exception: use
 `ingenium-coordination-reset reset`, verify its fresh epoch, and then resume.
 Runtime and repository-sync credentials remain restart-mode.
@@ -195,6 +231,54 @@ already seen by that session; a duplicate is a coordination defect to preserve i
 evidence, not a reason to repeat a mutation.
 
 ## 5. Recovery
+
+### Lost chat or unknown turn outcome
+
+> **Docs first:** Read this guide and the live `RECOVERY-100` checklist in the
+> [roadmap](../reference/ROADMAP.md) before any recovery action. No Chat
+> transcript is required, requested, reconstructed, exported, or used as
+> recovery evidence; current authorized typed MCP/worktree evidence and
+> retained bounded artifacts are authoritative.
+
+A missing, truncated, or disconnected Chat response is not evidence that the
+underlying operation failed or succeeded. Treat the turn as **unknown** and do
+not repeat a mutation from memory or from a partial response.
+
+1. Stop all writers and preserve the canonical worktree. Do not clean broadly,
+   delete database rows, or remove files to make the state look consistent.
+2. Start a fresh parent OpenCode process from the intended checkout. Use Plan
+   mode for recovery inspection only; its complete allowance is `read`, `glob`,
+   `grep`, `question`, and `ingenium_coordination_status`, with all repository
+   skills/references loadable. It cannot edit files, write artifacts, run shell
+   commands, or invoke coordination mutation tools.
+3. Confirm the project, workspace, storage mapping, canonical worktree, MCP
+   audience, and credential binding. If MCP is unavailable or the binding is
+   mismatched, stop; local file visibility is not shared-memory proof.
+4. Use Plan's `ingenium_coordination_status` with the exact current identity, then
+   have the authorized coordination-capable recovery session read the newest
+   handoff or typed-memory state with `ingenium_coordination_handoff` using
+   `read` or `memory_read`. Decode and revalidate every path in
+   `COORDINATION_MEMORY_V2`, then use `Read` on the exact relative path. The file
+   and current API state, not the lost chat, decide whether a write or sync
+   occurred.
+5. Reconcile the actual changed-path footprint, manifest/generation state,
+   checks/results, task and todo state, session status, and `nextWork`. If the
+   outcome remains uncertain, or the footprint is dirty, use the quarantined
+   epoch recovery sequence below instead of retrying the operation.
+6. If a plugin, MCP entry, OpenCode configuration, or parent binding changed,
+   rebuild the extension and perform a full parent restart. Only content-only
+   rotation of an already-attested general MCP credential may use the
+   `live-mcp-reload` reset exception; runtime and repository-sync credentials
+   remain restart-mode.
+7. Resume at the first unfinished declared phase with a new accepted session,
+   claim, and fence. Preserve the first failure and old proof, do not duplicate
+   markers, and do not record completion until the real MCP and actual
+   model/session evidence gates pass. If TodoWrite is unavailable, report that
+   unavailability rather than replacing it with an invented checklist.
+
+Source tests, a deployed canary, and a real model/session artifact prove
+different boundaries. None can substitute for the missing evidence from the
+lost turn.
 
 ### Session or lease expiry
 

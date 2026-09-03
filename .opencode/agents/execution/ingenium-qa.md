@@ -29,7 +29,7 @@ permission:
     "@self-learning": allow
     "@skill-maintenance": allow
     "@ponytail": allow
-    "*": deny
+    "*": allow
 ---
 
 # Ingenium QA

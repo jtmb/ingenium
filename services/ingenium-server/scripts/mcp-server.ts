@@ -1205,6 +1205,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  "coordination_memory_read",
+  {
+    description: "Read typed operational memory for an exact coordination session identity.",
+    inputSchema: {
+      project: projectParam,
+      worktree_id: coordinationOpaqueIdParam,
+      session_id: coordinationOpaqueIdParam,
+      incarnation: coordinationPositiveParam,
+      expected_revision: coordinationRevisionParam,
+      fence: coordinationPositiveParam,
+      ownership_token: coordinationTokenParam,
+      idempotency_key: coordinationKeyParam,
+      limit: z.number().int().min(1).max(8).optional(),
+    },
+  },
+  wrapHandler(C("coordination_memory_read"), async ({ project, ...input }) =>
+    coordinationTools.coordinationMemoryRead(project, input)),
+);
+
+server.registerTool(
   "coordination_update",
   {
     description: "Update a coordination session with an exact registry operation.",

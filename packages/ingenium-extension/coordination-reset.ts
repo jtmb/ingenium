@@ -13,7 +13,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  statSync,
+  type Stats,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -53,10 +53,33 @@ export type CoordinationResetFailure =
   | "source_changed"
   | "unavailable";
 
+const CREDENTIAL_INSTALL_SUBSTAGES = [
+  "ancestor",
+  "existing_target",
+  "temporary_create",
+  "temporary_write",
+  "rename",
+  "directory_sync",
+  "readback",
+  "rollback",
+] as const;
+
+export type CredentialInstallSubstage = typeof CREDENTIAL_INSTALL_SUBSTAGES[number];
+
+function isCredentialInstallSubstage(value: unknown): value is CredentialInstallSubstage {
+  return typeof value === "string" && (CREDENTIAL_INSTALL_SUBSTAGES as readonly string[]).includes(value);
+}
+
 export class CoordinationResetError extends Error {
-  constructor(readonly failure: CoordinationResetFailure) {
+  declare readonly substage: CredentialInstallSubstage | undefined;
+
+  constructor(
+    readonly failure: CoordinationResetFailure,
+    substage?: CredentialInstallSubstage,
+  ) {
     super("Coordination credential reset failed");
     this.name = "CoordinationResetError";
+    Object.defineProperty(this, "substage", { value: substage, enumerable: false });
   }
 }
 
@@ -141,8 +164,8 @@ export interface CoordinationResetDependencies {
   now?: () => number;
 }
 
-function fail(failure: CoordinationResetFailure): never {
-  throw new CoordinationResetError(failure);
+function fail(failure: CoordinationResetFailure, substage?: CredentialInstallSubstage): never {
+  throw new CoordinationResetError(failure, substage);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -157,6 +180,37 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 function isContained(parent: string, child: string): boolean {
   const path = relative(parent, child);
   return path.length > 0 && !path.startsWith("..") && !isAbsolute(path);
+}
+
+function currentOwner(): number | undefined {
+  if (typeof process.geteuid === "function") return process.geteuid();
+  return typeof process.getuid === "function" ? process.getuid() : undefined;
+}
+
+function secureFileLocation(
+  root: string,
+  target: string,
+  failure: CoordinationResetFailure,
+  substage?: CredentialInstallSubstage,
+): void {
+  const canonicalRoot = resolve(root);
+  const absoluteTarget = resolve(target);
+  if (!isContained(canonicalRoot, absoluteTarget)) return fail(failure, substage);
+  const owner = currentOwner();
+  let current = dirname(absoluteTarget);
+  try {
+    while (true) {
+      const metadata = lstatSync(current);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(current) !== current
+        || (owner !== undefined && metadata.uid !== owner)) return fail(failure, substage);
+      if (current === canonicalRoot) return;
+      if (!isContained(canonicalRoot, current)) return fail(failure, substage);
+      current = dirname(current);
+    }
+  } catch (error) {
+    if (error instanceof CoordinationResetError) throw error;
+    return fail(failure, substage);
+  }
 }
 
 function protectedDescriptor(descriptor: number): void {
@@ -191,10 +245,10 @@ function readExplicitProtectedOwnerSecret(environment: NodeJS.ProcessEnv): Owner
     if (path !== undefined) {
       if (!isAbsolute(path) || resolve(path) !== path) return fail("binding");
       const parent = lstatSync(dirname(path));
-      const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
+      const owner = currentOwner();
       if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o077) !== 0
-        || (owner !== undefined && parent.uid !== owner)) return fail("binding");
-      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        || realpathSync(dirname(path)) !== dirname(path) || (owner !== undefined && parent.uid !== owner)) return fail("binding");
+      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       close = true;
     } else {
       if (!/^[3-9][0-9]*$/.test(rawFd!)) return fail("binding");
@@ -212,9 +266,9 @@ function readExplicitProtectedOwnerSecret(environment: NodeJS.ProcessEnv): Owner
 
 function protectedDirectory(path: string): void {
   const metadata = lstatSync(path);
-  const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const owner = currentOwner();
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o700
-    || (owner !== undefined && metadata.uid !== owner)) return fail("binding");
+    || realpathSync(path) !== resolve(path) || (owner !== undefined && metadata.uid !== owner)) return fail("binding");
 }
 
 function readProtectedFile(path: string, maximumBytes: number): Buffer {
@@ -222,9 +276,9 @@ function readProtectedFile(path: string, maximumBytes: number): Buffer {
   let descriptor: number | undefined;
   try {
     protectedDirectory(dirname(path));
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const metadata = fstatSync(descriptor);
-    const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
+    const owner = currentOwner();
     if (!metadata.isFile() || (metadata.mode & 0o777) !== 0o600 || metadata.size < 1 || metadata.size > maximumBytes
       || (owner !== undefined && metadata.uid !== owner)) return fail("binding");
     return readFileSync(descriptor);
@@ -241,10 +295,10 @@ function readProviderReferenceFile(path: string): Buffer {
   let descriptor: number | undefined;
   try {
     const parent = lstatSync(dirname(path));
-    const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
+    const owner = currentOwner();
     if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o022) !== 0
-      || (owner !== undefined && parent.uid !== owner)) return fail("binding");
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      || realpathSync(dirname(path)) !== dirname(path) || (owner !== undefined && parent.uid !== owner)) return fail("binding");
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const metadata = fstatSync(descriptor);
     if (!metadata.isFile() || (metadata.mode & 0o777) !== 0o600 || metadata.size < 1 || metadata.size > PROVIDER_MAX_BYTES
       || (owner !== undefined && metadata.uid !== owner)) return fail("binding");
@@ -298,13 +352,16 @@ function parseProviderReference(source: Buffer, worktree: string): OwnerProvider
 
 function readProviderReference(worktree: string): OwnerProviderReference {
   const referencePath = resolve(worktree, OWNER_PROVIDER_REFERENCE);
+  secureFileLocation(worktree, referencePath, "binding");
   const source = readProviderReferenceFile(referencePath);
   try { return parseProviderReference(source, worktree); } finally { source.fill(0); }
 }
 
 function optionalProviderReference(worktree: string): OwnerProviderReference | undefined {
+  const referencePath = resolve(worktree, OWNER_PROVIDER_REFERENCE);
+  secureFileLocation(worktree, referencePath, "binding");
   try {
-    lstatSync(resolve(worktree, OWNER_PROVIDER_REFERENCE));
+    lstatSync(referencePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return fail("binding");
@@ -361,13 +418,16 @@ export function readProtectedOwnerSecret(
 function canonicalBinding(worktree: string): CanonicalBinding {
   let root: string;
   try {
-    root = realpathSync(resolve(worktree));
-    if (!statSync(root).isDirectory()) return fail("binding");
+    root = resolve(worktree);
+    const metadata = lstatSync(root);
+    const owner = currentOwner();
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(root) !== root
+      || (owner !== undefined && metadata.uid !== owner)) return fail("binding");
   } catch { return fail("binding"); }
   const configPath = resolve(root, "opencode.json");
   let descriptor: number | undefined;
   try {
-    descriptor = openSync(configPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openSync(configPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = fstatSync(descriptor);
     if (!stat.isFile() || stat.size > CONFIG_MAX_BYTES) return fail("binding");
     const config: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
@@ -387,22 +447,46 @@ function canonicalBinding(worktree: string): CanonicalBinding {
   const credentialFile = resolve(root, CREDENTIAL_REFERENCE);
   if (basename(credentialFile) !== ".ingenium-mcp-credential"
     || !isContained(resolve(root, ".opencode"), credentialFile)) return fail("binding");
+  secureFileLocation(root, credentialFile, "binding");
   return { worktree: root, credentialFile };
 }
 
-function writeAtomicFile(target: string, contents: Buffer, label: string): void {
+function writeAtomicFile(
+  root: string,
+  target: string,
+  contents: Buffer,
+  label: string,
+  failure: CoordinationResetFailure,
+): void {
   const temporary = resolve(dirname(target), `.${label}.${randomUUID()}.tmp`);
   let descriptor: number | undefined;
+  const operation = <T>(substage: CredentialInstallSubstage, callback: () => T): T => {
+    try { return callback(); } catch (error) {
+      if (error instanceof CoordinationResetError) throw error;
+      if (failure === "credential_install") return fail(failure, substage);
+      throw error;
+    }
+  };
   try {
-    descriptor = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    fchmodSync(descriptor, 0o600);
-    writeFileSync(descriptor, contents);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    renameSync(temporary, target);
-    const parent = openSync(dirname(target), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try { fsyncSync(parent); } finally { closeSync(parent); }
+    secureFileLocation(root, temporary, failure, "ancestor");
+    descriptor = operation("temporary_create", () => {
+      const created = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      fchmodSync(created, 0o600);
+      return created;
+    });
+    operation("temporary_write", () => {
+      writeFileSync(descriptor!, contents);
+      fsyncSync(descriptor!);
+      closeSync(descriptor!);
+      descriptor = undefined;
+    });
+    secureFileLocation(root, target, failure, "ancestor");
+    operation("rename", () => renameSync(temporary, target));
+    secureFileLocation(root, target, failure, "ancestor");
+    operation("directory_sync", () => {
+      const parent = openSync(dirname(target), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try { fsyncSync(parent); } finally { closeSync(parent); }
+    });
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
     try { unlinkSync(temporary); } catch { /* renamed or already removed */ }
@@ -460,13 +544,21 @@ export function persistEncryptedOwnerSecret(
   let bundleInstalled = false;
   let referenceInstalled = false;
   try {
-    writeAtomicFile(bundleFile, Buffer.from(`${JSON.stringify(envelope)}\n`, "utf8"), "ingenium-owner-bundle");
+    writeAtomicFile(
+      options.bundleDirectory,
+      bundleFile,
+      Buffer.from(`${JSON.stringify(envelope)}\n`, "utf8"),
+      "ingenium-owner-bundle",
+      "binding",
+    );
     bundleInstalled = true;
     dependencies.afterBundleRename?.();
     writeAtomicFile(
+      binding.worktree,
       referenceFile,
       Buffer.from(`${JSON.stringify(reference)}\n`, "utf8"),
       "ingenium-owner-provider",
+      "binding",
     );
     referenceInstalled = true;
     decryptProviderSecret(readProviderReference(binding.worktree));
@@ -475,7 +567,13 @@ export function persistEncryptedOwnerSecret(
     if (referenceInstalled) {
       try {
         if (previous) {
-          writeAtomicFile(referenceFile, Buffer.from(`${JSON.stringify(previous)}\n`, "utf8"), "ingenium-owner-provider-rollback");
+          writeAtomicFile(
+            binding.worktree,
+            referenceFile,
+            Buffer.from(`${JSON.stringify(previous)}\n`, "utf8"),
+            "ingenium-owner-provider-rollback",
+            "binding",
+          );
         } else {
           unlinkSync(referenceFile);
           const parent = openSync(dirname(referenceFile), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -493,25 +591,96 @@ export function persistEncryptedOwnerSecret(
   }
 }
 
-function readExistingCredential(target: string): Buffer | undefined {
-  let descriptor: number | undefined;
+interface CredentialRotation {
+  commit(): void;
+  rollback(): void;
+}
+
+function secureCredentialParent(root: string, target: string): string {
+  const parent = resolve(root, ".opencode");
   try {
-    descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const stat = fstatSync(descriptor);
-    const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
-    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600 || (owner !== undefined && stat.uid !== owner)) return fail("credential_install");
-    return readFileSync(descriptor);
+    secureFileLocation(root, target, "credential_install", "ancestor");
+    const metadata = lstatSync(parent);
+    const owner = currentOwner();
+    if (dirname(target) !== parent || owner === undefined || !metadata.isDirectory() || metadata.isSymbolicLink()
+      || metadata.uid !== owner || (metadata.mode & 0o022) !== 0 || realpathSync(parent) !== parent) {
+      return fail("credential_install", "ancestor");
+    }
+    return parent;
   } catch (error) {
     if (error instanceof CoordinationResetError) throw error;
+    return fail("credential_install", "ancestor");
+  }
+}
+
+function credentialTarget(
+  target: string,
+  substage: "existing_target" | "readback" | "rollback",
+): Stats | undefined {
+  try {
     try {
-      lstatSync(target);
-      return fail("credential_install");
-    } catch (nested) {
-      if (nested instanceof CoordinationResetError) throw nested;
-      return undefined;
+      const metadata = lstatSync(target);
+      const owner = currentOwner();
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1
+        || (owner !== undefined && metadata.uid !== owner)
+        || (metadata.mode & 0o400) === 0 || (metadata.mode & 0o077) !== 0) {
+        return fail("credential_install", substage);
+      }
+      return metadata;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      return fail("credential_install", substage);
     }
+  } catch (error) {
+    if (error instanceof CoordinationResetError) throw error;
+    return fail("credential_install", substage);
+  }
+}
+
+function sameFile(actual: Stats, expected: Stats): boolean {
+  return actual.dev === expected.dev && actual.ino === expected.ino;
+}
+
+function verifyInstalledCredential(target: string, expected: Stats, contents: Buffer): void {
+  let descriptor: number | undefined;
+  try {
+    const pathMetadata = credentialTarget(target, "readback");
+    if (!pathMetadata || !sameFile(pathMetadata, expected)) return fail("credential_install", "readback");
+    descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = fstatSync(descriptor);
+    const owner = currentOwner();
+    if (!sameFile(stat, expected) || !stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o600
+      || owner === undefined || stat.uid !== owner || !readFileSync(descriptor).equals(contents)) {
+      return fail("credential_install", "readback");
+    }
+  } catch (error) {
+    if (error instanceof CoordinationResetError) throw error;
+    return fail("credential_install", "readback");
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function syncCredentialDirectory(parent: string, substage: "directory_sync" | "rollback"): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    fsyncSync(descriptor);
+  } catch { return fail("credential_install", substage); }
+  finally { if (descriptor !== undefined) closeSync(descriptor); }
+}
+
+function exclusiveSibling(root: string, target: string, suffix: "tmp" | "quarantine"): string {
+  const ending = suffix === "quarantine" ? "quarantine.credential" : suffix;
+  const path = resolve(dirname(target), `.${basename(target)}.${randomUUID()}.${ending}`);
+  secureFileLocation(root, path, "credential_install", suffix === "tmp" ? "temporary_create" : "rename");
+  try {
+    lstatSync(path);
+    return fail("credential_install", suffix === "tmp" ? "temporary_create" : "rename");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return path;
+    if (error instanceof CoordinationResetError) throw error;
+    return fail("credential_install", suffix === "tmp" ? "temporary_create" : "rename");
   }
 }
 
@@ -520,36 +689,124 @@ export function installCoordinationCredentialAtomically(
   token: string,
   dependencies: AtomicCredentialInstallDependencies = {},
 ): void {
-  installCredentialAtomically(canonicalBinding(worktree).credentialFile, token, dependencies);
+  const binding = canonicalBinding(worktree);
+  installCredentialAtomically(binding.worktree, binding.credentialFile, token, dependencies).commit();
 }
 
 function installCredentialAtomically(
+  worktree: string,
   credentialFile: string,
   token: string,
   dependencies: AtomicCredentialInstallDependencies = {},
-): void {
-  if (!TOKEN.test(token)) return fail("credential_install");
-  const previous = readExistingCredential(credentialFile);
-  let replaced = false;
-  try {
-    writeAtomicFile(credentialFile, Buffer.from(`${token}\n`, "utf8"), "ingenium-mcp-credential");
-    replaced = true;
-    dependencies.afterRename?.();
-    const installed = readExistingCredential(credentialFile);
-    if (!installed?.equals(Buffer.from(`${token}\n`, "utf8"))) return fail("credential_install");
-  } catch (error) {
-    if (replaced) {
-      try {
-        if (previous) writeAtomicFile(credentialFile, previous, "ingenium-mcp-credential-rollback");
-        else {
-          unlinkSync(credentialFile);
-          const parent = openSync(dirname(credentialFile), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-          try { fsyncSync(parent); } finally { closeSync(parent); }
+): CredentialRotation {
+  if (!TOKEN.test(token)) return fail("credential_install", "readback");
+  const parent = secureCredentialParent(worktree, credentialFile);
+  const previous = credentialTarget(credentialFile, "existing_target");
+  const contents = Buffer.from(`${token}\n`, "utf8");
+  const temporary = exclusiveSibling(worktree, credentialFile, "tmp");
+  const quarantine = previous ? exclusiveSibling(worktree, credentialFile, "quarantine") : undefined;
+  let descriptor: number | undefined;
+  let staged: Stats | undefined;
+  let temporaryCreated = false;
+  let quarantined = false;
+  let installed = false;
+  let active = true;
+
+  const removeKnownFile = (path: string, expected: Stats, substage: "rollback"): void => {
+    const actual = credentialTarget(path, substage);
+    if (!actual || !sameFile(actual, expected)) return fail("credential_install", substage);
+    unlinkSync(path);
+  };
+  const rollback = (): void => {
+    if (!active) return;
+    try {
+      secureCredentialParent(worktree, credentialFile);
+      if (installed && staged) {
+        removeKnownFile(credentialFile, staged, "rollback");
+        installed = false;
+      }
+      if (quarantined && quarantine && previous) {
+        if (credentialTarget(credentialFile, "rollback")) return fail("credential_install", "rollback");
+        const held = credentialTarget(quarantine, "rollback");
+        if (!held || !sameFile(held, previous)) return fail("credential_install", "rollback");
+        renameSync(quarantine, credentialFile);
+        quarantined = false;
+      }
+      if (temporaryCreated) {
+        const leftover = credentialTarget(temporary, "rollback");
+        if (leftover) {
+          if (staged && !sameFile(leftover, staged)) return fail("credential_install", "rollback");
+          unlinkSync(temporary);
         }
-      } catch { return fail("credential_install"); }
+      }
+      syncCredentialDirectory(parent, "rollback");
+      active = false;
+    } catch { return fail("credential_install", "rollback"); }
+  };
+
+  try {
+    try {
+      descriptor = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      temporaryCreated = true;
+      staged = fstatSync(descriptor);
+      fchmodSync(descriptor, 0o600);
+    } catch { return fail("credential_install", "temporary_create"); }
+    try {
+      writeFileSync(descriptor, contents);
+      fsyncSync(descriptor);
+      staged = fstatSync(descriptor);
+      const owner = currentOwner();
+      if (!staged.isFile() || staged.nlink !== 1 || (staged.mode & 0o777) !== 0o600
+        || owner === undefined || staged.uid !== owner) return fail("credential_install", "temporary_write");
+      closeSync(descriptor);
+      descriptor = undefined;
+    } catch (error) {
+      if (error instanceof CoordinationResetError) throw error;
+      return fail("credential_install", "temporary_write");
     }
-    throw error instanceof CoordinationResetError ? error : new CoordinationResetError("credential_install");
+    if (!staged) return fail("credential_install", "temporary_write");
+    if (previous && quarantine) {
+      try {
+        renameSync(credentialFile, quarantine);
+        quarantined = true;
+        const held = credentialTarget(quarantine, "existing_target");
+        if (!held || !sameFile(held, previous)) return fail("credential_install", "existing_target");
+      } catch (error) {
+        if (error instanceof CoordinationResetError) throw error;
+        return fail("credential_install", "rename");
+      }
+    }
+    try {
+      renameSync(temporary, credentialFile);
+      installed = true;
+    } catch { return fail("credential_install", "rename"); }
+    verifyInstalledCredential(credentialFile, staged, contents);
+    syncCredentialDirectory(parent, "directory_sync");
+    dependencies.afterRename?.();
+  } catch (error) {
+    if (descriptor !== undefined) { closeSync(descriptor); descriptor = undefined; }
+    rollback();
+    throw error instanceof CoordinationResetError ? error : new CoordinationResetError("credential_install", "rollback");
   }
+  return {
+    rollback,
+    commit(): void {
+      if (!active) return;
+      try {
+        if (quarantined && quarantine && previous) {
+          removeKnownFile(quarantine, previous, "rollback");
+          quarantined = false;
+        }
+        active = false;
+        syncCredentialDirectory(parent, "directory_sync");
+      } catch (error) {
+        if (active) rollback();
+        throw error instanceof CoordinationResetError
+          ? error
+          : new CoordinationResetError("credential_install", "directory_sync");
+      }
+    },
+  };
 }
 
 function cookie(response: Response, name: string): string | undefined {
@@ -758,8 +1015,9 @@ function defaultSourceFingerprint(worktree: string): Buffer {
   });
 }
 
-function acquireResetLock(credentialFile: string): { close(): void } {
+function acquireResetLock(worktree: string, credentialFile: string): { close(): void } {
   const lock = resolve(dirname(credentialFile), `${basename(credentialFile)}.reset-lock`);
+  secureFileLocation(worktree, lock, "binding");
   let descriptor: number;
   try {
     descriptor = openSync(lock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -771,7 +1029,10 @@ function acquireResetLock(credentialFile: string): { close(): void } {
     if (closed) return;
     closed = true;
     closeSync(descriptor);
-    try { unlinkSync(lock); } catch { /* a failed cleanup remains fail-closed for the next reset */ }
+    try {
+      secureFileLocation(worktree, lock, "binding");
+      unlinkSync(lock);
+    } catch { /* a failed cleanup remains fail-closed for the next reset */ }
   } };
 }
 
@@ -803,9 +1064,11 @@ async function resetCredential(
       scopes: LEARNING_SCOPES,
     };
   if (!isContained(resolve(binding.worktree, ".opencode"), profile.credentialFile)) return fail("binding");
-  const lock = acquireResetLock(profile.credentialFile);
+  secureFileLocation(binding.worktree, profile.credentialFile, "binding");
+  const lock = acquireResetLock(binding.worktree, profile.credentialFile);
   const fingerprint = dependencies.sourceFingerprint ?? defaultSourceFingerprint;
   const before = fingerprint(binding.worktree);
+  let rotation: CredentialRotation | undefined;
   try {
     const secret = readProtectedOwnerSecret(binding.worktree);
     const request = dependencies.request ?? fetch;
@@ -816,11 +1079,21 @@ async function resetCredential(
     const issued = await issueCredential(
       request, session, identity, binding, profile, (dependencies.now ?? Date.now)(), servicePrincipalId,
     );
-    installCredentialAtomically(profile.credentialFile, issued.token, dependencies.installDependencies);
+    rotation = installCredentialAtomically(
+      binding.worktree,
+      profile.credentialFile,
+      issued.token,
+      dependencies.installDependencies,
+    );
     await verifyCredential(request, issued.token, binding, identity, profile);
-    await revokePriorCredentials(request, session, issued.id, identity, binding, profile, prior);
     if (!fingerprint(binding.worktree).equals(before)) return fail("source_changed");
+    rotation.commit();
+    rotation = undefined;
+    await revokePriorCredentials(request, session, issued.id, identity, binding, profile, prior);
     return { status: "completed" };
+  } catch (error) {
+    rotation?.rollback();
+    throw error;
   } finally {
     lock.close();
   }
@@ -849,7 +1122,11 @@ export async function runCoordinationResetCli(args = process.argv.slice(2)): Pro
     return 0;
   } catch (error) {
     const failure = error instanceof CoordinationResetError ? error.failure : "unavailable";
-    process.stderr.write(`coordination reset: failed (${failure})\n`);
+    const substage = error instanceof CoordinationResetError && error.failure === "credential_install"
+      && isCredentialInstallSubstage(error.substage)
+      ? `:${error.substage}`
+      : "";
+    process.stderr.write(`coordination reset: failed (${failure}${substage})\n`);
     return 1;
   }
 }

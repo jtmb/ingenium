@@ -49,6 +49,7 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
+  if (req.method === "POST" && req.path === "/api/v1/coordination/memory/read") return "read";
   if (req.method === "POST" && req.path === "/api/v1/coordination/epoch/recover") return "write";
   if (/\/(run|sync|execute|test|connect|disconnect|prompt|command|abort|compact|fork|revert|unrevert)(?:\/|$)/.test(req.path)) return "execute";
   if (req.method === "DELETE" || /\/(purge|restore|global|authorize|approve|rollback|recover)(?:\/|$)/.test(req.path)) return "admin";
@@ -58,6 +59,12 @@ function permissionFor(req: Request): PolicyPermission {
 function resourceFor(path: string): string {
   const segment = path.replace(/^\/(?:_ingenium\/)?(?:api\/v1\/)?/, "").split("/")[0];
   return segment || "api";
+}
+
+function isProjectScopedDocumentationRead(req: Pick<Request, "method" | "path">): boolean {
+  return req.method === "GET" && (req.path === "/api/v1/docs/search"
+    || req.path === "/api/v1/docs/pages"
+    || /^\/api\/v1\/docs\/pages\/[^/]+$/.test(req.path));
 }
 
 export function policyForRequest(req: Pick<Request, "method" | "path">): AuthorizationPolicy | undefined {
@@ -331,7 +338,12 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
   }
   const principal = toAuthorizationPrincipal(req.principal);
   let decision: authorization.AuthorizationDecision;
-  if (policy.target === "installation" || policy.target === "private") {
+  if (req.principal.type === "service" && isProjectScopedDocumentationRead(req)) {
+    const project = requestedProject(req);
+    decision = project
+      ? authorization.requireProjectPermission(principal, project.id, "documentation", "read")
+      : { allowed: false, visible: false };
+  } else if (policy.target === "installation" || policy.target === "private") {
     decision = authorization.requireInstallationPermission(principal, policy.resource, policy.permission);
     if (policy.target === "private" && req.path.startsWith("/api/v1/auth/") && req.principal.type === "user" && req.principal.session) decision = { allowed: true, visible: true };
     if (policy.target === "private" && req.principal.type === "user" && !req.principal.session

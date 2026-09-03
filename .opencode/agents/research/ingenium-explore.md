@@ -16,7 +16,7 @@ permission:
   skill:
     "@local-models": allow
     "@ponytail": allow
-    "*": deny
+    "*": allow
 ---
 
 ## 🔴 MANDATORY PREFLIGHT — Load Before Any Action
