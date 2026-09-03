@@ -1,6 +1,24 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -35,6 +53,7 @@ import {
   readManagedRecoveryEnrollment,
 } from "./tui-recovery.js";
 import {
+  hardenLegacyProductionCredentialPermissions,
   parseListeningLoopbackPorts,
   runProductionRestartAdapter,
   type ProductionRestartAdapterDependencies,
@@ -406,6 +425,89 @@ describe("managed command wrappers", () => {
     ].join("\n");
 
     expect(parseListeningLoopbackPorts(table)).toEqual([60117, 4098]);
+  });
+
+  it("credential_permission_bootstrap hardens only the configured descriptor and rejects metadata races", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-credential-permissions-"));
+    const opencode = join(worktree, ".opencode");
+    const credential = join(opencode, ".ingenium-mcp-credential");
+    const priorPurpose = process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE;
+    const priorCredential = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+    const priorInline = process.env.INGENIUM_MCP_CREDENTIAL;
+    try {
+      mkdirSync(opencode, { mode: 0o700 });
+      process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = "general";
+      process.env.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
+      delete process.env.INGENIUM_MCP_CREDENTIAL;
+      const sentinel = "legacy-credential-content\n";
+      writeFileSync(credential, sentinel, { mode: 0o644 });
+      chmodSync(credential, 0o644);
+      const before = lstatSync(credential);
+
+      hardenLegacyProductionCredentialPermissions(worktree);
+
+      const hardened = lstatSync(credential);
+      expect(hardened.mode & 0o777).toBe(0o600);
+      expect({ dev: hardened.dev, ino: hardened.ino, uid: hardened.uid, nlink: hardened.nlink, size: hardened.size, mtimeMs: hardened.mtimeMs })
+        .toEqual({ dev: before.dev, ino: before.ino, uid: before.uid, nlink: before.nlink, size: before.size, mtimeMs: before.mtimeMs });
+      expect(readFileSync(credential, "utf8")).toBe(sentinel);
+
+      chmodSync(credential, 0o644);
+      linkSync(credential, `${credential}.link`);
+      expect(() => hardenLegacyProductionCredentialPermissions(worktree)).toThrow("credential permission bootstrap failed");
+      expect(lstatSync(credential).mode & 0o777).toBe(0o644);
+      rmSync(`${credential}.link`);
+
+      const target = `${credential}.target`;
+      renameSync(credential, target);
+      symlinkSync(target, credential);
+      expect(() => hardenLegacyProductionCredentialPermissions(worktree)).toThrow("credential permission bootstrap failed");
+      expect(readFileSync(target, "utf8")).toBe(sentinel);
+      rmSync(credential);
+      renameSync(target, credential);
+
+      const replacement = `${credential}.replacement`;
+      writeFileSync(replacement, "replacement-must-not-be-chmodded\n", { mode: 0o644 });
+      chmodSync(credential, 0o644);
+      chmodSync(replacement, 0o644);
+      let swapped = false;
+      expect(() => hardenLegacyProductionCredentialPermissions(worktree, {
+        closeSync,
+        fchmodSync,
+        fstatSync,
+        lstatSync,
+        openSync(path, flags, mode) {
+          if (!swapped && path === credential) {
+            swapped = true;
+            renameSync(credential, `${credential}.old`);
+            renameSync(replacement, credential);
+          }
+          return openSync(path, flags, mode);
+        },
+      })).toThrow("credential permission bootstrap failed");
+      expect(lstatSync(credential).mode & 0o777).toBe(0o644);
+      expect(lstatSync(`${credential}.old`).mode & 0o777).toBe(0o644);
+      rmSync(`${credential}.old`);
+
+      const ownerMismatch = lstatSync(credential);
+      Object.defineProperty(ownerMismatch, "uid", { value: ownerMismatch.uid + 1 });
+      expect(() => hardenLegacyProductionCredentialPermissions(worktree, {
+        closeSync,
+        fchmodSync,
+        fstatSync,
+        openSync,
+        lstatSync: () => ownerMismatch,
+      })).toThrow("credential permission bootstrap failed");
+      expect(lstatSync(credential).mode & 0o777).toBe(0o644);
+    } finally {
+      if (priorPurpose === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE;
+      else process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = priorPurpose;
+      if (priorCredential === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_FILE;
+      else process.env.INGENIUM_MCP_CREDENTIAL_FILE = priorCredential;
+      if (priorInline === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL;
+      else process.env.INGENIUM_MCP_CREDENTIAL = priorInline;
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it("decodes bounded argv without a shell and rejects unsupported commands", () => {

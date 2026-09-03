@@ -319,6 +319,10 @@ function coordinationFixture() {
       const owner = `${args.project}\0${args.worktree_id}`;
       if (claims.get(owner) !== args.client_claim_key) throw new Error("claim key");
       if (args.action === "renew") state.revision += 1;
+      if (args.action === "quarantine") {
+        claims.delete(owner);
+        state.revision += 1;
+      }
       if (args.action === "complete") {
         claims.delete(owner);
         state.revision += 1;
@@ -1720,6 +1724,138 @@ describe("SessionCoordinatorPlugin hooks", () => {
     expect(callTool.mock.calls.filter(([, tool, args]) => tool === "coordination_claim" && args.action === "complete"))
       .toHaveLength(1);
     expect((coordinator as any).pendingMutations.size).toBe(0);
+  });
+
+  it("abort_without_after quarantines on session error and ignores duplicate errors", async () => {
+    const fixture = coordinationFixture();
+    const process = processHarness("abort-error", "/tmp/abort-error/home", "/tmp/abort-error/xdg", 43042, {});
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, now: () => 600, token: () => "E".repeat(32), disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "abort-error-session";
+    const input = { tool: "write", sessionID, callID: "abort-error-call", args: { path: "src/aborted.ts" } };
+
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+    await hooks["tool.execute.before"]!(input, { args: input.args });
+    const pending = (coordinator as any).pendingMutations as Map<string, Args>;
+    const mutation = pending.get(`${sessionID}\0${input.callID}`)!;
+    pending.set("other-session\0other-call", {
+      ...mutation, sessionId: "other-session", callId: "other-call", remoteClaimed: false,
+    });
+    await hooks.event!({ event: { type: "session.error", properties: { sessionID } } as any });
+    await hooks.event!({ event: { type: "session.error", properties: { sessionID } } as any });
+
+    const quarantine = fixture.calls.filter(({ tool, args }) => tool === "coordination_claim" && args.action === "quarantine");
+    const errorMemory = fixture.calls.filter(({ tool, args }) => tool === "coordination_handoff"
+      && args.operation === "memory" && args.memory_entry.status === "error");
+    expect(quarantine).toHaveLength(1);
+    expect(fixture.calls.indexOf(quarantine[0]!)).toBeLessThan(fixture.calls.indexOf(errorMemory[0]!));
+    expect([...pending.keys()]).toEqual(["other-session\0other-call"]);
+    expect(fixture.calls.some(({ tool }) => tool === "coordination_release")).toBe(false);
+  });
+
+  it("idle_stale_pending quarantines only stale mutations from the idle session", async () => {
+    const fixture = coordinationFixture();
+    let clock = 70_000;
+    const process = processHarness("idle-abort", "/tmp/idle-abort/home", "/tmp/idle-abort/xdg", 43043, {});
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, now: () => clock, token: () => "I".repeat(32), disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "idle-abort-session";
+    const input = { tool: "write", sessionID, callID: "stale-call", args: { path: "src/stale-abort.ts" } };
+
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+    await hooks["tool.execute.before"]!(input, { args: input.args });
+    const pending = (coordinator as any).pendingMutations as Map<string, Args>;
+    const stale = pending.get(`${sessionID}\0${input.callID}`)!;
+    stale.startedAt = clock - 60_002;
+    pending.set(`${sessionID}\0fresh-call`, { ...stale, callId: "fresh-call", startedAt: clock, remoteClaimed: false });
+    pending.set("other-session\0stale-call", { ...stale, sessionId: "other-session", callId: "stale-call", remoteClaimed: false });
+    for (let index = 0; index < 32; index += 1) {
+      const callId = `bounded-${String(index).padStart(2, "0")}`;
+      pending.set(`${sessionID}\0${callId}`, { ...stale, callId, startedAt: clock - 60_001, remoteClaimed: false });
+    }
+
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any });
+
+    expect(fixture.calls.filter(({ tool, args }) => tool === "coordination_claim" && args.action === "quarantine")).toHaveLength(1);
+    expect([...pending.keys()]).toEqual([
+      `${sessionID}\0fresh-call`,
+      "other-session\0stale-call",
+      `${sessionID}\0bounded-31`,
+    ]);
+  });
+
+  it("ambiguous_quarantine_replay retains original proof until acknowledgement", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-quarantine-replay-"));
+    mkdirSync(join(root, "src"));
+    execFileSync("git", ["-C", root, "init", "--quiet"]);
+    const fixture = coordinationFixture();
+    const outbox = new CoordinationOutbox(root, () => Date.parse("2026-08-31T00:00:00.000Z"));
+    const quarantineCalls: Args[] = [];
+    let quarantineResult: Awaited<ReturnType<typeof fixture.callTool>> | undefined;
+    let acknowledgeReplay = false;
+    const callTool = vi.fn(async (worktree: string, tool: string, args: Args) => {
+      if (tool === "coordination_claim" && args.action === "quarantine") {
+        quarantineCalls.push(structuredClone(args));
+        if (quarantineResult) {
+          if (!acknowledgeReplay) throw new McpBridgeError("request_failed", "", "call");
+          return quarantineResult;
+        }
+        quarantineResult = await fixture.callTool(worktree, tool, args);
+        throw new McpBridgeError("request_failed", "", "call");
+      }
+      if (tool === "coordination_handoff" && args.operation === "memory" && args.memory_entry.status === "error") {
+        expect(outbox.list()).toContainEqual(expect.objectContaining({ kind: "quarantine", ambiguous: true }));
+      }
+      return fixture.callTool(worktree, tool, args);
+    });
+    const process = processHarness("quarantine-replay", "/tmp/quarantine-replay/home", "/tmp/quarantine-replay/xdg", 43044, {}, root);
+    const sessionID = "quarantine-replay-session";
+    const input = { tool: "write", sessionID, callID: "quarantine-replay-call", args: { path: "src/aborted.ts" } };
+    try {
+      const first = new SessionCoordinator(process, {
+        binding: process.binding, callTool, outbox, now: () => 601, token: () => "Q".repeat(32), disableHeartbeat: true,
+      });
+      const firstHooks = first.hooks();
+      await firstHooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await firstHooks["tool.execute.before"]!(input, { args: input.args });
+      await firstHooks.event!({ event: { type: "session.error", properties: { sessionID } } as any });
+
+      const retained = outbox.list().find((record) => record.kind === "quarantine")!;
+      expect(retained).toMatchObject({
+        ambiguous: true,
+        mutation: {
+          phase: "completion_ambiguous",
+          operation: "write",
+          remoteClaim: {
+            remoteOperationId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+            clientClaimKey: expect.any(String),
+          },
+        },
+      });
+      expect((first as any).pendingMutations.size).toBe(0);
+
+      const restarted = new SessionCoordinator(process, {
+        binding: process.binding, callTool, outbox: new CoordinationOutbox(root), now: () => 602,
+        token: () => "R".repeat(32), disableHeartbeat: true,
+      });
+      await restarted.hooks().event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await vi.waitFor(() => expect((restarted as any).replayingOutbox).toBe(false));
+      expect(new CoordinationOutbox(root).list()).toContainEqual(expect.objectContaining({ operationId: retained.operationId }));
+
+      acknowledgeReplay = true;
+      await expect(restarted.heartbeatSession(sessionID)).resolves.toBe(true);
+
+      expect(quarantineCalls.length).toBeGreaterThanOrEqual(3);
+      for (const replay of quarantineCalls.slice(1)) expect(replay).toEqual(quarantineCalls[0]);
+      expect(new CoordinationOutbox(root).list().filter((record) => record.kind === "quarantine")).toEqual([]);
+      expect((restarted as any).pendingMutations.size).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("reconciles failed advisory claim evidence once after restart", async () => {

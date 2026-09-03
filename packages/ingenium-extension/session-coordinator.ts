@@ -43,6 +43,7 @@ import type { RedactedRestartHandoff } from "./replacement-first-restart.js";
 
 const SESSION_TTL_MS = 60_000;
 const HEARTBEAT_MS = 20_000;
+const MAX_IDLE_MUTATION_QUARANTINES = 32;
 const OWNERSHIP_BYTES = 32;
 const SNAPSHOT_VERSION = 1;
 const MAX_CHANGED_PATHS = 32;
@@ -277,6 +278,7 @@ interface PendingMutation {
   before: WorktreeSnapshot;
   acceptedEpoch: number;
   operationId: string;
+  startedAt: number;
   remoteClaimed: boolean;
   deploymentOwner?: true;
   claimFailure?: CoordinationOutboxFailure;
@@ -979,7 +981,6 @@ export class SessionCoordinator {
   private readonly pendingMutations = new Map<string, PendingMutation>();
   private readonly claimingMutations = new Set<string>();
   private readonly finalizingMutations = new Map<string, Promise<void>>();
-  private readonly uncertainMutations = new Set<string>();
   private readonly credentialResetSessionIds = new Set<string>();
   private readonly now: () => number;
   private readonly token: () => string;
@@ -1266,7 +1267,7 @@ export class SessionCoordinator {
 
   private mutationsActive(): boolean {
     return this.pendingMutations.size > 0 || this.claimingMutations.size > 0
-      || this.finalizingMutations.size > 0 || this.uncertainMutations.size > 0;
+      || this.finalizingMutations.size > 0;
   }
 
   private async reloadCredential(sessionId: string, timeoutMs: number, force = false): Promise<void> {
@@ -1402,6 +1403,7 @@ export class SessionCoordinator {
     await this.ensureReady();
     if (this.disposed) return;
     await this.reconcile();
+    await this.replayOutbox();
   }
 
   isDisposed(): boolean {
@@ -1426,7 +1428,6 @@ export class SessionCoordinator {
       this.pendingMutations.clear();
       this.claimingMutations.clear();
       this.finalizingMutations.clear();
-      this.uncertainMutations.clear();
       this.transformQueues.clear();
     });
     return this.disposal;
@@ -1639,6 +1640,27 @@ export class SessionCoordinator {
             });
             this.assertActive();
             if (result.acceptedEpoch !== claim.acceptedEpoch) return false;
+          } else if (record.kind === "quarantine" && record.mutation?.phase === "completion_ambiguous"
+            && record.mutation.remoteClaim) {
+            const claim = record.mutation.remoteClaim;
+            result = await this.invoke("coordination_claim", {
+              project: this.binding.project,
+              worktree_id: claim.worktreeId,
+              session_id: claim.sessionId,
+              incarnation: claim.incarnation,
+              expected_revision: claim.expectedRevision,
+              fence: claim.fence,
+              ownership_token: claim.ownershipToken,
+              client_claim_key: claim.clientClaimKey,
+              accepted_epoch: claim.acceptedEpoch,
+              action: "quarantine",
+              code: "uncertain_apply",
+              idempotency_key: `${claim.remoteOperationId}:quarantine`,
+            });
+            this.assertActive();
+            if (result.acceptedEpoch !== claim.acceptedEpoch) return false;
+            trace({ event: "recover_success", sessionHash: sessionHash(sessionId), mapMember: true, incarnation: local.incarnation });
+            return true;
           } else if (record.kind === "snapshot") {
             const snapshotRevision = Math.max(state.snapshotRevision ?? 0, record.revision ?? 0) + 1;
             result = await this.invoke("coordination_update", {
@@ -1933,6 +1955,7 @@ export class SessionCoordinator {
         });
         this.apply(state, result.session);
       });
+      await this.replayOutbox();
       if (recordRuntimeActivity && !(await this.recordRuntimeActivity())) this.warning();
       return true;
     } catch (error) {
@@ -2224,6 +2247,7 @@ export class SessionCoordinator {
       before,
       acceptedEpoch: 0,
       operationId: randomUUID(),
+      startedAt: this.now(),
       remoteClaimed: false,
       ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
     };
@@ -2288,8 +2312,7 @@ export class SessionCoordinator {
     });
   }
 
-  private async completePending(sessionId: string, pending: PendingMutation): Promise<void> {
-    if (this.disposed) return;
+  private capturePendingFootprint(pending: PendingMutation) {
     const footprint = changedFootprint(pending.before, worktreeSnapshot(this.ctx.worktree));
     pending.footprint = footprint.map((entry) => ({
       pathSegments: entry.path ? encodeCoordinationPath(entry.path) ?? null : null,
@@ -2297,23 +2320,51 @@ export class SessionCoordinator {
       beforeSha256: entry.before_sha256,
       afterSha256: entry.after_sha256,
     }));
+    return footprint;
+  }
+
+  private captureRemoteProof(state: SessionState, pending: PendingMutation): void {
+    pending.remoteProof = {
+      worktreeId: state.worktreeId,
+      sessionId: state.sessionId,
+      incarnation: state.incarnation,
+      expectedRevision: state.revision,
+      fence: state.fence,
+      ownershipToken: state.ownershipToken,
+      clientClaimKey: pending.clientClaimKey,
+      acceptedEpoch: pending.acceptedEpoch,
+      remoteOperationId: pending.operationId,
+    };
+  }
+
+  private async quarantinePendingMutation(
+    sessionId: string,
+    pending: PendingMutation,
+    code: "uncertain_apply" | "dirty_baseline" = "uncertain_apply",
+  ): Promise<void> {
+    this.capturePendingFootprint(pending);
+    await this.serialized(sessionId, async (state) => {
+      this.captureRemoteProof(state, pending);
+      const result = await this.invoke("coordination_claim", {
+        ...this.claimProof(state, pending),
+        idempotency_key: `${pending.operationId}:quarantine`,
+        action: "quarantine",
+        code,
+      });
+      this.apply(state, result.session);
+    });
+  }
+
+  private async completePending(sessionId: string, pending: PendingMutation): Promise<void> {
+    if (this.disposed) return;
+    const footprint = this.capturePendingFootprint(pending);
     if (!pending.remoteClaimed) {
       this.retainLocalMutation(pending);
       this.pendingMutations.delete(this.pendingKey(sessionId, pending.callId));
       return;
     }
     await this.serialized(sessionId, async (state) => {
-      pending.remoteProof = {
-        worktreeId: state.worktreeId,
-        sessionId: state.sessionId,
-        incarnation: state.incarnation,
-        expectedRevision: state.revision,
-        fence: state.fence,
-        ownershipToken: state.ownershipToken,
-        clientClaimKey: pending.clientClaimKey,
-        acceptedEpoch: pending.acceptedEpoch,
-        remoteOperationId: pending.operationId,
-      };
+      this.captureRemoteProof(state, pending);
       const result = await this.invoke("coordination_claim", {
         ...this.claimProof(state, pending),
         idempotency_key: `${pending.operationId}:complete`,
@@ -2356,26 +2407,19 @@ export class SessionCoordinator {
         this.pendingMutations.delete(key);
         return;
       }
-      await this.serialized(sessionId, async (state) => {
-        const result = await this.invoke("coordination_claim", {
-          ...this.claimProof(state, pending),
-          idempotency_key: `${pending.operationId}:quarantine`,
-          action: "quarantine",
-          code: "uncertain_apply",
-        });
-        this.apply(state, result.session);
-      });
+      await this.quarantinePendingMutation(sessionId, pending);
       this.pendingMutations.delete(key);
       trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(sessionId),
         mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
         claimState: "quarantined" });
     })().catch((error) => {
-      this.uncertainMutations.add(key);
       this.retainFailure("quarantine", sessionId, error, {
         exactKey: `quarantine:${sessionHash(sessionId)}:${pending.operationId}`,
         digest: createHash("sha256").update(pending.operationId).digest("hex"),
         ambiguous: true,
+        ...(pending.remoteProof ? { mutation: this.mutationEvidence(pending, "completion_ambiguous") } : {}),
       });
+      this.pendingMutations.delete(key);
     });
     this.finalizingMutations.set(key, finalizing);
     try {
@@ -2390,24 +2434,17 @@ export class SessionCoordinator {
     const key = this.pendingKey(sessionId, callId);
     const pending = this.pendingMutations.get(key);
     if (!pending) return undefined;
-    if (!pending.remoteClaimed) {
-      this.pendingMutations.delete(key);
-      return pending;
-    }
-    try {
-      await this.serialized(sessionId, async (state) => {
-        const result = await this.invoke("coordination_release", {
-          ...this.lease(state), client_claim_key: pending.clientClaimKey,
-        });
-        this.apply(state, result.session);
-      });
-      trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(sessionId),
-        mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
-        claimState: "released" });
-      return pending;
-    } finally {
-      this.pendingMutations.delete(key);
-    }
+    await this.finalizePending(sessionId, callId, "error");
+    return pending;
+  }
+
+  private async quarantineSessionMutations(sessionId: string, staleOnly: boolean): Promise<void> {
+    const staleBefore = this.now() - SESSION_TTL_MS;
+    const pending = [...this.pendingMutations.values()]
+      .filter((entry) => entry.sessionId === sessionId && (!staleOnly || entry.startedAt <= staleBefore))
+      .sort((left, right) => left.startedAt - right.startedAt || left.callId.localeCompare(right.callId))
+      .slice(0, staleOnly ? MAX_IDLE_MUTATION_QUARANTINES : undefined);
+    for (const mutation of pending) await this.finalizePending(sessionId, mutation.callId, "error");
   }
 
   private async unseenPeerSnapshots(sessionId: string): Promise<PeerSnapshot[]> {
@@ -2463,7 +2500,7 @@ export class SessionCoordinator {
           pending = {
             sessionId, callId, clientClaimKey, operation: "repository", paths: [],
             baselines: new Map(), before, acceptedEpoch: result.acceptedEpoch as number, operationId: result.operationId,
-            remoteClaimed: true,
+            startedAt: this.now(), remoteClaimed: true,
           };
           this.pendingMutations.set(key, pending);
         });
@@ -2500,12 +2537,7 @@ export class SessionCoordinator {
         },
         quarantine: async (code = "uncertain_apply") => {
           if (this.disposed) return;
-          await this.serialized(sessionId, async (state) => {
-            const result = await this.invoke("coordination_claim", {
-              ...this.claimProof(state, currentPending), action: "quarantine", code,
-            });
-            this.apply(state, result.session);
-          });
+          await this.quarantinePendingMutation(sessionId, currentPending, code);
           this.pendingMutations.delete(key);
           quarantined = true;
         },
@@ -2518,18 +2550,21 @@ export class SessionCoordinator {
       if (this.disposed) return undefined;
       this.warning();
       if (pending && !quarantined) {
+        const failedPending = pending;
         try {
-          await this.serialized(sessionId, async (state) => {
-            const result = await this.invoke("coordination_claim", {
-              ...this.claimProof(state, pending!), action: "quarantine", code: "uncertain_apply",
-            });
-            this.apply(state, result.session);
-          });
+          await this.quarantinePendingMutation(sessionId, failedPending);
           this.pendingMutations.delete(key);
           pending = undefined;
-        } catch {
-          this.uncertainMutations.add(key);
-          this.retainFailure("quarantine", sessionId, new Error("invalid coordination response"), { ambiguous: true });
+        } catch (quarantineError) {
+          this.pendingMutations.delete(key);
+          this.retainFailure("quarantine", sessionId, quarantineError, {
+            exactKey: `quarantine:${sessionHash(sessionId)}:${failedPending.operationId}`,
+            digest: createHash("sha256").update(failedPending.operationId).digest("hex"),
+            ambiguous: true,
+            ...(failedPending.remoteProof
+              ? { mutation: this.mutationEvidence(failedPending, "completion_ambiguous") }
+              : {}),
+          });
         }
       }
       return undefined;
@@ -2694,6 +2729,7 @@ export class SessionCoordinator {
           return;
         }
         if (event.type === "session.idle") {
+          await this.quarantineSessionMutations(sessionId, true);
           if (await this.heartbeatSession(sessionId)) {
             await this.publishSnapshot(sessionId, (state) => {
               state.status = "idle";
@@ -2720,6 +2756,7 @@ export class SessionCoordinator {
           return;
         }
         if (event.type === "session.error") {
+          await this.quarantineSessionMutations(sessionId, false);
           await this.publishSnapshot(sessionId, (state) => {
             state.status = "idle";
             state.memoryDirty = true;
@@ -2850,6 +2887,7 @@ export class SessionCoordinator {
             before: reconstructed,
             acceptedEpoch: 0,
             operationId: randomUUID(),
+            startedAt: this.now(),
             remoteClaimed: false,
             ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
           };

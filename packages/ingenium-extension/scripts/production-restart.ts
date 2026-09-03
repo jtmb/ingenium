@@ -15,9 +15,10 @@ import {
   realpathSync,
   renameSync,
   writeFileSync,
+  type Stats,
 } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   preflightApiAuthentication,
@@ -50,6 +51,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const UNNONCED_PARENT_SHA256 = "0".repeat(64);
+const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
 const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
   handoffMs: 5_000,
   launchMs: 30_000,
@@ -158,6 +160,91 @@ function exactMode(mode: number, expected: number): boolean {
 
 function processOwner(): number | undefined {
   return process.platform === "win32" || typeof process.getuid !== "function" ? undefined : process.getuid();
+}
+
+function productionCredentialPath(worktree: string): string {
+  const root = realpathSync(resolve(worktree));
+  let configured: string | undefined;
+  let inlineCredential = process.env.INGENIUM_MCP_CREDENTIAL;
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(join(root, "opencode.json"), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > MAX_AUTH_BYTES) throw new Error("invalid config");
+    const parsed: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
+    const environment = isRecord(parsed) && isRecord(parsed.mcp) && isRecord(parsed.mcp.ingenium)
+      && isRecord(parsed.mcp.ingenium.environment) ? parsed.mcp.ingenium.environment : undefined;
+    if (environment?.INGENIUM_MCP_CREDENTIAL !== undefined) inlineCredential = String(environment.INGENIUM_MCP_CREDENTIAL);
+    if (environment?.INGENIUM_MCP_CREDENTIAL_FILE !== undefined
+      && typeof environment.INGENIUM_MCP_CREDENTIAL_FILE !== "string") throw new Error("invalid config");
+    if (typeof environment?.INGENIUM_MCP_CREDENTIAL_FILE === "string") configured = environment.INGENIUM_MCP_CREDENTIAL_FILE;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Production restart credential permission bootstrap failed");
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  if (inlineCredential !== undefined) throw new Error("Production restart credential permission bootstrap failed");
+  const operationEnvironment = process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE === "general";
+  const reference = operationEnvironment
+    ? process.env.INGENIUM_MCP_CREDENTIAL_FILE ?? configured ?? `.opencode/${GENERAL_CREDENTIAL_FILE}`
+    : configured ?? process.env.INGENIUM_MCP_CREDENTIAL_FILE ?? `.opencode/${GENERAL_CREDENTIAL_FILE}`;
+  const credential = resolve(root, reference);
+  if (basename(credential) !== GENERAL_CREDENTIAL_FILE
+    || (!isAbsolute(reference) && credential !== join(root, ".opencode", GENERAL_CREDENTIAL_FILE))) {
+    throw new Error("Production restart credential permission bootstrap failed");
+  }
+  const parent = lstatSync(dirname(credential));
+  const uid = processOwner();
+  if (uid === undefined || !parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== uid
+    || (parent.mode & 0o022) !== 0 || realpathSync(dirname(credential)) !== dirname(credential)) {
+    throw new Error("Production restart credential permission bootstrap failed");
+  }
+  return credential;
+}
+
+interface CredentialPermissionFileSystem {
+  closeSync(descriptor: number): void;
+  fchmodSync(descriptor: number, mode: number): void;
+  fstatSync(descriptor: number): Stats;
+  lstatSync(path: string): Stats;
+  openSync(path: string, flags: number, mode?: number): number;
+}
+
+function sameCredentialMetadata(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.gid === right.gid
+    && left.nlink === right.nlink && left.rdev === right.rdev && left.size === right.size
+    && left.blksize === right.blksize && left.blocks === right.blocks && left.atimeMs === right.atimeMs
+    && left.mtimeMs === right.mtimeMs && left.birthtimeMs === right.birthtimeMs;
+}
+
+export function hardenLegacyProductionCredentialPermissions(
+  worktree: string,
+  fileSystem: CredentialPermissionFileSystem = { closeSync, fchmodSync, fstatSync, lstatSync, openSync },
+): void {
+  const credential = productionCredentialPath(worktree);
+  const uid = processOwner();
+  const before = fileSystem.lstatSync(credential);
+  const mode = before.mode & 0o7777;
+  if (uid === undefined || !before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== uid
+    || (mode & 0o600) !== 0o600 || (mode & 0o022) !== 0 || (mode & 0o7111) !== 0) {
+    throw new Error("Production restart credential permission bootstrap failed");
+  }
+  const descriptor = fileSystem.openSync(credential, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = fileSystem.fstatSync(descriptor);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== uid || !sameCredentialMetadata(before, opened)
+      || (opened.mode & 0o7777) !== mode) throw new Error("Production restart credential permission bootstrap failed");
+    fileSystem.fchmodSync(descriptor, 0o600);
+    const hardened = fileSystem.fstatSync(descriptor);
+    const current = fileSystem.lstatSync(credential);
+    if (!hardened.isFile() || hardened.nlink !== 1 || hardened.uid !== uid || (hardened.mode & 0o7777) !== 0o600
+      || !sameCredentialMetadata(opened, hardened) || !current.isFile() || current.isSymbolicLink()
+      || (current.mode & 0o7777) !== 0o600 || !sameCredentialMetadata(hardened, current)) {
+      throw new Error("Production restart credential permission bootstrap failed");
+    }
+  } finally {
+    fileSystem.closeSync(descriptor);
+  }
 }
 
 function assertPrivateDirectory(path: string): void {
@@ -1113,6 +1200,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
 
 async function resolveProductionBinding(worktree: string): Promise<ProductionRestartBinding> {
   const purpose = coordinationCredentialPurpose();
+  if (purpose === "general") hardenLegacyProductionCredentialPermissions(worktree);
   const local = resolveExtensionBinding(worktree, { purpose });
   if (local.audience !== "mcp") throw new Error("Production restart requires an MCP binding");
   const authentication = await preflightApiAuthentication(local.apiUrl, worktree, fetch, {
