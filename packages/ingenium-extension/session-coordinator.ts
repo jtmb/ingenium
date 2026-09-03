@@ -109,6 +109,18 @@ function durableSessionReference(sessionId: string): string {
   return createHash("sha256").update(sessionId, "utf8").digest("hex");
 }
 
+export function findSessionByDurableReference<T>(
+  reference: string,
+  sessions: Iterable<[string, T]>,
+  referenceFor: (sessionId: string) => string = durableSessionReference,
+): [string, T] | undefined {
+  if (reference.length !== 64) return undefined;
+  for (const session of sessions) {
+    if (referenceFor(session[0]) === reference) return session;
+  }
+  return undefined;
+}
+
 function appendPrivateRecord(path: string | undefined, record: Record<string, unknown>): void {
   if (!path) return;
   let descriptor: number | undefined;
@@ -1570,8 +1582,7 @@ export class SessionCoordinator {
     try {
       await this.outbox.replay(async (record) => {
         if (this.disposed) return false;
-        if (record.sessionHash.length !== 64) return false;
-        const session = [...this.sessions.entries()].find(([id]) => durableSessionReference(id) === record.sessionHash);
+        const session = findSessionByDurableReference(record.sessionHash, this.sessions);
         if (!session) return false;
         const [sessionId, local] = session;
         if (!local.remoteRegistered) return false;

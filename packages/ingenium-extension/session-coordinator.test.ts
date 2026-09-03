@@ -12,6 +12,7 @@ import { CoordinationOutbox } from "./coordination-outbox.js";
 import {
   decodeCoordinationPath,
   encodeCoordinationPath,
+  findSessionByDurableReference,
   MAX_COORDINATION_TRANSFORM_BYTES,
   SessionCoordinator,
   SessionCoordinatorPlugin,
@@ -1919,7 +1920,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     }
   });
 
-  it("does not route or clean up colliding legacy session prefixes", async () => {
+  it("rejects shared legacy prefixes and replays only exact current session references", async () => {
     const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-legacy-prefix-collision-"));
     mkdirSync(join(root, "src"));
     execFileSync("git", ["-C", root, "init", "--quiet"]);
@@ -1927,12 +1928,19 @@ describe("SessionCoordinatorPlugin hooks", () => {
     const outbox = new CoordinationOutbox(root);
     const legacyOwnerSessionID = "legacy-prefix-owner";
     const currentOwnerSessionID = "current-prefix-owner";
-    const legacyOwnerReference = durableSessionReference(legacyOwnerSessionID);
-    const currentOwnerReference = durableSessionReference(currentOwnerSessionID);
-    const simulatedLegacyReferences = {
-      [legacyOwnerSessionID]: legacyOwnerReference.slice(0, 16),
-      [currentOwnerSessionID]: legacyOwnerReference.slice(0, 16),
-    };
+    const sharedPrefix = "0123456789abcdef";
+    const legacyOwnerReference = `${sharedPrefix}${"a".repeat(48)}`;
+    const currentOwnerReference = `${sharedPrefix}${"b".repeat(48)}`;
+    const injectedReferences = new Map([
+      [legacyOwnerSessionID, legacyOwnerReference],
+      [currentOwnerSessionID, currentOwnerReference],
+    ]);
+    const liveSessions = new Map([
+      [legacyOwnerSessionID, { owner: "legacy" }],
+      [currentOwnerSessionID, { owner: "current" }],
+    ]);
+    const referenceFor = vi.fn((sessionID: string) => injectedReferences.get(sessionID)!);
+    const replayCurrentReference = durableSessionReference(currentOwnerSessionID);
     const process = processHarness("legacy-prefix-collision", "/tmp/legacy-prefix/home", "/tmp/legacy-prefix/xdg", 43046, {}, root);
     const coordinator = new SessionCoordinator(process, {
       binding: process.binding,
@@ -1947,8 +1955,13 @@ describe("SessionCoordinatorPlugin hooks", () => {
       expect(legacyOwnerReference).not.toBe(currentOwnerReference);
       expect(legacyOwnerReference).toHaveLength(64);
       expect(currentOwnerReference).toHaveLength(64);
-      expect(simulatedLegacyReferences[legacyOwnerSessionID]).toHaveLength(16);
-      expect(simulatedLegacyReferences[legacyOwnerSessionID]).toBe(simulatedLegacyReferences[currentOwnerSessionID]);
+      expect(legacyOwnerReference.slice(0, 16)).toBe(currentOwnerReference.slice(0, 16));
+      expect(findSessionByDurableReference(sharedPrefix, liveSessions, referenceFor)).toBeUndefined();
+      expect(referenceFor).not.toHaveBeenCalled();
+      expect(findSessionByDurableReference(legacyOwnerReference, liveSessions, referenceFor))
+        .toEqual([legacyOwnerSessionID, { owner: "legacy" }]);
+      expect(findSessionByDurableReference(currentOwnerReference, liveSessions, referenceFor))
+        .toEqual([currentOwnerSessionID, { owner: "current" }]);
 
       await hooks.event!({ event: { type: "session.created", properties: { info: { id: legacyOwnerSessionID } } } as any });
       await hooks.event!({ event: { type: "session.created", properties: { info: { id: currentOwnerSessionID } } } as any });
@@ -1963,12 +1976,12 @@ describe("SessionCoordinatorPlugin hooks", () => {
       const legacyPath = join(outbox.directory, `${legacy.key}.json`);
       writeFileSync(legacyPath, `${JSON.stringify({
         ...legacy,
-        sessionHash: simulatedLegacyReferences[legacyOwnerSessionID],
+        sessionHash: sharedPrefix,
       })}\n`);
       const current = outbox.put({
-        exactKey: `heartbeat:${currentOwnerReference}:current`,
+        exactKey: `heartbeat:${replayCurrentReference}:current`,
         kind: "heartbeat",
-        sessionHash: currentOwnerReference,
+        sessionHash: replayCurrentReference,
         failure: "unavailable",
       });
       const currentPath = join(outbox.directory, `${current.key}.json`);
@@ -1992,7 +2005,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
       expect(new CoordinationOutbox(root).list()).toEqual([
         expect.objectContaining({
           operationId: legacy.operationId,
-          sessionHash: simulatedLegacyReferences[legacyOwnerSessionID],
+          sessionHash: sharedPrefix,
         }),
       ]);
       expect((coordinator as any).sessions.get(legacyOwnerSessionID).revision).toBe(peerRevision);
