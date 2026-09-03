@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
+import { dirname } from "node:path";
 
 const ARG = /^[A-Za-z0-9_@%+=:,./-]{1,512}$/;
 const BUILD_SCRIPTS = new Set(["build", "typecheck", "test", "lint"]);
+const EXTENSION_TEST_FILES = new Set(["managed-command-wrapper.test.ts", "session-coordinator.test.ts"]);
+const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health"]);
 const GIT = "/usr/bin/git";
+const RUNTIME_BIN = dirname(process.execPath);
+const NPM = `${RUNTIME_BIN}/npm`;
+const OPENCODE = "/usr/local/bin/opencode";
+const DOCKER = "/usr/bin/docker";
+const CURL = "/usr/bin/curl";
 const GIT_CONFIGURATION = [
   "-c", "core.fsmonitor=false",
   "-c", "core.hooksPath=/dev/null",
@@ -88,9 +96,53 @@ export function validateManagedRepositoryArgv(argv: string[]): string[] {
 
 export function validateManagedBuildArgv(argv: string[]): string[] {
   const valid = (argv.length === 1 && BUILD_SCRIPTS.has(argv[0]!))
-    || (argv.length === 2 && argv[0] === "run" && BUILD_SCRIPTS.has(argv[1]!));
+    || (argv.length === 2 && argv[0] === "run" && BUILD_SCRIPTS.has(argv[1]!))
+    || (argv.length === 3 && argv[0] === "run" && argv[1] === "typecheck"
+      && argv[2] === "--workspace=packages/ingenium-extension")
+    || (argv.length === 7 && argv[0] === "run" && argv[1] === "test"
+      && argv[2] === "--workspace=packages/ingenium-extension" && argv[3] === "--"
+      && EXTENSION_TEST_FILES.has(argv[4]!) && argv[5] === "-t" && /^[A-Za-z0-9_-]{1,64}$/.test(argv[6]!))
+    || (argv.length === 1 && argv[0] === "agent-validation")
+    || isManagedDeploymentArgv(argv);
   if (!valid) throw new Error("Build wrapper rejected the command");
   return argv;
+}
+
+export function isManagedDeploymentArgv(argv: readonly string[]): boolean {
+  return argv.length === 2 && argv[0] === "deployment" && DEPLOYMENT_OPERATIONS.has(argv[1]!);
+}
+
+export function managedBuildExecution(argv: string[]): { command: string; argv: string[] } {
+  validateManagedBuildArgv(argv);
+  if (argv.length === 1 && argv[0] === "agent-validation") {
+    return { command: "/usr/bin/bash", argv: ["tests/test-agent-validation.sh", "--role-matrix"] };
+  }
+  if (!isManagedDeploymentArgv(argv)) return { command: NPM, argv };
+  switch (argv[1]) {
+    case "mcp-status":
+      return { command: OPENCODE, argv: ["mcp", "list"] };
+    case "compose-ps":
+      return { command: DOCKER, argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "ps"] };
+    case "compose-build":
+      return { command: DOCKER, argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "build"] };
+    case "compose-up":
+      return { command: DOCKER, argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "up", "--build", "-d"] };
+    case "compose-restart":
+      return { command: DOCKER, argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "restart", "ingenium"] };
+    case "health":
+      return { command: CURL, argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] };
+    default:
+      throw new Error("Build wrapper rejected the command");
+  }
+}
+
+export function managedBuildEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(Object.entries(source).filter(([key]) =>
+      !key.startsWith("COMPOSE_") && !key.startsWith("DOCKER_") && !key.startsWith("npm_")
+      && key !== "NODE_OPTIONS" && key !== "PATH")),
+    PATH: `${RUNTIME_BIN}:/usr/local/bin:/usr/bin:/bin`,
+  };
 }
 
 export function managedRepositoryArgv(argv: string[]): string[] {
@@ -139,8 +191,10 @@ export function managedCommand(kind: "repository" | "build", argv: string[], cwd
     command = GIT;
     commandArgv = ["-C", cwd, ...managedRepositoryArgv(argv)];
   } else {
-    command = "npm";
-    commandArgv = validateManagedBuildArgv(argv);
+    const execution = managedBuildExecution(argv);
+    command = execution.command;
+    commandArgv = execution.argv;
+    env = managedBuildEnvironment();
   }
   const before = kind === "build" ? sourceFingerprint(cwd) : undefined;
   const result = spawnSync(command, commandArgv, { cwd, stdio: "inherit", shell: false, env });

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionBinding } from "./extension-binding.js";
@@ -344,6 +344,33 @@ function processHarness(
     purpose: "general",
   };
   return { home, xdg, port, worktree, client, binding };
+}
+
+function trustedOpenCodeClient(
+  worktree: string,
+  evidence: { sessionID: string; callID: string; tool: string; args: Args; agent: string },
+) {
+  const get = vi.fn(async ({ path, query }: Args) => ({
+    data: path.id === evidence.sessionID && query.directory === worktree
+      ? { id: evidence.sessionID, directory: worktree }
+      : undefined,
+  }));
+  const messages = vi.fn(async ({ path, query }: Args) => ({
+    data: path.id === evidence.sessionID && query.directory === worktree ? [
+      { info: { id: "user-message", sessionID: evidence.sessionID, role: "user", agent: evidence.agent }, parts: [] },
+      {
+        info: {
+          id: "assistant-message", sessionID: evidence.sessionID, role: "assistant",
+          parentID: "user-message", mode: evidence.agent,
+        },
+        parts: [{
+          id: "tool-part", sessionID: evidence.sessionID, messageID: "assistant-message", type: "tool",
+          callID: evidence.callID, tool: evidence.tool, state: { status: "running", input: evidence.args, time: { start: 1 } },
+        }],
+      },
+    ] : [],
+  }));
+  return { session: { get, messages } };
 }
 
 describe("SessionCoordinatorPlugin hooks", () => {
@@ -1158,7 +1185,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     expect((coordinator as any).pendingMutations.size).toBe(0);
   });
 
-  it("denies generic shell text and admits only fixed encoded repository/build wrappers", async () => {
+  it("denies generic shell text and admits only the fixed repository wrapper without trusted build evidence", async () => {
     const fixture = coordinationFixture();
     const process = processHarness("wrapper-project", "/tmp/wrapper/home", "/tmp/wrapper/xdg", 43024, {});
     const hooks = new SessionCoordinator(process, {
@@ -1202,17 +1229,17 @@ describe("SessionCoordinatorPlugin hooks", () => {
         .rejects.toThrow("Managed shell coordination denied the command");
     }
 
-    for (const [callID, executable, argv, reserved] of [
-      ["repository-wrapper", "ingenium-repository", ["add", "src/file.ts"], "@repository"],
-      ["build-wrapper", "ingenium-build", ["run", "typecheck"], "@build"],
-    ] as const) {
-      const command = `${executable} ${Buffer.from(JSON.stringify(argv)).toString("base64url")}`;
-      const input = { tool: "bash", sessionID, callID, args: { command } };
-      await hooks["tool.execute.before"]!(input, { args: input.args });
-      expect(fixture.calls.slice().reverse().find((call) => call.tool === "coordination_claim" && !call.args.action)?.args.claims)
-        .toEqual([{ claim: { kind: "reserved", name: reserved } }]);
-      await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
-    }
+    const repositoryCommand = `ingenium-repository ${Buffer.from(JSON.stringify(["add", "src/file.ts"])).toString("base64url")}`;
+    const repositoryInput = { tool: "bash", sessionID, callID: "repository-wrapper", args: { command: repositoryCommand } };
+    await hooks["tool.execute.before"]!(repositoryInput, { args: repositoryInput.args });
+    expect(fixture.calls.slice().reverse().find((call) => call.tool === "coordination_claim" && !call.args.action)?.args.claims)
+      .toEqual([{ claim: { kind: "reserved", name: "@repository" } }]);
+    await hooks["tool.execute.after"]!(repositoryInput, { title: "", output: "", metadata: {} });
+
+    const buildCommand = `ingenium-build ${Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")}`;
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID, callID: "build-wrapper" }, { args: { command: buildCommand } },
+    )).rejects.toThrow("Managed shell coordination denied the command");
 
     const describedReset = {
       command: "ingenium-coordination-reset reset", description: "Rotate coordination credential", timeout: 5_000,
@@ -1221,6 +1248,158 @@ describe("SessionCoordinatorPlugin hooks", () => {
       { tool: "bash", sessionID, callID: "reset-description" },
       { args: describedReset },
     )).resolves.toBeUndefined();
+  });
+
+  it("trusteddeployment admits fixed operations only for trusted Premium runtime evidence", async () => {
+    const fixture = coordinationFixture();
+    const evidence = { sessionID: "deployment-session", callID: "", tool: "bash", args: {}, agent: "" };
+    const process = processHarness("deployment-project", "/tmp/deployment/home", "/tmp/deployment/xdg", 43026, {});
+    const runtimeClient = trustedOpenCodeClient(process.worktree, evidence);
+    process.client = runtimeClient;
+    const projectId = "00000000-0000-4000-8000-000000000001";
+    let authenticateDeployment = false;
+    const preflight = vi.fn(async (): Promise<ApiAuthenticationPreflightResult> => authenticateDeployment ? {
+      authenticated: true, binding: {
+        scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync"],
+        organizationId: "00000000-0000-4000-8000-000000000002",
+        projectId,
+        projectIds: [projectId],
+        audience: "mcp",
+        workspaceId: process.binding.workspaceId,
+        launcherWorktree: process.binding.launcherWorktree,
+        storageMappingHash: process.binding.storageMappingHash!,
+        restartRequiredOnCredentialChange: false,
+        credentialChangeMode: "live-mcp-reload",
+      },
+    } : { authenticated: false, error: "Unable to authenticate with Ingenium API", failure: "authentication" });
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      data: { project: { id: projectId, name: process.binding.project } },
+    }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const hooks = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, preflight, request,
+      now: () => 305, token: () => "D".repeat(32), disableHeartbeat: true,
+    }).hooks();
+    const encoded = (operation: string) => Buffer.from(JSON.stringify(["deployment", operation])).toString("base64url");
+    const command = (operation: string) => `ingenium-build ${encoded(operation)}`;
+    const sessionID = "deployment-session";
+
+    await hooks["chat.message"]?.({ sessionID, agent: "ingenium-software-engineer-premium" } as any, {
+      message: {} as any, parts: [],
+    });
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: "unknown-session", callID: "forged-premium" },
+      { args: { command: command("compose-ps") } },
+    )).rejects.toThrow("Managed shell coordination denied the command");
+    for (const agent of ["ingenium-software-engineer-fast", "ingenium-qa", "ingenium-security-auditor"]) {
+      evidence.agent = agent;
+      evidence.callID = `denied-${agent}`;
+      evidence.args = { command: command("compose-ps") };
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID, callID: evidence.callID }, { args: evidence.args },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+    }
+    expect(preflight).not.toHaveBeenCalled();
+
+    evidence.agent = "ingenium-software-engineer-premium";
+    evidence.callID = "deployment-unauthenticated";
+    evidence.args = { command: command("compose-ps") };
+    await expect(hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID, callID: evidence.callID }, { args: evidence.args },
+    )).rejects.toThrow("Managed shell coordination denied the command");
+    authenticateDeployment = true;
+    for (const operation of ["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health"]) {
+      const input = { tool: "bash", sessionID, callID: `deployment-${operation}`, args: { command: command(operation) } };
+      evidence.callID = input.callID;
+      evidence.args = input.args;
+      await hooks["tool.execute.before"]!(input, { args: input.args });
+      expect(fixture.calls.slice().reverse().find((call) => call.tool === "coordination_claim" && !call.args.action)?.args.claims)
+        .toEqual([{ claim: { kind: "reserved", name: "@build" } }]);
+      await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
+    }
+    evidence.callID = "premium-typecheck";
+    evidence.args = { command: `ingenium-build ${Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")}` };
+    const verificationInput = { tool: "bash", sessionID, callID: evidence.callID, args: evidence.args };
+    await hooks["tool.execute.before"]!(verificationInput, { args: verificationInput.args });
+    await hooks["tool.execute.after"]!(verificationInput, { title: "", output: "", metadata: {} });
+
+    expect(preflight).toHaveBeenCalledTimes(8);
+    expect(request).toHaveBeenCalledTimes(7);
+    expect(runtimeClient.session.get).toHaveBeenCalledTimes(12);
+    expect(runtimeClient.session.messages).toHaveBeenCalledTimes(11);
+
+    for (const args of [
+      { command: command("compose-down") },
+      { command: command("compose-up"), environment: { COMPOSE_FILE: "/tmp/attacker.yml" } },
+      { command: command("compose-up"), workdir: "/tmp" },
+      { command: `${command("compose-up")} && touch marker` },
+    ]) {
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID, callID: `malformed-${JSON.stringify(args).length}` }, { args },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+    }
+
+    const runtime = processHarness("runtime-deployment", "/tmp/runtime-deployment/home", "/tmp/runtime-deployment/xdg", 43027, {});
+    runtime.binding = {
+      ...runtime.binding,
+      projectId: "00000000-0000-4000-8000-000000000001",
+      runtimeId: "00000000-0000-4000-8000-000000000003",
+      audience: "runtime",
+      credentialFile: "/run/ingenium-runtime/capability",
+      purpose: "runtime",
+    };
+    const runtimeHooks = new SessionCoordinator(runtime, { binding: runtime.binding, disableHeartbeat: true }).hooks();
+    await expect(runtimeHooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: "runtime-session", callID: "runtime-deployment" },
+      { args: { command: command("compose-ps") } },
+    )).rejects.toThrow("Managed shell coordination denied the command");
+  });
+
+  it("sideeffect blocks a non-Premium managed build before repository code can access deployment privileges", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-untrusted-build-"));
+    const marker = join(directory, "side-effect");
+    const secretExposure = join(directory, "secret-exposure");
+    const recursiveDeployment = join(directory, "recursive-deployment");
+    const composeExposure = join(directory, "compose-exposure");
+    try {
+      execFileSync("git", ["-C", directory, "init", "--quiet"]);
+      mkdirSync(join(directory, "bin"));
+      writeFileSync(join(directory, "sentinel"), "credential-sentinel");
+      writeFileSync(join(directory, "bin", "docker"), `#!/bin/sh\ntouch '${marker}'\n`);
+      chmodSync(join(directory, "bin", "docker"), 0o700);
+      writeFileSync(join(directory, "attack.cjs"), [
+        "const fs = require('node:fs');",
+        "const cp = require('node:child_process');",
+        `fs.writeFileSync(${JSON.stringify(secretExposure)}, fs.readFileSync(process.env.SENTINEL_FILE, 'utf8'));`,
+        `fs.writeFileSync(${JSON.stringify(composeExposure)}, process.env.COMPOSE_FILE || '');`,
+        `cp.spawnSync('docker', ['compose', 'up'], { env: process.env });`,
+        `cp.spawnSync('ingenium-build', [${JSON.stringify(Buffer.from(JSON.stringify(["deployment", "compose-up"])).toString("base64url"))}]);`,
+        `fs.writeFileSync(${JSON.stringify(recursiveDeployment)}, 'attempted');`,
+      ].join("\n"));
+      writeFileSync(join(directory, "package.json"), JSON.stringify({ scripts: { build: "node attack.cjs" } }));
+
+      const evidence = {
+        sessionID: "non-premium-build", callID: "untrusted-build", tool: "bash", args: {} as Args,
+        agent: "ingenium-software-engineer-fast",
+      };
+      const runtimeClient = trustedOpenCodeClient(directory, evidence);
+      const context = processHarness("build-project", "/tmp/build/home", "/tmp/build/xdg", 43028, runtimeClient, directory);
+      const hooks = new SessionCoordinator(context, {
+        binding: context.binding, callTool: coordinationFixture().callTool, disableHeartbeat: true,
+      }).hooks();
+      evidence.args = {
+        command: `ingenium-build ${Buffer.from(JSON.stringify(["run", "build"])).toString("base64url")}`,
+      };
+
+      await expect(hooks["tool.execute.before"]!(
+        { tool: "bash", sessionID: evidence.sessionID, callID: evidence.callID }, { args: evidence.args },
+      )).rejects.toThrow("Managed shell coordination denied the command");
+      expect(runtimeClient.session.get).toHaveBeenCalledOnce();
+      expect(runtimeClient.session.messages).toHaveBeenCalledOnce();
+      expect([marker, secretExposure, recursiveDeployment, composeExposure].some((path) => existsSync(path))).toBe(false);
+      expect(readFileSync(join(directory, "sentinel"), "utf8")).toBe("credential-sentinel");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("accepts a bounded reset while an existing local mutation drains and keeps new mutations protected", async () => {

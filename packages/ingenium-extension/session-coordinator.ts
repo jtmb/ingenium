@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { Hooks, PluginInput } from "@opencode-ai/plugin";
 import {
   coordinationCredentialPurpose,
@@ -28,7 +29,10 @@ import {
   type CoordinationOutboxMutationEvidence,
   type CoordinationOutboxRemoteClaim,
 } from "./coordination-outbox.js";
-import { decodeManagedBuildArgv, decodeManagedRepositoryArgv } from "./scripts/managed-command-wrapper.js";
+import {
+  decodeManagedBuildArgv,
+  decodeManagedRepositoryArgv,
+} from "./scripts/managed-command-wrapper.js";
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
 
 const SESSION_TTL_MS = 60_000;
@@ -40,6 +44,7 @@ const MAX_PATH_SEGMENT_BYTES = 255;
 const MAX_DIFF_COUNT = 1_000_000;
 const TRACE_ROOT = "/tmp/opencode/";
 const MAX_RESET_DESCRIPTION_BYTES = 256;
+const DEPLOYMENT_OWNER_AGENT = "ingenium-software-engineer-premium";
 const PRECLAIM_ERROR_CODES = new Set([
   "BASELINE_MISMATCH",
   "CLAIM_CONFLICT",
@@ -264,6 +269,7 @@ interface PendingMutation {
   acceptedEpoch: number;
   operationId: string;
   remoteClaimed: boolean;
+  deploymentOwner?: true;
   claimFailure?: CoordinationOutboxFailure;
   footprint?: CoordinationOutboxFootprint[];
   remoteProof?: CoordinationOutboxRemoteClaim;
@@ -279,6 +285,7 @@ interface ManagedMutationDescriptor {
   readOnly?: boolean;
   coordinationReset?: true;
   reloadTimeoutMs?: number;
+  deploymentOwner?: true;
 }
 
 export interface RepositoryClaimContext {
@@ -471,7 +478,35 @@ function patchPaths(value: unknown): string[] | undefined {
   return paths.length > 0 ? [...new Set(paths)] : undefined;
 }
 
-function managedMutation(worktree: string, toolValue: string, args: unknown): ManagedMutationDescriptor | undefined {
+function isTrustedManagedWrapperArgs(worktree: string, args: Record<string, unknown>): boolean {
+  if (Object.keys(args).some((key) => !["command", "description", "timeout", "workdir"].includes(key))) return false;
+  if (args.workdir !== undefined && (typeof args.workdir !== "string" || resolve(args.workdir) !== resolve(worktree))) return false;
+  if (args.description !== undefined
+    && (typeof args.description !== "string" || args.description.length < 1 || args.description !== args.description.trim()
+      || Buffer.byteLength(args.description, "utf8") > MAX_RESET_DESCRIPTION_BYTES
+      || /[\u0000-\u001f\u007f]/.test(args.description))) return false;
+  return args.timeout === undefined || (Number.isSafeInteger(args.timeout) && (args.timeout as number) >= 1
+    && (args.timeout as number) <= MCP_LIVE_RELOAD_MAX_TIMEOUT_MS);
+}
+
+function isManagedBuildRequest(worktree: string, args: unknown): boolean {
+  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
+  const wrapper = /^ingenium-build ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
+  if (!wrapper) return false;
+  try {
+    decodeManagedBuildArgv(wrapper[1]!);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function managedMutation(
+  worktree: string,
+  toolValue: string,
+  args: unknown,
+  deploymentOwner = false,
+): ManagedMutationDescriptor | undefined {
   const tool = toolValue.toLowerCase().replace(/[.-]/g, "_");
   if (!isRecord(args)) return undefined;
   const path = (value: unknown) => relativeToolPath(worktree, value);
@@ -516,14 +551,21 @@ function managedMutation(worktree: string, toolValue: string, args: unknown): Ma
     const wrapper = /^(ingenium-repository|ingenium-build) ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
     if (wrapper) {
       try {
+        if (!isTrustedManagedWrapperArgs(worktree, args)) throw new Error("invalid wrapper arguments");
         if (wrapper[1] === "ingenium-repository") decodeManagedRepositoryArgv(wrapper[2]!);
-        else decodeManagedBuildArgv(wrapper[2]!);
+        else {
+          decodeManagedBuildArgv(wrapper[2]!);
+          if (!deploymentOwner) throw new Error("deployment owner required");
+        }
       } catch {
         throw new Error("Managed shell coordination denied the command");
       }
       return wrapper[1] === "ingenium-repository"
         ? { operation: "repository", paths: [], reserved: "@repository" }
-        : { operation: "build", paths: [], reserved: "@build" };
+        : {
+            operation: "build", paths: [], reserved: "@build",
+            ...(isManagedBuildRequest(worktree, args) ? { deploymentOwner: true as const } : {}),
+          };
     }
     throw new Error("Managed shell coordination denied the command");
   }
@@ -1104,6 +1146,47 @@ export class SessionCoordinator {
       throw new ExtensionBindingError();
     }
     return attested;
+  }
+
+  private async hasTrustedDeploymentCall(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
+    if (!isRecord(this.ctx.client) || !isRecord(this.ctx.client.session)
+      || typeof this.ctx.client.session.get !== "function" || typeof this.ctx.client.session.messages !== "function") return false;
+    try {
+      const session = await this.ctx.client.session.get({
+        path: { id: sessionId }, query: { directory: this.ctx.worktree },
+      });
+      if (!isRecord(session) || !isRecord(session.data) || session.data.id !== sessionId
+        || resolve(String(session.data.directory)) !== resolve(this.ctx.worktree)) return false;
+      const response = await this.ctx.client.session.messages({
+        path: { id: sessionId }, query: { directory: this.ctx.worktree },
+      });
+      if (!isRecord(response) || !Array.isArray(response.data)) return false;
+      const messages = response.data.filter((entry): entry is Record<string, unknown> => isRecord(entry) && isRecord(entry.info));
+      const parents = new Map(messages.map((entry) => [(entry.info as Record<string, unknown>).id, entry.info as Record<string, unknown>]));
+      return messages.some((entry) => {
+        const info = entry.info as Record<string, unknown>;
+        if (info.role !== "assistant" || info.sessionID !== sessionId || info.mode !== DEPLOYMENT_OWNER_AGENT
+          || typeof info.parentID !== "string"
+          || !Array.isArray(entry.parts)) return false;
+        const parent = parents.get(info.parentID);
+        if (!parent || parent.role !== "user" || parent.sessionID !== sessionId || parent.agent !== DEPLOYMENT_OWNER_AGENT) return false;
+        return entry.parts.some((part) => isRecord(part) && part.type === "tool" && part.sessionID === sessionId
+          && part.messageID === info.id && part.callID === callId && part.tool === tool && isRecord(part.state)
+          && (part.state.status === "pending" || part.state.status === "running")
+          && isDeepStrictEqual(part.state.input, args));
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private async isAuthorizedDeploymentOwner(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
+    if (this.binding.purpose !== "general" || !await this.hasTrustedDeploymentCall(sessionId, callId, tool, args)) return false;
+    try {
+      return await this.attestGeneralBinding() !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   private mutationsActive(): boolean {
@@ -2055,6 +2138,7 @@ export class SessionCoordinator {
       acceptedEpoch: 0,
       operationId: randomUUID(),
       remoteClaimed: false,
+      ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
     };
     this.pendingMutations.set(key, localPending);
     this.localSession(sessionId);
@@ -2568,7 +2652,10 @@ export class SessionCoordinator {
       },
       "tool.execute.before": async ({ tool, sessionID, callID }, output) => {
         if (this.disposed) return;
-        const descriptor = managedMutation(this.ctx.worktree, tool, output.args);
+        const deploymentOwner = isManagedBuildRequest(this.ctx.worktree, output.args)
+          ? await this.isAuthorizedDeploymentOwner(sessionID, callID, tool, output.args)
+          : false;
+        const descriptor = managedMutation(this.ctx.worktree, tool, output.args, deploymentOwner);
         if (!descriptor) {
           if (isManagedMutationTool(tool)) throw new Error("Managed mutation coordination rejected the tool arguments");
           return;
@@ -2608,7 +2695,8 @@ export class SessionCoordinator {
       },
       "tool.execute.after": async ({ tool, sessionID, callID, args }, result) => {
         if (this.disposed) return;
-        const descriptor = managedMutation(this.ctx.worktree, tool, args);
+        const deploymentOwner = this.pendingMutations.get(this.pendingKey(sessionID, callID))?.deploymentOwner === true;
+        const descriptor = managedMutation(this.ctx.worktree, tool, args, deploymentOwner);
         if (descriptor?.readOnly) {
           if (descriptor.coordinationReset) {
             await this.reconnectAfterCredentialReset(sessionID, descriptor.reloadTimeoutMs ?? 10_000);
@@ -2643,6 +2731,7 @@ export class SessionCoordinator {
             acceptedEpoch: 0,
             operationId: randomUUID(),
             remoteClaimed: false,
+            ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
           };
           this.pendingMutations.set(this.pendingKey(sessionID, callID), pending);
         }

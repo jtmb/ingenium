@@ -19,16 +19,45 @@ through one Ingenium project and canonical worktree:
 
 ## Current acceptance status
 
-The deployed COORD-103–COORD-106 rollout is recorded complete in the
-[roadmap](../reference/ROADMAP.md). The retained
+The permission/deployment policy below is finalized, but its current runtime
+acceptance remains open. The original MCP connection-closure/runtime canary
+remains unverified: it is not accepted until the full parent OpenCode restart
+described below is completed and the canary is rerun. This guide does not claim
+that connection-closure is fixed, and no runtime canary has yet passed for this
+policy. The retained
 [COORD-106 r24 evidence bundle](../evidence/multi-session/coord106-r24/README.md)
-proves the three-process model/session behavior, deployed coordination canaries,
-source checks, bounded review, privacy, cleanup, and deployment health.
+is historical coordination evidence; it does not prove either condition or
+replace current runtime acceptance.
 
-The accepted r24 profile used OpenCode `1.18.9`,
+The historical r24 profile used OpenCode `1.18.9`,
 `ingenium-software-engineer-premium`, `openai/gpt-5.6-sol`, and variant `high`.
-Those values identify the retained acceptance run; use the exact profile when
-reproducing that acceptance, and do not mix runtime versions between windows.
+Those values identify that prior run only; do not treat them as current policy
+acceptance or mix runtime versions between windows.
+
+## Security boundary for managed execution
+
+See the [effective role matrix](../configure/agents.md#effective-role-matrix) for
+the complete permissions. In this workflow, Plan has only `read`, `glob`, `grep`,
+and `question`; intentional writer profiles retain `edit`/`write` rights, while
+read-only profiles do not. Bounded Bash or MCP access on a read-only profile is
+not file-mutation or deployment authority.
+
+- A non-Premium managed `ingenium-build` request fails closed in the
+  pre-execution hook, before the wrapper can spawn `npm` or run a repository
+  build script. An internal runtime-audience session is also denied.
+- A Premium deployment request is authorized only from OpenCode server
+  message/tool-part evidence bound to the session, with a Premium user-parent
+  `agent` and assistant `mode` (`ingenium-software-engineer-premium`), plus the
+  call ID, tool, and exact input. The coordinator also verifies an authenticated
+  general-MCP binding with audience `mcp`, a single matching project and project
+  detail, the expected workspace ID and launcher worktree, and the required
+  scopes.
+  Mutable chat-hook strings do not authorize deployment.
+- Accepted deployment calls use only the fixed `mcp-status`, `compose-ps`,
+  `compose-build`, `compose-up`, `compose-restart`, and `health` operations.
+  They map to fixed argv arrays, use `shell: false`, and sanitize inherited
+  `COMPOSE_*`, `DOCKER_*`, `npm_*`, `NODE_OPTIONS`, and `PATH` values before
+  setting the fixed runtime `PATH`.
 
 ## 1. Establish one identity
 
@@ -65,9 +94,9 @@ the `shared-memory-ingenium` workspace, and the exact worktree. Keep credentials
 in protected ignored files; never put a bearer value in `opencode.json`, shell
 history, prompts, logs, or evidence.
 
-After changing a plugin, MCP entry, config, or parent binding, perform one full
-OpenCode restart from the intended worktree. Restarting only the child MCP
-process is not sufficient for those changes. Content-only rotation of an
+After changing an agent profile, plugin, MCP entry, config, or parent binding,
+perform one full parent OpenCode restart from the intended worktree. Restarting
+only the child MCP process is not sufficient for those changes. Content-only rotation of an
 already-attested general MCP credential is the documented exception: use
 `ingenium-coordination-reset reset`, verify its fresh epoch, and then resume.
 Runtime and repository-sync credentials remain restart-mode.

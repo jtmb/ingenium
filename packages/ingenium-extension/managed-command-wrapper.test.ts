@@ -1,12 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   decodeManagedArgv,
   decodeManagedBuildArgv,
   decodeManagedRepositoryArgv,
+  isManagedDeploymentArgv,
+  managedBuildEnvironment,
+  managedBuildExecution,
   managedCommand,
   managedGitEnvironment,
   managedRepositoryArgv,
@@ -25,6 +28,11 @@ describe("managed command wrappers", () => {
     expect(decodeManagedRepositoryArgv(encoded)).toEqual(["add", "src/file.ts"]);
     expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")))
       .toEqual(["run", "typecheck"]);
+    expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify([
+      "run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "identity",
+    ])).toString("base64url"))).toEqual([
+      "run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "identity",
+    ]);
     expect(() => decodeManagedArgv(Buffer.from(JSON.stringify(["add", "src/file.ts;rm"])).toString("base64url")))
       .toThrow("Invalid managed command payload");
     expect(() => decodeManagedRepositoryArgv(Buffer.from(JSON.stringify(["status"])).toString("base64url")))
@@ -83,6 +91,9 @@ describe("managed command wrappers", () => {
       ["run", "pretest"],
       ["exec", "build"],
       ["build", "--workspace=outside"],
+      ["run", "test", "--workspace=packages/ingenium-extension", "--", "other.test.ts", "-t", "identity"],
+      ["run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "has spaces"],
+      ["run", "typecheck", "--workspace=services/ingenium-api"],
       ["test\nmalicious"],
     ]) expect(() => validateManagedBuildArgv(argv)).toThrow("Build wrapper rejected the command");
 
@@ -96,6 +107,48 @@ describe("managed command wrappers", () => {
       ["run", "test"],
       ["run", "lint"],
     ]) expect(validateManagedBuildArgv(argv)).toEqual(argv);
+  });
+
+  it("maps only fixed deployment operations to shell-free process argv", () => {
+    expect(managedBuildExecution(["deployment", "mcp-status"]))
+      .toEqual({ command: "/usr/local/bin/opencode", argv: ["mcp", "list"] });
+    expect(managedBuildExecution(["deployment", "compose-ps"]))
+      .toEqual({ command: "/usr/bin/docker", argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "ps"] });
+    expect(managedBuildExecution(["deployment", "compose-build"]))
+      .toEqual({ command: "/usr/bin/docker", argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "build"] });
+    expect(managedBuildExecution(["deployment", "compose-up"]))
+      .toEqual({ command: "/usr/bin/docker", argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "up", "--build", "-d"] });
+    expect(managedBuildExecution(["deployment", "compose-restart"]))
+      .toEqual({ command: "/usr/bin/docker", argv: ["compose", "--profile", "compatibility", "-p", "ingenium", "restart", "ingenium"] });
+    expect(managedBuildExecution(["deployment", "health"]))
+      .toEqual({ command: "/usr/bin/curl", argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] });
+    expect(managedBuildExecution(["run", "typecheck"]))
+      .toEqual({ command: `${dirname(process.execPath)}/npm`, argv: ["run", "typecheck"] });
+    expect(managedBuildExecution(["agent-validation"]))
+      .toEqual({ command: "/usr/bin/bash", argv: ["tests/test-agent-validation.sh", "--role-matrix"] });
+
+    for (const argv of [
+      ["deployment"],
+      ["deployment", "compose-down"],
+      ["deployment", "compose-up", "--remove-orphans"],
+      ["deployment", "health", "https://attacker.invalid"],
+      ["deployment", "mcp-status;touch-marker"],
+    ]) {
+      expect(isManagedDeploymentArgv(argv)).toBe(false);
+      expect(() => managedBuildExecution(argv)).toThrow("Build wrapper rejected the command");
+    }
+  });
+
+  it("removes executable and Compose overrides from managed build children", () => {
+    const environment = managedBuildEnvironment({
+      PATH: "/tmp/fake-bin",
+      COMPOSE_FILE: "/tmp/attacker.yml",
+      DOCKER_HOST: "tcp://attacker.invalid",
+      NODE_OPTIONS: "--require=/tmp/attacker.js",
+      npm_config_script_shell: "/tmp/attacker-shell",
+      SAFE_VALUE: "retained",
+    });
+    expect(environment).toEqual({ PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`, SAFE_VALUE: "retained" });
   });
 
   it("removes Git execution environment overrides", () => {

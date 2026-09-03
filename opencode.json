@@ -10,6 +10,9 @@
   "agent": {
     "plan": {
       "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
         "question": "allow"
       }
     },
@@ -20,57 +23,277 @@
     "browser-agent": {
       "model": "openai/gpt-5.6-luna",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/execution/browser-agent.md}"
+      "prompt": "{file:.opencode/agents/execution/browser-agent.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "allow",
+        "write": "allow",
+        "bash": "allow",
+        "glob": "allow",
+        "grep": "allow"
+      }
     },
     "ingenium-docs": {
       "model": "openai/gpt-5.6-luna",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/execution/ingenium-docs.md}"
+      "prompt": "{file:.opencode/agents/execution/ingenium-docs.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "allow",
+        "write": "allow",
+        "bash": "allow",
+        "glob": "allow",
+        "grep": "allow"
+      }
     },
     "ingenium-qa": {
       "model": "openai/gpt-5.6-luna",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/execution/ingenium-qa.md}"
+      "prompt": "{file:.opencode/agents/execution/ingenium-qa.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "bash": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "playwright_*": "allow",
+        "task": "deny"
+      }
     },
     "ingenium-qa-vision": {
       "model": "openai/gpt-5.6-luna",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/execution/ingenium-qa-vision.md}"
+      "prompt": "{file:.opencode/agents/execution/ingenium-qa-vision.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "bash": "deny",
+        "glob": "allow",
+        "grep": "allow",
+        "playwright_*": "allow",
+        "playwright_browser_click": "deny",
+        "playwright_browser_drag": "deny",
+        "playwright_browser_drop": "deny",
+        "playwright_browser_evaluate": "deny",
+        "playwright_browser_file_upload": "deny",
+        "playwright_browser_fill_form": "deny",
+        "playwright_browser_find": "deny",
+        "playwright_browser_handle_dialog": "deny",
+        "playwright_browser_hover": "deny",
+        "playwright_browser_mouse_click_xy": "deny",
+        "playwright_browser_mouse_down": "deny",
+        "playwright_browser_mouse_drag_xy": "deny",
+        "playwright_browser_mouse_move_xy": "deny",
+        "playwright_browser_mouse_wheel": "deny",
+        "playwright_browser_navigate_back": "deny",
+        "playwright_browser_press_key": "deny",
+        "playwright_browser_run_code_unsafe": "deny",
+        "playwright_browser_select_option": "deny",
+        "playwright_browser_type": "deny",
+        "playwright_browser_wait_for": "deny",
+        "playwright_browser_press_sequentially": "deny",
+        "playwright_browser_check": "deny",
+        "playwright_browser_uncheck": "deny",
+        "playwright_browser_keydown": "deny",
+        "playwright_browser_keyup": "deny",
+        "playwright_browser_cookie_clear": "deny",
+        "playwright_browser_cookie_delete": "deny",
+        "playwright_browser_cookie_set": "deny",
+        "playwright_browser_cookie_get": "deny",
+        "playwright_browser_cookie_list": "deny",
+        "playwright_browser_localstorage_clear": "deny",
+        "playwright_browser_localstorage_delete": "deny",
+        "playwright_browser_localstorage_set": "deny",
+        "playwright_browser_localstorage_get": "deny",
+        "playwright_browser_localstorage_list": "deny",
+        "playwright_browser_sessionstorage_clear": "deny",
+        "playwright_browser_sessionstorage_delete": "deny",
+        "playwright_browser_sessionstorage_set": "deny",
+        "playwright_browser_sessionstorage_get": "deny",
+        "playwright_browser_sessionstorage_list": "deny",
+        "playwright_browser_set_storage_state": "deny",
+        "playwright_browser_storage_state": "deny",
+        "playwright_browser_route": "deny",
+        "playwright_browser_reload": "deny",
+        "playwright_browser_network_state_set": "deny",
+        "playwright_browser_pdf_save": "deny",
+        "playwright_browser_annotate": "deny",
+        "playwright_browser_navigate_forward": "deny",
+        "task": "deny"
+      }
     },
     "ingenium-software-engineer-fast": {
       "model": "openai/gpt-5.6-luna",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/execution/ingenium-software-engineer-fast.md}"
+      "prompt": "{file:.opencode/agents/execution/ingenium-software-engineer-fast.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "allow",
+        "write": "allow",
+        "bash": "allow",
+        "todowrite": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "webfetch": "allow",
+        "task": "deny"
+      }
     },
     "ingenium-software-engineer-premium": {
       "model": "openai/gpt-5.6-sol",
       "variant": "high",
-      "prompt": "{file:.opencode/agents/execution/ingenium-software-engineer-premium.md}"
+      "prompt": "{file:.opencode/agents/execution/ingenium-software-engineer-premium.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "allow",
+        "write": "allow",
+        "bash": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow",
+        "webfetch": "allow",
+        "task": "deny",
+        "ingenium_coordination_update": "allow",
+        "ingenium_coordination_claim": "allow",
+        "ingenium_coordination_release": "allow"
+      }
     },
     "ingenium-orchestrator": {
       "model": "openai/gpt-5.6-sol",
       "variant": "high",
-      "prompt": "{file:.opencode/agents/primary/ingenium-orchestrator.md}"
+      "prompt": "{file:.opencode/agents/primary/ingenium-orchestrator.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "todowrite": "allow",
+        "bash": {
+          "*": "deny",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git add *": "allow",
+          "git rev-parse --short HEAD": "allow",
+          "git commit -m *": "allow",
+          "gh *": "allow",
+          "npm test*": "allow",
+          "npm run test*": "allow",
+          "npm run build*": "allow",
+          "npm run typecheck*": "allow",
+          "npx tsc*": "allow",
+          "npx playwright test*": "allow",
+          "python -m pytest*": "allow",
+          "pytest*": "allow",
+          "go test*": "allow",
+          "go build*": "allow",
+          "cargo test*": "allow",
+          "cargo check*": "allow",
+          "cargo build*": "allow"
+        },
+        "task": {
+          "*": "deny",
+          "ingenium-explore": "allow",
+          "ingenium-qa": "allow",
+          "ingenium-docs": "allow",
+          "ingenium-security-auditor": "allow",
+          "ingenium-software-engineer-fast": "allow",
+          "ingenium-software-engineer-premium": "allow",
+          "ingenium-scout": "allow",
+          "ingenium-qa-vision": "allow",
+          "browser-agent": "allow"
+        },
+        "playwright_*": "deny",
+        "ingenium_coordination_update": "allow",
+        "ingenium_coordination_claim": "allow",
+        "ingenium_coordination_release": "allow"
+      }
     },
     "ingenium-explore": {
       "model": "openai/gpt-5.6-sol",
       "variant": "medium",
-      "prompt": "{file:.opencode/agents/research/ingenium-explore.md}"
+      "prompt": "{file:.opencode/agents/research/ingenium-explore.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "bash": "deny",
+        "glob": "allow",
+        "grep": "allow",
+        "playwright_*": "deny",
+        "task": "deny"
+      }
     },
     "ingenium-scout": {
       "model": "openai/gpt-5.6-luna",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/research/ingenium-scout.md}"
+      "prompt": "{file:.opencode/agents/research/ingenium-scout.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "bash": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "playwright_*": "deny",
+        "task": "deny",
+        "ingenium_docs_search": "allow",
+        "ingenium_docs_search_semantic": "allow",
+        "ingenium_docs_get_page": "allow"
+      }
     },
     "ingenium-chat": {
       "model": "deepseek/deepseek-v4-flash",
       "variant": "max",
-      "prompt": "{file:.opencode/agents/chat/ingenium-chat.md}"
+      "prompt": "{file:.opencode/agents/chat/ingenium-chat.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "bash": "deny",
+        "glob": "allow",
+        "grep": "allow",
+        "webfetch": "allow",
+        "playwright_*": "deny",
+        "task": "deny"
+      }
     },
     "ingenium-security-auditor": {
       "model": "openai/gpt-5.6-sol",
       "variant": "high",
-      "prompt": "{file:.opencode/agents/security/ingenium-security-auditor.md}"
+      "prompt": "{file:.opencode/agents/security/ingenium-security-auditor.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "bash": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "playwright_*": "deny",
+        "task": "deny"
+      }
     }
   },
   "mcp": {

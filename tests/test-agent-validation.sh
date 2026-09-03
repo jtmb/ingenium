@@ -12,6 +12,14 @@ ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
 ROADMAP_ARCHIVE_DIR="$REPO_ROOT/docs/reference/archive"
 FAILED=0
 ALLOCATION_FIXTURE_DIR=""
+ROLE_MATRIX_ONLY=0
+
+if [[ "${1:-}" == "--role-matrix" && "$#" -eq 1 ]]; then
+  ROLE_MATRIX_ONLY=1
+elif [[ "$#" -ne 0 ]]; then
+  printf 'Usage: %s [--role-matrix]\n' "$0" >&2
+  exit 2
+fi
 
 cleanup_allocation_fixtures() {
   if [[ -n "$ALLOCATION_FIXTURE_DIR" && -d "$ALLOCATION_FIXTURE_DIR" ]]; then
@@ -126,6 +134,7 @@ profile_has_broker_wildcard_deny_only() {
   ' "$1"
 }
 
+if [[ "$ROLE_MATRIX_ONLY" -eq 0 ]]; then
 mapfile -t AGENT_FILES < <(find "$AGENTS_DIR" -type f -name '*.md' -print | sort)
 mapfile -t AGENT_FILES < <(for file in "${AGENT_FILES[@]}"; do [[ "$(head -n 1 "$file")" == '---' ]] && printf '%s\n' "$file"; done)
 
@@ -316,6 +325,7 @@ if [[ ! -r "$BROKER_PROFILE" ]] || ! profile_has_broker_wildcard_deny_only "$BRO
 else
   pass "broker retains its wildcard-denied permission boundary"
 fi
+fi
 
 if ! node - "$CONFIG" <<'NODE'
 const fs = require("fs");
@@ -323,6 +333,9 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const errors = [];
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
+if (!isRecord(config.permission) || config.permission["*"] !== "deny") {
+  errors.push("root permission.* must remain deny");
+}
 if (!isRecord(config.permission) || config.permission.question !== "deny") {
   errors.push("root permission.question must be deny");
 }
@@ -330,6 +343,68 @@ if (!isRecord(config.permission) || config.permission.question !== "deny") {
 const plan = config.agent?.plan;
 if (!isRecord(plan) || !isRecord(plan.permission) || plan.permission.question !== "allow") {
   errors.push("built-in plan permission.question must be allow");
+} else {
+  const expectedPlanPermissions = {
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    question: "allow",
+  };
+  const actualPlanKeys = Object.keys(plan.permission).sort();
+  const expectedPlanKeys = Object.keys(expectedPlanPermissions).sort();
+  if (actualPlanKeys.join(",") !== expectedPlanKeys.join(",")) {
+    errors.push("built-in Plan must expose only read, glob, grep, and question permissions");
+  }
+  for (const [tool, expected] of Object.entries(expectedPlanPermissions)) {
+    if (plan.permission[tool] !== expected) {
+      errors.push(`built-in Plan permission.${tool} must be ${expected}`);
+    }
+  }
+  for (const tool of ["edit", "write", "bash", "task", "todowrite"]) {
+    if (plan.permission[tool] !== undefined && plan.permission[tool] !== "deny") {
+      errors.push(`built-in Plan must deny mutation/shell permission.${tool}`);
+    }
+  }
+}
+
+const roleMatrix = {
+  "browser-agent": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-docs": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-software-engineer-fast": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
+  "ingenium-software-engineer-premium": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
+  "ingenium-orchestrator": { edit: "deny", write: "deny", bash: "object", glob: "deny", grep: "deny", todowrite: "allow" },
+  "ingenium-qa": { edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-security-auditor": { edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-explore": { edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-scout": { edit: "deny", write: "deny", bash: "deny", glob: "deny", grep: "deny", todowrite: "deny" },
+  "ingenium-qa-vision": { edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-chat": { edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
+};
+for (const [name, expected] of Object.entries(roleMatrix)) {
+  const permission = config.agent?.[name]?.permission;
+  if (!isRecord(permission)) {
+    errors.push(`${name} root mapping must define an explicit permission object`);
+    continue;
+  }
+  if (permission["*"] !== "deny" || permission.read !== "allow" || permission.question !== "deny") {
+    errors.push(`${name} must explicitly deny by default, allow read, and deny question`);
+  }
+  for (const [tool, value] of Object.entries(expected)) {
+    const actual = permission[tool] === undefined ? "deny" : isRecord(permission[tool]) ? "object" : permission[tool];
+    if (actual !== value) errors.push(`${name} permission.${tool} must be ${value}, found ${String(actual)}`);
+  }
+  if (expected.edit === "deny" && (permission.edit !== "deny" || permission.write !== "deny")) {
+    errors.push(`${name} read-only boundary must explicitly deny edit and write`);
+  }
+}
+for (const tool of [
+  "playwright_browser_click", "playwright_browser_evaluate", "playwright_browser_fill_form",
+  "playwright_browser_press_key", "playwright_browser_type", "playwright_browser_cookie_set",
+  "playwright_browser_localstorage_set", "playwright_browser_sessionstorage_set", "playwright_browser_route",
+]) {
+  if (config.agent?.["ingenium-qa-vision"]?.permission?.[tool] !== "deny") {
+    errors.push(`ingenium-qa-vision permission.${tool} must be deny`);
+  }
 }
 
 for (const [name, projection] of Object.entries(config.agent ?? {})) {
@@ -348,10 +423,14 @@ if (errors.length > 0) {
   console.error(errors.join("\n"));
   process.exit(1);
 }
-console.log("PASS: root denies question, built-in Plan allows it, and custom projections do not grant it");
+console.log("PASS: root and every active role have exact writer/read-only core permissions; Plan alone has the read-only question boundary");
 NODE
 then
   FAILED=1
+fi
+
+if [[ "$ROLE_MATRIX_ONLY" -eq 1 ]]; then
+  exit "$FAILED"
 fi
 
 # Old agent topology tolerates the duplicate root-level ingenium-chat.md

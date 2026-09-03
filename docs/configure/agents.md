@@ -9,7 +9,7 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 **12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly).
 
-Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
+Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the deliberate analysis exception: root `opencode.json` grants it `read`, `glob`, `grep`, and `question`, while `edit`, `write`, and `bash` remain denied. Custom agents may not use interactive questions. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
 ### Verification scope
 
@@ -166,6 +166,70 @@ tools `ingenium_coordination_update`, `ingenium_coordination_claim`, and
 Scout profile additionally grants `ingenium_docs_search_semantic` for semantic
 Docs RAG retrieval. All other profile permissions remain deny-by-default.
 
+### Effective role matrix
+
+The root `opencode.json` default is deny. The effective core permission matrix is
+explicitly:
+
+| Profile | `read` | `glob` | `grep` | `question` | `edit`/`write` | `bash` | Effective role |
+|---|---|---|---|---|---|---|---|
+| Plan | allow | allow | allow | allow | deny | deny | Planning only; these four capabilities are the complete Plan allowance |
+| `browser-agent` | allow | allow | allow | deny | allow | allow | Intentional writer |
+| `ingenium-docs` | allow | allow | allow | deny | allow | allow | Intentional writer |
+| `ingenium-software-engineer-fast` | allow | allow | allow | deny | allow | allow | Intentional writer |
+| `ingenium-software-engineer-premium` | allow | allow | allow | deny | allow | allow | Intentional writer; deployment gate below still applies |
+| `ingenium-orchestrator` | allow | deny | deny | deny | deny | restricted allow | Coordination and verification only; no file-mutation rights |
+| `ingenium-chat` | allow | allow | allow | deny | deny | deny | Read-only |
+| `ingenium-explore` | allow | allow | allow | deny | deny | deny | Read-only |
+| `ingenium-scout` | allow | deny | deny | deny | deny | deny | Read-only; bounded Docs RAG MCP access |
+| `ingenium-qa` | allow | allow | allow | deny | deny | allow | Read-only; Bash is bounded by the managed-command boundary |
+| `ingenium-qa-vision` | allow | allow | allow | deny | deny | deny | Read-only |
+| `ingenium-security-auditor` | allow | allow | allow | deny | deny | allow | Read-only; Bash is bounded by the managed-command boundary |
+| `ingenium-llm-broker` | deny | deny | deny | deny | deny | deny | Hidden system profile; wildcard-denied with no tool allowances |
+
+`edit`/`write` are the file-mutation permissions. The intentional writer
+profiles retain those permissions; every read-only profile above does not. A
+read-only profile with bounded Bash or MCP access does not thereby gain generic
+shell, file-mutation, or deployment authority.
+
+### Permission and deployment boundary
+
+The root `opencode.json` explicitly declares the Premium agent's effective
+`read`, `edit`, `write`, `bash`, `glob`, `grep`, and `todowrite` permissions;
+`question` remains denied by the root default. The root config remains
+authoritative for the Premium model and variant; the Markdown profile is not a
+second model source.
+
+Generic `bash`/`shell` input is fail-closed. Deployment and MCP diagnostics are
+limited to the fixed, shell-free `ingenium-build deployment` operations
+`mcp-status`, `compose-ps`, `compose-build`, `compose-up`, `compose-restart`,
+and `health`. The coordinator admits that path only for an authenticated
+general-MCP session whose project, workspace, launcher worktree, and required
+scopes are attested. QA, security, and every other agent—including an
+unauthenticated or runtime-audience Premium session—have no deployment
+authority. A non-Premium managed `ingenium-build` request fails closed in the
+pre-execution hook, before the wrapper can spawn `npm` or run a repository build
+script.
+
+Premium deployment authorization does not come from mutable chat-hook strings
+or prompt text. The coordinator obtains trusted OpenCode server evidence and
+requires the session record and directory to match the current worktree, a
+same-session user parent whose `agent` is
+`ingenium-software-engineer-premium`, an assistant message whose `mode` is the
+same profile, and a same-session tool part whose call ID, tool name, and input
+match the request and whose state is still pending or running. It then requires
+a general-MCP attestation with the `mcp` audience, exactly one matching project
+identity and project detail, the expected workspace ID and launcher worktree,
+and the required coordination, project-read, and repository-sync scopes.
+
+When admitted, deployment maps only those named operations to fixed executable
+argv arrays and starts them with `shell: false`. Its child environment removes
+inherited `COMPOSE_*`, `DOCKER_*`, `npm_*`, `NODE_OPTIONS`, and `PATH` values,
+then supplies the fixed runtime `PATH` (`<node-runtime>:/usr/local/bin:/usr/bin:/bin`).
+Changing an agent profile, plugin, MCP entry, OpenCode config, or parent binding
+requires a full parent OpenCode restart; restarting only the child MCP process
+is insufficient because existing sessions retain their previous permissions.
+
 ---
 
 ## Email MCP Tools
@@ -290,7 +354,10 @@ QA and security may report scope-classified BLOCKING/FOLLOW_UP findings once per
 
 ### Restart Required for Agent Profile and Configuration Changes
 
-Adding or changing an agent profile (`.opencode/agents/*.md`) or OpenCode configuration requires restarting OpenCode before the change is loaded. Current sessions retain their previously loaded profile/configuration until they restart.
+Adding or changing an agent profile (`.opencode/agents/*.md`), plugin, or
+OpenCode configuration requires a full parent OpenCode restart before the change
+is loaded. Restarting only the child MCP process is insufficient; current
+sessions retain their previous profile/configuration until the parent restarts.
 
 ### Profile file safety
 
