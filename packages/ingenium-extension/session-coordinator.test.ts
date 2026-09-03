@@ -1919,6 +1919,92 @@ describe("SessionCoordinatorPlugin hooks", () => {
     }
   });
 
+  it("does not route or clean up colliding legacy session prefixes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-legacy-prefix-collision-"));
+    mkdirSync(join(root, "src"));
+    execFileSync("git", ["-C", root, "init", "--quiet"]);
+    const fixture = coordinationFixture();
+    const outbox = new CoordinationOutbox(root);
+    const legacyOwnerSessionID = "legacy-prefix-owner";
+    const currentOwnerSessionID = "current-prefix-owner";
+    const legacyOwnerReference = durableSessionReference(legacyOwnerSessionID);
+    const currentOwnerReference = durableSessionReference(currentOwnerSessionID);
+    const simulatedLegacyReferences = {
+      [legacyOwnerSessionID]: legacyOwnerReference.slice(0, 16),
+      [currentOwnerSessionID]: legacyOwnerReference.slice(0, 16),
+    };
+    const process = processHarness("legacy-prefix-collision", "/tmp/legacy-prefix/home", "/tmp/legacy-prefix/xdg", 43046, {}, root);
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: fixture.callTool,
+      outbox: new CoordinationOutbox(root),
+      now: () => 702,
+      token: () => "L".repeat(32),
+      disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    try {
+      expect(legacyOwnerReference).not.toBe(currentOwnerReference);
+      expect(legacyOwnerReference).toHaveLength(64);
+      expect(currentOwnerReference).toHaveLength(64);
+      expect(simulatedLegacyReferences[legacyOwnerSessionID]).toHaveLength(16);
+      expect(simulatedLegacyReferences[legacyOwnerSessionID]).toBe(simulatedLegacyReferences[currentOwnerSessionID]);
+
+      await hooks.event!({ event: { type: "session.created", properties: { info: { id: legacyOwnerSessionID } } } as any });
+      await hooks.event!({ event: { type: "session.created", properties: { info: { id: currentOwnerSessionID } } } as any });
+      await vi.waitFor(() => expect((coordinator as any).replayingOutbox).toBe(false));
+
+      const legacy = outbox.put({
+        exactKey: `heartbeat:${legacyOwnerReference}:legacy`,
+        kind: "heartbeat",
+        sessionHash: legacyOwnerReference,
+        failure: "unavailable",
+      });
+      const legacyPath = join(outbox.directory, `${legacy.key}.json`);
+      writeFileSync(legacyPath, `${JSON.stringify({
+        ...legacy,
+        sessionHash: simulatedLegacyReferences[legacyOwnerSessionID],
+      })}\n`);
+      const current = outbox.put({
+        exactKey: `heartbeat:${currentOwnerReference}:current`,
+        kind: "heartbeat",
+        sessionHash: currentOwnerReference,
+        failure: "unavailable",
+      });
+      const currentPath = join(outbox.directory, `${current.key}.json`);
+      const peerRevision = (coordinator as any).sessions.get(legacyOwnerSessionID).revision;
+      const callOffset = fixture.calls.length;
+
+      await (coordinator as any).replayOutbox();
+      const acknowledgedReplayCalls = fixture.calls.slice(callOffset);
+      expect(acknowledgedReplayCalls).toEqual([
+        expect.objectContaining({
+          tool: "coordination_update",
+          args: expect.objectContaining({ operation: "heartbeat", session_id: opaqueSessionId(currentOwnerSessionID) }),
+        }),
+      ]);
+      expect(acknowledgedReplayCalls.some(({ args }) => args.session_id === opaqueSessionId(legacyOwnerSessionID))).toBe(false);
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(currentPath)).toBe(false);
+
+      await (coordinator as any).replayOutbox();
+      expect(fixture.calls.slice(callOffset)).toEqual(acknowledgedReplayCalls);
+      expect(new CoordinationOutbox(root).list()).toEqual([
+        expect.objectContaining({
+          operationId: legacy.operationId,
+          sessionHash: simulatedLegacyReferences[legacyOwnerSessionID],
+        }),
+      ]);
+      expect((coordinator as any).sessions.get(legacyOwnerSessionID).revision).toBe(peerRevision);
+      expect([...((coordinator as any).sessions as Map<string, unknown>).keys()]).toEqual([
+        legacyOwnerSessionID,
+        currentOwnerSessionID,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reconciles failed advisory claim evidence once after restart", async () => {
     const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-claim-replay-"));
     mkdirSync(join(root, "src"));
