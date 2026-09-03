@@ -115,7 +115,8 @@ const FAILURES = new Set<CoordinationOutboxFailure>([
   "unavailable", "conflict", "authentication", "rate_limited", "quarantined", "invalid_response",
 ]);
 const HASH = /^[0-9a-f]{64}$/;
-const SESSION_HASH = /^[0-9a-f]{16}$/;
+const SESSION_REFERENCE = /^[0-9a-f]{64}$/;
+const STORED_SESSION_REFERENCE = /^(?:[0-9a-f]{16}|[0-9a-f]{64})$/;
 const TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID = /^(?:session|worktree)-[0-9a-f]{64}$/;
@@ -183,7 +184,7 @@ function validRecord(value: unknown): value is CoordinationOutboxRecord {
     && record.version === 1 && typeof record.operationId === "string" && HASH.test(record.operationId)
     && typeof record.key === "string" && HASH.test(record.key)
     && typeof record.kind === "string" && KINDS.has(record.kind as CoordinationOutboxKind)
-    && typeof record.sessionHash === "string" && SESSION_HASH.test(record.sessionHash)
+    && typeof record.sessionHash === "string" && STORED_SESSION_REFERENCE.test(record.sessionHash)
     && typeof record.createdAt === "string" && Number.isFinite(Date.parse(record.createdAt))
     && typeof record.failure === "string" && FAILURES.has(record.failure as CoordinationOutboxFailure)
     && (record.revision === null || safeInteger(record.revision))
@@ -334,7 +335,7 @@ export class CoordinationOutbox {
       operationId: hash(`operation\0${key}`),
       key,
       kind: "overflow",
-      sessionHash: "0".repeat(16),
+      sessionHash: "0".repeat(64),
       createdAt: existing?.createdAt ?? new Date(this.now()).toISOString(),
       failure: "unavailable",
       revision: null,
@@ -349,7 +350,7 @@ export class CoordinationOutbox {
   }
 
   put(input: CoordinationOutboxInput): CoordinationOutboxRecord {
-    if (!input.exactKey || input.exactKey.length > 1024 || !SESSION_HASH.test(input.sessionHash)
+    if (!input.exactKey || input.exactKey.length > 1024 || !SESSION_REFERENCE.test(input.sessionHash)
       || !KINDS.has(input.kind) || !FAILURES.has(input.failure)
       || (input.revision !== undefined && !safeInteger(input.revision))
       || (input.cursor !== undefined && !safeInteger(input.cursor))

@@ -186,14 +186,14 @@ describe("protected coordination outbox", () => {
       const first = outbox.put({
         exactKey: sensitive,
         kind: "snapshot",
-        sessionHash: "a".repeat(16),
+        sessionHash: "a".repeat(64),
         failure: "unavailable",
         revision: 1,
       });
       const second = outbox.put({
         exactKey: sensitive,
         kind: "snapshot",
-        sessionHash: "a".repeat(16),
+        sessionHash: "a".repeat(64),
         failure: "rate_limited",
         revision: 2,
       });
@@ -215,11 +215,11 @@ describe("protected coordination outbox", () => {
     const root = worktree();
     try {
       const outbox = new CoordinationOutbox(root);
-      outbox.put({ exactKey: "snapshot", kind: "snapshot", sessionHash: "b".repeat(16), failure: "unavailable" });
+      outbox.put({ exactKey: "snapshot", kind: "snapshot", sessionHash: "b".repeat(64), failure: "unavailable" });
       const completion = outbox.put({
         exactKey: "completion",
         kind: "completion",
-        sessionHash: "b".repeat(16),
+        sessionHash: "b".repeat(64),
         failure: "conflict",
         ambiguous: true,
         mutation: {
@@ -266,7 +266,7 @@ describe("protected coordination outbox", () => {
       const record = outbox.put({
         exactKey: "valid-record",
         kind: "snapshot",
-        sessionHash: "d".repeat(16),
+        sessionHash: "d".repeat(64),
         failure: "unavailable",
       });
       const recordPath = join(outbox.directory, `${record.key}.json`);
@@ -288,9 +288,10 @@ describe("protected coordination outbox", () => {
     const root = worktree();
     try {
       const outbox = new CoordinationOutbox(root);
-      const base = { exactKey: "safe", kind: "snapshot" as const, sessionHash: "e".repeat(16), failure: "unavailable" as const };
+      const base = { exactKey: "safe", kind: "snapshot" as const, sessionHash: "e".repeat(64), failure: "unavailable" as const };
       expect(() => outbox.put({ ...base, exactKey: "Bearer private", digest: "private" })).toThrow("Invalid coordination outbox record");
       expect(() => outbox.put({ ...base, exactKey: "x".repeat(1025) })).toThrow("Invalid coordination outbox record");
+      expect(() => outbox.put({ ...base, sessionHash: "e".repeat(16) })).toThrow("Invalid coordination outbox record");
       expect(() => outbox.put({ ...base, sessionHash: "private-session" })).toThrow("Invalid coordination outbox record");
       expect(readdirSync(outbox.directory)).toEqual([]);
     } finally {
@@ -305,7 +306,7 @@ describe("protected coordination outbox", () => {
       const stored = first.put({
         exactKey: "restart-snapshot",
         kind: "snapshot",
-        sessionHash: "f".repeat(16),
+        sessionHash: "f".repeat(64),
         failure: "unavailable",
         revision: 7,
       });
@@ -324,6 +325,31 @@ describe("protected coordination outbox", () => {
     }
   });
 
+  it("parses legacy 16-character session references from disk without rewriting them", () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root);
+      const current = outbox.put({
+        exactKey: "legacy-overflow",
+        kind: "snapshot",
+        sessionHash: "1".repeat(64),
+        failure: "unavailable",
+      });
+      const path = join(outbox.directory, `${current.key}.json`);
+      writeFileSync(path, `${JSON.stringify({
+        ...current,
+        kind: "overflow",
+        sessionHash: "0".repeat(16),
+      })}\n`);
+
+      expect(new CoordinationOutbox(root).list()).toEqual([
+        expect.objectContaining({ kind: "overflow", sessionHash: "0".repeat(16) }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("coalesces bounded overflow instead of blocking when the record cap is reached", () => {
     const root = worktree();
     try {
@@ -332,14 +358,16 @@ describe("protected coordination outbox", () => {
         outbox.put({
           exactKey: `record-${index}`,
           kind: "publication",
-          sessionHash: "c".repeat(16),
+          sessionHash: "c".repeat(64),
           failure: "unavailable",
           digest: index.toString(16).padStart(64, "0"),
         });
       }
       const records = outbox.list();
       expect(records.length).toBeLessThanOrEqual(COORDINATION_OUTBOX_MAX_RECORDS);
-      expect(records).toContainEqual(expect.objectContaining({ kind: "overflow", ambiguous: true, count: 21 }));
+      expect(records).toContainEqual(expect.objectContaining({
+        kind: "overflow", sessionHash: "0".repeat(64), ambiguous: true, count: 21,
+      }));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

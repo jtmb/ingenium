@@ -45,6 +45,10 @@ function opaqueSessionId(value: string): string {
   return `session-${createHash("sha256").update(value).digest("hex")}`;
 }
 
+function durableSessionReference(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 function browserWrapperCommand(script: string): string {
   return `${browserWrapperPath} <<'EOF'\n${script}\nEOF`;
 }
@@ -1858,6 +1862,63 @@ describe("SessionCoordinatorPlugin hooks", () => {
     }
   });
 
+  it("retains legacy references forever and routes only exact current session references", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-session-reference-"));
+    mkdirSync(join(root, "src"));
+    execFileSync("git", ["-C", root, "init", "--quiet"]);
+    const fixture = coordinationFixture();
+    const outbox = new CoordinationOutbox(root);
+    const sessionID = "session-reference-current";
+    const currentReference = durableSessionReference(sessionID);
+    const legacy = outbox.put({
+      exactKey: `heartbeat:${currentReference}`,
+      kind: "heartbeat",
+      sessionHash: currentReference,
+      failure: "unavailable",
+    });
+    const legacyPath = join(outbox.directory, `${legacy.key}.json`);
+    writeFileSync(legacyPath, `${JSON.stringify({ ...legacy, sessionHash: currentReference.slice(0, 16) })}\n`);
+    const process = processHarness("session-reference", "/tmp/session-reference/home", "/tmp/session-reference/xdg", 43045, {}, root);
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding,
+      callTool: fixture.callTool,
+      outbox: new CoordinationOutbox(root),
+      now: () => 701,
+      token: () => "S".repeat(32),
+      disableHeartbeat: true,
+    });
+    try {
+      await coordinator.hooks().event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+      await vi.waitFor(() => expect((coordinator as any).replayingOutbox).toBe(false));
+
+      const unmatched = outbox.put({
+        exactKey: `heartbeat:${durableSessionReference("other-session")}`,
+        kind: "heartbeat",
+        sessionHash: durableSessionReference("other-session"),
+        failure: "unavailable",
+      });
+      const matching = outbox.put({
+        exactKey: `heartbeat:${currentReference}:current`,
+        kind: "heartbeat",
+        sessionHash: currentReference,
+        failure: "unavailable",
+      });
+      await (coordinator as any).replayOutbox();
+      await (coordinator as any).replayOutbox();
+
+      const replayHeartbeats = fixture.calls.filter(({ tool, args }) => tool === "coordination_update" && args.operation === "heartbeat");
+      expect(replayHeartbeats).toHaveLength(1);
+      expect(replayHeartbeats[0]?.args.session_id).toBe(opaqueSessionId(sessionID));
+      expect(new CoordinationOutbox(root).list()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ operationId: legacy.operationId, sessionHash: currentReference.slice(0, 16) }),
+        expect.objectContaining({ operationId: unmatched.operationId, sessionHash: durableSessionReference("other-session") }),
+      ]));
+      expect(new CoordinationOutbox(root).list()).not.toContainEqual(expect.objectContaining({ operationId: matching.operationId }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reconciles failed advisory claim evidence once after restart", async () => {
     const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-claim-replay-"));
     mkdirSync(join(root, "src"));
@@ -1887,11 +1948,13 @@ describe("SessionCoordinatorPlugin hooks", () => {
       await firstHooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
       const applied = outbox.list().find((record) => record.kind === "claim")!;
       expect(applied.operationId).toBe(failed.operationId);
+      expect(applied.sessionHash).toBe(durableSessionReference(sessionID));
       expect(applied.mutation).toMatchObject({
         phase: "local_applied",
         operation: "write",
         footprint: [expect.objectContaining({ pathSegments: ["c3Jj", "cmVwbGF5ZWQudHM"] })],
       });
+      expect(readFileSync(join(outbox.directory, `${applied.key}.json`), "utf8")).not.toContain(sessionID);
 
       failClaim = false;
       const restarted = new SessionCoordinator(process, {
@@ -1977,6 +2040,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
       const ambiguous = outbox.list().find((record) => record.kind === "completion")!;
       const remoteOperationId = ambiguous.mutation!.remoteClaim!.remoteOperationId;
       expect(ambiguous).toMatchObject({
+        sessionHash: durableSessionReference(sessionID),
         ambiguous: true,
         mutation: {
           phase: "completion_ambiguous",

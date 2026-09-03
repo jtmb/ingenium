@@ -105,6 +105,10 @@ function sessionHash(sessionId: string): string {
   return createHash("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
 }
 
+function durableSessionReference(sessionId: string): string {
+  return createHash("sha256").update(sessionId, "utf8").digest("hex");
+}
+
 function appendPrivateRecord(path: string | undefined, record: Record<string, unknown>): void {
   if (!path) return;
   let descriptor: number | undefined;
@@ -1102,12 +1106,12 @@ export class SessionCoordinator {
     } = {},
   ): void {
     if (this.disposed) return;
-    const hashId = sessionHash(sessionId);
+    const sessionReference = durableSessionReference(sessionId);
     try {
       this.outbox?.put({
-        exactKey: options.exactKey ?? `${kind}:${hashId}`,
+        exactKey: options.exactKey ?? `${kind}:${sessionReference}`,
         kind,
-        sessionHash: hashId,
+        sessionHash: sessionReference,
         failure: this.outboxFailure(error),
         revision: options.revision,
         cursor: options.cursor,
@@ -1138,9 +1142,9 @@ export class SessionCoordinator {
     if (this.disposed) return;
     try {
       this.outbox?.put({
-        exactKey: `claim:${sessionHash(pending.sessionId)}:${pending.operationId}`,
+        exactKey: `claim:${durableSessionReference(pending.sessionId)}:${pending.operationId}`,
         kind: "claim",
-        sessionHash: sessionHash(pending.sessionId),
+        sessionHash: durableSessionReference(pending.sessionId),
         failure: pending.claimFailure ?? "unavailable",
         digest: createHash("sha256").update(pending.operationId).digest("hex"),
         mutation: this.mutationEvidence(pending, "local_applied"),
@@ -1566,7 +1570,8 @@ export class SessionCoordinator {
     try {
       await this.outbox.replay(async (record) => {
         if (this.disposed) return false;
-        const session = [...this.sessions.entries()].find(([id]) => sessionHash(id) === record.sessionHash);
+        if (record.sessionHash.length !== 64) return false;
+        const session = [...this.sessions.entries()].find(([id]) => durableSessionReference(id) === record.sessionHash);
         if (!session) return false;
         const [sessionId, local] = session;
         if (!local.remoteRegistered) return false;
@@ -2282,7 +2287,7 @@ export class SessionCoordinator {
       if (this.disposed) return;
       localPending.claimFailure = this.outboxFailure(error);
       this.retainFailure("claim", sessionId, error, {
-        exactKey: `claim:${sessionHash(sessionId)}:${localPending.operationId}`,
+        exactKey: `claim:${durableSessionReference(sessionId)}:${localPending.operationId}`,
         digest: createHash("sha256").update(descriptor.operation).update("\0").update(String(descriptor.paths.length)).digest("hex"),
         mutation: this.mutationEvidence(localPending, "claim_failed"),
       });
@@ -2395,7 +2400,7 @@ export class SessionCoordinator {
         } catch (error) {
           this.pendingMutations.delete(key);
           this.retainFailure("completion", sessionId, error, {
-            exactKey: `completion:${sessionHash(sessionId)}:${pending.operationId}`,
+            exactKey: `completion:${durableSessionReference(sessionId)}:${pending.operationId}`,
             digest: createHash("sha256").update(pending.operationId).digest("hex"),
             ambiguous: true,
             mutation: this.mutationEvidence(pending, "completion_ambiguous"),
@@ -2414,7 +2419,7 @@ export class SessionCoordinator {
         claimState: "quarantined" });
     })().catch((error) => {
       this.retainFailure("quarantine", sessionId, error, {
-        exactKey: `quarantine:${sessionHash(sessionId)}:${pending.operationId}`,
+        exactKey: `quarantine:${durableSessionReference(sessionId)}:${pending.operationId}`,
         digest: createHash("sha256").update(pending.operationId).digest("hex"),
         ambiguous: true,
         ...(pending.remoteProof ? { mutation: this.mutationEvidence(pending, "completion_ambiguous") } : {}),
@@ -2558,7 +2563,7 @@ export class SessionCoordinator {
         } catch (quarantineError) {
           this.pendingMutations.delete(key);
           this.retainFailure("quarantine", sessionId, quarantineError, {
-            exactKey: `quarantine:${sessionHash(sessionId)}:${failedPending.operationId}`,
+            exactKey: `quarantine:${durableSessionReference(sessionId)}:${failedPending.operationId}`,
             digest: createHash("sha256").update(failedPending.operationId).digest("hex"),
             ambiguous: true,
             ...(failedPending.remoteProof
@@ -2936,7 +2941,7 @@ export class SessionCoordinator {
             }
           } catch (error) {
             this.retainFailure("publication", sessionID, error, {
-              exactKey: `publication:${sessionHash(sessionID)}:${pending.operationId}`,
+              exactKey: `publication:${durableSessionReference(sessionID)}:${pending.operationId}`,
               digest: createHash("sha256").update(pending.operationId).digest("hex"),
               ambiguous: true,
             });
