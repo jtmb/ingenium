@@ -179,7 +179,7 @@ P0 DOC-100
   -> P2 MCP-101..103, CTX-101, TASK-101..102, JOB-101, USAGE-101, VAULT-101, RESTORE-101
   -> P3 JOB-102, MCP-104..105, USAGE-102, VAULT-102, RESTORE-102
   -> P4 MCP-106
-   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100
+   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101
   -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
   -> P5 UI-102 -> CHAT-101
   -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
@@ -5127,7 +5127,7 @@ begin until `RECOVERY-100` is complete and the restart gates below are proven.
   production-restart command plus safe Git inspection/checkpoint. The current
   Docs wave owns only the canonical policy files named above. There is no overlap with
   `RECOVERY-100`'s active credential/MCP remediation territory.
-- **Phase/counts:** `C8` later runtime wave; `A=6`, `W=3`, read-only ceiling
+- **Phase/counts:** `C8` later runtime wave; 3 writers / 3 nonwriters; `A=6`, `W=3`, read-only ceiling
   `6 - W = 3`; Premium owns implementation, the Recovery agent owns only the
   deployment-only fixed production-restart and safe Git inspection/checkpoint
   boundary, and Docs owns directly affected canonical guidance, with QA,
