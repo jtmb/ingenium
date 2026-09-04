@@ -179,7 +179,7 @@ P0 DOC-100
   -> P2 MCP-101..103, CTX-101, TASK-101..102, JOB-101, USAGE-101, VAULT-101, RESTORE-101
   -> P3 JOB-102, MCP-104..105, USAGE-102, VAULT-102, RESTORE-102
   -> P4 MCP-106
-   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101
+   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101 -> C9 RECOVERY-102
   -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
   -> P5 UI-102 -> CHAT-101
   -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
@@ -5198,3 +5198,209 @@ execution is limited to the fixed production-restart command plus safe Git
 inspection/checkpoint. Premium remains the implementation owner. Activation and
 runtime proof remain pending; this documentation-only update ran no tests and
 appended no `(work-complete)` marker.
+
+## Open launcher and durable session-sharing follow-up (2026-09-04)
+
+This append-only opening adds `RECOVERY-102` without changing the retained
+`RECOVERY-100`/`RECOVERY-101` markers or treating their source evidence as
+runtime proof. The dependency order is `RECOVERY-100 -> RECOVERY-101 ->
+RECOVERY-102`; RECOVERY-100 and RECOVERY-101 remain open dependencies.
+RECOVERY-102 source diagnosis/remediation and targeted source checks are
+explicitly authorized now when needed to unblock RECOVERY-100's MCP canary, but
+deployment, full-parent restart, and actual model/session execution remain
+serialized behind valid predecessor completion markers, non-empty evidence, and
+separate TodoWrite/roadmap reconciliation. No credential rotation is authorized.
+
+#### RECOVERY-102 — Launcher-safe linked/forked sessions and durable transcript sharing
+
+- **IN_SCOPE:** Reproduce the visible `ingenium MCP error -32000: Connection
+  closed` and fix it at the first reproducible launcher, API-authentication,
+  project/workspace/worktree-binding, or stdio-transport cause; do not rotate the
+  explicitly noncritical development credential. Make ordinary OpenCode/TUI
+  startup side-effect-free with respect to `npm`, Vitest, typecheck, build, test
+  scripts, and test databases; legitimate API migrations remain explicit,
+  authorized deployment/API-lifecycle work, never startup work. Implement
+  `/add-session <session-id>` to link an authorized existing session and
+  `/add-session fork` to create an authorized fork, with server-enforced project,
+  workspace, worktree, principal, and session boundaries. Provide durable full
+  transcript sharing with existing-history backfill, durable per-reader cursors,
+  idempotent deduplication, origin/lineage loop prevention, restart replay, and
+  bounded prompt injection with complete authorized retrieval through bounded
+  pages/cursors. Update the directly affected canonical usage, API, and MCP
+  troubleshooting sections; run targeted source verification; obtain one QA
+  report and one security report for the changed auth/transcript surface; then
+  perform the authorized Premium rebuild/full parent restart, route/MCP health
+  checks, actual linked/forked TUI evidence, and separate TodoWrite/roadmap
+  reconciliation.
+- **OUT_OF_SCOPE:** Credential rotation or replacement, password recovery, real
+  provider credentials, cross-project/workspace/session sharing, unbounded prompt
+  injection, arbitrary startup commands, automatic test execution, test-database
+  provisioning during normal startup, API migration implementation, direct
+  database access from OpenCode/TUI consumers, Docs Workspace mutation, broad
+  documentation/index cleanup, and any completion claim based only on source
+  tests, a deployed canary, or a file/native-fork result.
+- **Owner:** `@ingenium-software-engineer-premium` owns the launcher, API-auth,
+  binding, session, transcript, and acceptance implementation; `@ingenium-docs`
+  owns the canonical roadmap and later directly affected documentation.
+- **Dependencies:** `RECOVERY-100` and `RECOVERY-101` must retain their
+  fail-closed recovery, replacement-first, and parent-restart gates. Neither
+  predecessor is closed or rewritten by this task. Before any RECOVERY-102
+  deployment, full-parent restart, or actual model/session execution, both
+  predecessors must have valid established-syntax `(work-complete)` markers,
+  non-empty evidence covering their acceptance gates, and separately reconciled
+  TodoWrite and roadmap state. Their current open state does not satisfy that
+  later execution gate.
+- **Early unblock allowance:** RECOVERY-102 may perform bounded source
+  diagnosis/remediation and targeted source checks now, when needed to unblock
+  RECOVERY-100's MCP canary. This allowance does not close either predecessor,
+  authorize credential rotation, or permit deployment, restart, or model/session
+  execution; those later evidence classes remain serialized after the
+  predecessor gate.
+- **Acceptance:** The first reproducible cause of the `-32000` connection
+  closure is retained, repaired at that boundary, and proven without credential
+  rotation. A normal OpenCode/TUI launch runs no npm/Vitest/typecheck/build/test
+  script and opens no test database; any migration is separately attributable to
+  an authorized API/deployment lifecycle action. Both `/add-session` forms
+  reject foreign or mismatched project/workspace/worktree/session bindings and
+  produce the documented link or fork lineage. A linked and a forked session can
+  backfill the complete authorized transcript, continue from durable cursors,
+  suppress duplicate or reflected events, replay correctly after restart, and
+  retrieve the full authorized history in bounded pages. Model-facing transcript
+  injection is bounded, explicitly framed as untrusted data, and cannot grant
+  instructions, tools, permissions, or new scope. The affected canonical docs
+  describe the verified launcher/startup, API, `/add-session`, transcript, and
+  MCP troubleshooting behavior. Exactly one bounded QA report and exactly one
+  bounded current-diff/dependency security report are retained, with findings
+  classified under this contract. Premium rebuilds the current merged source and
+  performs one full parent OpenCode restart; child-MCP restart alone is
+  insufficient. The post-restart exact-binding MCP canary proves successful MCP
+  initialization, successful `tools/list`, and successful `ingenium_health_check`.
+  Actual API routes and TUI routes are also verified. Real TUI evidence proves
+  both link and fork flows, transcript backfill/cursor/replay/loop behavior, and
+  TodoWrite/roadmap reconciliation; no evidence class substitutes for another.
+- **Evidence classes:**
+  - **Source tests:** Focused launcher/API-auth/binding/transport and startup
+    side-effect checks; `/add-session` authorization/lineage tests; transcript
+    backfill, cursor, dedupe, loop-prevention, bounded-injection, full-retrieval,
+    and restart-replay tests; and the targeted canonical-doc/marker checks.
+  - **Deployed runtime:** The authorized Premium rebuild and full parent restart,
+    source/image provenance, API and TUI route health, connected MCP
+  initialization/tool listing, binding/auth behavior, and the post-restart
+  exact-binding MCP canary's successful initialization, `tools/list`, and
+  `ingenium_health_check`; also retain explicit proof that ordinary startup did
+  not run test/build tooling or open a test database.
+  - **Model/session:** Actual linked and forked TUI sessions with the authorized
+    project/workspace identity, transcript backfill and incremental cursor
+    exchange, duplicate/loop suppression, restart replay, bounded prompt
+    projection/full authorized retrieval, and separately captured TodoWrite plus
+    roadmap reconciliation. Source or deployed evidence cannot stand in for this
+    class.
+- **STOP_CONDITION:** `PASS` only after the first-cause fix, focused source
+  checks, exactly one QA report, exactly one security report, authorized Premium
+  rebuild/full parent restart, route/MCP health, actual linked/forked TUI and
+  transcript evidence, cleanup, and separate TodoWrite/roadmap reconciliation
+  all pass. Explicit user `STOP` or `CANCELLED` is terminal; otherwise continue
+  in scope or use only the permitted escalation rule.
+- **Escalation:** Only unavailable required protected access after the configured
+  path was attempted, an unauthorized irreversible action, a mutually exclusive
+  product decision, genuine ambiguity, or a root cause that remains unreproduced
+  after bounded diagnosis. A failed check alone and the explicitly prohibited
+  credential rotation are not escalation reasons.
+- **Verification owner:** `@ingenium-software-engineer-premium` owns the focused
+  source and runtime checks; `@ingenium-qa` produces exactly one targeted QA
+  report; `@ingenium-security-auditor` produces exactly one bounded current-diff/
+  dependency report for the predeclared auth/transcript surface; and
+  `@ingenium-docs` verifies only the named canonical wording, links, commands,
+  and marker state. Reviewers do not dispatch work or rerun after remediation.
+- **Security surface:** Launcher/API authentication and binding; authorized
+  project/workspace/worktree/session linking and forking; transcript ownership,
+  cursor and lineage integrity; deduplication/loop prevention; bounded
+  untrusted prompt injection; full-retrieval authorization; restart replay; and
+  redaction of credentials, private paths, and unauthorized transcript content.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with authorized
+  deployment access; rebuild and restart the current merged source through the
+  full parent OpenCode path, then health-check the actual API/TUI routes and MCP
+  transport.
+- **Rollback/safety:** Preserve the first connection failure and unknown turn
+  outcomes; do not rotate or guess the noncritical development credential; fail
+  closed on missing or mismatched identity; retain durable cursors and source
+  lineage before retrying; never replay an uncertain mutation; keep transcript
+  content out of logs and evidence except for authorized bounded session proof;
+  clean only identity-checked run-owned state; and keep API migrations on their
+  explicit deployment/API-lifecycle path.
+- **Tests:** Focused source tests for the first launcher/auth/binding/transport
+  cause and startup command/database negative cases; exact project/workspace/
+  worktree/session authorization and `/add-session` link/fork lineage cases;
+  transcript backfill, bounded cursor paging, idempotent deduplication,
+  origin/lineage loop prevention, restart replay, bounded prompt framing,
+  full-authorized retrieval, redaction, and failure recovery; one targeted QA
+  report; one bounded security report; deployed API/TUI/MCP health and startup
+  process/database inspection; the post-restart exact-binding MCP canary with
+  successful initialization, `tools/list`, and `ingenium_health_check`; actual
+  linked/forked TUI model/session artifacts; and final TodoWrite/roadmap marker
+  reconciliation. No broad suite is part of this contract unless separately
+  authorized by its acceptance boundary.
+- **Docs:** After behavior is source-verified, update only [OpenCode usage](../usage/opencode.md),
+  [Multi-session OpenCode](../usage/multi-session.md), [API Reference](../develop/api.md),
+  and [MCP Tools Reference](./mcp-tools.md) for launcher/auth/startup,
+  `/add-session`, transcript, API, and troubleshooting wording. This opening
+  changes no file except this roadmap and performs no Docs Workspace mutation.
+- **Exclusive writer territory:** Premium owns launcher/API-auth/binding,
+  session/transcript implementation, focused tests, and deployment acceptance;
+  later Docs work owns only the four named canonical files; this wave owns only
+  `docs/reference/ROADMAP.md`. No writer may overlap the active
+  `RECOVERY-100`/`RECOVERY-101` territories.
+- **Phase/counts:** `C9` later implementation and acceptance barrier; the full
+  declared wave uses `A=6`, `W=3` (Premium, Recovery, and Docs), with a
+  read-only ceiling of `6 - W = 3` for QA, security, and evidence review. The
+  current roadmap edit dispatches no agents; the explicit early source-unblock
+  allowance is available to the implementation owner without moving later
+  deployment, restart, or model/session evidence ahead of the predecessor gate.
+- **UNUSED_CAPACITY:** No delegated runtime or review wave is started by this
+  one-file roadmap edit. Direct RECOVERY-102 source diagnosis/remediation and
+  targeted source checks are authorized only when needed to unblock the
+  RECOVERY-100 MCP canary; later capacity remains reserved for the dependency-
+  gated deployment, one shared QA report, one shared security report, and actual
+  model/session evidence. No speculative work is added.
+- **Verification plan:** First isolate the earliest reproducible connection
+  closure with bounded launcher/API-auth/binding/transport tracing while keeping
+  the development credential unchanged; when needed, apply the smallest source
+  remediation and targeted source check that unblocks RECOVERY-100's MCP
+  canary. Verify startup negative cases and the API migration lifecycle
+  boundary. Only after both predecessors have valid completion markers,
+  non-empty evidence, and reconciled TodoWrite/roadmap state, deploy the current
+  merged source through the authorized Premium rebuild/full parent restart;
+  prove the post-restart exact-binding MCP canary with successful initialization,
+  `tools/list`, and `ingenium_health_check`; health-check actual routes, run
+  exactly one QA report and one security report, and exercise real TUI link/fork
+  sessions. Capture backfill, cursors, dedupe, loop prevention, restart replay,
+  bounded injection, and full authorized retrieval. Clean only owned state,
+  reconcile TodoWrite separately from the append-only roadmap markers, and append
+  no completion marker until every gate passes. If a reviewer identifies an
+  in-scope blocker, fix only its named reproducible root and run its minimum
+  proving regression; do not rerun that reviewer.
+- **Causal remediation rule:** Repair the first launcher, API-authentication,
+  binding, transport, startup-side-effect, authorization, cursor, lineage,
+  retrieval, or prompt-boundary cause proven by evidence. Never hide the
+  `Connection closed` symptom, rotate the credential, run tests from normal
+  startup, bypass project/workspace authorization, or patch only a rendered
+  transcript symptom.
+- **Finding classification:** The visible connection failure, startup execution
+  of test/build tooling or test databases, cross-boundary link/fork or transcript
+  access, duplicate/looped/lost replay, unbounded prompt injection, missing
+  required report/restart/health/session evidence, or false completion is
+  `BLOCKING`; unrelated docs drift, optional transcript UX, credential rotation,
+  and broader migration or provider work are `FOLLOW_UP`; retained causal,
+  provenance, and evidence-class metadata is `INFORMATIONAL`.
+- **Markers/evidence:** [x] appended exactly one `work-started` marker after the
+  roadmap preflight; [ ] append one matching `work-complete` marker only after
+  every acceptance gate passes, with non-empty evidence for source tests,
+  deployed runtime, QA/security, and actual model/session/TodoWrite
+  reconciliation. The task remains open and no completion marker is recorded.
+
+<!-- (work-started) RECOVERY-102 2026-09-04T00:00:00Z ingenium-docs -->
+Evidence RECOVERY-102: The roadmap contract is open and started for documentation
+and implementation planning only; `RECOVERY-100` and `RECOVERY-101` remain open
+dependencies, the explicitly noncritical development credential remains
+unchanged, and source, deployed-runtime, and actual model/session evidence remain
+separate and pending.
