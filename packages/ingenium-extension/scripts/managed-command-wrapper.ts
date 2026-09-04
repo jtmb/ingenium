@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -40,7 +40,6 @@ const RECOVERY_ENVIRONMENT = [
   "INGENIUM_RECOVERY_OWNER_START_TICKS",
   "INGENIUM_STORAGE_MAPPING_HASH",
   "INGENIUM_WORKSPACE_ID",
-  "INGENIUM_WORKTREE",
   "NO_COLOR",
   "TERM",
   "TMPDIR",
@@ -58,12 +57,49 @@ const COMMIT_CONFIGURATION = [
 ];
 const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
 
+export function managedWrapperPackageRoot(moduleUrl: string | URL = import.meta.url): string {
+  const wrapper = realpathSync(fileURLToPath(moduleUrl));
+  const scriptsDirectory = dirname(wrapper);
+  const built = basename(dirname(scriptsDirectory)) === "dist";
+  if (basename(scriptsDirectory) !== "scripts"
+    || basename(wrapper) !== `managed-command-wrapper.${built ? "js" : "ts"}`) {
+    throw new Error("Managed wrapper is outside its fixed source or distribution layout");
+  }
+  const packageRoot = realpathSync(resolve(scriptsDirectory, built ? "../.." : ".."));
+  if (basename(packageRoot) !== "ingenium-extension" || basename(dirname(packageRoot)) !== "packages") {
+    throw new Error("Managed wrapper is outside packages/ingenium-extension");
+  }
+  return packageRoot;
+}
+
+export function managedRecoveryWorktree(moduleUrl: string | URL = import.meta.url): string {
+  const packageRoot = managedWrapperPackageRoot(moduleUrl);
+  const repositoryRoot = realpathSync(resolve(packageRoot, "../.."));
+  if (realpathSync(resolve(repositoryRoot, "packages/ingenium-extension")) !== packageRoot) {
+    throw new Error("Managed wrapper package layout is not canonical");
+  }
+  if (existsSync(GIT) && existsSync(resolve(repositoryRoot, ".git"))) {
+    const gitTopLevel = realpathSync(execFileSync(
+      GIT,
+      ["-C", repositoryRoot, ...GIT_CONFIGURATION, "rev-parse", "--show-toplevel"],
+      {
+        encoding: "utf8",
+        timeout: 10_000,
+        env: {
+          PATH: "/usr/local/bin:/usr/bin:/bin",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_TERMINAL_PROMPT: "0",
+        },
+      },
+    ).trim());
+    if (gitTopLevel !== repositoryRoot) throw new Error("Managed wrapper Git top-level does not match its repository layout");
+  }
+  return repositoryRoot;
+}
+
 export function managedRecoveryBootstrapPath(moduleUrl: string | URL = import.meta.url): string {
-  const scriptsDirectory = dirname(fileURLToPath(moduleUrl));
-  const packageRoot = basename(dirname(scriptsDirectory)) === "dist"
-    ? resolve(scriptsDirectory, "../..")
-    : resolve(scriptsDirectory, "..");
-  return resolve(packageRoot, "scripts/recovery-bootstrap.js");
+  return resolve(managedWrapperPackageRoot(moduleUrl), "scripts/recovery-bootstrap.js");
 }
 
 function isSafeCommitMessage(value: string): boolean {
@@ -201,9 +237,13 @@ export function managedBuildEnvironment(source: NodeJS.ProcessEnv = process.env)
   };
 }
 
-export function managedRecoveryEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function managedRecoveryEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+  moduleUrl: string | URL = import.meta.url,
+): NodeJS.ProcessEnv {
   return {
     ...Object.fromEntries(RECOVERY_ENVIRONMENT.flatMap((name) => source[name] === undefined ? [] : [[name, source[name]!]])),
+    INGENIUM_WORKTREE: managedRecoveryWorktree(moduleUrl),
     PATH: `${RUNTIME_BIN}:/usr/local/bin:/usr/bin:/bin`,
   };
 }

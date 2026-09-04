@@ -35,6 +35,7 @@ import {
   managedBuildExecution,
   managedCommand,
   managedRecoveryBootstrapPath,
+  managedRecoveryWorktree,
   MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS,
   managedGitEnvironment,
   managedReplacementFirstRestart,
@@ -820,6 +821,8 @@ describe("managed command wrappers", () => {
 
     expect(managedRecoveryBootstrapPath(sourceWrapper)).toBe(recoveryBootstrapShim);
     expect(managedRecoveryBootstrapPath(builtWrapper)).toBe(recoveryBootstrapShim);
+    expect(managedRecoveryWorktree(sourceWrapper)).toBe(repositoryRoot);
+    expect(managedRecoveryWorktree(builtWrapper)).toBe(repositoryRoot);
     expect(managedBuildExecution(["deployment", "production-restart"], sourceWrapper).argv)
       .toEqual([recoveryBootstrapShim]);
     expect(managedBuildExecution(["deployment", "production-restart"], builtWrapper).argv)
@@ -1302,6 +1305,7 @@ describe("managed command wrappers", () => {
       command: process.execPath,
       argv: [recoveryBootstrapShim],
     });
+    expect(wrapper.managedRecoveryWorktree()).toBe(repositoryRoot);
   });
 
   it("autonomous-recovery times out the outer recovery bootstrap without reaching production mutation", () => {
@@ -2088,10 +2092,9 @@ describe("managed command wrappers", () => {
     expect(environment).toEqual({ PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`, SAFE_VALUE: "retained" });
   });
 
-  it("passes only attested recovery bindings to the production restart shim", () => {
+  it("binds the canonical worktree and passes only attested recovery bindings to the production restart shim", () => {
     const environment = managedRecoveryEnvironment({
       HOME: "/tmp/recovery-home",
-      INGENIUM_WORKTREE: repositoryRoot,
       INGENIUM_WORKSPACE_ID: "workspace",
       LD_PRELOAD: "/tmp/attacker.so",
       NODE_OPTIONS: "--require=/tmp/attacker.js",
@@ -2104,6 +2107,10 @@ describe("managed command wrappers", () => {
       INGENIUM_WORKTREE: repositoryRoot,
       PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
     });
+    expect(managedRecoveryEnvironment({ INGENIUM_WORKTREE: "/tmp/caller-controlled" }).INGENIUM_WORKTREE)
+      .toBe(repositoryRoot);
+    expect(managedBuildEnvironment({ INGENIUM_WORKTREE: "/tmp/unrelated-build" }).INGENIUM_WORKTREE)
+      .toBe("/tmp/unrelated-build");
   });
 
   it("removes Git execution environment overrides", () => {
