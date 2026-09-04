@@ -1317,10 +1317,13 @@ server.registerTool(
 server.registerTool(
   "coordination_handoff",
   {
-    description: "Publish or consume sanitized same-worktree peer-write handoffs.",
+    description: "Exchange sanitized handoffs, operational memory, and linked-session transcripts.",
     inputSchema: {
       project: projectParam,
-      operation: z.enum(["publish", "read", "ack", "consume", "memory", "memory_read", "memory_ack"]),
+      operation: z.enum([
+        "publish", "read", "ack", "consume", "memory", "memory_read", "memory_ack",
+        "link", "transcript_publish", "transcript_read", "transcript_ack",
+      ]),
       worktree_id: coordinationOpaqueIdParam,
       session_id: coordinationOpaqueIdParam,
       incarnation: coordinationPositiveParam,
@@ -1335,6 +1338,24 @@ server.registerTool(
       through_sequence: coordinationRevisionParam.optional(),
       through_revision: coordinationRevisionParam.optional(),
       memory_entry: coordinationMemoryEntryParam.optional(),
+      target_session_id: coordinationOpaqueIdParam.optional(),
+      link_kind: z.enum(["linked", "fork"]).optional(),
+      transcript_messages: z.array(z.object({
+        message_id: coordinationOpaqueIdParam,
+        payload: z.object({
+          info: z.object({
+            id: coordinationOpaqueIdParam,
+            sessionID: coordinationOpaqueIdParam,
+            role: z.enum(["user", "assistant"]),
+          }).passthrough(),
+          parts: z.array(z.object({
+            id: coordinationOpaqueIdParam,
+            sessionID: coordinationOpaqueIdParam,
+            messageID: coordinationOpaqueIdParam,
+            type: z.string().min(1).max(64),
+          }).passthrough()),
+        }).strict(),
+      }).strict()).min(1).max(16).optional(),
     },
   },
   wrapHandler(C("coordination_handoff"), async ({ project, operation, ...input }) =>

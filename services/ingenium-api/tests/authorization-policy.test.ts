@@ -46,6 +46,10 @@ describe("AUTH-102 canonical API policy", () => {
     "/api/v1/coordination/handoffs/publish",
     "/api/v1/coordination/handoffs/read",
     "/api/v1/coordination/handoffs/ack",
+    "/api/v1/coordination/sessions/link",
+    "/api/v1/coordination/transcripts/publish",
+    "/api/v1/coordination/transcripts/read",
+    "/api/v1/coordination/transcripts/ack",
   ])("keeps POST %s classified as a project write", (path) => {
     expect(policyForRequest({ method: "POST", path } as Pick<Request, "method" | "path">)).toMatchObject({
       target: "project",

@@ -13,6 +13,7 @@ import {
 } from "../lib/tools/context-conversations.js";
 import {
   authorizedTakeoverCoordinationSession,
+  acknowledgeCoordinationTranscript,
   acknowledgeCoordinationHandoffs,
   acknowledgeCoordinationMemory,
   claimCoordinationBatch,
@@ -25,13 +26,16 @@ import {
   getCoordinationSession,
   getCoordinationStatus,
   heartbeatCoordinationSession,
+  linkCoordinationSession,
   markCoordinationClaims,
   publishCoordinationHandoff,
   publishCoordinationMemory,
+  publishCoordinationTranscript,
   quarantineCoordinationClaims,
   readCoordinationHandoffs,
   readCoordinationMemory,
   readCoordinationMemoryUpdates,
+  readCoordinationTranscript,
   reconcileCoordinationEpoch,
   recoverCoordinationEpoch,
   recoverCoordinationSession,
@@ -197,7 +201,10 @@ describe("COORD-101 coordination registry fixtures", () => {
       { name: "coordination_managed_paths" },
       { name: "coordination_memory_cursors" },
       { name: "coordination_mutation_receipts" },
+      { name: "coordination_session_links" },
       { name: "coordination_sessions" },
+      { name: "coordination_transcript_cursors" },
+      { name: "coordination_transcript_messages" },
       { name: "coordination_worktree_epochs" },
       { name: "coordination_worktrees" },
     ]);
@@ -239,13 +246,13 @@ describe("COORD-101 coordination registry fixtures", () => {
     const { db } = setup();
     expect(db.prepare(
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'coordination_%'",
-    ).get()).toEqual({ count: 10 });
+    ).get()).toEqual({ count: 13 });
 
     resetDbForTest();
     const reopened = getDb(process.env.INGENIUM_CORE_DB_PATH);
     expect(reopened.prepare(
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'coordination_%'",
-    ).get()).toEqual({ count: 10 });
+    ).get()).toEqual({ count: 13 });
     expect(reopened.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
@@ -2062,7 +2069,143 @@ describe("COORD-101 coordination registry fixtures", () => {
     expect(migrated.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(migrated.prepare(
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'coordination_%'",
-    ).get()).toEqual({ count: 10 });
+    ).get()).toEqual({ count: 13 });
+  });
+
+  it("links principal-bound sessions and durably replays exact transcript envelopes", () => {
+    const { db, alpha } = setup();
+    const principalId = "service-principal-1";
+    const sourceRuntimeId = "ses_source";
+    const targetRuntimeId = "ses_target";
+    const sourceIdentity = {
+      worktreeId: MAIN.worktreeId,
+      sessionId: `session-${createHash("sha256").update(sourceRuntimeId).digest("hex")}`,
+      incarnation: 1,
+    };
+    const targetIdentity = {
+      worktreeId: MAIN.worktreeId,
+      sessionId: `session-${createHash("sha256").update(targetRuntimeId).digest("hex")}`,
+      incarnation: 1,
+    };
+    const message = (runtimeSessionId: string, messageId: string, text: string) => ({
+      messageId,
+      payload: {
+        info: { id: messageId, sessionID: runtimeSessionId, role: "user" },
+        parts: [{ id: `part-${messageId}`, sessionID: runtimeSessionId, messageID: messageId, type: "text", text }],
+      },
+    });
+    let source = registerCoordinationSession(alpha.id, {
+      ...sourceIdentity, principalId, ownershipToken: TOKEN_A, ttlMs: 2_000, idempotencyKey: "transcript-source-register",
+    });
+    const target = registerCoordinationSession(alpha.id, {
+      ...targetIdentity, principalId, ownershipToken: TOKEN_B, ttlMs: 2_000, idempotencyKey: "transcript-target-register",
+    });
+    const first = message(sourceRuntimeId, "msg-source-1", "complete transcript content");
+    const published = publishCoordinationTranscript(alpha.id, {
+      ...lease(sourceIdentity, source, TOKEN_A, "transcript-source-publish"), principalId, messages: [first],
+    });
+    source = published.session;
+    expect(published.accepted).toBe(1);
+
+    const linked = linkCoordinationSession(alpha.id, {
+      ...lease(sourceIdentity, source, TOKEN_A, "transcript-link"),
+      principalId,
+      targetSessionId: targetIdentity.sessionId,
+      kind: "linked",
+    });
+    source = linked.session;
+    const read = readCoordinationTranscript(alpha.id, {
+      ...lease(targetIdentity, target, TOKEN_B, "transcript-target-read"), principalId,
+    });
+    expect(read).toMatchObject({ messages: [{ messageId: first.messageId, payload: first.payload }], acknowledgementRequired: true });
+    const acknowledged = acknowledgeCoordinationTranscript(alpha.id, {
+      ...lease(targetIdentity, target, TOKEN_B, "transcript-target-ack"), principalId,
+      throughSequence: read.throughSequence,
+    });
+    expect(readCoordinationTranscript(alpha.id, {
+      ...lease(targetIdentity, acknowledged, TOKEN_B, "transcript-target-empty"), principalId,
+    }).messages).toEqual([]);
+
+    closeCoordinationSession(alpha.id, {
+      ...lease(targetIdentity, acknowledged, TOKEN_B, "transcript-target-close"),
+    });
+    const restartedIdentity = { ...targetIdentity, incarnation: 2 };
+    const restarted = registerCoordinationSession(alpha.id, {
+      ...restartedIdentity, principalId, ownershipToken: TOKEN_C, ttlMs: 2_000, idempotencyKey: "transcript-target-restart",
+    });
+    expect(readCoordinationTranscript(alpha.id, {
+      ...lease(restartedIdentity, restarted, TOKEN_C, "transcript-restart-empty"), principalId,
+    }).messages).toEqual([]);
+    const second = message(sourceRuntimeId, "msg-source-2", "new content after peer restart");
+    source = publishCoordinationTranscript(alpha.id, {
+      ...lease(sourceIdentity, source, TOKEN_A, "transcript-source-publish-2"), principalId, messages: [second],
+    }).session;
+    expect(readCoordinationTranscript(alpha.id, {
+      ...lease(restartedIdentity, restarted, TOKEN_C, "transcript-restart-read"), principalId,
+    }).messages.map(({ messageId }) => messageId)).toEqual([second.messageId]);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(JSON.stringify(read.messages)).toContain("complete transcript content");
+  });
+
+  it("rejects cross-principal links, cyclic lineage, and conflicting transcript identities", () => {
+    const { alpha } = setup();
+    const principalId = "service-principal-1";
+    const identity = (runtimeId: string, incarnation = 1) => ({
+      worktreeId: MAIN.worktreeId,
+      sessionId: `session-${createHash("sha256").update(runtimeId).digest("hex")}`,
+      incarnation,
+    });
+    const firstIdentity = identity("ses_first");
+    const secondIdentity = identity("ses_second");
+    const thirdIdentity = identity("ses_third");
+    let first = registerCoordinationSession(alpha.id, {
+      ...firstIdentity, principalId, ownershipToken: TOKEN_A, ttlMs: 2_000, idempotencyKey: "lineage-first",
+    });
+    let second = registerCoordinationSession(alpha.id, {
+      ...secondIdentity, principalId, ownershipToken: TOKEN_B, ttlMs: 2_000, idempotencyKey: "lineage-second",
+    });
+    let third = registerCoordinationSession(alpha.id, {
+      ...thirdIdentity, principalId, ownershipToken: TOKEN_C, ttlMs: 2_000, idempotencyKey: "lineage-third",
+    });
+    const foreignIdentity = identity("ses_foreign");
+    const foreign = registerCoordinationSession(alpha.id, {
+      ...foreignIdentity, principalId: "service-principal-2", ownershipToken: TOKEN_D,
+      ttlMs: 2_000, idempotencyKey: "lineage-foreign",
+    });
+    expectCode(() => linkCoordinationSession(alpha.id, {
+      ...lease(firstIdentity, first, TOKEN_A, "lineage-cross-principal"), principalId,
+      targetSessionId: foreignIdentity.sessionId, kind: "linked",
+    }), "TARGET_SESSION_NOT_FOUND");
+    expect(foreign.revision).toBe(0);
+
+    first = linkCoordinationSession(alpha.id, {
+      ...lease(firstIdentity, first, TOKEN_A, "lineage-first-second"), principalId,
+      targetSessionId: secondIdentity.sessionId, kind: "linked",
+    }).session;
+    second = linkCoordinationSession(alpha.id, {
+      ...lease(secondIdentity, second, TOKEN_B, "lineage-second-third"), principalId,
+      targetSessionId: thirdIdentity.sessionId, kind: "fork",
+    }).session;
+    expectCode(() => linkCoordinationSession(alpha.id, {
+      ...lease(thirdIdentity, third, TOKEN_C, "lineage-cycle"), principalId,
+      targetSessionId: firstIdentity.sessionId, kind: "linked",
+    }), "SESSION_LINK_CONFLICT");
+
+    const initial = {
+      messageId: "msg-conflict",
+      payload: {
+        info: { id: "msg-conflict", sessionID: "ses_first", role: "assistant" },
+        parts: [{ id: "part-conflict", sessionID: "ses_first", messageID: "msg-conflict", type: "text", text: "first" }],
+      },
+    };
+    const transcript = publishCoordinationTranscript(alpha.id, {
+      ...lease(firstIdentity, first, TOKEN_A, "transcript-conflict-first"), principalId, messages: [initial],
+    });
+    expectCode(() => publishCoordinationTranscript(alpha.id, {
+      ...lease(firstIdentity, transcript.session, TOKEN_A, "transcript-conflict-second"), principalId,
+      messages: [{ ...initial, payload: { ...initial.payload, parts: [{ ...initial.payload.parts[0], text: "changed" }] } }],
+    }), "TRANSCRIPT_CONFLICT");
+    expect(third.revision).toBe(0);
   });
 });
 

@@ -24,6 +24,8 @@ export const COORDINATION_HANDOFF_LIMIT = 32;
 export const COORDINATION_MEMORY_LIMIT = 8;
 export const COORDINATION_MEMORY_ACTION_LIMIT = 64;
 export const COORDINATION_MEMORY_CHECK_LIMIT = 32;
+export const COORDINATION_TRANSCRIPT_MESSAGE_LIMIT = 16;
+export const COORDINATION_TRANSCRIPT_MESSAGE_MAX_BYTES = 1_572_864;
 
 export type CoordinationErrorCode =
   | "INVALID_COORDINATION_INPUT"
@@ -47,6 +49,9 @@ export type CoordinationErrorCode =
   | "MANIFEST_GENERATION_CONFLICT"
   | "POINTER_NOT_FOUND"
   | "POINTER_REVISION_CONFLICT"
+  | "TARGET_SESSION_NOT_FOUND"
+  | "SESSION_LINK_CONFLICT"
+  | "TRANSCRIPT_CONFLICT"
   | "COORDINATION_INTEGRITY_ERROR";
 
 /** Stable failures for COORD-101. Token material and claim values are never embedded in messages. */
@@ -81,6 +86,7 @@ export interface RegisterCoordinationSessionInput extends CoordinationSessionIde
   ownershipToken: string;
   ttlMs: number;
   idempotencyKey: string;
+  principalId?: string;
   contextConversationId?: string;
   contextRevision?: number;
 }
@@ -335,6 +341,63 @@ export interface CoordinationMemoryMutationResult {
   };
 }
 
+export type CoordinationSessionLinkKind = "linked" | "fork";
+
+export interface LinkCoordinationSessionInput extends CoordinationLeaseInput {
+  principalId: string;
+  targetSessionId: string;
+  kind: CoordinationSessionLinkKind;
+}
+
+export interface CoordinationSessionLinkResult {
+  session: CoordinationSessionMutationResult;
+  link: {
+    id: string;
+    kind: CoordinationSessionLinkKind;
+    createdAt: string;
+  };
+}
+
+export interface CoordinationTranscriptMessageInput {
+  messageId: string;
+  payload: Record<string, unknown>;
+}
+
+export interface PublishCoordinationTranscriptInput extends CoordinationLeaseInput {
+  principalId: string;
+  messages: CoordinationTranscriptMessageInput[];
+}
+
+export interface ReadCoordinationTranscriptInput extends CoordinationLeaseInput {
+  principalId: string;
+  limit?: number;
+}
+
+export interface AcknowledgeCoordinationTranscriptInput extends CoordinationLeaseInput {
+  principalId: string;
+  throughSequence: number;
+}
+
+export interface CoordinationTranscriptMessage {
+  sequence: number;
+  messageId: string;
+  sourceActorId: string;
+  payload: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface CoordinationTranscriptPublishResult {
+  session: CoordinationSessionMutationResult;
+  accepted: number;
+}
+
+export interface CoordinationTranscriptReadResult {
+  session: CoordinationSessionMutationResult;
+  messages: CoordinationTranscriptMessage[];
+  throughSequence: number;
+  acknowledgementRequired: boolean;
+}
+
 export interface CoordinationPeerSnapshot {
   peerId: string;
   incarnation: number;
@@ -387,6 +450,9 @@ type CoordinationOperation =
   | "handoff_acknowledge"
   | "memory_publish"
   | "memory_acknowledge"
+  | "session_link"
+  | "transcript_publish"
+  | "transcript_acknowledge"
   | "close";
 
 interface StoredSession {
@@ -394,6 +460,7 @@ interface StoredSession {
   project_id: string;
   worktree_id: string;
   session_id: string;
+  principal_id: string | null;
   incarnation: number;
   ownership_token_hash: string;
   revision: number;
@@ -445,7 +512,19 @@ interface StoredHandoffEvent {
   created_at: string;
 }
 
+interface StoredTranscriptMessage {
+  sequence: number;
+  id: string;
+  source_message_id: string;
+  payload_json: string;
+  payload_sha256: string;
+  session_id: string;
+  incarnation: number;
+  created_at: string;
+}
+
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
+const PRINCIPAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const OWNERSHIP_TOKEN = /^[A-Za-z0-9_-]{32,512}$/;
@@ -734,6 +813,7 @@ function readSession(row: StoredSession): CoordinationSession {
     || !isCoordinationOpaqueId(row.project_id)
     || !isCoordinationOpaqueId(row.worktree_id)
     || !isCoordinationOpaqueId(row.session_id)
+    || (row.principal_id !== null && !PRINCIPAL_ID.test(row.principal_id))
     || !isSafePositiveInteger(row.incarnation)
     || !isSafeNonnegativeInteger(row.revision)
     || !isSafePositiveInteger(row.fence)
@@ -752,6 +832,7 @@ function readSession(row: StoredSession): CoordinationSession {
     project_id: row.project_id,
     worktree_id: row.worktree_id,
     session_id: row.session_id,
+    principal_id: row.principal_id,
     incarnation: row.incarnation,
     revision: row.revision,
     fence: row.fence,
@@ -1629,6 +1710,9 @@ export function registerCoordinationSession(
   if (!isCoordinationOwnershipToken(input.ownershipToken)) {
     throw new CoordinationError("INVALID_COORDINATION_INPUT");
   }
+  if (input.principalId !== undefined && !PRINCIPAL_ID.test(input.principalId)) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
   if ((input.contextConversationId === undefined) !== (input.contextRevision === undefined)
     || (input.contextConversationId !== undefined && !UUID.test(input.contextConversationId))
     || (input.contextRevision !== undefined && !isSafeNonnegativeInteger(input.contextRevision))) {
@@ -1644,6 +1728,7 @@ export function registerCoordinationSession(
       identity: identityForHash(input),
       ownershipTokenHash: ownershipHash,
       ttlMs: input.ttlMs,
+      principalId: input.principalId ?? null,
       contextConversationId: input.contextConversationId ?? null,
       // The API-owned operational-memory revision may advance between retries; the stable conversation is the request identity.
     });
@@ -1670,12 +1755,12 @@ export function registerCoordinationSession(
       `INSERT INTO coordination_sessions
        (id, project_id, worktree_id, session_id, incarnation, ownership_token_hash, revision, fence, state,
         heartbeat_at, expires_at, snapshot_json, snapshot_revision, current_task_id, current_task_revision,
-         context_conversation_id, context_revision, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, '{}', 0, NULL, NULL, ?, ?, ?, ?)`,
+         context_conversation_id, context_revision, created_at, updated_at, principal_id)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, '{}', 0, NULL, NULL, ?, ?, ?, ?, ?)`,
     ).run(
       randomUUID(), projectId, input.worktreeId, input.sessionId, input.incarnation, ownershipHash, fence,
       createdAt, expiryFrom(createdAt, input.ttlMs), input.contextConversationId ?? null,
-      input.contextRevision ?? null, createdAt, createdAt,
+      input.contextRevision ?? null, createdAt, createdAt, input.principalId ?? null,
     );
     const session = requireSession(db, projectId, input);
     const previousCursor = db.prepare(
@@ -1715,6 +1800,56 @@ export function registerCoordinationSession(
         previousMemoryCursor?.revision ?? Math.max(0, input.contextRevision - COORDINATION_MEMORY_LIMIT),
         createdAt,
       );
+    }
+    const previousSession = db.prepare(
+      `SELECT * FROM coordination_sessions
+       WHERE project_id = ? AND worktree_id = ? AND session_id = ? AND id <> ?
+       ORDER BY incarnation DESC LIMIT 1`,
+    ).get(projectId, input.worktreeId, input.sessionId, session.id) as StoredSession | undefined;
+    if (previousSession && previousSession.principal_id === input.principalId) {
+      const links = db.prepare(
+        `SELECT id, source_coordination_session_id, target_coordination_session_id, kind
+         FROM coordination_session_links
+         WHERE project_id = ? AND (
+           source_coordination_session_id = ? OR target_coordination_session_id = ?
+         )`,
+      ).all(projectId, previousSession.id, previousSession.id) as Array<{
+        id: string;
+        source_coordination_session_id: string;
+        target_coordination_session_id: string;
+        kind: CoordinationSessionLinkKind;
+      }>;
+      for (const link of links) {
+        const priorWasSource = link.source_coordination_session_id === previousSession.id;
+        const peerId = priorWasSource ? link.target_coordination_session_id : link.source_coordination_session_id;
+        const priorCursor = db.prepare(
+          `SELECT last_sequence FROM coordination_transcript_cursors
+           WHERE project_id = ? AND coordination_session_id = ? AND link_id = ?`,
+        ).get(projectId, previousSession.id, link.id) as { last_sequence: number } | undefined;
+        const nextLinkId = randomUUID();
+        db.prepare(
+          `INSERT INTO coordination_session_links
+           (id, project_id, worktree_id, source_coordination_session_id, target_coordination_session_id, kind, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          nextLinkId,
+          projectId,
+          input.worktreeId,
+          priorWasSource ? session.id : peerId,
+          priorWasSource ? peerId : session.id,
+          link.kind,
+          createdAt,
+        );
+        const insertTranscriptCursor = db.prepare(
+          `INSERT INTO coordination_transcript_cursors
+           (project_id, coordination_session_id, link_id, source_coordination_session_id, last_sequence, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        );
+        insertTranscriptCursor.run(
+          projectId, session.id, nextLinkId, peerId, priorCursor?.last_sequence ?? 0, createdAt,
+        );
+        insertTranscriptCursor.run(projectId, peerId, nextLinkId, session.id, 0, createdAt);
+      }
     }
     return {
       result: writeReceipt(db, projectId, "register", input.idempotencyKey, hash, mutationResult(session)),
@@ -3105,6 +3240,339 @@ export function closeCoordinationSession(
   });
   if (result.written) checkpointAfterWrite();
   return result.result;
+}
+
+function assertPrincipal(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !PRINCIPAL_ID.test(value)) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
+}
+
+function requirePrincipalBoundSession(session: StoredSession, principalId: string): void {
+  if (session.principal_id !== principalId) throw new CoordinationError("SESSION_NOT_FOUND");
+}
+
+function normalizedTranscriptMessages(
+  value: unknown,
+  coordinationSessionId: string,
+): Array<{ messageId: string; payload: Record<string, unknown>; payloadJson: string; payloadSha256: string }> {
+  if (!Array.isArray(value) || value.length < 1 || value.length > COORDINATION_TRANSCRIPT_MESSAGE_LIMIT) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
+  let totalBytes = 0;
+  const messageIds = new Set<string>();
+  return value.map((candidate) => {
+    if (!isPlainRecord(candidate) || !hasExactKeys(candidate, ["messageId", "payload"])
+      || !isCoordinationOpaqueId(candidate.messageId) || messageIds.has(candidate.messageId)
+      || !isPlainRecord(candidate.payload) || !hasExactKeys(candidate.payload, ["info", "parts"])
+      || !isPlainRecord(candidate.payload.info) || !Array.isArray(candidate.payload.parts)) {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
+    const info = candidate.payload.info;
+    if (info.id !== candidate.messageId || !isCoordinationOpaqueId(info.sessionID)
+      || `session-${sha256(info.sessionID)}` !== coordinationSessionId
+      || (info.role !== "user" && info.role !== "assistant")) {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
+    const partIds = new Set<string>();
+    for (const part of candidate.payload.parts) {
+      if (!isPlainRecord(part) || !isCoordinationOpaqueId(part.id) || partIds.has(part.id)
+        || part.sessionID !== info.sessionID || part.messageID !== candidate.messageId
+        || typeof part.type !== "string" || part.type.length < 1 || part.type.length > 64) {
+        throw new CoordinationError("INVALID_COORDINATION_INPUT");
+      }
+      partIds.add(part.id);
+    }
+    let payloadJson: string;
+    let payload: Record<string, unknown>;
+    try {
+      payloadJson = JSON.stringify(candidate.payload);
+      payload = JSON.parse(payloadJson) as Record<string, unknown>;
+    } catch {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
+    const bytes = Buffer.byteLength(payloadJson, "utf8");
+    totalBytes += bytes;
+    if (bytes < 1 || bytes > COORDINATION_TRANSCRIPT_MESSAGE_MAX_BYTES
+      || totalBytes > COORDINATION_TRANSCRIPT_MESSAGE_MAX_BYTES) {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
+    messageIds.add(candidate.messageId);
+    return {
+      messageId: candidate.messageId,
+      payload,
+      payloadJson,
+      payloadSha256: sha256(payloadJson),
+    };
+  });
+}
+
+function transcriptMessage(row: StoredTranscriptMessage): CoordinationTranscriptMessage {
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+  } catch {
+    throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  }
+  let normalized: ReturnType<typeof normalizedTranscriptMessages>[number];
+  try {
+    normalized = normalizedTranscriptMessages([{ messageId: row.source_message_id, payload }], row.session_id)[0]!;
+  } catch {
+    throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  }
+  if (!hashesEqual(normalized.payloadSha256, row.payload_sha256)) {
+    throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  }
+  return {
+    sequence: row.sequence,
+    messageId: row.source_message_id,
+    sourceActorId: coordinationActorId(row.session_id, row.incarnation),
+    payload: normalized.payload,
+    timestamp: row.created_at,
+  };
+}
+
+/** Link two active sessions only when their authenticated principal and worktree identity match. */
+export function linkCoordinationSession(
+  projectId: string,
+  input: LinkCoordinationSessionInput,
+): CoordinationSessionLinkResult {
+  assertProjectId(projectId);
+  assertLeaseInput(input);
+  assertPrincipal(input.principalId);
+  if (!isCoordinationOpaqueId(input.targetSessionId)
+    || (input.kind !== "linked" && input.kind !== "fork")
+    || input.targetSessionId === input.sessionId) throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  const ownershipHash = tokenHash(input.ownershipToken);
+  const hash = requestHash({
+    operation: "session_link", projectId, identity: identityForHash(input),
+    expectedRevision: input.expectedRevision, fence: input.fence, ownershipTokenHash: ownershipHash,
+    principalId: input.principalId, targetSessionId: input.targetSessionId, kind: input.kind,
+  });
+  const outcome = execTransaction(() => {
+    const db = getDb(dbPath());
+    const replay = readReceipt<CoordinationSessionLinkResult>(
+      db, projectId, "session_link", input.idempotencyKey, hash,
+    );
+    if (replay !== undefined) return { result: replay, written: false };
+    requireProject(db, projectId);
+    const createdAt = now();
+    const source = requireActiveLease(db, projectId, input, ownershipHash, createdAt);
+    requirePrincipalBoundSession(source, input.principalId);
+    const target = db.prepare(
+      `SELECT * FROM coordination_sessions
+       WHERE project_id = ? AND worktree_id = ? AND session_id = ? AND principal_id = ?
+         AND state = 'active' AND expires_at > ?
+       ORDER BY incarnation DESC, updated_at DESC LIMIT 1`,
+    ).get(projectId, input.worktreeId, input.targetSessionId, input.principalId, createdAt) as StoredSession | undefined;
+    if (!target) throw new CoordinationError("TARGET_SESSION_NOT_FOUND");
+    const connected = db.prepare(
+      `WITH RECURSIVE connected(id) AS (
+         SELECT ?
+         UNION
+         SELECT CASE
+           WHEN link.source_coordination_session_id = connected.id THEN link.target_coordination_session_id
+           ELSE link.source_coordination_session_id
+         END
+         FROM coordination_session_links link
+         JOIN connected ON link.source_coordination_session_id = connected.id
+           OR link.target_coordination_session_id = connected.id
+         WHERE link.project_id = ? AND link.worktree_id = ?
+       )
+       SELECT 1 FROM connected WHERE id = ? LIMIT 1`,
+    ).get(source.id, projectId, input.worktreeId, target.id);
+    if (connected) throw new CoordinationError("SESSION_LINK_CONFLICT");
+    const linkId = randomUUID();
+    db.prepare(
+      `INSERT INTO coordination_session_links
+       (id, project_id, worktree_id, source_coordination_session_id, target_coordination_session_id, kind, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(linkId, projectId, input.worktreeId, source.id, target.id, input.kind, createdAt);
+    const insertCursor = db.prepare(
+      `INSERT INTO coordination_transcript_cursors
+       (project_id, coordination_session_id, link_id, source_coordination_session_id, last_sequence, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?)`,
+    );
+    insertCursor.run(projectId, source.id, linkId, target.id, createdAt);
+    insertCursor.run(projectId, target.id, linkId, source.id, createdAt);
+    const updated = advanceActiveSession(
+      db, projectId, source, input, ownershipHash, createdAt,
+      "revision = revision + 1, updated_at = ?", [createdAt],
+    );
+    const result: CoordinationSessionLinkResult = {
+      session: mutationResult(updated),
+      link: { id: linkId, kind: input.kind, createdAt },
+    };
+    return {
+      result: writeReceipt(db, projectId, "session_link", input.idempotencyKey, hash, result),
+      written: true,
+    };
+  });
+  if (outcome.written) checkpointAfterWrite();
+  return outcome.result;
+}
+
+/** Persist complete, immutable OpenCode message envelopes for one exact owned session. */
+export function publishCoordinationTranscript(
+  projectId: string,
+  input: PublishCoordinationTranscriptInput,
+): CoordinationTranscriptPublishResult {
+  assertProjectId(projectId);
+  assertLeaseInput(input);
+  assertPrincipal(input.principalId);
+  const messages = normalizedTranscriptMessages(input.messages, input.sessionId);
+  const ownershipHash = tokenHash(input.ownershipToken);
+  const hash = requestHash({
+    operation: "transcript_publish", projectId, identity: identityForHash(input),
+    expectedRevision: input.expectedRevision, fence: input.fence, ownershipTokenHash: ownershipHash,
+    principalId: input.principalId,
+    messages: messages.map(({ messageId, payloadSha256 }) => ({ messageId, payloadSha256 })),
+  });
+  const outcome = execTransaction(() => {
+    const db = getDb(dbPath());
+    const replay = readReceipt<CoordinationTranscriptPublishResult>(
+      db, projectId, "transcript_publish", input.idempotencyKey, hash,
+    );
+    if (replay !== undefined) return { result: replay, written: false };
+    requireProject(db, projectId);
+    const createdAt = now();
+    const source = requireActiveLease(db, projectId, input, ownershipHash, createdAt);
+    requirePrincipalBoundSession(source, input.principalId);
+    let accepted = 0;
+    for (const message of messages) {
+      const existing = db.prepare(
+        `SELECT payload_sha256 FROM coordination_transcript_messages
+         WHERE project_id = ? AND source_coordination_session_id = ? AND source_message_id = ?`,
+      ).get(projectId, source.id, message.messageId) as { payload_sha256: string } | undefined;
+      if (existing) {
+        if (!hashesEqual(existing.payload_sha256, message.payloadSha256)) {
+          throw new CoordinationError("TRANSCRIPT_CONFLICT");
+        }
+        continue;
+      }
+      db.prepare(
+        `INSERT INTO coordination_transcript_messages
+         (id, project_id, worktree_id, source_coordination_session_id, source_message_id,
+          payload_json, payload_sha256, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        randomUUID(), projectId, input.worktreeId, source.id, message.messageId,
+        message.payloadJson, message.payloadSha256, createdAt,
+      );
+      accepted += 1;
+    }
+    const updated = accepted > 0
+      ? advanceActiveSession(
+        db, projectId, source, input, ownershipHash, createdAt,
+        "revision = revision + 1, updated_at = ?", [createdAt],
+      )
+      : source;
+    const result = { session: mutationResult(updated), accepted };
+    return {
+      result: writeReceipt(db, projectId, "transcript_publish", input.idempotencyKey, hash, result),
+      written: true,
+    };
+  });
+  if (outcome.written) checkpointAfterWrite();
+  return outcome.result;
+}
+
+/** Read a bounded global-order page from directly linked peer sessions without advancing cursors. */
+export function readCoordinationTranscript(
+  projectId: string,
+  input: ReadCoordinationTranscriptInput,
+): CoordinationTranscriptReadResult {
+  assertProjectId(projectId);
+  assertLeaseInput(input);
+  assertPrincipal(input.principalId);
+  const limit = input.limit ?? COORDINATION_TRANSCRIPT_MESSAGE_LIMIT;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > COORDINATION_TRANSCRIPT_MESSAGE_LIMIT) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
+  const db = getDb(dbPath());
+  requireProject(db, projectId);
+  const current = now();
+  const session = requireActiveLease(db, projectId, input, tokenHash(input.ownershipToken), current);
+  requirePrincipalBoundSession(session, input.principalId);
+  const rows = db.prepare(
+    `SELECT message.sequence, message.id, message.source_message_id, message.payload_json,
+            message.payload_sha256, source.session_id, source.incarnation, message.created_at
+     FROM coordination_transcript_cursors cursor
+     JOIN coordination_transcript_messages message
+       ON message.project_id = cursor.project_id
+      AND message.source_coordination_session_id = cursor.source_coordination_session_id
+      AND message.sequence > cursor.last_sequence
+     JOIN coordination_sessions source
+       ON source.project_id = message.project_id AND source.id = message.source_coordination_session_id
+     WHERE cursor.project_id = ? AND cursor.coordination_session_id = ?
+     ORDER BY message.sequence ASC LIMIT ?`,
+  ).all(projectId, session.id, limit) as StoredTranscriptMessage[];
+  return {
+    session: mutationResult(session),
+    messages: rows.map(transcriptMessage),
+    throughSequence: rows.at(-1)?.sequence ?? 0,
+    acknowledgementRequired: rows.length > 0,
+  };
+}
+
+/** Advance all linked-peer transcript cursors through one previously read global sequence. */
+export function acknowledgeCoordinationTranscript(
+  projectId: string,
+  input: AcknowledgeCoordinationTranscriptInput,
+): CoordinationSessionMutationResult {
+  assertProjectId(projectId);
+  assertLeaseInput(input);
+  assertPrincipal(input.principalId);
+  if (!isSafeNonnegativeInteger(input.throughSequence)) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
+  const ownershipHash = tokenHash(input.ownershipToken);
+  const hash = requestHash({
+    operation: "transcript_acknowledge", projectId, identity: identityForHash(input),
+    expectedRevision: input.expectedRevision, fence: input.fence, ownershipTokenHash: ownershipHash,
+    principalId: input.principalId, throughSequence: input.throughSequence,
+  });
+  const outcome = execTransaction(() => {
+    const db = getDb(dbPath());
+    const replay = readReceipt<CoordinationSessionMutationResult>(
+      db, projectId, "transcript_acknowledge", input.idempotencyKey, hash,
+    );
+    if (replay !== undefined) return { result: replay, written: false };
+    requireProject(db, projectId);
+    const updatedAt = now();
+    const session = requireActiveLease(db, projectId, input, ownershipHash, updatedAt);
+    requirePrincipalBoundSession(session, input.principalId);
+    if (input.throughSequence > 0 && !db.prepare(
+      `SELECT 1
+       FROM coordination_transcript_cursors cursor
+       JOIN coordination_transcript_messages message
+         ON message.project_id = cursor.project_id
+        AND message.source_coordination_session_id = cursor.source_coordination_session_id
+       WHERE cursor.project_id = ? AND cursor.coordination_session_id = ? AND message.sequence = ?
+       LIMIT 1`,
+    ).get(projectId, session.id, input.throughSequence)) {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
+    const changed = db.prepare(
+      `UPDATE coordination_transcript_cursors
+       SET last_sequence = ?, updated_at = ?
+       WHERE project_id = ? AND coordination_session_id = ? AND last_sequence < ?`,
+    ).run(input.throughSequence, updatedAt, projectId, session.id, input.throughSequence);
+    const updated = changed.changes > 0
+      ? advanceActiveSession(
+        db, projectId, session, input, ownershipHash, updatedAt,
+        "revision = revision + 1, updated_at = ?", [updatedAt],
+      )
+      : session;
+    return {
+      result: writeReceipt(
+        db, projectId, "transcript_acknowledge", input.idempotencyKey, hash, mutationResult(updated),
+      ),
+      written: true,
+    };
+  });
+  if (outcome.written) checkpointAfterWrite();
+  return outcome.result;
 }
 
 /** Read a retained session only inside its owning project. Ownership-token hashes are never selected into output. */

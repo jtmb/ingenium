@@ -97,6 +97,9 @@ export interface CoordinationHandoffInput {
   through_sequence?: number;
   through_revision?: number;
   memory_entry?: Record<string, unknown>;
+  target_session_id?: string;
+  link_kind?: "linked" | "fork";
+  transcript_messages?: Array<{ message_id: string; payload: Record<string, unknown> }>;
 }
 
 export type CoordinationMemoryReadInput = Pick<
@@ -205,6 +208,11 @@ const REGISTER_KEYS = ["session", "memory"] as const;
 const MEMORY_WINDOW_KEYS = ["conversationId", "revision", "entries", "throughRevision", "acknowledgementRequired"] as const;
 const MEMORY_PUBLISH_KEYS = ["session", "memory"] as const;
 const MEMORY_PUBLISHED_KEYS = ["conversationId", "revision", "entry"] as const;
+const LINK_KEYS = ["session", "link"] as const;
+const SESSION_LINK_KEYS = ["id", "kind", "createdAt"] as const;
+const TRANSCRIPT_PUBLISH_KEYS = ["session", "accepted"] as const;
+const TRANSCRIPT_READ_KEYS = ["session", "messages", "throughSequence", "acknowledgementRequired"] as const;
+const TRANSCRIPT_MESSAGE_KEYS = ["sequence", "messageId", "sourceActorId", "payload", "timestamp"] as const;
 const OPERATIONAL_ENTRY_KEYS = [
   "version", "type", "entryId", "actorId", "sourceRevision", "timestamp", "status", "actions", "checks",
   "todos", "currentTaskId", "contextRevision", "changedPaths", "nextWork",
@@ -220,6 +228,8 @@ const MAX_STATUS_CLAIMS = 100;
 const MAX_PEER_SNAPSHOTS = 128;
 const MAX_PEER_CHANGED_PATHS = 32;
 const MAX_PEER_COUNT = 1_000_000;
+const MAX_TRANSCRIPT_MESSAGES = 16;
+const MAX_TRANSCRIPT_BYTES = 1_572_864;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -668,6 +678,68 @@ function projectRuntimeActivityResponse(data: unknown): Record<string, unknown> 
     : undefined;
 }
 
+function transcriptPayload(value: unknown): Record<string, unknown> | undefined {
+  if (!hasExactKeys(value, ["info", "parts"]) || !isRecord(value.info) || !Array.isArray(value.parts)
+    || !isOpaqueId(value.info.id) || !isOpaqueId(value.info.sessionID)
+    || !isEnum(value.info.role, ["user", "assistant"] as const)) return undefined;
+  const partIds = new Set<string>();
+  for (const part of value.parts) {
+    if (!isRecord(part) || !isOpaqueId(part.id) || partIds.has(part.id)
+      || part.sessionID !== value.info.sessionID || part.messageID !== value.info.id
+      || typeof part.type !== "string" || part.type.length < 1 || part.type.length > 64) return undefined;
+    partIds.add(part.id);
+  }
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8") <= MAX_TRANSCRIPT_BYTES ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function projectLinkResponse(data: unknown): Record<string, unknown> | undefined {
+  if (!hasExactKeys(data, LINK_KEYS) || !hasExactKeys(data.link, SESSION_LINK_KEYS)
+    || !isUuid(data.link.id) || !isEnum(data.link.kind, ["linked", "fork"] as const)
+    || !isTimestamp(data.link.createdAt)) return undefined;
+  const link = data.link;
+  const session = mutationSession(data.session);
+  return session ? { session, link: Object.fromEntries(SESSION_LINK_KEYS.map((key) => [key, link[key]])) } : undefined;
+}
+
+function projectTranscriptPublishResponse(data: unknown): Record<string, unknown> | undefined {
+  if (!hasExactKeys(data, TRANSCRIPT_PUBLISH_KEYS)
+    || !isSafeNonnegativeInteger(data.accepted) || data.accepted > MAX_TRANSCRIPT_MESSAGES) return undefined;
+  const session = mutationSession(data.session);
+  return session ? { session, accepted: data.accepted } : undefined;
+}
+
+function projectTranscriptReadResponse(data: unknown): Record<string, unknown> | undefined {
+  if (!hasExactKeys(data, TRANSCRIPT_READ_KEYS) || !Array.isArray(data.messages)
+    || data.messages.length > MAX_TRANSCRIPT_MESSAGES || !isSafeNonnegativeInteger(data.throughSequence)
+    || typeof data.acknowledgementRequired !== "boolean") return undefined;
+  const session = mutationSession(data.session);
+  if (!session) return undefined;
+  let bytes = 0;
+  const messages = data.messages.map((message) => {
+    if (!hasExactKeys(message, TRANSCRIPT_MESSAGE_KEYS) || !isSafePositiveInteger(message.sequence)
+      || !isOpaqueId(message.messageId)
+      || typeof message.sourceActorId !== "string" || !/^actor-[0-9a-f]{64}$/.test(message.sourceActorId)
+      || !isTimestamp(message.timestamp)) return undefined;
+    const payload = transcriptPayload(message.payload);
+    if (!payload || !isRecord(payload.info) || payload.info.id !== message.messageId) return undefined;
+    bytes += Buffer.byteLength(JSON.stringify(payload), "utf8");
+    return Object.fromEntries(TRANSCRIPT_MESSAGE_KEYS.map((key) => [key, key === "payload" ? payload : message[key]]));
+  });
+  if (bytes > MAX_TRANSCRIPT_BYTES || messages.some((message) => message === undefined)
+    || (messages.length > 0) !== data.acknowledgementRequired
+    || (messages.length > 0 && data.throughSequence !== data.messages.at(-1)?.sequence)) return undefined;
+  return {
+    session,
+    messages: messages as Record<string, unknown>[],
+    throughSequence: data.throughSequence,
+    acknowledgementRequired: data.acknowledgementRequired,
+  };
+}
+
 async function request(
   call: () => Promise<ApiResponse>,
   projectResponse: (data: unknown) => Record<string, unknown> | undefined,
@@ -890,7 +962,8 @@ export async function coordinationClaimAction(
 /** Publish, read, acknowledge, consume, or persist sanitized coordination state. */
 export async function coordinationHandoff(
   project: string,
-  operation: "publish" | "read" | "ack" | "consume" | "memory" | "memory_read" | "memory_ack",
+  operation: "publish" | "read" | "ack" | "consume" | "memory" | "memory_read" | "memory_ack"
+    | "link" | "transcript_publish" | "transcript_read" | "transcript_ack",
   input: CoordinationHandoffInput,
 ): Promise<ToolResult> {
   const body = {
@@ -945,6 +1018,40 @@ export async function coordinationHandoff(
       () => api.settled.post("/coordination/memory/ack", {
         ...body,
         through_revision: input.through_revision,
+      }, { project }),
+      (data) => projectMutationResponse(data, "session"),
+    );
+  }
+  if (operation === "link") {
+    return request(
+      () => api.settled.post("/coordination/sessions/link", {
+        ...body,
+        target_session_id: input.target_session_id,
+        kind: input.link_kind,
+      }, { project }),
+      projectLinkResponse,
+    );
+  }
+  if (operation === "transcript_publish") {
+    return request(
+      () => api.settled.post("/coordination/transcripts/publish", {
+        ...body,
+        messages: input.transcript_messages,
+      }, { project }),
+      projectTranscriptPublishResponse,
+    );
+  }
+  if (operation === "transcript_read") {
+    return request(
+      () => api.settled.post("/coordination/transcripts/read", { ...body, limit: input.limit }, { project }),
+      projectTranscriptReadResponse,
+    );
+  }
+  if (operation === "transcript_ack") {
+    return request(
+      () => api.settled.post("/coordination/transcripts/ack", {
+        ...body,
+        through_sequence: input.through_sequence,
       }, { project }),
       (data) => projectMutationResponse(data, "session"),
     );

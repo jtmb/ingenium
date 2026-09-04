@@ -95,7 +95,7 @@ async function request(
     query?: Record<string, string | number>;
     authorization?: string | undefined;
     headers?: Record<string, string>;
-    principal?: "service" | "compatibility" | "user";
+    principal?: "service" | "service-b" | "compatibility" | "user";
     serviceBinding?: typeof MAIN_BINDING;
   } = {},
 ): Promise<ApiResult> {
@@ -204,10 +204,10 @@ beforeEach(async () => {
   app.use(authMiddleware);
   app.use((req, _res, next) => {
     const principal = req.get("x-test-principal");
-    if (principal === "service") {
+    if (principal === "service" || principal === "service-b") {
       req.principal = {
         type: "service",
-        id: "coordination-test-service",
+        id: principal === "service" ? "coordination-test-service" : "coordination-test-service-b",
         scopes: ["coordination:write", "coordination:read"],
         tokenId: "coordination-test-token",
         organizationId: null,
@@ -474,6 +474,92 @@ describe("COORD-102 coordination API", () => {
       prompt: "must not persist",
     });
     expect(unsafe).toMatchObject({ response: { status: 422 }, body: { error: { code: "INVALID_COORDINATION_INPUT" } } });
+  });
+
+  it("links same-principal sessions and replays complete transcript envelopes through durable cursors", async () => {
+    const sourceRuntimeId = "ses_api_source";
+    const sourceIdentity = {
+      ...IDENTITY,
+      session_id: `session-${createHash("sha256").update(sourceRuntimeId).digest("hex")}`,
+    };
+    let source = await register({ ...sourceIdentity, idempotency_key: "transcript-source-register" });
+    const targetIdentity = { ...IDENTITY, session_id: "transcript-target" };
+    let target = await register({
+      ...targetIdentity,
+      ownership_token: TOKEN_B,
+      idempotency_key: "transcript-target-register",
+    });
+    const payload = {
+      info: { id: "msg-api-1", sessionID: sourceRuntimeId, role: "user" },
+      parts: [{
+        id: "part-msg-api-1",
+        sessionID: sourceRuntimeId,
+        messageID: "msg-api-1",
+        type: "text",
+        text: "exact transcript envelope",
+      }],
+    };
+    const published = await request("/transcripts/publish", "POST", {
+      ...lease(source, TOKEN_A, "transcript-api-publish", sourceIdentity),
+      messages: [{ message_id: payload.info.id, payload }],
+    });
+    expect(published).toMatchObject({ response: { status: 201 }, body: { data: { accepted: 1 } } });
+    source = published.body.data.session;
+
+    const linked = await request("/sessions/link", "POST", {
+      ...lease(source, TOKEN_A, "transcript-api-link", sourceIdentity),
+      target_session_id: targetIdentity.session_id,
+      kind: "linked",
+    });
+    expect(linked).toMatchObject({
+      response: { status: 201 },
+      body: { data: { link: { id: expect.any(String), kind: "linked", createdAt: expect.any(String) } } },
+    });
+
+    const read = await request("/transcripts/read", "POST", {
+      ...lease(target, TOKEN_B, "transcript-api-read", targetIdentity),
+      limit: 16,
+    });
+    expect(read).toMatchObject({
+      response: { status: 200 },
+      body: { data: {
+        messages: [{ messageId: payload.info.id, payload }],
+        throughSequence: 1,
+        acknowledgementRequired: true,
+      } },
+    });
+    target = read.body.data.session;
+
+    const acknowledged = await request("/transcripts/ack", "POST", {
+      ...lease(target, TOKEN_B, "transcript-api-ack", targetIdentity),
+      through_sequence: read.body.data.throughSequence,
+    });
+    expect(acknowledged.response.status).toBe(200);
+    target = acknowledged.body.data.session;
+    const empty = await request("/transcripts/read", "POST", {
+      ...lease(target, TOKEN_B, "transcript-api-empty", targetIdentity),
+    });
+    expect(empty.body.data).toMatchObject({ messages: [], acknowledgementRequired: false });
+  });
+
+  it("does not link sessions registered to a different authenticated service principal", async () => {
+    const source = await register({ idempotency_key: "cross-principal-source-register" });
+    const targetIdentity = { ...IDENTITY, session_id: "cross-principal-target" };
+    await register({
+      ...targetIdentity,
+      ownership_token: TOKEN_B,
+      idempotency_key: "cross-principal-target-register",
+    }, { principal: "service-b" });
+
+    const linked = await request("/sessions/link", "POST", {
+      ...lease(source, TOKEN_A, "cross-principal-link"),
+      target_session_id: targetIdentity.session_id,
+      kind: "linked",
+    });
+    expect(linked).toMatchObject({
+      response: { status: 404 },
+      body: { error: { code: "TARGET_SESSION_NOT_FOUND" } },
+    });
   });
 
   it("reclaims expired claims only for the credential-attested worktree without ownership disclosure", async () => {

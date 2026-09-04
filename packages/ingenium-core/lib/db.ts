@@ -1067,6 +1067,61 @@ function inspectAtomicEpochRecoveryMigration(db: Database.Database): Authenticat
   return { any: columns.some(Boolean) || index || triggers.some(Boolean), complete: missing.length === 0, missing };
 }
 
+function inspectLinkedSessionTranscriptMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const principalColumn = (db.prepare(
+    "SELECT count(*) AS count FROM pragma_table_info('coordination_sessions') WHERE name = 'principal_id'",
+  ).get() as { count: number }).count === 1;
+  const indexes = [
+    "idx_coordination_sessions_principal",
+    "idx_coordination_session_links_worktree",
+    "idx_coordination_session_links_source",
+    "idx_coordination_session_links_target",
+    "idx_coordination_transcript_messages_source",
+    "idx_coordination_transcript_cursors_reader",
+  ];
+  const triggers = [
+    "coordination_session_links_immutable_update",
+    "coordination_session_links_immutable_delete",
+    "coordination_transcript_messages_immutable_update",
+    "coordination_transcript_messages_immutable_delete",
+  ];
+  const state = inspectMigrationComponents(db, {
+    coordination_session_links: [
+      "sequence", "id", "project_id", "worktree_id", "source_coordination_session_id",
+      "target_coordination_session_id", "kind", "created_at",
+    ],
+    coordination_transcript_messages: [
+      "sequence", "id", "project_id", "worktree_id", "source_coordination_session_id",
+      "source_message_id", "payload_json", "payload_sha256", "created_at",
+    ],
+    coordination_transcript_cursors: [
+      "project_id", "coordination_session_id", "link_id", "source_coordination_session_id",
+      "last_sequence", "updated_at",
+    ],
+  }, indexes, triggers);
+  if (principalColumn && state.missing.length === 0) {
+    state.missing.push(...compareMigrationDefinitions(
+      db,
+      "113_linked_session_transcripts.sql",
+      `CREATE TABLE projects (id TEXT PRIMARY KEY);
+       CREATE TABLE coordination_worktrees (
+         project_id TEXT, worktree_id TEXT, PRIMARY KEY(project_id, worktree_id)
+       );
+       CREATE TABLE coordination_sessions (
+         id TEXT, project_id TEXT, worktree_id TEXT, session_id TEXT, incarnation INTEGER,
+         UNIQUE(project_id, id)
+       );`,
+      [...Object.keys({
+        coordination_session_links: true,
+        coordination_transcript_messages: true,
+        coordination_transcript_cursors: true,
+      }), ...indexes, ...triggers],
+    ));
+  }
+  const missing = [...(!principalColumn ? ["coordination_sessions principal_id column"] : []), ...state.missing];
+  return { any: principalColumn || state.any, complete: principalColumn && missing.length === 0, missing };
+}
+
 /** Probe JOB-100 as one append-only boundary; a partial event catalog is unsafe. */
 function inspectTrustedJobEventsMigration(db: Database.Database): TrustedJobEventsMigrationState {
   const table = "trusted_job_events";
@@ -3789,7 +3844,7 @@ function runMigrations(db: Database.Database): void {
             "096_resource_ownership.sql",
              "097_mail_tenancy.sql",
              "098_content_tenancy.sql",
-             "099_automation_tenancy.sql",
+              "099_automation_tenancy.sql",
     ]) {
       db.exec(readFileSync(resolve(migrationsDir, file), "utf-8"));
       logger.info("db", `Applied migration ${file}`);
@@ -5287,6 +5342,22 @@ function runMigrations(db: Database.Database): void {
       throw restoreMigrationPartialStateError("112", [...applied.missing, "foreign key integrity"]);
     }
     logger.info("db", "Applied migration 112_atomic_epoch_recovery.sql");
+  }
+
+  const linkedSessionTranscripts = inspectLinkedSessionTranscriptMigration(db);
+  if (linkedSessionTranscripts.any && !linkedSessionTranscripts.complete) {
+    throw restoreMigrationPartialStateError("113", linkedSessionTranscripts.missing);
+  }
+  if (!linkedSessionTranscripts.complete) {
+    if (!inspectCoordinationHandoffMigration(db).complete) {
+      throw restoreMigrationPartialStateError("113", ["migration 107 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "113_linked_session_transcripts.sql"), "utf-8"));
+    const applied = inspectLinkedSessionTranscriptMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("113", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 113_linked_session_transcripts.sql");
   }
 
   enforceReservedBrokerInvariant(db);

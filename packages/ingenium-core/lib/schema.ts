@@ -618,6 +618,7 @@ export interface CoordinationSession {
   project_id: string;
   worktree_id: string;
   session_id: string;
+  principal_id: string | null;
   incarnation: number;
   revision: number;
   fence: number;

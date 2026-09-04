@@ -388,6 +388,79 @@ describe("coordination MCP transport adapters", () => {
     expect(text(acknowledged)).toEqual({ session });
   });
 
+  it("POSTs and strictly projects linked-session transcript operations", async () => {
+    const payload = {
+      info: { id: "msg-mcp-1", sessionID: "ses_mcp_source", role: "assistant" },
+      parts: [{
+        id: "part-msg-mcp-1",
+        sessionID: "ses_mcp_source",
+        messageID: "msg-mcp-1",
+        type: "text",
+        text: "complete transcript envelope",
+      }],
+    };
+    const link = { id: CLAIM_ID, kind: "fork", createdAt: TIMESTAMP };
+    mockApi.post.mockResolvedValueOnce(success({ session, link }));
+    expect(text(await coordination.coordinationHandoff(PROJECT, "link", {
+      ...lease,
+      target_session_id: "session-target",
+      link_kind: "fork",
+    }))).toEqual({ session, link });
+    expect(mockApi.post).toHaveBeenLastCalledWith("/coordination/sessions/link", {
+      ...lease,
+      target_session_id: "session-target",
+      kind: "fork",
+    }, { project: PROJECT });
+
+    mockApi.post.mockResolvedValueOnce(success({ session, accepted: 1 }));
+    expect(text(await coordination.coordinationHandoff(PROJECT, "transcript_publish", {
+      ...lease,
+      transcript_messages: [{ message_id: payload.info.id, payload }],
+    }))).toEqual({ session, accepted: 1 });
+    expect(mockApi.post).toHaveBeenLastCalledWith("/coordination/transcripts/publish", {
+      ...lease,
+      messages: [{ message_id: payload.info.id, payload }],
+    }, { project: PROJECT });
+
+    const message = {
+      sequence: 1,
+      messageId: payload.info.id,
+      sourceActorId: `actor-${"b".repeat(64)}`,
+      payload,
+      timestamp: TIMESTAMP,
+    };
+    const window = { session, messages: [message], throughSequence: 1, acknowledgementRequired: true };
+    mockApi.post.mockResolvedValueOnce(success(window));
+    expect(text(await coordination.coordinationHandoff(PROJECT, "transcript_read", {
+      ...lease,
+      limit: 16,
+    }))).toEqual(window);
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      "/coordination/transcripts/read",
+      { ...lease, limit: 16 },
+      { project: PROJECT },
+    );
+
+    mockApi.post.mockResolvedValueOnce(success({ session }));
+    expect(text(await coordination.coordinationHandoff(PROJECT, "transcript_ack", {
+      ...lease,
+      through_sequence: 1,
+    }))).toEqual({ session });
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      "/coordination/transcripts/ack",
+      { ...lease, through_sequence: 1 },
+      { project: PROJECT },
+    );
+
+    mockApi.post.mockResolvedValueOnce(success({
+      ...window,
+      messages: [{ ...message, payload: { ...payload, injected: TOKEN } }],
+    }));
+    const rejected = await coordination.coordinationHandoff(PROJECT, "transcript_read", { ...lease });
+    expect(rejected).toMatchObject({ isError: true });
+    expect(JSON.stringify(rejected)).not.toContain(TOKEN);
+  });
+
   it("returns only allowlisted API error fields and a fixed message", async () => {
     mockApi.post.mockResolvedValue({
       ok: false,

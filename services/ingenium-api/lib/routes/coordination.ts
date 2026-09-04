@@ -177,6 +177,30 @@ const acknowledgeMemorySchema = z.object({
   through_revision: nonnegativeInteger,
   ...idempotencyField,
 }).strict();
+const linkSessionSchema = z.object({
+  ...leaseFields,
+  target_session_id: opaqueId,
+  kind: z.enum(["linked", "fork"]),
+  ...idempotencyField,
+}).strict();
+const publishTranscriptSchema = z.object({
+  ...leaseFields,
+  messages: z.array(z.object({
+    message_id: opaqueId,
+    payload: z.record(z.unknown()),
+  }).strict()).min(1).max(coordination.COORDINATION_TRANSCRIPT_MESSAGE_LIMIT),
+  ...idempotencyField,
+}).strict();
+const readTranscriptSchema = z.object({
+  ...leaseFields,
+  limit: positiveInteger.optional(),
+  ...idempotencyField,
+}).strict();
+const acknowledgeTranscriptSchema = z.object({
+  ...leaseFields,
+  through_sequence: nonnegativeInteger,
+  ...idempotencyField,
+}).strict();
 const snapshotQuerySchema = z.object({
   project: z.string(),
   ...queryIdentityFields,
@@ -263,6 +287,13 @@ function requireBoundWorktree(req: Request, worktreeId: string): void {
   }
 }
 
+function coordinationPrincipal(req: Request): string {
+  if (req.principal?.type !== "service") {
+    throw new coordination.CoordinationError("SESSION_NOT_FOUND");
+  }
+  return req.principal.id;
+}
+
 function sessionDto(session: coordination.CoordinationSessionMutationResult) {
   return {
     actorId: session.actorId,
@@ -345,6 +376,16 @@ function handoffDto(event: coordination.CoordinationHandoffEvent) {
   };
 }
 
+function transcriptDto(message: coordination.CoordinationTranscriptMessage) {
+  return {
+    sequence: message.sequence,
+    messageId: message.messageId,
+    sourceActorId: message.sourceActorId,
+    payload: message.payload,
+    timestamp: message.timestamp,
+  };
+}
+
 function peerSnapshotDto(peer: coordination.CoordinationPeerSnapshot) {
   return {
     peerId: peer.peerId,
@@ -385,6 +426,9 @@ function sendCoordinationError(res: Response, error: unknown): boolean {
     FOOTPRINT_MISMATCH: 409,
     MANIFEST_GENERATION_CONFLICT: 409,
     POINTER_REVISION_CONFLICT: 409,
+    TARGET_SESSION_NOT_FOUND: 404,
+    SESSION_LINK_CONFLICT: 409,
+    TRANSCRIPT_CONFLICT: 409,
     COORDINATION_INTEGRITY_ERROR: 500,
   };
   const messageByCode: Record<coordination.CoordinationErrorCode, string> = {
@@ -409,6 +453,9 @@ function sendCoordinationError(res: Response, error: unknown): boolean {
     FOOTPRINT_MISMATCH: "Managed mutation footprint did not match its claims",
     MANIFEST_GENERATION_CONFLICT: "Repository manifest generation changed",
     POINTER_REVISION_CONFLICT: "Referenced coordination pointer changed since the requested revision",
+    TARGET_SESSION_NOT_FOUND: "Target coordination session not found",
+    SESSION_LINK_CONFLICT: "Coordination sessions are already linked",
+    TRANSCRIPT_CONFLICT: "Transcript message identity already has different content",
     COORDINATION_INTEGRITY_ERROR: "Coordination integrity verification failed",
   };
   res.status(statusByCode[responseCode]).json({
@@ -444,6 +491,7 @@ coordinationRouter.post("/register", route((req, res) => {
     ownershipToken: body.ownership_token,
     ttlMs: body.ttl_ms,
     idempotencyKey: idempotencyKey(req, body),
+    principalId: coordinationPrincipal(req),
     contextConversationId: memory.id,
     contextRevision: memory.revision,
   });
@@ -734,6 +782,70 @@ coordinationRouter.post("/memory/ack", route((req, res) => {
   const session = coordination.acknowledgeCoordinationMemory(resolvedProjectId, {
     ...lease(resolvedProjectId, body, req),
     throughRevision: body.through_revision,
+  });
+  res.json({ data: { session: sessionDto(session) } });
+}));
+
+coordinationRouter.post("/sessions/link", route((req, res) => {
+  const query = parseQuery(projectQuerySchema, req);
+  const body = parseBody(linkSessionSchema, req);
+  requireBoundWorktree(req, body.worktree_id);
+  const result = coordination.linkCoordinationSession(projectId(query.project), {
+    ...lease(projectId(query.project), body, req),
+    principalId: coordinationPrincipal(req),
+    targetSessionId: body.target_session_id,
+    kind: body.kind,
+  });
+  res.status(201).json({
+    data: {
+      session: sessionDto(result.session),
+      link: result.link,
+    },
+  });
+}));
+
+coordinationRouter.post("/transcripts/publish", route((req, res) => {
+  const query = parseQuery(projectQuerySchema, req);
+  const body = parseBody(publishTranscriptSchema, req);
+  requireBoundWorktree(req, body.worktree_id);
+  const resolvedProjectId = projectId(query.project);
+  const result = coordination.publishCoordinationTranscript(resolvedProjectId, {
+    ...lease(resolvedProjectId, body, req),
+    principalId: coordinationPrincipal(req),
+    messages: body.messages.map(({ message_id, payload }) => ({ messageId: message_id, payload })),
+  });
+  res.status(201).json({ data: { session: sessionDto(result.session), accepted: result.accepted } });
+}));
+
+coordinationRouter.post("/transcripts/read", route((req, res) => {
+  const query = parseQuery(projectQuerySchema, req);
+  const body = parseBody(readTranscriptSchema, req);
+  requireBoundWorktree(req, body.worktree_id);
+  const resolvedProjectId = projectId(query.project);
+  const result = coordination.readCoordinationTranscript(resolvedProjectId, {
+    ...lease(resolvedProjectId, body, req),
+    principalId: coordinationPrincipal(req),
+    limit: body.limit,
+  });
+  res.json({
+    data: {
+      session: sessionDto(result.session),
+      messages: result.messages.map(transcriptDto),
+      throughSequence: result.throughSequence,
+      acknowledgementRequired: result.acknowledgementRequired,
+    },
+  });
+}));
+
+coordinationRouter.post("/transcripts/ack", route((req, res) => {
+  const query = parseQuery(projectQuerySchema, req);
+  const body = parseBody(acknowledgeTranscriptSchema, req);
+  requireBoundWorktree(req, body.worktree_id);
+  const resolvedProjectId = projectId(query.project);
+  const session = coordination.acknowledgeCoordinationTranscript(resolvedProjectId, {
+    ...lease(resolvedProjectId, body, req),
+    principalId: coordinationPrincipal(req),
+    throughSequence: body.through_sequence,
   });
   res.json({ data: { session: sessionDto(session) } });
 }));
