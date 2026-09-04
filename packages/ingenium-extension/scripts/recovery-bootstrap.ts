@@ -4,7 +4,9 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import {
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -206,6 +208,58 @@ export function recoveryBootstrapCanonicalWorktree(source: NodeJS.ProcessEnv = p
   return canonical;
 }
 
+export function hardenGeneratedBootstrapDirectories(
+  root: string,
+  afterOpen?: (path: string) => void,
+): string {
+  if (process.platform !== "linux" || typeof process.getuid !== "function") {
+    throw new Error("Recovery bootstrap requires Linux process identity support");
+  }
+  const owner = process.getuid();
+  const directories = [
+    resolve(root, "packages/ingenium-extension/dist"),
+    resolve(root, "packages/ingenium-extension/dist/scripts"),
+  ];
+  for (const path of directories) {
+    const reference = lstatSync(path);
+    if (!reference.isDirectory() || reference.isSymbolicLink() || reference.uid !== owner || realpathSync(path) !== path) {
+      throw new Error("Recovery bootstrap generated directory identity is invalid");
+    }
+    const descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      const opened = fstatSync(descriptor);
+      const current = lstatSync(path);
+      const mode = opened.mode & 0o7777;
+      if (!opened.isDirectory() || !current.isDirectory() || current.isSymbolicLink()
+        || reference.dev !== opened.dev || reference.ino !== opened.ino
+        || opened.dev !== current.dev || opened.ino !== current.ino
+        || (reference.mode & 0o7777) !== mode || (current.mode & 0o7777) !== mode
+        || opened.uid !== owner || current.uid !== owner || realpathSync(path) !== path) {
+        throw new Error("Recovery bootstrap generated directory identity changed");
+      }
+      afterOpen?.(path);
+      const hardenedMode = mode & ~0o022;
+      if (hardenedMode !== mode) {
+        fchmodSync(descriptor, hardenedMode);
+        fsyncSync(descriptor);
+      }
+      const hardened = fstatSync(descriptor);
+      const hardenedPath = lstatSync(path);
+      if (!hardened.isDirectory() || !hardenedPath.isDirectory() || hardenedPath.isSymbolicLink()
+        || opened.dev !== hardened.dev || opened.ino !== hardened.ino
+        || opened.dev !== hardenedPath.dev || opened.ino !== hardenedPath.ino
+        || hardened.uid !== owner || hardenedPath.uid !== owner
+        || (hardened.mode & 0o7777) !== hardenedMode || (hardenedPath.mode & 0o7777) !== hardenedMode
+        || realpathSync(path) !== path) {
+        throw new Error("Recovery bootstrap generated directory hardening failed");
+      }
+    } finally {
+      closeSync(descriptor);
+    }
+  }
+  return directories[1]!;
+}
+
 export function verifyRecoveryBootstrapInvocation(
   scriptPath: string,
   expectedSha256 = process.env[RECOVERY_BOOTSTRAP_SHA256],
@@ -230,7 +284,7 @@ export function runRecoveryBootstrap(
   runner: Runner = spawnSync,
   retainEvidence?: (evidence: RecoveryBootstrapEvidence) => void,
   source: NodeJS.ProcessEnv = process.env,
-  paths: { productionRestart?: string } = {},
+  paths: { productionRestart?: string; afterDirectoryOpen?: (path: string) => void } = {},
 ): number {
   if (argv.length !== 2) throw new Error("Recovery bootstrap accepts no arguments");
   verifyRecoveryBootstrapInvocation(argv[1]!, source[RECOVERY_BOOTSTRAP_SHA256]);
@@ -251,6 +305,7 @@ export function runRecoveryBootstrap(
       const status = completedStatus(result, "check", index + 1);
       if (status !== 0) return status;
     }
+    hardenGeneratedBootstrapDirectories(root, paths.afterDirectoryOpen);
     const canonicalProductionRestart = realpathSync(productionRestart);
     if (canonicalProductionRestart !== productionRestart) throw new Error("Production restart path is not canonical");
     const retain = retainEvidence ?? ((evidence: RecoveryBootstrapEvidence) =>

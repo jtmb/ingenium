@@ -831,7 +831,14 @@ describe("managed command wrappers", () => {
     expect(managedRecoveryBootstrapPath(builtWrapper)).not.toBe(innerBootstrap);
   });
 
-  it("runs the fixed recovery checkpoint in order and launches production restart only after every check passes", () => {
+  it("recovery checkpoint hardens final build output before writing evidence and launching production restart", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-recovery-bootstrap-output-"));
+    const distPath = join(worktree, "packages/ingenium-extension/dist");
+    const scriptsPath = join(distPath, "scripts");
+    const productionRestart = join(scriptsPath, "production-restart.js");
+    const evidencePath = join(scriptsPath, "recovery-bootstrap-evidence.json");
+    mkdirSync(scriptsPath, { recursive: true });
+    writeFileSync(productionRestart, "export {}\n");
     const calls: Array<{ command: string; argv: readonly string[]; options: Record<string, unknown> }> = [];
     const runner = vi.fn((command: string, argv: readonly string[], options: Record<string, unknown>) => {
       const env = options.env as NodeJS.ProcessEnv;
@@ -846,43 +853,102 @@ describe("managed command wrappers", () => {
       }
       expect(env.NPM_CONFIG_SCRIPT_SHELL).toBe("/bin/sh");
       calls.push({ command, argv, options });
+      if (calls.length === RECOVERY_BOOTSTRAP_CHECKS.length) {
+        chmodSync(distPath, 0o775);
+        chmodSync(scriptsPath, 0o777);
+      }
+      if (command === process.execPath) {
+        expect([distPath, scriptsPath].map((path) => lstatSync(path).mode & 0o777)).toEqual([0o755, 0o755]);
+        expect(JSON.parse(readFileSync(evidencePath, "utf8")).productionRestart.result).toBe("pending");
+      }
       return { error: undefined, signal: null, status: 0 };
     });
 
+    try {
+      expect(runRecoveryBootstrap(
+        ["node", recoveryBootstrapSource],
+        runner as any,
+        undefined,
+        recoveryBootstrapEnvironment({
+          INGENIUM_WORKTREE: worktree,
+          INGENIUM_RECOVERY_CANONICAL_WORKTREE: worktree,
+        }),
+        { productionRestart },
+      )).toBe(0);
+      expect(calls.slice(0, -1).map(({ command, argv }) => [command, argv])).toEqual(RECOVERY_BOOTSTRAP_CHECKS);
+      expect(calls.at(-1)).toMatchObject({
+        command: process.execPath,
+        argv: [productionRestart],
+        options: { shell: false, stdio: "inherit" },
+      });
+      const productionRestartScriptSha256 = sha256(readFileSync(productionRestart));
+      expect((calls.at(-1)!.options.env as NodeJS.ProcessEnv).INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED)
+        .toBe(productionRestartScriptSha256);
+      expect(calls.every(({ options }) => options.cwd === worktree)).toBe(true);
+      const npmConfigurationPaths = calls.map(({ options }) => {
+        const env = options.env as NodeJS.ProcessEnv;
+        return [env.NPM_CONFIG_USERCONFIG, env.NPM_CONFIG_GLOBALCONFIG];
+      });
+      expect(npmConfigurationPaths.every((paths) => JSON.stringify(paths) === JSON.stringify(npmConfigurationPaths[0]))).toBe(true);
+      expect(npmConfigurationPaths[0]!.every((path) => !existsSync(path!))).toBe(true);
+      expect(calls.slice(0, -1).every(({ options }) => options.timeout === RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS)).toBe(true);
+      expect(calls.at(-1)!.options.timeout).toBe(RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS);
+      expect([distPath, scriptsPath].map((path) => lstatSync(path).mode & 0o300)).toEqual([0o300, 0o300]);
+      expect(lstatSync(evidencePath).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(readFileSync(evidencePath, "utf8"))).toEqual({
+        schemaVersion: 1,
+        checks: RECOVERY_BOOTSTRAP_CHECKS.map((_: readonly [string, readonly string[]], index: number) => ({
+          index: index + 1, result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
+        })),
+        productionRestart: { result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS },
+        productionRestartScriptSha256,
+      });
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("recovery checkpoint rejects a final output identity swap before retaining evidence or launching restart", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-recovery-bootstrap-swap-"));
+    const distPath = join(worktree, "packages/ingenium-extension/dist");
+    const scriptsPath = join(distPath, "scripts");
+    const productionRestart = join(scriptsPath, "production-restart.js");
+    const replacement = join(worktree, "replacement-dist");
+    mkdirSync(scriptsPath, { recursive: true });
+    mkdirSync(replacement);
+    writeFileSync(productionRestart, "export {}\n");
+    const calls: string[] = [];
+    const runner = vi.fn((command: string) => {
+      calls.push(command);
+      return { error: undefined, signal: null, status: 0 };
+    });
     const retainEvidence = vi.fn();
-    expect(runRecoveryBootstrap(
-      ["node", recoveryBootstrapSource],
-      runner as any,
-      retainEvidence,
-      recoveryBootstrapEnvironment(),
-      { productionRestart: productionRestartSource },
-    )).toBe(0);
-    expect(calls.slice(0, -1).map(({ command, argv }) => [command, argv])).toEqual(RECOVERY_BOOTSTRAP_CHECKS);
-    expect(calls.at(-1)).toMatchObject({
-      command: process.execPath,
-      argv: [productionRestartSource],
-      options: { shell: false, stdio: "inherit" },
-    });
-    const productionRestartScriptSha256 = sha256(readFileSync(calls.at(-1)!.argv[0]!));
-    expect((calls.at(-1)!.options.env as NodeJS.ProcessEnv).INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED)
-      .toBe(productionRestartScriptSha256);
-    expect(calls.every(({ options }) => options.cwd === repositoryRoot)).toBe(true);
-    const npmConfigurationPaths = calls.map(({ options }) => {
-      const env = options.env as NodeJS.ProcessEnv;
-      return [env.NPM_CONFIG_USERCONFIG, env.NPM_CONFIG_GLOBALCONFIG];
-    });
-    expect(npmConfigurationPaths.every((paths) => JSON.stringify(paths) === JSON.stringify(npmConfigurationPaths[0]))).toBe(true);
-    expect(npmConfigurationPaths[0]!.every((path) => !existsSync(path!))).toBe(true);
-    expect(calls.slice(0, -1).every(({ options }) => options.timeout === RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS)).toBe(true);
-    expect(calls.at(-1)!.options.timeout).toBe(RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS);
-    expect(retainEvidence).toHaveBeenLastCalledWith({
-      schemaVersion: 1,
-      checks: RECOVERY_BOOTSTRAP_CHECKS.map((_: readonly [string, readonly string[]], index: number) => ({
-        index: index + 1, result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
-      })),
-      productionRestart: { result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS },
-      productionRestartScriptSha256,
-    });
+
+    try {
+      expect(() => runRecoveryBootstrap(
+        ["node", recoveryBootstrapSource],
+        runner as any,
+        retainEvidence,
+        recoveryBootstrapEnvironment({
+          INGENIUM_WORKTREE: worktree,
+          INGENIUM_RECOVERY_CANONICAL_WORKTREE: worktree,
+        }),
+        {
+          productionRestart,
+          afterDirectoryOpen(path: string) {
+            if (path !== distPath) return;
+            renameSync(path, `${path}.opened`);
+            renameSync(replacement, path);
+          },
+        },
+      )).toThrow("generated directory hardening failed");
+      expect(calls).toEqual(RECOVERY_BOOTSTRAP_CHECKS.map(([command]: readonly [string, readonly string[]]) => command));
+      expect(calls).not.toContain(process.execPath);
+      expect(retainEvidence).not.toHaveBeenCalled();
+      expect(existsSync(join(`${distPath}.opened`, "scripts/recovery-bootstrap-evidence.json"))).toBe(false);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it("stops the recovery checkpoint on the first failed check without launching or inheriting unsafe environment", () => {
