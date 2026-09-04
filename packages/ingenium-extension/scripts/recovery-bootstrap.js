@@ -51,7 +51,7 @@ const CHECKPOINT_PATHS = [
 ];
 const COMMON_ENVIRONMENT = ["CI", "FORCE_COLOR", "HOME", "NO_COLOR", "TERM", "TMPDIR"];
 const BUILD_ENVIRONMENT = ["CI", "FORCE_COLOR", "NO_COLOR", "TERM", "TMPDIR"];
-const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
+const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff(?:\.external|\..*\.(?:command|textconv))|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
 const RECOVERY_ENVIRONMENT = [
   ...COMMON_ENVIRONMENT,
   "INGENIUM_API_URL",
@@ -416,10 +416,27 @@ function git(root, args, encoding = "buffer") {
   });
 }
 
+function gitConfiguration(root) {
+  return execFileSync(GIT, ["-C", root, "config", "--null", "--list", "--includes"], {
+    encoding: "utf8",
+    env: gitEnvironment(),
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 10_000,
+  });
+}
+
+function isExecutableGitConfiguration(entry) {
+  const separator = entry.indexOf("\n");
+  const key = separator === -1 ? entry : entry.slice(0, separator);
+  const value = separator === -1 ? "" : entry.slice(separator + 1);
+  return EXECUTABLE_GIT_CONFIGURATION.test(key)
+    || (/^alias\./i.test(key) && value.trimStart().startsWith("!"));
+}
+
 export function verifyScopedCheckpoint(root, sourcePath, sourceBytes) {
   const canonicalRoot = canonicalOwnedDirectory(root, "Repository root");
-  const configuration = git(canonicalRoot, ["config", "--null", "--list", "--includes"], "utf8");
-  if (configuration.split("\0").some((entry) => EXECUTABLE_GIT_CONFIGURATION.test(entry.slice(0, entry.indexOf("\n"))))) {
+  const configuration = gitConfiguration(canonicalRoot);
+  if (configuration.split("\0").some(isExecutableGitConfiguration)) {
     throw new Error("Recovery bootstrap checkpoint rejected executable Git configuration");
   }
   const topLevel = git(canonicalRoot, ["rev-parse", "--show-toplevel"], "utf8").trim();

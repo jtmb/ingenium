@@ -972,6 +972,9 @@ describe("managed command wrappers", () => {
     const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-trust-"));
+    const priorGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
+    const priorGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
+    const priorGitConfigSystem = process.env.GIT_CONFIG_SYSTEM;
     try {
       const trusted = join(directory, "trusted.js");
       writeFileSync(trusted, "export {};\n", { mode: 0o644 });
@@ -1035,6 +1038,43 @@ describe("managed command wrappers", () => {
       const sourceBytes = readFileSync(source);
       expect(shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toMatch(/^[0-9a-f]{40,64}$/);
+
+      for (const [key, value] of [
+        ["core.hooksPath", "/tmp/hooks"],
+        ["filter.inject.process", "/tmp/filter"],
+        ["diff.external", "/tmp/diff"],
+        ["alias.inject", "!/tmp/alias"],
+      ] as const) {
+        execFileSync("/usr/bin/git", ["-C", checkpoint, "config", key, value]);
+        expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+          .toThrow("checkpoint rejected executable Git configuration");
+        execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "--unset", key]);
+      }
+
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "extensions.worktreeConfig", "true"]);
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "--worktree", "core.hooksPath", "/tmp/hooks"]);
+      expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toThrow("checkpoint rejected executable Git configuration");
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "--worktree", "--unset", "core.hooksPath"]);
+
+      const ignoredGlobal = join(directory, "ignored-global.gitconfig");
+      const ignoredSystem = join(directory, "ignored-system.gitconfig");
+      writeFileSync(ignoredGlobal, "[core]\n\thooksPath = /tmp/global-hooks\n");
+      writeFileSync(ignoredSystem, "[diff]\n\texternal = /tmp/system-diff\n");
+      process.env.GIT_CONFIG_GLOBAL = ignoredGlobal;
+      process.env.GIT_CONFIG_NOSYSTEM = "0";
+      process.env.GIT_CONFIG_SYSTEM = ignoredSystem;
+      expect(shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toMatch(/^[0-9a-f]{40,64}$/);
+
+      const shimSource = readFileSync(recoveryBootstrapShim, "utf8");
+      const operationalGit = shimSource.slice(shimSource.indexOf("function git("), shimSource.indexOf("function gitConfiguration("));
+      const configurationGit = shimSource.slice(shimSource.indexOf("function gitConfiguration("), shimSource.indexOf("function isExecutableGitConfiguration("));
+      expect(operationalGit).toContain('["-C", root, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args]');
+      expect(configurationGit).toContain('["-C", root, "config", "--null", "--list", "--includes"]');
+      expect(configurationGit).not.toContain("core.fsmonitor=false");
+      expect(configurationGit).not.toContain("core.hooksPath=/dev/null");
+
       chmodSync(dirname(source), 0o777);
       writeFileSync(source, "export const changed = true;\n");
       const npm = vi.fn();
@@ -1058,6 +1098,12 @@ describe("managed command wrappers", () => {
       expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toThrow("scoped checkpoint has untracked drift");
     } finally {
+      if (priorGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = priorGitConfigGlobal;
+      if (priorGitConfigNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+      else process.env.GIT_CONFIG_NOSYSTEM = priorGitConfigNoSystem;
+      if (priorGitConfigSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+      else process.env.GIT_CONFIG_SYSTEM = priorGitConfigSystem;
       rmSync(directory, { recursive: true, force: true });
     }
   });
