@@ -28,7 +28,6 @@ permission:
     "@database-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
-    "@local-models": allow
     "@security-audit": allow
     "@documentation": allow
     "@self-learning": allow

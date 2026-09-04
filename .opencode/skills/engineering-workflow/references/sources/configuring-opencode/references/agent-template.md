@@ -37,7 +37,7 @@ permission:
 `permission.skill` key is the actual canonical directory name, without `@`.
 The supported canonical names, in repository order, are
 `development-conventions`, `devops-conventions`, `database-conventions`,
-`engineering-workflow`, `mcp-tooling`, `local-models`, `security-audit`,
+`engineering-workflow`, `mcp-tooling`, `security-audit`,
 `documentation`, `self-learning`, and `skill-maintenance`.
 
 The current user-facing policy is the universal block above. For a deliberate

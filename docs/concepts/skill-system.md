@@ -13,7 +13,7 @@ patterns that agents load at session startup to guide their behavior.
 
 ## Canonical Taxonomy
 
-As of Phase 3 (2026-07-16), 36 legacy skills were consolidated into **10 canonical skills**:
+The repository currently exposes **9 canonical skills**:
 
 | Skill | Domain | Inherits From |
 |-------|--------|---------------|
@@ -22,7 +22,6 @@ As of Phase 3 (2026-07-16), 36 legacy skills were consolidated into **10 canonic
 | `database-conventions` | SQLite WAL, FTS5, migrations | database-migration-management, sqlite-migration-patterns, sqlite-wal-safety |
 | `engineering-workflow` | Agent pipeline, debugging, orchestrator | agent-execution-quality, agent-workflow-patterns, debugging-patterns, configuring-opencode, logging-visibility, orchestrator-primer, per-project-scoping, supervision-logging, uncensored-direct-response |
 | `mcp-tooling` | MCP integration, browser automation | browsing-the-web, dashboard-screenshots |
-| `local-models` | Local model profiles, command safety | — |
 | `security-audit` | Security scanning, leak detection | security-audit-workflow |
 | `documentation` | Docs workspace, conventions, audit | docs-workspace, documentation-architecture, documentation-audit-workflow |
 | `self-learning` | Observations, traits, synthesis | — |
@@ -107,7 +106,7 @@ map and canonical `references/sources/*/source-index.md` lineage are preserved.
 
 The canonical worktree currently contains zero `MIGRATED-TO.md` markers and zero
 root-level legacy skill directories named by the mappings; all 28 source indexes
-remain under their 10 canonical skills.
+remain under the canonical skills that absorbed them.
 
 ## Maintenance Locks
 

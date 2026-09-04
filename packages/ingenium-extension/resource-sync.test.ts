@@ -66,7 +66,6 @@ const CANONICAL_SKILLS = [
   "database-conventions",
   "engineering-workflow",
   "mcp-tooling",
-  "local-models",
   "security-audit",
   "documentation",
   "self-learning",

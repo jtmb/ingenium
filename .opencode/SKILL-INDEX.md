@@ -1,10 +1,10 @@
-# Skill Index — Phase 3 Taxonomy (10 Canonical Skills)
+# Skill Index — Phase 3 Taxonomy (9 Active Canonical Skills)
 
 > **Migration**: 36 legacy skills consolidated into 10 canonical skills on 2026-07-16.
 > See `.opencode/skills/consolidation-map.json` for full source→target mappings and SHA-256 hashes.
 > Legacy content preserved under `references/sources/<legacy-name>/` in each canonical skill.
 
-## Active Skills (10)
+## Active Skills (9)
 
 | # | Skill | Absorbed Sources | Description |
 |---|-------|-----------------|-------------|
@@ -13,11 +13,10 @@
 | 3 | `database-conventions` | 3 | SQL/PostgreSQL, SQLite WAL safety, migration management, FTS5 integrity |
 | 4 | `engineering-workflow` | 9 | Agent execution quality, debugging, agent configuration, orchestrator, logging, supervision |
 | 5 | `mcp-tooling` | 2 | Playwright browser automation, Docs RAG persistence, email tools, MCP integration |
-| 6 | `local-models` | 0 | Local model profiles, command safety, cross-model strategy |
-| 7 | `security-audit` | 1 | Surface scan, git-history leak scan, credential rotation, remediation |
-| 8 | `documentation` | 3 | Docs workspace, architecture conventions, audit workflow |
-| 9 | `self-learning` | 0 | Observation pipeline, personality traits, synthesis |
-| 10 | `skill-maintenance` | 1 | Skill lifecycle: detection, creation, indexing, audit, validation |
+| 6 | `security-audit` | 1 | Surface scan, git-history leak scan, credential rotation, remediation |
+| 7 | `documentation` | 3 | Docs workspace, architecture conventions, audit workflow |
+| 8 | `self-learning` | 0 | Observation pipeline, personality traits, synthesis |
+| 9 | `skill-maintenance` | 1 | Skill lifecycle: detection, creation, indexing, audit, validation |
 
 ## Legacy Source Provenance (28 absorbed → 10 canonical)
 

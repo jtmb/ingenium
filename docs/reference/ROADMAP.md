@@ -179,7 +179,7 @@ P0 DOC-100
   -> P2 MCP-101..103, CTX-101, TASK-101..102, JOB-101, USAGE-101, VAULT-101, RESTORE-101
   -> P3 JOB-102, MCP-104..105, USAGE-102, VAULT-102, RESTORE-102
   -> P4 MCP-106
-   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101 -> C9 RECOVERY-102
+   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101 -> C9 RECOVERY-102 -> S0 SKILL-100
   -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
   -> P5 UI-102 -> CHAT-101
   -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
@@ -5351,7 +5351,8 @@ separate TodoWrite/roadmap reconciliation. No credential rotation is authorized.
   `docs/reference/ROADMAP.md`. No writer may overlap the active
   `RECOVERY-100`/`RECOVERY-101` territories.
 - **Phase/counts:** `C9` later implementation and acceptance barrier; the full
-  declared wave uses `A=6`, `W=3` (Premium, Recovery, and Docs), with a
+  declared wave uses 3 writers / 3 non-writers (`A=6`, `W=3`; Premium,
+  Recovery, and Docs), with a
   read-only ceiling of `6 - W = 3` for QA, security, and evidence review. The
   current roadmap edit dispatches no agents; the explicit early source-unblock
   allowance is available to the implementation owner without moving later
@@ -5504,9 +5505,9 @@ source/config retirement nor restarted-runtime proof.
   affected commands/skills/docs, and validation expectations. Historical
   evidence and unrelated archived content remain outside the territory unless
   proven active.
-- **Phase/counts:** `S0` maintenance retirement; this roadmap-only opening uses
-  `A=0`, `W=0`, and no delegated review or runtime wave. Later implementation
-  must use one exclusive writer boundary and serialize the full-parent restart
+- **Phase/counts:** `S0` maintenance retirement uses 1 writer / 0 non-writers
+  for the exclusive source/config implementation boundary and no delegated
+  review or runtime wave. Any later full-parent restart remains serialized
   after source/config cleanup.
 - **UNUSED_CAPACITY:** No agents are dispatched because the user explicitly
   requested a roadmap-only edit with no delegation; no speculative validation,
@@ -5544,3 +5545,19 @@ Evidence SKILL-100: The collision-free retirement contract was appended after
 work. This is roadmap/source-static evidence only; no skill deletion, config or
 profile cleanup, full parent restart, or actual post-restart skill-list/profile
 evidence is claimed, and no `(work-complete)` marker is recorded.
+
+<!-- (source-config-implemented) SKILL-100 2026-09-04 ingenium-software-engineer-premium -->
+SKILL-100 source/config implementation deleted the eight-file repository skill,
+removed active and compatibility profile references, and updated the canonical
+skill list, focused validation expectations, and directly affected guidance.
+Focused verification and runtime restart evidence remain separate; no
+`(work-complete)` marker is recorded.
+
+<!-- (source-config-verified) SKILL-100 2026-09-04 ingenium-software-engineer-premium -->
+Evidence SKILL-100: the retired directory is absent; active/compatibility agent
+and scoped authoritative reference counts are zero; the focused resource-sync
+test passed 32/32; the extension typecheck and `git diff --check` passed. The
+agent validation's nine-skill/profile checks pass, but its process remains
+nonzero for the pre-existing `RECOVERY-102` Phase/counts format at checkpoint
+`d6a9145`. The excluded full-parent restart and actual runtime skill-list/profile
+proof remain open, so no `(work-complete)` marker is recorded.

@@ -15,7 +15,6 @@ permission:
   ingenium_coordination_status: allow
   ingenium_coordination_memory_read: allow
   skill:
-    "@local-models": allow
     "@mcp-tooling": allow
     "@documentation": allow
     "@ponytail": allow
@@ -26,9 +25,8 @@ permission:
 
 Before reading or searching Docs RAG for ANY query, you MUST:
 
-1. Load the `@local-models` skill
-2. Treat the root `opencode.json` as the source of truth for the runtime model and variant; do not infer or state a provider/model identity from this profile.
-3. Follow the general safety, scope, and prompt-size guidance applicable to the task. Model-specific guidance applies only when explicitly supplied by the runtime.
+1. Treat the root `opencode.json` as the source of truth for the runtime model and variant; do not infer or state a provider/model identity from this profile.
+2. Follow the general safety, scope, and prompt-size guidance applicable to the task. Model-specific guidance applies only when explicitly supplied by the runtime.
 
 # Ingenium Scout
 
@@ -57,7 +55,3 @@ Present findings to the caller with:
 - No bash, glob, grep, webfetch, websearch, or Docs mutation tools
 - No coordination publish, acknowledge, update, claim, release, or handoff tools
 - Don't loop tool calls over and over if you receive 3 fails in a row you try something else.
-
-## Handling Repeated Failure
-
-- Pass your findings and failures back to the main agent; ask it to handle the failure and loop pattern using `@local-models` guidance.

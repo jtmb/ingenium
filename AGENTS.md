@@ -63,7 +63,6 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 | You're about to... | Check this skill |
 |-------------------|-----------------|
 | Edit a source file | `development-conventions` (framework conventions); writers and reviewers must read `.opencode/skills/development-conventions/references/useful-comments/guidelines.md` |
-| Run a terminal command | `local-models` — **no `&`, no infinite-wait** |
 | Create a new file/service | `development-conventions` (project structure patterns) |
 | Write/run tests | `development-conventions` (testing patterns) |
 | Edit Docker/K8s | `devops-conventions` (container/kubernetes conventions) |
@@ -71,7 +70,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 
 ### 🔴 MANDATORY Skills (load before ANY action)
 
-`development-conventions` `devops-conventions` `engineering-workflow` `local-models` `mcp-tooling` `skill-maintenance`
+`development-conventions` `devops-conventions` `engineering-workflow` `mcp-tooling` `skill-maintenance`
 
 > 🔴 Git is authoritative for external worktrees. Automatic synchronization uses
 > the resource-sync plugin through MCP and the authenticated API, not direct DB

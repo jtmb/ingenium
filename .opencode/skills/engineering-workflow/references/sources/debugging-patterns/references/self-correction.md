@@ -27,7 +27,6 @@ Every output must be verified against the available evidence before being submit
 | User says "no" or "that's wrong" within seconds | You made an assumption without verifying | Backtrack to last verified state, re-read files |
 | User repeats the same request with different words | They didn't get what they needed | Stop. Re-read original request. Ask clarifying question. |
 | A tool returns an error | Your command or input was incorrect | Read error text fully, fix the command |
-| About to run `find`/`grep` in `node_modules/` | Command will hang terminal | **STOP.** Check `local-models` skill. |
 | Command running 10+ seconds with no output | It's hung | Kill it. Try different approach. |
 | Same approach tried twice | It won't work the third time | Switch to fundamentally different approach |
 | User provides file path you haven't seen | You may be hallucinating a different file | Read the actual file |

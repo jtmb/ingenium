@@ -50,6 +50,5 @@ Build tools report cascading errors. Always scroll to the top and fix the first 
 
 ## Cross-References
 
-- **`local-models`** — Command safety rules; model profiles that inform debugging strategies
 - **`development-conventions`** — Code conventions that may affect error interpretation
 - **`devops-conventions`** — Docker/K8s CLI commands for debugging container/runtime issues

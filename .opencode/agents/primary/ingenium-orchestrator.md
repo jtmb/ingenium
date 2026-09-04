@@ -69,7 +69,6 @@ permission:
     "@development-conventions": allow
     "@devops-conventions": allow
     "@engineering-workflow": allow
-    "@local-models": allow
     "@skill-maintenance": allow
     "@mcp-tooling": allow
     "@documentation": allow
@@ -342,7 +341,7 @@ UI work receives one changed-route visual gate **after the final UI change** for
 
 ## Required Skills
 
-Load at session start: `@development-conventions`, `@devops-conventions`, `@engineering-workflow`, `@local-models`, `@skill-maintenance`, `@mcp-tooling`, `@documentation`, `@security-audit`, `@self-learning`, and `@database-conventions`.
+Load at session start: `@development-conventions`, `@devops-conventions`, `@engineering-workflow`, `@skill-maintenance`, `@mcp-tooling`, `@documentation`, `@security-audit`, `@self-learning`, and `@database-conventions`.
 
 ## Example: Bounded Implementation Wave
 

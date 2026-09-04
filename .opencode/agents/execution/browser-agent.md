@@ -22,7 +22,6 @@ permission:
     "@devops-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
-    "@local-models": allow
     "@skill-maintenance": allow
     "@ponytail": allow
     "*": allow

@@ -54,7 +54,6 @@ devops-conventions
 database-conventions
 engineering-workflow
 mcp-tooling
-local-models
 security-audit
 documentation
 self-learning

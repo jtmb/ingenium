@@ -14,7 +14,6 @@ permission:
   ingenium_docs_search: allow
   ingenium_docs_get_page: allow
   skill:
-    "@local-models": allow
     "@ponytail": allow
     "*": allow
 ---
@@ -23,9 +22,8 @@ permission:
 
 Before reading, globbing, or grepping for ANY query, you MUST:
 
-1. Load the `@local-models` skill
-2. Treat the root `opencode.json` as the source of truth for the runtime model and variant; do not infer or state a provider/model identity from this profile.
-3. Follow the general safety, scope, and prompt-size guidance applicable to the task. Model-specific guidance applies only when explicitly supplied by the runtime.
+1. Treat the root `opencode.json` as the source of truth for the runtime model and variant; do not infer or state a provider/model identity from this profile.
+2. Follow the general safety, scope, and prompt-size guidance applicable to the task. Model-specific guidance applies only when explicitly supplied by the runtime.
 
 # Ingenium Explore
 

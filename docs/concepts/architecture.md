@@ -518,7 +518,7 @@ The dashboard sync log captures this condition and prompts the user to restart O
 
 ### Skill Seeds
 
-10 canonical skill directories (plus absorbed legacy source archives under
+9 active canonical skill directories (plus absorbed legacy source archives under
 `references/sources/`) live at `.opencode/skills/` and are projected by the
 Git-authoritative resource-sync path. The Phase 3 migration (2026-07-16)
 consolidated 36 legacy skills into 10 canonical skills with full provenance
