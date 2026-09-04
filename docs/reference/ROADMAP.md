@@ -5416,3 +5416,131 @@ epoch/fence/claim, nonce/enrollment, durable handoff, changed paths,
 task/TodoWrite/status/nextWork, and current activity remain unknown.
 `RECOVERY-100`, `RECOVERY-101`, and `RECOVERY-102` remain open; no completion
 marker or remediation is claimed.
+
+## Open repository skill-retirement follow-up (2026-09-04)
+
+This append-only opening adds collision-free task `SKILL-100` after
+`RECOVERY-102`. It does not rewrite the retained recovery contract or markers.
+The roadmap entry is started for the retirement boundary only; it claims neither
+source/config retirement nor restarted-runtime proof.
+
+#### SKILL-100 — Retire the repository `local-models` skill
+
+- **IN_SCOPE:** Delete `.opencode/skills/local-models/`; remove `local-models`
+  and `@local-models` from every active and compatibility agent profile under
+  `.opencode/agents/**`; remove authoritative references that require or
+  advertise the retired skill from `AGENTS.md`, active OpenCode configuration
+  and projections if any, directly affected commands, skills, and docs, and
+  validation expectations. Repair the required-skill list/index and any active
+  skill projection so the deleted skill is not listed, loaded, or required.
+  Preserve unrelated current work and determine the active loading surface from
+  current configuration and profiles rather than historical records.
+- **OUT_OF_SCOPE:** This roadmap-only opening performs no source, profile,
+  configuration, projection, validation, or runtime mutation. Do not change
+  historical evidence or unrelated archived content unless it is part of an
+  active loading surface; do not change unrelated skills, commands, docs,
+  indexes, providers, credentials, model behavior, or the Docs Workspace. Do
+  not commit or delegate this opening.
+- **Owner:** `@ingenium-software-engineer-premium` owns the retirement boundary;
+  the current roadmap-only update is owned by `@ingenium-docs`.
+- **Dependencies:** The contract is appended after `RECOVERY-102` without
+  changing its open state. Source/config retirement is a separate maintenance
+  boundary; full-parent restart and runtime proof occur only after the changed
+  source/config state is ready and the restart is authorized.
+- **Acceptance:** The skill directory is absent; zero active or compatibility
+  agent/profile references to `local-models` or `@local-models` remain; no
+  authoritative `AGENTS.md`, active OpenCode configuration/projection, directly
+  affected command/skill/doc, or validation expectation requires or advertises
+  the deleted skill; required-skill lists/indexes remain coherent; relevant
+  agent and skill validation passes; and current uncommitted source work is
+  unchanged. A full parent OpenCode restart, not a child-MCP restart, then
+  loads the changed source. Post-restart actual skill-list output and actual
+  loaded active/compatibility profile evidence prove that the retired skill is
+  absent. File inspection or source tests do not substitute for restarted
+  runtime evidence.
+- **Evidence classes:** **Source/config evidence** is the scoped Git change,
+  absent-directory result, zero-reference inventory over active loading
+  surfaces, coherent required-skill list/index, and relevant agent/skill
+  validation output; it proves repository state only. **Restarted runtime
+  evidence** is the full parent restart plus actual skill-list and loaded
+  profile results proving the retired skill is not available at runtime; it is
+  not inferred from source/config evidence.
+- **STOP_CONDITION:** `PASS` only after source/config cleanup, focused agent/
+  skill validation, full parent restart, actual post-restart skill-list/profile
+  evidence, and final roadmap reconciliation all pass. Explicit user `STOP` or
+  `CANCELLED` is terminal; otherwise continue in scope or use only the
+  permitted escalation rule. No completion marker is valid before every gate
+  passes.
+- **Escalation:** Only unavailable required protected access after its
+  configured path was attempted, an unauthorized irreversible deletion or
+  restart, a genuine product/configuration decision or ambiguity, or a bounded
+  diagnosis that cannot reproduce the cause. A failed check alone is not an
+  escalation reason.
+- **Verification owner:** The implementation owner runs the focused active
+  profile/config/projection, directory, required-list/index, and relevant
+  agent/skill checks; the authorized restart owner records the full-parent
+  restart and actual skill-list/profile evidence. No verification is dispatched
+  by this roadmap-only opening.
+- **Deployment owner:** `@ingenium-software-engineer-premium` with authorized
+  full-parent OpenCode restart access; a child-MCP restart alone is insufficient.
+- **Security surface:** Active profile skill grants, required-skill resolution,
+  OpenCode configuration/projection loading, and protection against accidentally
+  retaining a retired loading path; no credential or authentication change.
+- **Rollback/safety:** Snapshot the pre-change status and preserve all existing
+  uncommitted source work; stage only the retirement boundary when implementation
+  begins; restore the deleted skill and active references if source/config or
+  restart validation fails; never rewrite historical evidence or delete foreign
+  state.
+- **Tests:** Focused zero-reference and absent-directory checks; required-skill
+  list/index consistency; the relevant agent validation and skill taxonomy/
+  frontmatter checks; full-parent restart; and post-restart actual skill-list
+  plus loaded-profile checks. Do not expand this task into a broad suite.
+- **Docs:** Update only directly affected canonical repository guidance,
+  commands, skills, indexes, and `AGENTS.md`; do not mutate Docs Workspace pages
+  or unrelated archived/history material.
+- **Exclusive writer territory:** One retirement implementation boundary owns
+  `.opencode/skills/local-models/`, active/compatibility profiles under
+  `.opencode/agents/**`, active OpenCode configuration/projections, directly
+  affected commands/skills/docs, and validation expectations. Historical
+  evidence and unrelated archived content remain outside the territory unless
+  proven active.
+- **Phase/counts:** `S0` maintenance retirement; this roadmap-only opening uses
+  `A=0`, `W=0`, and no delegated review or runtime wave. Later implementation
+  must use one exclusive writer boundary and serialize the full-parent restart
+  after source/config cleanup.
+- **UNUSED_CAPACITY:** No agents are dispatched because the user explicitly
+  requested a roadmap-only edit with no delegation; no speculative validation,
+  implementation, or runtime work is added.
+- **Verification plan:** Inventory the active/compatibility loading surface and
+  identify any required-list/index or projection dependencies; delete the skill,
+  remove active profile and authoritative reference edges, repair only directly
+  affected list/index and validation expectations, and check the exact scoped
+  diff without disturbing existing work. Run the focused agent/skill checks,
+  perform the authorized full parent restart, and retain actual post-restart
+  skill-list/profile evidence. If a check fails, fix the earliest reproducible
+  loading, reference, index, or restart cause and rerun only its minimum proving
+  check; do not treat file-only or child-process evidence as runtime proof.
+- **Causal remediation rule:** Fix the first active loading-surface, reference,
+  required-list/index, profile-resolution, or parent-restart boundary proven by
+  evidence. Do not hide a stale reference with an allowlist exception, mutate
+  historical evidence to make scans pass, or claim runtime absence from files.
+- **Finding classification:** Any active/compatibility reference, missing skill
+  directory cleanup, broken required-skill list/index, failed relevant
+  validation, or post-restart loading of the retired skill is `BLOCKING`;
+  unrelated documentation drift or historical/archive references outside the
+  active loading surface are `FOLLOW_UP`; retained source/config and restarted-
+  runtime provenance are `INFORMATIONAL` evidence.
+- **Markers/evidence:** [x] append exactly one `work-started` marker after the
+  roadmap preflight; [ ] append one matching `work-complete` marker only after
+  every acceptance gate passes; [ ] retain non-empty evidence for source/config
+  cleanup and separately for full-parent restarted-runtime skill-list/profile
+  absence. This opening records only roadmap evidence and remains open.
+
+### Work marker log (continued)
+
+<!-- (work-started) SKILL-100 2026-09-04T00:01:00Z ingenium-docs -->
+Evidence SKILL-100: The collision-free retirement contract was appended after
+`RECOVERY-102` without changing existing recovery markers or uncommitted source
+work. This is roadmap/source-static evidence only; no skill deletion, config or
+profile cleanup, full parent restart, or actual post-restart skill-list/profile
+evidence is claimed, and no `(work-complete)` marker is recorded.
