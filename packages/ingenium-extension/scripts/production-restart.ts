@@ -94,10 +94,21 @@ export interface PreparedProductionReplacement<Session> {
   release(): Promise<void> | void;
 }
 
+export type ProductionRestartCandidateRejectionReason =
+  | "malformed"
+  | "binding_mismatch"
+  | "missing_nonce"
+  | "unattested";
+
 export interface ProductionRestartAdapterDependencies<Session> {
   canonicalWorktree(): string;
   resolveBinding(worktree: string): Promise<ProductionRestartBinding>;
-  readParentCandidates(worktree: string): Promise<ProductionRestartParentCandidate[]> | ProductionRestartParentCandidate[];
+  readParentCandidates(worktree: string): Promise<unknown[]> | unknown[];
+  retainCandidateRejection(
+    worktree: string,
+    candidate: unknown,
+    reason: ProductionRestartCandidateRejectionReason,
+  ): Promise<void> | void;
   enrollParentCandidate?(
     worktree: string,
     binding: ProductionRestartBinding,
@@ -142,6 +153,7 @@ interface ProductionPreparedState {
   handoffPublisher?: RestartHandoffPublisher;
   logDescriptor: number;
   nonce: string;
+  parentStateFile: string;
   parentStateSha256: string;
   port: number;
   reservation: Server;
@@ -425,6 +437,45 @@ export function appendProductionRestartEvidence(
   }
 }
 
+export function appendProductionRestartCandidateRejection(
+  worktree: string,
+  candidate: unknown,
+  reason: ProductionRestartCandidateRejectionReason,
+): void {
+  const serializedCandidate = JSON.stringify(candidate);
+  if (serializedCandidate === undefined || Buffer.byteLength(serializedCandidate) > MAX_STATE_BYTES) {
+    throw new Error("Production restart candidate rejection is unavailable");
+  }
+  const record = `${JSON.stringify({
+    schemaVersion: 1,
+    disposition: "quarantined",
+    reason,
+    candidateSha256: hash(serializedCandidate),
+    identitySha256: hash(JSON.stringify(isRecord(candidate) ? candidate.oldProcess ?? null : null)),
+    handoffSha256: hash(JSON.stringify(isRecord(candidate) ? candidate.handoff ?? null : null)),
+    occurredAt: new Date().toISOString(),
+  })}\n`;
+  const directory = createStateDirectory(worktree);
+  const descriptor = openSync(
+    join(directory, "candidate-rejections.jsonl"),
+    constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    const stat = fstatSync(descriptor);
+    const uid = processOwner();
+    if (!stat.isFile() || stat.nlink !== 1 || !exactMode(stat.mode, 0o600) || (uid !== undefined && stat.uid !== uid)) {
+      throw new Error("Production restart candidate rejection is unavailable");
+    }
+    writeFileSync(descriptor, record, "utf8");
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  const parent = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { fsyncSync(parent); } finally { closeSync(parent); }
+}
+
 function writePrivateBuffer(path: string, value: Buffer): void {
   let descriptor: number | undefined;
   try {
@@ -483,7 +534,7 @@ function stateCandidate(value: unknown): ProductionRestartParentCandidate | unde
   return value as unknown as ProductionRestartParentCandidate;
 }
 
-export function readProtectedProductionRestartState(worktree: string): ProductionRestartParentCandidate[] {
+export function readProtectedProductionRestartState(worktree: string): unknown[] {
   let serialized: string;
   try {
     serialized = readPrivateFile(join(stateDirectory(worktree), "state.json"), MAX_STATE_BYTES).toString("utf8");
@@ -497,9 +548,7 @@ export function readProtectedProductionRestartState(worktree: string): Productio
     || !Array.isArray(parsed.parentCandidates) || parsed.parentCandidates.length > 2) {
     throw new Error("Production restart state is unavailable");
   }
-  const candidates = parsed.parentCandidates.map(stateCandidate);
-  if (candidates.some((candidate) => candidate === undefined)) throw new Error("Production restart state is unavailable");
-  return candidates as ProductionRestartParentCandidate[];
+  return parsed.parentCandidates;
 }
 
 function bindingsMatch(left: ReplacementFirstRestartRequest["binding"], right: ProductionRestartBinding): boolean {
@@ -513,9 +562,11 @@ function encodeRequest(request: ReplacementFirstRestartRequest): string {
 }
 
 function validateParentCandidate(
-  candidate: ProductionRestartParentCandidate,
+  value: unknown,
   worktree: string,
 ): ProductionRestartParentCandidate {
+  const candidate = stateCandidate(value);
+  if (!candidate) throw new Error("Production restart parent candidate is malformed");
   const replacementPort = candidate.oldPort === 65535 ? 65534 : candidate.oldPort + 1;
   const nonceSha256 = candidate.oldProcess.nonceSha256 === "0".repeat(64) ? "1".repeat(64) : "0".repeat(64);
   const validated = decodeReplacementFirstRestartRequest(encodeRequest({
@@ -548,17 +599,43 @@ export async function runProductionRestartAdapter<Session>(
 ): Promise<ReplacementFirstRestartResult> {
   const worktree = dependencies.canonicalWorktree();
   const binding = await dependencies.resolveBinding(worktree);
-  let candidates = await dependencies.readParentCandidates(worktree);
-  if (candidates.length === 0 && dependencies.enrollParentCandidate) {
+  const candidates = await dependencies.readParentCandidates(worktree);
+  const admitted: ProductionRestartParentCandidate[] = [];
+  const admit = async (value: unknown, requireNonce: boolean): Promise<ProductionRestartParentCandidate | undefined> => {
+    let candidate: ProductionRestartParentCandidate;
+    try {
+      candidate = validateParentCandidate(value, worktree);
+    } catch {
+      await dependencies.retainCandidateRejection(worktree, value, "malformed");
+      return undefined;
+    }
+    if (!bindingsMatch(candidate.binding, binding)) {
+      await dependencies.retainCandidateRejection(worktree, value, "binding_mismatch");
+      return undefined;
+    }
+    if (requireNonce && candidate.oldProcess.nonceSha256 === UNNONCED_PARENT_SHA256) {
+      await dependencies.retainCandidateRejection(worktree, value, "missing_nonce");
+      return undefined;
+    }
+    let attested = false;
+    try { attested = await dependencies.attestParentProcess(candidate); } catch {}
+    if (!attested) {
+      await dependencies.retainCandidateRejection(worktree, value, "unattested");
+      return undefined;
+    }
+    return candidate;
+  };
+  for (const candidate of candidates) {
+    const parent = await admit(candidate, true);
+    if (parent) admitted.push(parent);
+  }
+  if (admitted.length > 1) throw new Error("Production restart parent identity is absent or ambiguous");
+  let parent = admitted[0];
+  if (!parent && dependencies.enrollParentCandidate) {
     const enrolled = await dependencies.enrollParentCandidate(worktree, binding);
-    if (enrolled) candidates = [enrolled];
+    if (enrolled) parent = await admit(enrolled, false);
   }
-  if (candidates.length !== 1) throw new Error("Production restart parent identity is absent or ambiguous");
-  const parent = validateParentCandidate(candidates[0]!, worktree);
-  if (!bindingsMatch(parent.binding, binding)) throw new Error("Production restart parent binding changed");
-  if (!await dependencies.attestParentProcess(parent)) {
-    throw new Error("Production restart parent launcher nonce is invalid");
-  }
+  if (!parent) throw new Error("Production restart parent identity is absent or ambiguous");
   const prepared = await dependencies.prepareReplacement({ worktree, binding, parent });
   try {
     const request = decodeReplacementFirstRestartRequest(encodeRequest({
@@ -1072,20 +1149,23 @@ async function enrollRunningProductionParent(
     port: parent.oldPort,
     dataHome: parent.oldDataHome,
   }, parent.handoff);
-  const root = createStateDirectory(worktree);
-  writePrivateNewFile(join(root, "state.json"), `${JSON.stringify({ schemaVersion: 1, parentCandidates: [parent] })}\n`);
-  return readProtectedProductionRestartState(worktree)[0];
+  return parent;
 }
 
 async function attestProductionParent(parent: ProductionRestartParentCandidate): Promise<boolean> {
   if (!identitiesMatch(inspectExpectedProcessIdentity(parent.oldProcess), parent.oldProcess)) return false;
-  if (parent.oldProcess.nonceSha256 !== UNNONCED_PARENT_SHA256) return true;
+  const executable = processExecutable(parent.oldProcess.pid);
   const argv = processCommandLine(parent.oldProcess.pid);
   const sessionId = argv ? sessionIdFromCommandLine(argv) : undefined;
-  return isProcessAncestor(parent.oldProcess.pid) && processWorkingDirectory(parent.oldProcess.pid) === parent.binding.launcherWorktree
+  const liveHandoff = sessionId
+    ? await readLiveParentHandoff(parent.oldPort, sessionId, parent.binding.launcherWorktree, parent.oldProcess.pid)
+    : undefined;
+  return executable !== undefined && basename(executable) === "opencode"
+    && hash(readFileSync(executable)) === parent.oldProcess.executableSha256
+    && isProcessAncestor(parent.oldProcess.pid) && processWorkingDirectory(parent.oldProcess.pid) === parent.binding.launcherWorktree
     && parentDataHome(parent.oldProcess.pid) === parent.oldDataHome && sessionId !== undefined
     && listeningLoopbackPorts().includes(parent.oldPort)
-    && await readLiveParentHandoff(parent.oldPort, sessionId, parent.binding.launcherWorktree, parent.oldProcess.pid) !== undefined;
+    && liveHandoff !== undefined && hash(JSON.stringify(liveHandoff)) === hash(JSON.stringify(parent.handoff));
 }
 
 export function restartHandoffMemoryEntry(handoff: RedactedRestartHandoff): Record<string, unknown> {
@@ -1278,7 +1358,8 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       signal.throwIfAborted();
       try {
         const binding = await resolveProductionBinding(worktree);
-        return bindingsMatch(expected, binding) && hash(readPrivateFile(join(stateDirectory(worktree), "state.json"), MAX_STATE_BYTES)) === state.parentStateSha256;
+        return bindingsMatch(expected, binding)
+          && hash(readPrivateFile(state.parentStateFile, MAX_STATE_BYTES)) === state.parentStateSha256;
       } catch {
         return false;
       }
@@ -1539,8 +1620,9 @@ async function prepareProductionReplacement(input: {
   const currentParent = inspectExpectedProcessIdentity(input.parent.oldProcess);
   if (!identitiesMatch(currentParent, input.parent.oldProcess)) throw new Error("Production restart parent identity changed");
   const root = createStateDirectory(input.worktree);
-  writePrivateFile(join(root, "state.json"), `${JSON.stringify({ schemaVersion: 1, parentCandidates: [input.parent] })}\n`);
-  const parentStateSha256 = hash(readPrivateFile(join(root, "state.json"), MAX_STATE_BYTES));
+  const parentStateFile = join(root, `selected-candidate-${randomUUID()}.json`);
+  writePrivateNewFile(parentStateFile, `${JSON.stringify({ schemaVersion: 1, parentCandidates: [input.parent] })}\n`);
+  const parentStateSha256 = hash(readPrivateFile(parentStateFile, MAX_STATE_BYTES));
   const runtimeRoot = "/tmp/opencode";
   assertOwnedDirectory(runtimeRoot);
   const runDirectory = join(runtimeRoot, `production-restart-${randomUUID()}`);
@@ -1592,6 +1674,7 @@ async function prepareProductionReplacement(input: {
     healthEvidenceFile,
     logDescriptor,
     nonce,
+    parentStateFile,
     parentStateSha256,
     port: reservation.port,
     reservation: reservation.server,
@@ -1649,6 +1732,7 @@ export function productionRestartDependencies(
         timeouts: DEFAULT_TIMEOUTS,
       }] : readProtectedProductionRestartState(worktree);
     },
+    retainCandidateRejection: appendProductionRestartCandidateRejection,
     enrollParentCandidate: enrollRunningProductionParent,
     attestParentProcess: attestProductionParent,
     prepareReplacement: (input) => prepareProductionReplacement(input, productionRestartScriptSha256),

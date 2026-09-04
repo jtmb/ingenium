@@ -67,6 +67,7 @@ import {
   stopTimedOutLegacyRecoveryOwner,
 } from "./tui-recovery.js";
 import {
+  appendProductionRestartCandidateRejection,
   appendProductionRestartEvidence,
   hardenLegacyProductionCredentialPermissions,
   openCodeJsonRequest,
@@ -1877,7 +1878,45 @@ describe("managed command wrappers", () => {
     ]) expect(() => restartHandoffEvidence(invalid, sha256(JSON.stringify(invalid)))).toThrow();
   });
 
-  it("derives the fixed production restart request and preserves replacement-first ordering", async () => {
+  it("fixed deployment appends hashed stale-candidate quarantine evidence without rewriting retained state", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-candidate-evidence-"));
+    const protectedRoot = join(worktree, ".opencode", "protected-runtime-index");
+    const restartRoot = join(protectedRoot, "production-restart");
+    try {
+      mkdirSync(protectedRoot, { recursive: true, mode: 0o700 });
+      chmodSync(protectedRoot, 0o700);
+      mkdirSync(restartRoot, { mode: 0o700 });
+      const candidate = {
+        oldProcess: { pid: 1259022, startTimeTicks: 1, executableSha256: sha256("dead"), nonceSha256: "0".repeat(64) },
+        handoff: { incomplete: true },
+      };
+      const retainedState = `${JSON.stringify({ schemaVersion: 1, parentCandidates: [candidate] })}\n`;
+      writePrivateJson(join(restartRoot, "state.json"), JSON.parse(retainedState));
+
+      appendProductionRestartCandidateRejection(worktree, candidate, "missing_nonce");
+      appendProductionRestartCandidateRejection(worktree, candidate, "malformed");
+
+      expect(readFileSync(join(restartRoot, "state.json"), "utf8")).toBe(retainedState);
+      const evidence = readFileSync(join(restartRoot, "candidate-rejections.jsonl"), "utf8")
+        .trim().split("\n").map((line) => JSON.parse(line));
+      expect(evidence.map((entry) => entry.reason)).toEqual(["missing_nonce", "malformed"]);
+      expect(evidence).toEqual(evidence.map((entry) => ({
+        schemaVersion: 1,
+        disposition: "quarantined",
+        reason: entry.reason,
+        candidateSha256: sha256(JSON.stringify(candidate)),
+        identitySha256: sha256(JSON.stringify(candidate.oldProcess)),
+        handoffSha256: sha256(JSON.stringify(candidate.handoff)),
+        occurredAt: expect.any(String),
+      })));
+      expect(JSON.stringify(evidence)).not.toContain("1259022");
+      expect(lstatSync(join(restartRoot, "candidate-rejections.jsonl")).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("fixed deployment reconciles dead and active unnonced candidates before replacement-first bootstrap", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-adapter-"));
     try {
       const request = replacementRequest(worktree);
@@ -1900,15 +1939,28 @@ describe("managed command wrappers", () => {
         startTimeTicks: 2002,
         ...request.replacement.expectedIdentity,
       };
+      const dead = { ...parent, oldProcess: { ...parent.oldProcess, pid: 900001 } };
+      const orphan = {
+        ...parent,
+        oldProcess: { ...parent.oldProcess, pid: process.pid, nonceSha256: "0".repeat(64) },
+      };
       const calls: string[] = [];
+      const retired: RestartProcessIdentity[] = [];
       const dependencies: ProductionRestartAdapterDependencies<string> = {
         canonicalWorktree: () => { calls.push("worktree"); return worktree; },
         resolveBinding: async () => { calls.push("resolve-binding"); return binding; },
-        readParentCandidates: () => { calls.push("read-parent"); return []; },
+        readParentCandidates: () => { calls.push("read-parent"); return [dead, orphan]; },
+        retainCandidateRejection: (_worktree, candidate, reason) => {
+          calls.push(`reject:${reason}:${(candidate as ProductionRestartParentCandidate).oldProcess.pid}`);
+        },
         enrollParentCandidate: async () => { calls.push("enroll-parent"); return parent; },
-        attestParentProcess: () => { calls.push("attest-parent"); return true; },
-        prepareReplacement: async () => {
+        attestParentProcess: (candidate) => {
+          calls.push(`attest-parent:${candidate.oldProcess.pid}`);
+          return candidate.oldProcess.pid === parent.oldProcess.pid;
+        },
+        prepareReplacement: async (input) => {
           calls.push("prepare");
+          expect(input.parent).toEqual(parent);
           return {
             replacement: request.replacement,
             dependencies: {
@@ -1929,7 +1981,12 @@ describe("managed command wrappers", () => {
                 calls.push("terminal-idle");
                 return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
               },
-              retireOldProcess: async () => { calls.push("retire-old"); },
+              prepareRecoveryOwner: async (identity, _session, _handoffSha256, transactionSha256) => {
+                calls.push("owner-ready");
+                return { status: "ready", transactionSha256, replacementIdentitySha256: recoveryIdentitySha256(identity) };
+              },
+              commitRecoveryOwner: async () => { calls.push("owner-commit"); },
+              retireOldProcess: async (identity) => { calls.push("retire-old"); retired.push(identity); },
               stopReplacement: async () => { calls.push("stop-replacement"); },
               persistEvidence: (entry) => { calls.push(`persist:${entry.phase}`); },
             },
@@ -1942,19 +1999,23 @@ describe("managed command wrappers", () => {
         handoffSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
         replacementIdentitySha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
+      expect(retired).toEqual([parent.oldProcess]);
+      expect(retired).not.toContainEqual(orphan.oldProcess);
       expect(calls).toEqual([
-        "worktree", "resolve-binding", "read-parent", "enroll-parent", "attest-parent", "prepare", "binding", "identity:old", "publish",
+        "worktree", "resolve-binding", "read-parent", "attest-parent:900001", "reject:unattested:900001",
+        `reject:missing_nonce:${process.pid}`, "enroll-parent", "attest-parent:1001", "prepare", "binding", "identity:old", "publish",
         "persist:handoff_published", "launch", "identity:replacement", "persist:replacement_started", "health",
         "persist:replacement_healthy", "session", "persist:session_created", "memory-ack",
-        "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged", "binding",
-        "identity:old", "identity:replacement", "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
+        "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged", "owner-ready",
+        "persist:recovery_owner_ready", "binding", "identity:old", "identity:replacement", "owner-commit",
+        "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
       ]);
     } finally {
       rmSync(worktree, { recursive: true, force: true });
     }
   });
 
-  it("rejects absent, ambiguous, or unattested production restart parents before launch", async () => {
+  it("fixed deployment rejects absent, ambiguous, malformed, foreign, or unattested parents before launch", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-adapter-failure-"));
     try {
       const request = replacementRequest(worktree);
@@ -1982,10 +2043,12 @@ describe("managed command wrappers", () => {
       let stopped: RestartProcessIdentity | undefined;
       let released = false;
       let prepared = 0;
+      const rejections: Array<{ candidate: unknown; reason: string }> = [];
       const base = (parentCandidates: ProductionRestartParentCandidate[]): ProductionRestartAdapterDependencies<object> => ({
         canonicalWorktree: () => worktree,
         resolveBinding: async () => binding,
         readParentCandidates: () => parentCandidates,
+        retainCandidateRejection: (_worktree, candidate, reason) => { rejections.push({ candidate, reason }); },
         attestParentProcess: (candidate) => candidate.oldProcess.nonceSha256 !== hash("sentinel"),
         prepareReplacement: async () => {
           prepared += 1;
@@ -2019,7 +2082,20 @@ describe("managed command wrappers", () => {
         .rejects.toThrow("parent identity is absent or ambiguous");
       const forged = { ...parent, oldProcess: { ...parent.oldProcess, nonceSha256: hash("sentinel") } };
       await expect(runProductionRestartAdapter(base([forged])))
-        .rejects.toThrow("parent launcher nonce is invalid");
+        .rejects.toThrow("parent identity is absent or ambiguous");
+      const malformed = { ...parent, handoff: { ...parent.handoff, checks: [] } };
+      const retainedMalformed = JSON.stringify(malformed);
+      await expect(runProductionRestartAdapter(base([malformed])))
+        .rejects.toThrow("parent identity is absent or ambiguous");
+      const foreign = { ...parent, binding: { ...parent.binding, storageMappingHash: sha256("foreign") } };
+      await expect(runProductionRestartAdapter(base([foreign])))
+        .rejects.toThrow("parent identity is absent or ambiguous");
+      expect(JSON.stringify(malformed)).toBe(retainedMalformed);
+      expect(rejections).toEqual([
+        { candidate: forged, reason: "unattested" },
+        { candidate: malformed, reason: "malformed" },
+        { candidate: foreign, reason: "binding_mismatch" },
+      ]);
       expect(prepared).toBe(0);
       await expect(runProductionRestartAdapter(base([parent])))
         .rejects.toThrow("typed memory acknowledgement failed");
