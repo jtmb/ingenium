@@ -82,7 +82,7 @@ import {
   type ProductionRestartBinding,
   type ProductionRestartParentCandidate,
 } from "./scripts/production-restart.js";
-import {
+const {
   RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
   RECOVERY_BOOTSTRAP_CHECKS,
   RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS,
@@ -93,7 +93,7 @@ import {
   recoveryBootstrapRestartEnvironment,
   runRecoveryBootstrap,
   verifyRecoveryBootstrapInvocation,
-} from "./scripts/recovery-bootstrap.js";
+} = await vi.importActual<Record<string, any>>("./scripts/recovery-bootstrap.ts");
 
 const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toString("hex").slice(0, 64);
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -834,6 +834,17 @@ describe("managed command wrappers", () => {
   it("runs the fixed recovery checkpoint in order and launches production restart only after every check passes", () => {
     const calls: Array<{ command: string; argv: readonly string[]; options: Record<string, unknown> }> = [];
     const runner = vi.fn((command: string, argv: readonly string[], options: Record<string, unknown>) => {
+      const env = options.env as NodeJS.ProcessEnv;
+      expect(env.NPM_CONFIG_USERCONFIG).not.toBe(env.NPM_CONFIG_GLOBALCONFIG);
+      for (const path of [env.NPM_CONFIG_USERCONFIG!, env.NPM_CONFIG_GLOBALCONFIG!]) {
+        const stat = lstatSync(path);
+        expect(stat.isFile()).toBe(true);
+        expect(stat.isSymbolicLink()).toBe(false);
+        expect(stat.uid).toBe(process.getuid!());
+        expect(stat.mode & 0o777).toBe(0o400);
+        expect(readFileSync(path)).toHaveLength(0);
+      }
+      expect(env.NPM_CONFIG_SCRIPT_SHELL).toBe("/bin/sh");
       calls.push({ command, argv, options });
       return { error: undefined, signal: null, status: 0 };
     });
@@ -856,6 +867,12 @@ describe("managed command wrappers", () => {
     expect((calls.at(-1)!.options.env as NodeJS.ProcessEnv).INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED)
       .toBe(productionRestartScriptSha256);
     expect(calls.every(({ options }) => options.cwd === repositoryRoot)).toBe(true);
+    const npmConfigurationPaths = calls.map(({ options }) => {
+      const env = options.env as NodeJS.ProcessEnv;
+      return [env.NPM_CONFIG_USERCONFIG, env.NPM_CONFIG_GLOBALCONFIG];
+    });
+    expect(npmConfigurationPaths.every((paths) => JSON.stringify(paths) === JSON.stringify(npmConfigurationPaths[0]))).toBe(true);
+    expect(npmConfigurationPaths[0]!.every((path) => !existsSync(path!))).toBe(true);
     expect(calls.slice(0, -1).every(({ options }) => options.timeout === RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS)).toBe(true);
     expect(calls.at(-1)!.options.timeout).toBe(RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS);
     expect(retainEvidence).toHaveBeenLastCalledWith({
@@ -869,9 +886,9 @@ describe("managed command wrappers", () => {
   });
 
   it("stops the recovery checkpoint on the first failed check without launching or inheriting unsafe environment", () => {
-    const calls: Array<{ command: string; argv: readonly string[] }> = [];
-    const runner = vi.fn((command: string, argv: readonly string[]) => {
-      calls.push({ command, argv });
+    const calls: Array<{ command: string; argv: readonly string[]; options: Record<string, unknown> }> = [];
+    const runner = vi.fn((command: string, argv: readonly string[], options: Record<string, unknown>) => {
+      calls.push({ command, argv, options });
       return { error: undefined, signal: null, status: calls.length === 2 ? 7 : 0 };
     });
     const hostile = {
@@ -881,6 +898,8 @@ describe("managed command wrappers", () => {
       INGENIUM_MCP_CREDENTIAL: "must-not-pass",
       INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
       INGENIUM_RECOVERY_OWNER_NONCE: "owner-nonce",
+      NPM_CONFIG_GLOBALCONFIG: "/tmp/attacker-global",
+      NPM_CONFIG_USERCONFIG: "/tmp/attacker-user",
     };
 
     expect(runRecoveryBootstrap(
@@ -890,22 +909,31 @@ describe("managed command wrappers", () => {
       recoveryBootstrapEnvironment(),
       { productionRestart: productionRestartSource },
     )).toBe(7);
-    expect(calls).toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(([command, argv]) => ({ command, argv })));
-    expect(recoveryBootstrapCheckEnvironment(hostile)).toEqual({
+    expect(calls.map(({ command, argv }) => ({ command, argv })))
+      .toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(([command, argv]) => ({ command, argv })));
+    const failedEnvironment = calls[0]!.options.env as NodeJS.ProcessEnv;
+    expect(failedEnvironment.NPM_CONFIG_USERCONFIG).not.toBe(failedEnvironment.NPM_CONFIG_GLOBALCONFIG);
+    expect(existsSync(failedEnvironment.NPM_CONFIG_USERCONFIG!)).toBe(false);
+    expect(existsSync(failedEnvironment.NPM_CONFIG_GLOBALCONFIG!)).toBe(false);
+    const npmConfiguration = { globalConfig: "/tmp/private-global", userConfig: "/tmp/private-user" };
+    expect(recoveryBootstrapCheckEnvironment(npmConfiguration, hostile)).toEqual({
       HOME: "/tmp/recovery-home",
-      NPM_CONFIG_GLOBALCONFIG: "/dev/null",
+      NPM_CONFIG_GLOBALCONFIG: "/tmp/private-global",
       NPM_CONFIG_SCRIPT_SHELL: "/bin/sh",
-      NPM_CONFIG_USERCONFIG: "/dev/null",
+      NPM_CONFIG_USERCONFIG: "/tmp/private-user",
       PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
     });
     const scriptSha256 = sha256("production-restart");
-    expect(recoveryBootstrapRestartEnvironment(scriptSha256, hostile)).toMatchObject({
+    expect(recoveryBootstrapRestartEnvironment(scriptSha256, npmConfiguration, hostile)).toMatchObject({
       HOME: "/tmp/recovery-home",
       INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
       INGENIUM_RECOVERY_OWNER_NONCE: "owner-nonce",
+      NPM_CONFIG_GLOBALCONFIG: "/tmp/private-global",
+      NPM_CONFIG_USERCONFIG: "/tmp/private-user",
       INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED: scriptSha256,
     });
-    expect(JSON.stringify(recoveryBootstrapRestartEnvironment(scriptSha256, hostile))).not.toContain("must-not-pass");
+    expect(JSON.stringify(recoveryBootstrapRestartEnvironment(scriptSha256, npmConfiguration, hostile)))
+      .not.toContain("must-not-pass");
     expect(() => runRecoveryBootstrap(["node", recoveryBootstrapSource, "argument"], runner as any))
       .toThrow("Recovery bootstrap accepts no arguments");
   });
@@ -970,12 +998,28 @@ describe("managed command wrappers", () => {
   });
 
   it("source recovery shim accepts mode 0644 and reports the first bounded trust failure reason", async () => {
-    const shim = await import(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const shim = await import(/* @vite-ignore */ `${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-trust-"));
     const priorGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
     const priorGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
     const priorGitConfigSystem = process.env.GIT_CONFIG_SYSTEM;
     try {
+      const npmConfiguration = shim.privateNpmConfiguration();
+      expect(npmConfiguration.userConfig).not.toBe(npmConfiguration.globalConfig);
+      const npmDirectory = dirname(npmConfiguration.userConfig);
+      for (const path of [npmConfiguration.userConfig, npmConfiguration.globalConfig]) {
+        const stat = lstatSync(path);
+        expect(stat.isFile()).toBe(true);
+        expect(stat.isSymbolicLink()).toBe(false);
+        expect(stat.uid).toBe(process.getuid!());
+        expect(stat.mode & 0o777).toBe(0o400);
+        expect(readFileSync(path)).toHaveLength(0);
+      }
+      npmConfiguration.cleanup();
+      expect(existsSync(npmConfiguration.userConfig)).toBe(false);
+      expect(existsSync(npmConfiguration.globalConfig)).toBe(false);
+      expect(existsSync(npmDirectory)).toBe(false);
+
       const trusted = join(directory, "trusted.js");
       writeFileSync(trusted, "export {};\n", { mode: 0o644 });
       chmodSync(trusted, 0o644);

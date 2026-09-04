@@ -692,6 +692,46 @@ function privateStagedBootstrap(bytes, owner) {
   };
 }
 
+export function privateNpmConfiguration(owner = ownerUid()) {
+  const root = privateTemporaryRoot(owner);
+  const directory = mkdtempSync(resolve(root, "recovery-npm-config-"));
+  canonicalOwnedDirectory(directory, "Recovery npm configuration directory", owner);
+  const created = [];
+  const create = (name) => {
+    const path = resolve(directory, name);
+    writeFileSync(path, "", { flag: "wx", mode: 0o400 });
+    created.push(path);
+    const file = readTrustedRegularFile(path, `Recovery npm ${name}`, { expectedMode: 0o400, expectedOwner: owner });
+    if (file.bytes.length !== 0) throw new Error("Recovery npm configuration is not empty");
+    return file.path;
+  };
+  let userConfig;
+  let globalConfig;
+  try {
+    userConfig = create("user.npmrc");
+    globalConfig = create("global.npmrc");
+  } catch (error) {
+    for (const path of created.reverse()) unlinkSync(path);
+    rmdirSync(directory);
+    throw error;
+  }
+  return {
+    userConfig,
+    globalConfig,
+    cleanup() {
+      try {
+        unlinkSync(userConfig);
+      } finally {
+        try {
+          unlinkSync(globalConfig);
+        } finally {
+          rmdirSync(directory);
+        }
+      }
+    },
+  };
+}
+
 export async function runRecoveryBootstrapShim(argv = process.argv) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
   const owner = ownerUid();
@@ -732,55 +772,60 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
     executable: true,
     expectedOwner: runtimeOwner,
   }).path;
-  const recoveryEnvironment = {
-    [CANONICAL_WORKTREE]: repoRoot,
-    INGENIUM_WORKTREE: repoRoot,
-  };
-  const build = await runFixed(
-    npm,
-    ["run", "build", "--workspace=packages/ingenium-extension"],
-    BUILD_TIMEOUT_MS,
-    childEnvironment(BUILD_ENVIRONMENT, runtime, {
-      ...recoveryEnvironment,
-      NPM_CONFIG_GLOBALCONFIG: "/dev/null",
-      NPM_CONFIG_SCRIPT_SHELL: "/bin/sh",
-      NPM_CONFIG_USERCONFIG: "/dev/null",
-    }),
-    repoRoot,
-  );
-  if (!propagate(build, "Extension recovery bootstrap build")) return;
-  verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
-
-  const generatedDirectory = canonicalOwnedDirectory(resolve(packageRoot, "dist/scripts"), "Generated scripts directory", owner);
-  const generated = readTrustedRegularFile(resolve(generatedDirectory, "recovery-bootstrap.js"), "Generated recovery bootstrap", {
-    executable: true,
-    expectedMode: 0o555,
-    expectedOwner: owner,
-  });
-  if (generated.path !== resolve(repoRoot, "packages/ingenium-extension/dist/scripts/recovery-bootstrap.js")) {
-    throw new Error("Generated recovery bootstrap path is invalid");
-  }
-  const staged = privateStagedBootstrap(generated.bytes, owner);
+  const npmConfiguration = privateNpmConfiguration(owner);
   try {
-    const generatedModule = await import(`${pathToFileURL(staged.path).href}?inspect=1`);
-    const declaredRuntimeMs = generatedModule.RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS;
-    if (!Number.isSafeInteger(declaredRuntimeMs) || declaredRuntimeMs < 1
-      || declaredRuntimeMs > MAX_TIMER_MS - GENERATED_TIMEOUT_GRACE_MS) {
-      throw new Error("Generated recovery bootstrap timeout declaration is invalid");
-    }
-    const generatedResult = await runFixed(
-      runtime,
-      [staged.path],
-      declaredRuntimeMs + GENERATED_TIMEOUT_GRACE_MS,
-      childEnvironment(RECOVERY_ENVIRONMENT, runtime, {
+    const recoveryEnvironment = {
+      [CANONICAL_WORKTREE]: repoRoot,
+      INGENIUM_WORKTREE: repoRoot,
+    };
+    const build = await runFixed(
+      npm,
+      ["run", "build", "--workspace=packages/ingenium-extension"],
+      BUILD_TIMEOUT_MS,
+      childEnvironment(BUILD_ENVIRONMENT, runtime, {
         ...recoveryEnvironment,
-        [GENERATED_BOOTSTRAP_SHA256]: staged.sha256,
+        NPM_CONFIG_GLOBALCONFIG: npmConfiguration.globalConfig,
+        NPM_CONFIG_SCRIPT_SHELL: "/bin/sh",
+        NPM_CONFIG_USERCONFIG: npmConfiguration.userConfig,
       }),
       repoRoot,
     );
-    propagate(generatedResult, "Generated recovery bootstrap");
+    if (!propagate(build, "Extension recovery bootstrap build")) return;
+    verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
+
+    const generatedDirectory = canonicalOwnedDirectory(resolve(packageRoot, "dist/scripts"), "Generated scripts directory", owner);
+    const generated = readTrustedRegularFile(resolve(generatedDirectory, "recovery-bootstrap.js"), "Generated recovery bootstrap", {
+      executable: true,
+      expectedMode: 0o555,
+      expectedOwner: owner,
+    });
+    if (generated.path !== resolve(repoRoot, "packages/ingenium-extension/dist/scripts/recovery-bootstrap.js")) {
+      throw new Error("Generated recovery bootstrap path is invalid");
+    }
+    const staged = privateStagedBootstrap(generated.bytes, owner);
+    try {
+      const generatedModule = await import(`${pathToFileURL(staged.path).href}?inspect=1`);
+      const declaredRuntimeMs = generatedModule.RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS;
+      if (!Number.isSafeInteger(declaredRuntimeMs) || declaredRuntimeMs < 1
+        || declaredRuntimeMs > MAX_TIMER_MS - GENERATED_TIMEOUT_GRACE_MS) {
+        throw new Error("Generated recovery bootstrap timeout declaration is invalid");
+      }
+      const generatedResult = await runFixed(
+        runtime,
+        [staged.path],
+        declaredRuntimeMs + GENERATED_TIMEOUT_GRACE_MS,
+        childEnvironment(RECOVERY_ENVIRONMENT, runtime, {
+          ...recoveryEnvironment,
+          [GENERATED_BOOTSTRAP_SHA256]: staged.sha256,
+        }),
+        repoRoot,
+      );
+      propagate(generatedResult, "Generated recovery bootstrap");
+    } finally {
+      staged.cleanup();
+    }
   } finally {
-    staged.cleanup();
+    npmConfiguration.cleanup();
   }
 }
 
