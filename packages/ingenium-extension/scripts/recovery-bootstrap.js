@@ -59,6 +59,22 @@ const RECOVERY_ENVIRONMENT = [
 ];
 const SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"];
 
+export const CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS = Object.freeze([
+  "directory",
+  "canonical",
+  "owner",
+  "writable",
+]);
+
+export class CanonicalOwnedDirectoryError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.name = "CanonicalOwnedDirectoryError";
+    this.code = "CANONICAL_OWNED_DIRECTORY_INVALID";
+    this.reason = reason;
+  }
+}
+
 export const TRUSTED_REGULAR_FILE_FAILURE_REASONS = Object.freeze([
   "regular_file",
   "symlink",
@@ -91,13 +107,26 @@ function ownerUid() {
   return process.getuid();
 }
 
-export function canonicalOwnedDirectory(path, label, owner = ownerUid()) {
+export function canonicalOwnedDirectory(path, _label, owner = ownerUid()) {
   const canonical = resolve(path);
-  const stat = lstatSync(canonical);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== owner || (stat.mode & 0o022) !== 0
-    || realpathSync(canonical) !== canonical) {
-    throw new Error(`${label} is not a canonical owner-controlled directory`);
+  const fail = (reason) => { throw new CanonicalOwnedDirectoryError(reason); };
+  let stat;
+  try {
+    stat = lstatSync(canonical);
+  } catch {
+    fail("directory");
   }
+  if (!stat.isDirectory() && !stat.isSymbolicLink()) fail("directory");
+  if (stat.isSymbolicLink()) fail("canonical");
+  let real;
+  try {
+    real = realpathSync(canonical);
+  } catch {
+    fail("canonical");
+  }
+  if (real !== canonical) fail("canonical");
+  if (stat.uid !== owner) fail("owner");
+  if ((stat.mode & 0o022) !== 0) fail("writable");
   return canonical;
 }
 

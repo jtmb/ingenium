@@ -1046,27 +1046,39 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("source recovery shim accepts 0755 owner-controlled directories and rejects writable, wrong-owner, and symlink directories", async () => {
+  it("source recovery shim reports bounded directory trust failures in first-failure order", async () => {
     const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-trust-"));
-    const message = "not a canonical owner-controlled directory";
     try {
       const ownerControlled = join(directory, "owner-controlled");
       mkdirSync(ownerControlled, { mode: 0o755 });
       chmodSync(ownerControlled, 0o755);
       expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture")).toBe(realpathSync(ownerControlled));
 
-      for (const mode of [0o775, 0o777]) {
-        chmodSync(ownerControlled, mode);
-        expect(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture")).toThrow(message);
-      }
-      chmodSync(ownerControlled, 0o755);
+      expect(shim.CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS)
+        .toEqual(["directory", "canonical", "owner", "writable"]);
+      const regularFile = join(directory, "regular-file");
+      writeFileSync(regularFile, "not a directory", { mode: 0o777 });
+      chmodSync(regularFile, 0o777);
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(regularFile, "fixture"))).toBe("directory");
+      expect(() => shim.canonicalOwnedDirectory(regularFile, regularFile)).toThrow(/^directory$/);
 
-      expect(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid + 1))
-        .toThrow(message);
-      symlinkSync(ownerControlled, join(directory, "directory-link"));
-      expect(() => shim.canonicalOwnedDirectory(join(directory, "directory-link"), "fixture")).toThrow(message);
+      const directoryLink = join(directory, "directory-link");
+      symlinkSync(ownerControlled, directoryLink);
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(directoryLink, "fixture"))).toBe("canonical");
+
+      chmodSync(ownerControlled, 0o775);
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(
+        ownerControlled,
+        "fixture",
+        lstatSync(ownerControlled).uid + 1,
+      ))).toBe("owner");
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))).toBe("writable");
+      chmodSync(ownerControlled, 0o777);
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))).toBe("writable");
+      expect(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))
+        .toThrow(/^writable$/);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
