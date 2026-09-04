@@ -397,6 +397,19 @@ export function hardenCanonicalRepositoryDirectories(sourcePath, expectedReposit
   return { repoRoot, packagesRoot, packageRoot, scriptsPath };
 }
 
+export function hardenGeneratedBootstrapDirectories(packageRoot, owner = ownerUid(), options = {}) {
+  const distPath = resolve(packageRoot, "dist");
+  const scriptsPath = resolve(distPath, "scripts");
+  for (const [path, label] of [[distPath, "Generated distribution directory"], [scriptsPath, "Generated scripts directory"]]) {
+    canonicalOwnedDirectory(path, label, owner, {
+      hardenWritablePath: path,
+      fileSystem: options.fileSystem,
+      afterOpen: options.afterOpen,
+    });
+  }
+  return scriptsPath;
+}
+
 function gitEnvironment() {
   return {
     PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -793,7 +806,7 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
     if (!propagate(build, "Extension recovery bootstrap build")) return;
     verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
 
-    const generatedDirectory = canonicalOwnedDirectory(resolve(packageRoot, "dist/scripts"), "Generated scripts directory", owner);
+    const generatedDirectory = hardenGeneratedBootstrapDirectories(packageRoot, owner);
     const generated = readTrustedRegularFile(resolve(generatedDirectory, "recovery-bootstrap.js"), "Generated recovery bootstrap", {
       executable: true,
       expectedMode: 0o555,

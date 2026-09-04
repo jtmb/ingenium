@@ -1269,6 +1269,75 @@ describe("managed command wrappers", () => {
     }
   });
 
+  it("source recovery shim hardens regenerated bootstrap directories and rejects identity failures", async () => {
+    const shim = await import(/* @vite-ignore */ `${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-generated-bootstrap-directories-"));
+    const owner = lstatSync(directory).uid;
+    const createGenerated = (name: string) => {
+      const packageRoot = join(directory, name);
+      const distPath = join(packageRoot, "dist");
+      const scriptsPath = join(distPath, "scripts");
+      mkdirSync(scriptsPath, { recursive: true });
+      chmodSync(distPath, 0o775);
+      chmodSync(scriptsPath, 0o777);
+      return { packageRoot, distPath, scriptsPath };
+    };
+    try {
+      const generated = createGenerated("valid");
+      const descriptorFchmod = vi.fn(fchmodSync);
+      const descriptorFsync = vi.fn(fsyncSync);
+      expect(shim.hardenGeneratedBootstrapDirectories(generated.packageRoot, owner, {
+        fileSystem: { fchmodSync: descriptorFchmod, fsyncSync: descriptorFsync },
+      })).toBe(generated.scriptsPath);
+      expect([generated.distPath, generated.scriptsPath].map((path) => lstatSync(path).mode & 0o777))
+        .toEqual([0o755, 0o755]);
+      expect(descriptorFchmod).toHaveBeenCalledTimes(2);
+      expect(descriptorFsync).toHaveBeenCalledTimes(2);
+
+      const wrongOwner = createGenerated("wrong-owner");
+      expect(trustedFailureReason(() => shim.hardenGeneratedBootstrapDirectories(wrongOwner.packageRoot, owner + 1)))
+        .toBe("owner");
+
+      const linked = createGenerated("linked");
+      const linkTarget = join(directory, "link-target");
+      mkdirSync(linkTarget);
+      rmSync(linked.scriptsPath, { recursive: true });
+      symlinkSync(linkTarget, linked.scriptsPath);
+      expect(trustedFailureReason(() => shim.hardenGeneratedBootstrapDirectories(linked.packageRoot, owner)))
+        .toBe("canonical");
+
+      const nonDirectory = createGenerated("non-directory");
+      rmSync(nonDirectory.scriptsPath, { recursive: true });
+      writeFileSync(nonDirectory.scriptsPath, "not a directory\n");
+      expect(trustedFailureReason(() => shim.hardenGeneratedBootstrapDirectories(nonDirectory.packageRoot, owner)))
+        .toBe("directory");
+
+      const swapped = createGenerated("swapped");
+      const replacement = join(directory, "replacement-dist");
+      mkdirSync(replacement, { mode: 0o775 });
+      chmodSync(replacement, 0o775);
+      expect(trustedFailureReason(() => shim.hardenGeneratedBootstrapDirectories(swapped.packageRoot, owner, {
+        afterOpen(path: string) {
+          if (path !== swapped.distPath) return;
+          renameSync(path, `${path}.opened`);
+          renameSync(replacement, path);
+        },
+      }))).toBe("canonical");
+      expect(lstatSync(swapped.distPath).mode & 0o777).toBe(0o775);
+
+      const shimSource = readFileSync(recoveryBootstrapShim, "utf8");
+      const runSource = shimSource.slice(shimSource.indexOf("export async function runRecoveryBootstrapShim"));
+      expect(runSource.indexOf("const build = await runFixed(")).toBeLessThan(
+        runSource.indexOf("hardenGeneratedBootstrapDirectories(packageRoot, owner)"),
+      );
+      expect(runSource.indexOf("hardenGeneratedBootstrapDirectories(packageRoot, owner)")).toBeLessThan(
+        runSource.indexOf('readTrustedRegularFile(resolve(generatedDirectory, "recovery-bootstrap.js")'),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("source recovery shim leaves trusted 0755 unchanged without descriptor mutation", async () => {
     const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
