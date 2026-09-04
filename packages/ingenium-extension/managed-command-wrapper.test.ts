@@ -4,9 +4,11 @@ import { createServer as createHttpServer } from "node:http";
 import {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
   fchmodSync,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -1046,15 +1048,90 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("source recovery shim reports bounded directory trust failures in first-failure order", async () => {
+  it("source recovery shim hardens owner-owned 0775 through the exact descriptor and redacts its audit", async () => {
     const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
-    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-trust-"));
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-harden-"));
+    try {
+      const ownerControlled = join(directory, "owner-controlled");
+      mkdirSync(ownerControlled, { mode: 0o775 });
+      chmodSync(ownerControlled, 0o775);
+      const audits: Array<Record<string, unknown>> = [];
+      const descriptorOpen = vi.fn(openSync);
+      const descriptorFchmod = vi.fn(fchmodSync);
+      const descriptorFsync = vi.fn(fsyncSync);
+
+      expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid, {
+        hardenGroupWritable: true,
+        retainAudit: (audit: Record<string, unknown>) => audits.push(audit),
+        fileSystem: { openSync: descriptorOpen, fchmodSync: descriptorFchmod, fsyncSync: descriptorFsync },
+      })).toBe(realpathSync(ownerControlled));
+
+      expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o755);
+      expect(descriptorOpen).toHaveBeenCalledWith(
+        realpathSync(ownerControlled),
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      expect(descriptorFchmod).toHaveBeenCalledTimes(1);
+      expect(descriptorFchmod).toHaveBeenCalledWith(descriptorOpen.mock.results[0]!.value, 0o755);
+      expect(descriptorFsync).toHaveBeenCalledWith(descriptorFchmod.mock.calls[0]![0]);
+      expect(audits).toEqual([{
+        schema: shim.CANONICAL_DIRECTORY_AUDIT_SCHEMA,
+        directoryPathSha256: sha256(realpathSync(ownerControlled)),
+        beforeMode: "0775",
+        afterMode: "0755",
+        result: "hardened",
+        timestamp: expect.any(String),
+      }]);
+      expect(shim.CANONICAL_DIRECTORY_AUDIT_PATH)
+        .toBe("/tmp/opencode/recovery-bootstrap-directory-audit.json");
+      expect(Object.keys(audits[0]!).sort()).toEqual([
+        "afterMode", "beforeMode", "directoryPathSha256", "result", "schema", "timestamp",
+      ]);
+      expect(JSON.stringify(audits[0])).not.toContain(ownerControlled);
+      expect(Buffer.byteLength(JSON.stringify(audits[0]))).toBeLessThan(512);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("source recovery shim leaves trusted 0755 unchanged without descriptor mutation", async () => {
+    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-unchanged-"));
     try {
       const ownerControlled = join(directory, "owner-controlled");
       mkdirSync(ownerControlled, { mode: 0o755 });
       chmodSync(ownerControlled, 0o755);
-      expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture")).toBe(realpathSync(ownerControlled));
+      const descriptorFchmod = vi.fn(fchmodSync);
+      const descriptorFsync = vi.fn(fsyncSync);
+      const audits: Array<Record<string, unknown>> = [];
+
+      expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid, {
+        hardenGroupWritable: true,
+        retainAudit: (audit: Record<string, unknown>) => audits.push(audit),
+        fileSystem: { fchmodSync: descriptorFchmod, fsyncSync: descriptorFsync },
+      })).toBe(realpathSync(ownerControlled));
+
+      expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o755);
+      expect(descriptorFchmod).not.toHaveBeenCalled();
+      expect(descriptorFsync).not.toHaveBeenCalled();
+      expect(audits).toEqual([expect.objectContaining({
+        beforeMode: "0755", afterMode: "0755", result: "unchanged",
+      })]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("source recovery shim rejects world-writable, wrong-owner, symlink, and non-directory paths", async () => {
+    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-reject-"));
+    try {
+      const ownerControlled = join(directory, "owner-controlled");
+      mkdirSync(ownerControlled, { mode: 0o755 });
+      chmodSync(ownerControlled, 0o755);
 
       expect(shim.CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS)
         .toEqual(["directory", "canonical", "owner", "writable"]);
@@ -1076,9 +1153,57 @@ describe("managed command wrappers", () => {
       ))).toBe("owner");
       expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))).toBe("writable");
       chmodSync(ownerControlled, 0o777);
-      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))).toBe("writable");
-      expect(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))
-        .toThrow(/^writable$/);
+      const audits: Array<Record<string, unknown>> = [];
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(
+        ownerControlled,
+        "fixture",
+        lstatSync(ownerControlled).uid,
+        { hardenGroupWritable: true, retainAudit: (audit: Record<string, unknown>) => audits.push(audit) },
+      ))).toBe("writable");
+      expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o777);
+      expect(audits).toEqual([expect.objectContaining({
+        beforeMode: "0777", afterMode: "0777", result: "rejected",
+      })]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("source recovery shim rejects inode swaps and failed descriptor hardening", async () => {
+    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-race-"));
+    try {
+      const ownerControlled = join(directory, "owner-controlled");
+      const replacement = join(directory, "replacement");
+      mkdirSync(ownerControlled, { mode: 0o775 });
+      mkdirSync(replacement, { mode: 0o775 });
+      chmodSync(ownerControlled, 0o775);
+      chmodSync(replacement, 0o775);
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(
+        ownerControlled,
+        "fixture",
+        lstatSync(ownerControlled).uid,
+        {
+          hardenGroupWritable: true,
+          afterOpen(path: string) {
+            renameSync(path, `${path}.opened`);
+            renameSync(replacement, path);
+          },
+        },
+      ))).toBe("canonical");
+      expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o775);
+
+      const failed = join(directory, "failed");
+      mkdirSync(failed, { mode: 0o775 });
+      chmodSync(failed, 0o775);
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(
+        failed,
+        "fixture",
+        lstatSync(failed).uid,
+        { hardenGroupWritable: true, fileSystem: { fchmodSync: vi.fn() } },
+      ))).toBe("writable");
+      expect(lstatSync(failed).mode & 0o777).toBe(0o775);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

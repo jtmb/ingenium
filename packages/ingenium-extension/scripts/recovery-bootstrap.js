@@ -4,7 +4,9 @@ import { execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -13,6 +15,7 @@ import {
   readdirSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmdirSync,
   unlinkSync,
   writeFileSync,
@@ -28,6 +31,8 @@ const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
 const GIT = "/usr/bin/git";
+export const CANONICAL_DIRECTORY_AUDIT_PATH = "/tmp/opencode/recovery-bootstrap-directory-audit.json";
+export const CANONICAL_DIRECTORY_AUDIT_SCHEMA = "ingenium.recovery.canonical-owned-directory.v1";
 const CHECKPOINT_PATHS = [
   "opencode.json",
   "package.json",
@@ -107,27 +112,120 @@ function ownerUid() {
   return process.getuid();
 }
 
-export function canonicalOwnedDirectory(path, _label, owner = ownerUid()) {
+function directoryIdentityMatches(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function directoryMode(stat) {
+  return stat.mode & 0o7777;
+}
+
+function auditMode(mode) {
+  return mode === undefined ? null : mode.toString(8).padStart(4, "0");
+}
+
+export function canonicalOwnedDirectory(path, _label, owner = ownerUid(), options = {}) {
   const canonical = resolve(path);
-  const fail = (reason) => { throw new CanonicalOwnedDirectoryError(reason); };
-  let stat;
+  const fileSystem = {
+    closeSync,
+    fchmodSync,
+    fstatSync,
+    fsyncSync,
+    lstatSync,
+    openSync,
+    realpathSync,
+    ...options.fileSystem,
+  };
+  let audited = false;
+  let beforeMode;
+  let afterMode;
+  const retainAudit = (result) => {
+    if (!options.retainAudit || audited) return;
+    audited = true;
+    options.retainAudit({
+      schema: CANONICAL_DIRECTORY_AUDIT_SCHEMA,
+      directoryPathSha256: sha256(canonical),
+      beforeMode: auditMode(beforeMode),
+      afterMode: auditMode(afterMode),
+      result,
+      timestamp: new Date().toISOString(),
+    });
+  };
+  const fail = (reason) => {
+    retainAudit("rejected");
+    throw new CanonicalOwnedDirectoryError(reason);
+  };
+  let reference;
   try {
-    stat = lstatSync(canonical);
+    reference = fileSystem.lstatSync(canonical);
   } catch {
     fail("directory");
   }
-  if (!stat.isDirectory() && !stat.isSymbolicLink()) fail("directory");
-  if (stat.isSymbolicLink()) fail("canonical");
+  if (!reference.isDirectory() && !reference.isSymbolicLink()) fail("directory");
+  if (reference.isSymbolicLink()) fail("canonical");
   let real;
   try {
-    real = realpathSync(canonical);
+    real = fileSystem.realpathSync(canonical);
   } catch {
     fail("canonical");
   }
   if (real !== canonical) fail("canonical");
-  if (stat.uid !== owner) fail("owner");
-  if ((stat.mode & 0o022) !== 0) fail("writable");
-  return canonical;
+  let descriptor;
+  try {
+    try {
+      descriptor = fileSystem.openSync(canonical, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    } catch {
+      fail("canonical");
+    }
+    const opened = fileSystem.fstatSync(descriptor);
+    const current = fileSystem.lstatSync(canonical);
+    beforeMode = directoryMode(opened);
+    afterMode = beforeMode;
+    if (!opened.isDirectory() || !current.isDirectory()) fail("directory");
+    if (current.isSymbolicLink() || !directoryIdentityMatches(reference, opened)
+      || !directoryIdentityMatches(opened, current) || directoryMode(reference) !== beforeMode
+      || directoryMode(current) !== beforeMode) fail("canonical");
+    if (reference.uid !== owner || opened.uid !== owner || current.uid !== owner) fail("owner");
+    try {
+      if (fileSystem.realpathSync(canonical) !== canonical) fail("canonical");
+    } catch (error) {
+      if (error instanceof CanonicalOwnedDirectoryError) throw error;
+      fail("canonical");
+    }
+    if ((beforeMode & 0o002) !== 0) fail("writable");
+    if ((beforeMode & 0o020) === 0) {
+      retainAudit("unchanged");
+      return canonical;
+    }
+    if (!options.hardenGroupWritable) fail("writable");
+
+    const hardenedMode = beforeMode & ~0o020;
+    try {
+      options.afterOpen?.(canonical);
+      fileSystem.fchmodSync(descriptor, hardenedMode);
+      fileSystem.fsyncSync(descriptor);
+      const hardened = fileSystem.fstatSync(descriptor);
+      const hardenedPath = fileSystem.lstatSync(canonical);
+      afterMode = directoryMode(hardened);
+      if (!hardened.isDirectory() || !hardenedPath.isDirectory()) fail("directory");
+      if (hardenedPath.isSymbolicLink() || !directoryIdentityMatches(opened, hardened)
+        || !directoryIdentityMatches(opened, hardenedPath)) fail("canonical");
+      if (hardened.uid !== owner || hardenedPath.uid !== owner) fail("owner");
+      if (directoryMode(hardenedPath) !== afterMode || afterMode !== hardenedMode
+        || (afterMode & 0o022) !== 0) fail("writable");
+      if (fileSystem.realpathSync(canonical) !== canonical) fail("canonical");
+    } catch (error) {
+      if (error instanceof CanonicalOwnedDirectoryError) throw error;
+      fail("writable");
+    }
+    retainAudit("hardened");
+    return canonical;
+  } catch (error) {
+    if (error instanceof CanonicalOwnedDirectoryError) throw error;
+    fail("canonical");
+  } finally {
+    if (descriptor !== undefined) fileSystem.closeSync(descriptor);
+  }
 }
 
 export function readTrustedRegularFile(path, label, options = {}) {
@@ -192,6 +290,49 @@ export function readTrustedRegularFile(path, label, options = {}) {
     return { bytes, path: canonical, sha256: sha256(bytes) };
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function privateTemporaryRoot(owner) {
+  const root = dirname(CANONICAL_DIRECTORY_AUDIT_PATH);
+  try {
+    mkdirSync(root, { mode: 0o700 });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+  }
+  return canonicalOwnedDirectory(root, "Recovery temporary root", owner);
+}
+
+function retainCanonicalDirectoryAudit(audit, owner) {
+  const root = privateTemporaryRoot(owner);
+  const directory = mkdtempSync(resolve(root, "recovery-directory-audit-"));
+  const stagedPath = resolve(directory, "audit.json");
+  const bytes = Buffer.from(`${JSON.stringify(audit)}\n`);
+  let moved = false;
+  try {
+    writeFileSync(stagedPath, bytes, { flag: "wx", mode: 0o600 });
+    const staged = readTrustedRegularFile(stagedPath, "Recovery directory audit", {
+      expectedMode: 0o600,
+      expectedOwner: owner,
+    });
+    if (!staged.bytes.equals(bytes)) throw new Error("Recovery directory audit content changed");
+    renameSync(stagedPath, CANONICAL_DIRECTORY_AUDIT_PATH);
+    moved = true;
+    const rootDescriptor = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      fsyncSync(rootDescriptor);
+    } finally {
+      closeSync(rootDescriptor);
+    }
+  } finally {
+    if (!moved) {
+      try {
+        unlinkSync(stagedPath);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    rmdirSync(directory);
   }
 }
 
@@ -423,13 +564,7 @@ function propagate(result, timeoutLabel) {
 }
 
 function privateStagedBootstrap(bytes, owner) {
-  const root = "/tmp/opencode";
-  try {
-    mkdirSync(root, { mode: 0o700 });
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
-  }
-  canonicalOwnedDirectory(root, "Recovery staging root", owner);
+  const root = privateTemporaryRoot(owner);
   const directory = mkdtempSync(resolve(root, "recovery-bootstrap-"));
   canonicalOwnedDirectory(directory, "Recovery staging directory", owner);
   const path = resolve(directory, "recovery-bootstrap.js");
@@ -450,7 +585,10 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
   const owner = ownerUid();
   const source = readTrustedRegularFile(fileURLToPath(import.meta.url), "Recovery bootstrap shim", { expectedOwner: owner });
-  const scriptsDirectory = canonicalOwnedDirectory(dirname(source.path), "Extension scripts directory", owner);
+  const scriptsDirectory = canonicalOwnedDirectory(dirname(source.path), "Extension scripts directory", owner, {
+    hardenGroupWritable: true,
+    retainAudit: (audit) => retainCanonicalDirectoryAudit(audit, owner),
+  });
   const packageRoot = canonicalOwnedDirectory(resolve(scriptsDirectory, ".."), "Extension package root", owner);
   const packagesRoot = canonicalOwnedDirectory(resolve(packageRoot, ".."), "Packages root", owner);
   const repoRoot = canonicalOwnedDirectory(resolve(packagesRoot, ".."), "Repository root", owner);
