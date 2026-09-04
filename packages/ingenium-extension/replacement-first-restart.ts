@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_BINDING_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 120_000;
+const MAX_HANDOFF_ACTIONS = 64;
+const MAX_HANDOFF_CHECKS = 32;
+const MAX_HANDOFF_PATHS = 32;
+const MAX_HANDOFF_COUNT = 1_000_000;
+const ACTION_KINDS = ["read", "search", "write", "edit", "execute"] as const;
+const CHECK_NAMES = ["test", "typecheck", "lint", "build", "format", "security", "other"] as const;
 
 export interface RestartProcessIdentity {
   pid: number;
@@ -23,6 +29,26 @@ export interface ReplacementIdentityExpectation {
 export interface RedactedRestartHandoff {
   status: "active" | "working" | "idle" | "completed" | "error";
   taskHash: string | null;
+  actions: Array<{
+    kind: typeof ACTION_KINDS[number];
+    result: "succeeded";
+    path: string | null;
+    targetHash: string | null;
+  }>;
+  changedPaths: Array<{
+    path: string;
+    operation: "write" | "edit";
+    additions: number;
+    deletions: number;
+    changeRevision: number;
+  }>;
+  checks: Array<{
+    name: typeof CHECK_NAMES[number];
+    status: "completed" | "failed";
+    result: "passed" | "failed";
+    exitCode: number | null;
+    targetHash: string;
+  }>;
   todos: {
     total: number;
     pending: number;
@@ -83,10 +109,15 @@ export interface ReplacementFirstRestartEvidence {
   phase: ReplacementFirstRestartPhase | "committed_recovery" | "failed";
   lastCompletedPhase: ReplacementFirstRestartPhase | null;
   handoffSha256: string;
+  actionCount: number;
+  changedPathCount: number;
+  checkCount: number;
   replacementIdentitySha256: string | null;
+  transactionSha256: string | null;
   retirementCommitted: boolean;
   oldParentRetired: boolean;
   replacementStopped: boolean;
+  occurredAt: string;
 }
 
 export interface ReplacementFirstRestartResult {
@@ -210,6 +241,75 @@ function nullableSha256(value: unknown, name: string): string | null {
   return value === null ? null : sha256(value, name);
 }
 
+export function isSafeRestartHandoffPath(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 1024 || value !== value.trim()
+    || value.startsWith("/") || value.startsWith("~") || /^[A-Za-z]:\//.test(value)
+    || value.includes("\\") || posix.normalize(value) !== value || /[\u0000-\u001f\u007f]/.test(value)) return false;
+  const segments = value.split("/");
+  const protectedName = /(^|[-_.])(secret|secrets|token|tokens|password|passwd|credential|credentials|private|apikey|api[-_]?key|id_rsa|env)([-_.]|$)/i;
+  return !segments.some((segment) => segment.length === 0 || segment === "." || segment === ".." || segment === ".git"
+    || Buffer.byteLength(segment, "utf8") > 255 || segment.startsWith("@") || protectedName.test(segment))
+    && value !== ".opencode/protected-runtime-index" && !value.startsWith(".opencode/protected-runtime-index/");
+}
+
+function handoffActions(value: unknown): RedactedRestartHandoff["actions"] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_HANDOFF_ACTIONS) throw new Error("handoff.actions is invalid");
+  return value.map((entry) => {
+    if (!hasExactKeys(entry, ["kind", "result", "path", "targetHash"])
+      || !ACTION_KINDS.includes(entry.kind as typeof ACTION_KINDS[number]) || entry.result !== "succeeded"
+      || (entry.path === null) === (entry.targetHash === null)
+      || (entry.path !== null && !isSafeRestartHandoffPath(entry.path))
+      || (entry.targetHash !== null && (typeof entry.targetHash !== "string" || !SHA256.test(entry.targetHash)))) {
+      throw new Error("handoff.actions is invalid");
+    }
+    return {
+      kind: entry.kind as RedactedRestartHandoff["actions"][number]["kind"],
+      result: "succeeded" as const,
+      path: entry.path as string | null,
+      targetHash: entry.targetHash as string | null,
+    };
+  });
+}
+
+function handoffChangedPaths(value: unknown): RedactedRestartHandoff["changedPaths"] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_HANDOFF_PATHS) throw new Error("handoff.changedPaths is invalid");
+  return value.map((entry) => {
+    if (!hasExactKeys(entry, ["path", "operation", "additions", "deletions", "changeRevision"])
+      || !isSafeRestartHandoffPath(entry.path) || !["write", "edit"].includes(entry.operation as string)) {
+      throw new Error("handoff.changedPaths is invalid");
+    }
+    return {
+      path: entry.path,
+      operation: entry.operation as "write" | "edit",
+      additions: boundedInteger(entry.additions, "handoff.changedPaths.additions", 0, MAX_HANDOFF_COUNT),
+      deletions: boundedInteger(entry.deletions, "handoff.changedPaths.deletions", 0, MAX_HANDOFF_COUNT),
+      changeRevision: boundedInteger(entry.changeRevision, "handoff.changedPaths.changeRevision", 1, Number.MAX_SAFE_INTEGER),
+    };
+  });
+}
+
+function handoffChecks(value: unknown): RedactedRestartHandoff["checks"] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_HANDOFF_CHECKS) throw new Error("handoff.checks is invalid");
+  return value.map((entry) => {
+    if (!hasExactKeys(entry, ["name", "status", "result", "exitCode", "targetHash"])
+      || !CHECK_NAMES.includes(entry.name as typeof CHECK_NAMES[number])
+      || !["completed", "failed"].includes(entry.status as string) || !["passed", "failed"].includes(entry.result as string)
+      || (entry.status === "completed") !== (entry.result === "passed")
+      || (entry.exitCode !== null && (!Number.isSafeInteger(entry.exitCode) || (entry.exitCode as number) < 0 || (entry.exitCode as number) > 255))
+      || (entry.exitCode !== null && (entry.result === "passed") !== (entry.exitCode === 0))
+      || typeof entry.targetHash !== "string" || !SHA256.test(entry.targetHash)) {
+      throw new Error("handoff.checks is invalid");
+    }
+    return {
+      name: entry.name as RedactedRestartHandoff["checks"][number]["name"],
+      status: entry.status as "completed" | "failed",
+      result: entry.result as "passed" | "failed",
+      exitCode: entry.exitCode as number | null,
+      targetHash: entry.targetHash,
+    };
+  });
+}
+
 function processIdentity(value: unknown, name: string): RestartProcessIdentity {
   if (!hasExactKeys(value, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])) {
     throw new Error(`${name} is invalid`);
@@ -241,7 +341,7 @@ function todoState(todos: RedactedRestartHandoff["todos"]): RedactedRestartHando
 }
 
 export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHandoff {
-  if (!hasExactKeys(value, ["status", "taskHash", "todos", "nextWork"])
+  if (!hasExactKeys(value, ["status", "taskHash", "actions", "changedPaths", "checks", "todos", "nextWork"])
     || !["active", "working", "idle", "completed", "error"].includes(value.status as string)
     || !hasExactKeys(value.todos, ["total", "pending", "inProgress", "completed", "cancelled", "state"])
     || !hasExactKeys(value.nextWork, ["kind", "referenceHash"])) throw new Error("handoff is invalid");
@@ -262,6 +362,9 @@ export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHand
   return {
     status: value.status as RedactedRestartHandoff["status"],
     taskHash: nullableSha256(value.taskHash, "handoff.taskHash"),
+    actions: handoffActions(value.actions),
+    changedPaths: handoffChangedPaths(value.changedPaths),
+    checks: handoffChecks(value.checks),
     todos,
     nextWork: {
       kind: nextWorkKind as RedactedRestartHandoff["nextWork"]["kind"],
@@ -369,19 +472,24 @@ export async function runReplacementFirstRestart<Session>(
   const handoffDigest = handoffSha256(request.handoff);
   let lastCompletedPhase: ReplacementFirstRestartPhase | null = null;
   let replacement: RestartProcessIdentity | undefined;
+  let transactionDigest: string | undefined;
   let oldParentRetired = false;
   let replacementStopped = false;
-  let terminalIdleAcknowledged = false;
   let retirementCommitted = false;
   const persist = async (phase: ReplacementFirstRestartPhase, committed = retirementCommitted): Promise<void> => {
     await dependencies.persistEvidence({
       phase,
       lastCompletedPhase: phase,
       handoffSha256: handoffDigest,
+      actionCount: request.handoff.actions.length,
+      changedPathCount: request.handoff.changedPaths.length,
+      checkCount: request.handoff.checks.length,
       replacementIdentitySha256: replacement ? identitySha256(replacement) : null,
+      transactionSha256: transactionDigest ?? null,
       retirementCommitted: committed,
       oldParentRetired,
       replacementStopped,
+      occurredAt: new Date().toISOString(),
     });
     lastCompletedPhase = phase;
   };
@@ -418,6 +526,8 @@ export async function runReplacementFirstRestart<Session>(
       || identitySha256(candidate) !== identitySha256(replacement)) {
       throw new Error("Replacement process identity is invalid");
     }
+    const transaction = createHash("sha256").update(handoffDigest).update("\0").update(identitySha256(replacement)).digest("hex");
+    transactionDigest = transaction;
     const replacementIsCurrent = await bounded("replacement process identity", request.timeouts.identityMs, (signal) =>
       dependencies.revalidateProcessIdentity(replacement!, "replacement", signal));
     if (!replacementIsCurrent) throw new Error("Replacement process identity changed");
@@ -426,34 +536,32 @@ export async function runReplacementFirstRestart<Session>(
     await bounded("replacement health", request.timeouts.healthMs, (signal) =>
       dependencies.verifyReplacementHealth(replacement!, request.replacement.port, signal));
     await persist("replacement_healthy");
-    const transactionDigest = createHash("sha256").update(handoffDigest).update("\0").update(identitySha256(replacement)).digest("hex");
     const creation = await bounded("replacement session", request.timeouts.sessionMs, (signal) =>
-      dependencies.createReplacementSession(replacement!, request.replacement.port, transactionDigest, signal));
-    if (!isRecord(creation) || creation.status !== "created" || creation.transactionSha256 !== transactionDigest
+      dependencies.createReplacementSession(replacement!, request.replacement.port, transaction, signal));
+    if (!isRecord(creation) || creation.status !== "created" || creation.transactionSha256 !== transaction
       || !Object.hasOwn(creation, "session")) throw new Error("Replacement session creation is invalid");
     const session = creation.session as Session;
     await persist("session_created");
 
     const memoryAcknowledgement = await bounded("typed memory acknowledgement", request.timeouts.memoryAckMs, (signal) =>
-      dependencies.acknowledgeTypedMemory(replacement!, session, handoffDigest, transactionDigest, signal));
+      dependencies.acknowledgeTypedMemory(replacement!, session, handoffDigest, transaction, signal));
     if (memoryAcknowledgement.status !== "acknowledged" || memoryAcknowledgement.handoffSha256 !== handoffDigest
-      || memoryAcknowledgement.transactionSha256 !== transactionDigest) {
+      || memoryAcknowledgement.transactionSha256 !== transaction) {
       throw new Error("Typed memory acknowledgement is invalid");
     }
     await persist("typed_memory_acknowledged");
     const idleAcknowledgement = await bounded("terminal idle acknowledgement", request.timeouts.terminalIdleMs, (signal) =>
-      dependencies.awaitTerminalIdleAcknowledgement(replacement!, session, handoffDigest, transactionDigest, signal));
+      dependencies.awaitTerminalIdleAcknowledgement(replacement!, session, handoffDigest, transaction, signal));
     if (idleAcknowledgement.status !== "idle" || idleAcknowledgement.handoffSha256 !== handoffDigest
-      || idleAcknowledgement.transactionSha256 !== transactionDigest || idleAcknowledgement.assistantResult !== "completed") {
+      || idleAcknowledgement.transactionSha256 !== transaction || idleAcknowledgement.assistantResult !== "completed") {
       throw new Error("Terminal idle acknowledgement is invalid");
     }
-    terminalIdleAcknowledged = true;
     await persist("terminal_idle_acknowledged");
 
     if (dependencies.prepareRecoveryOwner) {
       const owner = await bounded("recovery owner", request.timeouts.identityMs, (signal) =>
-        dependencies.prepareRecoveryOwner!(replacement!, session, handoffDigest, transactionDigest, signal));
-      if (owner.status !== "ready" || owner.transactionSha256 !== transactionDigest
+        dependencies.prepareRecoveryOwner!(replacement!, session, handoffDigest, transaction, signal));
+      if (owner.status !== "ready" || owner.transactionSha256 !== transaction
         || owner.replacementIdentitySha256 !== identitySha256(replacement)) {
         throw new Error("Recovery owner acknowledgement is invalid");
       }
@@ -471,7 +579,7 @@ export async function runReplacementFirstRestart<Session>(
     }
     if (dependencies.commitRecoveryOwner) {
       await bounded("recovery owner commit", request.timeouts.identityMs, (signal) =>
-        dependencies.commitRecoveryOwner!(transactionDigest, signal));
+        dependencies.commitRecoveryOwner!(transaction, signal));
     }
     retirementCommitted = true;
     await persist("retirement_committed", true);
@@ -487,10 +595,15 @@ export async function runReplacementFirstRestart<Session>(
           phase: "committed_recovery",
           lastCompletedPhase,
           handoffSha256: handoffDigest,
+          actionCount: request.handoff.actions.length,
+          changedPathCount: request.handoff.changedPaths.length,
+          checkCount: request.handoff.checks.length,
           replacementIdentitySha256: identitySha256(replacement),
+          transactionSha256: transactionDigest ?? null,
           retirementCommitted: true,
           oldParentRetired,
           replacementStopped: false,
+          occurredAt: new Date().toISOString(),
         });
       } catch {}
       return {
@@ -516,10 +629,15 @@ export async function runReplacementFirstRestart<Session>(
         phase: "failed",
         lastCompletedPhase,
         handoffSha256: handoffDigest,
+        actionCount: request.handoff.actions.length,
+        changedPathCount: request.handoff.changedPaths.length,
+        checkCount: request.handoff.checks.length,
         replacementIdentitySha256: replacement ? identitySha256(replacement) : null,
+        transactionSha256: transactionDigest ?? null,
         retirementCommitted,
         oldParentRetired,
         replacementStopped,
+        occurredAt: new Date().toISOString(),
       });
     } catch {}
     throw error;

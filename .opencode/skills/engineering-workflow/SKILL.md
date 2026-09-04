@@ -25,6 +25,21 @@ tags: ["engineering", "workflow", "agents", "debugging", "orchestrator", "loggin
 
 While any roadmap task or `TodoWrite` item remains open, the orchestrator must not emit a normal final/progress response, end a turn as a status update, or require a user reprompt. It must immediately dispatch the next declared phase. Token/turn pressure, partial agent completion, and unverified source changes are never terminal reasons. Only `PASS`, `ESCALATE_USER`, an explicit user-requested `STOP`, or an explicit user-requested `CANCELLED` may end a turn.
 
+### 🔴 Autonomous TUI Recovery
+
+Autonomous terminal user interface (TUI) recovery performs a read-only recovery
+preflight before any restart task is dispatched. A parent restart is forbidden
+until retained proof covers fresh nonce/enrollment, a durable typed handoff,
+external supervisor ownership, replacement health, reconnect/resume,
+rollback/adoption, and split-brain fencing. Legacy unenrolled parents use
+automatic bootstrap; the replacement is enrolled and healthy before the legacy
+parent is ever signaled. A task or tool transport abort is nonterminal and
+triggers immediate state recovery; an aborted restart task never ends the turn.
+Actual live TUI/session and `TodoWrite` replay evidence is mandatory for `PASS`;
+source tests and deployed canaries do not prove that boundary. The complete
+gate is in
+[`tui-recovery.md`](references/sources/agent-workflow-patterns/references/tui-recovery.md).
+
 ### 🔴 Self-Verify Everything Before Delivery
 
 Every agent task must self-verify: run typechecks, tests, lints before returning results. Never ask the user to verify — do it yourself. No simulated testing.
@@ -146,6 +161,7 @@ Always respect the current project scope. Don't cross-contaminate projects. Use 
 | File | Content |
 |------|---------|
 | [`references/sources/agent-workflow-patterns/source-index.md`](references/sources/agent-workflow-patterns/source-index.md) | Agent workflow patterns |
+| [`references/sources/agent-workflow-patterns/references/tui-recovery.md`](references/sources/agent-workflow-patterns/references/tui-recovery.md) | Autonomous TUI recovery preflight, restart gates, abort handling, and replay evidence |
 | [`references/sources/orchestrator-primer/source-index.md`](references/sources/orchestrator-primer/source-index.md) | Orchestrator pipeline primer |
 | [`references/sources/orchestrator-primer/references/`](references/sources/orchestrator-primer/references/) | Orchestrator flow |
 

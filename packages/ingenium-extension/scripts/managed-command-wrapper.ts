@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,6 +10,7 @@ import {
   type ReplacementFirstRestartDependencies,
   type ReplacementFirstRestartResult,
 } from "../replacement-first-restart.js";
+import { RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS } from "./recovery-bootstrap.js";
 
 const ARG = /^[A-Za-z0-9_@%+=:,./-]{1,512}$/;
 const BUILD_SCRIPTS = new Set(["build", "typecheck", "test", "lint"]);
@@ -20,7 +22,29 @@ const NPM = `${RUNTIME_BIN}/npm`;
 const OPENCODE = "/usr/local/bin/opencode";
 const DOCKER = "/usr/bin/docker";
 const CURL = "/usr/bin/curl";
-const PRODUCTION_RESTART = resolve(dirname(fileURLToPath(import.meta.url)), "production-restart.js");
+const RECOVERY_BOOTSTRAP = resolve(dirname(fileURLToPath(import.meta.url)), "recovery-bootstrap.js");
+const MANAGED_COMMAND_NONCE = "INGENIUM_MANAGED_COMMAND_NONCE";
+const RECOVERY_ENVIRONMENT = [
+  "CI",
+  "FORCE_COLOR",
+  "HOME",
+  "INGENIUM_API_URL",
+  "INGENIUM_MCP_AUDIENCE",
+  "INGENIUM_MCP_CREDENTIAL_FILE",
+  "INGENIUM_MCP_CREDENTIAL_PURPOSE",
+  "INGENIUM_PROJECT",
+  "INGENIUM_PROJECT_ID",
+  "INGENIUM_RECOVERY_OWNER_NONCE",
+  "INGENIUM_RECOVERY_OWNER_PID",
+  "INGENIUM_RECOVERY_OWNER_START_TICKS",
+  "INGENIUM_STORAGE_MAPPING_HASH",
+  "INGENIUM_WORKSPACE_ID",
+  "INGENIUM_WORKTREE",
+  "NO_COLOR",
+  "TERM",
+  "TMPDIR",
+] as const;
+export const MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS = RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS + 30_000;
 const GIT_CONFIGURATION = [
   "-c", "core.fsmonitor=false",
   "-c", "core.hooksPath=/dev/null",
@@ -151,7 +175,7 @@ export function managedBuildExecution(argv: string[]): { command: string; argv: 
     case "health":
       return { command: CURL, argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] };
     case "production-restart":
-      return { command: process.execPath, argv: [PRODUCTION_RESTART] };
+      return { command: process.execPath, argv: [RECOVERY_BOOTSTRAP] };
     default:
       throw new Error("Build wrapper rejected the command");
   }
@@ -162,6 +186,13 @@ export function managedBuildEnvironment(source: NodeJS.ProcessEnv = process.env)
     ...Object.fromEntries(Object.entries(source).filter(([key]) =>
       !key.startsWith("COMPOSE_") && !key.startsWith("DOCKER_") && !key.startsWith("npm_")
       && key !== "NODE_OPTIONS" && key !== "PATH")),
+    PATH: `${RUNTIME_BIN}:/usr/local/bin:/usr/bin:/bin`,
+  };
+}
+
+export function managedRecoveryEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(RECOVERY_ENVIRONMENT.flatMap((name) => source[name] === undefined ? [] : [[name, source[name]!]])),
     PATH: `${RUNTIME_BIN}:/usr/local/bin:/usr/bin:/bin`,
   };
 }
@@ -179,7 +210,8 @@ export function managedRepositoryArgv(argv: string[]): string[] {
 }
 
 export function managedGitEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(Object.entries(source).filter(([key]) => !key.startsWith("GIT_") && key !== "SSH_ASKPASS"));
+  const env = Object.fromEntries(Object.entries(source).filter(([key]) => !key.startsWith("GIT_")
+    && !key.startsWith("LD_") && !key.startsWith("DYLD_") && key !== "NODE_OPTIONS" && key !== "SSH_ASKPASS"));
   return {
     ...env,
     PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -193,6 +225,126 @@ export function managedGitEnvironment(source: NodeJS.ProcessEnv = process.env): 
   };
 }
 
+export interface ManagedProcessIdentity {
+  pid: number;
+  processGroupId: number;
+  startTimeTicks: number;
+  executableSha256: string;
+}
+
+export interface ManagedProcessGroupIdentity {
+  leader: ManagedProcessIdentity;
+  members: Map<number, ManagedProcessIdentity>;
+}
+
+export interface ManagedTimedOutProcessAttestation {
+  nonce: string;
+  executableSha256: string;
+}
+
+function managedProcessStat(pid: number): { processGroupId: number; startTimeTicks: number } | undefined {
+  try {
+    const source = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = source.slice(source.lastIndexOf(")") + 1).trim().split(/\s+/);
+    const processGroupId = Number(fields[2]);
+    const startTimeTicks = Number(fields[19]);
+    return Number.isSafeInteger(processGroupId) && processGroupId > 0
+      && Number.isSafeInteger(startTimeTicks) && startTimeTicks > 0
+      ? { processGroupId, startTimeTicks }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function managedProcessHasNonce(pid: number, nonce: string): boolean {
+  try {
+    return readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes(`${MANAGED_COMMAND_NONCE}=${nonce}`);
+  } catch {
+    return false;
+  }
+}
+
+function managedProcessIdentity(pid: number, nonce: string): ManagedProcessIdentity | undefined {
+  const stat = managedProcessStat(pid);
+  if (!stat || !managedProcessHasNonce(pid, nonce)) return undefined;
+  try {
+    const executable = realpathSync(readlinkSync(`/proc/${pid}/exe`));
+    return {
+      pid,
+      ...stat,
+      executableSha256: createHash("sha256").update(readFileSync(executable)).digest("hex"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function inspectManagedProcessGroup(pid: number, nonce: string): ManagedProcessGroupIdentity | undefined {
+  const leader = managedProcessIdentity(pid, nonce);
+  if (!leader || leader.processGroupId !== pid) return undefined;
+  const members = new Map<number, ManagedProcessIdentity>();
+  for (const entry of readdirSync("/proc")) {
+    if (!/^[1-9][0-9]*$/.test(entry)) continue;
+    const memberPid = Number(entry);
+    const stat = managedProcessStat(memberPid);
+    if (stat?.processGroupId !== pid) continue;
+    const member = managedProcessIdentity(memberPid, nonce);
+    if (!member) throw new Error("Managed process group contains an unattested member");
+    members.set(memberPid, member);
+  }
+  if (!members.has(pid)) throw new Error("Managed process-group leader is unavailable");
+  return { leader, members };
+}
+
+function sameManagedProcess(left: ManagedProcessIdentity | undefined, right: ManagedProcessIdentity): boolean {
+  return left?.pid === right.pid && left.processGroupId === right.processGroupId
+    && left.startTimeTicks === right.startTimeTicks && left.executableSha256 === right.executableSha256;
+}
+
+function groupRemainsAttested(
+  expected: ManagedProcessGroupIdentity,
+  current: ManagedProcessGroupIdentity | undefined,
+): boolean {
+  if (!current) return false;
+  if (!sameManagedProcess(current.leader, expected.leader)) {
+    throw new Error("Managed process-group leader identity changed before signal");
+  }
+  for (const [pid, member] of current.members) {
+    if (!sameManagedProcess(expected.members.get(pid), member)) {
+      throw new Error("Managed process-group member identity changed before signal");
+    }
+  }
+  return true;
+}
+
+export function terminateTimedOutManagedProcess(
+  pid: number | undefined,
+  detached: boolean,
+  attestation: ManagedTimedOutProcessAttestation,
+  dependencies: {
+    inspect?: typeof inspectManagedProcessGroup;
+    kill?: typeof process.kill;
+  } = {},
+): void {
+  if (!Number.isSafeInteger(pid) || pid! < 2) return;
+  const inspect = dependencies.inspect ?? inspectManagedProcessGroup;
+  const kill = dependencies.kill ?? process.kill;
+  const captured = inspect(pid!, attestation.nonce);
+  if (!captured) return;
+  if (captured.leader.executableSha256 !== attestation.executableSha256) {
+    throw new Error("Managed timed-out process executable identity changed");
+  }
+  const signal = (name: NodeJS.Signals) => {
+    if (!groupRemainsAttested(captured, inspect(pid!, attestation.nonce))) return;
+    try { kill(detached ? -pid! : pid!, name); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  };
+  signal("SIGTERM");
+  if (detached) signal("SIGKILL");
+}
+
 function assertNonExecutableGitConfiguration(cwd: string, env: NodeJS.ProcessEnv): void {
   const configuration = execFileSync(GIT, ["-C", cwd, "config", "--null", "--list", "--includes"], {
     encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024, env,
@@ -202,7 +354,16 @@ function assertNonExecutableGitConfiguration(cwd: string, env: NodeJS.ProcessEnv
   }
 }
 
-export function managedCommand(kind: "repository" | "build", argv: string[], cwd = process.cwd()): number {
+export function managedCommand(
+  kind: "repository" | "build",
+  argv: string[],
+  cwd = process.cwd(),
+  dependencies: {
+    runner?: typeof spawnSync;
+    terminateTimedOut?: typeof terminateTimedOutManagedProcess;
+  } = {},
+): number {
+  const productionRestart = kind === "build" && argv[0] === "deployment" && argv[1] === "production-restart";
   let command: string;
   let commandArgv: string[];
   let env: NodeJS.ProcessEnv | undefined;
@@ -215,19 +376,41 @@ export function managedCommand(kind: "repository" | "build", argv: string[], cwd
     const execution = managedBuildExecution(argv);
     command = execution.command;
     commandArgv = execution.argv;
-    env = managedBuildEnvironment();
+    env = productionRestart ? managedRecoveryEnvironment() : managedBuildEnvironment();
   }
   const before = kind === "build" ? sourceFingerprint(cwd) : undefined;
-  const result = spawnSync(command, commandArgv, { cwd, stdio: "inherit", shell: false, env });
+  const detached = productionRestart && process.platform !== "win32";
+  const managedNonce = productionRestart ? randomBytes(32).toString("base64url") : undefined;
+  const timedOutProcessAttestation = productionRestart ? {
+    nonce: managedNonce!,
+    executableSha256: createHash("sha256").update(readFileSync(realpathSync(process.execPath))).digest("hex"),
+  } : undefined;
+  const result = (dependencies.runner ?? spawnSync)(command, commandArgv, {
+    cwd,
+    stdio: "inherit",
+    shell: false,
+    env: managedNonce ? { ...env, [MANAGED_COMMAND_NONCE]: managedNonce } : env,
+    ...(productionRestart ? { timeout: MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS, killSignal: "SIGTERM", detached } : {}),
+  });
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
+    (dependencies.terminateTimedOut ?? terminateTimedOutManagedProcess)(result.pid, detached, timedOutProcessAttestation!);
+    const error = new Error(`Managed recovery bootstrap timed out after ${MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS}ms`) as NodeJS.ErrnoException;
+    error.code = "ETIMEDOUT";
+    throw error;
+  }
   if (result.error) throw result.error;
   if (kind === "build" && sourceFingerprint(cwd) !== before) throw new Error("Build wrapper produced source changes");
   return result.status ?? 1;
 }
 
 export function runManagedCommandCli(kind: "repository" | "build", argv = process.argv): void {
-  if (argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
-  const commandArgv = kind === "repository"
-    ? decodeManagedRepositoryArgv(argv[2]!)
-    : decodeManagedBuildArgv(argv[2]!);
+  const fixedProductionRestart = kind === "build" && argv.length === 4
+    && argv[2] === "deployment" && argv[3] === "production-restart";
+  if (!fixedProductionRestart && argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
+  const commandArgv = fixedProductionRestart
+    ? validateManagedBuildArgv(argv.slice(2))
+    : kind === "repository"
+      ? decodeManagedRepositoryArgv(argv[2]!)
+      : decodeManagedBuildArgv(argv[2]!);
   process.exitCode = managedCommand(kind, commandArgv);
 }

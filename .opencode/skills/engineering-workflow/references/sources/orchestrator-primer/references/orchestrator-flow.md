@@ -14,6 +14,16 @@
 10. Only Plan mode may use interactive decision questions. Orchestration never invokes the `question` tool; return `ESCALATE_USER` in the normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 11. Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or a narrow escalation condition is proven; never report completion from source tests alone. Runtime-impacting changes require a named, authorized writer deployment owner with Docker/Compose permission and a deployment wave, which rebuilds and restarts the current merged source and health-checks actual routes. Visual/UI gates and full acceptance are mandatory before `PASS`; reconcile roadmap markers and `TodoWrite` before the final response.
 
+For autonomous terminal user interface (TUI) recovery, insert a read-only
+recovery preflight before restart dispatch. The restart gate requires retained
+proof of nonce/enrollment, durable handoff, external supervisor ownership,
+replacement health, reconnect/resume, rollback/adoption, and split-brain
+fencing. An unenrolled legacy parent is automatically bootstrapped and is never
+signaled first. A task/tool transport abort is nonterminal and starts immediate
+state recovery; an aborted restart task never ends the turn. Actual TUI/session
+and `TodoWrite` replay evidence is mandatory; source or deployed evidence does
+not substitute for it.
+
 ## User-Facing Communication
 
 The orchestrator starts with a one-to-three-sentence plain-language introduction, follows with the structured contract, and interprets each completed phase in human terms: what changed, which checks ran, the finding classification, and what dependency comes next. While work remains open, the interpreted handoff immediately precedes the next phase rather than asking for a reprompt. The terminal summary includes status, changed files, verification execution count, findings or remaining work, and Markdown links or repository paths to retained source-test, deployed-runtime, or model/session proof.

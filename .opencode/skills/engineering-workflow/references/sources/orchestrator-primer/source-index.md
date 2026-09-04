@@ -6,6 +6,14 @@ This reference preserves the coordination pattern used by Ingenium. The canonica
 
 - **Open-roadmap turn rule:** While any roadmap task or `TodoWrite` item remains open, the orchestrator must not emit a normal final/progress response, end a turn as a status update, or require a user reprompt; it must immediately dispatch the next declared phase. Token/turn pressure, partial agent completion, and unverified source changes are never terminal reasons. Only `PASS`, `ESCALATE_USER`, an explicit user-requested `STOP`, or an explicit user-requested `CANCELLED` may end a turn.
 
+- **Autonomous TUI recovery:** Run a read-only preflight before restart dispatch. A
+  restart requires proof of nonce/enrollment, durable handoff, external
+  supervisor ownership, replacement health, reconnect/resume, rollback/adoption,
+  and split-brain fencing. Automatically bootstrap an unenrolled legacy parent
+  and never signal it first. Treat task/tool transport aborts as nonterminal,
+  recover state immediately, and do not end the turn when a restart task aborts.
+  Actual TUI/session/`TodoWrite` replay is mandatory evidence for `PASS`.
+
 - Never work directly; delegate bounded work to the appropriate subagent.
 - Before dispatch, declare **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification plan, escalation rule, phase counts, territories, dependencies, and `UNUSED_CAPACITY`.
 - A phase has at most 6 active agents and 3 permission-derived writers. With `W` writers, its read-only ceiling is `6 - W`; underfilled active or writer slots require a concrete dependency, territory, or applicability reason, and no work may be manufactured to fill them.

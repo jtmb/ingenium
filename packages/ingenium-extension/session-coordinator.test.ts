@@ -1451,7 +1451,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     }
   });
 
-  it("trusteddeployment admits fixed operations only for trusted Premium runtime evidence", async () => {
+  it("trusteddeployment admits exact recovery commands only for trusted deployment-owner identities", async () => {
     const fixture = coordinationFixture();
     const evidence = { sessionID: "deployment-session", callID: "", tool: "bash", args: {}, agent: "" };
     const process = processHarness("deployment-project", "/tmp/deployment/home", "/tmp/deployment/xdg", 43026, {});
@@ -1491,7 +1491,12 @@ describe("SessionCoordinatorPlugin hooks", () => {
       { tool: "bash", sessionID: "unknown-session", callID: "forged-premium" },
       { args: { command: command("compose-ps") } },
     )).rejects.toThrow("Managed shell coordination denied the command");
-    for (const agent of ["ingenium-software-engineer-fast", "ingenium-qa", "ingenium-security-auditor"]) {
+    for (const agent of [
+      "ingenium-software-engineer-fast",
+      "ingenium-qa",
+      "ingenium-security-auditor",
+      "ingenium-recovery-engineer-copy",
+    ]) {
       evidence.agent = agent;
       evidence.callID = `denied-${agent}`;
       evidence.args = { command: command("compose-ps") };
@@ -1508,6 +1513,36 @@ describe("SessionCoordinatorPlugin hooks", () => {
       { tool: "bash", sessionID, callID: evidence.callID }, { args: evidence.args },
     )).rejects.toThrow("Managed shell coordination denied the command");
     authenticateDeployment = true;
+    evidence.agent = "ingenium-recovery-engineer";
+    const recoveryCommands = [
+      "ingenium-build deployment production-restart",
+      "git add -- docs/reference/ROADMAP.md",
+      "git add -- tests/artifacts/tui-recovery/run-20260903/restart.json",
+      "git commit -m 'recovery evidence checkpoint'",
+    ];
+    for (const [index, recoveryCommand] of recoveryCommands.entries()) {
+      const input = {
+        tool: "bash",
+        sessionID,
+        callID: `recovery-${index}`,
+        args: { command: recoveryCommand },
+      };
+      evidence.callID = input.callID;
+      evidence.args = input.args;
+      await hooks["tool.execute.before"]!(input, { args: input.args });
+      await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
+    }
+    for (const command of [
+      "git status",
+      "git diff -- docs/reference/ROADMAP.md",
+      "git diff --cached -- tests/artifacts/tui-recovery/run-20260903/restart.json",
+      "git log --oneline -10",
+    ]) {
+      const input = { tool: "bash", sessionID, callID: `recovery-read-${command.length}`, args: { command } };
+      await expect(hooks["tool.execute.before"]!(input, { args: input.args })).resolves.toBeUndefined();
+    }
+
+    evidence.agent = "ingenium-software-engineer-premium";
     for (const operation of ["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health"]) {
       const input = { tool: "bash", sessionID, callID: `deployment-${operation}`, args: { command: command(operation) } };
       evidence.callID = input.callID;
@@ -1517,19 +1552,36 @@ describe("SessionCoordinatorPlugin hooks", () => {
         .toEqual([{ claim: { kind: "reserved", name: "@build" } }]);
       await hooks["tool.execute.after"]!(input, { title: "", output: "", metadata: {} });
     }
+    evidence.callID = "deployment-production-restart";
+    evidence.args = { command: "ingenium-build deployment production-restart" };
+    const restartInput = { tool: "bash", sessionID, callID: evidence.callID, args: evidence.args };
+    await hooks["tool.execute.before"]!(restartInput, { args: restartInput.args });
+    await hooks["tool.execute.after"]!(restartInput, { title: "", output: "", metadata: {} });
     evidence.callID = "premium-typecheck";
     evidence.args = { command: `ingenium-build ${Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")}` };
     const verificationInput = { tool: "bash", sessionID, callID: evidence.callID, args: evidence.args };
     await hooks["tool.execute.before"]!(verificationInput, { args: verificationInput.args });
     await hooks["tool.execute.after"]!(verificationInput, { title: "", output: "", metadata: {} });
 
-    expect(preflight).toHaveBeenCalledTimes(8);
-    expect(request).toHaveBeenCalledTimes(7);
-    expect(runtimeClient.session.get).toHaveBeenCalledTimes(12);
-    expect(runtimeClient.session.messages).toHaveBeenCalledTimes(11);
+    expect(preflight).toHaveBeenCalledTimes(13);
+    expect(request).toHaveBeenCalledTimes(12);
+    expect(runtimeClient.session.get).toHaveBeenCalledTimes(18);
+    expect(runtimeClient.session.messages).toHaveBeenCalledTimes(17);
 
+    evidence.agent = "ingenium-recovery-engineer";
     for (const args of [
       { command: command("compose-down") },
+      { command: `ingenium-build ${Buffer.from(JSON.stringify(["run", "typecheck", "--workspace=packages/ingenium-extension"])).toString("base64url")}` },
+      { command: "npm run build --workspace=packages/ingenium-extension" },
+      { command: "npm run typecheck --workspace=packages/ingenium-extension" },
+      { command: "npm run test --workspace=packages/ingenium-extension -- session-coordinator.test.ts -t trusteddeployment" },
+      { command: "npm run test --workspace=packages/ingenium-extension" },
+      { command: "npm run typecheck --workspace=services/ingenium-api" },
+      { command: "git add -- packages/ingenium-extension/session-coordinator.ts" },
+      { command: "git add -- ../outside.ts" },
+      { command: "git commit -m 'recovery boundary'" },
+      { command: "git commit --amend -m 'recovery boundary'" },
+      { command: "git reset --hard" },
       { command: command("compose-up"), environment: { COMPOSE_FILE: "/tmp/attacker.yml" } },
       { command: command("compose-up"), workdir: "/tmp" },
       { command: `${command("compose-up")} && touch marker` },
@@ -1555,7 +1607,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     )).rejects.toThrow("Managed shell coordination denied the command");
   });
 
-  it("sideeffect blocks a non-Premium managed build before repository code can access deployment privileges", async () => {
+  it("sideeffect blocks a non-deployment-owner managed build before repository code can access deployment privileges", async () => {
     const directory = mkdtempSync(join(tmpdir(), "ingenium-untrusted-build-"));
     const marker = join(directory, "side-effect");
     const secretExposure = join(directory, "secret-exposure");
@@ -2423,6 +2475,34 @@ describe("SessionCoordinatorPlugin hooks", () => {
     expect(second.system).toEqual([]);
   });
 
+  it("redacts a protected runtime action at restart serialization without poisoning later actions", async () => {
+    const fixture = coordinationFixture();
+    const process = processHarness("restart-redaction", "/tmp/restart-redaction/home", "/tmp/restart-redaction/xdg", 43043, {});
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, now: () => 43, token: () => "R".repeat(32), disableHeartbeat: true,
+    });
+    const hooks = coordinator.hooks();
+    const sessionID = "restart-redaction-session";
+    const protectedArgs = { filePath: ".opencode/protected-runtime-index" };
+
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: sessionID } } } as any });
+    await expect(hooks["tool.execute.after"]!(
+      { tool: "read", sessionID, callID: "protected-read", args: protectedArgs },
+      { title: "", output: "", metadata: {} },
+    )).resolves.toBeUndefined();
+    await expect(hooks["tool.execute.after"]!(
+      { tool: "read", sessionID, callID: "ordinary-read", args: { filePath: "src/ordinary.ts" } },
+      { title: "", output: "", metadata: {} },
+    )).resolves.toBeUndefined();
+
+    const state = (coordinator as any).sessions.get(sessionID);
+    expect((coordinator as any).recoveryHandoff(state).actions).toEqual([
+      { kind: "read", result: "succeeded", path: null, targetHash: createHash("sha256")
+        .update("read").update("\0").update(JSON.stringify(protectedArgs)).digest("hex") },
+      { kind: "read", result: "succeeded", path: "src/ordinary.ts", targetHash: null },
+    ]);
+  });
+
   it("records git status as a passing typed check", async () => {
     const fixture = coordinationFixture();
     const process = processHarness("status-project", "/tmp/status/home", "/tmp/status/xdg", 43033, {});
@@ -2713,6 +2793,11 @@ describe("SessionCoordinatorPlugin hooks", () => {
         schemaVersion: 1,
         memory: coordinationBlock(capturedOutput.system, "COORDINATION_MEMORY_V2"),
         activity: coordinationBlock(capturedOutput.system, "COORDINATION_ACTIVITY_V1"),
+        operationalEntries: [expect.objectContaining({
+          status: "idle",
+          actions: [expect.objectContaining({ kind: "write", result: "succeeded" })],
+          changedPaths: [expect.objectContaining({ operation: "write" })],
+        })],
       }]);
       expect(statSync(directory).mode & 0o777).toBe(0o700);
       expect(statSync(captureFile).mode & 0o777).toBe(0o600);

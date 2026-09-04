@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
 CONFIG="$REPO_ROOT/opencode.json"
 QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
-EXPECTED_LOGICAL_AGENT_COUNT=12
+EXPECTED_LOGICAL_AGENT_COUNT=13
 MAX_ACTIVE_SUBAGENTS=6
 MAX_CONCURRENT_WRITERS=3
 MAX_CONCURRENT_TODOS=3
@@ -828,6 +828,19 @@ if (!isRecord(config?.agent)) {
 }
 
 const scoutPermission = config?.agent?.["ingenium-scout"]?.permission;
+const recoveryPermission = config?.agent?.["ingenium-recovery-engineer"]?.permission;
+const recoveryProfilePath = path.resolve(agentsDir, "execution", "ingenium-recovery-engineer.md");
+const recoveryProfileSource = isRegularFile(recoveryProfilePath)
+  ? readText(recoveryProfilePath, "ingenium-recovery-engineer canonical profile")
+  : null;
+if (!isRecord(recoveryPermission) || recoveryProfileSource === null) {
+  errors.push("ingenium-recovery-engineer must retain readable root and profile permission objects");
+} else {
+  const profileBash = parsePermission(recoveryProfileSource, recoveryProfilePath).value?.bash;
+  if (!same(profileBash, recoveryPermission.bash)) {
+    errors.push("ingenium-recovery-engineer profile/root bash rules must match exactly, including deny-first order");
+  }
+}
 const expectedScoutCoordinationTools = new Set([
   "ingenium_coordination_status",
   "ingenium_coordination_memory_read",
@@ -961,6 +974,7 @@ fi
 
 declare -A TODOWRITE_OWNER_NAMES=(
   [ingenium-orchestrator]=1
+  [ingenium-recovery-engineer]=1
   [ingenium-software-engineer-fast]=1
   [ingenium-software-engineer-premium]=1
 )
@@ -978,11 +992,12 @@ for file in "${AGENT_FILES[@]}"; do
   fi
 done
 if [[ "$todowrite_permissions_valid" -eq 1 ]]; then
-  pass "TodoWrite is allowed only for the orchestrator and both software-engineer writers"
+  pass "TodoWrite is allowed only for the orchestrator and three implementation/recovery writers"
 fi
 
 node - \
   "$AGENTS_DIR/primary/ingenium-orchestrator.md" \
+  "$AGENTS_DIR/execution/ingenium-recovery-engineer.md" \
   "$AGENTS_DIR/execution/ingenium-software-engineer-fast.md" \
   "$AGENTS_DIR/execution/ingenium-software-engineer-premium.md" <<'NODE' || FAILED=1
 const fs = require("fs");
@@ -1068,6 +1083,7 @@ const roleMatrix = {
   "ingenium-docs": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
   "ingenium-software-engineer-fast": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
   "ingenium-software-engineer-premium": { edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
+  "ingenium-recovery-engineer": { edit: "object", write: "object", bash: "object", glob: "allow", grep: "allow", todowrite: "allow" },
   "ingenium-orchestrator": { edit: "deny", write: "deny", bash: "object", glob: "deny", grep: "deny", todowrite: "allow" },
   "ingenium-qa": { edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
   "ingenium-security-auditor": { edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
@@ -1098,6 +1114,59 @@ for (const [name, expected] of Object.entries(roleMatrix)) {
   if (expected.edit === "deny" && (permission.edit !== "deny" || permission.write !== "deny")) {
     errors.push(`${name} read-only boundary must explicitly deny edit and write`);
   }
+}
+
+const recovery = config.agent?.["ingenium-recovery-engineer"];
+const expectedRecoveryWritable = {
+  "*": "deny",
+  "docs/reference/ROADMAP.md": "allow",
+  "tests/artifacts/tui-recovery/**": "allow",
+};
+const expectedRecoveryBash = {
+  "*": "deny",
+  "ingenium-build deployment production-restart": "allow",
+  "git status": "allow",
+  "git diff -- docs/reference/ROADMAP.md": "allow",
+  "git diff -- tests/artifacts/tui-recovery/*": "allow",
+  "git diff --cached -- docs/reference/ROADMAP.md": "allow",
+  "git diff --cached -- tests/artifacts/tui-recovery/*": "allow",
+  "git log --oneline -10": "allow",
+  "git add -- docs/reference/ROADMAP.md": "allow",
+  "git add -- tests/artifacts/tui-recovery/*": "allow",
+  "git commit -m 'recovery evidence checkpoint'": "allow",
+};
+if (!isRecord(recovery) || recovery.model !== "openai/gpt-5.6-sol" || recovery.variant !== "high"
+  || recovery.mode !== "subagent") {
+  errors.push("ingenium-recovery-engineer must be a high-variant openai/gpt-5.6-sol subagent");
+} else if (JSON.stringify(recovery.permission?.bash) !== JSON.stringify(expectedRecoveryBash)) {
+  errors.push("ingenium-recovery-engineer bash permission must retain the exact deny-first finite-command matrix");
+}
+for (const tool of ["edit", "write"]) {
+  if (JSON.stringify(recovery?.permission?.[tool]) !== JSON.stringify(expectedRecoveryWritable)) {
+    errors.push(`ingenium-recovery-engineer ${tool} permission must deny executable/package paths and allow only roadmap/recovery evidence`);
+  }
+}
+for (const tool of ["question", "webfetch", "websearch", "playwright_*", "browser_*"]) {
+  if (recovery?.permission?.[tool] !== "deny") errors.push(`ingenium-recovery-engineer permission.${tool} must be deny`);
+}
+if (recovery?.permission?.task?.["*"] !== "deny") errors.push("ingenium-recovery-engineer must deny task delegation");
+const recoveryCoordination = new Set([
+  "ingenium_coordination_status",
+  "ingenium_coordination_memory_read",
+  "ingenium_coordination_update",
+  "ingenium_coordination_claim",
+  "ingenium_coordination_release",
+]);
+for (const tool of recoveryCoordination) {
+  if (recovery?.permission?.[tool] !== "allow") errors.push(`ingenium-recovery-engineer must allow ${tool}`);
+}
+for (const [tool, grant] of Object.entries(recovery?.permission ?? {})) {
+  if (tool.startsWith("ingenium_coordination_") && grant === "allow" && !recoveryCoordination.has(tool)) {
+    errors.push(`ingenium-recovery-engineer has an unexpected coordination grant: ${tool}`);
+  }
+}
+if (config.agent?.["ingenium-orchestrator"]?.permission?.task?.["ingenium-recovery-engineer"] !== "allow") {
+  errors.push("ingenium-orchestrator must explicitly allow delegation to ingenium-recovery-engineer");
 }
 for (const tool of [
   "playwright_browser_click", "playwright_browser_evaluate", "playwright_browser_fill_form",
@@ -1187,11 +1256,11 @@ if [[ "$FAILED" -eq 0 ]]; then pass "active profiles have required frontmatter a
 
 # Writer classification is derived from every profile's permission block, not
 # from a hard-coded list of implementation agents.  Keep explicit regression
-# guards for the two profiles that previously got misclassified because they
-# use nested permission maps.
+# guards for profiles that use nested permission maps and must remain writers.
 for expected_writer in \
   ingenium-software-engineer-fast \
   ingenium-software-engineer-premium \
+  ingenium-recovery-engineer \
   ingenium-docs \
   browser-agent; do
   if [[ -n "${WRITER_NAMES[$expected_writer]:-}" ]]; then
@@ -1249,6 +1318,7 @@ const expected = {
   "ingenium-qa-vision": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-qa-vision.md"],
   "ingenium-software-engineer-fast": ["openai/gpt-5.6-luna", "max", ".opencode/agents/execution/ingenium-software-engineer-fast.md"],
   "ingenium-software-engineer-premium": ["openai/gpt-5.6-sol", "high", ".opencode/agents/execution/ingenium-software-engineer-premium.md"],
+  "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "high", ".opencode/agents/execution/ingenium-recovery-engineer.md"],
   "ingenium-orchestrator": ["openai/gpt-5.6-sol", "high", ".opencode/agents/primary/ingenium-orchestrator.md"],
   "ingenium-explore": ["openai/gpt-5.6-sol", "medium", ".opencode/agents/research/ingenium-explore.md"],
   "ingenium-scout": ["openai/gpt-5.6-luna", "max", ".opencode/agents/research/ingenium-scout.md"],
@@ -1656,12 +1726,13 @@ validate_orchestrator_bash_permissions() {
 
 validate_coordination_tool_permissions() {
   local premium_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+  local recovery_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-recovery-engineer.md"
   local scout_profile="$REPO_ROOT/.opencode/agents/research/ingenium-scout.md"
 
-  if ! node - "$ORCHESTRATOR" "$premium_profile" "$scout_profile" "$CONFIG" <<'NODE'
+  if ! node - "$ORCHESTRATOR" "$premium_profile" "$recovery_profile" "$scout_profile" "$CONFIG" <<'NODE'
 const fs = require("fs");
 
-const [orchestratorPath, premiumPath, scoutPath, configPath] = process.argv.slice(2);
+const [orchestratorPath, premiumPath, recoveryPath, scoutPath, configPath] = process.argv.slice(2);
 const expected = new Map([
   [orchestratorPath, {
     required: ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
@@ -1670,6 +1741,16 @@ const expected = new Map([
   [premiumPath, {
     required: ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
     forbidden: [],
+  }],
+  [recoveryPath, {
+    required: [
+      "ingenium_coordination_status",
+      "ingenium_coordination_memory_read",
+      "ingenium_coordination_update",
+      "ingenium_coordination_claim",
+      "ingenium_coordination_release",
+    ],
+    forbidden: ["ingenium_coordination_handoff"],
   }],
   [scoutPath, {
     required: ["ingenium_docs_search_semantic", "ingenium_coordination_status", "ingenium_coordination_memory_read"],
@@ -1749,7 +1830,7 @@ if (errors.length > 0) {
   console.error(errors.join("\n"));
   process.exit(1);
 }
-console.log("PASS: coordination tools use top-level grants; Scout has status and typed-memory reads without mixed or mutation tools");
+console.log("PASS: coordination tools use top-level grants; Recovery has only required recovery operations; Scout remains read-only");
 NODE
   then
     return 0

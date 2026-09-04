@@ -33,6 +33,12 @@ runtime canary has yet passed for this policy. The retained
 is historical coordination evidence; it does not prove either condition or
 replace current runtime acceptance.
 
+`RECOVERY-101` is the next non-conflicting autonomous TUI recovery contract.
+Its policy work is started in the roadmap, but its runtime implementation and
+any parent-restart dispatch remain blocked on the open `RECOVERY-100` recovery
+work and the restart gates defined below. No source test, deployed canary, or
+file-only result is treated as TUI/session/`TodoWrite` replay evidence.
+
 The historical r24 profile used OpenCode `1.18.9`,
 `ingenium-software-engineer-premium`, `openai/gpt-5.6-sol`, and variant `high`.
 Those values identify that prior run only; do not treat them as current policy
@@ -232,9 +238,44 @@ evidence, not a reason to repeat a mutation.
 
 ## 5. Recovery
 
+### Autonomous TUI recovery gate
+
+Recovery of a terminal user interface (TUI) parent or session is replacement-
+first and fail-closed. Before dispatching any restart task, perform a
+read-only preflight and retain its result. Read the exact project, workspace,
+storage mapping, canonical worktree, parent/session/incarnation,
+epoch/fence/claim, nonce/enrollment, newest durable handoff, exact changed
+paths, and task/`TodoWrite`/status/`nextWork` state. The preflight must not
+signal, stop, restart, mutate, claim, release, or clear state.
+
+Do not dispatch a parent restart until one proof bundle establishes every gate:
+
+- fresh nonce/enrollment for the replacement;
+- durable typed handoff covering actions, changed paths, checks/results,
+  task/`TodoWrite` state, status, and `nextWork`;
+- ownership of the restart by an external supervisor, not the parent being
+  replaced;
+- replacement health on the current merged source and intended binding;
+- reconnect/resume at the first unfinished phase without replaying an uncertain
+  mutation;
+- a retained rollback or authorized-adoption result; and
+- a newer successor fence/incarnation with split-brain rejection of stale calls.
+
+An unenrolled legacy parent uses automatic bootstrap. The external supervisor
+enrolls and health-checks the replacement first and never signals the legacy
+parent first. A task or tool transport abort is nonterminal: preserve the
+unknown outcome and first failure, trigger immediate state recovery, and do not
+end the turn because a restart task aborted.
+
+`PASS` requires actual live TUI/session replay and `TodoWrite` replay evidence,
+including reconnect/resume and stale-parent fencing. Source tests and deployed
+canaries are separate evidence classes; neither proves actual TUI/session
+recovery.
+
 ### Lost chat or unknown turn outcome
 
-> **Docs first:** Read this guide and the live `RECOVERY-100` checklist in the
+> **Docs first:** Read this guide and the live `RECOVERY-100` and `RECOVERY-101`
+> checklists in the
 > [roadmap](../reference/ROADMAP.md) before any recovery action. No Chat
 > transcript is required, requested, reconstructed, exported, or used as
 > recovery evidence; current authorized typed MCP/worktree evidence and
@@ -246,14 +287,13 @@ not repeat a mutation from memory or from a partial response.
 
 1. Stop all writers and preserve the canonical worktree. Do not clean broadly,
    delete database rows, or remove files to make the state look consistent.
-2. Start a fresh parent OpenCode process from the intended checkout. Use Plan
-   mode for recovery inspection only; its complete allowance is `read`, `glob`,
-   `grep`, `question`, and `ingenium_coordination_status`, with all repository
-   skills/references loadable. It cannot edit files, write artifacts, run shell
-   commands, or invoke coordination mutation tools.
+2. Perform the read-only recovery preflight above before dispatching any restart
+   task. Do not signal, stop, restart, mutate, claim, release, or clear state
+   during this inspection.
 3. Confirm the project, workspace, storage mapping, canonical worktree, MCP
-   audience, and credential binding. If MCP is unavailable or the binding is
-   mismatched, stop; local file visibility is not shared-memory proof.
+   audience, credential binding, nonce/enrollment, and durable handoff. If MCP
+   is unavailable or the binding is mismatched, stop mutation; local file
+   visibility is not shared-memory proof.
 4. Use Plan's `ingenium_coordination_status` with the exact current identity, then
    have the authorized coordination-capable recovery session read the newest
    handoff or typed-memory state with `ingenium_coordination_handoff` using
@@ -265,9 +305,11 @@ not repeat a mutation from memory or from a partial response.
    checks/results, task and todo state, session status, and `nextWork`. If the
    outcome remains uncertain, or the footprint is dirty, use the quarantined
    epoch recovery sequence below instead of retrying the operation.
-6. If a plugin, MCP entry, OpenCode configuration, or parent binding changed,
-   rebuild the extension and perform a full parent restart. Only content-only
-   rotation of an already-attested general MCP credential may use the
+6. Require the complete `RECOVERY-101` restart proof bundle. Only the external
+   supervisor may dispatch the replacement. If a plugin, MCP entry, OpenCode
+   configuration, or parent binding changed, rebuild the extension and perform
+   the full parent restart only after the replacement-first gates pass. Content-
+   only rotation of an already-attested general MCP credential may use the
    `live-mcp-reload` reset exception; runtime and repository-sync credentials
    remain restart-mode.
 7. Resume at the first unfinished declared phase with a new accepted session,

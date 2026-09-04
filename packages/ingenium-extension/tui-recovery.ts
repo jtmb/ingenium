@@ -29,6 +29,7 @@ import {
 } from "./replacement-first-restart.js";
 
 const MAX_STATE_BYTES = 64 * 1024;
+const MAX_EVENT_BYTES = 4 * 1024;
 const HASH = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -48,9 +49,11 @@ export interface ManagedRecoveryBinding {
   storageMappingHash: string;
 }
 
-export interface ManagedRecoveryJournalInput extends RedactedRestartHandoff {
-  changedPathSegments: string[][];
-  checks: Array<{ kind: string; result: "passed" | "failed"; targetHash: string }>;
+export type ManagedRecoveryJournalInput = RedactedRestartHandoff;
+
+export interface RecoveryServerAuthentication {
+  username: string;
+  password: string;
 }
 
 export interface ManagedRecoveryEnrollment {
@@ -115,6 +118,17 @@ interface LegacyOwnerBootstrap {
   binding: ManagedRecoveryBinding;
   parent: RestartProcessIdentity & { port: number; dataHome: string };
   handoff: RedactedRestartHandoff;
+}
+
+type RecoveryEventName = "attach_started" | "attach_healthy" | "adoption" | "rollback" | "fence_transition";
+
+interface RecoveryEventDetails {
+  attachPid?: number;
+  priorFence?: number;
+  reason?: "enrollment_timeout" | "precommit_abort" | "replacement_identity_unavailable";
+  replacement?: RestartProcessIdentity;
+  sessionId?: string;
+  transactionSha256?: string;
 }
 
 function hash(value: string | Buffer): string {
@@ -251,6 +265,51 @@ function recoveryDirectory(worktree: string): string {
   return directory;
 }
 
+function appendRecoveryEvent(
+  worktree: string,
+  state: RecoveryState,
+  event: RecoveryEventName,
+  details: RecoveryEventDetails = {},
+): void {
+  const replacement = details.replacement ?? state.replacement?.identity;
+  const record = {
+    schemaVersion: 1,
+    event,
+    occurredAt: new Date().toISOString(),
+    fence: state.fence,
+    priorFence: details.priorFence ?? null,
+    generation: state.generation,
+    ownerPid: state.owner.pid,
+    ownerIdentitySha256: identitySha256(state.owner),
+    activeParentPid: state.activeParent?.pid ?? null,
+    activeParentIdentitySha256: state.activeParent ? identitySha256(state.activeParent) : null,
+    replacementPid: replacement?.pid ?? null,
+    replacementIdentitySha256: replacement ? identitySha256(replacement) : null,
+    attachPid: details.attachPid ?? null,
+    transactionSha256: details.transactionSha256 ?? state.replacement?.transactionSha256 ?? null,
+    successorSessionSha256: details.sessionId ? hash(details.sessionId) : null,
+    reason: details.reason ?? null,
+  };
+  const serialized = `${JSON.stringify(record)}\n`;
+  if (Buffer.byteLength(serialized, "utf8") > MAX_EVENT_BYTES) throw new Error("TUI recovery event is too large");
+  const directory = recoveryDirectory(worktree);
+  const path = join(directory, "events.jsonl");
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  try {
+    const stat = fstatSync(descriptor);
+    const uid = ownerUid();
+    if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o600 || (uid !== undefined && stat.uid !== uid)) {
+      throw new Error("TUI recovery event history is unavailable");
+    }
+    writeFileSync(descriptor, serialized, "utf8");
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  const parent = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { fsyncSync(parent); } finally { closeSync(parent); }
+}
+
 function atomicWrite(path: string, value: unknown): void {
   const serialized = `${JSON.stringify(value)}\n`;
   if (Buffer.byteLength(serialized) > MAX_STATE_BYTES) throw new Error("TUI recovery state is too large");
@@ -284,6 +343,25 @@ function readJson(path: string): unknown {
   } finally {
     closeSync(descriptor);
   }
+}
+
+export function recoveryServerAuthenticationPath(dataHome: string): string {
+  return join(realpathSync(resolve(dataHome)), ".ingenium-recovery-server-auth.json");
+}
+
+export function readRecoveryServerAuthentication(dataHome: string): RecoveryServerAuthentication {
+  const value = readJson(recoveryServerAuthenticationPath(dataHome));
+  if (!hasExactKeys(value, ["username", "password"])
+    || value.username !== "opencode"
+    || typeof value.password !== "string" || !/^[A-Za-z0-9_-]{43,128}$/.test(value.password)) {
+    throw new Error("Recovery server authentication is unavailable");
+  }
+  return { username: value.username, password: value.password };
+}
+
+function removeRecoveryServerAuthentication(dataHome: string): void {
+  readRecoveryServerAuthentication(dataHome);
+  unlinkSync(recoveryServerAuthenticationPath(dataHome));
 }
 
 function withRecoveryMutation<T>(worktree: string, operation: () => T): T {
@@ -403,6 +481,24 @@ function readState(worktree: string): RecoveryState {
   return state;
 }
 
+export function recordManagedRecoveryAttachEvent(
+  worktree: string,
+  event: "attach_started" | "attach_healthy",
+  attachPid: number,
+  sessionId: string,
+  transactionSha256: string,
+  replacement: RestartProcessIdentity,
+): void {
+  if (!Number.isSafeInteger(attachPid) || attachPid < 2 || !SAFE_SESSION_ID.test(sessionId)
+    || !HASH.test(transactionSha256)) throw new Error("TUI recovery attach event is invalid");
+  withRecoveryMutation(worktree, () => {
+    const state = readState(worktree);
+    if (state.phase !== "replacement_committed" || state.replacement?.transactionSha256 !== transactionSha256
+      || !identitiesMatch(state.replacement.identity, replacement)) throw new Error("TUI recovery attach state changed");
+    appendRecoveryEvent(worktree, state, event, { attachPid, sessionId, transactionSha256, replacement });
+  });
+}
+
 function liveOwner(state: RecoveryState): boolean {
   return processLifetimeMatches(state.owner);
 }
@@ -447,6 +543,15 @@ export function readManagedRecoveryEnrollment(worktree: string): ManagedRecovery
       || journal.fence !== state.fence || journal.generation !== state.generation || journal.phase !== state.phase
       || journal.transactionSha256 !== null || journal.replacementIdentitySha256 !== null
       || journal.boundIdentitySha256 !== identitySha256(parent)) return undefined;
+    const handoff = parseRedactedRestartHandoff({
+      status: journal.status,
+      taskHash: journal.taskHash,
+      actions: journal.actions,
+      changedPaths: journal.changedPaths,
+      checks: journal.checks,
+      todos: journal.todos,
+      nextWork: journal.nextWork,
+    });
     return {
       binding: {
         project: parent.project,
@@ -463,12 +568,7 @@ export function readManagedRecoveryEnrollment(worktree: string): ManagedRecovery
         port: parent.port,
         dataHome: parent.dataHome,
       },
-      handoff: {
-        status: journal.status,
-        taskHash: journal.taskHash,
-        todos: journal.todos,
-        nextWork: journal.nextWork,
-      },
+      handoff,
     };
   } catch {
     return undefined;
@@ -545,11 +645,8 @@ export function enrollManagedRecoveryParent(
         updatedAt: new Date().toISOString(),
       };
       atomicWrite(statePath(exactBinding.launcherWorktree), next);
-      writeJournal(exactBinding.launcherWorktree, next, {
-        ...handoff,
-        changedPathSegments: [],
-        checks: [],
-      });
+      writeJournal(exactBinding.launcherWorktree, next, handoff);
+      appendRecoveryEvent(exactBinding.launcherWorktree, next, "fence_transition", { priorFence: state.fence });
       return true;
     });
   } catch (error) {
@@ -615,6 +712,9 @@ export async function prepareManagedRecoveryReplacement(
     const durableHandoff = {
       status: preparedJournal.status,
       taskHash: preparedJournal.taskHash,
+      actions: preparedJournal.actions,
+      changedPaths: preparedJournal.changedPaths,
+      checks: preparedJournal.checks,
       todos: preparedJournal.todos,
       nextWork: preparedJournal.nextWork,
     };
@@ -680,6 +780,7 @@ export function commitManagedRecoveryReplacement(worktree: string, transactionSh
     const journal = readJson(join(recoveryDirectory(worktree), "journal.json")) as RecoveryJournal;
     atomicWrite(statePath(worktree), committed);
     writeJournal(worktree, committed, journal);
+    appendRecoveryEvent(worktree, committed, "fence_transition", { priorFence: state.fence });
   });
 }
 
@@ -688,7 +789,7 @@ export function abortManagedRecoveryReplacement(worktree: string, transactionSha
   withRecoveryMutation(worktree, () => {
     const state = readState(worktree);
     if (!owner || !identitiesMatch(state.owner, owner.identity) || state.phase !== "replacement_prepared"
-      || state.replacement?.transactionSha256 !== transactionSha256) return;
+      || !state.replacement || state.replacement.transactionSha256 !== transactionSha256) return;
     const journal = readJson(join(recoveryDirectory(worktree), "journal.json")) as RecoveryJournal;
     const aborted: RecoveryState = {
       ...state,
@@ -699,6 +800,11 @@ export function abortManagedRecoveryReplacement(worktree: string, transactionSha
     };
     atomicWrite(statePath(worktree), aborted);
     writeJournal(worktree, aborted, journal);
+    appendRecoveryEvent(worktree, aborted, "rollback", {
+      reason: "precommit_abort",
+      replacement: state.replacement.identity,
+      transactionSha256: state.replacement.transactionSha256,
+    });
   });
 }
 
@@ -735,6 +841,7 @@ function initializeOwner(worktree: string, nonce: string): RecoveryState {
     updatedAt: new Date().toISOString(),
   };
   atomicWrite(statePath(worktree), state);
+  appendRecoveryEvent(worktree, state, "fence_transition", { priorFence: 0 });
   return state;
 }
 
@@ -799,6 +906,11 @@ function rollbackDeadPreparedReplacement(worktree: string, nonce: string, transa
     };
     atomicWrite(statePath(worktree), rolledBack);
     writeJournal(worktree, rolledBack, journal);
+    appendRecoveryEvent(worktree, rolledBack, "rollback", {
+      reason: "replacement_identity_unavailable",
+      replacement: state.replacement.identity,
+      transactionSha256: state.replacement.transactionSha256,
+    });
     return true;
   });
 }
@@ -862,12 +974,51 @@ function bindSession(argv: readonly string[], sessionId: string): string[] {
   return [...retained, "--session", sessionId];
 }
 
-function signalExact(identity: RestartProcessIdentity): boolean {
+function signalExact(identity: RestartProcessIdentity, signal: NodeJS.Signals = "SIGTERM"): boolean {
   if (!processMatchesAttestedIdentity(identity, true)) return false;
-  try { process.kill(identity.pid, "SIGTERM"); } catch (error) {
+  try { process.kill(identity.pid, signal); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   }
   return true;
+}
+
+function recoveryOwnerMatches(identity: RestartProcessIdentity): boolean {
+  const nonce = processEnvironmentValue(identity.pid, OWNER_NONCE_ENV);
+  return Boolean(nonce) && hash(nonce!) === identity.nonceSha256
+    && identitiesMatch(processIdentity(identity.pid, identity.nonceSha256, true), identity);
+}
+
+export async function stopTimedOutLegacyRecoveryOwner(
+  worktree: string,
+  identity: RestartProcessIdentity,
+): Promise<void> {
+  withRecoveryMutation(worktree, () => {
+    const state = readState(worktree);
+    if (!identitiesMatch(state.owner, identity)) throw new Error("Legacy recovery owner identity changed before cleanup");
+    appendRecoveryEvent(worktree, state, "rollback", { reason: "enrollment_timeout" });
+  });
+  if (!recoveryOwnerMatches(identity)) {
+    if (processLifetimeMatches(identity)) throw new Error("Legacy recovery owner identity changed before cleanup");
+    return;
+  }
+  try { process.kill(identity.pid, "SIGTERM"); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+  const terminateDeadline = Date.now() + 500;
+  while (Date.now() < terminateDeadline && processLifetimeMatches(identity)) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  if (processLifetimeMatches(identity)) {
+    if (!recoveryOwnerMatches(identity)) throw new Error("Legacy recovery owner identity changed before cleanup");
+    try { process.kill(identity.pid, "SIGKILL"); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+  const killDeadline = Date.now() + 500;
+  while (Date.now() < killDeadline && processLifetimeMatches(identity)) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  if (processLifetimeMatches(identity)) throw new Error("Legacy recovery owner did not stop after enrollment timeout");
 }
 
 async function retireCommittedParent(identity: RestartProcessIdentity): Promise<void> {
@@ -913,6 +1064,10 @@ function settleCommittedState(worktree: string, ownerNonce: string, transactionS
     };
     atomicWrite(statePath(worktree), adopted);
     writeJournal(worktree, adopted, journal);
+    appendRecoveryEvent(worktree, adopted, "adoption", {
+      replacement: replacement.identity,
+      transactionSha256: replacement.transactionSha256,
+    });
   });
 }
 
@@ -958,18 +1113,26 @@ export async function runManagedTui(argv = process.argv.slice(2)): Promise<numbe
   let continuationSession = explicitSession(argv);
   let frontend = await spawnManagedTui(worktree, ownerNonce, state.owner, executable, argv);
   let backendIdentity: RestartProcessIdentity | undefined;
+  let backendDataHome: string | undefined;
   while (true) {
     const outcome = await waitForCommitOrExit(worktree, ownerNonce, frontend);
     if ("replacementRolledBack" in outcome || "parentExited" in outcome) continue;
     if ("exit" in outcome) {
       if (outcome.exit.code === 0) {
-        if (backendIdentity) await retireCommittedParent(backendIdentity);
+        if (backendIdentity) {
+          await retireCommittedParent(backendIdentity);
+          removeRecoveryServerAuthentication(backendDataHome!);
+        }
         return 0;
       }
-      if (backendIdentity) await retireCommittedParent(backendIdentity);
+      if (backendIdentity) {
+        await retireCommittedParent(backendIdentity);
+        removeRecoveryServerAuthentication(backendDataHome!);
+      }
       if (!continuationSession) return outcome.exit.code ?? 1;
       frontend = await spawnManagedTui(worktree, ownerNonce, state.owner, executable, bindSession(argv, continuationSession));
       backendIdentity = undefined;
+      backendDataHome = undefined;
       continue;
     }
     const replacement = outcome.replacement!;
@@ -978,16 +1141,32 @@ export async function runManagedTui(argv = process.argv.slice(2)): Promise<numbe
     const retiring = backendIdentity ?? childIdentity;
     if (!retiring) throw new Error("TUI recovery lost the retiring parent identity");
     await retireCommittedParent(retiring);
+    if (backendIdentity) removeRecoveryServerAuthentication(backendDataHome!);
     await childExit(frontend).catch(() => undefined);
     const sessionId = decryptSession(replacement.session, ownerNonce);
+    const authentication = readRecoveryServerAuthentication(replacement.dataHome);
     frontend = spawn(executable, ["attach", `http://127.0.0.1:${replacement.port}`, "--session", sessionId], {
       cwd: worktree,
       shell: false,
       stdio: "inherit",
-      env: process.env,
+      env: {
+        ...process.env,
+        OPENCODE_SERVER_USERNAME: authentication.username,
+        OPENCODE_SERVER_PASSWORD: authentication.password,
+      },
     });
+    if (!frontend.pid || !processStat(frontend.pid)) throw new Error("TUI recovery attach did not start");
+    recordManagedRecoveryAttachEvent(
+      worktree, "attach_started", frontend.pid, sessionId, replacement.transactionSha256, replacement.identity,
+    );
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    if (!processStat(frontend.pid)) throw new Error("TUI recovery attach exited before health confirmation");
+    recordManagedRecoveryAttachEvent(
+      worktree, "attach_healthy", frontend.pid, sessionId, replacement.transactionSha256, replacement.identity,
+    );
     continuationSession = sessionId;
     backendIdentity = replacement.identity;
+    backendDataHome = replacement.dataHome;
     settleCommittedState(worktree, ownerNonce, replacement.transactionSha256);
   }
 }
@@ -1053,11 +1232,8 @@ export async function runDetachedRecoveryOwner(encoded: string): Promise<void> {
   };
   withRecoveryMutation(input.worktree, () => {
     atomicWrite(statePath(input.worktree), enrolledState);
-    writeJournal(input.worktree, enrolledState, {
-      ...input.handoff,
-      changedPathSegments: [],
-      checks: [],
-    });
+    writeJournal(input.worktree, enrolledState, input.handoff);
+    appendRecoveryEvent(input.worktree, enrolledState, "fence_transition", { priorFence: state.fence });
   });
   let retiring: RestartProcessIdentity = input.parent;
   while (true) {
@@ -1092,6 +1268,8 @@ export async function bootstrapLegacyRecoveryOwner(
     },
   });
   if (!child.pid) throw new Error("Legacy recovery owner did not start");
+  const ownerIdentity = processIdentity(child.pid, hash(nonce), true);
+  if (!ownerIdentity) throw new Error("Legacy recovery owner identity is unavailable");
   child.unref();
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -1107,5 +1285,6 @@ export async function bootstrapLegacyRecoveryOwner(
     } catch {}
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
   }
+  await stopTimedOutLegacyRecoveryOwner(worktree, ownerIdentity);
   throw new Error("Legacy recovery owner enrollment timed out");
 }

@@ -39,7 +39,10 @@ import {
   persistManagedRecoveryJournal,
   type ManagedRecoveryJournalInput,
 } from "./tui-recovery.js";
-import type { RedactedRestartHandoff } from "./replacement-first-restart.js";
+import {
+  isSafeRestartHandoffPath,
+  type RedactedRestartHandoff,
+} from "./replacement-first-restart.js";
 
 const SESSION_TTL_MS = 60_000;
 const HEARTBEAT_MS = 20_000;
@@ -51,7 +54,9 @@ const MAX_PATH_SEGMENT_BYTES = 255;
 const MAX_DIFF_COUNT = 1_000_000;
 const TRACE_ROOT = "/tmp/opencode/";
 const MAX_RESET_DESCRIPTION_BYTES = 256;
+const RECOVERY_OWNER_AGENT = "ingenium-recovery-engineer";
 const DEPLOYMENT_OWNER_AGENT = "ingenium-software-engineer-premium";
+const PRODUCTION_RESTART_OWNER_AGENTS = new Set([DEPLOYMENT_OWNER_AGENT, RECOVERY_OWNER_AGENT]);
 const BROWSER_AGENT = "browser-agent";
 const BROWSER_WRAPPER_PATH = ".opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh";
 const BROWSER_WRAPPER_DELIMITER = "EOF";
@@ -151,12 +156,17 @@ function trace(record: Omit<TraceRecord, "timestamp">): void {
   });
 }
 
-function captureTransform(memory: string | null, activity: string | null): void {
+function captureTransform(
+  memory: string | null,
+  activity: string | null,
+  operationalEntries: Record<string, unknown>[] = [],
+): void {
   if (process.env.INGENIUM_COORDINATION_TRANSFORM_CAPTURE !== "1" || (!memory && !activity)) return;
   appendPrivateRecord(process.env.INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE, {
     schemaVersion: 1,
     memory,
     activity,
+    operationalEntries,
   });
 }
 
@@ -231,6 +241,7 @@ interface OperationalCheck {
   kind: "test" | "typecheck" | "lint" | "build" | "format" | "security" | "other";
   result: "passed" | "failed";
   targetHash: string;
+  exitCode: number | null;
 }
 
 interface OperationalEntry {
@@ -297,6 +308,7 @@ interface PendingMutation {
   startedAt: number;
   remoteClaimed: boolean;
   deploymentOwner?: true;
+  recoveryEngineer?: true;
   claimFailure?: CoordinationOutboxFailure;
   footprint?: CoordinationOutboxFootprint[];
   remoteProof?: CoordinationOutboxRemoteClaim;
@@ -313,6 +325,7 @@ interface ManagedMutationDescriptor {
   coordinationReset?: true;
   reloadTimeoutMs?: number;
   deploymentOwner?: true;
+  recoveryEngineer?: true;
 }
 
 export interface RepositoryClaimContext {
@@ -564,6 +577,7 @@ function isBoundBrowserWrapperRequest(worktree: string, args: unknown): boolean 
 
 function isManagedBuildRequest(worktree: string, args: unknown): boolean {
   if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
+  if (args.command === "ingenium-build deployment production-restart") return true;
   const wrapper = /^ingenium-build ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
   if (!wrapper) return false;
   try {
@@ -574,12 +588,43 @@ function isManagedBuildRequest(worktree: string, args: unknown): boolean {
   }
 }
 
+function isRecoveryCheckpointPath(path: string): boolean {
+  return path === "docs/reference/ROADMAP.md"
+    || /^tests\/artifacts\/tui-recovery\/[A-Za-z0-9_@%+=:,.-]+(?:\/[A-Za-z0-9_@%+=:,.-]+){0,15}$/.test(path);
+}
+
+function recoveryRepositoryMutation(worktree: string, args: unknown): ManagedMutationDescriptor | undefined {
+  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return undefined;
+  const add = /^git add -- ([A-Za-z0-9_@%+=:,./-]+(?: [A-Za-z0-9_@%+=:,./-]+){0,31})$/.exec(args.command);
+  if (add) {
+    const paths = add[1]!.split(" ");
+    if (paths.every((path) => isSafeCoordinationPath(path) && isRecoveryCheckpointPath(path))) {
+      return { operation: "repository", paths: [], reserved: "@repository", recoveryEngineer: true };
+    }
+  }
+  const commit = /^git commit -m '([^'\r\n]{1,100})'$/.exec(args.command);
+  if (commit?.[1] === "recovery evidence checkpoint") {
+    return { operation: "repository", paths: [], reserved: "@repository", recoveryEngineer: true };
+  }
+  return undefined;
+}
+
+function isTrustedReadOnlyShellRequest(worktree: string, args: unknown): boolean {
+  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
+  if (/^(?:pwd|git (?:status(?: --short)?|diff(?: --stat)?|log --oneline(?: -\d+)?|show --stat|rev-parse (?:HEAD|--show-toplevel)))$/.test(args.command)) {
+    return true;
+  }
+  const diff = /^git diff( --cached)? -- ([A-Za-z0-9_@%+=:,./-]+(?: [A-Za-z0-9_@%+=:,./-]+){0,31})$/.exec(args.command);
+  return Boolean(diff && diff[2]!.split(" ").every(isSafeCoordinationPath));
+}
+
 function managedMutation(
   worktree: string,
   toolValue: string,
   args: unknown,
   deploymentOwner = false,
   browserAgent = false,
+  recoveryEngineer = false,
 ): ManagedMutationDescriptor | undefined {
   const tool = toolValue.toLowerCase().replace(/[.-]/g, "_");
   if (!isRecord(args)) return undefined;
@@ -622,22 +667,29 @@ function managedMutation(
         reloadTimeoutMs: typeof args.timeout === "number" ? args.timeout : undefined,
       };
     }
-    if (/^(?:pwd|git (?:status(?: --short)?|diff(?: --stat)?|log --oneline(?: -\d+)?|show --stat|rev-parse (?:HEAD|--show-toplevel)))$/.test(args.command)) {
+    if (isTrustedReadOnlyShellRequest(worktree, args)) {
       return { operation: "build", paths: [], readOnly: true };
     }
+    const recoveryRepository = recoveryRepositoryMutation(worktree, args);
+    if (recoveryRepository) {
+      if (!recoveryEngineer) throw new Error("Managed shell coordination denied the command");
+      return recoveryRepository;
+    }
+    const fixedProductionRestart = args.command === "ingenium-build deployment production-restart";
     const wrapper = /^(ingenium-repository|ingenium-build) ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
-    if (wrapper) {
+    if (wrapper || fixedProductionRestart) {
       try {
         if (!isTrustedManagedWrapperArgs(worktree, args)) throw new Error("invalid wrapper arguments");
-        if (wrapper[1] === "ingenium-repository") decodeManagedRepositoryArgv(wrapper[2]!);
+        if (wrapper?.[1] === "ingenium-repository") decodeManagedRepositoryArgv(wrapper[2]!);
         else {
-          decodeManagedBuildArgv(wrapper[2]!);
+          if (!fixedProductionRestart) decodeManagedBuildArgv(wrapper![2]!);
           if (!deploymentOwner) throw new Error("deployment owner required");
         }
+        if (fixedProductionRestart && !deploymentOwner) throw new Error("deployment owner required");
       } catch {
         throw new Error("Managed shell coordination denied the command");
       }
-      return wrapper[1] === "ingenium-repository"
+      return wrapper?.[1] === "ingenium-repository"
         ? { operation: "repository", paths: [], reserved: "@repository" }
         : {
             operation: "build", paths: [], reserved: "@build",
@@ -742,6 +794,19 @@ function checkKind(tool: string, args: unknown): OperationalCheck["kind"] | unde
   if (/\b(test|vitest|jest|pytest|playwright)\b/.test(command)) return "test";
   if (/^\s*git\s+status(?:\s|$)/.test(command)) return "other";
   return undefined;
+}
+
+function commandExitCode(value: unknown): number | null {
+  if (!isRecord(value)) return null;
+  const metadata = isRecord(value.metadata) ? value.metadata : value;
+  const exitCode = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
+  return Number.isSafeInteger(exitCode) && (exitCode as number) >= 0 && (exitCode as number) <= 255
+    ? exitCode as number
+    : null;
+}
+
+function publishedChecks(checks: OperationalCheck[]): Array<Omit<OperationalCheck, "exitCode">> {
+  return checks.map(({ exitCode: _exitCode, ...check }) => check);
 }
 
 function eventStatus(value: unknown): SessionState["status"] | undefined {
@@ -1196,7 +1261,7 @@ export class SessionCoordinator {
     });
   }
 
-  private async attestGeneralBinding(): Promise<ApiAuthenticationBinding | undefined> {
+  private async attestGeneralBinding(enrollRecoveryParent = true): Promise<ApiAuthenticationBinding | undefined> {
     if (this.disposed) return undefined;
     if (this.binding.purpose !== "general") return undefined;
     const result = await this.preflight(this.binding.apiUrl, this.ctx.worktree, this.request, {
@@ -1221,15 +1286,20 @@ export class SessionCoordinator {
     if (payload?.data?.project?.id !== attested.projectId || payload.data.project.name !== this.binding.project) {
       throw new ExtensionBindingError();
     }
-    const current = this.sessions.values().next().value as SessionState | undefined;
-    enrollManagedRecoveryParent(this.binding, attested, current
-      ? this.recoveryHandoff(current)
-      : {
-          status: "active",
-          taskHash: null,
-          todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" },
-          nextWork: { kind: "none", referenceHash: null },
-        });
+    if (enrollRecoveryParent) {
+      const current = this.sessions.values().next().value as SessionState | undefined;
+      enrollManagedRecoveryParent(this.binding, attested, current
+        ? this.recoveryHandoff(current)
+        : {
+            status: "active",
+            taskHash: null,
+            actions: [],
+            changedPaths: [],
+            checks: [],
+            todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" },
+            nextWork: { kind: "none", referenceHash: null },
+          });
+    }
     return attested;
   }
 
@@ -1238,7 +1308,7 @@ export class SessionCoordinator {
     callId: string,
     tool: string,
     args: unknown,
-    agent: string,
+    agent: string | ReadonlySet<string>,
   ): Promise<boolean> {
     if (!isRecord(this.ctx.client) || !isRecord(this.ctx.client.session)
       || typeof this.ctx.client.session.get !== "function" || typeof this.ctx.client.session.messages !== "function") return false;
@@ -1254,13 +1324,14 @@ export class SessionCoordinator {
       if (!isRecord(response) || !Array.isArray(response.data)) return false;
       const messages = response.data.filter((entry): entry is Record<string, unknown> => isRecord(entry) && isRecord(entry.info));
       const parents = new Map(messages.map((entry) => [(entry.info as Record<string, unknown>).id, entry.info as Record<string, unknown>]));
+      const agents = typeof agent === "string" ? new Set([agent]) : agent;
       return messages.some((entry) => {
         const info = entry.info as Record<string, unknown>;
-        if (info.role !== "assistant" || info.sessionID !== sessionId || info.mode !== agent
+        if (info.role !== "assistant" || info.sessionID !== sessionId || typeof info.mode !== "string" || !agents.has(info.mode)
           || typeof info.parentID !== "string"
           || !Array.isArray(entry.parts)) return false;
         const parent = parents.get(info.parentID);
-        if (!parent || parent.role !== "user" || parent.sessionID !== sessionId || parent.agent !== agent) return false;
+        if (!parent || parent.role !== "user" || parent.sessionID !== sessionId || parent.agent !== info.mode) return false;
         return entry.parts.some((part) => isRecord(part) && part.type === "tool" && part.sessionID === sessionId
           && part.messageID === info.id && part.callID === callId && part.tool === tool && isRecord(part.state)
           && (part.state.status === "pending" || part.state.status === "running")
@@ -1275,7 +1346,27 @@ export class SessionCoordinator {
     if (this.binding.purpose !== "general"
       || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, DEPLOYMENT_OWNER_AGENT)) return false;
     try {
-      return await this.attestGeneralBinding() !== undefined;
+      return await this.attestGeneralBinding(false) !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  private async isAuthorizedProductionRestartOwner(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
+    if (this.binding.purpose !== "general"
+      || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, PRODUCTION_RESTART_OWNER_AGENTS)) return false;
+    try {
+      return await this.attestGeneralBinding(false) !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  private async isAuthorizedRecoveryEngineer(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
+    if (this.binding.purpose !== "general"
+      || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, RECOVERY_OWNER_AGENT)) return false;
+    try {
+      return await this.attestGeneralBinding(false) !== undefined;
     } catch {
       return false;
     }
@@ -1693,7 +1784,7 @@ export class SessionCoordinator {
               ...this.lease(state), operation: "memory", memory_entry: {
                 status: state.status,
                 actions: state.actions,
-                checks: state.checks,
+                checks: publishedChecks(state.checks),
                 todos: { total, ...state.todos, state: operationalTodoState(state.todos) },
                 currentTaskId: state.currentTaskId,
                 changedPaths,
@@ -2266,6 +2357,7 @@ export class SessionCoordinator {
       startedAt: this.now(),
       remoteClaimed: false,
       ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
+      ...(descriptor.recoveryEngineer ? { recoveryEngineer: true } : {}),
     };
     this.pendingMutations.set(key, localPending);
     this.localSession(sessionId);
@@ -2587,7 +2679,13 @@ export class SessionCoordinator {
     }
   }
 
-  private async recordSuccessfulTool(sessionId: string, tool: string, args: unknown, knownPath?: string): Promise<void> {
+  private async recordSuccessfulTool(
+    sessionId: string,
+    tool: string,
+    args: unknown,
+    knownPath?: string,
+    result?: unknown,
+  ): Promise<void> {
     if (this.disposed) return;
     const state = this.localSession(sessionId);
     const normalizedTool = tool.toLowerCase();
@@ -2614,6 +2712,7 @@ export class SessionCoordinator {
         kind: classifiedCheck,
         result: "passed",
         targetHash: targetHash(normalizedTool, args),
+        exitCode: commandExitCode(result),
       };
       state.checks = [...state.checks, check].slice(-32);
     }
@@ -2644,6 +2743,35 @@ export class SessionCoordinator {
     return {
       status,
       taskHash: state.currentTaskId?.slice(5) ?? null,
+      actions: state.actions.map((action) => {
+        const path = action.pathSegments ? decodeCoordinationPath(action.pathSegments) : null;
+        if (path !== null && isSafeRestartHandoffPath(path)) {
+          return { kind: action.kind, result: action.result, path, targetHash: null };
+        }
+        return {
+          kind: action.kind,
+          result: action.result,
+          path: null,
+          targetHash: action.targetHash ?? targetHash("path", action.pathSegments),
+        };
+      }),
+      changedPaths: state.changedPaths.filter((entry) => isSafeRestartHandoffPath(entry.path)).map((entry) => ({ ...entry })),
+      checks: state.checks.map((check) => {
+        const status = check.result === "passed" ? "completed" as const : "failed" as const;
+        return {
+          name: check.kind,
+          status,
+          result: check.result,
+          exitCode: check.exitCode,
+          targetHash: createHash("sha256").update(JSON.stringify({
+            name: check.kind,
+            status,
+            result: check.result,
+            exitCode: check.exitCode,
+            sourceTargetHash: check.targetHash,
+          })).digest("hex"),
+        };
+      }),
       todos: { total, ...state.todos, state: operationalTodoState(state.todos) },
       nextWork: this.nextWork(state),
     };
@@ -2652,10 +2780,6 @@ export class SessionCoordinator {
   private recoveryJournal(state: SessionState, status: RedactedRestartHandoff["status"]): ManagedRecoveryJournalInput {
     return {
       ...this.recoveryHandoff(state, status),
-      changedPathSegments: state.changedPaths
-        .map((entry) => encodeCoordinationPath(entry.path))
-        .filter((entry): entry is string[] => entry !== undefined),
-      checks: state.checks.map((check) => ({ ...check })),
     };
   }
 
@@ -2680,7 +2804,7 @@ export class SessionCoordinator {
           memory_entry: {
             status,
             actions: state.actions,
-            checks: state.checks,
+            checks: publishedChecks(state.checks),
             todos: { total, ...state.todos, state: operationalTodoState(state.todos) },
             currentTaskId: state.currentTaskId,
             changedPaths,
@@ -2819,10 +2943,17 @@ export class SessionCoordinator {
           ? await this.hasTrustedAgentCall(sessionID, callID, tool, output.args, BROWSER_AGENT)
           : false;
         if (browserAgent && isRecord(output.args)) output.args.command = boundBrowserCommand;
+        const fixedProductionRestart = isRecord(output.args)
+          && output.args.command === "ingenium-build deployment production-restart";
         const deploymentOwner = isManagedBuildRequest(this.ctx.worktree, output.args)
-          ? await this.isAuthorizedDeploymentOwner(sessionID, callID, tool, output.args)
+          ? fixedProductionRestart
+            ? await this.isAuthorizedProductionRestartOwner(sessionID, callID, tool, output.args)
+            : await this.isAuthorizedDeploymentOwner(sessionID, callID, tool, output.args)
           : false;
-        const descriptor = managedMutation(this.ctx.worktree, tool, output.args, deploymentOwner, browserAgent);
+        const recoveryEngineer = recoveryRepositoryMutation(this.ctx.worktree, output.args)
+          ? await this.isAuthorizedRecoveryEngineer(sessionID, callID, tool, output.args)
+          : false;
+        const descriptor = managedMutation(this.ctx.worktree, tool, output.args, deploymentOwner, browserAgent, recoveryEngineer);
         if (!descriptor) {
           if (isManagedMutationTool(tool)) throw new Error("Managed mutation coordination rejected the tool arguments");
           return;
@@ -2863,22 +2994,24 @@ export class SessionCoordinator {
       "tool.execute.after": async ({ tool, sessionID, callID, args }, result) => {
         if (this.disposed) return;
         const deploymentOwner = this.pendingMutations.get(this.pendingKey(sessionID, callID))?.deploymentOwner === true;
+        const recoveryEngineer = this.pendingMutations.get(this.pendingKey(sessionID, callID))?.recoveryEngineer === true;
         const descriptor = managedMutation(
           this.ctx.worktree,
           tool,
           args,
           deploymentOwner,
           isBoundBrowserWrapperRequest(this.ctx.worktree, args),
+          recoveryEngineer,
         );
         if (descriptor?.readOnly) {
           if (descriptor.coordinationReset) {
             await this.reconnectAfterCredentialReset(sessionID, descriptor.reloadTimeoutMs ?? 10_000);
           }
-          await this.recordSuccessfulTool(sessionID, tool, args);
+          await this.recordSuccessfulTool(sessionID, tool, args, undefined, result);
           return;
         }
         if (!isManagedMutationTool(tool)) {
-          await this.recordSuccessfulTool(sessionID, tool, args);
+          await this.recordSuccessfulTool(sessionID, tool, args, undefined, result);
           return;
         }
         trace({
@@ -2906,6 +3039,7 @@ export class SessionCoordinator {
             startedAt: this.now(),
             remoteClaimed: false,
             ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
+            ...(descriptor.recoveryEngineer ? { recoveryEngineer: true } : {}),
           };
           this.pendingMutations.set(this.pendingKey(sessionID, callID), pending);
         }
@@ -2932,7 +3066,7 @@ export class SessionCoordinator {
           }
           state.memoryDirty = true;
         });
-        await this.recordSuccessfulTool(sessionID, tool, args, pending.paths[0]);
+        await this.recordSuccessfulTool(sessionID, tool, args, pending.paths[0], result);
         if (pending.remoteClaimed) {
           try {
             await this.renewPending(sessionID, pending);
@@ -3049,7 +3183,7 @@ export class SessionCoordinator {
             captureTransform(null, activity ?? null);
             return;
           }
-          captureTransform(memory ?? null, activity ?? null);
+          captureTransform(memory ?? null, activity ?? null, safeMemory as Record<string, unknown>[]);
           trace({
             event: "hook_exit",
             operation: "experimental.chat.system.transform",

@@ -1813,20 +1813,24 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 
 - **IN_SCOPE:** Define and verify the fail-closed recovery path when a Plan/chat turn, parent OpenCode process, MCP child, or selected runtime ends before its outcome is known; recover from the intended canonical worktree using Plan's all-skill loading surface, exact tool allowance (`read`, `glob`, `grep`, `question`, and read-only `ingenium_coordination_status`), authorized handoff/memory reads, exact-path inspection, typed operational memory, and roadmap/TodoWrite reconciliation; require a full parent restart after plugin, MCP, configuration, prompt/profile, or parent-binding changes; preserve separate source, deployed-canary, and actual model/session evidence.
 - **OUT_OF_SCOPE:** New MCP tools, credential-reset implementation, password recovery, automatic transcript or Docs Workspace export, broad documentation cleanup, database/file deletion as recovery, bypassing coordination, and claiming a prior incomplete canary as successful.
-- **Owner:** `@ingenium-software-engineer-premium`.
+- **Owner:** `@ingenium-software-engineer-premium` for recovery implementation;
+  `@ingenium-recovery-engineer` for the finite recovery/build/checkpoint execution
+  boundary.
 - **Dependencies:** COORD-106, COORD-RESET-100.
 - **Acceptance:** A lost or partial chat turn resumes from the same authorized project, workspace, storage mapping, and canonical worktree without guessing stale session, lease, fence, claim, or ownership values; Plan has universal skill/reference loading and is limited to `read`, `glob`, `grep`, `question`, and the read-only `ingenium_coordination_status` tool; handoff or typed-memory reads use `ingenium_coordination_handoff` with `read` or `memory_read` only from an authorized coordination-capable session; MCP recovery reads return typed actions, changed paths, checks/results, task/todo/status/next-work, and current revision; unavailable MCP, mismatched binding/audience, stopped runtime, stale proof, dirty footprint, or quarantined epoch blocks mutation; content-only general-credential rotation uses the exact live-MCP-reload exception, while runtime/repository-sync credential or binding changes require a full parent restart; a real MCP canary and actual model/session restart replay are retained before completion.
 - **STOP_CONDITION:** `PASS` only after source/permission checks, deployed rebuild/restart and health, real MCP recovery canary, actual model/session replay, bounded QA/security review, cleanup, and roadmap/TodoWrite reconciliation; otherwise continue in scope or use a permitted escalation.
 - **Escalation:** Only unavailable required protected access after the configured path was attempted, unauthorized destructive recovery, a mutually exclusive product decision, genuine recovery-contract ambiguity, or a reproducible root cause that remains unreproduced after bounded diagnosis.
 - **Verification owner:** `@ingenium-qa`.
 - **Security owner:** `@ingenium-security-auditor` for the predeclared credential, permission, evidence, and recovery-boundary surface.
-- **Deployment owner:** `@ingenium-software-engineer-premium`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for the broader
+  runtime deployment; `@ingenium-recovery-engineer` for the finite
+  build/recovery/checkpoint admission and restart path.
 - **Rollback/safety:** Treat an unknown outcome as unresolved, stop writers before recovery, preserve the worktree and first failure, use only identity-checked run-owned cleanup, never print or persist secrets/transcripts, never clear foreign/live/uncertain claims, and never add a completion marker from source tests alone.
 - **Tests:** Plan all-skill and exact-tool permission matrix; MCP project/workspace/worktree/audience preflight; typed-memory and handoff reads; stale/expired/quarantined/outage fail-closed cases; exact parent-restart and live-MCP-reload mode cases; real MCP transport canary; actual model/session recovery and restart-replay artifacts; redaction, cleanup, and marker reconciliation checks.
 - **Docs:** `docs/usage/multi-session.md` and this roadmap only, unless verified shipped behavior directly changes another canonical reference.
-- **Exclusive writer territory:** Premium owns recovery/runtime/MCP implementation and acceptance harnesses; Docs owns `docs/reference/ROADMAP.md` and `docs/usage/multi-session.md`; no overlapping writer territory.
-- **Phase/counts:** C7; 2 writers / 3 nonwriters (`A=5`, `W=2`, read-only ceiling `6 - W = 4`); premium owns implementation/deployment, Docs owns directly affected guidance, and QA/security/explore share the finalized review phase.
-- **UNUSED_CAPACITY:** Active slot 6 remains unused because this boundary has no visual/UI review; writer slot 3 remains unused because no third non-overlapping territory is in scope.
+- **Exclusive writer territory:** Premium owns recovery/runtime/MCP implementation and acceptance harnesses; the Recovery agent owns only finite build/recovery/checkpoint execution and deployment admission; Docs owns `docs/reference/ROADMAP.md` and `docs/usage/multi-session.md`; no overlapping writer territory.
+- **Phase/counts:** C7; 3 writers / 3 nonwriters (`A=6`, `W=3`, read-only ceiling `6 - W = 3`); Premium owns implementation, the Recovery agent owns finite recovery deployment, Docs owns directly affected guidance, and QA/security/explore share the finalized review phase.
+- **UNUSED_CAPACITY:** The later runtime/acceptance wave uses all six active slots and all three writer slots; the current documentation opening dispatches no runtime agents.
 - **Verification plan:** Start from the retained first-failure state, use Plan-only inspection to establish the exact worktree and typed recovery state, perform only the authorized MCP recovery, rebuild/restart the merged source, verify health and the real transport, run the bounded actual-session replay once, inspect redaction and owned cleanup, then reconcile evidence and markers; remediate only a reproducible in-scope root cause and rerun its smallest proving check.
 - **Causal remediation rule:** Fix the earliest proven boundary—parent permission loading, MCP binding/credential mode, runtime readiness, typed-memory recovery, or restart replay—and never retry a mutation merely because chat output was lost.
 - **Finding classification:** Any mutation after an unknown outcome, stale/foreign recovery acceptance, secret/evidence leak, missing real MCP or model/session proof, or false completion is `BLOCKING`; stronger automation, transcript export, or separate-worktree recovery is `FOLLOW_UP`; retained bounded provenance is `INFORMATIONAL`.
@@ -4999,3 +5003,198 @@ Resumable next step: an externally authorized full parent launch/restart loading
 the current source, then run the named focused regressions and canaries. No
 deployed-runtime, model/session, or `PASS` proof is recorded. RECOVERY-100
 remains **OPEN and RESUMABLE**; no `(work-complete)` marker is added.
+
+## Autonomous TUI recovery lane (2026-09-03)
+
+The recovery lane extends without rewriting its retained history:
+`RECOVERY-100 -> RECOVERY-101`. `RECOVERY-100` remains the current open
+Plan/MCP recovery work. This new task records the next non-conflicting
+replacement-parent contract; its policy documentation may start in a separate
+Docs territory, but no runtime implementation or parent-restart dispatch may
+begin until `RECOVERY-100` is complete and the restart gates below are proven.
+
+#### RECOVERY-101 — Autonomous TUI recovery and replacement-parent adoption
+
+- **IN_SCOPE:** Define and later verify the replacement-first recovery state
+  machine for a terminal user interface (TUI) parent or session whose task or
+  tool transport ends before its outcome is known; require a read-only recovery
+  preflight, durable typed handoff, externally supervised replacement launch,
+  health, reconnect/resume, rollback or authorized adoption, and split-brain
+  fencing; support automatic bootstrap for legacy unenrolled parents; preserve
+  the first failure, worktree, task, `TodoWrite`, and evidence state. The
+  security-remediated Recovery boundary is a deployment-only
+  permission-derived writer: source/package/config executable paths are denied,
+  writes are limited to declared recovery evidence/roadmap, and execution is
+  limited to the fixed production-restart command plus safe Git
+  inspection/checkpoint; Premium remains the implementation owner.
+- **OUT_OF_SCOPE:** Completing or reimplementing `RECOVERY-100`, new MCP or
+  credential-reset features, broad supervisor/runtime redesign, automatic
+  transcript or Docs Workspace export, manual/editor write guarantees, broad
+  cleanup, Cloudflare decisions, Playwright/browser decisions, and source/test
+  edits, source/package/config permission changes, and profile/skill changes in
+  this documentation contract wave.
+- **Owner:** `@ingenium-software-engineer-premium` for replacement implementation;
+  `@ingenium-recovery-engineer` for deployment-only fixed production restart,
+  safe Git inspection/checkpoint, and declared recovery evidence/roadmap writes;
+  `@ingenium-docs` owns this canonical policy opening only. Recovery may own a
+  TodoWrite item only for declared deployment/recovery/checkpoint evidence and
+  roadmap reconciliation; Premium owns recovery implementation TodoWrite items.
+- **Dependencies:** `RECOVERY-100` must reach its declared acceptance and
+  reconciliation gates first; its `COORD-106` and `COORD-RESET-100`
+  prerequisites remain transitive prerequisites. The `RECOVERY-101` policy
+  marker may be opened now, but no runtime implementation or restart dispatch is
+  dependency-ready while `RECOVERY-100` is **OPEN and RESUMABLE**.
+- **Acceptance:** Before any restart task is dispatched, a retained read-only
+  recovery preflight verifies the exact project, workspace, storage mapping,
+  canonical worktree, parent/session/incarnation, epoch/fence/claim,
+  nonce/enrollment, newest durable handoff, exact changed paths, and
+  task/`TodoWrite`/status/`nextWork` state without signaling, stopping,
+  restarting, mutating, claiming, releasing, or clearing state. A parent restart
+  is then permitted only when retained proof establishes every gate: fresh
+  nonce/enrollment; durable typed handoff; external supervisor ownership;
+  replacement health on the current merged source; reconnect/resume without
+  replaying an uncertain mutation; rollback or authorized adoption; and
+  split-brain fencing with stale-parent rejection. A task/tool transport abort
+  is nonterminal, preserves the unknown outcome and first failure, and triggers
+  immediate state recovery; an aborted restart task never ends the turn. A
+  legacy unenrolled parent uses automatic bootstrap, with the replacement
+  enrolled and health-checked before the legacy parent is ever signaled. Actual
+   live TUI/session and `TodoWrite` replay evidence proves the replacement path,
+   including resume and fencing; source tests, deployed canaries, file-only
+   visibility, or native forks cannot substitute for it.
+  Any temporary self-bootstrap used by the recovery lane remains pending and
+  unverified; it does not satisfy this acceptance until the live runtime gates
+  pass.
+  The Recovery writer cannot implement source, package, or configuration changes;
+  its activation and runtime proof remain pending until the full parent restart
+  and live acceptance gates pass.
+- **Live acceptance:** Run one bounded live recovery with a real TUI parent,
+  externally supervised enrolled replacement, durable handoff, current-source
+  health, reconnect/resume, explicit rollback/adoption outcome, stale-parent
+  rejection, and actual TUI/session/`TodoWrite` replay. Retain content-free
+  proof for every gate and the identity-checked cleanup result; do not infer
+  live acceptance from source or simulated artifacts.
+- **STOP_CONDITION:** `PASS` only after the source/policy gates, rebuilt current
+  deployment and health, one bounded security review, live TUI/session/
+  `TodoWrite` replay, rollback/adoption, split-brain, cleanup, and final
+  marker/TodoWrite reconciliation all pass. Explicit user `STOP` or
+  `CANCELLED` is terminal; otherwise continue in scope or use only the
+  permitted escalation rule.
+- **Escalation:** Only unavailable required protected access after the
+  configured path was attempted, unauthorized destructive or irreversible
+  recovery, a mutually exclusive product decision, genuine recovery-contract
+  ambiguity, or bounded diagnosis that cannot reproduce a root cause.
+- **Verification owner:** `@ingenium-qa` owns one declared targeted runtime/
+  recovery pass; `@ingenium-security-auditor` owns one bounded review of the
+  predeclared security surface; `@ingenium-explore` cross-checks retained
+  identity and evidence boundaries. No reviewer may dispatch work or reopen a
+  closed task.
+- **Deployment owner:** `@ingenium-recovery-engineer` for the deployment-only
+  recovery lane. Its permission-derived writer boundary admits only the fixed
+  production-restart command plus safe Git inspection/checkpoint operations;
+  source/package/config executable paths are denied and writes are limited to
+  declared recovery evidence/roadmap. Premium owns implementation. Recovery has
+  no arbitrary shell, `question`, task/delegation, or implementation access.
+  Activation and runtime proof remain pending; after activation, rebuild and
+  restart the current merged source, then health-check the actual replacement
+  path before any old-parent retirement.
+- **Security surface:** Restart authorization and external-supervisor ownership;
+  nonce/enrollment and project/workspace/worktree binding; durable handoff
+  integrity and redaction; lease/fence/incarnation and stale-call rejection;
+  legacy bootstrap ordering; rollback/adoption; and protection against
+  credential, transcript, reasoning, or private-path disclosure.
+- **Rollback/safety:** Treat every unknown outcome as unresolved. Stop writers,
+  preserve the old parent and first failure, use only identity-checked
+  run-owned cleanup, keep the old parent unsignaled until replacement health,
+  handoff, adoption/rollback, and fencing are proven, and never clear foreign,
+  live, or uncertain claims. Do not place secrets, transcripts, or raw tool
+  payloads in logs or retained evidence.
+- **Tests:** Focused source/permission and marker checks; read-only preflight
+  fixtures; nonce/enrollment and durable-handoff checks; external-supervisor and
+  replacement-health checks; reconnect/resume and abort-state recovery;
+  legacy-bootstrap ordering; rollback/adoption; stale-parent/split-brain
+  rejection; redaction and owned-cleanup checks; one deployed live recovery;
+  and actual TUI/session/`TodoWrite` replay artifacts. Source checks are not
+  runtime acceptance.
+- **Docs:** `AGENTS.md`, `README.md`, `docs/configure/agents.md`, and this
+  roadmap only; never mutate Docs Workspace pages, profiles, skills, or
+  unrelated documentation/indexes.
+- **Exclusive writer territory:** The later Premium runtime wave owns the
+  recovery supervisor/TUI replacement implementation and run-owned acceptance
+  harness. The Recovery agent is a deployment-only permission-derived writer:
+  source/package/config executable paths are denied, writes are limited to
+  declared recovery evidence/roadmap, and it owns only the fixed
+  production-restart command plus safe Git inspection/checkpoint. The current
+  Docs wave owns only the canonical policy files named above. There is no overlap with
+  `RECOVERY-100`'s active credential/MCP remediation territory.
+- **Phase/counts:** `C8` later runtime wave; `A=6`, `W=3`, read-only ceiling
+  `6 - W = 3`; Premium owns implementation, the Recovery agent owns only the
+  deployment-only fixed production-restart and safe Git inspection/checkpoint
+  boundary, and Docs owns directly affected canonical guidance, with QA,
+  security, and exploration in the declared post-wave review. No runtime agents
+  are dispatched by this documentation opening.
+- **UNUSED_CAPACITY:** The later runtime wave uses all six active slots and all
+  three writer slots; the current documentation opening dispatches no additional
+  runtime work.
+- **Verification plan:** First run the focused policy/Markdown and append-only
+  checks against the six canonical policy surfaces and confirm the new marker is
+  under an approved log heading. After `RECOVERY-100` completes, perform the
+  read-only preflight and retain the exact identity/handoff state; obtain
+  external supervisor ownership; enroll/bootstrap and health-check the
+  replacement on the current merged source; reconnect/resume; exercise the
+  abort, rollback/adoption, legacy-bootstrap, and split-brain fences; capture
+  actual TUI/session/`TodoWrite` replay; run the single targeted QA and security
+  reviews; clean only owned state; and reconcile markers/TodoWrite. For any
+  failure, retain the first actionable error, name the current reproducible
+  root cause, fix only that in-scope boundary, and rerun its smallest proving
+  regression; never treat a restart abort or a missing artifact as terminal.
+- **Causal remediation rule:** Fix the earliest proven preflight, enrollment,
+  handoff, supervisor-ownership, replacement-health, reconnect/resume,
+  rollback/adoption, or fencing boundary. Do not signal the old parent first,
+  replay an uncertain mutation, or hide missing runtime/model evidence behind a
+  source-test or deployed-canary result.
+- **Finding classification:** Any restart without the full proof bundle,
+  unauthorized signal, legacy-first signal, stale-parent mutation,
+  split-brain acceptance, lost handoff, false health, missing live replay, or
+  false completion is `BLOCKING`; stronger automation, transcript export,
+  separate-worktree support, and unrelated policy drift are `FOLLOW_UP`;
+  retained content-free provenance is `INFORMATIONAL`.
+- **Markers/evidence:** [x] append one `work-started` marker after the
+  documentation preflight and declared policy ownership; [ ] append one
+  matching `work-complete` marker only after every acceptance and live-evidence
+  gate passes; [ ] retain non-empty evidence covering source, deployment/
+  health, security, cleanup, and actual TUI/session/`TodoWrite` replay. The
+  start marker below records policy work only and does not claim runtime proof.
+
+### Work marker log (continued)
+
+<!-- (work-started) RECOVERY-101 2026-09-03T00:00:00Z ingenium-docs -->
+Evidence RECOVERY-101: The canonical RECOVERY-101 contract and aligned TUI
+recovery safeguards are recorded in the repository policy surfaces. This is
+source/static documentation evidence only; RECOVERY-100 remains open, no parent
+restart or runtime recovery was dispatched, and no actual TUI/session/
+`TodoWrite` replay or completion claim is recorded.
+Evidence RECOVERY-101: The active recovery policy now identifies
+`ingenium-recovery-engineer` as the `openai/gpt-5.6-sol` / `high` recovery-lane
+deployment owner, mapped to
+`.opencode/agents/execution/ingenium-recovery-engineer.md`. Its narrow finite
+admission covers build, recovery, and checkpoint operations only; arbitrary
+shell, `question`, and task/delegation access remain denied. The dedicated
+admission removes the recovery bootstrap permission deadlock, but it becomes
+active only after a full parent OpenCode restart; a child-MCP restart is not
+sufficient. This remains source/static policy evidence only: RECOVERY-100 and
+RECOVERY-101 remain open, and no runtime acceptance or `(work-complete)` marker
+is recorded.
+Evidence RECOVERY-101: The canonical reconciliation adds the Recovery agent to
+TodoWrite ownership and permission-derived writer accounting. Temporary
+self-bootstrap remains pending and unverified until live runtime acceptance, and
+root/profile loading requires a full parent replacement/restart rather than a
+child-MCP restart. This is source/static documentation evidence only; no live
+TUI/session replay, runtime acceptance, or `(work-complete)` marker is claimed.
+Evidence RECOVERY-101: The security remediation records Recovery as a
+deployment-only permission-derived writer. Source/package/config executable
+paths are denied; writes are limited to declared recovery evidence/roadmap; and
+execution is limited to the fixed production-restart command plus safe Git
+inspection/checkpoint. Premium remains the implementation owner. Activation and
+runtime proof remain pending; this documentation-only update ran no tests and
+appended no `(work-complete)` marker.

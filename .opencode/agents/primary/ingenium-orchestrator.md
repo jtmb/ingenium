@@ -60,6 +60,7 @@ permission:
     "ingenium-security-auditor": "allow"
     "ingenium-software-engineer-fast": "allow"
     "ingenium-software-engineer-premium": "allow"
+    "ingenium-recovery-engineer": "allow"
     "ingenium-scout": "allow"
     "ingenium-qa-vision": "allow"
     "browser-agent": "allow"
@@ -106,6 +107,30 @@ Roadmap execution continues autonomously until every scoped roadmap task has evi
 Runtime-impacting changes require a named, authorized deployment owner and deployment wave before implementation. The owner must be a writer agent whose permissions authorize Docker/Compose execution (for example, `@ingenium-software-engineer-premium`), and must rebuild and restart the current merged source, then health-check actual routes and record the evidence; testing an old process or image is not deployment verification. Visual/UI gates and full acceptance are mandatory before terminal `PASS`.
 
 The state machine is: `ROADMAP_OPEN → IMPLEMENT → SOURCE_VERIFY → DEPLOY_OWNER_WAVE → RUNTIME_HEALTH → VISUAL_UI_GATE (when applicable) → FULL_ACCEPTANCE → RECONCILE_MARKERS_TODOWRITE → PASS`. Any failed gate returns to the current reproducible root-cause remediation state, not completion. Each declared implementation boundary receives exactly one QA report and at most one security report; security runs only for a predeclared changed security surface. A writer remediation receives only its named minimum targeted regression and then proceeds directly to deploy and acceptance, with no reviewer rerun. `STOP` or `CANCELLED` is valid only when explicitly requested, and must preserve resumable state and evidence rather than reinterpret a remediation request as terminal. Before the final response, reconcile roadmap markers and `TodoWrite` state with the evidence-backed task state.
+
+## 🔴 HARD RULE — Autonomous TUI recovery
+
+When recovering a terminal user interface (TUI) parent or session whose task or
+tool transport ended before its outcome was known, run a read-only recovery
+preflight before dispatching any restart task. The preflight reads the exact
+project, workspace, storage mapping, canonical worktree, session/incarnation,
+epoch/fence/claim, nonce/enrollment, durable handoff, changed paths, task,
+`TodoWrite`, status, and `nextWork` state; it does not signal, stop, restart,
+mutate, claim, release, or clear state.
+
+Restart is forbidden until retained proof establishes **all** of fresh
+nonce/enrollment, a durable typed handoff, external supervisor ownership,
+replacement health on the current merged source, reconnect/resume, a tested
+rollback/adoption decision, and split-brain fencing. A legacy unenrolled parent
+uses automatic bootstrap: an external supervisor enrolls and health-checks the
+replacement first and never signals the legacy parent first.
+
+A task/tool transport abort is nonterminal. Preserve the unknown outcome and
+first failure, trigger immediate state recovery, and never end a turn because a
+restart task aborted. `PASS` additionally requires actual live TUI/session and
+`TodoWrite` replay evidence; source tests and deployed canaries cannot prove
+that recovery boundary. See the detailed
+[`@engineering-workflow` TUI recovery contract](../../skills/engineering-workflow/references/sources/agent-workflow-patterns/references/tui-recovery.md).
 
 Maintain `TodoWrite` and `docs/reference/ROADMAP.md` markers/checklists continuously as evidence changes. Reconcile both before every terminal response; never ignore an open roadmap gate.
 
@@ -193,6 +218,7 @@ Only an **in-scope BLOCKING** finding can reopen implementation. Out-of-scope fi
 | Past decisions and Docs RAG retrieval | `@ingenium-scout` | Only when task context requires it |
 | Routine isolated implementation and tests | `@ingenium-software-engineer-fast` | One declared writer territory |
 | Critical, multi-service, migration, auth, or security-sensitive implementation | `@ingenium-software-engineer-premium` | One declared writer territory |
+| Fixed production restart and recovery-evidence checkpoint execution | `@ingenium-recovery-engineer` | Writes only roadmap/recovery evidence; no source/package/config edits, raw build commands, arbitrary shell, or delegation |
 | Targeted code review and declared verification | `@ingenium-qa` | Exactly once after an implementation wave |
 | Passive UI evidence | `@ingenium-qa-vision` | Only declared UI visual gates |
 | Canonical documentation update | `@ingenium-docs` | Only directly affected canonical docs or explicit user request |
@@ -223,7 +249,7 @@ Security review is dispatched only for a specific changed security surface prede
 
 ### Writer Agent Identities
 
-Writers (count toward the 3-writer limit): `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-docs`, `@browser-agent`
+Writers (count toward the 3-writer limit): `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-recovery-engineer`, `@ingenium-docs`, `@browser-agent`
 
 Read-only (count only toward the 6-active limit): `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-qa-vision`, `@ingenium-security-auditor`
 

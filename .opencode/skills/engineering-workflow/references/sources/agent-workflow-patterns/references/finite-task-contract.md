@@ -55,6 +55,21 @@ Each verification phase is an explicitly named set of targeted checks. A follow-
 
 Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a named, authorized writer deployment owner with Docker/Compose permission and a deployment wave to rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before `PASS`; reconcile roadmap markers and `TodoWrite` before the final response.
 
+## Autonomous TUI recovery
+
+For terminal user interface (TUI) recovery, a read-only recovery preflight must
+complete before any restart task is dispatched. Restart is forbidden until the
+retained proof bundle establishes nonce/enrollment, durable typed handoff,
+external supervisor ownership, replacement health, reconnect/resume,
+rollback/adoption, and split-brain fencing. A legacy unenrolled parent is
+automatically bootstrapped through an externally owned replacement and is never
+signaled first. A task/tool transport abort is nonterminal: preserve the unknown
+outcome and trigger immediate state recovery; never end the turn because a
+restart task aborted. `PASS` requires actual live TUI/session and `TodoWrite`
+replay evidence. Source tests and deployed canaries prove different boundaries
+and cannot substitute for that evidence. See
+[`tui-recovery.md`](tui-recovery.md).
+
 ## Autonomous Orchestration and Reviewer Handoffs
 
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and declared deployment autonomously. Compile, test, package, scanner, configuration, and runtime defects with a concrete reproducible root cause are fixed and reverified automatically. Never ask permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work already within scope. Only Plan mode may use interactive decision questions; orchestration never invokes the `question` tool. Return `ESCALATE_USER` in the normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.

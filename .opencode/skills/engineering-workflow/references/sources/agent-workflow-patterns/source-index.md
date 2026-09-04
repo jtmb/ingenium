@@ -19,6 +19,15 @@ Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. BLO
 
 Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave that rebuilds and restarts the current merged source, then health-checks actual routes. Visual/UI gates and full acceptance are mandatory before terminal success, and roadmap markers plus `TodoWrite` must be reconciled before the final response.
 
+**Autonomous TUI recovery:** perform a read-only recovery preflight before
+restart dispatch. Do not restart until fresh nonce/enrollment, durable handoff,
+external supervisor ownership, replacement health, reconnect/resume,
+rollback/adoption, and split-brain fencing are proven. An unenrolled legacy
+parent is bootstrapped automatically and is never signaled first. A task/tool
+transport abort is nonterminal and triggers immediate state recovery; an aborted
+restart task cannot end the turn. `PASS` requires actual TUI/session and
+`TodoWrite` replay evidence, not source-test or deployed-canary substitution.
+
 ## 🔴 HARD RULEs — Concurrency & Phase Scheduling
 
 - **Maximum 6 active subagents per phase** — total simultaneous subagents, including writers and read-only agents
@@ -67,3 +76,4 @@ history, or force-push without explicit authorization.
 | [`references/finite-task-contract.md`](references/finite-task-contract.md) | Canonical scope, finding-classification, bounded verification, cancellation, and escalation rules |
 | [`references/agent-limits.md`](references/agent-limits.md) | Canonical concurrency policy and bounded phase declaration |
 | [`references/visual-validation.md`](references/visual-validation.md) | Bounded changed-route and batch visual QA protocol |
+| [`references/tui-recovery.md`](references/tui-recovery.md) | Read-only preflight, restart gates, abort recovery, legacy bootstrap, and TUI/session replay evidence |

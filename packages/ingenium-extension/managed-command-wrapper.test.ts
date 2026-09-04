@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
 import {
   chmodSync,
   closeSync,
@@ -31,12 +32,16 @@ import {
   managedBuildEnvironment,
   managedBuildExecution,
   managedCommand,
+  MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS,
   managedGitEnvironment,
   managedReplacementFirstRestart,
+  managedRecoveryEnvironment,
   managedRepositoryArgv,
   runManagedCommandCli,
+  terminateTimedOutManagedProcess,
   validateManagedBuildArgv,
   validateManagedRepositoryArgv,
+  type ManagedProcessGroupIdentity,
 } from "./scripts/managed-command-wrapper.js";
 import type {
   RedactedRestartHandoff,
@@ -51,20 +56,56 @@ import {
   parseLegacyRecoveryOwnerPayload,
   prepareManagedRecoveryReplacement,
   readManagedRecoveryEnrollment,
+  readRecoveryServerAuthentication,
+  recordManagedRecoveryAttachEvent,
+  recoveryServerAuthenticationPath,
+  stopTimedOutLegacyRecoveryOwner,
 } from "./tui-recovery.js";
 import {
+  appendProductionRestartEvidence,
   hardenLegacyProductionCredentialPermissions,
+  openCodeJsonRequest,
   parseListeningLoopbackPorts,
+  probeReplacementHealthGate,
+  productionRestartCanonicalWorktree,
+  restartHandoffEvidence,
+  restartHandoffMemoryEntry,
+  runProductionRestartCli,
   runProductionRestartAdapter,
+  typedMemoryAcknowledgementEvidence,
   type ProductionRestartAdapterDependencies,
   type ProductionRestartBinding,
   type ProductionRestartParentCandidate,
 } from "./scripts/production-restart.js";
+import {
+  RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
+  RECOVERY_BOOTSTRAP_CHECKS,
+  RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS,
+  RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS,
+  RecoveryBootstrapTimeoutError,
+  recoveryBootstrapCheckEnvironment,
+  recoveryBootstrapCanonicalWorktree,
+  recoveryBootstrapRestartEnvironment,
+  runRecoveryBootstrap,
+  verifyRecoveryBootstrapInvocation,
+} from "./scripts/recovery-bootstrap.js";
 
 const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toString("hex").slice(0, 64);
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const recoverySource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "tui-recovery.ts")).href;
 const tsxLoader = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/tsx/dist/loader.mjs")).href;
+const repositoryRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), "../.."));
+const recoveryBootstrapSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.ts");
+const productionRestartSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "production-restart.ts");
+
+function recoveryBootstrapEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    INGENIUM_WORKTREE: repositoryRoot,
+    INGENIUM_RECOVERY_CANONICAL_WORKTREE: repositoryRoot,
+    INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256: sha256(readFileSync(recoveryBootstrapSource)),
+    ...overrides,
+  };
+}
 
 function recoveryProcessIdentity(pid: number, nonceSha256: string): RestartProcessIdentity {
   const source = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -92,16 +133,25 @@ function writePrivateJson(path: string, value: unknown): void {
   chmodSync(path, 0o600);
 }
 
-function recoveryPaths(worktree: string): { state: string; journal: string } {
+function recoveryPaths(worktree: string): { state: string; journal: string; events: string } {
   const directory = join(dirname(new CoordinationOutbox(worktree).directory), "tui-recovery");
   mkdirSync(directory, { mode: 0o700 });
-  return { state: join(directory, "state.json"), journal: join(directory, "journal.json") };
+  return {
+    state: join(directory, "state.json"),
+    journal: join(directory, "journal.json"),
+    events: join(directory, "events.jsonl"),
+  };
 }
 
 function recoveryHandoff(): RedactedRestartHandoff {
   return {
     status: "working",
     taskHash: sha256("recovery-task"),
+    actions: [{ kind: "edit", result: "succeeded", path: "src/recovery.ts", targetHash: null }],
+    changedPaths: [{ path: "src/recovery.ts", operation: "edit", additions: 2, deletions: 1, changeRevision: 1 }],
+    checks: [{
+      name: "test", status: "completed", result: "passed", exitCode: 0, targetHash: sha256("recovery-check"),
+    }],
     todos: { total: 3, pending: 1, inProgress: 1, completed: 1, cancelled: 0, state: "mixed" },
     nextWork: { kind: "continue_task", referenceHash: sha256("recovery-next-work") },
   };
@@ -204,6 +254,9 @@ function replacementRequest(worktree: string): ReplacementFirstRestartRequest {
     handoff: {
       status: "working",
       taskHash: hash("e"),
+      actions: [{ kind: "edit", result: "succeeded", path: "src/restart.ts", targetHash: null }],
+      changedPaths: [{ path: "src/restart.ts", operation: "edit", additions: 1, deletions: 0, changeRevision: 1 }],
+      checks: [{ name: "typecheck", status: "completed", result: "passed", exitCode: 0, targetHash: hash("g") }],
       todos: { total: 2, pending: 1, inProgress: 1, completed: 0, cancelled: 0, state: "mixed" },
       nextWork: { kind: "continue_task", referenceHash: hash("f") },
     },
@@ -244,6 +297,13 @@ describe("managed command wrappers", () => {
         { ...payload, changedPaths: ["secret/path"] },
         { ...payload, handoff: { ...(payload.handoff as object), todoItems: [{ content: "raw todo" }] } },
         { ...payload, handoff: { ...(payload.handoff as object), nextWork: { kind: "continue_task", referenceHash: sha256("next"), command: "run" } } },
+        { ...payload, handoff: { ...(payload.handoff as object), changedPaths: [{ path: "../outside", operation: "edit", additions: 1, deletions: 0, changeRevision: 1 }] } },
+        { ...payload, handoff: { ...(payload.handoff as object), changedPaths: [{ path: ".opencode/protected-runtime-index/state", operation: "edit", additions: 1, deletions: 0, changeRevision: 1 }] } },
+        { ...payload, handoff: { ...(payload.handoff as object), actions: [{ kind: "execute", result: "succeeded", path: null, targetHash: "raw command" }] } },
+        { ...payload, handoff: { ...(payload.handoff as object), checks: [{ name: "test", status: "completed", result: "failed", exitCode: 1, targetHash: sha256("invalid-check") }] } },
+        { ...payload, handoff: { ...(payload.handoff as object), actions: [] } },
+        { ...payload, handoff: { ...(payload.handoff as object), changedPaths: [] } },
+        { ...payload, handoff: { ...(payload.handoff as object), checks: [] } },
       ]) expect(() => parseLegacyRecoveryOwnerPayload(encoded(invalid))).toThrow();
 
       const paths = recoveryPaths(worktree);
@@ -270,8 +330,6 @@ describe("managed command wrappers", () => {
       const journal = {
         schemaVersion: 1,
         ...handoff,
-        changedPathSegments: [],
-        checks: [],
         fence: 2,
         generation: 2,
         phase: "enrolled",
@@ -399,6 +457,24 @@ describe("managed command wrappers", () => {
       expect(readFileSync(paths.journal, "utf8")).not.toContain("successor-session");
       expect(() => process.kill(legacy.pid!, 0)).toThrow();
       expect(readManagedRecoveryEnrollment(worktree)?.handoff).toEqual(recoveryHandoff());
+      const events = readFileSync(paths.events, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(events.filter((event) => event.event === "fence_transition").map((event) => [event.priorFence, event.fence]))
+        .toEqual(expect.arrayContaining([[0, 1], [1, 2], [2, 3]]));
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          event: "rollback",
+          reason: "replacement_identity_unavailable",
+          replacementPid: failedReplacement.pid,
+          transactionSha256: firstTransaction,
+        }),
+        expect.objectContaining({
+          event: "adoption",
+          replacementPid: successor.pid,
+          replacementIdentitySha256: recoveryIdentitySha256(successorIdentity),
+          transactionSha256: transaction,
+        }),
+      ]));
+      expect(JSON.stringify(events)).not.toContain("successor-session");
     } finally {
       if (priorOwnerNonce === undefined) delete process.env.INGENIUM_RECOVERY_OWNER_NONCE;
       else process.env.INGENIUM_RECOVERY_OWNER_NONCE = priorOwnerNonce;
@@ -414,6 +490,65 @@ describe("managed command wrappers", () => {
       rmSync(worktree, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it("autonomous-recovery records bounded protected attach-started and attach-healthy events without session or secret data", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-recovery-attach-events-"));
+    try {
+      const paths = recoveryPaths(worktree);
+      const replacement = {
+        pid: process.pid + 1,
+        startTimeTicks: 2301,
+        executableSha256: sha256("attach-executable"),
+        nonceSha256: sha256("attach-nonce"),
+      };
+      const transactionSha256 = sha256("attach-transaction");
+      const activeParent = {
+        ...replacement,
+        worktree,
+        project: "tui-recovery-test",
+        projectId: "00000000-0000-4000-8000-000000000001",
+        workspaceId: "recovery-workspace",
+        storageMappingHash: sha256("recovery-storage"),
+        port: 43001,
+        dataHome: worktree,
+      };
+      writePrivateJson(paths.state, {
+        schemaVersion: 1,
+        owner: recoveryProcessIdentity(process.pid, sha256("owner")),
+        fence: 3,
+        generation: 4,
+        phase: "replacement_committed",
+        activeParent,
+        replacement: {
+          identity: replacement,
+          port: 43001,
+          dataHome: worktree,
+          transactionSha256,
+          identitySha256: recoveryIdentitySha256(replacement),
+          session: { iv: "a".repeat(16), tag: "b".repeat(22), value: "c" },
+          ownerReady: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      recordManagedRecoveryAttachEvent(worktree, "attach_started", process.pid, "successor-session", transactionSha256, replacement);
+      recordManagedRecoveryAttachEvent(worktree, "attach_healthy", process.pid, "successor-session", transactionSha256, replacement);
+      const events = readFileSync(paths.events, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(events.map((event) => event.event)).toEqual(["attach_started", "attach_healthy"]);
+      expect(events).toEqual(expect.arrayContaining([expect.objectContaining({
+        attachPid: process.pid,
+        successorSessionSha256: sha256("successor-session"),
+        replacementIdentitySha256: recoveryIdentitySha256(replacement),
+        transactionSha256,
+        occurredAt: expect.any(String),
+      })]));
+      expect(JSON.stringify(events)).not.toContain("successor-session");
+      expect(() => recordManagedRecoveryAttachEvent(
+        worktree, "attach_started", 1, "successor-session", transactionSha256, replacement,
+      )).toThrow("attach event is invalid");
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
 
   it("discovers listening loopback servers without depending on transient client sockets", () => {
     const table = [
@@ -616,7 +751,7 @@ describe("managed command wrappers", () => {
     expect(managedBuildExecution(["deployment", "production-restart"]))
       .toEqual({
         command: process.execPath,
-        argv: [join(dirname(fileURLToPath(import.meta.url)), "scripts", "production-restart.js")],
+        argv: [join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js")],
       });
     expect(managedBuildExecution(["run", "typecheck"]))
       .toEqual({ command: `${dirname(process.execPath)}/npm`, argv: ["run", "typecheck"] });
@@ -634,6 +769,533 @@ describe("managed command wrappers", () => {
       expect(isManagedDeploymentArgv(argv)).toBe(false);
       expect(() => managedBuildExecution(argv)).toThrow("Build wrapper rejected the command");
     }
+  });
+
+  it("runs the fixed recovery checkpoint in order and launches production restart only after every check passes", () => {
+    const calls: Array<{ command: string; argv: readonly string[]; options: Record<string, unknown> }> = [];
+    const runner = vi.fn((command: string, argv: readonly string[], options: Record<string, unknown>) => {
+      calls.push({ command, argv, options });
+      return { error: undefined, signal: null, status: 0 };
+    });
+
+    const retainEvidence = vi.fn();
+    expect(runRecoveryBootstrap(
+      ["node", recoveryBootstrapSource],
+      runner as any,
+      retainEvidence,
+      recoveryBootstrapEnvironment(),
+      { productionRestart: productionRestartSource },
+    )).toBe(0);
+    expect(calls.slice(0, -1).map(({ command, argv }) => [command, argv])).toEqual(RECOVERY_BOOTSTRAP_CHECKS);
+    expect(calls.at(-1)).toMatchObject({
+      command: process.execPath,
+      argv: [productionRestartSource],
+      options: { shell: false, stdio: "inherit" },
+    });
+    const productionRestartScriptSha256 = sha256(readFileSync(calls.at(-1)!.argv[0]!));
+    expect((calls.at(-1)!.options.env as NodeJS.ProcessEnv).INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED)
+      .toBe(productionRestartScriptSha256);
+    expect(calls.every(({ options }) => options.cwd === repositoryRoot)).toBe(true);
+    expect(calls.slice(0, -1).every(({ options }) => options.timeout === RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS)).toBe(true);
+    expect(calls.at(-1)!.options.timeout).toBe(RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS);
+    expect(retainEvidence).toHaveBeenLastCalledWith({
+      schemaVersion: 1,
+      checks: RECOVERY_BOOTSTRAP_CHECKS.map((_, index) => ({
+        index: index + 1, result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
+      })),
+      productionRestart: { result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS },
+      productionRestartScriptSha256,
+    });
+  });
+
+  it("stops the recovery checkpoint on the first failed check without launching or inheriting unsafe environment", () => {
+    const calls: Array<{ command: string; argv: readonly string[] }> = [];
+    const runner = vi.fn((command: string, argv: readonly string[]) => {
+      calls.push({ command, argv });
+      return { error: undefined, signal: null, status: calls.length === 2 ? 7 : 0 };
+    });
+    const hostile = {
+      HOME: "/tmp/recovery-home",
+      NODE_OPTIONS: "--require=/tmp/attacker.js",
+      OPENCODE_SERVER_PASSWORD: "must-not-pass",
+      INGENIUM_MCP_CREDENTIAL: "must-not-pass",
+      INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
+      INGENIUM_RECOVERY_OWNER_NONCE: "owner-nonce",
+    };
+
+    expect(runRecoveryBootstrap(
+      ["node", recoveryBootstrapSource],
+      runner as any,
+      undefined,
+      recoveryBootstrapEnvironment(),
+      { productionRestart: productionRestartSource },
+    )).toBe(7);
+    expect(calls).toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(([command, argv]) => ({ command, argv })));
+    expect(recoveryBootstrapCheckEnvironment(hostile)).toEqual({
+      HOME: "/tmp/recovery-home",
+      NPM_CONFIG_GLOBALCONFIG: "/dev/null",
+      NPM_CONFIG_SCRIPT_SHELL: "/bin/sh",
+      NPM_CONFIG_USERCONFIG: "/dev/null",
+      PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+    });
+    const scriptSha256 = sha256("production-restart");
+    expect(recoveryBootstrapRestartEnvironment(scriptSha256, hostile)).toMatchObject({
+      HOME: "/tmp/recovery-home",
+      INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
+      INGENIUM_RECOVERY_OWNER_NONCE: "owner-nonce",
+      INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED: scriptSha256,
+    });
+    expect(JSON.stringify(recoveryBootstrapRestartEnvironment(scriptSha256, hostile))).not.toContain("must-not-pass");
+    expect(() => runRecoveryBootstrap(["node", recoveryBootstrapSource, "argument"], runner as any))
+      .toThrow("Recovery bootstrap accepts no arguments");
+  });
+
+  it("reports the first recovery checkpoint timeout and never launches production restart", () => {
+    const calls: string[] = [];
+    const timeout = Object.assign(new Error("spawnSync timed out"), { code: "ETIMEDOUT" });
+    const runner = vi.fn((command: string) => {
+      calls.push(command);
+      return { error: calls.length === 2 ? timeout : undefined, signal: calls.length === 2 ? "SIGTERM" : null, status: calls.length === 2 ? null : 0 };
+    });
+
+    let failure: unknown;
+    try {
+      runRecoveryBootstrap(
+        ["node", recoveryBootstrapSource],
+        runner as any,
+        undefined,
+        recoveryBootstrapEnvironment(),
+        { productionRestart: productionRestartSource },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(RecoveryBootstrapTimeoutError);
+    expect(failure).toMatchObject({
+      name: "RecoveryBootstrapTimeoutError",
+      code: "RECOVERY_BOOTSTRAP_TIMEOUT",
+      stage: "check",
+      checkIndex: 2,
+      message: "Recovery bootstrap check 2 timed out",
+    });
+    expect(calls).toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(([command]) => command));
+    expect(calls).not.toContain(process.execPath);
+  });
+
+  it("recovery checkpoint accepts stable bootstrap content and rejects a hash mismatch before execution", () => {
+    const bytes = readFileSync(recoveryBootstrapSource);
+    expect(verifyRecoveryBootstrapInvocation(recoveryBootstrapSource, sha256(bytes))).toBe(sha256(bytes));
+    expect(recoveryBootstrapCanonicalWorktree(recoveryBootstrapEnvironment())).toBe(repositoryRoot);
+    expect(productionRestartCanonicalWorktree(recoveryBootstrapEnvironment())).toBe(repositoryRoot);
+
+    const runner = vi.fn(() => ({ error: undefined, signal: null, status: 0 }));
+    expect(() => runRecoveryBootstrap(
+      ["node", recoveryBootstrapSource],
+      runner as any,
+      undefined,
+      recoveryBootstrapEnvironment({ INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256: sha256("changed") }),
+      { productionRestart: productionRestartSource },
+    )).toThrow("generated content changed before execution");
+    expect(runner).not.toHaveBeenCalled();
+
+    const other = mkdtempSync(join(tmpdir(), "ingenium-canonical-worktree-mismatch-"));
+    try {
+      expect(() => recoveryBootstrapCanonicalWorktree(recoveryBootstrapEnvironment({ INGENIUM_WORKTREE: other })))
+        .toThrow("canonical worktree binding changed");
+      expect(() => productionRestartCanonicalWorktree(recoveryBootstrapEnvironment({ INGENIUM_WORKTREE: other })))
+        .toThrow("canonical worktree binding changed");
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("source recovery shim rejects writable links, path swaps, and dirty scoped checkpoints", async () => {
+    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
+    const shim = await importModule(`${pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js")).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-trust-"));
+    try {
+      const trusted = join(directory, "trusted.js");
+      writeFileSync(trusted, "export {};\n", { mode: 0o600 });
+      expect(shim.readTrustedRegularFile(trusted, "fixture").sha256).toBe(sha256("export {};\n"));
+
+      chmodSync(trusted, 0o620);
+      expect(() => shim.readTrustedRegularFile(trusted, "fixture")).toThrow("not a trusted canonical file");
+      chmodSync(trusted, 0o600);
+      symlinkSync(trusted, join(directory, "symlink.js"));
+      expect(() => shim.readTrustedRegularFile(join(directory, "symlink.js"), "fixture"))
+        .toThrow("not a trusted canonical file");
+      linkSync(trusted, join(directory, "hardlink.js"));
+      expect(() => shim.readTrustedRegularFile(trusted, "fixture")).toThrow("not a trusted canonical file");
+      rmSync(join(directory, "hardlink.js"));
+
+      expect(() => shim.readTrustedRegularFile(trusted, "fixture", { afterOpen: (path: string) => {
+        renameSync(path, `${path}.opened`);
+        writeFileSync(path, "swapped\n", { mode: 0o600 });
+      } })).toThrow("changed while it was being verified");
+
+      const writableDirectory = join(directory, "writable");
+      mkdirSync(writableDirectory, { mode: 0o770 });
+      chmodSync(writableDirectory, 0o770);
+      expect(() => shim.canonicalOwnedDirectory(writableDirectory, "fixture"))
+        .toThrow("not a canonical owner-only directory");
+      symlinkSync(directory, join(directory, "directory-link"));
+      expect(() => shim.canonicalOwnedDirectory(join(directory, "directory-link"), "fixture"))
+        .toThrow("not a canonical owner-only directory");
+
+      const checkpoint = join(directory, "checkpoint");
+      mkdirSync(join(checkpoint, "packages/ingenium-extension/scripts"), { recursive: true });
+      mkdirSync(join(checkpoint, ".opencode/agents/execution"), { recursive: true });
+      mkdirSync(join(checkpoint, ".opencode/agents/primary"), { recursive: true });
+      mkdirSync(join(checkpoint, "tests"), { recursive: true });
+      const source = join(checkpoint, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+      writeFileSync(source, "export {};\n");
+      writeFileSync(join(checkpoint, "opencode.json"), "{}\n");
+      writeFileSync(join(checkpoint, ".opencode/agents/execution/ingenium-recovery-engineer.md"), "---\n---\n");
+      writeFileSync(join(checkpoint, ".opencode/agents/primary/ingenium-orchestrator.md"), "---\n---\n");
+      writeFileSync(join(checkpoint, "tests/test-agent-validation.sh"), "#!/bin/sh\n");
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "init", "--quiet"]);
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "add", "."]);
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "checkpoint"]);
+      const sourceBytes = readFileSync(source);
+      expect(shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toMatch(/^[0-9a-f]{40,64}$/);
+      writeFileSync(source, "export const changed = true;\n");
+      expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), readFileSync(source)))
+        .toThrow("does not match reviewed Git HEAD");
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "checkout", "--", "packages/ingenium-extension/scripts/recovery-bootstrap.js"]);
+      writeFileSync(join(checkpoint, "opencode.json"), "{\"dirty\":true}\n");
+      expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toThrow("scoped checkpoint has tracked drift");
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "checkout", "--", "opencode.json"]);
+      writeFileSync(join(checkpoint, "packages/ingenium-extension/untracked.ts"), "export {};\n");
+      expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toThrow("scoped checkpoint has untracked drift");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("installed current managed wrapper resolves production restart to the source shim", async () => {
+    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
+    const installed = join(dirname(fileURLToPath(import.meta.url)), "dist", "scripts", "managed-command-wrapper.js");
+    const wrapper = await importModule(`${pathToFileURL(installed).href}?test=${Date.now()}`);
+    expect(wrapper.managedBuildExecution(["deployment", "production-restart"])).toEqual({
+      command: process.execPath,
+      argv: [join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js")],
+    });
+  });
+
+  it("autonomous-recovery times out the outer recovery bootstrap without reaching production mutation", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-recovery-timeout-"));
+    const timeout = Object.assign(new Error("outer timeout"), { code: "ETIMEDOUT" });
+    const runner = vi.fn((_command: string, _argv: readonly string[], _options: Record<string, unknown>) => ({
+      error: timeout, signal: "SIGTERM", status: null, pid: 4242,
+    }));
+    const terminateTimedOut = vi.fn();
+    try {
+      execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      writeFileSync(join(directory, "source.ts"), "export {};\n");
+      let failure: unknown;
+      try {
+        managedCommand("build", ["deployment", "production-restart"], directory, {
+          runner: runner as any,
+          terminateTimedOut,
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toMatchObject({ code: "ETIMEDOUT" });
+      expect(runner).toHaveBeenCalledTimes(1);
+      expect(runner.mock.calls[0]![2]).toMatchObject({
+        timeout: MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS,
+        killSignal: "SIGTERM",
+        detached: process.platform !== "win32",
+      });
+      expect(MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS).toBeGreaterThan(RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS);
+      expect(terminateTimedOut).toHaveBeenCalledWith(4242, process.platform !== "win32", {
+        nonce: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+        executableSha256: sha256(readFileSync(realpathSync(process.execPath))),
+      });
+      expect(existsSync(join(directory, "production-mutation"))).toBe(false);
+
+      const kill = vi.fn();
+      const identity = {
+        pid: 4242,
+        processGroupId: 4242,
+        startTimeTicks: 100,
+        executableSha256: sha256(readFileSync(realpathSync(process.execPath))),
+      };
+      const group: ManagedProcessGroupIdentity = { leader: identity, members: new Map([[identity.pid, identity]]) };
+      terminateTimedOutManagedProcess(4242, true, { nonce: "n".repeat(43), executableSha256: identity.executableSha256 }, {
+        inspect: () => group,
+        kill: kill as any,
+      });
+      expect(kill).toHaveBeenCalledWith(-4242, "SIGTERM");
+      expect(kill).toHaveBeenCalledWith(-4242, "SIGKILL");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("autonomous-recovery never signals a reused PID or changed process group", () => {
+    const executableSha256 = sha256(readFileSync(realpathSync(process.execPath)));
+    const original = {
+      pid: 4242,
+      processGroupId: 4242,
+      startTimeTicks: 100,
+      executableSha256,
+    };
+    const reused = { ...original, startTimeTicks: 101 };
+    const inspect = vi.fn()
+      .mockReturnValueOnce({ leader: original, members: new Map([[original.pid, original]]) })
+      .mockReturnValue({ leader: reused, members: new Map([[reused.pid, reused]]) });
+    const kill = vi.fn();
+    expect(() => terminateTimedOutManagedProcess(4242, true, { nonce: "n".repeat(43), executableSha256 }, {
+      inspect,
+      kill: kill as any,
+    })).toThrow("leader identity changed before signal");
+    expect(kill).not.toHaveBeenCalled();
+
+    const member = { ...original, pid: 4243 };
+    const replacementMember = { ...member, startTimeTicks: 201 };
+    const memberInspect = vi.fn()
+      .mockReturnValueOnce({ leader: original, members: new Map([[original.pid, original], [member.pid, member]]) })
+      .mockReturnValue({ leader: original, members: new Map([[original.pid, original], [member.pid, replacementMember]]) });
+    expect(() => terminateTimedOutManagedProcess(4242, true, { nonce: "n".repeat(43), executableSha256 }, {
+      inspect: memberInspect,
+      kill: kill as any,
+    })).toThrow("member identity changed before signal");
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("autonomous-recovery stops an exact legacy recovery owner and retains its enrollment-timeout reason", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-legacy-owner-timeout-"));
+    const nonce = "o".repeat(43);
+    const owner = spawn(process.execPath, ["--input-type=module", "--eval", "setTimeout(() => {}, 10000)"], {
+      cwd: worktree,
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", INGENIUM_RECOVERY_OWNER_NONCE: nonce },
+      stdio: "ignore",
+    });
+    try {
+      if (!owner.pid) throw new Error("Legacy recovery owner did not start");
+      const identity = recoveryProcessIdentity(owner.pid, sha256(nonce));
+      const paths = recoveryPaths(worktree);
+      writePrivateJson(paths.state, {
+        schemaVersion: 1,
+        owner: identity,
+        fence: 1,
+        generation: 1,
+        phase: "owner_ready",
+        activeParent: null,
+        replacement: null,
+        updatedAt: new Date().toISOString(),
+      });
+
+      await stopTimedOutLegacyRecoveryOwner(worktree, identity);
+
+      expect(() => process.kill(owner.pid!, 0)).toThrow();
+      expect(readFileSync(paths.events, "utf8").trim().split("\n").map((line) => JSON.parse(line)))
+        .toContainEqual(expect.objectContaining({ event: "rollback", reason: "enrollment_timeout" }));
+    } finally {
+      await stopRecoveryProcess(owner);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("recovery checkpoint rejects a changed production restart script before adapter mutation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-production-script-hash-"));
+    const script = join(directory, "production-restart.js");
+    const previousGuard = process.env.INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED;
+    const canonicalWorktree = vi.fn(() => directory);
+    try {
+      writeFileSync(script, "export {};\n");
+      process.env.INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED = sha256("different script");
+      await expect(runProductionRestartCli({ canonicalWorktree } as any, script, ["node", script]))
+        .rejects.toThrow("script hash changed after bootstrap");
+      expect(canonicalWorktree).not.toHaveBeenCalled();
+    } finally {
+      if (previousGuard === undefined) delete process.env.INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED;
+      else process.env.INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED = previousGuard;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("requires Basic authentication for OpenCode recovery requests", async () => {
+    const authentication = { username: "recovery-user", password: "p".repeat(43) };
+    const expected = `Basic ${Buffer.from(`${authentication.username}:${authentication.password}`).toString("base64")}`;
+    const server = createHttpServer((request, response) => {
+      const authorized = request.headers.authorization === expected;
+      response.writeHead(authorized ? 200 : 401, { "content-type": "application/json" });
+      response.end(JSON.stringify(authorized ? { healthy: true } : { error: "unauthorized" }));
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolvePromise);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Test server did not bind");
+      const url = `http://127.0.0.1:${address.port}/global/health`;
+      expect((await fetch(url)).status).toBe(401);
+      await expect(openCodeJsonRequest(url, {}, AbortSignal.timeout(1_000), authentication))
+        .resolves.toEqual({ status: 200, value: { healthy: true } });
+    } finally {
+      await new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise()));
+    }
+  });
+
+  it("records Basic authentication rejection, health, and agent success without the secret", async () => {
+    const authentication = { username: "opencode", password: "p".repeat(43) };
+    const expected = `Basic ${Buffer.from(`${authentication.username}:${authentication.password}`).toString("base64")}`;
+    const permissions = ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"]
+      .map((permission) => ({ permission, pattern: "*", action: "allow" }));
+    const server = createHttpServer((request, response) => {
+      if (request.headers.authorization !== expected) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(request.url === "/agent"
+        ? [{ name: "ingenium-scout", permission: permissions }]
+        : { healthy: true, version: "1.18.9" }));
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolvePromise);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Test server did not bind");
+      const evidence = await probeReplacementHealthGate(
+        `http://127.0.0.1:${address.port}`,
+        "1.18.9",
+        authentication,
+        AbortSignal.timeout(2_000),
+      );
+      expect(evidence).toEqual({
+        schemaVersion: 1,
+        unauthenticatedStatus: 401,
+        unauthenticatedRejected: true,
+        authenticatedHealthStatus: 200,
+        authenticatedHealthReady: true,
+        authenticatedAgentStatus: 200,
+        authenticatedAgentReady: true,
+      });
+      expect(JSON.stringify(evidence)).not.toContain(authentication.password);
+    } finally {
+      await new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise()));
+    }
+  });
+
+  it("refuses Basic authentication health requests when the unauthenticated endpoint is accepted", async () => {
+    let authenticatedRequests = 0;
+    const server = createHttpServer((request, response) => {
+      if (request.headers.authorization) authenticatedRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ healthy: true, version: "1.18.9" }));
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolvePromise);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Test server did not bind");
+      await expect(probeReplacementHealthGate(
+        `http://127.0.0.1:${address.port}`,
+        "1.18.9",
+        { username: "opencode", password: "p".repeat(43) },
+        AbortSignal.timeout(2_000),
+      )).resolves.toMatchObject({
+        unauthenticatedStatus: 200,
+        unauthenticatedRejected: false,
+        authenticatedHealthStatus: null,
+        authenticatedAgentStatus: null,
+      });
+      expect(authenticatedRequests).toBe(0);
+    } finally {
+      await new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise()));
+    }
+  });
+
+  it("accepts a recovery server secret only from its verified owner-private file", () => {
+    const dataHome = mkdtempSync(join(tmpdir(), "ingenium-recovery-server-auth-"));
+    try {
+      chmodSync(dataHome, 0o700);
+      const authentication = { username: "opencode", password: "s".repeat(43) };
+      const path = recoveryServerAuthenticationPath(dataHome);
+      writeFileSync(path, `${JSON.stringify(authentication)}\n`, { mode: 0o600 });
+      expect(readRecoveryServerAuthentication(dataHome)).toEqual(authentication);
+      writeFileSync(path, `${JSON.stringify({ ...authentication, username: "other" })}\n`);
+      expect(() => readRecoveryServerAuthentication(dataHome)).toThrow("Recovery server authentication is unavailable");
+      chmodSync(path, 0o644);
+      expect(() => readRecoveryServerAuthentication(dataHome)).toThrow("TUI recovery state is unavailable");
+    } finally {
+      rmSync(dataHome, { recursive: true, force: true });
+    }
+  });
+
+  it("projects the exact captured handoff arrays into typed coordination memory", () => {
+    const handoff = recoveryHandoff();
+    expect(restartHandoffMemoryEntry(handoff)).toEqual({
+      status: handoff.status,
+      actions: [{ kind: "edit", result: "succeeded", pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], targetHash: null }],
+      checks: [{ kind: "test", result: "passed", targetHash: sha256("recovery-check") }],
+      todos: handoff.todos,
+      currentTaskId: `task-${handoff.taskHash}`,
+      changedPaths: [{
+        pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], operation: "edit", additions: 2, deletions: 1, changeRevision: 1,
+      }],
+      nextWork: handoff.nextWork,
+    });
+  });
+
+  it("records exact bounded handoff and typed coordination acknowledgement evidence", () => {
+    const handoff = recoveryHandoff();
+    const handoffSha256 = sha256(JSON.stringify(handoff));
+    const replacementIdentity = {
+      pid: 2001,
+      startTimeTicks: 3001,
+      executableSha256: sha256("replacement-executable"),
+      nonceSha256: sha256("replacement-nonce"),
+    };
+    expect(restartHandoffEvidence(handoff, handoffSha256)).toEqual({
+      schemaVersion: 1,
+      handoffSha256,
+      actionCount: 1,
+      changedPathCount: 1,
+      checkCount: 1,
+      handoff,
+    });
+    expect(typedMemoryAcknowledgementEvidence({
+      handoff,
+      handoffSha256,
+      captureFile: "/tmp/opencode/recovery/capture.jsonl",
+      captureOffset: 128,
+      sessionId: "successor-session",
+      replacementIdentity,
+      transactionSha256: sha256("transaction"),
+    })).toEqual({
+      schemaVersion: 1,
+      handoffSha256,
+      actionCount: 1,
+      changedPathCount: 1,
+      checkCount: 1,
+      captureFile: "/tmp/opencode/recovery/capture.jsonl",
+      captureOffset: 128,
+      successorSessionSha256: sha256("successor-session"),
+      replacementIdentitySha256: recoveryIdentitySha256(replacementIdentity),
+      transactionSha256: sha256("transaction"),
+      assistantResult: "completed",
+      terminalStatus: "idle",
+    });
+    expect(() => restartHandoffEvidence(handoff, sha256("wrong-handoff"))).toThrow("handoff hash changed");
+    for (const invalid of [
+      { ...handoff, actions: Array(65).fill(handoff.actions[0]) },
+      { ...handoff, changedPaths: Array(33).fill(handoff.changedPaths[0]) },
+      { ...handoff, checks: Array(33).fill(handoff.checks[0]) },
+    ]) expect(() => restartHandoffEvidence(invalid, sha256(JSON.stringify(invalid)))).toThrow();
   });
 
   it("derives the fixed production restart request and preserves replacement-first ordering", async () => {
@@ -803,6 +1465,8 @@ describe("managed command wrappers", () => {
       };
       const calls: string[] = [];
       const evidence: ReplacementFirstRestartEvidence[] = [];
+      const phaseHistory = join(worktree, "phase-history.jsonl");
+      writeFileSync(phaseHistory, "\n", { mode: 0o600 });
       const dependencies: ReplacementFirstRestartDependencies<string> = {
         revalidateBinding: async () => { calls.push("binding"); return true; },
         revalidateProcessIdentity: async (_identity, role) => { calls.push(`identity:${role}`); return true; },
@@ -823,9 +1487,18 @@ describe("managed command wrappers", () => {
           calls.push("terminal-idle");
           return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
         },
+        prepareRecoveryOwner: async (identity, _session, _handoffSha256, transactionSha256) => {
+          calls.push("owner-ready");
+          return { status: "ready", transactionSha256, replacementIdentitySha256: recoveryIdentitySha256(identity) };
+        },
+        commitRecoveryOwner: async () => { calls.push("owner-commit"); },
         retireOldProcess: async () => { calls.push("retire-old"); },
         stopReplacement: async () => { calls.push("stop-replacement"); },
-        persistEvidence: (entry) => { calls.push(`persist:${entry.phase}`); evidence.push(entry); },
+        persistEvidence: (entry) => {
+          calls.push(`persist:${entry.phase}`);
+          evidence.push(entry);
+          appendProductionRestartEvidence(phaseHistory, entry);
+        },
       };
 
       const result = await managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree);
@@ -834,7 +1507,8 @@ describe("managed command wrappers", () => {
         "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
         "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
         "memory-ack", "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged",
-        "binding", "identity:old", "identity:replacement", "persist:retirement_committed", "retire-old", "persist:old_parent_retired",
+        "owner-ready", "persist:recovery_owner_ready", "binding", "identity:old", "identity:replacement", "owner-commit",
+        "persist:retirement_committed", "retire-old", "persist:old_parent_retired",
       ]);
       expect(evidence.at(-1)).toMatchObject({ phase: "old_parent_retired", oldParentRetired: true, replacementStopped: false });
       expect(result).toEqual({
@@ -843,6 +1517,13 @@ describe("managed command wrappers", () => {
       });
       expect(JSON.stringify(evidence)).not.toContain("raw-session-id");
       expect(JSON.stringify(evidence)).not.toContain('"pid"');
+      const retained = readFileSync(phaseHistory, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(retained.map((entry) => entry.phase)).toEqual(evidence.map((entry) => entry.phase));
+      expect(retained.every((entry) => entry.handoffSha256 === result.handoffSha256
+        && entry.actionCount === 1 && entry.changedPathCount === 1 && entry.checkCount === 1
+        && typeof entry.occurredAt === "string")).toBe(true);
+      expect(retained.filter((entry) => entry.phase !== "handoff_published").every((entry) =>
+        /^[0-9a-f]{64}$/.test(entry.replacementIdentitySha256) && /^[0-9a-f]{64}$/.test(entry.transactionSha256))).toBe(true);
 
       await expect(managedReplacementFirstRestart([JSON.stringify(request)], dependencies, worktree))
         .rejects.toThrow("Replacement-first restart payload is invalid");
@@ -1088,6 +1769,24 @@ describe("managed command wrappers", () => {
     expect(environment).toEqual({ PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`, SAFE_VALUE: "retained" });
   });
 
+  it("passes only attested recovery bindings to the production restart shim", () => {
+    const environment = managedRecoveryEnvironment({
+      HOME: "/tmp/recovery-home",
+      INGENIUM_WORKTREE: repositoryRoot,
+      INGENIUM_WORKSPACE_ID: "workspace",
+      LD_PRELOAD: "/tmp/attacker.so",
+      NODE_OPTIONS: "--require=/tmp/attacker.js",
+      OPENCODE_SERVER_PASSWORD: "must-not-pass",
+      SAFE_VALUE: "must-not-pass",
+    });
+    expect(environment).toEqual({
+      HOME: "/tmp/recovery-home",
+      INGENIUM_WORKSPACE_ID: "workspace",
+      INGENIUM_WORKTREE: repositoryRoot,
+      PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+    });
+  });
+
   it("removes Git execution environment overrides", () => {
     expect(managedGitEnvironment({
       PATH: "/tmp/attacker",
@@ -1307,12 +2006,16 @@ describe("managed command wrappers", () => {
       "ingenium-build": "./dist/scripts/build-command.js",
     });
     expect(manifest.bin["ingenium-repository"]).not.toBe(manifest.bin["ingenium-build"]);
+    expect(manifest.scripts.build).toContain("test -f dist/scripts/recovery-bootstrap.js");
     expect(manifest.scripts.build).toContain("test -f dist/scripts/production-restart.js");
+    expect(manifest.scripts.build).toMatch(/chmod 0555 [^&]+dist\/scripts\/recovery-bootstrap\.js/);
     expect(manifest.scripts.build).toMatch(/chmod 0555 [^&]+dist\/scripts\/production-restart\.js/);
 
     expect(() => runManagedCommandCli("repository", ["node", "repository-command", Buffer.from(JSON.stringify(["status"])).toString("base64url")]))
       .toThrow("Repository wrapper rejected the command");
     expect(() => runManagedCommandCli("build", ["node", "build-command", Buffer.from(JSON.stringify(["exec", "arbitrary"])).toString("base64url")]))
       .toThrow("Build wrapper rejected the command");
+    expect(() => runManagedCommandCli("build", ["node", "build-command", "deployment", "compose-up"]))
+      .toThrow("Managed wrapper requires one encoded argv payload");
   });
 });

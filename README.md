@@ -10,7 +10,7 @@ Integrates native AI chat, embedded OpenCode Web/CLI, project management, Kanban
 
 <p>
   <img src="https://img.shields.io/badge/MCP%20tools-283-blue?style=flat-square" alt="283 MCP tools" />
-  <img src="https://img.shields.io/badge/agents-12-orange?style=flat-square" alt="12 agents" />
+  <img src="https://img.shields.io/badge/agents-13-orange?style=flat-square" alt="13 agents" />
   <img src="https://img.shields.io/badge/dashboard%20views-24-8A2BE2?style=flat-square" alt="24 dashboard views" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
@@ -40,11 +40,22 @@ Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extens
 | **Observations** | FTS5-searchable log of 10 observation types from the self-learning pipeline. Full type/status filtering |
 | **Personality** | 10 trait dimensions with confidence model (≥0.30 display threshold, time decay, dismiss). Traits inform agent behaviour |
 | **Synthesis Pipeline** | API-side extraction engine reads OpenCode messages, regex pre-filter + LLM candidate batching creates observations. Phase 1 consolidates traits; Phase 2 proposes new skills (governed — requires approval). 15-minute autoscheduler with backup provider fallback. Cross-project synthesis shares patterns |
-| **Agents** | 12-agent topology: 2 primary + 10 subagents, with model assignment and skill permissions. The hidden LLM broker is system-internal and not counted; the chat compatibility mirror is not a separate agent. |
+| **Agents** | 13 logical agents: 12 user-facing agents (2 primary + 10 subagents) plus 1 hidden system-internal broker, with model assignment and skill permissions. The Chat primary is user-facing even when hidden from general selectors; the broker is never directly invocable, and the chat compatibility mirror is not a separate agent. |
 | **MCP Tools** | 283 catalogued tools in 30 baseline categories: 281 `ingenium_`-prefixed server registrations plus 2 extension tools. Per-tool and per-category enable/disable toggles. Disabled tools return `TOOL_DISABLED` before execution |
 | **Plugins** | OpenCode plugin lifecycle (enable, disable, configure) with auto-config sync between DB and `opencode.json` |
 | **Config** | Tabbed editor for `opencode.json` (project) and `opencode.jsonc` (global). Sync from disk, save to DB + disk |
 | **Logs & Status** | Structured log viewer with level filtering. Supervisord process states, uptime, restart counts |
+
+The dedicated `ingenium-recovery-engineer` is mapped to
+`openai/gpt-5.6-sol` / `high` with profile
+`.opencode/agents/execution/ingenium-recovery-engineer.md`. It is a
+deployment-only permission-derived writer: source/package/config executable
+paths are denied, writes are limited to declared recovery evidence/roadmap, and
+execution is limited to the fixed production-restart command plus safe Git
+inspection/checkpoint. Premium remains the implementation owner; Recovery has no
+arbitrary shell, `question`, delegation, or implementation authority. Root and
+profile loading occurs only after a full parent replacement/restart, and
+activation plus runtime proof remain pending.
 
 The self-learning pipeline runs server-side: the extraction engine reads OpenCode messages, uses a regex pre-filter for candidate selection, batches candidates to the synthesis LLM, and creates observations from extracted behaviour rules. The API scheduler runs extraction → synthesis every 15 minutes (configurable via `SYNTHESIS_INTERVAL_MS`). The extension's `resource-sync.ts` plugin separately reconciles disk and API state on `session.created` and throttled `session.idle` events.
 

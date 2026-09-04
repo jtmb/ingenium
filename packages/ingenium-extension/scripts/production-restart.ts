@@ -14,11 +14,12 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
   type Stats,
 } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   preflightApiAuthentication,
@@ -30,9 +31,12 @@ import {
 import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
   decodeReplacementFirstRestartRequest,
+  isSafeRestartHandoffPath,
+  parseRedactedRestartHandoff,
   runReplacementFirstRestart,
   type RedactedRestartHandoff,
   type ReplacementFirstRestartDependencies,
+  type ReplacementFirstRestartEvidence,
   type ReplacementFirstRestartRequest,
   type ReplacementFirstRestartResult,
   type RestartProcessIdentity,
@@ -43,6 +47,9 @@ import {
   commitManagedRecoveryReplacement,
   prepareManagedRecoveryReplacement,
   readManagedRecoveryEnrollment,
+  readRecoveryServerAuthentication,
+  recoveryServerAuthenticationPath,
+  type RecoveryServerAuthentication,
 } from "../tui-recovery.js";
 
 const MAX_STATE_BYTES = 64 * 1024;
@@ -52,6 +59,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const UNNONCED_PARENT_SHA256 = "0".repeat(64);
 const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
+const REPLACEMENT_SERVER_USERNAME = "opencode";
+export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
+export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
   handoffMs: 5_000,
   launchMs: 30_000,
@@ -121,6 +131,7 @@ interface RestartHandoffPublisher {
 }
 
 interface ProductionPreparedState {
+  acknowledgementFile: string;
   child?: ChildProcess;
   captureFile: string;
   evidenceFile: string;
@@ -140,6 +151,9 @@ interface ProductionPreparedState {
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
+  productionRestartScriptSha256: string;
+  serverAuthentication: RecoveryServerAuthentication;
+  serverAuthenticationRetained: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,6 +166,65 @@ function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<
 
 function hash(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function restartIdentitySha256(identity: RestartProcessIdentity): string {
+  return hash(JSON.stringify({
+    pid: identity.pid,
+    startTimeTicks: identity.startTimeTicks,
+    executableSha256: identity.executableSha256,
+    nonceSha256: identity.nonceSha256,
+  }));
+}
+
+function handoffCounts(handoff: RedactedRestartHandoff): {
+  actionCount: number;
+  changedPathCount: number;
+  checkCount: number;
+} {
+  const validated = parseRedactedRestartHandoff(handoff);
+  return {
+    actionCount: validated.actions.length,
+    changedPathCount: validated.changedPaths.length,
+    checkCount: validated.checks.length,
+  };
+}
+
+export function restartHandoffEvidence(handoff: RedactedRestartHandoff, handoffSha256: string): Record<string, unknown> {
+  const validated = parseRedactedRestartHandoff(handoff);
+  if (hash(JSON.stringify(validated)) !== handoffSha256) throw new Error("Production restart handoff hash changed");
+  return { schemaVersion: 1, handoffSha256, ...handoffCounts(validated), handoff: validated };
+}
+
+export function typedMemoryAcknowledgementEvidence(input: {
+  handoff: RedactedRestartHandoff;
+  handoffSha256: string;
+  captureFile: string;
+  captureOffset: number;
+  sessionId: string;
+  replacementIdentity: RestartProcessIdentity;
+  transactionSha256: string;
+}): Record<string, unknown> {
+  if (!isAbsolute(input.captureFile) || resolve(input.captureFile) !== input.captureFile
+    || !Number.isSafeInteger(input.captureOffset) || input.captureOffset < 0
+    || !SAFE_SESSION_ID.test(input.sessionId) || !SHA256.test(input.transactionSha256)) {
+    throw new Error("Typed memory acknowledgement evidence is invalid");
+  }
+  const handoff = restartHandoffEvidence(input.handoff, input.handoffSha256);
+  return {
+    schemaVersion: 1,
+    handoffSha256: input.handoffSha256,
+    actionCount: handoff.actionCount,
+    changedPathCount: handoff.changedPathCount,
+    checkCount: handoff.checkCount,
+    captureFile: input.captureFile,
+    captureOffset: input.captureOffset,
+    successorSessionSha256: hash(input.sessionId),
+    replacementIdentitySha256: restartIdentitySha256(input.replacementIdentity),
+    transactionSha256: input.transactionSha256,
+    assistantResult: "completed",
+    terminalStatus: "idle",
+  };
 }
 
 function exactMode(mode: number, expected: number): boolean {
@@ -318,15 +391,38 @@ function writePrivateFile(path: string, value: string): void {
 
 function writePrivateNewFile(path: string, value: string): void {
   let descriptor: number | undefined;
+  let completed = false;
   try {
     descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     writeFileSync(descriptor, value, "utf8");
     fsyncSync(descriptor);
+    completed = true;
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
+    if (!completed) try { unlinkSync(path); } catch {}
   }
   const directory = openSync(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try { fsyncSync(directory); } finally { closeSync(directory); }
+}
+
+export function appendProductionRestartEvidence(
+  path: string,
+  evidence: ReplacementFirstRestartEvidence & { productionRestartScriptSha256?: string },
+): void {
+  const serialized = `${JSON.stringify(evidence)}\n`;
+  if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) throw new Error("Production restart evidence is too large");
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(descriptor);
+    const uid = processOwner();
+    if (!stat.isFile() || stat.nlink !== 1 || !exactMode(stat.mode, 0o600) || (uid !== undefined && stat.uid !== uid)) {
+      throw new Error("Production restart evidence is unavailable");
+    }
+    writeFileSync(descriptor, serialized, "utf8");
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function writePrivateBuffer(path: string, value: Buffer): void {
@@ -338,6 +434,25 @@ function writePrivateBuffer(path: string, value: Buffer): void {
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
     value.fill(0);
+  }
+}
+
+function removeRecoveryServerAuthentication(
+  dataHome: string,
+  expected?: RecoveryServerAuthentication,
+): void {
+  const path = recoveryServerAuthenticationPath(dataHome);
+  try {
+    const current = readRecoveryServerAuthentication(dataHome);
+    if (expected && (current.username !== expected.username || current.password !== expected.password)) {
+      throw new Error("Recovery server authentication changed");
+    }
+    unlinkSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT"
+      && !["Recovery server authentication is unavailable", "TUI recovery state is unavailable"].includes((error as Error).message)) {
+      throw error;
+    }
   }
 }
 
@@ -556,9 +671,80 @@ function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function jsonRequest(url: string, init: RequestInit, signal: AbortSignal): Promise<{ status: number; value: unknown }> {
-  const response = await fetch(url, { ...init, signal });
+function processServerAuthentication(pid: number): RecoveryServerAuthentication | undefined {
+  const environment = processEnvironment(pid);
+  const username = environment?.OPENCODE_SERVER_USERNAME ?? "opencode";
+  const password = environment?.OPENCODE_SERVER_PASSWORD;
+  return /^[A-Za-z0-9._-]{1,64}$/.test(username) && typeof password === "string"
+    && /^[A-Za-z0-9_-]{43,128}$/.test(password) ? { username, password } : undefined;
+}
+
+export async function openCodeJsonRequest(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal,
+  authentication: RecoveryServerAuthentication,
+): Promise<{ status: number; value: unknown }> {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Basic ${Buffer.from(`${authentication.username}:${authentication.password}`, "utf8").toString("base64")}`);
+  const response = await fetch(url, { ...init, headers, signal });
   return { status: response.status, value: await response.json().catch(() => null) };
+}
+
+export interface ReplacementHealthGateEvidence {
+  schemaVersion: 1;
+  unauthenticatedStatus: number | null;
+  unauthenticatedRejected: boolean;
+  authenticatedHealthStatus: number | null;
+  authenticatedHealthReady: boolean;
+  authenticatedAgentStatus: number | null;
+  authenticatedAgentReady: boolean;
+}
+
+export async function probeReplacementHealthGate(
+  baseUrl: string,
+  expectedVersion: string,
+  authentication: RecoveryServerAuthentication,
+  signal: AbortSignal,
+): Promise<ReplacementHealthGateEvidence> {
+  const evidence: ReplacementHealthGateEvidence = {
+    schemaVersion: 1,
+    unauthenticatedStatus: null,
+    unauthenticatedRejected: false,
+    authenticatedHealthStatus: null,
+    authenticatedHealthReady: false,
+    authenticatedAgentStatus: null,
+    authenticatedAgentReady: false,
+  };
+  const unauthenticated = await fetch(`${baseUrl}/global/health`, {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
+  });
+  evidence.unauthenticatedStatus = unauthenticated.status;
+  evidence.unauthenticatedRejected = unauthenticated.status === 401;
+  await unauthenticated.body?.cancel();
+  if (!evidence.unauthenticatedRejected) return evidence;
+
+  const health = await openCodeJsonRequest(
+    `${baseUrl}/global/health`,
+    {},
+    AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
+    authentication,
+  );
+  const healthValue = responseRecord(health.value);
+  evidence.authenticatedHealthStatus = health.status;
+  evidence.authenticatedHealthReady = health.status === 200 && healthValue?.healthy === true
+    && healthValue.version === expectedVersion;
+  if (!evidence.authenticatedHealthReady) return evidence;
+
+  const agents = await openCodeJsonRequest(
+    `${baseUrl}/agent`,
+    {},
+    AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    authentication,
+  );
+  evidence.authenticatedAgentStatus = agents.status;
+  evidence.authenticatedAgentReady = agents.status === 200 && hasScoutCapabilities(agents.value);
+  return evidence;
 }
 
 function processExecutable(pid: number): string | undefined {
@@ -692,7 +878,39 @@ function handoffTodoState(counts: Omit<RedactedRestartHandoff["todos"], "total" 
   return "cancelled";
 }
 
-function redactedHandoffFromSession(messages: unknown, status: unknown, sessionId: string): RedactedRestartHandoff | undefined {
+function restartCheckName(command: unknown): RedactedRestartHandoff["checks"][number]["name"] | undefined {
+  if (typeof command !== "string") return undefined;
+  const value = command.toLowerCase();
+  if (/\b(typecheck|tsc\b)/.test(value)) return "typecheck";
+  if (/\b(eslint|lint\b)/.test(value)) return "lint";
+  if (/\b(prettier|format\b)/.test(value)) return "format";
+  if (/\b(audit|security|snyk)\b/.test(value)) return "security";
+  if (/\b(build|compile)\b/.test(value)) return "build";
+  if (/\b(test|vitest|jest|pytest|playwright)\b/.test(value)) return "test";
+  if (/^\s*git\s+status(?:\s|$)/.test(value)) return "other";
+  return undefined;
+}
+
+function restartExitCode(state: Record<string, unknown>): number | null {
+  const metadata = isRecord(state.metadata) ? state.metadata : state;
+  const value = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 255 ? value as number : null;
+}
+
+function restartInputPath(input: Record<string, unknown>, worktree: string): string | undefined {
+  const candidate = input.filePath ?? input.path;
+  if (typeof candidate !== "string") return undefined;
+  const path = isAbsolute(candidate) ? relative(worktree, resolve(candidate)) : candidate;
+  return isSafeRestartHandoffPath(path) ? path : undefined;
+}
+
+function redactedHandoffFromSession(
+  messages: unknown,
+  status: unknown,
+  session: unknown,
+  sessionId: string,
+  worktree: string,
+): RedactedRestartHandoff | undefined {
   const list = messageList(messages);
   if (!list) return undefined;
   let todos: unknown[] = [];
@@ -717,34 +935,100 @@ function redactedHandoffFromSession(messages: unknown, status: unknown, sessionI
   const open = counts.pending > 0 || counts.inProgress > 0;
   const operationalStatus = rawStatus === "idle" ? "idle"
     : rawStatus === "busy" || rawStatus === "retry" || rawStatus === "working" || open ? "working" : "active";
-  return {
+  const actions: RedactedRestartHandoff["actions"] = [];
+  const changed = new Map<string, RedactedRestartHandoff["changedPaths"][number]>();
+  const checks: RedactedRestartHandoff["checks"] = [];
+  for (const message of list) {
+    if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+    for (const part of message.parts) {
+      if (!isRecord(part) || part.type !== "tool" || typeof part.tool !== "string" || !isRecord(part.state)
+        || !["completed", "error"].includes(part.state.status as string) || !isRecord(part.state.input)) continue;
+      const tool = part.tool.toLowerCase().replace(/[.-]/g, "_");
+      const path = restartInputPath(part.state.input, worktree);
+      const kind = tool === "read" ? "read" : tool === "grep" || tool === "glob" ? "search"
+        : tool === "write" || tool === "file_write" ? "write" : tool === "edit" || tool === "file_edit" ? "edit" : "execute";
+      if (part.state.status === "completed") {
+        actions.push({
+          kind,
+          result: "succeeded",
+          path: path ?? null,
+          targetHash: path ? null : hash(`${tool}\0${JSON.stringify(part.state.input)}`),
+        });
+      }
+      if (path && (kind === "write" || kind === "edit")) {
+        changed.set(path, {
+          path,
+          operation: kind,
+          additions: 0,
+          deletions: 0,
+          changeRevision: changed.size + 1,
+        });
+      }
+      const name = tool === "bash" ? restartCheckName(part.state.input.command) : undefined;
+      if (name) {
+        const result = part.state.status === "completed" ? "passed" as const : "failed" as const;
+        const checkStatus = result === "passed" ? "completed" as const : "failed" as const;
+        const exitCode = restartExitCode(part.state);
+        checks.push({
+          name,
+          status: checkStatus,
+          result,
+          exitCode,
+          targetHash: hash(JSON.stringify({ name, status: checkStatus, result, exitCode,
+            sourceTargetHash: hash(`${tool}\0${JSON.stringify(part.state.input)}`) })),
+        });
+      }
+    }
+  }
+  const sessionValue = responseRecord(session);
+  const task = sessionValue?.currentTaskId ?? sessionValue?.current_task_id ?? sessionValue?.taskId ?? sessionValue?.task_id;
+  const taskHash = typeof task === "string" && task.length > 0 && task.length <= 512
+    && !/[\u0000-\u001f\u007f]/.test(task) ? hash(task) : null;
+  const boundedActions = actions.slice(-64);
+  const boundedChangedPaths = [...changed.values()].slice(-32);
+  const boundedChecks = checks.slice(-32);
+  const failed = [...boundedChecks].reverse().find((check) => check.result === "failed");
+  const latestCheck = boundedChecks.at(-1);
+  const latestAction = boundedActions.at(-1);
+  const nextWork = failed ? { kind: "address_failure" as const, referenceHash: failed.targetHash }
+    : open ? { kind: "continue_task" as const, referenceHash: taskHash }
+      : latestCheck ? { kind: "run_checks" as const, referenceHash: latestCheck.targetHash }
+        : latestAction ? { kind: "review_changes" as const, referenceHash: latestAction.targetHash ?? hash(latestAction.path!) }
+          : { kind: "none" as const, referenceHash: null };
+  return parseRedactedRestartHandoff({
     status: operationalStatus,
-    taskHash: null,
+    taskHash,
+    actions: boundedActions,
+    changedPaths: boundedChangedPaths,
+    checks: boundedChecks,
     todos: { total: todos.length, ...counts, state: handoffTodoState(counts) },
-    nextWork: { kind: open ? "continue_task" : "none", referenceHash: null },
-  };
+    nextWork,
+  });
 }
 
 async function readLiveParentHandoff(
   port: number,
   sessionId: string,
   worktree: string,
+  parentPid: number,
 ): Promise<RedactedRestartHandoff | undefined> {
   const signal = AbortSignal.timeout(5_000);
   try {
+    const authentication = processServerAuthentication(parentPid);
+    if (!authentication) return undefined;
     const baseUrl = `http://127.0.0.1:${port}`;
     const [health, session, messages, status] = await Promise.all([
-      jsonRequest(`${baseUrl}/global/health`, {}, signal),
-      jsonRequest(`${baseUrl}/session/${encodeURIComponent(sessionId)}`, {}, signal),
-      jsonRequest(`${baseUrl}/session/${encodeURIComponent(sessionId)}/message`, {}, signal),
-      jsonRequest(`${baseUrl}/session/status`, {}, signal),
+      openCodeJsonRequest(`${baseUrl}/global/health`, {}, signal, authentication),
+      openCodeJsonRequest(`${baseUrl}/session/${encodeURIComponent(sessionId)}`, {}, signal, authentication),
+      openCodeJsonRequest(`${baseUrl}/session/${encodeURIComponent(sessionId)}/message`, {}, signal, authentication),
+      openCodeJsonRequest(`${baseUrl}/session/status`, {}, signal, authentication),
     ]);
     const healthValue = responseRecord(health.value);
     const sessionValue = responseRecord(session.value);
     if (health.status !== 200 || healthValue?.healthy !== true || typeof healthValue.version !== "string"
       || session.status !== 200 || sessionValue?.id !== sessionId || sessionValue.directory !== worktree
       || messages.status !== 200 || status.status !== 200) return undefined;
-    return redactedHandoffFromSession(messages.value, status.value, sessionId);
+    return redactedHandoffFromSession(messages.value, status.value, session.value, sessionId, worktree);
   } catch {
     return undefined;
   }
@@ -758,7 +1042,7 @@ async function enrollRunningProductionParent(
   if (!discovered) return undefined;
   const matches: Array<{ port: number; handoff: RedactedRestartHandoff }> = [];
   for (const port of listeningLoopbackPorts()) {
-    const handoff = await readLiveParentHandoff(port, discovered.sessionId, worktree);
+    const handoff = await readLiveParentHandoff(port, discovered.sessionId, worktree, discovered.identity.pid);
     if (handoff) matches.push({ port, handoff });
   }
   if (matches.length !== 1) return undefined;
@@ -801,43 +1085,47 @@ async function attestProductionParent(parent: ProductionRestartParentCandidate):
   return isProcessAncestor(parent.oldProcess.pid) && processWorkingDirectory(parent.oldProcess.pid) === parent.binding.launcherWorktree
     && parentDataHome(parent.oldProcess.pid) === parent.oldDataHome && sessionId !== undefined
     && listeningLoopbackPorts().includes(parent.oldPort)
-    && await readLiveParentHandoff(parent.oldPort, sessionId, parent.binding.launcherWorktree) !== undefined;
+    && await readLiveParentHandoff(parent.oldPort, sessionId, parent.binding.launcherWorktree, parent.oldProcess.pid) !== undefined;
 }
 
-function hasCapturedHandoff(path: string, expectedSha256: string, offset: number): boolean {
+export function restartHandoffMemoryEntry(handoff: RedactedRestartHandoff): Record<string, unknown> {
+  const validated = parseRedactedRestartHandoff(handoff);
+  const pathSegments = (path: string) => path.split("/").map((segment) => Buffer.from(segment, "utf8").toString("base64url"));
+  return {
+    status: validated.status,
+    actions: validated.actions.map((action) => ({
+      kind: action.kind,
+      result: action.result,
+      pathSegments: action.path === null ? null : pathSegments(action.path),
+      targetHash: action.targetHash,
+    })),
+    checks: validated.checks.map((check) => ({ kind: check.name, result: check.result, targetHash: check.targetHash })),
+    todos: validated.todos,
+    currentTaskId: validated.taskHash === null ? null : `task-${validated.taskHash}`,
+    changedPaths: validated.changedPaths.map(({ path, ...entry }) => ({ pathSegments: pathSegments(path), ...entry })),
+    nextWork: validated.nextWork,
+  };
+}
+
+function hasCapturedHandoff(
+  path: string,
+  expectedHandoff: RedactedRestartHandoff,
+  expectedSha256: string,
+  offset: number,
+): boolean {
   let source: Buffer;
   try { source = readFileSync(path); } catch { return false; }
   if (source.length <= offset) return false;
+  if (hash(JSON.stringify(expectedHandoff)) !== expectedSha256) return false;
+  const expectedEntry = restartHandoffMemoryEntry(expectedHandoff);
   for (const line of source.subarray(offset).toString("utf8").split(/\r?\n/).filter(Boolean).reverse()) {
     let capture: unknown;
     try { capture = JSON.parse(line); } catch { continue; }
-    if (!isRecord(capture) || typeof capture.memory !== "string") continue;
-    const payloadStart = capture.memory.indexOf("\n", capture.memory.indexOf("\n") + 1);
-    if (payloadStart < 0) continue;
-    let payload: unknown;
-    try { payload = JSON.parse(capture.memory.slice(payloadStart + 1)); } catch { continue; }
-    if (!isRecord(payload) || !Array.isArray(payload.memoryEntries)) continue;
-    for (const entry of [...payload.memoryEntries].reverse()) {
-      if (!isRecord(entry) || !isRecord(entry.todoCounts) || !isRecord(entry.nextWork)) continue;
-      const currentTaskId = entry.currentTaskId;
-      const taskHash = typeof currentTaskId === "string" && /^task-[0-9a-f]{64}$/.test(currentTaskId)
-        ? currentTaskId.slice(5)
-        : currentTaskId === null ? null : undefined;
-      if (taskHash === undefined) continue;
-      const handoff = {
-        status: entry.status,
-        taskHash,
-        todos: {
-          total: entry.todoCounts.total,
-          pending: entry.todoCounts.pending,
-          inProgress: entry.todoCounts.inProgress,
-          completed: entry.todoCounts.completed,
-          cancelled: entry.todoCounts.cancelled,
-          state: entry.todoState,
-        },
-        nextWork: { kind: entry.nextWork.kind, referenceHash: entry.nextWork.referenceHash },
-      };
-      if (hash(JSON.stringify(handoff)) === expectedSha256) return true;
+    if (!isRecord(capture) || !Array.isArray(capture.operationalEntries)) continue;
+    for (const entry of [...capture.operationalEntries].reverse()) {
+      if (!isRecord(entry)) continue;
+      const projected = Object.fromEntries(Object.keys(expectedEntry).map((key) => [key, entry[key]]));
+      if (JSON.stringify(projected) === JSON.stringify(expectedEntry)) return true;
     }
   }
   return false;
@@ -898,13 +1186,7 @@ async function publishRestartHandoff(
       fence: registeredSession.fence,
       idempotency_key: randomUUID(),
       memory_entry: {
-        status: handoff.status,
-        actions: [],
-        checks: [],
-        todos: handoff.todos,
-        currentTaskId: handoff.taskHash === null ? null : `task-${handoff.taskHash}`,
-        changedPaths: [],
-        nextWork: handoff.nextWork,
+        ...restartHandoffMemoryEntry(handoff),
       },
     })));
     const publishedSession = restartPublisherMutation(published?.session);
@@ -965,7 +1247,8 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
     XDG_DATA_HOME: join(home, ".local", "share"),
     XDG_CACHE_HOME: join(home, ".cache"),
     XDG_STATE_HOME: join(home, ".local", "state"),
-    OPENCODE_SERVER_PASSWORD: "",
+    OPENCODE_SERVER_USERNAME: state.serverAuthentication.username,
+    OPENCODE_SERVER_PASSWORD: state.serverAuthentication.password,
     INGENIUM_API_URL: state.binding.apiUrl,
     INGENIUM_PROJECT: state.binding.project,
     INGENIUM_PROJECT_ID: state.binding.projectId,
@@ -988,6 +1271,8 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
 function productionDependencies(state: ProductionPreparedState): ReplacementFirstRestartDependencies<ReplacementSession> {
   const baseUrl = `http://127.0.0.1:${state.port}`;
   const headers = { "content-type": "application/json" };
+  const request = (url: string, init: RequestInit, signal: AbortSignal) =>
+    openCodeJsonRequest(url, init, signal, state.serverAuthentication);
   return {
     revalidateBinding: async (expected, worktree, signal) => {
       signal.throwIfAborted();
@@ -1004,7 +1289,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
     },
     persistHandoff: async (handoff, handoffSha256, signal) => {
       signal.throwIfAborted();
-      writePrivateFile(join(state.runDirectory, "handoff.json"), `${JSON.stringify({ schemaVersion: 1, handoffSha256, handoff })}\n`);
+      writePrivateFile(join(state.runDirectory, "handoff.json"), `${JSON.stringify(restartHandoffEvidence(handoff, handoffSha256))}\n`);
     },
     launchReplacement: async (input, signal) => {
       signal.throwIfAborted();
@@ -1042,44 +1327,29 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       let diagnostic = {
         schemaVersion: 1,
         stage: "health_request",
-        healthStatus: null as number | null,
-        healthReady: false,
-        agentStatus: null as number | null,
-        scoutCapabilities: false,
+        unauthenticatedStatus: null as number | null,
+        unauthenticatedRejected: false,
+        authenticatedHealthStatus: null as number | null,
+        authenticatedHealthReady: false,
+        authenticatedAgentStatus: null as number | null,
+        authenticatedAgentReady: false,
       };
       try {
         while (true) {
           signal.throwIfAborted();
           try {
             diagnostic = { ...diagnostic, stage: "health_request" };
-            // OpenCode can accept a request before startup completes, so each probe must be shorter than the phase budget.
-            const response = await jsonRequest(
-              `${baseUrl}/global/health`,
-              {},
-              AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
-            );
-            const value = responseRecord(response.value);
-            const healthReady = response.status === 200 && value?.healthy === true && value.version === state.expectedVersion;
-            diagnostic = { ...diagnostic, stage: "health_response", healthStatus: response.status, healthReady };
-            if (healthReady) {
-              diagnostic = { ...diagnostic, stage: "agent_request" };
-              const agents = await jsonRequest(
-                `${baseUrl}/agent`,
-                {},
-                AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-              );
-              const scoutCapabilities = agents.status === 200 && hasScoutCapabilities(agents.value);
-              diagnostic = { ...diagnostic, stage: "agent_response", agentStatus: agents.status, scoutCapabilities };
-              if (scoutCapabilities) {
-                writePrivateFile(state.healthEvidenceFile, `${JSON.stringify({ ...diagnostic, result: "passed" })}\n`);
-                writePrivateFile(state.scoutEvidenceFile, `${JSON.stringify({
-                  schemaVersion: 1,
-                  agent: "ingenium-scout",
-                  capabilities: ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"],
-                  runtimeVersion: state.expectedVersion,
-                })}\n`);
-                return;
-              }
+            const probe = await probeReplacementHealthGate(baseUrl, state.expectedVersion, state.serverAuthentication, signal);
+            diagnostic = { ...probe, stage: "health_response" };
+            if (probe.unauthenticatedRejected && probe.authenticatedHealthReady && probe.authenticatedAgentReady) {
+              writePrivateFile(state.healthEvidenceFile, `${JSON.stringify({ ...diagnostic, result: "passed" })}\n`);
+              writePrivateFile(state.scoutEvidenceFile, `${JSON.stringify({
+                schemaVersion: 1,
+                agent: "ingenium-scout",
+                capabilities: ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"],
+                runtimeVersion: state.expectedVersion,
+              })}\n`);
+              return;
             }
           } catch (error) {
             if (signal.aborted) throw error;
@@ -1095,10 +1365,10 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       }
     },
     createReplacementSession: async (_identity, _port, transactionSha256, signal) => {
-      const before = await jsonRequest(`${baseUrl}/session`, {}, signal);
+      const before = await request(`${baseUrl}/session`, {}, signal);
       const existingSessionIds = sessionIds(before.value);
       if (before.status !== 200 || !existingSessionIds) throw new Error("Replacement session list is invalid");
-      const created = await jsonRequest(`${baseUrl}/session`, {
+      const created = await request(`${baseUrl}/session`, {
         method: "POST",
         headers,
         body: JSON.stringify({ title: "Ingenium replacement-first restart acknowledgement" }),
@@ -1108,7 +1378,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
         || existingSessionIds.has(session.id)) {
         throw new Error("Replacement session creation failed");
       }
-      const messages = await jsonRequest(`${baseUrl}/session/${encodeURIComponent(session.id)}/message`, {}, signal);
+      const messages = await request(`${baseUrl}/session/${encodeURIComponent(session.id)}/message`, {}, signal);
       const initial = messageList(messages.value);
       if (messages.status !== 200 || !initial) throw new Error("Replacement session messages are invalid");
       return {
@@ -1125,7 +1395,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
     acknowledgeTypedMemory: async (_identity, session, handoffSha256, transactionSha256, signal) => {
       if (session.transactionSha256 !== transactionSha256) throw new Error("Replacement acknowledgement transaction changed");
       const expectedText = `READY ${transactionSha256}`;
-      const prompted = await jsonRequest(`${baseUrl}/session/${encodeURIComponent(session.id)}/prompt_async`, {
+      const prompted = await request(`${baseUrl}/session/${encodeURIComponent(session.id)}/prompt_async`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -1136,18 +1406,18 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       if (![200, 202, 204].includes(prompted.status)) throw new Error("Replacement acknowledgement prompt failed");
       while (true) {
         signal.throwIfAborted();
-        if (hasCapturedHandoff(state.captureFile, handoffSha256, session.captureOffset)) {
+        if (hasCapturedHandoff(state.captureFile, state.parent.handoff, handoffSha256, session.captureOffset)) {
           return { status: "acknowledged", handoffSha256, transactionSha256 };
         }
         await wait(100, signal);
       }
     },
-    awaitTerminalIdleAcknowledgement: async (_identity, session, handoffSha256, transactionSha256, signal) => {
+    awaitTerminalIdleAcknowledgement: async (identity, session, handoffSha256, transactionSha256, signal) => {
       if (session.transactionSha256 !== transactionSha256) throw new Error("Replacement acknowledgement transaction changed");
       const expectedText = `READY ${transactionSha256}`;
       while (true) {
         signal.throwIfAborted();
-        const messagesResponse = await jsonRequest(`${baseUrl}/session/${encodeURIComponent(session.id)}/message`, {}, signal);
+        const messagesResponse = await request(`${baseUrl}/session/${encodeURIComponent(session.id)}/message`, {}, signal);
         const messages = messageList(messagesResponse.value);
         const terminal = hasSuccessfulTerminalAssistant(
           messagesResponse.value,
@@ -1156,11 +1426,20 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
           "ingenium-scout",
         );
         if (terminal) {
-          const statusResponse = await jsonRequest(`${baseUrl}/session/status`, {}, signal);
+          const statusResponse = await request(`${baseUrl}/session/status`, {}, signal);
           const statuses = responseRecord(statusResponse.value);
           const current = statuses?.[session.id];
           if (statusResponse.status === 200 && statuses
             && (current === undefined || (isRecord(current) && (current.type === "idle" || current.status === "idle")))) {
+            writePrivateFile(state.acknowledgementFile, `${JSON.stringify(typedMemoryAcknowledgementEvidence({
+              handoff: state.parent.handoff,
+              handoffSha256,
+              captureFile: state.captureFile,
+              captureOffset: session.captureOffset,
+              sessionId: session.id,
+              replacementIdentity: identity,
+              transactionSha256,
+            }))}\n`);
             return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
           }
         }
@@ -1173,7 +1452,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
         state.parent.oldProcess,
         identity,
         state.port,
-        join(state.runDirectory, "home"),
+        join(state.runDirectory, "home", ".local", "share"),
         session.id,
         handoffSha256,
         transactionSha256,
@@ -1182,19 +1461,32 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       return {
         status: "ready",
         transactionSha256,
-        replacementIdentitySha256: hash(JSON.stringify(identity)),
+        replacementIdentitySha256: restartIdentitySha256(identity),
       };
     },
     commitRecoveryOwner: async (transactionSha256, signal) => {
       signal.throwIfAborted();
       commitManagedRecoveryReplacement(state.worktree, transactionSha256);
+      state.serverAuthenticationRetained = true;
     },
     abortRecoveryOwner: (transactionSha256) => {
       abortManagedRecoveryReplacement(state.worktree, transactionSha256);
     },
-    retireOldProcess: (identity, signal) => terminate(identity, "old", signal),
-    stopReplacement: (identity, signal) => terminate(identity, "replacement", signal),
-    persistEvidence: (evidence) => writePrivateFile(state.evidenceFile, `${JSON.stringify(evidence)}\n`),
+    retireOldProcess: async (identity, signal) => {
+      await terminate(identity, "old", signal);
+      removeRecoveryServerAuthentication(state.parent.oldDataHome);
+    },
+    stopReplacement: async (identity, signal) => {
+      await terminate(identity, "replacement", signal);
+      removeRecoveryServerAuthentication(
+        join(state.runDirectory, "home", ".local", "share"),
+        state.serverAuthentication,
+      );
+    },
+    persistEvidence: (evidence) => appendProductionRestartEvidence(state.evidenceFile, {
+      ...evidence,
+      productionRestartScriptSha256: state.productionRestartScriptSha256,
+    }),
   };
 }
 
@@ -1229,7 +1521,7 @@ async function prepareProductionReplacement(input: {
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
-}): Promise<PreparedProductionReplacement<ReplacementSession>> {
+}, productionRestartScriptSha256: string): Promise<PreparedProductionReplacement<ReplacementSession>> {
   const executable = processExecutable(input.parent.oldProcess.pid);
   if (!executable || basename(executable) !== "opencode") throw new Error("Production OpenCode executable is unavailable");
   const expectedExecutableSha256 = hash(readFileSync(executable));
@@ -1254,6 +1546,7 @@ async function prepareProductionReplacement(input: {
   const runDirectory = join(runtimeRoot, `production-restart-${randomUUID()}`);
   ensurePrivateDirectory(runDirectory);
   const home = join(runDirectory, "home");
+  const dataHome = join(home, ".local", "share");
   for (const directory of [
     home,
     join(home, ".config"),
@@ -1264,13 +1557,15 @@ async function prepareProductionReplacement(input: {
     join(home, ".cache"),
   ]) ensurePrivateDirectory(directory);
   const authSource = readPrivateFile(currentAuthFile(input.parent.oldDataHome), MAX_AUTH_BYTES);
-  const authDestination = join(home, ".local", "share", "opencode", "auth.json");
+  const authDestination = join(dataHome, "opencode", "auth.json");
   writePrivateBuffer(authDestination, authSource);
   const captureFile = join(runDirectory, "coordination-capture.jsonl");
   writePrivateFile(captureFile, "\n");
   const traceFile = join(runDirectory, "coordination-trace.jsonl");
   writePrivateFile(traceFile, "\n");
-  const evidenceFile = join(runDirectory, "evidence.json");
+  const evidenceFile = join(runDirectory, "phase-history.jsonl");
+  writePrivateFile(evidenceFile, "\n");
+  const acknowledgementFile = join(runDirectory, "typed-memory-acknowledgement.json");
   const healthEvidenceFile = join(runDirectory, "health-gate.json");
   const scoutEvidenceFile = join(runDirectory, "scout-capabilities.json");
   const logFile = join(runDirectory, "opencode.log");
@@ -1281,8 +1576,14 @@ async function prepareProductionReplacement(input: {
     closeSync(logDescriptor);
     throw new Error("Production replacement port is not distinct");
   }
+  const serverAuthentication: RecoveryServerAuthentication = {
+    username: REPLACEMENT_SERVER_USERNAME,
+    password: randomBytes(32).toString("base64url"),
+  };
+  writePrivateNewFile(recoveryServerAuthenticationPath(dataHome), `${JSON.stringify(serverAuthentication)}\n`);
   const nonce = randomBytes(32).toString("base64url");
   const state: ProductionPreparedState = {
+    acknowledgementFile,
     captureFile,
     evidenceFile,
     executable,
@@ -1300,18 +1601,22 @@ async function prepareProductionReplacement(input: {
     worktree: input.worktree,
     binding: input.binding,
     parent: input.parent,
+    productionRestartScriptSha256,
+    serverAuthentication,
+    serverAuthenticationRetained: false,
   };
   try {
     state.handoffPublisher = await publishRestartHandoff(input.worktree, input.binding, input.parent.handoff);
   } catch (error) {
     await closeServer(reservation.server);
     closeSync(logDescriptor);
+    removeRecoveryServerAuthentication(dataHome, serverAuthentication);
     throw error;
   }
   return {
     replacement: {
       port: reservation.port,
-      dataHome: home,
+      dataHome,
       expectedIdentity: { executableSha256: expectedExecutableSha256, nonceSha256: hash(nonce) },
     },
     dependencies: productionDependencies(state),
@@ -1319,13 +1624,19 @@ async function prepareProductionReplacement(input: {
       if (state.handoffPublisher) await closeRestartHandoffPublisher(state.handoffPublisher);
       await closeServer(reservation.server);
       closeSync(logDescriptor);
+      if (!state.serverAuthenticationRetained) {
+        removeRecoveryServerAuthentication(dataHome, serverAuthentication);
+      }
     },
   };
 }
 
-export function productionRestartDependencies(): ProductionRestartAdapterDependencies<ReplacementSession> {
+export function productionRestartDependencies(
+  productionRestartScriptSha256: string,
+): ProductionRestartAdapterDependencies<ReplacementSession> {
+  if (!SHA256.test(productionRestartScriptSha256)) throw new Error("Production restart script hash is invalid");
   return {
-    canonicalWorktree: () => realpathSync(resolve(process.cwd())),
+    canonicalWorktree: () => productionRestartCanonicalWorktree(),
     resolveBinding: resolveProductionBinding,
     readParentCandidates: (worktree) => {
       const managed = readManagedRecoveryEnrollment(worktree);
@@ -1340,13 +1651,46 @@ export function productionRestartDependencies(): ProductionRestartAdapterDepende
     },
     enrollParentCandidate: enrollRunningProductionParent,
     attestParentProcess: attestProductionParent,
-    prepareReplacement: prepareProductionReplacement,
+    prepareReplacement: (input) => prepareProductionReplacement(input, productionRestartScriptSha256),
   };
 }
 
-export async function runProductionRestartCli(): Promise<void> {
-  if (process.argv.length !== 2) throw new Error("Production restart accepts no arguments");
-  const result = await runProductionRestartAdapter(productionRestartDependencies());
+export function productionRestartCanonicalWorktree(source: NodeJS.ProcessEnv = process.env): string {
+  const declared = source[RECOVERY_CANONICAL_WORKTREE];
+  const bound = source.INGENIUM_WORKTREE;
+  if (!declared || !bound || !isAbsolute(declared) || !isAbsolute(bound)
+    || resolve(declared) !== declared || resolve(bound) !== bound) {
+    throw new Error("Production restart requires an attested canonical worktree");
+  }
+  const canonical = realpathSync(declared);
+  if (canonical !== declared || realpathSync(bound) !== canonical) {
+    throw new Error("Production restart canonical worktree binding changed");
+  }
+  return canonical;
+}
+
+export function verifyProductionRestartScript(
+  expectedSha256: string | undefined,
+  scriptPath = fileURLToPath(import.meta.url),
+): string {
+  if (!expectedSha256 || !SHA256.test(expectedSha256)) {
+    throw new Error("Production restart requires the verified recovery bootstrap");
+  }
+  const actualSha256 = hash(readFileSync(realpathSync(scriptPath)));
+  if (actualSha256 !== expectedSha256) throw new Error("Production restart script hash changed after bootstrap");
+  return actualSha256;
+}
+
+export async function runProductionRestartCli(
+  dependencies?: ProductionRestartAdapterDependencies<ReplacementSession>,
+  scriptPath = fileURLToPath(import.meta.url),
+  argv: readonly string[] = process.argv,
+): Promise<void> {
+  if (argv.length !== 2) throw new Error("Production restart requires the verified recovery bootstrap");
+  const expectedSha256 = process.env[RECOVERY_BOOTSTRAP_GUARD];
+  delete process.env[RECOVERY_BOOTSTRAP_GUARD];
+  const verifiedSha256 = verifyProductionRestartScript(expectedSha256, scriptPath);
+  const result = await runProductionRestartAdapter(dependencies ?? productionRestartDependencies(verifiedSha256));
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

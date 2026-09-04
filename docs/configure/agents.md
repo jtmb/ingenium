@@ -7,7 +7,7 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 ## Overview
 
-**12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. Every user-facing active agent, including built-in Plan, can load all repository skills and their `references/` material; this is separate from tool grants. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly) and is excluded from that loading surface.
+**13 logical agents: 12 user-facing agents (2 primary + 10 subagents) and 1 hidden system-internal broker.** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **Chat primary** (`ingenium-chat`) handles user-facing conversational interactions and may be hidden from general selectors. Ten user-facing subagents handle exploration, QA, documentation, engineering, recovery, security, and web automation. The separate hidden `ingenium-llm-broker` is reserved for system use, never directly invocable, and excluded from the repository skill/reference loading surface. Every user-facing active agent, including built-in Plan, can load all repository skills and their `references/` material; this is separate from tool grants.
 
 Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the deliberate analysis exception: root `opencode.json` grants it `read`, `glob`, `grep`, `question`, and the read-only `ingenium_coordination_status` tool, while `edit`, `write`, `bash`, and coordination mutation tools remain denied. Plan also has the universal skill-loading surface. Custom agents may not use interactive questions. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
@@ -21,6 +21,29 @@ Root `npm test`, entire Playwright configs, and Docker/provider/mail/
 route-parity/manual suites require an explicitly declared `FULL_ACCEPTANCE`,
 release, or cross-cutting acceptance gate. `FULL_ACCEPTANCE` means the declared
 acceptance checks, not automatically every repository test.
+
+### Autonomous TUI recovery safeguards
+
+Recovery of a terminal user interface (TUI) parent or session whose task or
+tool transport ended before its outcome was known starts with a read-only
+recovery preflight. Before dispatching a restart task, inspect the exact
+project, workspace, storage mapping, canonical worktree, session/incarnation,
+epoch/fence/claim, nonce/enrollment, newest durable handoff, exact changed
+paths, and task/`TodoWrite`/status/`nextWork` state. The preflight cannot signal,
+stop, restart, mutate, claim, release, or clear state.
+
+Restart is forbidden until retained proof covers fresh nonce/enrollment, durable
+typed handoff, external supervisor ownership, replacement health on the current
+merged source, reconnect/resume, rollback or authorized adoption, and
+split-brain fencing. Legacy unenrolled parents use automatic bootstrap: the
+external supervisor enrolls and health-checks the replacement first and never
+signals the legacy parent first.
+
+Task/tool transport aborts are nonterminal and trigger immediate state recovery;
+an aborted restart task never ends the turn. `PASS` requires actual live
+TUI/session and `TodoWrite` replay evidence. Source tests and deployed canaries
+remain separate evidence classes and cannot prove runtime recovery or actual
+model/session behavior.
 
 ### Git and GitHub workflow
 
@@ -50,7 +73,7 @@ not agent requirements.
 
 The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agent"` key:
 
-- **Model** — Defined in `opencode.json` (not the Markdown profile). The orchestrator routes writer tasks to Fast and Premium tiers based on task complexity and risk, with Premium handling critical/high-risk work.
+- **Model** — Defined in `opencode.json` (not the Markdown profile). The orchestrator routes writer tasks to Fast, Premium, and Recovery tiers based on task complexity and risk, with Premium handling critical/high-risk implementation and Recovery handling only the deployment-only recovery boundary.
 - **`hidden: true`** — Prevents agents from appearing in non-Chat selectors where appropriate.
 - **Provider from Settings** — Providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
@@ -85,6 +108,7 @@ protected `ingenium-llm-broker` intentionally has no root mapping.
 | `ingenium-qa-vision` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa-vision.md` |
 | `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
 | `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
+| `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
 | `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/primary/ingenium-orchestrator.md` |
 | `ingenium-explore` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
 | `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
@@ -175,15 +199,16 @@ record the unused active slots and concrete dependency or applicability reason i
 | **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | All repository skills/references |
 | **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All repository skills/references |
 | **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All repository skills/references |
+| **ingenium-recovery-engineer** | Subagent | **Permission-derived writer (deployment-only)** — only the fixed production-restart command plus safe Git inspection/checkpoint; source/package/config executable paths denied; writes limited to declared recovery evidence/roadmap; no questions, delegation, or implementation | All repository skills/references |
 | **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All repository skills/references |
 | **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All repository skills/references |
 | **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All repository skills/references |
 | **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | All repository skills/references |
-| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — (excluded) |
+| **ingenium-llm-broker** | Subagent | Hidden system-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — (excluded) |
 
 > **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
 >
-> > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 12-agent total.
+> > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 13-agent total.
 
 ### Skill permission policy
 
@@ -213,6 +238,23 @@ its skill permission is `{"*": "deny"}` and it has no tool allowances. See
 [the skill taxonomy](../reference/skill-taxonomy.md) for the canonical names
 and legacy mapping.
 
+### Dedicated recovery-engineer boundary
+
+`@ingenium-recovery-engineer` has the universal skill/reference loading surface
+but is a **deployment-only permission-derived writer**. Source, package, and
+configuration executable paths are denied; its writes are limited to declared
+recovery evidence and roadmap state. It may execute only the fixed
+production-restart command plus safe Git inspection/checkpoint operations. It
+cannot implement source, package, or configuration changes, execute arbitrary
+shell, use `question`, or delegate work. Premium remains the implementation
+owner. This security remediation does not bypass any recovery or acceptance
+gate; activation and runtime proof remain pending.
+
+The root mapping and mapped profile load only after a **full parent OpenCode
+replacement/restart**; restarting only the child MCP process is insufficient.
+After the replacement, verify the exact model, variant, profile path, and
+effective grants.
+
 The orchestrator and Premium writer profiles explicitly grant the top-level MCP
 tools `ingenium_coordination_update`, `ingenium_coordination_claim`, and
 `ingenium_coordination_release`; these are not Bash permissions. The read-only
@@ -239,6 +281,7 @@ explicitly:
 | `ingenium-docs` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-fast` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-premium` | allow | allow | allow | deny | allow | allow | Intentional writer; deployment gate below still applies |
+| `ingenium-recovery-engineer` | allow | allow | allow | deny | declared evidence/roadmap only | fixed production-restart plus safe Git inspection/checkpoint only | Permission-derived writer for deployment only; source/package/config executable paths denied; Premium owns implementation |
 | `ingenium-orchestrator` | allow | deny | deny | deny | deny | restricted allow | Coordination and verification only; no file-mutation rights |
 | `ingenium-chat` | allow | allow | allow | deny | deny | deny | Read-only |
 | `ingenium-explore` | allow | allow | allow | deny | deny | deny | Read-only |
@@ -261,16 +304,21 @@ The root `opencode.json` explicitly declares the Premium agent's effective
 authoritative for the Premium model and variant; the Markdown profile is not a
 second model source.
 
-Generic `bash`/`shell` input is fail-closed. Deployment and MCP diagnostics are
+Generic `bash`/`shell` input is fail-closed. Premium deployment and MCP diagnostics are
 limited to the fixed, shell-free `ingenium-build deployment` operations
 `mcp-status`, `compose-ps`, `compose-build`, `compose-up`, `compose-restart`,
 and `health`. The coordinator admits that path only for an authenticated
 general-MCP session whose project, workspace, launcher worktree, and required
 scopes are attested. QA, security, and every other agent—including an
 unauthenticated or runtime-audience Premium session—have no deployment
-authority. A non-Premium managed `ingenium-build` request fails closed in the
+authority outside the named owners. A managed `ingenium-build` request from an
+agent other than Premium or the dedicated Recovery agent fails closed in the
 pre-execution hook, before the wrapper can spawn `npm` or run a repository build
-script.
+script. Recovery is narrower than Premium: it may invoke only the fixed
+`ingenium-build deployment production-restart` command plus safe Git
+inspection/checkpoint operations; its source/package/config executable paths are
+denied and its writes are limited to declared recovery evidence/roadmap. Recovery
+does not implement source; Premium owns implementation.
 
 Premium deployment authorization does not come from mutable chat-hook strings
 or prompt text. The coordinator obtains trusted OpenCode server evidence and
@@ -287,6 +335,16 @@ When admitted, deployment maps only those named operations to fixed executable
 argv arrays and starts them with `shell: false`. Its child environment removes
 inherited `COMPOSE_*`, `DOCKER_*`, `npm_*`, `NODE_OPTIONS`, and `PATH` values,
 then supplies the fixed runtime `PATH` (`<node-runtime>:/usr/local/bin:/usr/bin:/bin`).
+
+The dedicated `ingenium-recovery-engineer` is the separate deployment owner for
+the recovery lane and a permission-derived writer for deployment only. Its
+permission boundary admits only the fixed production-restart command plus safe
+Git inspection/checkpoint operations; source/package/config executable paths are
+denied, writes are limited to declared recovery evidence/roadmap, and arbitrary
+shell, `question`, task/delegation, and implementation access remain denied.
+Premium owns implementation. Activation and runtime proof remain pending, and
+its parent-loaded root mapping and profile still require a full parent OpenCode
+replacement/restart before use.
 Changing an agent profile, its prompt-file frontmatter, plugin, MCP entry, OpenCode
 config, or parent binding requires a full parent OpenCode restart; restarting only
 the child MCP process is insufficient because existing sessions retain their
@@ -311,7 +369,7 @@ wave examples in this document are serialized unless explicitly stated
 otherwise: Wave N must finish and be verified before Wave N+1 starts. Never read
 the examples as one combined simultaneous dispatch exceeding either limit.
 
-Writer classification follows the actual permission blocks: `ingenium-software-engineer-fast`, `ingenium-software-engineer-premium`, `ingenium-docs`, and `browser-agent` have `edit: allow` or `write: allow`. `ingenium-explore`, `ingenium-scout`, `ingenium-qa`, `ingenium-qa-vision`, and `ingenium-security-auditor` are non-writers. Writers still count toward the six-active limit, and no wave may contain more than three writers. Every underfilled declaration records unused active slots (`6 - A`) and writer slots (`3 - W`) in `UNUSED_CAPACITY` with a concrete dependency, territory, or applicability reason; no work is manufactured to fill capacity.
+Writer classification follows the actual permission blocks: `ingenium-software-engineer-fast`, `ingenium-software-engineer-premium`, `ingenium-recovery-engineer`, `ingenium-docs`, and `browser-agent` have `edit: allow` or `write: allow`. `ingenium-explore`, `ingenium-scout`, `ingenium-qa`, `ingenium-qa-vision`, and `ingenium-security-auditor` are non-writers. Writers still count toward the six-active limit, and no wave may contain more than three writers. Every underfilled declaration records unused active slots (`6 - A`) and writer slots (`3 - W`) in `UNUSED_CAPACITY` with a concrete dependency, territory, or applicability reason; no work is manufactured to fill capacity.
 
 After an implementation wave and its declared verification are complete,
 independent applicable QA, security, and visual review share one post-wave phase
@@ -320,7 +378,13 @@ retains its final-UI boundary. A blocked or non-applicable review is omitted and
 its unused slot and concrete reason are declared rather than splitting safe
 reviewers or starting substitute work.
 
-This classification is permission-derived rather than based on task type: Docs and Browser count as writers even when handling documentation or browser automation. `browser-agent` is dispatchable by `@ingenium-orchestrator` and must be included in the writer count whenever it is active.
+This classification is permission-derived rather than based on task type: Docs,
+Browser, and Recovery count as writers even when handling documentation, browser
+automation, or deployment-only recovery execution. `browser-agent` and
+`ingenium-recovery-engineer` are dispatchable by `@ingenium-orchestrator` and must
+be included in the writer count whenever active; Recovery is not an implementation
+writer, and its boundary still denies source/package/config executable paths,
+arbitrary shell, and task/delegation access.
 
 | # | Phase | Agent | Action |
 |---|-------|-------|--------|
@@ -343,8 +407,11 @@ This classification is permission-derived rather than based on task type: Docs a
 The task board (via `ingenium_task_*` MCP tools) can be used to track work items. Tasks flow through a standard todo → in_progress → review → done lifecycle.
 
 TodoWrite is a separate live execution checklist and is allowed only for
-`ingenium-orchestrator`, `ingenium-software-engineer-fast`, and
-`ingenium-software-engineer-premium`. Each owner must initialize a nonempty list
+`ingenium-orchestrator`, `ingenium-software-engineer-fast`,
+`ingenium-software-engineer-premium`, and `ingenium-recovery-engineer`. Recovery
+may own TodoWrite only for declared deployment/recovery/checkpoint evidence and
+roadmap reconciliation; Premium owns recovery implementation TodoWrite items.
+Each owner must initialize a nonempty list
 before any dispatch, edit, or command on a nonterminal task, update it after each
 implementation or evidence transition, reconcile it before a terminal response,
 and explicitly report tool failure or unavailability. Roadmap markers remain an
@@ -374,6 +441,7 @@ completed and been verified. Writer tiers:
 |------|-------|---------------|
 | **Fast** | `ingenium-software-engineer-fast` | Routine isolated work, single-package scope |
 | **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work: auth, migrations, Docker, multi-service, high-risk, cross-package |
+| **Recovery** | `ingenium-recovery-engineer` | Deployment-only permission-derived writer: fixed production-restart plus safe Git inspection/checkpoint; declared recovery evidence/roadmap writes; Premium owns implementation |
 | **Docs** | `ingenium-docs` | Documentation and skill-system work |
 | **Browser** | `browser-agent` | Browser automation and self-healing site interaction |
 
@@ -444,7 +512,7 @@ Full details for each agent are available in the agent definition files at `.ope
 
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
-| Model-dependent (configurable) | All agents | 12 | Configurable via `opencode.json` agent mappings |
+| Model-dependent (configurable) | All agents | 13 | Configurable via `opencode.json` agent mappings |
 
 **Model configuration**: Agent model mappings live in `opencode.json` under the `"agent"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. When agents are created or updated via MCP tools, the model field is persisted to `opencode.json`, not the `.md` file. A `{file:...}` prompt reference loads the profile body; its frontmatter does not become a second root mapping.
 
@@ -461,6 +529,7 @@ Full details for each agent are available in the agent definition files at `.ope
 | ingenium-qa-vision | `@ingenium-qa-vision` | Read/glob/grep + Playwright; no Bash, no writes | Subagent — passive visual QA |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Full R/W/Bash | Subagent — writer tier Fast |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Full R/W/Bash | Subagent — writer tier Premium |
+| ingenium-recovery-engineer | `@ingenium-recovery-engineer` | Read + declared recovery evidence/roadmap writes + fixed production-restart and safe Git inspection/checkpoint only | Subagent — deployment-only permission-derived writer; source/package/config executable paths denied; Premium owns implementation |
 | ingenium-qa | `@ingenium-qa` | Bash + read-only | Subagent — quality assurance |
 | ingenium-docs | `@ingenium-docs` | Full R/W/Bash | Subagent — writer for documentation |
 | ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | Subagent — security audit |
