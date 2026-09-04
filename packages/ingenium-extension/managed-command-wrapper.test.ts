@@ -1039,6 +1039,16 @@ describe("managed command wrappers", () => {
       expect(shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toMatch(/^[0-9a-f]{40,64}$/);
 
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "extensions.worktreeConfig", "false"]);
+      expect(shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toMatch(/^[0-9a-f]{40,64}$/);
+      const validCheckpointConfig = readFileSync(join(checkpoint, ".git/config"), "utf8");
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "extensions.worktreeConfig", "invalid"]);
+      expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
+        .toThrow("worktreeConfig probe failed");
+      writeFileSync(join(checkpoint, ".git/config"), validCheckpointConfig);
+      execFileSync("/usr/bin/git", ["-C", checkpoint, "config", "--unset", "extensions.worktreeConfig"]);
+
       for (const [key, value] of [
         ["core.hooksPath", "/tmp/hooks"],
         ["filter.inject.process", "/tmp/filter"],
@@ -1072,6 +1082,7 @@ describe("managed command wrappers", () => {
       const configurationGit = shimSource.slice(shimSource.indexOf("function gitConfigurationEnvironment("), shimSource.indexOf("export function isExecutableGitConfiguration("));
       expect(operationalGit).toContain('["-C", root, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args]');
       expect(configurationGit).toContain('["-C", root, "config", "--null", "--local", "--list", "--includes"]');
+      expect(configurationGit).toContain('["-C", root, "config", "--local", "--bool", "--get", "extensions.worktreeConfig"]');
       expect(configurationGit).toContain('["-C", root, "config", "--null", "--worktree", "--list", "--includes"]');
       expect(configurationGit).toContain("delete env.GIT_CONFIG_GLOBAL");
       expect(configurationGit).not.toContain("/dev/null");
@@ -2207,6 +2218,15 @@ describe("managed command wrappers", () => {
     try {
       execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
       writeFileSync(join(directory, "safe.txt"), "safe\n");
+      expect(managedCommand("repository", ["add", "safe.txt"], directory)).toBe(0);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "extensions.worktreeConfig", "false"]);
+      expect(managedCommand("repository", ["add", "safe.txt"], directory)).toBe(0);
+      const validRepositoryConfig = readFileSync(join(directory, ".git/config"), "utf8");
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "extensions.worktreeConfig", "invalid"]);
+      expect(() => managedCommand("repository", ["add", "safe.txt"], directory))
+        .toThrow("worktreeConfig probe failed");
+      writeFileSync(join(directory, ".git/config"), validRepositoryConfig);
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "--unset", "extensions.worktreeConfig"]);
       for (const [key, value] of [
         ["core.hooksPath", "/tmp/hooks"],
         ["filter.inject.process", "/tmp/filter"],

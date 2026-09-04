@@ -429,10 +429,33 @@ function gitConfiguration(root) {
     maxBuffer: 16 * 1024 * 1024,
     timeout: 10_000,
   };
-  return [
-    execFileSync(GIT, ["-C", root, "config", "--null", "--local", "--list", "--includes"], options),
-    execFileSync(GIT, ["-C", root, "config", "--null", "--worktree", "--list", "--includes"], options),
-  ].flatMap((configuration) => configuration.split("\0"));
+  let worktreeConfig;
+  try {
+    worktreeConfig = execFileSync(
+      GIT,
+      ["-C", root, "config", "--local", "--bool", "--get", "extensions.worktreeConfig"],
+      options,
+    ).trim();
+  } catch (error) {
+    if (error?.status === 1) worktreeConfig = "false";
+    else throw new Error("Recovery bootstrap worktreeConfig probe failed", { cause: error });
+  }
+  if (worktreeConfig !== "true" && worktreeConfig !== "false") {
+    throw new Error("Recovery bootstrap worktreeConfig probe is invalid");
+  }
+  const configuration = execFileSync(
+    GIT,
+    ["-C", root, "config", "--null", "--local", "--list", "--includes"],
+    options,
+  ).split("\0");
+  if (worktreeConfig === "true") {
+    configuration.push(...execFileSync(
+      GIT,
+      ["-C", root, "config", "--null", "--worktree", "--list", "--includes"],
+      options,
+    ).split("\0"));
+  }
+  return configuration;
 }
 
 export function isExecutableGitConfiguration(entry) {

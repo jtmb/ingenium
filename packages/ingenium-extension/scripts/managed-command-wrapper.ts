@@ -425,10 +425,32 @@ function assertNonExecutableGitConfiguration(cwd: string, env: NodeJS.ProcessEnv
     maxBuffer: 1024 * 1024,
     env: configurationEnvironment,
   };
-  const configuration = [
-    execFileSync(GIT, ["-C", cwd, "config", "--null", "--local", "--list", "--includes"], options),
-    execFileSync(GIT, ["-C", cwd, "config", "--null", "--worktree", "--list", "--includes"], options),
-  ].flatMap((value) => value.split("\0"));
+  let worktreeConfig: string;
+  try {
+    worktreeConfig = execFileSync(
+      GIT,
+      ["-C", cwd, "config", "--local", "--bool", "--get", "extensions.worktreeConfig"],
+      options,
+    ).trim();
+  } catch (error) {
+    if ((error as { status?: unknown }).status === 1) worktreeConfig = "false";
+    else throw new Error("Repository wrapper worktreeConfig probe failed", { cause: error });
+  }
+  if (worktreeConfig !== "true" && worktreeConfig !== "false") {
+    throw new Error("Repository wrapper worktreeConfig probe is invalid");
+  }
+  const configuration = execFileSync(
+    GIT,
+    ["-C", cwd, "config", "--null", "--local", "--list", "--includes"],
+    options,
+  ).split("\0");
+  if (worktreeConfig === "true") {
+    configuration.push(...execFileSync(
+      GIT,
+      ["-C", cwd, "config", "--null", "--worktree", "--list", "--includes"],
+      options,
+    ).split("\0"));
+  }
   if (configuration.some(isExecutableGitConfiguration)) {
     throw new Error("Repository wrapper rejected executable Git configuration");
   }
