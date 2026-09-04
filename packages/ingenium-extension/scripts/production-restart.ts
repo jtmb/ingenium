@@ -28,6 +28,7 @@ import {
   coordinationCredentialPurpose,
   resolveExtensionBinding,
 } from "../extension-binding.js";
+import { CoordinationOutbox } from "../coordination-outbox.js";
 import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
   decodeReplacementFirstRestartRequest,
@@ -1719,7 +1720,13 @@ export function productionRestartDependencies(
 ): ProductionRestartAdapterDependencies<ReplacementSession> {
   if (!SHA256.test(productionRestartScriptSha256)) throw new Error("Production restart script hash is invalid");
   return {
-    canonicalWorktree: () => productionRestartCanonicalWorktree(),
+    canonicalWorktree: () => {
+      const worktree = productionRestartCanonicalWorktree();
+      if (new CoordinationOutbox(worktree).list().some((record) => record.ambiguous || record.kind === "overflow")) {
+        throw new Error("Production restart coordination state is ambiguous");
+      }
+      return worktree;
+    },
     resolveBinding: resolveProductionBinding,
     readParentCandidates: (worktree) => {
       const managed = readManagedRecoveryEnrollment(worktree);

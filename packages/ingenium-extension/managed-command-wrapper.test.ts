@@ -74,6 +74,7 @@ import {
   parseListeningLoopbackPorts,
   probeReplacementHealthGate,
   productionRestartCanonicalWorktree,
+  productionRestartDependencies,
   restartHandoffEvidence,
   restartHandoffMemoryEntry,
   runProductionRestartCli,
@@ -2011,6 +2012,66 @@ describe("managed command wrappers", () => {
         "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
       ]);
     } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("fixed deployment rejects a saturated ambiguous legacy preflight before enrollment or signal", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-ambiguous-"));
+    const priorCanonicalWorktree = process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
+    const priorWorktree = process.env.INGENIUM_WORKTREE;
+    try {
+      process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = worktree;
+      process.env.INGENIUM_WORKTREE = worktree;
+      const outbox = new CoordinationOutbox(worktree);
+      for (let index = 0; index < 128; index += 1) {
+        outbox.put({
+          exactKey: `legacy-preflight-${index}`,
+          kind: "claim",
+          sessionHash: sha256("legacy-session"),
+          failure: "unavailable",
+        });
+      }
+      expect(outbox.list()).toContainEqual(expect.objectContaining({ kind: "overflow", ambiguous: true }));
+
+      const restartRoot = join(worktree, ".opencode", "protected-runtime-index", "production-restart");
+      mkdirSync(restartRoot, { mode: 0o700 });
+      const retainedState = {
+        schemaVersion: 1,
+        parentCandidates: [{
+          oldProcess: {
+            pid: 1259022,
+            startTimeTicks: 5096426,
+            executableSha256: sha256("dead-parent"),
+            nonceSha256: "0".repeat(64),
+          },
+          handoff: { incomplete: true },
+        }],
+      };
+      writePrivateJson(join(restartRoot, "state.json"), retainedState);
+
+      const production = productionRestartDependencies(sha256("production-restart-script"));
+      const resolveBinding = vi.fn();
+      const readParentCandidates = vi.fn();
+      const enrollParentCandidate = vi.fn();
+      const prepareReplacement = vi.fn();
+      await expect(runProductionRestartAdapter({
+        ...production,
+        resolveBinding,
+        readParentCandidates,
+        enrollParentCandidate,
+        prepareReplacement,
+      })).rejects.toThrow("coordination state is ambiguous");
+      expect(resolveBinding).not.toHaveBeenCalled();
+      expect(readParentCandidates).not.toHaveBeenCalled();
+      expect(enrollParentCandidate).not.toHaveBeenCalled();
+      expect(prepareReplacement).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(join(restartRoot, "state.json"), "utf8"))).toEqual(retainedState);
+    } finally {
+      if (priorCanonicalWorktree === undefined) delete process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
+      else process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = priorCanonicalWorktree;
+      if (priorWorktree === undefined) delete process.env.INGENIUM_WORKTREE;
+      else process.env.INGENIUM_WORKTREE = priorWorktree;
       rmSync(worktree, { recursive: true, force: true });
     }
   });
