@@ -55,7 +55,7 @@ const COMMIT_CONFIGURATION = [
   "-c", "user.name=Ingenium Managed Command",
   "-c", "user.email=managed-command@ingenium.invalid",
 ];
-const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
+const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff(?:\.external|\..*\.(?:command|textconv))|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
 
 export function managedWrapperPackageRoot(moduleUrl: string | URL = import.meta.url): string {
   const wrapper = realpathSync(fileURLToPath(moduleUrl));
@@ -408,11 +408,28 @@ export function terminateTimedOutManagedProcess(
   if (detached) signal("SIGKILL");
 }
 
+export function isExecutableGitConfiguration(entry: string): boolean {
+  const separator = entry.indexOf("\n");
+  const key = separator === -1 ? entry : entry.slice(0, separator);
+  const value = separator === -1 ? "" : entry.slice(separator + 1);
+  return EXECUTABLE_GIT_CONFIGURATION.test(key)
+    || (/^alias\./i.test(key) && value.trimStart().startsWith("!"));
+}
+
 function assertNonExecutableGitConfiguration(cwd: string, env: NodeJS.ProcessEnv): void {
-  const configuration = execFileSync(GIT, ["-C", cwd, "config", "--null", "--list", "--includes"], {
-    encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024, env,
-  });
-  if (configuration.split("\0").some((entry) => EXECUTABLE_GIT_CONFIGURATION.test(entry.slice(0, entry.indexOf("\n"))))) {
+  const configurationEnvironment = { ...env };
+  delete configurationEnvironment.GIT_CONFIG_GLOBAL;
+  const options = {
+    encoding: "utf8" as const,
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+    env: configurationEnvironment,
+  };
+  const configuration = [
+    execFileSync(GIT, ["-C", cwd, "config", "--null", "--local", "--list", "--includes"], options),
+    execFileSync(GIT, ["-C", cwd, "config", "--null", "--worktree", "--list", "--includes"], options),
+  ].flatMap((value) => value.split("\0"));
+  if (configuration.some(isExecutableGitConfiguration)) {
     throw new Error("Repository wrapper rejected executable Git configuration");
   }
 }

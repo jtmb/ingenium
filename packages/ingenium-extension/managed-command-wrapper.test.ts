@@ -30,6 +30,7 @@ import {
   decodeManagedArgv,
   decodeManagedBuildArgv,
   decodeManagedRepositoryArgv,
+  isExecutableGitConfiguration,
   isManagedDeploymentArgv,
   managedBuildEnvironment,
   managedBuildExecution,
@@ -969,8 +970,7 @@ describe("managed command wrappers", () => {
   });
 
   it("source recovery shim accepts mode 0644 and reports the first bounded trust failure reason", async () => {
-    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
-    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const shim = await import(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-trust-"));
     const priorGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
     const priorGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
@@ -1069,11 +1069,27 @@ describe("managed command wrappers", () => {
 
       const shimSource = readFileSync(recoveryBootstrapShim, "utf8");
       const operationalGit = shimSource.slice(shimSource.indexOf("function git("), shimSource.indexOf("function gitConfiguration("));
-      const configurationGit = shimSource.slice(shimSource.indexOf("function gitConfiguration("), shimSource.indexOf("function isExecutableGitConfiguration("));
+      const configurationGit = shimSource.slice(shimSource.indexOf("function gitConfigurationEnvironment("), shimSource.indexOf("export function isExecutableGitConfiguration("));
       expect(operationalGit).toContain('["-C", root, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args]');
-      expect(configurationGit).toContain('["-C", root, "config", "--null", "--list", "--includes"]');
+      expect(configurationGit).toContain('["-C", root, "config", "--null", "--local", "--list", "--includes"]');
+      expect(configurationGit).toContain('["-C", root, "config", "--null", "--worktree", "--list", "--includes"]');
+      expect(configurationGit).toContain("delete env.GIT_CONFIG_GLOBAL");
+      expect(configurationGit).not.toContain("/dev/null");
       expect(configurationGit).not.toContain("core.fsmonitor=false");
       expect(configurationGit).not.toContain("core.hooksPath=/dev/null");
+
+      for (const [entry, executable] of [
+        ["core.hooksPath\n/tmp/hooks", true],
+        ["diff.external\n/tmp/diff", true],
+        ["alias.inject\n  !/tmp/alias", true],
+        ["filter.inject.process\n/tmp/filter", true],
+        ["merge.inject.driver\n/tmp/merge", true],
+        ["alias.safe\nlog --oneline", false],
+        ["user.name\nSafe User", false],
+      ] as const) {
+        expect(shim.isExecutableGitConfiguration(entry)).toBe(executable);
+        expect(isExecutableGitConfiguration(entry)).toBe(executable);
+      }
 
       chmodSync(dirname(source), 0o777);
       writeFileSync(source, "export const changed = true;\n");
@@ -2185,21 +2201,45 @@ describe("managed command wrappers", () => {
     expect(serialized).not.toContain("/tmp/askpass");
   });
 
-  it("rejects repository-local hooks and helper configuration before Git mutation", () => {
+  it("rejects executable local and worktree Git configuration but ignores global configuration", () => {
     const directory = mkdtempSync(join(tmpdir(), "ingenium-managed-git-"));
+    const previousHome = process.env.HOME;
     try {
       execFileSync("/usr/bin/git", ["-C", directory, "init", "--quiet"]);
+      writeFileSync(join(directory, "safe.txt"), "safe\n");
       for (const [key, value] of [
         ["core.hooksPath", "/tmp/hooks"],
         ["filter.inject.process", "/tmp/filter"],
         ["merge.inject.driver", "/tmp/merge-driver"],
+        ["diff.external", "/tmp/diff"],
+        ["alias.inject", "!/tmp/alias"],
       ] as const) {
         execFileSync("/usr/bin/git", ["-C", directory, "config", key, value]);
         expect(() => managedCommand("repository", ["add", "safe.txt"], directory))
           .toThrow("Repository wrapper rejected executable Git configuration");
         execFileSync("/usr/bin/git", ["-C", directory, "config", "--unset", key]);
       }
+
+      execFileSync("/usr/bin/git", ["-C", directory, "config", "extensions.worktreeConfig", "true"]);
+      for (const [key, value] of [
+        ["core.hooksPath", "/tmp/worktree-hooks"],
+        ["diff.external", "/tmp/worktree-diff"],
+        ["alias.inject", "!/tmp/worktree-alias"],
+      ] as const) {
+        execFileSync("/usr/bin/git", ["-C", directory, "config", "--worktree", key, value]);
+        expect(() => managedCommand("repository", ["add", "safe.txt"], directory))
+          .toThrow("Repository wrapper rejected executable Git configuration");
+        execFileSync("/usr/bin/git", ["-C", directory, "config", "--worktree", "--unset", key]);
+      }
+
+      const home = join(directory, "home");
+      mkdirSync(home);
+      writeFileSync(join(home, ".gitconfig"), "[core]\n\thooksPath = /tmp/global-hooks\n[diff]\n\texternal = /tmp/global-diff\n");
+      process.env.HOME = home;
+      expect(managedCommand("repository", ["add", "safe.txt"], directory)).toBe(0);
     } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
       rmSync(directory, { recursive: true, force: true });
     }
   });

@@ -416,16 +416,26 @@ function git(root, args, encoding = "buffer") {
   });
 }
 
-function gitConfiguration(root) {
-  return execFileSync(GIT, ["-C", root, "config", "--null", "--list", "--includes"], {
-    encoding: "utf8",
-    env: gitEnvironment(),
-    maxBuffer: 16 * 1024 * 1024,
-    timeout: 10_000,
-  });
+function gitConfigurationEnvironment() {
+  const env = gitEnvironment();
+  delete env.GIT_CONFIG_GLOBAL;
+  return env;
 }
 
-function isExecutableGitConfiguration(entry) {
+function gitConfiguration(root) {
+  const options = {
+    encoding: "utf8",
+    env: gitConfigurationEnvironment(),
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 10_000,
+  };
+  return [
+    execFileSync(GIT, ["-C", root, "config", "--null", "--local", "--list", "--includes"], options),
+    execFileSync(GIT, ["-C", root, "config", "--null", "--worktree", "--list", "--includes"], options),
+  ].flatMap((configuration) => configuration.split("\0"));
+}
+
+export function isExecutableGitConfiguration(entry) {
   const separator = entry.indexOf("\n");
   const key = separator === -1 ? entry : entry.slice(0, separator);
   const value = separator === -1 ? "" : entry.slice(separator + 1);
@@ -436,7 +446,7 @@ function isExecutableGitConfiguration(entry) {
 export function verifyScopedCheckpoint(root, sourcePath, sourceBytes) {
   const canonicalRoot = canonicalOwnedDirectory(root, "Repository root");
   const configuration = gitConfiguration(canonicalRoot);
-  if (configuration.split("\0").some(isExecutableGitConfiguration)) {
+  if (configuration.some(isExecutableGitConfiguration)) {
     throw new Error("Recovery bootstrap checkpoint rejected executable Git configuration");
   }
   const topLevel = git(canonicalRoot, ["rev-parse", "--show-toplevel"], "utf8").trim();
