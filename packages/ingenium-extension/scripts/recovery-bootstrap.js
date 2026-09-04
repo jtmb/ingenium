@@ -31,7 +31,13 @@ const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
 const GIT = "/usr/bin/git";
-export const CANONICAL_DIRECTORY_AUDIT_PATH = "/tmp/opencode/recovery-bootstrap-directory-audit.json";
+export const CANONICAL_DIRECTORY_AUDIT_PATH = "/tmp/opencode/recovery-bootstrap-directory-audit.jsonl";
+export const CANONICAL_DIRECTORY_ROLES = Object.freeze([
+  "repository_root",
+  "packages_root",
+  "extension_root",
+  "scripts_root",
+]);
 const CHECKPOINT_PATHS = [
   "opencode.json",
   "package.json",
@@ -138,19 +144,24 @@ export function canonicalOwnedDirectory(path, _label, owner = ownerUid(), option
   let audited = false;
   let beforeMode;
   let afterMode;
+  let result = "rejected";
   const retainAudit = () => {
     if (!options.retainAudit || audited) return;
     audited = true;
     options.retainAudit({
+      role: options.auditRole,
       directoryPathSha256: sha256(canonical),
       beforeMode: auditMode(beforeMode),
       afterMode: auditMode(afterMode),
+      result,
+      timestamp: new Date().toISOString(),
     });
   };
   const fail = (reason) => {
     retainAudit();
     throw new CanonicalOwnedDirectoryError(reason);
   };
+  if (options.retainAudit && !CANONICAL_DIRECTORY_ROLES.includes(options.auditRole)) fail("canonical");
   let reference;
   try {
     reference = fileSystem.lstatSync(canonical);
@@ -189,6 +200,7 @@ export function canonicalOwnedDirectory(path, _label, owner = ownerUid(), option
       fail("canonical");
     }
     if ((beforeMode & 0o022) === 0) {
+      result = "validated";
       retainAudit();
       return canonical;
     }
@@ -213,6 +225,7 @@ export function canonicalOwnedDirectory(path, _label, owner = ownerUid(), option
       if (error instanceof CanonicalOwnedDirectoryError) throw error;
       fail("writable");
     }
+    result = "hardened";
     retainAudit();
     return canonical;
   } catch (error) {
@@ -298,11 +311,29 @@ function privateTemporaryRoot(owner) {
   return canonicalOwnedDirectory(root, "Recovery temporary root", owner);
 }
 
-function retainCanonicalDirectoryAudit(audit, owner) {
+export function canonicalDirectoryAuditJsonl(audits) {
+  const keys = ["afterMode", "beforeMode", "directoryPathSha256", "result", "role", "timestamp"];
+  if (audits.length !== CANONICAL_DIRECTORY_ROLES.length
+    || audits.some((audit, index) => audit.role !== CANONICAL_DIRECTORY_ROLES[index]
+      || Object.keys(audit).sort().some((key, keyIndex) => key !== keys[keyIndex])
+      || !/^[0-9a-f]{64}$/.test(audit.directoryPathSha256)
+      || !/^[0-7]{4}$/.test(audit.beforeMode) || !/^[0-7]{4}$/.test(audit.afterMode)
+      || !["hardened", "validated"].includes(audit.result)
+      || new Date(audit.timestamp).toISOString() !== audit.timestamp)) {
+    throw new Error("Recovery canonical directory audit is incomplete");
+  }
+  const lines = audits.map((audit) => JSON.stringify(audit));
+  if (lines.some((line) => Buffer.byteLength(line) >= 512)) {
+    throw new Error("Recovery canonical directory audit record is too large");
+  }
+  return Buffer.from(`${lines.join("\n")}\n`);
+}
+
+function retainCanonicalDirectoryAudit(audits, owner) {
   const root = privateTemporaryRoot(owner);
   const directory = mkdtempSync(resolve(root, "recovery-directory-audit-"));
   const stagedPath = resolve(directory, "audit.json");
-  const bytes = Buffer.from(`${JSON.stringify(audit)}\n`);
+  const bytes = canonicalDirectoryAuditJsonl(audits);
   let moved = false;
   try {
     writeFileSync(stagedPath, bytes, { flag: "wx", mode: 0o600 });
@@ -329,6 +360,41 @@ function retainCanonicalDirectoryAudit(audit, owner) {
     }
     rmdirSync(directory);
   }
+}
+
+export function hardenCanonicalRepositoryDirectories(sourcePath, expectedRepositoryRoot, owner = ownerUid(), options = {}) {
+  const source = resolve(sourcePath);
+  const scriptsPath = dirname(source);
+  const packageRoot = resolve(scriptsPath, "..");
+  const packagesRoot = resolve(packageRoot, "..");
+  const repoRoot = resolve(packagesRoot, "..");
+  if (repoRoot !== resolve(expectedRepositoryRoot)
+    || basename(packageRoot) !== "ingenium-extension" || basename(packagesRoot) !== "packages"
+    || packagesRoot !== resolve(repoRoot, "packages")
+    || packageRoot !== resolve(packagesRoot, "ingenium-extension")
+    || scriptsPath !== resolve(packageRoot, "scripts")
+    || source !== resolve(scriptsPath, "recovery-bootstrap.js")) {
+    throw new Error("Recovery bootstrap shim is outside the canonical extension package");
+  }
+
+  const audits = [];
+  const directories = [
+    { role: CANONICAL_DIRECTORY_ROLES[0], path: repoRoot, label: "Repository root" },
+    { role: CANONICAL_DIRECTORY_ROLES[1], path: packagesRoot, label: "Packages root" },
+    { role: CANONICAL_DIRECTORY_ROLES[2], path: packageRoot, label: "Extension package root" },
+    { role: CANONICAL_DIRECTORY_ROLES[3], path: scriptsPath, label: "Extension scripts directory" },
+  ];
+  for (const directory of directories) {
+    canonicalOwnedDirectory(directory.path, directory.label, owner, {
+      auditRole: directory.role,
+      hardenWritablePath: directory.path,
+      retainAudit: (audit) => audits.push(audit),
+      fileSystem: options.fileSystem,
+      afterOpen: options.afterOpen,
+    });
+  }
+  options.retainAudit?.(audits);
+  return { repoRoot, packagesRoot, packageRoot, scriptsPath };
 }
 
 function gitEnvironment() {
@@ -580,25 +646,27 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
   const owner = ownerUid();
   const sourcePath = resolve(fileURLToPath(import.meta.url));
-  const scriptsPath = dirname(sourcePath);
-  const packageRoot = canonicalOwnedDirectory(resolve(scriptsPath, ".."), "Extension package root", owner);
-  const packagesRoot = canonicalOwnedDirectory(resolve(packageRoot, ".."), "Packages root", owner);
-  const repoRoot = canonicalOwnedDirectory(resolve(packagesRoot, ".."), "Repository root", owner);
-  if (basename(packageRoot) !== "ingenium-extension" || basename(packagesRoot) !== "packages"
-    || packageRoot !== resolve(repoRoot, "packages/ingenium-extension")
-    || scriptsPath !== resolve(packageRoot, "scripts")
-    || sourcePath !== resolve(scriptsPath, "recovery-bootstrap.js")) {
-    throw new Error("Recovery bootstrap shim is outside the canonical extension package");
-  }
   const declaredWorktree = process.env.INGENIUM_WORKTREE;
-  if (!declaredWorktree || resolve(declaredWorktree) !== repoRoot || realpathSync(declaredWorktree) !== repoRoot) {
+  if (!declaredWorktree) {
     throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
   }
-  const scriptsDirectory = canonicalOwnedDirectory(scriptsPath, "Extension scripts directory", owner, {
-    hardenWritablePath: scriptsPath,
-    retainAudit: (audit) => retainCanonicalDirectoryAudit(audit, owner),
-  });
-  const source = readTrustedRegularFile(resolve(scriptsDirectory, "recovery-bootstrap.js"), "Recovery bootstrap shim", {
+  try {
+    if (realpathSync(declaredWorktree) !== resolve(declaredWorktree)) {
+      throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === "Recovery bootstrap shim requires the attested canonical worktree") {
+      throw error;
+    }
+    throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
+  }
+  const { repoRoot, packageRoot, scriptsPath } = hardenCanonicalRepositoryDirectories(
+    sourcePath,
+    declaredWorktree,
+    owner,
+    { retainAudit: (audits) => retainCanonicalDirectoryAudit(audits, owner) },
+  );
+  const source = readTrustedRegularFile(resolve(scriptsPath, "recovery-bootstrap.js"), "Recovery bootstrap shim", {
     expectedOwner: owner,
   });
   verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
