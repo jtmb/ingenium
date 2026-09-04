@@ -877,7 +877,7 @@ describe("managed command wrappers", () => {
     expect(calls.at(-1)!.options.timeout).toBe(RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS);
     expect(retainEvidence).toHaveBeenLastCalledWith({
       schemaVersion: 1,
-      checks: RECOVERY_BOOTSTRAP_CHECKS.map((_, index) => ({
+      checks: RECOVERY_BOOTSTRAP_CHECKS.map((_: readonly [string, readonly string[]], index: number) => ({
         index: index + 1, result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
       })),
       productionRestart: { result: "passed", timeoutMs: RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS },
@@ -910,7 +910,9 @@ describe("managed command wrappers", () => {
       { productionRestart: productionRestartSource },
     )).toBe(7);
     expect(calls.map(({ command, argv }) => ({ command, argv })))
-      .toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(([command, argv]) => ({ command, argv })));
+      .toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(
+        ([command, argv]: readonly [string, readonly string[]]) => ({ command, argv }),
+      ));
     const failedEnvironment = calls[0]!.options.env as NodeJS.ProcessEnv;
     expect(failedEnvironment.NPM_CONFIG_USERCONFIG).not.toBe(failedEnvironment.NPM_CONFIG_GLOBALCONFIG);
     expect(existsSync(failedEnvironment.NPM_CONFIG_USERCONFIG!)).toBe(false);
@@ -966,7 +968,9 @@ describe("managed command wrappers", () => {
       checkIndex: 2,
       message: "Recovery bootstrap check 2 timed out",
     });
-    expect(calls).toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(([command]) => command));
+    expect(calls).toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(
+      ([command]: readonly [string, readonly string[]]) => command,
+    ));
     expect(calls).not.toContain(process.execPath);
   });
 
