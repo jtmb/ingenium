@@ -5404,3 +5404,15 @@ and implementation planning only; `RECOVERY-100` and `RECOVERY-101` remain open
 dependencies, the explicitly noncritical development credential remains
 unchanged, and source, deployed-runtime, and actual model/session evidence remain
 separate and pending.
+
+Evidence RECOVERY-102: This observer session did not expose the coordination
+status/handoff tools (`ingenium_coordination_status` and
+`ingenium_coordination_handoff`), so live coordination reads could not be
+performed. The retained preflight report states that the configured API boundary
+at `localhost:4097` refused connection; this is not independently retained
+connection proof. Configured project/workspace/worktree values are configuration
+values only; runtime enrollment is unknown. Live session/incarnation,
+epoch/fence/claim, nonce/enrollment, durable handoff, changed paths,
+task/TodoWrite/status/nextWork, and current activity remain unknown.
+`RECOVERY-100`, `RECOVERY-101`, and `RECOVERY-102` remain open; no completion
+marker or remediation is claimed.
