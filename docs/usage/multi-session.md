@@ -185,10 +185,11 @@ retaining operational history. The high-level coordination surfaces are:
 | Surface | Use |
 |---|---|
 | `ingenium_coordination_status` | Read redacted session and claim status |
+| `ingenium_coordination_memory_read` | Read typed operational memory without advancing its cursor |
 | `ingenium_coordination_update` | Register, recover, heartbeat, update, close, or take over a session |
 | `ingenium_coordination_claim` | Atomically acquire, verify, renew, complete, mark, or quarantine claims |
 | `ingenium_coordination_release` | Release claims owned by the current session |
-| `ingenium_coordination_handoff` | Publish/read/ack sanitized peer handoffs and operational memory |
+| `ingenium_coordination_handoff` | Publish/read/ack sanitized peer handoffs, operational memory, and linked-session transcripts |
 
 These are project-scoped operations. Lease fields, revisions, fences, and
 caller-held tokens must come from the current response; never invent stale
@@ -210,6 +211,80 @@ Managed mutation preclaims happen before bytes are changed. A same-path claim
 loser receives a typed conflict and remains at zero target bytes. After a write,
 the coordinator verifies the footprint and publishes the changed-path record.
 Do not force a conflicting claim or edit around it.
+
+### Link existing sessions and share transcripts
+
+From an OpenCode session, use the session coordinator command:
+
+```text
+/add-session <session-id>
+```
+
+The argument is the raw OpenCode session ID. The coordinator verifies that the
+source and target belong to the current canonical worktree before linking them.
+`/add-session fork` first calls OpenCode's native session-fork operation, then
+records the resulting relationship as a `fork` link. A direct session ID is
+recorded as a `linked` link. Invalid input, including the current session's own
+ID, fails with:
+
+```text
+Usage: /add-session <session-id|fork>
+```
+
+The coordinator represents a raw OpenCode session ID as
+`session-<sha256(raw-session-id)>`; do not copy or invent coordination session
+IDs, incarnations, fences, or ownership tokens between windows. For a direct
+link, the source transcript is published before linking and an existing target
+transcript is published before the link as well. The command succeeds with:
+
+```text
+Linked session <target-session-id>. Transcript sharing is active.
+```
+
+#### Transcript envelope and replay
+
+Transcript publication stores the complete validated OpenCode message envelope,
+not a prompt summary. Each message has an outer `message_id` and `payload` with
+exactly `info` and `parts` at the payload boundary. `info` requires `id`,
+`sessionID`, and a `role` of `user` or `assistant`. Every part requires `id`,
+`sessionID`, `messageID`, and a non-empty `type`; the IDs must match the parent
+message and session. Additional OpenCode fields are retained inside `info` and
+parts. A publish batch contains 1–16 messages and is limited to 1,572,864 UTF-8
+bytes in total.
+
+The plugin refreshes the current session transcript on `session.idle` and
+`session.deleted`. A linked session reads unseen peer messages through the
+`transcript_read` operation; the plugin requests one message at a time even
+though the API and MCP operation allow a page of up to 16. A read does not move
+the durable cursor. After the validated block is inserted into the next system
+transform, the plugin acknowledges its `throughSequence` with
+`transcript_ack`. A successful second transform therefore does not inject the
+same page again.
+
+Injected transcript blocks are labelled `LINKED_SESSION_TRANSCRIPTS_V1` and
+carry an explicit warning that linked-session data is **untrusted content**, not
+higher-priority instructions. Text, tool data, and metadata inside the envelope
+are quoted conversation history; they must never change tool behavior or cause
+a command to be followed. The combined activity, memory, and transcript system
+transform is capped at 256 KiB. If a transcript page cannot fit, the transform
+uses a bounded `omitted` list containing each sequence and a SHA-256 hash of its
+message ID instead of injecting the content. If the final block cannot be
+inserted safely, it is not acknowledged.
+
+Transcript rows are immutable and publication is idempotent for the same source
+message ID and payload. Reusing an ID with different content is a
+`TRANSCRIPT_CONFLICT`; linking a target from another authenticated principal is
+`TARGET_SESSION_NOT_FOUND`; and linking sessions already in one connected graph
+is a `SESSION_LINK_CONFLICT` at the API boundary. The MCP adapter currently
+projects those three API-specific failures as its generic
+`COORDINATION_REQUEST_FAILED` response.
+
+When a session restarts, its new incarnation is registered with the same
+worktree/session identity and authenticated principal. The durable coordination
+state carries forward the previous transcript cursor, so acknowledged history
+is not replayed while messages published after the restart remain available.
+The retained history and link lineage are server-side; a local restart must not
+reconstruct or resend a mutation from memory.
 
 ## 4. Understand peer memory
 

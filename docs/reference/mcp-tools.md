@@ -324,7 +324,7 @@ pipeline status.
 
 ## TASKS — Full task management (Kanban)
 
-31 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_update, coordination_claim, coordination_release, coordination_handoff.
+32 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_memory_read, coordination_update, coordination_claim, coordination_release, coordination_handoff.
 
 `ingenium_task_reserve` and `ingenium_task_release` are cooperative managed-agent
 operations. They require the same project and canonical worktree boundary,
@@ -333,11 +333,14 @@ expected revision, idempotency key, owner, worktree, and a caller-held
 hash is stored; neither the token nor hash is returned. Manual editors and
 external processes are outside the guarantee.
 
-The five coordination tools are project-scoped and use strict snake_case
+The six coordination tools are project-scoped and use strict snake_case
 inputs. Their catalog authorization is `coordination:read` for
-`ingenium_coordination_status`, `coordination:write` for the other four, and
-the coordination policies require no additional `repository:sync` scope. All
-five require the exact launcher/workspace binding. The packaged transport
+`ingenium_coordination_status` and `ingenium_coordination_memory_read`, and
+`coordination:write` for the other four. The coordination catalog policies
+require no additional `repository:sync` scope. All six require the exact
+launcher/workspace binding. The session coordinator's separate lease
+attestation still requests `coordination:read`, `coordination:write`,
+`projects:read`, and `repository:sync`. The packaged transport
 uses the `mcp` audience; runtime activity uses the separate `runtime` audience,
 and repository-authoritative synchronization uses `repository-sync` with its
 restricted route set. The API also verifies the project and derived worktree
@@ -346,10 +349,37 @@ identity; the MCP transport never accesses the database directly.
 | Tool | Operation and API mapping |
 |------|---------------------------|
 | `ingenium_coordination_status` | Requires `project`, `worktree_id`, `session_id`, `incarnation`, and `ownership_token`; reads `GET /api/v1/coordination/snapshot` and sends the ownership proof in the dedicated header. |
+| `ingenium_coordination_memory_read` | Requires the session lease plus `idempotency_key` and optional `limit` (maximum 8); posts `/api/v1/coordination/memory/read` and reads typed operational memory without advancing its cursor. |
 | `ingenium_coordination_update` | Requires `project`, `operation`, the session identity, and operation-specific lease fields. Operations are `register` → `POST /api/v1/coordination/register`, `recover` → `POST /api/v1/coordination/recover`, `recovery_state` → `POST /api/v1/coordination/epoch/recovery-state`, `reconcile_epoch` → `POST /api/v1/coordination/epoch/reconcile`, `recover_epoch` → `POST /api/v1/coordination/epoch/recover`, `update` → `PATCH /api/v1/coordination/update`, `heartbeat` → `POST /api/v1/coordination/heartbeat`, `close` → `POST /api/v1/coordination/close`, and `takeover` → `POST /api/v1/coordination/takeover`. `runtime_activity` maps to `POST /api/v1/runtimes/activity` with `runtime_id` and `observed_at`. |
 | `ingenium_coordination_claim` | Defaults to `action: acquire` and posts `/api/v1/coordination/claims/batch`; `verify`, `renew`, `mark`, `quarantine`, and `complete` post their matching `/api/v1/coordination/claims/<action>` routes. Acquire requires `client_claim_key` and `claims[]`; proof actions require `client_claim_key` and `accepted_epoch`; renew adds `ttl_ms`, mark adds `state`, quarantine may add `code`, and complete adds `operation_id`, `operation`, and `footprint[]`. |
 | `ingenium_coordination_release` | Requires the session lease plus `client_claim_key`; posts `/api/v1/coordination/claims/release`. |
-| `ingenium_coordination_handoff` | `publish`, `read`, `ack`, and `consume` map to the matching `/api/v1/coordination/handoffs/*` routes. `memory`, `memory_read`, and `memory_ack` map to `/api/v1/coordination/memory/publish`, `/api/v1/coordination/memory/read`, and `/api/v1/coordination/memory/ack`. Handoff reads use a durable sequence cursor; memory reads use a durable revision cursor. |
+| `ingenium_coordination_handoff` | `publish`, `read`, `ack`, and `consume` map to the matching `/api/v1/coordination/handoffs/*` routes. `memory` and `memory_ack` map to `/api/v1/coordination/memory/publish` and `/api/v1/coordination/memory/ack`; `link` maps to `/api/v1/coordination/sessions/link`; and `transcript_publish`, `transcript_read`, and `transcript_ack` map to the matching `/api/v1/coordination/transcripts/*` routes. Handoff and transcript reads use durable sequence cursors; memory reads use a durable revision cursor. |
+
+#### Linked-session transcript operations
+
+`ingenium_coordination_handoff` accepts these transcript-related operations in
+addition to ordinary handoffs and memory:
+
+| Operation | Required operation-specific fields | Result and limits |
+|---|---|---|
+| `link` | `target_session_id`, `link_kind` (`linked` or `fork`) | Posts `/api/v1/coordination/sessions/link`; returns a redacted session plus `link: { id, kind, createdAt }`. |
+| `transcript_publish` | `transcript_messages[]` | Posts `/api/v1/coordination/transcripts/publish`; accepts 1–16 messages and returns `accepted`. |
+| `transcript_read` | Optional `limit` | Posts `/api/v1/coordination/transcripts/read`; the generic MCP limit allows 1–32, but transcript reads are capped by the core at 16 and do not advance the cursor. |
+| `transcript_ack` | `through_sequence` | Posts `/api/v1/coordination/transcripts/ack`; advances the durable cursor only through a sequence visible to the receiver. |
+
+All four operations require the common session lease and `idempotency_key`.
+Transcript messages use `message_id` plus a payload whose boundary is exactly
+`info` and `parts`. `info` requires `id`, `sessionID`, and role `user` or
+`assistant`; every part requires `id`, matching `sessionID` and `messageID`, and
+a non-empty `type` of at most 64 characters. The coordination session ID is
+`session-<sha256(raw OpenCode session ID)>`. A publish batch is limited to 16
+messages and 1,572,864 UTF-8 bytes. See [the multi-session workflow](../usage/multi-session.md#link-existing-sessions-and-share-transcripts)
+for the `/add-session` command and the untrusted prompt-projection behavior.
+
+The separate `ingenium_coordination_memory_read` tool has the common session
+lease, required `idempotency_key`, and optional `limit` capped at 8. It is the
+read-only catalog entry for typed operational memory; the combined handoff tool
+remains write-classified because it also publishes and acknowledges state.
 
 Common lease fields are `worktree_id`, `session_id`, `incarnation`,
 `expected_revision`, `fence`, and caller-held `ownership_token`; mutation
@@ -375,8 +405,11 @@ Every coordination failure is returned as `isError: true`. Transport failures
 return `COORDINATION_UNAVAILABLE`; malformed or unexpected API data returns
 `COORDINATION_INVALID_RESPONSE`; an unrecognized upstream failure becomes
 `COORDINATION_REQUEST_FAILED`. Recognized upstream codes are allowlisted and
-all use the fixed message `The coordination request failed.`; raw upstream
-messages, tokens, and claim data never enter the MCP response.
+use the fixed message `The coordination request failed.`; raw upstream
+messages, tokens, and claim data never enter the MCP response. The API-specific
+`TARGET_SESSION_NOT_FOUND`, `SESSION_LINK_CONFLICT`, and `TRANSCRIPT_CONFLICT`
+codes are currently not in the MCP allowlist, so those link/transcript failures
+are projected as `COORDINATION_REQUEST_FAILED`.
 
 ## PLANS — Saved notes & context (legacy)
 

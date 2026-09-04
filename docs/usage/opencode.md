@@ -115,6 +115,50 @@ extension artifact, verify the owner-only token file, and verify the intended
 project identity. The drawer deliberately does not reveal upstream paths,
 tokens, or transport diagnostics.
 
+### Startup versus deployment restart
+
+The `ingenium-opencode` executable delegates to the managed TUI launcher. It
+starts OpenCode and manages its replacement-first recovery loop; it does not
+run `npm`, builds, typechecks, or tests on its own. Build the packaged extension
+before a local session when `dist/` is stale:
+
+```bash
+npm run build --workspace=packages/ingenium-extension
+```
+
+For the single-container compatibility profile, use the documented startup
+sequence from the repository root:
+
+```bash
+./scripts/bootstrap-local-secrets.sh
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose --profile compatibility up --build
+```
+
+The container waits for `http://127.0.0.1:4097/api/v1/health` before starting
+OpenCode Web. The readiness probe allows ten one-second attempts, with each
+request limited to five seconds; only then does the container run
+`opencode serve --port 4098 --hostname 127.0.0.1`. A deployment lifecycle check
+or restart is separate from normal launcher startup: the fixed managed command
+is `ingenium-build deployment production-restart`.
+
+If OpenCode reports `-32000 Connection closed` while invoking Ingenium MCP,
+treat the operation as unknown rather than assuming it succeeded or failed. In
+the current reproduction the underlying failure is API `ECONNREFUSED`:
+
+1. Check `http://127.0.0.1:4097/api/v1/health`.
+2. If the API is refused, start or restore the compatibility profile with the
+   sequence above and wait for readiness.
+3. If the packaged MCP artifact is stale, rebuild the extension and verify its
+   owner-only credential and project binding.
+4. Perform a **full parent OpenCode restart** after plugin, MCP, configuration,
+   or parent-binding changes; restarting only the child MCP process is not
+   sufficient.
+
+Do not print or rotate credentials as a first response, expose ports `4098` or
+`4099`, or treat an API health result or source build as proof of deployed or
+actual model/session acceptance.
+
 Web and CLI sessions share the same backend process state.
 
 In the production profile, Web, CLI, and VS Code processes for one

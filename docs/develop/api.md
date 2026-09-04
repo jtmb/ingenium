@@ -596,7 +596,7 @@ Both routes return the task in `data` and use `422 INVALID_TASK_MUTATION_INPUT`,
 
 ### Coordination registry (COORD-102)
 
-The project-scoped coordination transport exposes 24 routes. Every route uses
+The project-scoped coordination transport exposes 28 routes. Every route uses
 `?project=<name>`; mutation bodies use strict snake_case fields and require an
 `Idempotency-Key` header or matching `idempotency_key` body field. The raw
 ownership token is caller-held, stored only as a SHA-256 hash, and is never
@@ -607,17 +607,19 @@ Coordination is a project-scoped authorization family. The route handler
 requires an authenticated service principal with the exact workspace and
 storage-mapping binding that derives the submitted `worktree_id`; when a
 request reaches that handler, user, compatibility, and foreign-worktree callers
-are neutralized as `SESSION_NOT_FOUND`. The MCP catalog policies are
-`coordination:read` for `ingenium_coordination_status`, and
-`coordination:write` for `ingenium_coordination_update`,
-`ingenium_coordination_claim`, `ingenium_coordination_release`, and
-`ingenium_coordination_handoff`. The update, claim, and release tools also
-require `repository:sync`; all five require the launcher binding. A dedicated
-packaged MCP transport uses the `mcp` audience; runtime capability calls use
-the `runtime` audience where applicable. A dedicated `repository-sync`
-audience may use only register, heartbeat, close, batch claim, claim
-verify/renew/quarantine/complete, and claim release, subject to the repository
-project authorization. Coordination requests are additionally
+are neutralized as `SESSION_NOT_FOUND`. The six MCP catalog tools use
+`coordination:read` for `ingenium_coordination_status` and
+`ingenium_coordination_memory_read`, and `coordination:write` for
+`ingenium_coordination_update`, `ingenium_coordination_claim`,
+`ingenium_coordination_release`, and `ingenium_coordination_handoff`. All six
+require the launcher binding. The session coordinator's separate lease
+attestation requests `coordination:read`, `coordination:write`, `projects:read`,
+and `repository:sync`; that binding preflight is distinct from the per-tool
+catalog scope. A dedicated packaged MCP transport uses the `mcp` audience;
+runtime capability calls use the `runtime` audience where applicable. A
+dedicated `repository-sync` audience may use only register, heartbeat, close,
+batch claim, claim verify/renew/quarantine/complete, and claim release, subject
+to the repository project authorization. Coordination requests are additionally
 limited to 300 per minute per attested credential and 600 per minute per
 project/worktree; failed authentication or attestation is charged to the
 strict 100-per-minute pre-authentication bucket.
@@ -654,9 +656,47 @@ it; if both are supplied they must match.
 | POST | `/api/v1/coordination/memory/publish?project=<name>` | Lease fields plus typed `entry` | Append one bounded typed operational-memory entry. |
 | POST | `/api/v1/coordination/memory/read?project=<name>` | Lease fields plus optional `limit` (maximum 8) | Read unseen typed operational memory without advancing the receiver cursor. |
 | POST | `/api/v1/coordination/memory/ack?project=<name>` | Lease fields plus `through_revision` | Advance the durable memory cursor after the receiver validates the entries. |
+| POST | `/api/v1/coordination/sessions/link?project=<name>` | Lease fields plus `target_session_id` and `kind` (`linked` or `fork`) | Link two active sessions with the same authenticated principal and worktree. |
+| POST | `/api/v1/coordination/transcripts/publish?project=<name>` | Lease fields plus `messages[]` (1–16 `message_id`/`payload` pairs) | Persist complete validated message envelopes for the owned session. |
+| POST | `/api/v1/coordination/transcripts/read?project=<name>` | Lease fields plus optional `limit` (maximum 16) | Read unseen messages from directly linked peers without advancing the cursor. |
+| POST | `/api/v1/coordination/transcripts/ack?project=<name>` | Lease fields plus `through_sequence` | Advance the durable transcript cursor after validated delivery. |
 | POST | `/api/v1/coordination/handoffs/consume?project=<name>` | Lease fields plus optional `limit` (maximum 32) | Consume the next bounded peer-write batch and advance the receiver cursor atomically. |
 | POST | `/api/v1/coordination/handoffs/read?project=<name>` | Lease fields plus optional `limit` (maximum 32) | Read a bounded peer-write batch without advancing the receiver cursor. |
 | POST | `/api/v1/coordination/handoffs/ack?project=<name>` | Lease fields plus `through_sequence` | Advance the durable handoff cursor after the receiver validates and injects the batch. |
+
+#### Linked-session transcript contract
+
+`/sessions/link` requires the current session lease, a different opaque
+`target_session_id`, and `kind` equal to `linked` or `fork`. Both sessions must
+be active, belong to the submitted project and derived worktree, and be bound
+to the same authenticated service principal. The API creates per-reader
+transcript cursors and returns `data.session` plus `data.link` with only `id`,
+`kind`, and `createdAt`.
+
+`/transcripts/publish` accepts 1–16 messages. Each message has `message_id` and
+a payload whose boundary is exactly `info` plus `parts`; `info` contains an
+opaque `id`, the raw OpenCode `sessionID`, and `role` (`user` or `assistant`).
+Each part contains opaque `id`, matching `sessionID` and `messageID`, and a
+non-empty `type` no longer than 64 characters. Extra OpenCode fields are
+allowed inside `info` and parts. The payload bytes for one batch must be at
+least 1 byte and no more than 1,572,864 UTF-8 bytes; the source message ID must
+match `info.id`, and the hashed raw session ID must match the coordination
+session identity. The response is `data.session` plus `accepted`.
+
+`/transcripts/read` returns `data.session`, `messages[]`, `throughSequence`, and
+`acknowledgementRequired`. Each returned message contains `sequence`,
+`messageId`, `sourceActorId`, the complete validated `payload`, and `timestamp`.
+The read is non-mutating: call `/transcripts/ack` with the returned
+`throughSequence` only after the receiver has validated and delivered the
+page. Acknowledgement is monotonic and must name a sequence visible to that
+receiver. Registering a new incarnation for the same worktree, opaque session,
+and principal carries forward the prior transcript cursor, so acknowledged
+history is not replayed after restart while later publications remain readable.
+
+Publication is idempotent for a matching source message ID and payload hash;
+the same message ID with different content returns `409 TRANSCRIPT_CONFLICT`.
+Cross-principal or inactive targets return `404 TARGET_SESSION_NOT_FOUND`, and
+an already connected link graph returns `409 SESSION_LINK_CONFLICT`.
 
 The claim shapes are `path` or `tree` with a safe relative `path`, or
 `reserved` with the name `@build` or `@repository`. A batch accepts at most 128
@@ -676,8 +716,8 @@ memory paths are base64url-encoded UTF-8 segments. Typed memory entries contain
 no prompt, command, or source-content fields, and snapshot/peer projections do
 not return credential-bearing material or token material.
 
-Successful registration, handoff publication, and memory publication return
-`201`; other successful coordination routes return `200`. Mutation session
+Successful registration, handoff publication, memory publication, session
+linking, and transcript publication return `201`; other successful coordination routes return `200`. Mutation session
 projections return `actorId`, `revision`, `fence`, `state`, lease timestamps,
 snapshot/task/context revisions, and `updatedAt`, but not the database session
 ID or ownership token. Registration also returns the initial `memory` window;
@@ -697,22 +737,26 @@ codes including `SESSION_IDENTITY_CONFLICT`, `SESSION_CLOSED`,
 `IDEMPOTENCY_KEY_REUSED`, `CLAIM_CONFLICT`, `CLAIM_KEY_REUSED`,
 `CLAIM_NOT_OWNED`, `EPOCH_QUARANTINED`, `BASELINE_MISMATCH`,
 `FOOTPRINT_MISMATCH`, `MANIFEST_GENERATION_CONFLICT`, and
-`POINTER_REVISION_CONFLICT`. An ownership-token mismatch is deliberately
+`POINTER_REVISION_CONFLICT`, `SESSION_LINK_CONFLICT`, and
+`TRANSCRIPT_CONFLICT`. Missing or inactive transcript targets return
+`TARGET_SESSION_NOT_FOUND`. An ownership-token mismatch is deliberately
 returned as neutral `404 SESSION_NOT_FOUND` rather than disclosing ownership.
 Integrity failures return `500 COORDINATION_INTEGRITY_ERROR`; rate limiting
 returns `429 RATE_LIMITED`. A revision conflict may include `currentRevision`,
 and error messages do not disclose token material.
 
-The five MCP tools map to these operations. `ingenium_coordination_status` reads
-`GET /snapshot`. `ingenium_coordination_update` dispatches `register`,
+The six MCP tools map to these operations. `ingenium_coordination_status` reads
+`GET /snapshot`; `ingenium_coordination_memory_read` reads
+`POST /memory/read` with a maximum window of 8. `ingenium_coordination_update` dispatches `register`,
 `recover`, `recovery_state`, `reconcile_epoch`, `recover_epoch`, `update`,
 `heartbeat`, `close`, or `takeover`; its `runtime_activity` operation instead
 dispatches `POST /api/v1/runtimes/activity` with `runtime_id` and `observed_at`
 under the separate runtime-capability authorization. The claim tool defaults to
 `acquire` and dispatches batch claim; its other actions are `verify`, `renew`,
 `mark`, `quarantine`, and `complete`. Release dispatches claim release.
-`ingenium_coordination_handoff` dispatches publish/read/ack/consume handoffs and
-publish/read/ack typed memory. The MCP adapter projects only allowlisted
+`ingenium_coordination_handoff` dispatches publish/read/ack/consume handoffs,
+publish/read/ack typed memory, `link`, and `transcript_publish`/`transcript_read`/
+`transcript_ack`. The MCP adapter projects only allowlisted
 redacted fields, converts malformed API data to
 `COORDINATION_INVALID_RESPONSE`, converts transport failures to
 `COORDINATION_UNAVAILABLE`, and reduces upstream failures to an allowlisted
