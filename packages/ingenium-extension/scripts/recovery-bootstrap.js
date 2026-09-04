@@ -96,7 +96,7 @@ export function canonicalOwnedDirectory(path, label, owner = ownerUid()) {
   const stat = lstatSync(canonical);
   if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== owner || (stat.mode & 0o022) !== 0
     || realpathSync(canonical) !== canonical) {
-    throw new Error(`${label} is not a canonical owner-only directory`);
+    throw new Error(`${label} is not a canonical owner-controlled directory`);
   }
   return canonical;
 }

@@ -1013,15 +1013,6 @@ describe("managed command wrappers", () => {
         writeFileSync(path, "swapped\n", { mode: 0o600 });
       } }))).toBe("identity");
 
-      const writableDirectory = join(directory, "writable");
-      mkdirSync(writableDirectory, { mode: 0o770 });
-      chmodSync(writableDirectory, 0o770);
-      expect(() => shim.canonicalOwnedDirectory(writableDirectory, "fixture"))
-        .toThrow("not a canonical owner-only directory");
-      symlinkSync(directory, join(directory, "directory-link"));
-      expect(() => shim.canonicalOwnedDirectory(join(directory, "directory-link"), "fixture"))
-        .toThrow("not a canonical owner-only directory");
-
       const checkpoint = join(directory, "checkpoint");
       mkdirSync(join(checkpoint, "packages/ingenium-extension/scripts"), { recursive: true });
       mkdirSync(join(checkpoint, ".opencode/agents/execution"), { recursive: true });
@@ -1050,6 +1041,32 @@ describe("managed command wrappers", () => {
       writeFileSync(join(checkpoint, "packages/ingenium-extension/untracked.ts"), "export {};\n");
       expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toThrow("scoped checkpoint has untracked drift");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("source recovery shim accepts 0755 owner-controlled directories and rejects writable, wrong-owner, and symlink directories", async () => {
+    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-trust-"));
+    const message = "not a canonical owner-controlled directory";
+    try {
+      const ownerControlled = join(directory, "owner-controlled");
+      mkdirSync(ownerControlled, { mode: 0o755 });
+      chmodSync(ownerControlled, 0o755);
+      expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture")).toBe(realpathSync(ownerControlled));
+
+      for (const mode of [0o775, 0o777]) {
+        chmodSync(ownerControlled, mode);
+        expect(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture")).toThrow(message);
+      }
+      chmodSync(ownerControlled, 0o755);
+
+      expect(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid + 1))
+        .toThrow(message);
+      symlinkSync(ownerControlled, join(directory, "directory-link"));
+      expect(() => shim.canonicalOwnedDirectory(join(directory, "directory-link"), "fixture")).toThrow(message);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
