@@ -1032,15 +1032,26 @@ describe("managed command wrappers", () => {
       const sourceBytes = readFileSync(source);
       expect(shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toMatch(/^[0-9a-f]{40,64}$/);
+      chmodSync(dirname(source), 0o777);
       writeFileSync(source, "export const changed = true;\n");
-      expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), readFileSync(source)))
-        .toThrow("does not match reviewed Git HEAD");
+      const npm = vi.fn();
+      expect(() => {
+        shim.canonicalOwnedDirectory(dirname(source), "Extension scripts directory", lstatSync(dirname(source)).uid, {
+          hardenWritablePath: realpathSync(dirname(source)),
+        });
+        shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), readFileSync(source));
+        npm();
+      }).toThrow("does not match reviewed Git HEAD");
+      expect(lstatSync(dirname(source)).mode & 0o777).toBe(0o755);
+      expect(npm).not.toHaveBeenCalled();
       execFileSync("/usr/bin/git", ["-C", checkpoint, "checkout", "--", "packages/ingenium-extension/scripts/recovery-bootstrap.js"]);
       writeFileSync(join(checkpoint, "opencode.json"), "{\"dirty\":true}\n");
       expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toThrow("scoped checkpoint has tracked drift");
       execFileSync("/usr/bin/git", ["-C", checkpoint, "checkout", "--", "opencode.json"]);
-      writeFileSync(join(checkpoint, "packages/ingenium-extension/untracked.ts"), "export {};\n");
+      const untrackedExecutable = join(checkpoint, "packages/ingenium-extension/untracked.sh");
+      writeFileSync(untrackedExecutable, "#!/bin/sh\n", { mode: 0o755 });
+      chmodSync(untrackedExecutable, 0o755);
       expect(() => shim.verifyScopedCheckpoint(realpathSync(checkpoint), realpathSync(source), sourceBytes))
         .toThrow("scoped checkpoint has untracked drift");
     } finally {
@@ -1048,48 +1059,44 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("source recovery shim hardens owner-owned 0775 through the exact descriptor and redacts its audit", async () => {
+  it("source recovery shim clears group and world write bits through the authorized descriptor", async () => {
     const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-harden-"));
     try {
-      const ownerControlled = join(directory, "owner-controlled");
-      mkdirSync(ownerControlled, { mode: 0o775 });
-      chmodSync(ownerControlled, 0o775);
-      const audits: Array<Record<string, unknown>> = [];
-      const descriptorOpen = vi.fn(openSync);
-      const descriptorFchmod = vi.fn(fchmodSync);
-      const descriptorFsync = vi.fn(fsyncSync);
+      for (const [beforeMode, afterMode] of [[0o775, 0o755], [0o777, 0o755], [0o2775, 0o2755]] as const) {
+        const ownerControlled = join(directory, `owner-controlled-${beforeMode.toString(8)}`);
+        mkdirSync(ownerControlled, { mode: beforeMode });
+        chmodSync(ownerControlled, beforeMode);
+        const audits: Array<Record<string, unknown>> = [];
+        const descriptorOpen = vi.fn(openSync);
+        const descriptorFchmod = vi.fn(fchmodSync);
+        const descriptorFsync = vi.fn(fsyncSync);
 
-      expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid, {
-        hardenGroupWritable: true,
-        retainAudit: (audit: Record<string, unknown>) => audits.push(audit),
-        fileSystem: { openSync: descriptorOpen, fchmodSync: descriptorFchmod, fsyncSync: descriptorFsync },
-      })).toBe(realpathSync(ownerControlled));
+        expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid, {
+          hardenWritablePath: realpathSync(ownerControlled),
+          retainAudit: (audit: Record<string, unknown>) => audits.push(audit),
+          fileSystem: { openSync: descriptorOpen, fchmodSync: descriptorFchmod, fsyncSync: descriptorFsync },
+        })).toBe(realpathSync(ownerControlled));
 
-      expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o755);
-      expect(descriptorOpen).toHaveBeenCalledWith(
-        realpathSync(ownerControlled),
-        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-      );
-      expect(descriptorFchmod).toHaveBeenCalledTimes(1);
-      expect(descriptorFchmod).toHaveBeenCalledWith(descriptorOpen.mock.results[0]!.value, 0o755);
-      expect(descriptorFsync).toHaveBeenCalledWith(descriptorFchmod.mock.calls[0]![0]);
-      expect(audits).toEqual([{
-        schema: shim.CANONICAL_DIRECTORY_AUDIT_SCHEMA,
-        directoryPathSha256: sha256(realpathSync(ownerControlled)),
-        beforeMode: "0775",
-        afterMode: "0755",
-        result: "hardened",
-        timestamp: expect.any(String),
-      }]);
+        expect(lstatSync(ownerControlled).mode & 0o7777).toBe(afterMode);
+        expect(descriptorOpen).toHaveBeenCalledWith(
+          realpathSync(ownerControlled),
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+        expect(descriptorFchmod).toHaveBeenCalledWith(descriptorOpen.mock.results[0]!.value, afterMode);
+        expect(descriptorFsync).toHaveBeenCalledWith(descriptorFchmod.mock.calls[0]![0]);
+        expect(audits).toEqual([{
+          directoryPathSha256: sha256(realpathSync(ownerControlled)),
+          beforeMode: beforeMode.toString(8).padStart(4, "0"),
+          afterMode: afterMode.toString(8).padStart(4, "0"),
+        }]);
+        expect(Object.keys(audits[0]!).sort()).toEqual(["afterMode", "beforeMode", "directoryPathSha256"]);
+        expect(JSON.stringify(audits[0])).not.toContain(ownerControlled);
+        expect(Buffer.byteLength(JSON.stringify(audits[0]))).toBeLessThan(512);
+      }
       expect(shim.CANONICAL_DIRECTORY_AUDIT_PATH)
         .toBe("/tmp/opencode/recovery-bootstrap-directory-audit.json");
-      expect(Object.keys(audits[0]!).sort()).toEqual([
-        "afterMode", "beforeMode", "directoryPathSha256", "result", "schema", "timestamp",
-      ]);
-      expect(JSON.stringify(audits[0])).not.toContain(ownerControlled);
-      expect(Buffer.byteLength(JSON.stringify(audits[0]))).toBeLessThan(512);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1108,7 +1115,7 @@ describe("managed command wrappers", () => {
       const audits: Array<Record<string, unknown>> = [];
 
       expect(shim.canonicalOwnedDirectory(ownerControlled, "fixture", lstatSync(ownerControlled).uid, {
-        hardenGroupWritable: true,
+        hardenWritablePath: realpathSync(ownerControlled),
         retainAudit: (audit: Record<string, unknown>) => audits.push(audit),
         fileSystem: { fchmodSync: descriptorFchmod, fsyncSync: descriptorFsync },
       })).toBe(realpathSync(ownerControlled));
@@ -1116,9 +1123,9 @@ describe("managed command wrappers", () => {
       expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o755);
       expect(descriptorFchmod).not.toHaveBeenCalled();
       expect(descriptorFsync).not.toHaveBeenCalled();
-      expect(audits).toEqual([expect.objectContaining({
-        beforeMode: "0755", afterMode: "0755", result: "unchanged",
-      })]);
+      expect(audits).toEqual([{
+        directoryPathSha256: sha256(realpathSync(ownerControlled)), beforeMode: "0755", afterMode: "0755",
+      }]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1143,13 +1150,16 @@ describe("managed command wrappers", () => {
 
       const directoryLink = join(directory, "directory-link");
       symlinkSync(ownerControlled, directoryLink);
-      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(directoryLink, "fixture"))).toBe("canonical");
+      expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(
+        directoryLink, "fixture", lstatSync(ownerControlled).uid, { hardenWritablePath: directoryLink },
+      ))).toBe("canonical");
 
       chmodSync(ownerControlled, 0o775);
       expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(
         ownerControlled,
         "fixture",
         lstatSync(ownerControlled).uid + 1,
+        { hardenWritablePath: realpathSync(ownerControlled) },
       ))).toBe("owner");
       expect(trustedFailureReason(() => shim.canonicalOwnedDirectory(ownerControlled, "fixture"))).toBe("writable");
       chmodSync(ownerControlled, 0o777);
@@ -1158,12 +1168,12 @@ describe("managed command wrappers", () => {
         ownerControlled,
         "fixture",
         lstatSync(ownerControlled).uid,
-        { hardenGroupWritable: true, retainAudit: (audit: Record<string, unknown>) => audits.push(audit) },
+        { retainAudit: (audit: Record<string, unknown>) => audits.push(audit) },
       ))).toBe("writable");
       expect(lstatSync(ownerControlled).mode & 0o777).toBe(0o777);
-      expect(audits).toEqual([expect.objectContaining({
-        beforeMode: "0777", afterMode: "0777", result: "rejected",
-      })]);
+      expect(audits).toEqual([{
+        directoryPathSha256: sha256(realpathSync(ownerControlled)), beforeMode: "0777", afterMode: "0777",
+      }]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1185,7 +1195,7 @@ describe("managed command wrappers", () => {
         "fixture",
         lstatSync(ownerControlled).uid,
         {
-          hardenGroupWritable: true,
+          hardenWritablePath: realpathSync(ownerControlled),
           afterOpen(path: string) {
             renameSync(path, `${path}.opened`);
             renameSync(replacement, path);
@@ -1201,7 +1211,7 @@ describe("managed command wrappers", () => {
         failed,
         "fixture",
         lstatSync(failed).uid,
-        { hardenGroupWritable: true, fileSystem: { fchmodSync: vi.fn() } },
+        { hardenWritablePath: realpathSync(failed), fileSystem: { fchmodSync: vi.fn() } },
       ))).toBe("writable");
       expect(lstatSync(failed).mode & 0o777).toBe(0o775);
     } finally {
