@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   decodeReplacementFirstRestartRequest,
@@ -16,13 +16,14 @@ const ARG = /^[A-Za-z0-9_@%+=:,./-]{1,512}$/;
 const BUILD_SCRIPTS = new Set(["build", "typecheck", "test", "lint"]);
 const EXTENSION_TEST_FILES = new Set(["managed-command-wrapper.test.ts", "session-coordinator.test.ts"]);
 const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart"]);
+const REPOSITORY_INSPECTIONS = new Set(["status", "staged-paths", "recent-log", "head"]);
+const REPOSITORY_PATH_INSPECTIONS = new Set(["diff", "staged-diff"]);
 const GIT = "/usr/bin/git";
 const RUNTIME_BIN = dirname(process.execPath);
 const NPM = `${RUNTIME_BIN}/npm`;
 const OPENCODE = "/usr/local/bin/opencode";
 const DOCKER = "/usr/bin/docker";
 const CURL = "/usr/bin/curl";
-const RECOVERY_BOOTSTRAP = resolve(dirname(fileURLToPath(import.meta.url)), "recovery-bootstrap.js");
 const MANAGED_COMMAND_NONCE = "INGENIUM_MANAGED_COMMAND_NONCE";
 const RECOVERY_ENVIRONMENT = [
   "CI",
@@ -56,6 +57,14 @@ const COMMIT_CONFIGURATION = [
   "-c", "user.email=managed-command@ingenium.invalid",
 ];
 const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff\..*\.(?:command|textconv)|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
+
+export function managedRecoveryBootstrapPath(moduleUrl: string | URL = import.meta.url): string {
+  const scriptsDirectory = dirname(fileURLToPath(moduleUrl));
+  const packageRoot = basename(dirname(scriptsDirectory)) === "dist"
+    ? resolve(scriptsDirectory, "../..")
+    : resolve(scriptsDirectory, "..");
+  return resolve(packageRoot, "scripts/recovery-bootstrap.js");
+}
 
 function isSafeCommitMessage(value: string): boolean {
   return value.length >= 1 && value.length <= 100 && value === value.trim()
@@ -122,6 +131,7 @@ function isSafeRepositoryPath(value: string): boolean {
 
 export function validateManagedRepositoryArgv(argv: string[]): string[] {
   const [operation, ...paths] = argv;
+  if (paths.length === 0 && REPOSITORY_INSPECTIONS.has(operation!)) return argv;
   if (operation === "commit") {
     if (paths.length !== 1 || !isSafeCommitMessage(paths[0]!)) {
       throw new Error("Repository wrapper rejected the command");
@@ -130,6 +140,7 @@ export function validateManagedRepositoryArgv(argv: string[]): string[] {
   }
   const validPaths = paths.length > 0 && paths.length <= 32
     && paths.every((path) => ARG.test(path) && isSafeRepositoryPath(path));
+  if (validPaths && REPOSITORY_PATH_INSPECTIONS.has(operation!)) return argv;
   if (!validPaths || (operation === "mv" && paths.length !== 2)
     || (operation !== "add" && operation !== "mv" && operation !== "rm")) {
     throw new Error("Repository wrapper rejected the command");
@@ -155,7 +166,7 @@ export function isManagedDeploymentArgv(argv: readonly string[]): boolean {
   return argv.length === 2 && argv[0] === "deployment" && DEPLOYMENT_OPERATIONS.has(argv[1]!);
 }
 
-export function managedBuildExecution(argv: string[]): { command: string; argv: string[] } {
+export function managedBuildExecution(argv: string[], moduleUrl: string | URL = import.meta.url): { command: string; argv: string[] } {
   validateManagedBuildArgv(argv);
   if (argv.length === 1 && argv[0] === "agent-validation") {
     return { command: "/usr/bin/bash", argv: ["tests/test-agent-validation.sh", "--role-matrix"] };
@@ -175,7 +186,7 @@ export function managedBuildExecution(argv: string[]): { command: string; argv: 
     case "health":
       return { command: CURL, argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] };
     case "production-restart":
-      return { command: process.execPath, argv: [RECOVERY_BOOTSTRAP] };
+      return { command: process.execPath, argv: [managedRecoveryBootstrapPath(moduleUrl)] };
     default:
       throw new Error("Build wrapper rejected the command");
   }
@@ -199,6 +210,18 @@ export function managedRecoveryEnvironment(source: NodeJS.ProcessEnv = process.e
 
 export function managedRepositoryArgv(argv: string[]): string[] {
   const [operation, ...paths] = validateManagedRepositoryArgv(argv);
+  if (operation === "status") return [...GIT_CONFIGURATION, "status", "--short"];
+  if (operation === "staged-paths") {
+    return [...GIT_CONFIGURATION, "diff", "--cached", "--name-only", "--no-ext-diff"];
+  }
+  if (operation === "recent-log") {
+    return [...GIT_CONFIGURATION, "log", "--format=%h %s", "--max-count=10", "--no-decorate"];
+  }
+  if (operation === "head") return [...GIT_CONFIGURATION, "rev-parse", "HEAD"];
+  if (operation === "diff") return [...GIT_CONFIGURATION, "diff", "--no-ext-diff", "--", ...paths];
+  if (operation === "staged-diff") {
+    return [...GIT_CONFIGURATION, "diff", "--cached", "--no-ext-diff", "--", ...paths];
+  }
   if (operation === "commit") {
     return [
       ...GIT_CONFIGURATION,

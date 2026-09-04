@@ -59,6 +59,27 @@ const RECOVERY_ENVIRONMENT = [
 ];
 const SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"];
 
+export const TRUSTED_REGULAR_FILE_FAILURE_REASONS = Object.freeze([
+  "regular_file",
+  "symlink",
+  "link_count",
+  "identity",
+  "owner",
+  "writable",
+  "realpath",
+  "executable",
+  "mode",
+]);
+
+export class TrustedRegularFileError extends Error {
+  constructor(label, reason) {
+    super(`${label} failed trust validation: ${reason}`);
+    this.name = "TrustedRegularFileError";
+    this.code = "TRUSTED_REGULAR_FILE_INVALID";
+    this.reason = reason;
+  }
+}
+
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -83,33 +104,62 @@ export function canonicalOwnedDirectory(path, label, owner = ownerUid()) {
 export function readTrustedRegularFile(path, label, options = {}) {
   const owner = options.expectedOwner ?? ownerUid();
   const requested = resolve(path);
-  const reference = lstatSync(requested);
-  if ((!options.allowReferenceSymlink && reference.isSymbolicLink()) || (!reference.isFile() && !reference.isSymbolicLink())) {
-    throw new Error(`${label} is not a trusted canonical file`);
+  const fail = (reason) => { throw new TrustedRegularFileError(label, reason); };
+  let reference;
+  try {
+    reference = lstatSync(requested);
+  } catch {
+    fail("regular_file");
   }
-  const canonical = realpathSync(requested);
+  if (!reference.isFile() && !reference.isSymbolicLink()) fail("regular_file");
+  if (!options.allowReferenceSymlink && reference.isSymbolicLink()) fail("symlink");
+  let canonical;
+  try {
+    canonical = realpathSync(requested);
+  } catch {
+    fail("realpath");
+  }
   let descriptor;
   try {
-    descriptor = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      descriptor = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch {
+      fail("identity");
+    }
     const opened = fstatSync(descriptor);
     const before = lstatSync(canonical);
-    if (!opened.isFile() || before.isSymbolicLink() || opened.nlink !== 1 || before.nlink !== 1
-      || opened.dev !== before.dev || opened.ino !== before.ino || opened.uid !== owner || before.uid !== owner
-      || (opened.mode & 0o022) !== 0 || realpathSync(canonical) !== canonical
-      || (options.executable && (opened.mode & 0o111) === 0)
-      || (options.expectedMode !== undefined && (opened.mode & 0o777) !== options.expectedMode)) {
-      throw new Error(`${label} is not a trusted canonical file`);
+    if (!opened.isFile() || (!before.isFile() && !before.isSymbolicLink())) fail("regular_file");
+    if (before.isSymbolicLink()) fail("symlink");
+    if (opened.nlink !== 1 || before.nlink !== 1) fail("link_count");
+    if (opened.dev !== before.dev || opened.ino !== before.ino) fail("identity");
+    if (opened.uid !== owner || before.uid !== owner) fail("owner");
+    if ((opened.mode & 0o022) !== 0 || (before.mode & 0o022) !== 0) fail("writable");
+    try {
+      if (realpathSync(canonical) !== canonical || (!options.allowReferenceSymlink && canonical !== requested)) fail("realpath");
+    } catch {
+      fail("realpath");
     }
+    if (options.executable && (opened.mode & 0o111) === 0) fail("executable");
+    if (options.expectedMode !== undefined && (opened.mode & 0o777) !== options.expectedMode) fail("mode");
     options.afterOpen?.(canonical);
     const bytes = readFileSync(descriptor);
     const afterDescriptor = fstatSync(descriptor);
     const afterPath = lstatSync(canonical);
+    if (!afterDescriptor.isFile() || (!afterPath.isFile() && !afterPath.isSymbolicLink())) fail("regular_file");
+    if (afterPath.isSymbolicLink()) fail("symlink");
+    if (afterDescriptor.nlink !== 1 || afterPath.nlink !== 1) fail("link_count");
     if (afterDescriptor.dev !== opened.dev || afterDescriptor.ino !== opened.ino || afterDescriptor.size !== opened.size
       || afterDescriptor.mtimeMs !== opened.mtimeMs || afterDescriptor.ctimeMs !== opened.ctimeMs
-      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.nlink !== 1
-      || afterPath.uid !== owner || (afterPath.mode & 0o022) !== 0) {
-      throw new Error(`${label} changed while it was being verified`);
+      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino) fail("identity");
+    if (afterDescriptor.uid !== owner || afterPath.uid !== owner) fail("owner");
+    if ((afterDescriptor.mode & 0o022) !== 0 || (afterPath.mode & 0o022) !== 0) fail("writable");
+    try {
+      if (realpathSync(canonical) !== canonical || (!options.allowReferenceSymlink && canonical !== requested)) fail("realpath");
+    } catch {
+      fail("realpath");
     }
+    if (options.executable && (afterDescriptor.mode & 0o111) === 0) fail("executable");
+    if (options.expectedMode !== undefined && (afterDescriptor.mode & 0o777) !== options.expectedMode) fail("mode");
     return { bytes, path: canonical, sha256: sha256(bytes) };
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);

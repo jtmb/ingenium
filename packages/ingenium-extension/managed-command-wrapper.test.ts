@@ -32,6 +32,7 @@ import {
   managedBuildEnvironment,
   managedBuildExecution,
   managedCommand,
+  managedRecoveryBootstrapPath,
   MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS,
   managedGitEnvironment,
   managedReplacementFirstRestart,
@@ -96,7 +97,17 @@ const recoverySource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)
 const tsxLoader = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/tsx/dist/loader.mjs")).href;
 const repositoryRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), "../.."));
 const recoveryBootstrapSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.ts");
+const recoveryBootstrapShim = join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js");
 const productionRestartSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "production-restart.ts");
+
+function trustedFailureReason(run: () => unknown): string | undefined {
+  try {
+    run();
+  } catch (error) {
+    return (error as { reason?: string }).reason;
+  }
+  throw new Error("Expected trusted-file validation to fail");
+}
 
 function recoveryBootstrapEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -661,15 +672,37 @@ describe("managed command wrappers", () => {
     ]);
     expect(() => decodeManagedArgv(Buffer.from(JSON.stringify(["add", "src/file.ts;rm"])).toString("base64url")))
       .toThrow("Invalid managed command payload");
-    expect(() => decodeManagedRepositoryArgv(Buffer.from(JSON.stringify(["status"])).toString("base64url")))
-      .toThrow("Repository wrapper rejected the command");
+    expect(decodeManagedRepositoryArgv(Buffer.from(JSON.stringify(["status"])).toString("base64url")))
+      .toEqual(["status"]);
     expect(() => decodeManagedBuildArgv(Buffer.from(JSON.stringify(["run", "test", "--watch"])).toString("base64url")))
       .toThrow("Build wrapper rejected the command");
-    expect(() => managedCommand("repository", ["status"])).toThrow("Repository wrapper rejected the command");
+    expect(() => managedCommand("repository", ["checkout"])).toThrow("Repository wrapper rejected the command");
     expect(() => managedCommand("build", ["exec", "arbitrary"])).toThrow("Build wrapper rejected the command");
   });
 
   it("admits only literal path operations and rejects executable Git forms", () => {
+    expect(managedRepositoryArgv(["status"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "status", "--short",
+    ]);
+    expect(managedRepositoryArgv(["staged-paths"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+      "diff", "--cached", "--name-only", "--no-ext-diff",
+    ]);
+    expect(managedRepositoryArgv(["recent-log"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+      "log", "--format=%h %s", "--max-count=10", "--no-decorate",
+    ]);
+    expect(managedRepositoryArgv(["head"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD",
+    ]);
+    expect(managedRepositoryArgv(["diff", "src/file.ts"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+      "diff", "--no-ext-diff", "--", "src/file.ts",
+    ]);
+    expect(managedRepositoryArgv(["staged-diff", "src/file.ts"])).toEqual([
+      "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+      "diff", "--cached", "--no-ext-diff", "--", "src/file.ts",
+    ]);
     expect(managedRepositoryArgv(["add", "src/file.ts"])).toEqual([
       "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", "src/file.ts",
     ]);
@@ -685,6 +718,12 @@ describe("managed command wrappers", () => {
     ]);
     for (const argv of [
       ["add", "--all"],
+      ["status", "extra"],
+      ["staged-paths", "extra"],
+      ["recent-log", "extra"],
+      ["head", "extra"],
+      ["diff"],
+      ["staged-diff"],
       ["add", "../outside"],
       ["add", ".git/config"],
       ["add", "src/file with spaces.ts"],
@@ -751,7 +790,7 @@ describe("managed command wrappers", () => {
     expect(managedBuildExecution(["deployment", "production-restart"]))
       .toEqual({
         command: process.execPath,
-        argv: [join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js")],
+        argv: [recoveryBootstrapShim],
       });
     expect(managedBuildExecution(["run", "typecheck"]))
       .toEqual({ command: `${dirname(process.execPath)}/npm`, argv: ["run", "typecheck"] });
@@ -769,6 +808,21 @@ describe("managed command wrappers", () => {
       expect(isManagedDeploymentArgv(argv)).toBe(false);
       expect(() => managedBuildExecution(argv)).toThrow("Build wrapper rejected the command");
     }
+  });
+
+  it("fixed deployment source and simulated built wrappers resolve the outer shim instead of the generated inner bootstrap", () => {
+    const extensionRoot = dirname(fileURLToPath(import.meta.url));
+    const sourceWrapper = pathToFileURL(join(extensionRoot, "scripts", "managed-command-wrapper.ts"));
+    const builtWrapper = pathToFileURL(join(extensionRoot, "dist", "scripts", "managed-command-wrapper.js"));
+    const innerBootstrap = join(extensionRoot, "dist", "scripts", "recovery-bootstrap.js");
+
+    expect(managedRecoveryBootstrapPath(sourceWrapper)).toBe(recoveryBootstrapShim);
+    expect(managedRecoveryBootstrapPath(builtWrapper)).toBe(recoveryBootstrapShim);
+    expect(managedBuildExecution(["deployment", "production-restart"], sourceWrapper).argv)
+      .toEqual([recoveryBootstrapShim]);
+    expect(managedBuildExecution(["deployment", "production-restart"], builtWrapper).argv)
+      .toEqual([recoveryBootstrapShim]);
+    expect(managedRecoveryBootstrapPath(builtWrapper)).not.toBe(innerBootstrap);
   });
 
   it("runs the fixed recovery checkpoint in order and launches production restart only after every check passes", () => {
@@ -882,7 +936,7 @@ describe("managed command wrappers", () => {
     expect(calls).not.toContain(process.execPath);
   });
 
-  it("recovery checkpoint accepts stable bootstrap content and rejects a hash mismatch before execution", () => {
+  it("recovery checkpoint inner hash guard cannot be bypassed before execution", () => {
     const bytes = readFileSync(recoveryBootstrapSource);
     expect(verifyRecoveryBootstrapInvocation(recoveryBootstrapSource, sha256(bytes))).toBe(sha256(bytes));
     expect(recoveryBootstrapCanonicalWorktree(recoveryBootstrapEnvironment())).toBe(repositoryRoot);
@@ -909,29 +963,55 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("source recovery shim rejects writable links, path swaps, and dirty scoped checkpoints", async () => {
+  it("source recovery shim accepts mode 0644 and reports the first bounded trust failure reason", async () => {
     const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
-    const shim = await importModule(`${pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js")).href}?test=${Date.now()}`);
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-trust-"));
     try {
       const trusted = join(directory, "trusted.js");
-      writeFileSync(trusted, "export {};\n", { mode: 0o600 });
+      writeFileSync(trusted, "export {};\n", { mode: 0o644 });
+      chmodSync(trusted, 0o644);
       expect(shim.readTrustedRegularFile(trusted, "fixture").sha256).toBe(sha256("export {};\n"));
+      expect(shim.TRUSTED_REGULAR_FILE_FAILURE_REASONS).toEqual([
+        "regular_file", "symlink", "link_count", "identity", "owner", "writable", "realpath", "executable", "mode",
+      ]);
 
-      chmodSync(trusted, 0o620);
-      expect(() => shim.readTrustedRegularFile(trusted, "fixture")).toThrow("not a trusted canonical file");
-      chmodSync(trusted, 0o600);
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(directory, "fixture"))).toBe("regular_file");
       symlinkSync(trusted, join(directory, "symlink.js"));
-      expect(() => shim.readTrustedRegularFile(join(directory, "symlink.js"), "fixture"))
-        .toThrow("not a trusted canonical file");
-      linkSync(trusted, join(directory, "hardlink.js"));
-      expect(() => shim.readTrustedRegularFile(trusted, "fixture")).toThrow("not a trusted canonical file");
-      rmSync(join(directory, "hardlink.js"));
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(join(directory, "symlink.js"), "fixture"))).toBe("symlink");
 
-      expect(() => shim.readTrustedRegularFile(trusted, "fixture", { afterOpen: (path: string) => {
+      linkSync(trusted, join(directory, "hardlink.js"));
+      chmodSync(trusted, 0o622);
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(trusted, "fixture", {
+        expectedOwner: lstatSync(trusted).uid + 1,
+      }))).toBe("link_count");
+      rmSync(join(directory, "hardlink.js"));
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(trusted, "fixture", {
+        expectedOwner: lstatSync(trusted).uid + 1,
+      }))).toBe("owner");
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(trusted, "fixture"))).toBe("writable");
+      chmodSync(trusted, 0o644);
+
+      const canonicalDirectory = join(directory, "canonical");
+      mkdirSync(canonicalDirectory);
+      const canonicalFile = join(canonicalDirectory, "trusted.js");
+      writeFileSync(canonicalFile, "export {};\n", { mode: 0o644 });
+      symlinkSync(canonicalDirectory, join(directory, "directory-alias"));
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(
+        join(directory, "directory-alias", "trusted.js"), "fixture",
+      ))).toBe("realpath");
+
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(trusted, "fixture", { executable: true })))
+        .toBe("executable");
+      chmodSync(trusted, 0o700);
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(trusted, "fixture", { expectedMode: 0o555 })))
+        .toBe("mode");
+      chmodSync(trusted, 0o600);
+
+      expect(trustedFailureReason(() => shim.readTrustedRegularFile(trusted, "fixture", { afterOpen: (path: string) => {
         renameSync(path, `${path}.opened`);
         writeFileSync(path, "swapped\n", { mode: 0o600 });
-      } })).toThrow("changed while it was being verified");
+      } }))).toBe("identity");
 
       const writableDirectory = join(directory, "writable");
       mkdirSync(writableDirectory, { mode: 0o770 });
@@ -981,7 +1061,7 @@ describe("managed command wrappers", () => {
     const wrapper = await importModule(`${pathToFileURL(installed).href}?test=${Date.now()}`);
     expect(wrapper.managedBuildExecution(["deployment", "production-restart"])).toEqual({
       command: process.execPath,
-      argv: [join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js")],
+      argv: [recoveryBootstrapShim],
     });
   });
 

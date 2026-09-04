@@ -18,7 +18,7 @@ function activePatterns(path: string): string[] {
 }
 
 describe("learning credential packaging boundary", () => {
-  it("excludes the protected credential from Git, npm, and Docker COPY context", () => {
+  it("excludes protected credentials and includes only approved package content", () => {
     const gitignore = activePatterns(join(repositoryRoot, ".gitignore"));
     const dockerignore = activePatterns(join(repositoryRoot, ".dockerignore"));
     const dockerfile = readFileSync(join(repositoryRoot, "Dockerfile"), "utf8");
@@ -36,7 +36,9 @@ describe("learning credential packaging boundary", () => {
     }
     expect(dockerignore).toContain("**/.opencode/.ingenium-learning-credential");
     expect(dockerfile).toContain("COPY . .");
-    expect(packageJson.files).toEqual(["dist/", "README.md", "plugin-specs.mjs", "ponytail/"]);
+    expect(packageJson.files).toEqual([
+      "dist/", "scripts/recovery-bootstrap.js", "README.md", "plugin-specs.mjs", "ponytail/",
+    ]);
     expect(packageJson.files?.some((path) => path.includes(".opencode"))).toBe(false);
   });
 });
