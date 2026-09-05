@@ -307,6 +307,26 @@ export function managedRecoveryEnvironment(
   };
 }
 
+export function runManagedRecoveryBootstrap(
+  moduleUrl: string | URL = import.meta.url,
+  dependencies: { runner?: typeof spawnSync } = {},
+): number {
+  const worktree = managedRecoveryWorktree(moduleUrl);
+  const result = (dependencies.runner ?? spawnSync)(
+    process.execPath,
+    [managedRecoveryBootstrapPath(moduleUrl)],
+    {
+      cwd: worktree,
+      stdio: "inherit",
+      shell: false,
+      env: managedRecoveryEnvironment(process.env, moduleUrl),
+    },
+  );
+  if (result.error) throw result.error;
+  if (result.signal) throw new Error(`Managed recovery bootstrap exited on ${result.signal}`);
+  return result.status ?? 1;
+}
+
 export function managedRepositoryArgv(argv: string[]): string[] {
   const [operation, ...paths] = validateManagedRepositoryArgv(argv);
   if (operation === "status") return [...GIT_CONFIGURATION, "status", "--short"];
@@ -567,7 +587,14 @@ export function managedCommand(
   return result.status ?? 1;
 }
 
-export function runManagedCommandCli(kind: "repository" | "build", argv = process.argv): void {
+export function runManagedCommandCli(
+  kind: "repository" | "build",
+  argv = process.argv,
+  dependencies: {
+    runRecoveryBootstrap?: typeof runManagedRecoveryBootstrap;
+    runCommand?: typeof managedCommand;
+  } = {},
+): void {
   const fixedProductionRestart = kind === "build" && argv.length === 4
     && argv[2] === "deployment" && argv[3] === "production-restart";
   if (!fixedProductionRestart && argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
@@ -576,5 +603,10 @@ export function runManagedCommandCli(kind: "repository" | "build", argv = proces
     : kind === "repository"
       ? decodeManagedRepositoryArgv(argv[2]!)
       : decodeManagedBuildArgv(argv[2]!);
-  process.exitCode = managedCommand(kind, commandArgv);
+  if (kind === "build" && commandArgv.length === 2
+    && commandArgv[0] === "deployment" && commandArgv[1] === "production-restart") {
+    process.exitCode = (dependencies.runRecoveryBootstrap ?? runManagedRecoveryBootstrap)();
+    return;
+  }
+  process.exitCode = (dependencies.runCommand ?? managedCommand)(kind, commandArgv);
 }

@@ -46,6 +46,7 @@ import {
   managedRecoveryEnvironment,
   normalizeManagedRecoveryBootstrapMode,
   managedRepositoryArgv,
+  runManagedRecoveryBootstrap,
   runManagedCommandCli,
   terminateTimedOutManagedProcess,
   validateManagedBuildArgv,
@@ -115,6 +116,10 @@ const {
 
 const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toString("hex").slice(0, 64);
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+const canonicalTestJson = (value: unknown): string => JSON.stringify(value, (_key, entry) =>
+  entry && typeof entry === "object" && !Array.isArray(entry)
+    ? Object.fromEntries(Object.keys(entry).sort().map((key) => [key, entry[key]]))
+    : entry);
 const mcpResult = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
 const recoverySource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "tui-recovery.ts")).href;
 const coordinationOutboxSource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "coordination-outbox.ts")).href;
@@ -140,6 +145,82 @@ function recoveryBootstrapEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS
     INGENIUM_RECOVERY_CANONICAL_WORKTREE: repositoryRoot,
     INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256: sha256(readFileSync(recoveryBootstrapSource)),
     ...overrides,
+  };
+}
+
+function twoPassRecoveryPreflight(worktree: string): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    action: "production-restart",
+    admissible: true,
+    failures: [],
+    source: { status: "validated", sha256: sha256("outer-bootstrap") },
+    ancestry: { status: "exact", members: [] },
+    parent: {
+      pid: 4242,
+      startTimeTicks: 100,
+      executableSha256: sha256("opencode"),
+      cwd: worktree,
+      cmdlineSha256: sha256("opencode-session"),
+      sessionId: "session-exact",
+      dataHome: join(worktree, "data-home"),
+      port: 4098,
+      nonceSha256: sha256("restart-nonce"),
+    },
+    nonceEnrollment: { classification: "enrolled" },
+    binding: {
+      project: "ingenium",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      workspaceId: "workspace-exact",
+      storageMappingHash: sha256("storage"),
+      worktree,
+    },
+    git: { status: "validated", head: "a".repeat(40), dirtyPaths: ["scoped-change.ts"], sourceMatchesHead: true },
+    recovery: {
+      status: "validated",
+      state: { phase: "enrolled", fence: 2, generation: 2, activeParent: true, replacement: false, sha256: sha256("state") },
+      handoff: {
+        status: "working",
+        taskHash: sha256("task"),
+        actionCount: 1,
+        changedPathCount: 1,
+        checkCount: 1,
+        todos: { total: 1, pending: 0, inProgress: 1, completed: 0, cancelled: 0, state: "in_progress" },
+        nextWork: { kind: "continue_task", referenceHash: sha256("task") },
+        sha256: sha256("handoff"),
+      },
+    },
+    outbox: { status: "validated", count: 0, ambiguousCount: 0, sha256: sha256("") },
+    disposition: { status: "missing", count: 0, ambiguousCount: 0, sha256: null },
+    freeze: { status: "clear", sha256: null },
+    deployed: {
+      ociRevision: { status: "attested", revision: "b".repeat(40) },
+      apiHealth: { status: "healthy", httpStatus: 200 },
+    },
+  };
+}
+
+function twoPassRecoveryAdmission(preflight: Record<string, any>, digest: string, now: number): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    action: "production-restart",
+    preflightDigest: digest,
+    head: preflight.git.head,
+    parent: {
+      pid: preflight.parent.pid,
+      startTimeTicks: preflight.parent.startTimeTicks,
+      executableSha256: preflight.parent.executableSha256,
+      nonceSha256: preflight.parent.nonceSha256,
+      sessionId: preflight.parent.sessionId,
+    },
+    binding: {
+      project: preflight.binding.project,
+      workspaceId: preflight.binding.workspaceId,
+      storageMappingHash: preflight.binding.storageMappingHash,
+      worktree: preflight.binding.worktree,
+    },
+    issuedAt: new Date(now - 1_000).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(),
   };
 }
 
@@ -890,6 +971,314 @@ describe("managed command wrappers", () => {
     expect(managedRecoveryBootstrapPath(builtWrapper)).not.toBe(innerBootstrap);
   });
 
+  it("routes exact recovery production restart to read-only shim discovery before managed normalization", () => {
+    const sourceWrapper = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "scripts", "managed-command-wrapper.ts"));
+    const runner = vi.fn(() => ({ status: 0, signal: null, error: undefined }));
+    const runRecoveryBootstrap = vi.fn(() => 0);
+    const runCommand = vi.fn(() => { throw new Error("managed normalization reached"); });
+    const priorExitCode = process.exitCode;
+    try {
+      expect(runManagedRecoveryBootstrap(sourceWrapper, { runner: runner as any })).toBe(0);
+      expect(runner).toHaveBeenCalledWith(process.execPath, [recoveryBootstrapShim], expect.objectContaining({
+        cwd: repositoryRoot,
+        shell: false,
+      }));
+      expect(runner.mock.calls[0]![2]).not.toHaveProperty("timeout");
+
+      runManagedCommandCli(
+        "build",
+        ["node", "build-command", "deployment", "production-restart"],
+        { runRecoveryBootstrap, runCommand },
+      );
+
+      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(() => runManagedCommandCli(
+        "build",
+        ["node", "build-command", "deployment", "production-restart", "extra"],
+        { runRecoveryBootstrap, runCommand },
+      )).toThrow("Managed wrapper requires one encoded argv payload");
+      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+    } finally {
+      process.exitCode = priorExitCode;
+    }
+  });
+
+  it("two-pass recovery admission emits one exact canonical preflight and performs no first-pass mutation", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const preflight = twoPassRecoveryPreflight(repositoryRoot);
+    const digest = sha256(canonicalTestJson(preflight));
+    const writeOutput = vi.fn();
+    const consumeAdmission = vi.fn();
+    const executeAdmitted = vi.fn();
+
+    const result = await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+      collectPreflight: vi.fn(async () => preflight),
+      admissionPath: join(repositoryRoot, "tests/artifacts/tui-recovery/production-restart-admission.json"),
+      admissionExists: vi.fn(() => false),
+      consumeAdmission,
+      executeAdmitted,
+      writeOutput,
+    });
+
+    expect(writeOutput).toHaveBeenCalledOnce();
+    expect(writeOutput).toHaveBeenCalledWith(`${canonicalTestJson({ digest, preflight })}\n`);
+    expect(result).toBeUndefined();
+    expect(JSON.parse(writeOutput.mock.calls[0]![0])).toEqual({ digest, preflight });
+    expect(writeOutput.mock.calls[0]![0]).not.toContain("restart-nonce");
+    expect(writeOutput.mock.calls[0]![0]).not.toContain("password");
+    expect(consumeAdmission).not.toHaveBeenCalled();
+    expect(executeAdmitted).not.toHaveBeenCalled();
+
+    const source = readFileSync(recoveryBootstrapShim, "utf8");
+    const collector = source.slice(
+      source.indexOf("export async function collectRecoveryPreflight"),
+      source.indexOf("export function recoveryAdmissionPath"),
+    );
+    const firstPass = source.slice(
+      source.indexOf("export async function runRecoveryBootstrapShim"),
+      source.indexOf("(dependencies.consumeAdmission"),
+    );
+    for (const forbidden of [
+      "mkdirSync(", "writeFileSync(", "fchmodSync(", "fsyncSync(", "runFixed(", "verifyScopedCheckpoint(",
+      "normalizeTrustedRegularFileMode(", "hardenCanonicalRepositoryDirectories(", "privateNpmConfiguration(",
+      "privateStagedBootstrap(", "process.kill(", "spawn(", "claim(", "restart(",
+    ]) {
+      expect(collector, forbidden).not.toContain(forbidden);
+      expect(firstPass, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("two-pass recovery preflight represents ambiguous identity fail closed", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const preflight = await shim.collectRecoveryPreflight({
+      environment: {},
+      sourcePath: recoveryBootstrapShim,
+      request: vi.fn(),
+    });
+    const writeOutput = vi.fn();
+    const executeAdmitted = vi.fn();
+
+    await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+      collectPreflight: vi.fn(async () => preflight),
+      admissionExists: vi.fn(() => false),
+      executeAdmitted,
+      writeOutput,
+    });
+
+    const emitted = JSON.parse(writeOutput.mock.calls[0]![0]);
+    expect(emitted.preflight).toMatchObject({
+      admissible: false,
+      source: {
+        status: "validated",
+        regularFile: true,
+        ownerControlled: true,
+        groupWorldWritable: false,
+        mode: "0644",
+        expectedMode: "0644",
+      },
+      ancestry: { status: "ambiguous" },
+      parent: null,
+      binding: null,
+      nonceEnrollment: { classification: "ambiguous" },
+    });
+    expect(emitted.preflight.failures).toContain("parent_identity");
+    expect(executeAdmitted).not.toHaveBeenCalled();
+  });
+
+  it("source-shim preflight rejects an unexpected mode without normalizing it", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-recovery-shim-mode-preflight-"));
+    const source = join(directory, "recovery-bootstrap.js");
+    try {
+      copyFileSync(recoveryBootstrapShim, source);
+      chmodSync(source, 0o674);
+
+      const preflight = await shim.collectRecoveryPreflight({
+        environment: {},
+        sourcePath: source,
+        request: vi.fn(),
+      });
+      const writeOutput = vi.fn();
+      const executeAdmitted = vi.fn();
+
+      await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+        collectPreflight: vi.fn(async () => preflight),
+        executeAdmitted,
+        writeOutput,
+      });
+
+      expect(preflight).toMatchObject({
+        admissible: false,
+        failures: expect.arrayContaining(["source", "git"]),
+        source: {
+          status: "invalid",
+          expectedMode: "0644",
+        },
+      });
+      expect(writeOutput).toHaveBeenCalledOnce();
+      expect(executeAdmitted).not.toHaveBeenCalled();
+      expect(lstatSync(source).mode & 0o777).toBe(0o674);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("two-pass recovery digest excludes transient command descendants from parent ancestry", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const executableSha256 = sha256("opencode");
+    const parent = { pid: 200, startTimeTicks: 20, executableSha256 };
+    const stable = [
+      { ...parent, parentPid: 100 },
+      { pid: 100, parentPid: 1, startTimeTicks: 10, executableSha256: sha256("supervisor") },
+    ];
+
+    expect(shim.stableRecoveryAncestryMembers([
+      { pid: 301, parentPid: 300, startTimeTicks: 31, executableSha256: sha256("second-invocation") },
+      ...stable,
+    ], parent)).toEqual(stable);
+    expect(shim.stableRecoveryAncestryMembers([
+      { pid: 401, parentPid: 400, startTimeTicks: 41, executableSha256: sha256("first-invocation") },
+      ...stable,
+    ], parent)).toEqual(stable);
+  });
+
+  it("two-pass recovery admission rejects stale, mismatched, symlink, and oversized artifacts", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-two-pass-admission-reject-"));
+    const worktree = realpathSync(directory);
+    const path = join(directory, "admission.json");
+    const target = join(directory, "target.json");
+    const now = Date.parse("2026-09-05T12:00:00.000Z");
+    const preflight = twoPassRecoveryPreflight(worktree);
+    const digest = sha256(shim.canonicalJson(preflight));
+    const writeAdmission = (value: unknown) => {
+      writeFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+      chmodSync(path, 0o600);
+    };
+    try {
+      writeAdmission({
+        ...twoPassRecoveryAdmission(preflight, digest, now),
+        issuedAt: new Date(now - 16 * 60_000).toISOString(),
+        expiresAt: new Date(now + 60_000).toISOString(),
+      });
+      expect(() => shim.validateAndConsumeRecoveryAdmission(path, preflight, digest, now)).toThrow("stale");
+      rmSync(path);
+
+      writeAdmission({ ...twoPassRecoveryAdmission(preflight, digest, now), head: "c".repeat(40) });
+      expect(() => shim.validateAndConsumeRecoveryAdmission(path, preflight, digest, now)).toThrow("does not match");
+      rmSync(path);
+
+      writeAdmission({
+        ...twoPassRecoveryAdmission(preflight, digest, now),
+        issuedAt: new Date(now + 10_000).toISOString(),
+        expiresAt: new Date(now + 5_000).toISOString(),
+      });
+      expect(() => shim.validateAndConsumeRecoveryAdmission(path, preflight, digest, now)).toThrow("stale");
+      rmSync(path);
+
+      writeFileSync(target, `${JSON.stringify(twoPassRecoveryAdmission(preflight, digest, now))}\n`, { mode: 0o600 });
+      symlinkSync(target, path);
+      expect(() => shim.validateAndConsumeRecoveryAdmission(path, preflight, digest, now)).toThrow("not trusted");
+      rmSync(path);
+
+      writeFileSync(path, Buffer.alloc(16 * 1024 + 1, 0x61), { mode: 0o600 });
+      expect(() => shim.validateAndConsumeRecoveryAdmission(path, preflight, digest, now)).toThrow("not trusted");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("two-pass recovery consumes exact admission once before reaching the existing bootstrap", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-two-pass-admission-success-"));
+    const worktree = realpathSync(directory);
+    const path = join(directory, "admission.json");
+    const now = Date.parse("2026-09-05T12:00:00.000Z");
+    const preflight = twoPassRecoveryPreflight(worktree);
+    const digest = sha256(shim.canonicalJson(preflight));
+    const admission = twoPassRecoveryAdmission(preflight, digest, now);
+    const executeAdmitted = vi.fn(async () => undefined);
+    const writeOutput = vi.fn();
+    try {
+      writeFileSync(path, `${JSON.stringify(admission)}\n`, { mode: 0o644 });
+      chmodSync(path, 0o644);
+      await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+        collectPreflight: vi.fn(async () => preflight),
+        admissionPath: path,
+        executeAdmitted,
+        now: () => now,
+        writeOutput,
+      });
+
+      const consumed = `${path}.consumed-${digest}.json`;
+      expect(executeAdmitted).toHaveBeenCalledOnce();
+      expect(writeOutput).not.toHaveBeenCalled();
+      expect(existsSync(path)).toBe(false);
+      expect(lstatSync(consumed).mode & 0o777).toBe(0o400);
+
+      writeFileSync(path, `${JSON.stringify(admission)}\n`, { mode: 0o600 });
+      chmodSync(path, 0o600);
+      expect(() => shim.validateAndConsumeRecoveryAdmission(path, preflight, digest, now)).toThrow();
+      expect(executeAdmitted).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("two-pass recovery treats only the exact legacy overflow disposition as resolved", async () => {
+    const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-two-pass-outbox-"));
+    const protectedIndex = join(worktree, ".opencode", "protected-runtime-index");
+    const outbox = join(protectedIndex, "coordination-outbox");
+    const dispositions = join(protectedIndex, "coordination-outbox-dispositions");
+    const key = "196a4bf40b3672e0245a6a39fabeddcefb155b56fe264dc3b29b355f6258b1e2";
+    const operationId = "e3b31090e32ac32474f150958ecd2c2cedff8a92f3ddcad03b9a9acb108e68fc";
+    const recordSha256 = "b00ae79c982e8e3948e1ee421ef09ac12e2a7b71e83f49ac4381b56a306e0a3c";
+    const record = {
+      version: 1,
+      operationId,
+      key,
+      kind: "overflow",
+      sessionHash: "0".repeat(64),
+      createdAt: "2026-09-03T20:53:18.005Z",
+      failure: "unavailable",
+      revision: null,
+      cursor: null,
+      digest: "9a1a4af66380af9f8a77c3feff5d16cbbe22c7ad4385fad69a825da99560eb8b",
+      ambiguous: true,
+      count: 6852,
+      mutation: null,
+    };
+    const disposition = {
+      schemaVersion: 1,
+      recordKey: key,
+      recordSha256,
+      operationId,
+      decision: "abandoned",
+      authority: "explicit_user_authorization",
+      reason: "nonrecoverable_identityless_overflow",
+      createdAt: "2026-09-05T03:07:55.899Z",
+    };
+    try {
+      mkdirSync(outbox, { recursive: true, mode: 0o700 });
+      mkdirSync(dispositions, { mode: 0o700 });
+      const serialized = `${JSON.stringify(record)}\n`;
+      expect(sha256(serialized)).toBe(recordSha256);
+      writeFileSync(join(outbox, `${key}.json`), serialized, { mode: 0o600 });
+      expect(shim.summarizeCoordinationOutboxState(protectedIndex).outbox.ambiguousCount).toBe(1);
+
+      writeFileSync(join(dispositions, `${key}.json`), `${JSON.stringify(disposition)}\n`, { mode: 0o600 });
+      expect(shim.summarizeCoordinationOutboxState(protectedIndex)).toMatchObject({
+        outbox: { status: "validated", count: 1, ambiguousCount: 0 },
+        disposition: { status: "validated", count: 1 },
+      });
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
   it("fixed deployment normalizes only the reviewed tracked bootstrap mode", () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-recovery-bootstrap-mode-"));
     const source = join(worktree, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
@@ -1409,7 +1798,7 @@ describe("managed command wrappers", () => {
       }
 
       const shimSource = readFileSync(recoveryBootstrapShim, "utf8");
-      const runSource = shimSource.slice(shimSource.indexOf("export async function runRecoveryBootstrapShim"));
+      const runSource = shimSource.slice(shimSource.indexOf("async function runAdmittedRecoveryBootstrapShim"));
       expect(runSource.indexOf("hardenCanonicalRepositoryDirectories(")).toBeLessThan(
         runSource.indexOf("verifyScopedCheckpoint("),
       );
@@ -1487,7 +1876,7 @@ describe("managed command wrappers", () => {
       expect(lstatSync(swapped.distPath).mode & 0o777).toBe(0o775);
 
       const shimSource = readFileSync(recoveryBootstrapShim, "utf8");
-      const runSource = shimSource.slice(shimSource.indexOf("export async function runRecoveryBootstrapShim"));
+      const runSource = shimSource.slice(shimSource.indexOf("async function runAdmittedRecoveryBootstrapShim"));
       expect(runSource.indexOf("const build = await runFixed(")).toBeLessThan(
         runSource.indexOf("hardenGeneratedBootstrapDirectories(packageRoot, owner)"),
       );

@@ -7,11 +7,13 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   readlinkSync,
   realpathSync,
@@ -20,7 +22,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const BUILD_TIMEOUT_MS = 300_000;
@@ -68,6 +70,18 @@ const RECOVERY_ENVIRONMENT = [
   "INGENIUM_WORKTREE",
 ];
 const SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"];
+const HASH = /^[0-9a-f]{64}$/;
+const GIT_OID = /^[0-9a-f]{40,64}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SAFE_PROJECT = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SAFE_SESSION = /^[A-Za-z0-9_-]{1,256}$/;
+const RECOVERY_ADMISSION_MAX_BYTES = 16 * 1024;
+const RECOVERY_ADMISSION_LIFETIME_MS = 15 * 60 * 1_000;
+const LEGACY_DISPOSITION_KEY = "196a4bf40b3672e0245a6a39fabeddcefb155b56fe264dc3b29b355f6258b1e2";
+const LEGACY_DISPOSITION_OPERATION_ID = "e3b31090e32ac32474f150958ecd2c2cedff8a92f3ddcad03b9a9acb108e68fc";
+const LEGACY_DISPOSITION_RECORD_SHA256 = "b00ae79c982e8e3948e1ee421ef09ac12e2a7b71e83f49ac4381b56a306e0a3c";
+export const RECOVERY_ADMISSION_RELATIVE_PATH = "tests/artifacts/tui-recovery/production-restart-admission.json";
 
 export const CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS = Object.freeze([
   "directory",
@@ -301,6 +315,966 @@ export function readTrustedRegularFile(path, label, options = {}) {
   }
 }
 
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value, keys) {
+  return isRecord(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+}
+
+export function canonicalJson(value) {
+  return JSON.stringify(canonicalValue(value));
+}
+
+export function recoveryPreflightOutput(preflight) {
+  const digest = sha256(canonicalJson(preflight));
+  return { digest, output: canonicalJson({ digest, preflight }) };
+}
+
+function readBoundedDescriptor(descriptor, maximumBytes, allowEmpty = false) {
+  const buffer = Buffer.allocUnsafe(maximumBytes + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const count = readSync(descriptor, buffer, offset, buffer.length - offset, null);
+    if (count === 0) break;
+    offset += count;
+  }
+  if ((!allowEmpty && offset < 1) || offset > maximumBytes) throw new Error("Recovery preflight file is unavailable");
+  return buffer.subarray(0, offset);
+}
+
+function readOnlyRegularFile(path, maximumBytes, allowEmpty = false) {
+  const requested = resolve(path);
+  const owner = ownerUid();
+  let descriptor;
+  try {
+    const before = lstatSync(requested);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== owner
+      || (before.mode & 0o022) !== 0 || (!allowEmpty && before.size < 1) || before.size > maximumBytes
+      || realpathSync(requested) !== requested) throw new Error("Recovery preflight file is unavailable");
+    descriptor = openSync(requested, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & 0o022) !== 0
+      || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+      throw new Error("Recovery preflight file is unavailable");
+    }
+    const bytes = readBoundedDescriptor(descriptor, maximumBytes, allowEmpty);
+    const after = fstatSync(descriptor);
+    const current = lstatSync(requested);
+    if (bytes.length !== opened.size || after.dev !== opened.dev || after.ino !== opened.ino
+      || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
+      || !current.isFile() || current.isSymbolicLink() || current.nlink !== 1
+      || current.dev !== opened.dev || current.ino !== opened.ino || current.size !== opened.size
+      || current.uid !== owner || (current.mode & 0o022) !== 0 || realpathSync(requested) !== requested) {
+      throw new Error("Recovery preflight file changed during inspection");
+    }
+    return bytes;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function optionalReadOnlyRegularFile(path, maximumBytes, allowEmpty = false) {
+  try {
+    return { status: "validated", bytes: readOnlyRegularFile(path, maximumBytes, allowEmpty) };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { status: "missing" };
+    return { status: "invalid" };
+  }
+}
+
+function parseProcessStat(pid) {
+  try {
+    const source = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const closeParen = source.lastIndexOf(")");
+    if (closeParen < 1) return undefined;
+    const fields = source.slice(closeParen + 1).trim().split(/\s+/);
+    const parentPid = Number(fields[1]);
+    const startTimeTicks = Number(fields[19]);
+    return Number.isSafeInteger(parentPid) && parentPid >= 0 && Number.isSafeInteger(startTimeTicks) && startTimeTicks > 0
+      ? { parentPid, startTimeTicks } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function processEnvironment(pid) {
+  try {
+    return Object.fromEntries(readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").filter(Boolean).map((entry) => {
+      const separator = entry.indexOf("=");
+      return separator > 0 ? [entry.slice(0, separator), entry.slice(separator + 1)] : [entry, ""];
+    }));
+  } catch {
+    return undefined;
+  }
+}
+
+function processCommandLine(pid) {
+  try {
+    const argv = readFileSync(`/proc/${pid}/cmdline`).toString("utf8").split("\0").filter(Boolean);
+    return argv.length > 0 ? argv : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function commandLineSession(argv) {
+  const sessions = [];
+  for (let index = 1; index < argv.length; index += 1) {
+    if (argv[index] === "-s" || argv[index] === "--session") {
+      if (index + 1 < argv.length) sessions.push(argv[index + 1]);
+      index += 1;
+    } else if (argv[index].startsWith("--session=")) {
+      sessions.push(argv[index].slice("--session=".length));
+    }
+  }
+  return sessions.length === 1 && SAFE_SESSION.test(sessions[0]) ? sessions[0] : undefined;
+}
+
+function processListeningPorts(pid) {
+  const sockets = new Set();
+  try {
+    for (const entry of readdirSync(`/proc/${pid}/fd`)) {
+      try {
+        const match = /^socket:\[(\d+)\]$/.exec(readlinkSync(`/proc/${pid}/fd/${entry}`));
+        if (match) sockets.add(match[1]);
+      } catch {}
+    }
+  } catch {
+    return [];
+  }
+  const ports = new Set();
+  for (const table of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let source;
+    try { source = readFileSync(table, "utf8"); } catch { continue; }
+    for (const line of source.trim().split(/\r?\n/).slice(1)) {
+      const fields = line.trim().split(/\s+/);
+      if (fields[3] !== "0A" || !sockets.has(fields[9])) continue;
+      const separator = fields[1].lastIndexOf(":");
+      const address = fields[1].slice(0, separator).toUpperCase();
+      const port = Number.parseInt(fields[1].slice(separator + 1), 16);
+      if (port >= 1024 && port <= 65535 && (/^[0-9A-F]{6}7F$/.test(address)
+        || address === "00000000000000000000000001000000"
+        || /^0000000000000000FFFF0000[0-9A-F]{6}7F$/.test(address))) ports.add(port);
+    }
+  }
+  return [...ports].sort((left, right) => left - right);
+}
+
+function inspectAncestor(pid) {
+  const before = parseProcessStat(pid);
+  const argv = processCommandLine(pid);
+  if (!before || !argv) return undefined;
+  let descriptor;
+  try {
+    descriptor = openSync(`/proc/${pid}/exe`, constants.O_RDONLY);
+    const opened = fstatSync(descriptor);
+    const executableSha256 = sha256(readFileSync(descriptor));
+    const afterDescriptor = fstatSync(descriptor);
+    const after = parseProcessStat(pid);
+    const cwd = realpathSync(readlinkSync(`/proc/${pid}/cwd`));
+    if (!opened.isFile() || (opened.mode & 0o111) === 0 || !after
+      || before.parentPid !== after.parentPid || before.startTimeTicks !== after.startTimeTicks
+      || opened.dev !== afterDescriptor.dev || opened.ino !== afterDescriptor.ino
+      || opened.size !== afterDescriptor.size || opened.mtimeMs !== afterDescriptor.mtimeMs
+      || opened.ctimeMs !== afterDescriptor.ctimeMs) return undefined;
+    return {
+      pid,
+      parentPid: before.parentPid,
+      startTimeTicks: before.startTimeTicks,
+      executableSha256,
+      cwd,
+      commandName: basename(argv[0]),
+      cmdlineSha256: sha256(Buffer.from(argv.join("\0"))),
+      argv,
+    };
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+export function stableRecoveryAncestryMembers(ancestry, parent) {
+  if (!parent) return ancestry;
+  const parentIndex = ancestry.findIndex((member) => member.pid === parent.pid
+    && member.startTimeTicks === parent.startTimeTicks
+    && member.executableSha256 === parent.executableSha256);
+  return parentIndex < 0 ? [] : ancestry.slice(parentIndex);
+}
+
+function inspectAncestry(worktree) {
+  const ancestry = [];
+  const candidates = [];
+  let pid = process.ppid;
+  for (let depth = 0; depth < 32 && pid > 1; depth += 1) {
+    const inspected = inspectAncestor(pid);
+    if (!inspected) return { status: "ambiguous", members: [], parent: null };
+    const { argv, ...member } = inspected;
+    ancestry.push(member);
+    const sessionId = commandLineSession(argv);
+    if (inspected.commandName === "opencode" && inspected.cwd === worktree && sessionId) {
+      const environment = processEnvironment(pid);
+      const dataHomeCandidate = environment?.XDG_DATA_HOME
+        ?? (environment?.HOME ? resolve(environment.HOME, ".local/share") : undefined);
+      let dataHome;
+      try { dataHome = dataHomeCandidate && realpathSync(dataHomeCandidate); } catch {}
+      const ports = processListeningPorts(pid);
+      const nonce = environment?.INGENIUM_RESTART_NONCE;
+      if (environment && dataHome && ports.length <= 1 && (!nonce || /^[A-Za-z0-9_-]{43,128}$/.test(nonce))) {
+        candidates.push({
+          pid,
+          startTimeTicks: inspected.startTimeTicks,
+          executableSha256: inspected.executableSha256,
+          cwd: inspected.cwd,
+          cmdlineSha256: inspected.cmdlineSha256,
+          sessionId,
+          dataHome,
+          port: ports[0] ?? null,
+          nonceSha256: nonce ? sha256(nonce) : "0".repeat(64),
+          environment,
+        });
+      }
+    }
+    if (inspected.parentPid === pid) break;
+    pid = inspected.parentPid;
+  }
+  const parent = candidates.length === 1 ? candidates[0] : null;
+  const members = stableRecoveryAncestryMembers(ancestry, parent);
+  return {
+    status: parent && members.length > 0 ? "exact" : "ambiguous",
+    members,
+    parent: members.length > 0 ? parent : null,
+  };
+}
+
+function safeHandoffPath(path) {
+  return typeof path === "string" && path.length >= 1 && path.length <= 1024 && path === path.trim()
+    && !path.startsWith("/") && !path.startsWith("~") && !path.includes("\\")
+    && !/[\u0000-\u001f\u007f]/.test(path)
+    && path.split("/").every((segment) => segment && segment !== "." && segment !== ".." && segment !== ".git");
+}
+
+function safeHandoffSummary(value) {
+  if (!isRecord(value) || !["active", "working", "idle", "completed", "error"].includes(value.status)
+    || !(value.taskHash === null || HASH.test(value.taskHash)) || !Array.isArray(value.actions) || value.actions.length > 64
+    || !Array.isArray(value.changedPaths) || value.changedPaths.length > 32
+    || !Array.isArray(value.checks) || value.checks.length > 32 || !isRecord(value.todos) || !isRecord(value.nextWork)) return undefined;
+  if (value.actions.some((entry) => !hasExactKeys(entry, ["kind", "result", "path", "targetHash"])
+    || !["read", "search", "write", "edit", "execute"].includes(entry.kind) || entry.result !== "succeeded"
+    || (entry.path === null) === (entry.targetHash === null)
+    || (entry.path !== null && !safeHandoffPath(entry.path)) || (entry.targetHash !== null && !HASH.test(entry.targetHash)))) return undefined;
+  if (value.changedPaths.some((entry) => !hasExactKeys(entry, ["path", "operation", "additions", "deletions", "changeRevision"])
+    || !safeHandoffPath(entry.path) || !["write", "edit"].includes(entry.operation)
+    || ![entry.additions, entry.deletions].every((count) => Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000)
+    || !Number.isSafeInteger(entry.changeRevision) || entry.changeRevision < 1)) return undefined;
+  if (value.checks.some((entry) => !hasExactKeys(entry, ["name", "status", "result", "exitCode", "targetHash"])
+    || !["typecheck", "lint", "test", "build", "format", "security", "other"].includes(entry.name)
+    || !["completed", "failed"].includes(entry.status) || !["passed", "failed"].includes(entry.result)
+    || (entry.status === "completed") !== (entry.result === "passed") || !HASH.test(entry.targetHash)
+    || !(entry.exitCode === null || (Number.isSafeInteger(entry.exitCode) && entry.exitCode >= 0 && entry.exitCode <= 255)))) return undefined;
+  const todoKeys = ["total", "pending", "inProgress", "completed", "cancelled", "state"];
+  const counts = todoKeys.slice(0, 5).map((key) => value.todos[key]);
+  const populated = counts.slice(1).filter((count) => count > 0).length;
+  const expectedTodoState = populated === 0 ? "none" : populated > 1 ? "mixed" : counts[1] > 0 ? "pending"
+    : counts[2] > 0 ? "in_progress" : counts[3] > 0 ? "complete" : "cancelled";
+  if (!todoKeys.every((key) => Object.hasOwn(value.todos, key)) || !counts.every((count) => Number.isSafeInteger(count) && count >= 0)
+    || counts[0] !== counts.slice(1).reduce((sum, count) => sum + count, 0)
+    || value.todos.state !== expectedTodoState
+    || !["none", "continue_task", "review_changes", "run_checks", "address_failure"].includes(value.nextWork.kind)
+    || !(value.nextWork.referenceHash === null || HASH.test(value.nextWork.referenceHash))) return undefined;
+  return {
+    status: value.status,
+    taskHash: value.taskHash,
+    actionCount: value.actions.length,
+    changedPathCount: value.changedPaths.length,
+    checkCount: value.checks.length,
+    todos: Object.fromEntries(todoKeys.map((key) => [key, value.todos[key]])),
+    nextWork: { kind: value.nextWork.kind, referenceHash: value.nextWork.referenceHash },
+  };
+}
+
+function safeRecoveryIdentity(value) {
+  return isRecord(value) && Number.isSafeInteger(value.pid) && value.pid >= 2
+    && Number.isSafeInteger(value.startTimeTicks) && value.startTimeTicks >= 1
+    && HASH.test(value.executableSha256 ?? "") && HASH.test(value.nonceSha256 ?? "");
+}
+
+function safeEnrolledParent(value) {
+  return safeRecoveryIdentity(value) && resolve(value.worktree ?? "") === value.worktree
+    && SAFE_PROJECT.test(value.project ?? "") && UUID.test(value.projectId ?? "") && SAFE_ID.test(value.workspaceId ?? "")
+    && HASH.test(value.storageMappingHash ?? "") && (value.port === null
+      || (Number.isSafeInteger(value.port) && value.port >= 1024 && value.port <= 65535))
+    && typeof value.dataHome === "string" && resolve(value.dataHome) === value.dataHome;
+}
+
+function readRecoverySummary(worktree) {
+  const directory = resolve(worktree, ".opencode/protected-runtime-index/tui-recovery");
+  const stateFile = optionalReadOnlyRegularFile(resolve(directory, "state.json"), 64 * 1024);
+  const journalFile = optionalReadOnlyRegularFile(resolve(directory, "journal.json"), 64 * 1024);
+  const legacyFile = optionalReadOnlyRegularFile(resolve(directory, "legacy-handoff.json"), 64 * 1024);
+  if ([stateFile, journalFile, legacyFile].every((file) => file.status === "missing")) {
+    return { summary: { status: "missing", state: null, handoff: null }, enrollment: null };
+  }
+  try {
+    const state = stateFile.bytes ? JSON.parse(stateFile.bytes.toString("utf8")) : undefined;
+    const journal = journalFile.bytes ? JSON.parse(journalFile.bytes.toString("utf8")) : undefined;
+    const legacy = legacyFile.bytes ? JSON.parse(legacyFile.bytes.toString("utf8")) : undefined;
+    const handoffValue = journal ?? (isRecord(legacy) ? legacy.handoff : undefined);
+    const handoff = safeHandoffSummary(handoffValue);
+    if (!hasExactKeys(state, ["schemaVersion", "owner", "fence", "generation", "phase", "activeParent", "replacement", "updatedAt"])
+      || state.schemaVersion !== 1 || !Number.isSafeInteger(state.fence) || state.fence < 1
+      || !Number.isSafeInteger(state.generation) || state.generation < 1
+      || !["owner_ready", "enrolled", "replacement_prepared", "replacement_committed"].includes(state.phase)
+      || typeof state.updatedAt !== "string" || !Number.isFinite(Date.parse(state.updatedAt))
+      || !safeRecoveryIdentity(state.owner) || !(state.activeParent === null || safeEnrolledParent(state.activeParent))
+      || !(state.replacement === null || isRecord(state.replacement))
+      || (state.phase === "owner_ready" && (state.activeParent !== null || state.replacement !== null))
+      || (state.phase === "enrolled" && (state.activeParent === null || state.replacement !== null))
+      || (["replacement_prepared", "replacement_committed"].includes(state.phase)
+        && (state.activeParent === null || state.replacement === null)) || !handoff) throw new Error("invalid");
+    return {
+      summary: {
+        status: "validated",
+        state: {
+          phase: state.phase,
+          fence: state.fence,
+          generation: state.generation,
+          activeParent: state.activeParent !== null,
+          replacement: state.replacement !== null,
+          sha256: sha256(stateFile.bytes),
+        },
+        handoff: { ...handoff, sha256: sha256(canonicalJson(handoffValue)) },
+      },
+      enrollment: state.phase === "enrolled" && isRecord(state.activeParent) ? state.activeParent : null,
+    };
+  } catch {
+    return { summary: { status: "invalid", state: null, handoff: null }, enrollment: null };
+  }
+}
+
+function inspectSummaryDirectory(path, maximumBytes, validate) {
+  const empty = (status) => ({
+    summary: { status, count: 0, ambiguousCount: 0, sha256: null },
+    entries: [],
+  });
+  try {
+    const directory = resolve(path);
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== ownerUid() || (stat.mode & 0o022) !== 0
+      || realpathSync(directory) !== directory) return empty("invalid");
+    const records = [];
+    const entries = [];
+    let ambiguousCount = 0;
+    for (const name of readdirSync(directory).sort()) {
+      if (!/^[0-9a-f]{64}(?:\.[0-9a-f]{64})?\.json$/.test(name)) {
+        return empty("invalid");
+      }
+      const bytes = readOnlyRegularFile(resolve(directory, name), maximumBytes);
+      const value = JSON.parse(bytes.toString("utf8"));
+      if (!isRecord(value) || !validate(value, name.split(".", 1)[0], name)) {
+        return empty("invalid");
+      }
+      if (value.ambiguous === true || value.kind === "overflow") ambiguousCount += 1;
+      records.push(`${name}:${sha256(bytes)}`);
+      entries.push({ name, sha256: sha256(bytes), value });
+    }
+    return {
+      summary: { status: "validated", count: records.length, ambiguousCount, sha256: sha256(records.join("\n")) },
+      entries,
+    };
+  } catch (error) {
+    return empty(error?.code === "ENOENT" ? "missing" : "invalid");
+  }
+}
+
+function validOutboxPathSegments(value) {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 128
+    && value.every((segment) => typeof segment === "string" && /^[A-Za-z0-9_-]{1,342}$/.test(segment));
+}
+
+function validOutboxMutation(value) {
+  if (!hasExactKeys(value, ["phase", "operation", "declaredPathSegments", "footprint", "remoteClaim"])
+    || !["claim_failed", "local_applied", "completion_ambiguous"].includes(value.phase)
+    || !["write", "edit", "create", "delete", "rename", "apply_patch", "repository", "build"].includes(value.operation)
+    || !Array.isArray(value.declaredPathSegments) || value.declaredPathSegments.length > 32
+    || !value.declaredPathSegments.every(validOutboxPathSegments)
+    || !Array.isArray(value.footprint) || value.footprint.length > 256) return false;
+  if (value.footprint.some((entry) => !hasExactKeys(entry, ["pathSegments", "pathSha256", "beforeSha256", "afterSha256"])
+    || (entry.pathSegments !== null && !validOutboxPathSegments(entry.pathSegments))
+    || !HASH.test(entry.pathSha256 ?? "")
+    || !(entry.beforeSha256 === null || HASH.test(entry.beforeSha256 ?? ""))
+    || !(entry.afterSha256 === null || HASH.test(entry.afterSha256 ?? "")))) return false;
+  if (value.remoteClaim === null) return value.phase !== "completion_ambiguous";
+  const claim = value.remoteClaim;
+  return hasExactKeys(claim, ["worktreeId", "sessionId", "incarnation", "expectedRevision", "fence", "ownershipToken",
+    "clientClaimKey", "acceptedEpoch", "remoteOperationId"])
+    && /^worktree-[0-9a-f]{64}$/.test(claim.worktreeId ?? "")
+    && /^session-[0-9a-f]{64}$/.test(claim.sessionId ?? "")
+    && [claim.incarnation, claim.expectedRevision, claim.fence, claim.acceptedEpoch]
+      .every((entry) => Number.isSafeInteger(entry) && entry >= 0)
+    && claim.incarnation >= 1 && claim.fence >= 1 && claim.acceptedEpoch >= 1
+    && /^[A-Za-z0-9_-]{32,128}$/.test(claim.ownershipToken ?? "")
+    && /^[A-Za-z0-9_-]{32,128}$/.test(claim.clientClaimKey ?? "")
+    && claim.clientClaimKey !== claim.ownershipToken && UUID.test(claim.remoteOperationId ?? "")
+    && value.phase === "completion_ambiguous";
+}
+
+function validOutboxSummaryRecord(value, key, name) {
+  const keys = ["version", "operationId", "key", "kind", "sessionHash", "createdAt", "failure",
+    "revision", "cursor", "digest", "ambiguous", "count", "mutation"];
+  return name === `${key}.json` && hasExactKeys(value, keys) && value.version === 1
+    && value.key === key && HASH.test(value.key ?? "")
+    && HASH.test(value.operationId ?? "") && HASH.test(value.digest ?? "")
+    && ["register", "claim", "completion", "quarantine", "snapshot", "memory", "publication", "ack",
+      "memory_ack", "heartbeat", "recovery", "close", "overflow"].includes(value.kind)
+    && ["unavailable", "conflict", "authentication", "rate_limited", "quarantined", "invalid_response"].includes(value.failure)
+    && /^(?:[0-9a-f]{16}|[0-9a-f]{64})$/.test(value.sessionHash ?? "")
+    && typeof value.createdAt === "string" && Number.isFinite(Date.parse(value.createdAt))
+    && [value.revision, value.cursor].every((entry) => entry === null || (Number.isSafeInteger(entry) && entry >= 0))
+    && (value.mutation === null || validOutboxMutation(value.mutation))
+    && typeof value.ambiguous === "boolean" && Number.isSafeInteger(value.count) && value.count >= 1;
+}
+
+function validDispositionSummaryRecord(value, key, name) {
+  const keys = value.schemaVersion === 1
+    ? ["schemaVersion", "recordKey", "recordSha256", "operationId", "decision", "authority", "reason", "createdAt"]
+    : ["schemaVersion", "recordKey", "recordSha256", "recordCount", "operationId", "authorizationSha256",
+        "decision", "authority", "reason", "createdAt"];
+  return [1, 2].includes(value.schemaVersion) && hasExactKeys(value, keys)
+    && value.recordKey === key && HASH.test(value.recordKey ?? "")
+    && HASH.test(value.recordSha256 ?? "") && HASH.test(value.operationId ?? "")
+    && (value.schemaVersion === 1 ? name === `${key}.json`
+      : name === `${key}.${value.recordSha256}.json` && Number.isSafeInteger(value.recordCount)
+        && value.recordCount >= 1 && HASH.test(value.authorizationSha256 ?? ""))
+    && value.decision === "abandoned" && value.authority === "explicit_user_authorization"
+    && value.reason === "nonrecoverable_identityless_overflow" && typeof value.createdAt === "string"
+    && Number.isFinite(Date.parse(value.createdAt));
+}
+
+export function summarizeCoordinationOutboxState(protectedIndex) {
+  const inspectedOutbox = inspectSummaryDirectory(
+    resolve(protectedIndex, "coordination-outbox"),
+    16 * 1024,
+    validOutboxSummaryRecord,
+  );
+  const inspectedDisposition = inspectSummaryDirectory(
+    resolve(protectedIndex, "coordination-outbox-dispositions"),
+    16 * 1024,
+    validDispositionSummaryRecord,
+  );
+  const legacyDisposed = inspectedDisposition.entries.some(({ value }) => value.schemaVersion === 1
+    && value.recordKey === LEGACY_DISPOSITION_KEY
+    && value.recordSha256 === LEGACY_DISPOSITION_RECORD_SHA256
+    && value.operationId === LEGACY_DISPOSITION_OPERATION_ID);
+  const ambiguousCount = inspectedOutbox.entries.filter(({ sha256: recordSha256, value }) =>
+    (value.ambiguous === true || value.kind === "overflow")
+    && !(legacyDisposed && value.key === LEGACY_DISPOSITION_KEY
+      && value.operationId === LEGACY_DISPOSITION_OPERATION_ID
+      && recordSha256 === LEGACY_DISPOSITION_RECORD_SHA256)).length;
+  return {
+    outbox: { ...inspectedOutbox.summary, ambiguousCount },
+    disposition: inspectedDisposition.summary,
+  };
+}
+
+function summarizeFreeze(path) {
+  const file = optionalReadOnlyRegularFile(path, 4 * 1024, true);
+  return file.bytes !== undefined
+    ? { status: "present", sha256: sha256(file.bytes) }
+    : { status: file.status === "missing" ? "clear" : "invalid", sha256: null };
+}
+
+function collectGitSummary(root, sourcePath, sourceBytes) {
+  try {
+    if (gitConfiguration(root).some(isExecutableGitConfiguration)) throw new Error("configuration");
+    const topLevel = git(root, ["rev-parse", "--show-toplevel"], "utf8").trim();
+    const head = git(root, ["rev-parse", "--verify", "HEAD"], "utf8").trim();
+    const relativeSource = "packages/ingenium-extension/scripts/recovery-bootstrap.js";
+    const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]);
+    const dirtyPaths = status.toString("utf8").split("\0").filter(Boolean).map((entry) => entry.slice(3)).sort();
+    const sourceMatchesHead = resolve(root, relativeSource) === sourcePath
+      && Buffer.from(git(root, ["show", `${head}:${relativeSource}`])).equals(sourceBytes);
+    return {
+      status: topLevel === root && GIT_OID.test(head) && sourceMatchesHead ? "validated" : "invalid",
+      head: GIT_OID.test(head) ? head : null,
+      dirtyPaths,
+      sourceMatchesHead,
+    };
+  } catch {
+    return { status: "invalid", head: null, dirtyPaths: [], sourceMatchesHead: false };
+  }
+}
+
+async function collectApiHealth(environment, request) {
+  const configured = environment.INGENIUM_API_URL;
+  if (!configured) return { status: "unconfigured", httpStatus: null };
+  try {
+    const base = new URL(configured);
+    if (base.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(base.hostname)
+      || base.username || base.password) return { status: "invalid", httpStatus: null };
+    const response = await request(`${base.href.replace(/\/$/, "")}/health`, {
+      method: "GET",
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+    const value = await response.json();
+    return { status: response.status === 200 && value?.status === "ok" ? "healthy" : "unhealthy", httpStatus: response.status };
+  } catch {
+    return { status: "unavailable", httpStatus: null };
+  }
+}
+
+function responseValue(value) {
+  return isRecord(value) && Object.hasOwn(value, "data") ? value.data : value;
+}
+
+function liveCheckName(command) {
+  if (typeof command !== "string") return undefined;
+  const value = command.toLowerCase();
+  if (/\b(typecheck|tsc\b)/.test(value)) return "typecheck";
+  if (/\b(eslint|lint\b)/.test(value)) return "lint";
+  if (/\b(prettier|format\b)/.test(value)) return "format";
+  if (/\b(audit|security|snyk)\b/.test(value)) return "security";
+  if (/\b(build|compile)\b/.test(value)) return "build";
+  if (/\b(test|vitest|jest|pytest|playwright)\b/.test(value)) return "test";
+  if (/^\s*git\s+status(?:\s|$)/.test(value)) return "other";
+  return undefined;
+}
+
+function liveExitCode(state) {
+  const metadata = isRecord(state.metadata) ? state.metadata : state;
+  const value = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
+  return Number.isSafeInteger(value) && value >= 0 && value <= 255 ? value : null;
+}
+
+function liveInputChanges(tool, input, worktree) {
+  const candidate = input.filePath ?? input.path;
+  if (typeof candidate === "string") {
+    const path = isAbsolute(candidate) ? relative(worktree, resolve(candidate)) : candidate;
+    if (!safeHandoffPath(path)) throw new Error("Recovery live changed path is invalid");
+    return [{ path, operation: tool === "write" || tool === "file_write" ? "write" : "edit" }];
+  }
+  if (tool !== "apply_patch") return [];
+  const patch = input.patchText ?? input.patch;
+  if (typeof patch !== "string" || Buffer.byteLength(patch, "utf8") > 1024 * 1024) {
+    throw new Error("Recovery live patch capture is invalid");
+  }
+  const changes = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: (.+)$/gm)].map((match) => ({
+    path: match[2],
+    operation: match[1] === "Add" ? "write" : "edit",
+  }));
+  if (changes.length === 0 || changes.some((change) => !safeHandoffPath(change.path))) {
+    throw new Error("Recovery live patch capture is invalid");
+  }
+  return changes;
+}
+
+async function readLiveRecoverySummary(parent, worktree, request) {
+  const password = parent?.environment?.OPENCODE_SERVER_PASSWORD;
+  const username = parent?.environment?.OPENCODE_SERVER_USERNAME ?? "opencode";
+  if (!parent || parent.port === null || !/^[A-Za-z0-9._-]{1,64}$/.test(username)
+    || !/^[A-Za-z0-9_-]{43,128}$/.test(password ?? "")) return undefined;
+  try {
+    const headers = { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` };
+    const base = `http://127.0.0.1:${parent.port}`;
+    const get = async (path) => {
+      const response = await request(`${base}${path}`, {
+        method: "GET",
+        headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.status !== 200) throw new Error("unavailable");
+      return responseValue(await response.json());
+    };
+    const [health, session, messages, statuses] = await Promise.all([
+      get("/global/health"),
+      get(`/session/${encodeURIComponent(parent.sessionId)}`),
+      get(`/session/${encodeURIComponent(parent.sessionId)}/message`),
+      get("/session/status"),
+    ]);
+    if (!isRecord(health) || health.healthy !== true || typeof health.version !== "string" || !isRecord(session)
+      || session.id !== parent.sessionId || session.directory !== worktree || !Array.isArray(messages)
+      || !isRecord(statuses)) return undefined;
+    let todos = [];
+    for (const message of [...messages].reverse()) {
+      if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+      const part = [...message.parts].reverse().find((entry) => isRecord(entry) && entry.type === "tool"
+        && entry.tool === "todowrite" && isRecord(entry.state) && entry.state.status === "completed"
+        && isRecord(entry.state.input) && Array.isArray(entry.state.input.todos));
+      if (isRecord(part) && isRecord(part.state) && isRecord(part.state.input)) {
+        todos = part.state.input.todos;
+        break;
+      }
+    }
+    const todoCounts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
+    for (const todo of todos) {
+      if (!isRecord(todo) || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status)) return undefined;
+      if (todo.status === "in_progress") todoCounts.inProgress += 1;
+      else todoCounts[todo.status] += 1;
+    }
+    const actions = [];
+    const changedPaths = new Map();
+    const checks = [];
+    for (const message of messages) {
+      if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+      for (const part of message.parts) {
+        if (!isRecord(part) || part.type !== "tool" || !isRecord(part.state)
+          || !["completed", "error"].includes(part.state.status) || !isRecord(part.state.input)) continue;
+        const tool = String(part.tool).toLowerCase().replace(/[.-]/g, "_");
+        if (["bash", "shell"].includes(tool)
+          && part.state.input.command === "ingenium-build deployment production-restart") continue;
+        const changes = liveInputChanges(tool, part.state.input, worktree);
+        const path = changes.length === 1 ? changes[0].path : undefined;
+        const kind = tool === "read" ? "read" : tool === "grep" || tool === "glob" ? "search"
+          : tool === "write" || tool === "file_write" ? "write"
+            : tool === "edit" || tool === "file_edit" ? "edit" : "execute";
+        if (part.state.status === "completed") {
+          actions.push({
+            kind,
+            result: "succeeded",
+            path: path ?? null,
+            targetHash: path ? null : sha256(`${tool}\0${JSON.stringify(part.state.input)}`),
+          });
+        }
+        for (const change of changes) {
+          if (!["write", "edit", "apply_patch", "file_write", "file_edit"].includes(tool)) continue;
+          changedPaths.set(change.path, {
+            ...change,
+            additions: 0,
+            deletions: 0,
+            changeRevision: changedPaths.size + 1,
+          });
+        }
+        const name = ["bash", "shell"].includes(tool) ? liveCheckName(part.state.input.command) : undefined;
+        if (name) {
+          const result = part.state.status === "completed" ? "passed" : "failed";
+          const checkStatus = result === "passed" ? "completed" : "failed";
+          const exitCode = liveExitCode(part.state);
+          checks.push({
+            name,
+            status: checkStatus,
+            result,
+            exitCode,
+            targetHash: sha256(JSON.stringify({
+              name,
+              status: checkStatus,
+              result,
+              exitCode,
+              sourceTargetHash: sha256(`${tool}\0${JSON.stringify(part.state.input)}`),
+            })),
+          });
+        }
+      }
+    }
+    const statusValue = statuses[parent.sessionId];
+    const rawStatus = isRecord(statusValue) ? statusValue.type ?? statusValue.status : statusValue;
+    const open = todoCounts.pending > 0 || todoCounts.inProgress > 0;
+    const status = rawStatus === "idle" ? "idle"
+      : ["busy", "retry", "working"].includes(rawStatus) || open ? "working" : "active";
+    const task = session.currentTaskId ?? session.current_task_id ?? session.taskId ?? session.task_id;
+    const taskHash = typeof task === "string" && task.length > 0 && task.length <= 512
+      && !/[\u0000-\u001f\u007f]/.test(task) ? sha256(task) : null;
+    const boundedActions = actions.slice(-64);
+    const boundedChangedPaths = [...changedPaths.values()].slice(-32);
+    const boundedChecks = checks.slice(-32);
+    const failedCheck = [...boundedChecks].reverse().find((check) => check.result === "failed");
+    const latestCheck = boundedChecks.at(-1);
+    const latestAction = boundedActions.at(-1);
+    const populated = Object.values(todoCounts).filter((count) => count > 0).length;
+    const todoState = populated === 0 ? "none" : populated > 1 ? "mixed" : todoCounts.pending ? "pending"
+      : todoCounts.inProgress ? "in_progress" : todoCounts.completed ? "complete" : "cancelled";
+    const nextWork = failedCheck ? { kind: "address_failure", referenceHash: failedCheck.targetHash }
+      : open ? { kind: "continue_task", referenceHash: taskHash }
+        : latestCheck ? { kind: "run_checks", referenceHash: latestCheck.targetHash }
+          : latestAction ? { kind: "review_changes", referenceHash: latestAction.targetHash ?? sha256(latestAction.path) }
+            : { kind: "none", referenceHash: null };
+    const handoff = {
+      status,
+      taskHash,
+      actionCount: boundedActions.length,
+      changedPathCount: boundedChangedPaths.length,
+      checkCount: boundedChecks.length,
+      todos: { total: todos.length, ...todoCounts, state: todoState },
+      nextWork,
+    };
+    return { status: "validated", state: null, handoff: { ...handoff, sha256: sha256(canonicalJson(handoff)) } };
+  } catch {
+    return undefined;
+  }
+}
+
+function bindingFromParent(parent, worktree) {
+  const environment = parent?.environment;
+  if (!environment || !SAFE_PROJECT.test(environment.INGENIUM_PROJECT ?? "")
+    || !UUID.test(environment.INGENIUM_PROJECT_ID ?? "") || !SAFE_ID.test(environment.INGENIUM_WORKSPACE_ID ?? "")
+    || !HASH.test(environment.INGENIUM_STORAGE_MAPPING_HASH ?? "")
+    || environment.INGENIUM_WORKTREE !== worktree) return null;
+  return {
+    project: environment.INGENIUM_PROJECT,
+    projectId: environment.INGENIUM_PROJECT_ID,
+    workspaceId: environment.INGENIUM_WORKSPACE_ID,
+    storageMappingHash: environment.INGENIUM_STORAGE_MAPPING_HASH,
+    worktree,
+  };
+}
+
+function enrollmentClassification(parent, binding, recovery) {
+  if (!parent || !binding) return "ambiguous";
+  if (!recovery.enrollment) return parent.nonceSha256 === "0".repeat(64) ? "legacy_unenrolled" : "unenrolled";
+  const enrolled = recovery.enrollment;
+  return enrolled.pid === parent.pid && enrolled.startTimeTicks === parent.startTimeTicks
+    && enrolled.executableSha256 === parent.executableSha256 && enrolled.nonceSha256 === parent.nonceSha256
+    && enrolled.worktree === binding.worktree && enrolled.project === binding.project
+    && enrolled.projectId === binding.projectId && enrolled.workspaceId === binding.workspaceId
+    && enrolled.storageMappingHash === binding.storageMappingHash && enrolled.dataHome === parent.dataHome
+    && enrolled.port === parent.port ? "enrolled" : "ambiguous";
+}
+
+export async function collectRecoveryPreflight(options = {}) {
+  const environment = options.environment ?? process.env;
+  const sourcePath = resolve(options.sourcePath ?? fileURLToPath(import.meta.url));
+  const declaredWorktree = environment.INGENIUM_WORKTREE;
+  let worktree;
+  try {
+    worktree = declaredWorktree && realpathSync(declaredWorktree);
+    if (!worktree || worktree !== resolve(declaredWorktree)) throw new Error("worktree");
+  } catch {
+    worktree = null;
+  }
+  let source;
+  try {
+    source = readTrustedRegularFile(sourcePath, "Recovery bootstrap shim", {
+      expectedMode: 0o644,
+      expectedOwner: ownerUid(),
+    });
+  } catch {}
+  const ancestry = worktree ? inspectAncestry(worktree) : { status: "ambiguous", members: [], parent: null };
+  const parentInternal = ancestry.parent;
+  const parent = parentInternal ? Object.fromEntries(Object.entries(parentInternal).filter(([key]) => key !== "environment")) : null;
+  const binding = worktree ? bindingFromParent(parentInternal, worktree) : null;
+  let recovery = worktree ? readRecoverySummary(worktree) : {
+    summary: { status: "invalid", state: null, handoff: null }, enrollment: null,
+  };
+  if (worktree && parentInternal && parentInternal.port !== null) {
+    const live = await readLiveRecoverySummary(parentInternal, worktree, options.request ?? fetch);
+    recovery = {
+      summary: live ? { ...live, state: recovery.summary.state } : { status: "invalid", state: recovery.summary.state, handoff: null },
+      enrollment: recovery.enrollment,
+    };
+  }
+  const gitSummary = worktree && source
+    ? collectGitSummary(worktree, source.path, source.bytes)
+    : { status: "invalid", head: null, dirtyPaths: [], sourceMatchesHead: false };
+  const protectedIndex = worktree ? resolve(worktree, ".opencode/protected-runtime-index") : null;
+  const coordination = protectedIndex ? summarizeCoordinationOutboxState(protectedIndex) : {
+    outbox: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
+    disposition: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
+  };
+  const { outbox, disposition } = coordination;
+  const freeze = protectedIndex
+    ? summarizeFreeze(resolve(protectedIndex, "coordination-outbox-mutation.lock"))
+    : { status: "invalid", sha256: null };
+  const classification = enrollmentClassification(parentInternal, binding, recovery);
+  const apiHealth = await collectApiHealth(parentInternal?.environment ?? environment, options.request ?? fetch);
+  const imageRevision = parentInternal?.environment?.IMAGE_REVISION ?? environment.IMAGE_REVISION;
+  const ociRevision = /^[0-9a-f]{40}$/.test(imageRevision ?? "")
+    ? { status: "attested", revision: imageRevision }
+    : { status: "unconfigured", revision: null };
+  const failures = [];
+  if (!worktree) failures.push("worktree");
+  if (!source) failures.push("source");
+  if (ancestry.status !== "exact" || !parent) failures.push("parent_identity");
+  if (!binding) failures.push("binding");
+  if (gitSummary.status !== "validated") failures.push("git");
+  if (recovery.summary.status !== "validated") failures.push("recovery_handoff");
+  if (recovery.summary.state && recovery.summary.state.phase !== "enrolled") failures.push("recovery_phase");
+  if (classification === "ambiguous") failures.push("nonce_enrollment");
+  if (outbox.status === "invalid" || outbox.ambiguousCount > 0) failures.push("outbox");
+  if (disposition.status === "invalid") failures.push("disposition");
+  if (freeze.status === "invalid" || freeze.status === "present") failures.push("freeze");
+  if (["invalid", "unavailable", "unhealthy"].includes(apiHealth.status)) failures.push("api_health");
+  return {
+    schemaVersion: 1,
+    action: "production-restart",
+    admissible: failures.length === 0,
+    failures: [...new Set(failures)].sort(),
+    source: source ? {
+      status: "validated",
+      sha256: source.sha256,
+      regularFile: true,
+      gitMatching: gitSummary.sourceMatchesHead,
+      ownerControlled: true,
+      groupWorldWritable: false,
+      mode: "0644",
+      expectedMode: "0644",
+    } : {
+      status: "invalid",
+      sha256: null,
+      regularFile: null,
+      gitMatching: false,
+      ownerControlled: null,
+      groupWorldWritable: null,
+      mode: null,
+      expectedMode: "0644",
+    },
+    ancestry: { status: ancestry.status, members: ancestry.members },
+    parent,
+    nonceEnrollment: { classification },
+    binding,
+    git: gitSummary,
+    recovery: recovery.summary,
+    outbox,
+    disposition,
+    freeze,
+    deployed: { ociRevision, apiHealth },
+  };
+}
+
+export function recoveryAdmissionPath(worktree) {
+  const root = resolve(worktree);
+  if (realpathSync(root) !== root) throw new Error("Recovery admission worktree is not canonical");
+  return resolve(root, RECOVERY_ADMISSION_RELATIVE_PATH);
+}
+
+function recoveryAdmissionExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function expectedRecoveryAdmission(preflight, preflightDigest) {
+  if (!preflight.admissible || !HASH.test(preflightDigest) || preflightDigest !== sha256(canonicalJson(preflight))
+    || !GIT_OID.test(preflight.git?.head ?? "") || !preflight.parent || !preflight.binding) {
+    throw new Error("Recovery admission preflight is not admissible");
+  }
+  return {
+    head: preflight.git.head,
+    parent: {
+      pid: preflight.parent.pid,
+      startTimeTicks: preflight.parent.startTimeTicks,
+      executableSha256: preflight.parent.executableSha256,
+      nonceSha256: preflight.parent.nonceSha256,
+      sessionId: preflight.parent.sessionId,
+    },
+    binding: {
+      project: preflight.binding.project,
+      workspaceId: preflight.binding.workspaceId,
+      storageMappingHash: preflight.binding.storageMappingHash,
+      worktree: preflight.binding.worktree,
+    },
+  };
+}
+
+export function validateAndConsumeRecoveryAdmission(path, preflight, preflightDigest, now = Date.now()) {
+  const expected = expectedRecoveryAdmission(preflight, preflightDigest);
+  const requested = resolve(path);
+  const owner = ownerUid();
+  let descriptor;
+  try {
+    const parent = dirname(requested);
+    const parentStat = lstatSync(parent);
+    if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || parentStat.uid !== owner
+      || (parentStat.mode & 0o022) !== 0 || realpathSync(parent) !== parent) {
+      throw new Error("Recovery admission directory is not trusted");
+    }
+    const before = lstatSync(requested);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== owner
+      || (before.mode & 0o022) !== 0 || before.size < 1 || before.size > RECOVERY_ADMISSION_MAX_BYTES
+      || realpathSync(requested) !== requested) throw new Error("Recovery admission artifact is not trusted");
+    descriptor = openSync(requested, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & 0o022) !== 0
+      || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+      throw new Error("Recovery admission artifact is not trusted");
+    }
+    const bytes = readBoundedDescriptor(descriptor, RECOVERY_ADMISSION_MAX_BYTES);
+    const afterRead = fstatSync(descriptor);
+    const afterPath = lstatSync(requested);
+    if (bytes.length !== opened.size || afterRead.dev !== opened.dev || afterRead.ino !== opened.ino
+      || afterRead.size !== opened.size || afterRead.mtimeMs !== opened.mtimeMs || afterRead.ctimeMs !== opened.ctimeMs
+      || !afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.nlink !== 1
+      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size
+      || afterPath.uid !== owner || (afterPath.mode & 0o022) !== 0) {
+      throw new Error("Recovery admission artifact changed during validation");
+    }
+    const text = bytes.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(bytes)) throw new Error("Recovery admission artifact is invalid");
+    let admission;
+    try { admission = JSON.parse(text); } catch { throw new Error("Recovery admission artifact is invalid"); }
+    if (!hasExactKeys(admission, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "issuedAt", "expiresAt"])
+      || admission.schemaVersion !== 1 || admission.action !== "production-restart"
+      || admission.preflightDigest !== preflightDigest || admission.head !== expected.head
+      || canonicalJson(admission.parent) !== canonicalJson(expected.parent)
+      || canonicalJson(admission.binding) !== canonicalJson(expected.binding)
+      || !hasExactKeys(admission.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "sessionId"])
+      || !hasExactKeys(admission.binding, ["project", "workspaceId", "storageMappingHash", "worktree"])
+      || !Number.isSafeInteger(admission.parent.pid) || admission.parent.pid < 2
+      || !Number.isSafeInteger(admission.parent.startTimeTicks) || admission.parent.startTimeTicks < 1
+      || !HASH.test(admission.parent.executableSha256) || !HASH.test(admission.parent.nonceSha256)
+      || !SAFE_SESSION.test(admission.parent.sessionId) || !SAFE_PROJECT.test(admission.binding.project)
+      || !SAFE_ID.test(admission.binding.workspaceId) || !HASH.test(admission.binding.storageMappingHash)
+      || resolve(admission.binding.worktree) !== admission.binding.worktree
+      || typeof admission.issuedAt !== "string" || typeof admission.expiresAt !== "string") {
+      throw new Error("Recovery admission artifact does not match the current preflight");
+    }
+    const issuedAt = Date.parse(admission.issuedAt);
+    const expiresAt = Date.parse(admission.expiresAt);
+    if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
+      || new Date(issuedAt).toISOString() !== admission.issuedAt || new Date(expiresAt).toISOString() !== admission.expiresAt
+      || issuedAt > now + 30_000 || now - issuedAt > RECOVERY_ADMISSION_LIFETIME_MS
+      || expiresAt <= now || expiresAt <= issuedAt || expiresAt - issuedAt > RECOVERY_ADMISSION_LIFETIME_MS) {
+      throw new Error("Recovery admission artifact is stale");
+    }
+    fchmodSync(descriptor, 0o400);
+    fsyncSync(descriptor);
+    const hardened = fstatSync(descriptor);
+    const current = lstatSync(requested);
+    if ((hardened.mode & 0o777) !== 0o400 || hardened.dev !== opened.dev || hardened.ino !== opened.ino
+      || hardened.size !== opened.size || hardened.mtimeMs !== opened.mtimeMs
+      || !current.isFile() || current.isSymbolicLink() || current.dev !== opened.dev || current.ino !== opened.ino
+      || (current.mode & 0o777) !== 0o400) throw new Error("Recovery admission artifact changed before consumption");
+    const consumed = resolve(dirname(requested), `${basename(requested)}.consumed-${preflightDigest}.json`);
+    linkSync(requested, consumed);
+    const consumedDescriptor = openSync(consumed, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const linked = fstatSync(consumedDescriptor);
+      if (!linked.isFile() || linked.nlink !== 2 || linked.dev !== opened.dev || linked.ino !== opened.ino
+        || linked.uid !== owner || (linked.mode & 0o777) !== 0o400) {
+        throw new Error("Recovery admission consumption is not replay safe");
+      }
+      unlinkSync(requested);
+      const consumedStat = fstatSync(consumedDescriptor);
+      const consumedPath = lstatSync(consumed);
+      if (!consumedStat.isFile() || consumedStat.nlink !== 1 || consumedStat.dev !== opened.dev
+        || consumedStat.ino !== opened.ino || !consumedPath.isFile() || consumedPath.isSymbolicLink()
+        || consumedPath.nlink !== 1 || consumedPath.dev !== opened.dev || consumedPath.ino !== opened.ino
+        || consumedPath.uid !== owner || (consumedPath.mode & 0o777) !== 0o400) {
+        throw new Error("Recovery admission consumption is not replay safe");
+      }
+    } finally {
+      closeSync(consumedDescriptor);
+    }
+    const parentDescriptor = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try { fsyncSync(parentDescriptor); } finally { closeSync(parentDescriptor); }
+    return consumed;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 export function normalizeTrustedRegularFileMode(path, label, expectedMode, expectedOwner = ownerUid()) {
   const canonical = resolve(path);
   if ((expectedMode & 0o022) !== 0) throw new TrustedRegularFileError(label, "mode");
@@ -449,6 +1423,7 @@ function gitEnvironment() {
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_TERMINAL_PROMPT: "0",
     GIT_LITERAL_PATHSPECS: "1",
+    GIT_OPTIONAL_LOCKS: "0",
   };
 }
 
@@ -777,7 +1752,7 @@ export function privateNpmConfiguration(owner = ownerUid()) {
   };
 }
 
-export async function runRecoveryBootstrapShim(argv = process.argv) {
+async function runAdmittedRecoveryBootstrapShim(argv) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
   const owner = ownerUid();
   const sourcePath = resolve(fileURLToPath(import.meta.url));
@@ -795,6 +1770,7 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
     }
     throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
   }
+  normalizeTrustedRegularFileMode(sourcePath, "Recovery bootstrap shim", 0o644, owner);
   const { repoRoot, packageRoot, scriptsPath } = hardenCanonicalRepositoryDirectories(
     sourcePath,
     declaredWorktree,
@@ -802,6 +1778,7 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
     { retainAudit: (audits) => retainCanonicalDirectoryAudit(audits, owner) },
   );
   const source = readTrustedRegularFile(resolve(scriptsPath, "recovery-bootstrap.js"), "Recovery bootstrap shim", {
+    expectedMode: 0o644,
     expectedOwner: owner,
   });
   verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
@@ -878,6 +1855,29 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
   } finally {
     npmConfiguration.cleanup();
   }
+}
+
+export async function runRecoveryBootstrapShim(argv = process.argv, dependencies = {}) {
+  if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
+  const preflight = await (dependencies.collectPreflight ?? collectRecoveryPreflight)({
+    environment: process.env,
+    sourcePath: resolve(fileURLToPath(import.meta.url)),
+  });
+  const { digest, output } = recoveryPreflightOutput(preflight);
+  const admissionPath = dependencies.admissionPath
+    ?? (preflight.binding?.worktree ? recoveryAdmissionPath(preflight.binding.worktree) : undefined);
+  const exists = dependencies.admissionExists ?? recoveryAdmissionExists;
+  if (!admissionPath || !exists(admissionPath)) {
+    (dependencies.writeOutput ?? ((value) => process.stdout.write(value)))(`${output}\n`);
+    return;
+  }
+  (dependencies.consumeAdmission ?? validateAndConsumeRecoveryAdmission)(
+    admissionPath,
+    preflight,
+    digest,
+    (dependencies.now ?? Date.now)(),
+  );
+  await (dependencies.executeAdmitted ?? runAdmittedRecoveryBootstrapShim)(argv);
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : undefined;
