@@ -349,6 +349,76 @@ OpenCode interactive `question` access is denied globally and in every custom ag
 
 Each declared implementation boundary receives exactly one QA report and at most one security report. Security is dispatched only when the task contract predeclares a changed security surface; ordinary harness or test changes are not a security surface. Reviewers cannot add acceptance criteria or expand scope, have no task-delegation authority, cannot spawn one another, and cannot reopen a closed task. After a writer remediates a reviewer-reported BLOCKING root cause, no reviewer is rerun: run only the named minimum targeted regression, then proceed directly to the declared deploy and acceptance steps. User urgency does not waive declared functional tests, but it forbids speculative hardening loops.
 
+### 🔴 Deterministic Failure, Authorization, and Dispatch Safeguards
+
+These guards add a same-turn continuation state machine; they do not replace or
+weaken the existing five `ESCALATE_USER` conditions, safety checks, exact-two
+pairing, concurrency and territory limits, bounded QA/security/visual gates, or
+TUI restart gates. Every nonterminal failure—including internal tool/profile or
+managed-shell denial, stale claim, unavailable subagent, failed check, and
+task/tool cancellation—must take exactly one transition in the same turn. A
+`BLOCKED` label is recoverable state, never a bare terminal response.
+
+Apply this table top-to-bottom:
+
+| Condition | Required transition and meaning |
+|---|---|
+| The outcome or mutation is unknown: a task/tool was canceled or aborted, a claim is stale, or transport ended before the result was known. | `RECOVER_UNKNOWN_OUTCOME` — preserve the unknown outcome, first failure, worktree, and evidence; reconcile durable status, claims, and outbox; perform the existing read-only recovery preflight; then resume without replaying an uncertain mutation. |
+| A concrete, reproducible in-scope policy, source, managed-command, or check defect is identified. | `AUTO_REMEDIATE_ROOT_CAUSE` — repair the named cause and run only its minimum proving regression before continuing the declared flow. |
+| All applicable configured supported paths actually fail, and one of the five permitted escalation conditions below is proven with a concrete user-resolvable action or decision and retained evidence. | `ESCALATE_EXTERNAL` — the only failure transition that may produce terminal `ESCALATE_USER`; it is invalid without the required condition, action/decision, and evidence. |
+| Any other denial, unavailable subagent, failed check, activation-pending branch, or internal blocker. | `CONTINUE_INDEPENDENT_WORK` — run the next safe dependency-ready Todo or supported recovery/status step, preserve the blocked item and evidence, and continue without a terminal or status-only response. |
+
+`ESCALATE_EXTERNAL` remains limited to: (1) required external credential or
+access unavailable after the configured supported path; (2) a destructive or
+irreversible operation lacking authorization; (3) a mutually exclusive product
+decision; (4) a genuinely ambiguous user requirement; or (5) bounded diagnosis
+cannot establish a reproducible root cause. The applicable configured supported
+paths must actually be exhausted first. The escalation must state what the user
+can concretely provide, authorize, or decide. If the user cannot resolve the
+condition, it is not an escalation: continue recovery, causal remediation, or
+independent work instead.
+
+For a canceled or aborted task, preserve the unknown outcome and first failure,
+then immediately reconcile durable status, claims, and outbox **before** any
+retry or replay. Continue in the same turn without a user reprompt; a tool/task
+cancellation is not itself an explicit user `STOP`/`CANCELLED` request.
+
+Explicit authorization persists for the exact declared scope through retries,
+recovery, and same-turn failures. `DO NOT ASK AGAIN` forbids asking again for
+the same key or record, including an atomically changing hash/count race.
+Broadened keys or resources are new scope and require their own authorization
+unless the user explicitly authorized that resource class.
+
+Before invoking `Task`, a deterministic guard must reject the dispatch unless
+there is a nonempty real task description/prompt, a complete contract containing
+all required phase-declaration fields, a dependency-ready Todo, and exactly two
+agents for that Todo in one parallel call, with valid roles, non-overlapping
+territories, and valid active/writer counts. Placeholder text, singleton calls,
+malformed contracts, and substitute pair members are rejected before invocation;
+do not bypass the guard to make progress.
+
+When a command, tool, profile, or managed shell is denied, use this fallback
+order: inspect effective grants and source; use the correct already-authorized
+agent or managed command; use supported MCP/API recovery status; causally repair
+the in-scope policy or source; then continue independent work while activation
+is pending. Never bypass security policy or ask the user to run a command that
+is already in scope.
+
+No bootstrap cycle is valid: code, a profile, or an instruction loaded only
+after a restart must not be required to create the evidence or authorization
+needed before that restart. Use an already-loaded recovery capability or an
+externally supervised replacement-first path, with replacement health,
+rollback or authorized adoption, reconnect/resume, split-brain fencing, and a
+deterministic fallback. Parent/config instruction changes require a **full safe
+parent OpenCode restart** to affect existing sessions; restarting only the
+child MCP process is insufficient. The existing TUI restart gate remains
+mandatory.
+
+Before any terminal response, reconcile `TodoWrite` and roadmap state and prove
+that no dependency-ready work remains. An open item plus an internal blocker
+forces another valid pair dispatch or causal remediation; it cannot produce a
+bare `BLOCKED` or status-only terminal response.
+
 ### Human-Readable Orchestration Communication
 
 The structured task contract and phase accounting remain mandatory, but the
@@ -670,7 +740,7 @@ parent configuration; frontmatter is not a second root mapping. After the parent
 restarts, verify the exact mapped profile and root-effective grants before
 resuming recovery.
 
-After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result means stop and reconfigure the visual-QA path; it is not a pass.
+After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result holds the visual-QA gate and requires reconfiguration/recovery under the deterministic transitions above; it is not a pass or terminal response.
 
 > See the [orchestrator agent profile](./.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification, dispatch examples, and collision resolution rules.
 
@@ -988,6 +1058,7 @@ For quick reference, here are the non-negotiable rules from above:
 | 30 | Task/tool transport aborts are nonterminal; recover state immediately and never end a turn because a restart task aborted | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 31 | Legacy unenrolled parents use automatic bootstrap and are never signaled first | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 32 | Actual TUI/session/`TodoWrite` replay evidence is mandatory; source tests and deployed canaries are not substitutes | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 33 | Every nonterminal failure takes one same-turn deterministic transition; no bare `BLOCKED` or status-only terminal response | [Deterministic Failure, Authorization, and Dispatch Safeguards](#-deterministic-failure-authorization-and-dispatch-safeguards) |
 
 ---
 
