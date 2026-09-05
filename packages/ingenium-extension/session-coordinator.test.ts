@@ -1651,7 +1651,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     }
   });
 
-  it("trusteddeployment admits exact recovery commands only for trusted deployment-owner identities", async () => {
+  it("trusteddeployment admits the fixed restart when the legacy coordinator has no enrollment hook", async () => {
     const fixture = coordinationFixture();
     const evidence = { sessionID: "deployment-session", callID: "", tool: "bash", args: {}, agent: "" };
     const process = processHarness("deployment-project", "/tmp/deployment/home", "/tmp/deployment/xdg", 43026, {});
@@ -1675,11 +1675,12 @@ describe("SessionCoordinatorPlugin hooks", () => {
     } : { authenticated: false, error: "Unable to authenticate with Ingenium API", failure: "authentication" });
     const request = vi.fn(async () => new Response(JSON.stringify({
       data: { project: { id: projectId, name: process.binding.project } },
-    }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
-    const hooks = new SessionCoordinator(process, {
-      binding: process.binding, callTool: fixture.callTool, preflight, request,
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const coordinator = new SessionCoordinator(process, {
+      binding: process.binding, callTool: fixture.callTool, preflight, request: request as unknown as typeof fetch,
       now: () => 305, token: () => "D".repeat(32), disableHeartbeat: true,
-    }).hooks();
+    });
+    const hooks = coordinator.hooks();
     const encoded = (operation: string) => Buffer.from(JSON.stringify(["deployment", operation])).toString("base64url");
     const command = (operation: string) => `ingenium-build ${encoded(operation)}`;
     const sessionID = "deployment-session";
@@ -1687,6 +1688,11 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await hooks["chat.message"]?.({ sessionID, agent: "ingenium-software-engineer-premium" } as any, {
       message: {} as any, parts: [],
     });
+    authenticateDeployment = true;
+    await (coordinator as any).register(sessionID);
+    authenticateDeployment = false;
+    preflight.mockClear();
+    request.mockClear();
     await expect(hooks["tool.execute.before"]!(
       { tool: "bash", sessionID: "unknown-session", callID: "forged-premium" },
       { args: { command: command("compose-ps") } },

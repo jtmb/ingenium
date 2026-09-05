@@ -5,6 +5,7 @@ import {
   chmodSync,
   closeSync,
   constants,
+  copyFileSync,
   existsSync,
   fchmodSync,
   fstatSync,
@@ -41,6 +42,7 @@ import {
   managedGitEnvironment,
   managedReplacementFirstRestart,
   managedRecoveryEnvironment,
+  normalizeManagedRecoveryBootstrapMode,
   managedRepositoryArgv,
   runManagedCommandCli,
   terminateTimedOutManagedProcess,
@@ -61,6 +63,7 @@ import {
   commitManagedRecoveryReplacement,
   parseLegacyRecoveryOwnerPayload,
   prepareManagedRecoveryReplacement,
+  readLegacyRecoveryHandoff,
   readManagedRecoveryEnrollment,
   readRecoveryServerAuthentication,
   recordManagedRecoveryAttachEvent,
@@ -71,12 +74,15 @@ import {
   appendProductionRestartCandidateRejection,
   appendProductionRestartEvidence,
   hardenLegacyProductionCredentialPermissions,
+  inspectExpectedProcessIdentity,
   openCodeJsonRequest,
   parseListeningLoopbackPorts,
+  persistClaimedLegacyHandoff,
   publishRestartHandoff,
   probeReplacementHealthGate,
   productionRestartCanonicalWorktree,
   productionRestartDependencies,
+  redactedHandoffFromExport,
   restartHandoffEvidence,
   restartHandoffMemoryEntry,
   runProductionRestartCli,
@@ -95,6 +101,7 @@ const {
   recoveryBootstrapCheckEnvironment,
   recoveryBootstrapCanonicalWorktree,
   recoveryBootstrapRestartEnvironment,
+  normalizeGeneratedRecoveryExecutable,
   runRecoveryBootstrap,
   verifyRecoveryBootstrapInvocation,
 } = await vi.importActual<Record<string, any>>("./scripts/recovery-bootstrap.ts");
@@ -108,6 +115,7 @@ const repositoryRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url))
 const recoveryBootstrapSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.ts");
 const recoveryBootstrapShim = join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.js");
 const productionRestartSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "production-restart.ts");
+const importModule = (url: string): Promise<any> => import(/* @vite-ignore */ url);
 
 function trustedFailureReason(run: () => unknown): string | undefined {
   try {
@@ -189,7 +197,7 @@ function startRecoveryProcess(worktree: string, nonce?: string): ChildProcess {
   });
 }
 
-function recoveryPayload(worktree: string, parent: RestartProcessIdentity & { port: number; dataHome: string }): Record<string, unknown> {
+function recoveryPayload(worktree: string, parent: RestartProcessIdentity & { port: number | null; dataHome: string }): Record<string, unknown> {
   return {
     schemaVersion: 1,
     worktree,
@@ -321,10 +329,18 @@ describe("managed command wrappers", () => {
         { ...payload, handoff: { ...(payload.handoff as object), changedPaths: [{ path: ".opencode/protected-runtime-index/state", operation: "edit", additions: 1, deletions: 0, changeRevision: 1 }] } },
         { ...payload, handoff: { ...(payload.handoff as object), actions: [{ kind: "execute", result: "succeeded", path: null, targetHash: "raw command" }] } },
         { ...payload, handoff: { ...(payload.handoff as object), checks: [{ name: "test", status: "completed", result: "failed", exitCode: 1, targetHash: sha256("invalid-check") }] } },
-        { ...payload, handoff: { ...(payload.handoff as object), actions: [] } },
-        { ...payload, handoff: { ...(payload.handoff as object), changedPaths: [] } },
-        { ...payload, handoff: { ...(payload.handoff as object), checks: [] } },
       ]) expect(() => parseLegacyRecoveryOwnerPayload(encoded(invalid))).toThrow();
+
+      const emptyHandoff = {
+        status: "active",
+        taskHash: null,
+        actions: [],
+        changedPaths: [],
+        checks: [],
+        todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" },
+        nextWork: { kind: "none", referenceHash: null },
+      };
+      expect(parseLegacyRecoveryOwnerPayload(encoded({ ...payload, handoff: emptyHandoff })).handoff).toEqual(emptyHandoff);
 
       const paths = recoveryPaths(worktree);
       const ownerNonce = "o".repeat(43);
@@ -836,6 +852,29 @@ describe("managed command wrappers", () => {
     expect(managedRecoveryBootstrapPath(builtWrapper)).not.toBe(innerBootstrap);
   });
 
+  it("fixed deployment normalizes only the reviewed tracked bootstrap mode", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-recovery-bootstrap-mode-"));
+    const source = join(worktree, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+    try {
+      mkdirSync(dirname(source), { recursive: true });
+      writeFileSync(source, "export {};\n", { mode: 0o644 });
+      execFileSync("/usr/bin/git", ["-C", worktree, "init", "--quiet"]);
+      execFileSync("/usr/bin/git", ["-C", worktree, "add", "."]);
+      execFileSync("/usr/bin/git", ["-C", worktree, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "checkpoint"]);
+
+      chmodSync(source, 0o674);
+      expect(normalizeManagedRecoveryBootstrapMode(source, worktree)).toBe(source);
+      expect(lstatSync(source).mode & 0o777).toBe(0o644);
+
+      writeFileSync(source, "export const changed = true;\n");
+      chmodSync(source, 0o674);
+      expect(() => normalizeManagedRecoveryBootstrapMode(source, worktree)).toThrow();
+      expect(lstatSync(source).mode & 0o777).toBe(0o674);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
   it("recovery checkpoint hardens final build output before writing evidence and launching production restart", () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-recovery-bootstrap-output-"));
     const distPath = join(worktree, "packages/ingenium-extension/dist");
@@ -843,7 +882,8 @@ describe("managed command wrappers", () => {
     const productionRestart = join(scriptsPath, "production-restart.js");
     const evidencePath = join(scriptsPath, "recovery-bootstrap-evidence.json");
     mkdirSync(scriptsPath, { recursive: true });
-    writeFileSync(productionRestart, "export {}\n");
+    writeFileSync(productionRestart, "export {}\n", { mode: 0o575 });
+    chmodSync(productionRestart, 0o575);
     const calls: Array<{ command: string; argv: readonly string[]; options: Record<string, unknown> }> = [];
     const runner = vi.fn((command: string, argv: readonly string[], options: Record<string, unknown>) => {
       const env = options.env as NodeJS.ProcessEnv;
@@ -864,6 +904,7 @@ describe("managed command wrappers", () => {
       }
       if (command === process.execPath) {
         expect([distPath, scriptsPath].map((path) => lstatSync(path).mode & 0o777)).toEqual([0o755, 0o755]);
+        expect(lstatSync(productionRestart).mode & 0o777).toBe(0o555);
         expect(JSON.parse(readFileSync(evidencePath, "utf8")).productionRestart.result).toBe("pending");
       }
       return { error: undefined, signal: null, status: 0 };
@@ -1255,7 +1296,6 @@ describe("managed command wrappers", () => {
   });
 
   it("source recovery shim hardens all four canonical repository directories and emits bounded JSONL", async () => {
-    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-harden-"));
     try {
@@ -1310,7 +1350,7 @@ describe("managed command wrappers", () => {
         ]);
       }
       expect(shim.CANONICAL_DIRECTORY_AUDIT_PATH)
-        .toBe("/tmp/opencode/recovery-bootstrap-directory-audit.jsonl");
+        .toBe(`/tmp/opencode-${process.getuid!()}/recovery-bootstrap-directory-audit.jsonl`);
 
       const outside = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-outside-"));
       try {
@@ -1355,6 +1395,12 @@ describe("managed command wrappers", () => {
     };
     try {
       const generated = createGenerated("valid");
+      const generatedBootstrap = join(generated.scriptsPath, "recovery-bootstrap.js");
+      const generatedRestart = join(generated.scriptsPath, "production-restart.js");
+      for (const path of [generatedBootstrap, generatedRestart]) {
+        writeFileSync(path, "export {};\n", { mode: 0o575 });
+        chmodSync(path, 0o575);
+      }
       const descriptorFchmod = vi.fn(fchmodSync);
       const descriptorFsync = vi.fn(fsyncSync);
       expect(shim.hardenGeneratedBootstrapDirectories(generated.packageRoot, owner, {
@@ -1364,6 +1410,12 @@ describe("managed command wrappers", () => {
         .toEqual([0o755, 0o755]);
       expect(descriptorFchmod).toHaveBeenCalledTimes(2);
       expect(descriptorFsync).toHaveBeenCalledTimes(2);
+      expect(shim.normalizeTrustedRegularFileMode(
+        generatedBootstrap, "Generated recovery bootstrap", 0o555, owner,
+      )).toBe(generatedBootstrap);
+      expect(normalizeGeneratedRecoveryExecutable(generatedRestart)).toBe(generatedRestart);
+      expect([generatedBootstrap, generatedRestart].map((path) => lstatSync(path).mode & 0o777))
+        .toEqual([0o555, 0o555]);
 
       const wrongOwner = createGenerated("wrong-owner");
       expect(trustedFailureReason(() => shim.hardenGeneratedBootstrapDirectories(wrongOwner.packageRoot, owner + 1)))
@@ -1410,7 +1462,6 @@ describe("managed command wrappers", () => {
   });
 
   it("source recovery shim leaves trusted 0755 unchanged without descriptor mutation", async () => {
-    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-unchanged-"));
     try {
@@ -1445,7 +1496,6 @@ describe("managed command wrappers", () => {
   });
 
   it("source recovery shim rejects world-writable, wrong-owner, symlink, and non-directory paths", async () => {
-    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-reject-"));
     try {
@@ -1498,7 +1548,6 @@ describe("managed command wrappers", () => {
   });
 
   it("source recovery shim rejects inode swaps and failed descriptor hardening", async () => {
-    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const directory = mkdtempSync(join(tmpdir(), "ingenium-source-recovery-directory-race-"));
     try {
@@ -1559,7 +1608,6 @@ describe("managed command wrappers", () => {
   });
 
   it("installed current managed wrapper resolves production restart to the source shim", async () => {
-    const importModule = Function("url", "return import(url)") as (url: string) => Promise<any>;
     const installed = join(dirname(fileURLToPath(import.meta.url)), "dist", "scripts", "managed-command-wrapper.js");
     const wrapper = await importModule(`${pathToFileURL(installed).href}?test=${Date.now()}`);
     expect(wrapper.managedBuildExecution(["deployment", "production-restart"])).toEqual({
@@ -1584,6 +1632,7 @@ describe("managed command wrappers", () => {
         managedCommand("build", ["deployment", "production-restart"], directory, {
           runner: runner as any,
           terminateTimedOut,
+          normalizeRecoveryBootstrap: (path) => path,
         });
       } catch (error) {
         failure = error;
@@ -1920,10 +1969,187 @@ describe("managed command wrappers", () => {
     }
   });
 
+  it("fixed deployment attests a deleted live executable through its kernel handle", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-deleted-executable-"));
+    const executable = join(directory, "opencode");
+    let child: ChildProcess | undefined;
+    try {
+      copyFileSync(process.execPath, executable);
+      chmodSync(executable, 0o755);
+      child = spawn(executable, ["--input-type=module", "--eval", "setTimeout(() => process.exit(0), 10000)"], {
+        stdio: "ignore",
+      });
+      if (child.pid === undefined) throw new Error("Deleted executable fixture did not start");
+      const identity = recoveryProcessIdentity(child.pid, "0".repeat(64));
+      rmSync(executable);
+      expect(readlinkSync(`/proc/${child.pid}/exe`)).toContain("(deleted)");
+      expect(inspectExpectedProcessIdentity(identity)).toEqual(identity);
+      expect(inspectExpectedProcessIdentity({ ...identity, executableSha256: sha256("wrong") })).toBeUndefined();
+    } finally {
+      if (child) await stopRecoveryProcess(child);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("autonomous-recovery captures the legacy session under an external scoped claim", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-legacy-durable-handoff-"));
+    const dataHome = join(worktree, "data-home");
+    const priorNonce = process.env.INGENIUM_RESTART_NONCE;
+    try {
+      delete process.env.INGENIUM_RESTART_NONCE;
+      mkdirSync(dataHome, { mode: 0o700 });
+      mkdirSync(join(worktree, ".opencode", "protected-runtime-index"), { recursive: true, mode: 0o700 });
+      chmodSync(join(worktree, ".opencode", "protected-runtime-index"), 0o700);
+      const projectId = "00000000-0000-4000-8000-000000000001";
+      const storageMappingHash = sha256("legacy-storage");
+      const sessionId = "legacy-session";
+      const handoff = {
+        status: "working" as const,
+        taskHash: sha256("current-task"),
+        actions: [{ kind: "read" as const, result: "succeeded" as const, path: "src/current.ts", targetHash: null }],
+        changedPaths: [],
+        checks: [],
+        todos: { total: 2, pending: 1, inProgress: 1, completed: 0, cancelled: 0, state: "mixed" as const },
+        nextWork: { kind: "continue_task" as const, referenceHash: sha256("current-task") },
+      };
+      expect(redactedHandoffFromExport({
+        info: { id: sessionId, directory: worktree },
+        messages: [{
+          info: { id: "message-1", role: "assistant" },
+          parts: [
+            {
+              type: "tool",
+              tool: "todowrite",
+              state: { status: "completed", input: { todos: [
+                { content: "capture", status: "completed", priority: "high" },
+                { content: "restart", status: "in_progress", priority: "high" },
+              ] } },
+            },
+            {
+              type: "tool",
+              tool: "apply_patch",
+              state: { status: "completed", input: { patchText: "*** Begin Patch\n*** Update File: src/current.ts\n*** End Patch" } },
+            },
+            {
+              type: "tool",
+              tool: "bash",
+              state: { status: "completed", input: { command: "npm run typecheck" }, metadata: { exitCode: 0 } },
+            },
+            {
+              type: "tool",
+              tool: "bash",
+              state: { status: "running", input: { command: "ingenium-build deployment production-restart" } },
+            },
+          ],
+        }],
+      }, sessionId, worktree)).toMatchObject({
+        status: "working",
+        changedPaths: [{ path: "src/current.ts", operation: "edit" }],
+        checks: [{ name: "typecheck", status: "completed", result: "passed", exitCode: 0 }],
+        todos: { total: 2, pending: 0, inProgress: 1, completed: 1, cancelled: 0, state: "mixed" },
+        nextWork: { kind: "continue_task" },
+      });
+      expect(redactedHandoffFromExport({
+        info: { id: sessionId, directory: worktree },
+        messages: [],
+      }, sessionId, worktree)).toBeUndefined();
+
+      const request = replacementRequest(worktree);
+      request.oldProcess = recoveryProcessIdentity(process.pid, "0".repeat(64));
+      request.oldPort = null;
+      request.oldDataHome = dataHome;
+      request.handoff = handoff;
+      request.binding.projectId = projectId;
+      request.binding.workspaceId = "legacy-workspace";
+      request.binding.storageMappingHash = storageMappingHash;
+      const binding: ProductionRestartBinding = {
+        ...request.binding,
+        apiUrl: "http://127.0.0.1:4097/api/v1",
+        project: "legacy-project",
+        credentialFile: join(worktree, ".credential"),
+      };
+      binding.projectId = projectId;
+      binding.workspaceId = "legacy-workspace";
+      binding.storageMappingHash = storageMappingHash;
+      const artifact = join(worktree, ".opencode", "protected-runtime-index", "tui-recovery", "legacy-handoff.json");
+      const calls: string[] = [];
+      const operationId = "00000000-0000-4000-8000-000000000010";
+      const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+        calls.push(`${name}:${String(args.operation ?? args.action ?? "status")}:${existsSync(artifact)}`);
+        if (name === "coordination_update" && args.operation === "register") {
+          return mcpResult({ data: { session: { revision: 0, fence: 3 } } });
+        }
+        if (name === "coordination_claim" && args.action === undefined) {
+          expect(args.claims).toEqual([{
+            claim: { kind: "path", path: ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json" },
+            baseline_sha256: null,
+            current_sha256: null,
+            repository_sha256: null,
+          }]);
+          return mcpResult({ data: { session: { revision: 1, fence: 3 }, acceptedEpoch: 5, operationId } });
+        }
+        if (name === "coordination_claim" && args.action === "verify") {
+          return mcpResult({ data: { session: { revision: 1, fence: 3 }, acceptedEpoch: 5 } });
+        }
+        if (name === "coordination_claim" && args.action === "complete") {
+          expect(args.footprint).toEqual([expect.objectContaining({
+            path: ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json",
+            before_sha256: null,
+            after_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+          })]);
+          return mcpResult({ data: { session: { revision: 2, fence: 3 }, acceptedEpoch: 5 } });
+        }
+        if (name === "coordination_status") {
+          return mcpResult({ data: { session: { revision: 2, fence: 3 } } });
+        }
+        if (name === "coordination_update" && args.operation === "close") return mcpResult({ data: {} });
+        throw new Error(`Unexpected MCP call: ${name}`);
+      });
+      const close = vi.fn(async () => {});
+      await persistClaimedLegacyHandoff(worktree, binding, {
+        binding: request.binding,
+        oldProcess: request.oldProcess,
+        oldPort: null,
+        oldDataHome: dataHome,
+        handoff,
+        timeouts: request.timeouts,
+      }, sessionId, async () => ({ callTool, close }));
+
+      const retained = readLegacyRecoveryHandoff(worktree);
+      expect(retained).toMatchObject({
+        binding: { project: "legacy-project", projectId, launcherWorktree: worktree, storageMappingHash },
+        parent: { pid: process.pid, port: null, dataHome },
+        handoff,
+        coordination: {
+          incarnation: expect.any(Number),
+          revision: 1,
+          fence: 3,
+          captureClaimEpoch: 5,
+          captureClaimSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+      });
+      expect(calls).toEqual([
+        "coordination_update:register:false",
+        "coordination_claim:create:false",
+        "coordination_claim:verify:true",
+        "coordination_claim:create:true",
+        "coordination_status:status:true",
+        "coordination_update:close:true",
+      ]);
+      expect(readFileSync(artifact, "utf8")).not.toMatch(/ownershipToken|clientClaimKey|raw-session/);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      if (priorNonce === undefined) delete process.env.INGENIUM_RESTART_NONCE;
+      else process.env.INGENIUM_RESTART_NONCE = priorNonce;
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
   it("fixed deployment reconciles dead and active unnonced candidates before replacement-first bootstrap", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-adapter-"));
     try {
       const request = replacementRequest(worktree);
+      request.oldPort = null;
       const binding: ProductionRestartBinding = {
         ...request.binding,
         apiUrl: "http://127.0.0.1:4097/api/v1",
@@ -2239,7 +2465,10 @@ describe("managed command wrappers", () => {
       const forged = { ...parent, oldProcess: { ...parent.oldProcess, nonceSha256: hash("sentinel") } };
       await expect(runProductionRestartAdapter(base([forged])))
         .rejects.toThrow("parent identity is absent or ambiguous");
-      const malformed = { ...parent, handoff: { ...parent.handoff, checks: [] } };
+      const malformed = {
+        ...parent,
+        handoff: { ...parent.handoff, checks: [{ ...parent.handoff.checks[0]!, command: "raw" }] },
+      };
       const retainedMalformed = JSON.stringify(malformed);
       await expect(runProductionRestartAdapter(base([malformed])))
         .rejects.toThrow("parent identity is absent or ambiguous");

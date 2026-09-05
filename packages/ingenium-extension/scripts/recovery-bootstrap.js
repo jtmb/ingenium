@@ -31,7 +31,7 @@ const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
 const GIT = "/usr/bin/git";
-export const CANONICAL_DIRECTORY_AUDIT_PATH = "/tmp/opencode/recovery-bootstrap-directory-audit.jsonl";
+export const CANONICAL_DIRECTORY_AUDIT_PATH = `/tmp/opencode-${ownerUid()}/recovery-bootstrap-directory-audit.jsonl`;
 export const CANONICAL_DIRECTORY_ROLES = Object.freeze([
   "repository_root",
   "packages_root",
@@ -296,6 +296,38 @@ export function readTrustedRegularFile(path, label, options = {}) {
     if (options.executable && (afterDescriptor.mode & 0o111) === 0) fail("executable");
     if (options.expectedMode !== undefined && (afterDescriptor.mode & 0o777) !== options.expectedMode) fail("mode");
     return { bytes, path: canonical, sha256: sha256(bytes) };
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+export function normalizeTrustedRegularFileMode(path, label, expectedMode, expectedOwner = ownerUid()) {
+  const canonical = resolve(path);
+  if ((expectedMode & 0o022) !== 0) throw new TrustedRegularFileError(label, "mode");
+  const reference = lstatSync(canonical);
+  let descriptor;
+  try {
+    descriptor = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    const mode = opened.mode & 0o777;
+    if (!reference.isFile() || reference.isSymbolicLink() || reference.nlink !== 1
+      || !opened.isFile() || opened.nlink !== 1) throw new TrustedRegularFileError(label, "regular_file");
+    if (reference.dev !== opened.dev || reference.ino !== opened.ino) throw new TrustedRegularFileError(label, "identity");
+    if (reference.uid !== expectedOwner || opened.uid !== expectedOwner) throw new TrustedRegularFileError(label, "owner");
+    if ((mode & expectedMode) !== expectedMode) throw new TrustedRegularFileError(label, "mode");
+    if (mode !== expectedMode) {
+      fchmodSync(descriptor, expectedMode);
+      fsyncSync(descriptor);
+    }
+    const hardened = fstatSync(descriptor);
+    const current = lstatSync(canonical);
+    if (!hardened.isFile() || hardened.nlink !== 1 || (hardened.mode & 0o777) !== expectedMode
+      || hardened.dev !== opened.dev || hardened.ino !== opened.ino || hardened.size !== opened.size
+      || hardened.mtimeMs !== opened.mtimeMs || !current.isFile() || current.isSymbolicLink()
+      || current.dev !== opened.dev || current.ino !== opened.ino || (current.mode & 0o777) !== expectedMode) {
+      throw new TrustedRegularFileError(label, "identity");
+    }
+    return canonical;
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
   }
@@ -807,6 +839,12 @@ export async function runRecoveryBootstrapShim(argv = process.argv) {
     verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
 
     const generatedDirectory = hardenGeneratedBootstrapDirectories(packageRoot, owner);
+    normalizeTrustedRegularFileMode(
+      resolve(generatedDirectory, "recovery-bootstrap.js"),
+      "Generated recovery bootstrap",
+      0o555,
+      owner,
+    );
     const generated = readTrustedRegularFile(resolve(generatedDirectory, "recovery-bootstrap.js"), "Generated recovery bootstrap", {
       executable: true,
       expectedMode: 0o555,

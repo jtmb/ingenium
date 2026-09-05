@@ -91,7 +91,7 @@ function privateNpmConfiguration(): PrivateNpmConfiguration {
     throw new Error("Recovery bootstrap requires Linux process identity support");
   }
   const owner = process.getuid();
-  const root = "/tmp/opencode";
+  const root = `/tmp/opencode-${owner}`;
   try {
     mkdirSync(root, { mode: 0o700 });
   } catch (error) {
@@ -260,6 +260,41 @@ export function hardenGeneratedBootstrapDirectories(
   return directories[1]!;
 }
 
+export function normalizeGeneratedRecoveryExecutable(path: string): string {
+  if (process.platform !== "linux" || typeof process.getuid !== "function") {
+    throw new Error("Recovery bootstrap requires Linux process identity support");
+  }
+  const canonical = realpathSync(resolve(path));
+  if (canonical !== resolve(path)) throw new Error("Recovery executable path is not canonical");
+  const reference = lstatSync(canonical);
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    const mode = opened.mode & 0o777;
+    if (!reference.isFile() || reference.isSymbolicLink() || reference.nlink !== 1 || reference.uid !== process.getuid()
+      || !opened.isFile() || opened.nlink !== 1 || opened.uid !== process.getuid()
+      || reference.dev !== opened.dev || reference.ino !== opened.ino || (mode & 0o555) !== 0o555) {
+      throw new Error("Recovery executable identity is invalid");
+    }
+    if (mode !== 0o555) {
+      fchmodSync(descriptor, 0o555);
+      fsyncSync(descriptor);
+    }
+    const hardened = fstatSync(descriptor);
+    const current = lstatSync(canonical);
+    if (!hardened.isFile() || hardened.nlink !== 1 || (hardened.mode & 0o777) !== 0o555
+      || hardened.dev !== opened.dev || hardened.ino !== opened.ino || hardened.size !== opened.size
+      || hardened.mtimeMs !== opened.mtimeMs || !current.isFile() || current.isSymbolicLink()
+      || current.dev !== opened.dev || current.ino !== opened.ino || (current.mode & 0o777) !== 0o555) {
+      throw new Error("Recovery executable mode normalization failed");
+    }
+    return canonical;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 export function verifyRecoveryBootstrapInvocation(
   scriptPath: string,
   expectedSha256 = process.env[RECOVERY_BOOTSTRAP_SHA256],
@@ -306,7 +341,7 @@ export function runRecoveryBootstrap(
       if (status !== 0) return status;
     }
     hardenGeneratedBootstrapDirectories(root, paths.afterDirectoryOpen);
-    const canonicalProductionRestart = realpathSync(productionRestart);
+    const canonicalProductionRestart = normalizeGeneratedRecoveryExecutable(productionRestart);
     if (canonicalProductionRestart !== productionRestart) throw new Error("Production restart path is not canonical");
     const retain = retainEvidence ?? ((evidence: RecoveryBootstrapEvidence) =>
       writeRecoveryBootstrapEvidence(evidence, canonicalProductionRestart));

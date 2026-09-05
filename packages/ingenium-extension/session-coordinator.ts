@@ -1425,7 +1425,14 @@ export class SessionCoordinator {
     if (this.binding.purpose !== "general"
       || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, PRODUCTION_RESTART_OWNER_AGENTS)) return false;
     try {
-      return await this.attestGeneralBinding(false) !== undefined;
+      const attested = await this.attestGeneralBinding(false);
+      const current = this.sessions.get(sessionId);
+      const prefix = `${sessionId}\0`;
+      const activeClaim = [...this.pendingMutations.values()].some((pending) => pending.sessionId === sessionId)
+        || [...this.claimingMutations].some((key) => key.startsWith(prefix))
+        || [...this.finalizingMutations.keys()].some((key) => key.startsWith(prefix));
+      if (!attested || !current || current.state !== "active" || !current.remoteRegistered || activeClaim) return false;
+      return true;
     } catch {
       return false;
     }

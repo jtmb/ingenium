@@ -46,7 +46,9 @@ import {
   abortManagedRecoveryReplacement,
   bootstrapLegacyRecoveryOwner,
   commitManagedRecoveryReplacement,
+  persistLegacyRecoveryHandoff,
   prepareManagedRecoveryReplacement,
+  readLegacyRecoveryHandoff,
   readManagedRecoveryEnrollment,
   readRecoveryServerAuthentication,
   recoveryServerAuthenticationPath,
@@ -61,6 +63,7 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const UNNONCED_PARENT_SHA256 = "0".repeat(64);
 const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
 const REPLACEMENT_SERVER_USERNAME = "opencode";
+const LEGACY_HANDOFF_PATH = ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json";
 export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
 export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
@@ -83,7 +86,7 @@ export type ProductionRestartBinding = ReplacementFirstRestartRequest["binding"]
 export interface ProductionRestartParentCandidate {
   binding: ReplacementFirstRestartRequest["binding"];
   oldProcess: RestartProcessIdentity;
-  oldPort: number;
+  oldPort: number | null;
   oldDataHome: string;
   handoff: RedactedRestartHandoff;
   timeouts: ReplacementFirstRestartRequest["timeouts"];
@@ -140,6 +143,12 @@ export interface RestartHandoffPublisher {
   ownershipToken: string;
   revision: number;
   fence: number;
+}
+
+interface RestartCaptureClaim extends RestartHandoffPublisher {
+  acceptedEpoch: number;
+  operationId: string;
+  clientClaimKey: string;
 }
 
 interface ProductionPreparedState {
@@ -568,7 +577,7 @@ function validateParentCandidate(
 ): ProductionRestartParentCandidate {
   const candidate = stateCandidate(value);
   if (!candidate) throw new Error("Production restart parent candidate is malformed");
-  const replacementPort = candidate.oldPort === 65535 ? 65534 : candidate.oldPort + 1;
+  const replacementPort = candidate.oldPort === null ? 65534 : candidate.oldPort === 65535 ? 65534 : candidate.oldPort + 1;
   const nonceSha256 = candidate.oldProcess.nonceSha256 === "0".repeat(64) ? "1".repeat(64) : "0".repeat(64);
   const validated = decodeReplacementFirstRestartRequest(encodeRequest({
     schemaVersion: 1,
@@ -684,27 +693,40 @@ function processEnvironment(pid: number): Record<string, string> | undefined {
 }
 
 function inspectProcessIdentity(pid: number, nonceSha256: string, requireProcessNonce: boolean): RestartProcessIdentity | undefined {
-  const stat = procStat(pid);
-  if (!stat) return undefined;
+  const before = procStat(pid);
+  if (!before) return undefined;
+  const nonceBefore = processEnvironment(pid)?.INGENIUM_RESTART_NONCE;
+  if (requireProcessNonce && (!nonceBefore || hash(nonceBefore) !== nonceSha256)) return undefined;
+  let descriptor: number | undefined;
   try {
-    const executable = realpathSync(readlinkSync(`/proc/${pid}/exe`));
-    const executableSha256 = hash(readFileSync(executable));
-    if (requireProcessNonce) {
-      const nonce = processEnvironment(pid)?.INGENIUM_RESTART_NONCE;
-      if (!nonce || hash(nonce) !== nonceSha256) return undefined;
-    }
-    return { pid, startTimeTicks: stat.startTimeTicks, executableSha256, nonceSha256 };
+    descriptor = openSync(`/proc/${pid}/exe`, constants.O_RDONLY);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || (opened.mode & 0o111) === 0) return undefined;
+    const executableSha256 = hash(readFileSync(descriptor));
+    const afterDescriptor = fstatSync(descriptor);
+    const after = procStat(pid);
+    const nonceAfter = processEnvironment(pid)?.INGENIUM_RESTART_NONCE;
+    if (!after || before.parentPid !== after.parentPid || before.startTimeTicks !== after.startTimeTicks
+      || opened.dev !== afterDescriptor.dev || opened.ino !== afterDescriptor.ino || opened.size !== afterDescriptor.size
+      || opened.mtimeMs !== afterDescriptor.mtimeMs || opened.ctimeMs !== afterDescriptor.ctimeMs
+      || nonceBefore !== nonceAfter) return undefined;
+    return { pid, startTimeTicks: before.startTimeTicks, executableSha256, nonceSha256 };
   } catch {
     return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 
-function inspectExpectedProcessIdentity(identity: RestartProcessIdentity): RestartProcessIdentity | undefined {
-  if (identity.nonceSha256 === UNNONCED_PARENT_SHA256) {
-    if (processEnvironment(identity.pid)?.INGENIUM_RESTART_NONCE) return undefined;
-    return inspectProcessIdentity(identity.pid, UNNONCED_PARENT_SHA256, false);
-  }
-  return inspectProcessIdentity(identity.pid, identity.nonceSha256, true);
+export function inspectExpectedProcessIdentity(identity: RestartProcessIdentity): RestartProcessIdentity | undefined {
+  if (identity.nonceSha256 === UNNONCED_PARENT_SHA256
+    && processEnvironment(identity.pid)?.INGENIUM_RESTART_NONCE) return undefined;
+  const inspected = inspectProcessIdentity(
+    identity.pid,
+    identity.nonceSha256,
+    identity.nonceSha256 !== UNNONCED_PARENT_SHA256,
+  );
+  return identitiesMatch(inspected, identity) ? inspected : undefined;
 }
 
 function identitiesMatch(left: RestartProcessIdentity | undefined, right: RestartProcessIdentity): boolean {
@@ -825,11 +847,31 @@ export async function probeReplacementHealthGate(
   return evidence;
 }
 
-function processExecutable(pid: number): string | undefined {
+function replacementExecutable(pid: number): { path: string; sha256: string } | undefined {
+  let descriptor: number | undefined;
   try {
-    return realpathSync(readlinkSync(`/proc/${pid}/exe`));
+    const linked = readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, "");
+    const path = realpathSync(linked);
+    const reference = lstatSync(path);
+    const uid = processOwner();
+    if (basename(path) !== "opencode" || !reference.isFile() || reference.isSymbolicLink() || reference.nlink !== 1
+      || (reference.mode & 0o111) === 0 || (reference.mode & 0o022) !== 0
+      || (uid !== undefined && reference.uid !== uid && reference.uid !== 0)) return undefined;
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.dev !== reference.dev || opened.ino !== reference.ino || opened.nlink !== 1
+      || opened.uid !== reference.uid || (opened.mode & 0o111) === 0 || (opened.mode & 0o022) !== 0) return undefined;
+    const sha256 = hash(readFileSync(descriptor));
+    const after = fstatSync(descriptor);
+    const current = lstatSync(path);
+    if (opened.dev !== after.dev || opened.ino !== after.ino || opened.size !== after.size
+      || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs
+      || opened.dev !== current.dev || opened.ino !== current.ino || opened.size !== current.size) return undefined;
+    return { path, sha256 };
   } catch {
     return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 
@@ -892,10 +934,9 @@ function discoverInteractiveParent(worktree: string): { identity: RestartProcess
   for (let depth = 0; depth < 32 && pid > 1; depth += 1) {
     const stat = procStat(pid);
     if (!stat) break;
-    const executable = processExecutable(pid);
     const argv = processCommandLine(pid);
     const sessionId = argv ? sessionIdFromCommandLine(argv) : undefined;
-    if (executable && basename(executable) === "opencode" && sessionId && processWorkingDirectory(pid) === worktree) {
+    if (argv && basename(argv[0]!) === "opencode" && sessionId && processWorkingDirectory(pid) === worktree) {
       const environment = processEnvironment(pid);
       const nonce = environment?.INGENIUM_RESTART_NONCE;
       const nonceSha256 = nonce ? hash(nonce) : UNNONCED_PARENT_SHA256;
@@ -982,6 +1023,28 @@ function restartInputPath(input: Record<string, unknown>, worktree: string): str
   return isSafeRestartHandoffPath(path) ? path : undefined;
 }
 
+function restartInputChanges(
+  tool: string,
+  input: Record<string, unknown>,
+  worktree: string,
+): Array<{ path: string; operation: "write" | "edit" }> {
+  const path = restartInputPath(input, worktree);
+  if (path) return [{ path, operation: tool === "write" || tool === "file_write" ? "write" : "edit" }];
+  if (tool !== "apply_patch") return [];
+  const patch = input.patchText ?? input.patch;
+  if (typeof patch !== "string" || Buffer.byteLength(patch, "utf8") > 1024 * 1024) {
+    throw new Error("Production restart patch capture is invalid");
+  }
+  const changes = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: (.+)$/gm)].map((match) => ({
+    path: match[2]!,
+    operation: match[1] === "Add" ? "write" as const : "edit" as const,
+  }));
+  if (changes.length === 0 || changes.some((change) => !isSafeRestartHandoffPath(change.path))) {
+    throw new Error("Production restart patch capture is invalid");
+  }
+  return changes;
+}
+
 function redactedHandoffFromSession(
   messages: unknown,
   status: unknown,
@@ -1022,7 +1085,8 @@ function redactedHandoffFromSession(
       if (!isRecord(part) || part.type !== "tool" || typeof part.tool !== "string" || !isRecord(part.state)
         || !["completed", "error"].includes(part.state.status as string) || !isRecord(part.state.input)) continue;
       const tool = part.tool.toLowerCase().replace(/[.-]/g, "_");
-      const path = restartInputPath(part.state.input, worktree);
+      const changes = restartInputChanges(tool, part.state.input, worktree);
+      const path = changes.length === 1 ? changes[0]!.path : undefined;
       const kind = tool === "read" ? "read" : tool === "grep" || tool === "glob" ? "search"
         : tool === "write" || tool === "file_write" ? "write" : tool === "edit" || tool === "file_edit" ? "edit" : "execute";
       if (part.state.status === "completed") {
@@ -1033,10 +1097,10 @@ function redactedHandoffFromSession(
           targetHash: path ? null : hash(`${tool}\0${JSON.stringify(part.state.input)}`),
         });
       }
-      if (path && (kind === "write" || kind === "edit")) {
-        changed.set(path, {
-          path,
-          operation: kind,
+      for (const change of changes) {
+        if (!["write", "edit", "apply_patch"].includes(tool) && !["file_write", "file_edit"].includes(tool)) continue;
+        changed.set(change.path, {
+          ...change,
           additions: 0,
           deletions: 0,
           changeRevision: changed.size + 1,
@@ -1084,6 +1148,59 @@ function redactedHandoffFromSession(
   });
 }
 
+function hasRunningProductionRestart(messages: unknown): boolean {
+  return messageList(messages)?.some((message) => isRecord(message) && Array.isArray(message.parts)
+    && message.parts.some((part) => isRecord(part) && part.type === "tool"
+      && ["bash", "shell"].includes(String(part.tool).toLowerCase()) && isRecord(part.state)
+      && ["pending", "running"].includes(String(part.state.status)) && isRecord(part.state.input)
+      && part.state.input.command === "ingenium-build deployment production-restart")) === true;
+}
+
+export function redactedHandoffFromExport(
+  exported: unknown,
+  sessionId: string,
+  worktree: string,
+): RedactedRestartHandoff | undefined {
+  if (!isRecord(exported) || !isRecord(exported.info) || !Array.isArray(exported.messages)
+    || exported.info.id !== sessionId || exported.info.directory !== worktree
+    || !hasRunningProductionRestart(exported.messages)) return undefined;
+  return redactedHandoffFromSession(
+    exported.messages,
+    { [sessionId]: { type: "working" } },
+    exported.info,
+    sessionId,
+    worktree,
+  );
+}
+
+function readDurableParentHandoff(
+  sessionId: string,
+  worktree: string,
+  parent: RestartProcessIdentity,
+  dataHome: string,
+): RedactedRestartHandoff | undefined {
+  const environment = processEnvironment(parent.pid);
+  if (!environment?.HOME || !isAbsolute(environment.HOME)) return undefined;
+  try {
+    if (!identitiesMatch(inspectExpectedProcessIdentity(parent), parent)) return undefined;
+    const exported: unknown = JSON.parse(execFileSync(`/proc/${parent.pid}/exe`, ["export", sessionId, "--pure"], {
+      cwd: worktree,
+      encoding: "utf8",
+      timeout: 10_000,
+      maxBuffer: 32 * 1024 * 1024,
+      env: {
+        HOME: environment.HOME,
+        XDG_DATA_HOME: dataHome,
+        PATH: "/usr/local/bin:/usr/bin:/bin",
+      },
+    }));
+    if (!identitiesMatch(inspectExpectedProcessIdentity(parent), parent)) return undefined;
+    return redactedHandoffFromExport(exported, sessionId, worktree);
+  } catch {
+    return undefined;
+  }
+}
+
 async function readLiveParentHandoff(
   port: number,
   sessionId: string,
@@ -1123,7 +1240,16 @@ async function enrollRunningProductionParent(
     const handoff = await readLiveParentHandoff(port, discovered.sessionId, worktree, discovered.identity.pid);
     if (handoff) matches.push({ port, handoff });
   }
-  if (matches.length !== 1) return undefined;
+  if (matches.length > 1) return undefined;
+  const durableHandoff = matches.length === 0
+    ? readDurableParentHandoff(
+        discovered.sessionId,
+        worktree,
+        discovered.identity,
+        discovered.dataHome,
+      )
+    : undefined;
+  if (matches.length === 0 && !durableHandoff) return undefined;
   const parent: ProductionRestartParentCandidate = {
     binding: {
       projectId: binding.projectId,
@@ -1133,12 +1259,13 @@ async function enrollRunningProductionParent(
       audience: "mcp",
     },
     oldProcess: discovered.identity,
-    oldPort: matches[0]!.port,
+    oldPort: matches[0]?.port ?? null,
     oldDataHome: discovered.dataHome,
-    handoff: matches[0]!.handoff,
+    handoff: matches[0]?.handoff ?? durableHandoff!,
     timeouts: DEFAULT_TIMEOUTS,
   };
   validateParentCandidate(parent, worktree);
+  if (parent.oldPort === null) await persistClaimedLegacyHandoff(worktree, binding, parent, discovered.sessionId);
   await bootstrapLegacyRecoveryOwner(worktree, {
     project: binding.project,
     projectId: binding.projectId,
@@ -1155,18 +1282,21 @@ async function enrollRunningProductionParent(
 
 async function attestProductionParent(parent: ProductionRestartParentCandidate): Promise<boolean> {
   if (!identitiesMatch(inspectExpectedProcessIdentity(parent.oldProcess), parent.oldProcess)) return false;
-  const executable = processExecutable(parent.oldProcess.pid);
   const argv = processCommandLine(parent.oldProcess.pid);
   const sessionId = argv ? sessionIdFromCommandLine(argv) : undefined;
-  const liveHandoff = sessionId
+  const liveHandoff = sessionId && parent.oldPort !== null
     ? await readLiveParentHandoff(parent.oldPort, sessionId, parent.binding.launcherWorktree, parent.oldProcess.pid)
     : undefined;
-  return executable !== undefined && basename(executable) === "opencode"
-    && hash(readFileSync(executable)) === parent.oldProcess.executableSha256
+  const durable = parent.oldPort === null ? readManagedRecoveryEnrollment(parent.binding.launcherWorktree) : undefined;
+  return argv !== undefined && basename(argv[0]!) === "opencode"
     && isProcessAncestor(parent.oldProcess.pid) && processWorkingDirectory(parent.oldProcess.pid) === parent.binding.launcherWorktree
     && parentDataHome(parent.oldProcess.pid) === parent.oldDataHome && sessionId !== undefined
-    && listeningLoopbackPorts().includes(parent.oldPort)
-    && liveHandoff !== undefined && hash(JSON.stringify(liveHandoff)) === hash(JSON.stringify(parent.handoff));
+    && (parent.oldPort === null
+      ? durable !== undefined && identitiesMatch(durable.parent, parent.oldProcess)
+        && durable.parent.port === null && durable.parent.dataHome === parent.oldDataHome
+        && hash(JSON.stringify(durable.handoff)) === hash(JSON.stringify(parent.handoff))
+      : listeningLoopbackPorts().includes(parent.oldPort)
+        && liveHandoff !== undefined && hash(JSON.stringify(liveHandoff)) === hash(JSON.stringify(parent.handoff)));
 }
 
 export function restartHandoffMemoryEntry(handoff: RedactedRestartHandoff): Record<string, unknown> {
@@ -1235,6 +1365,161 @@ function restartPublisherMutation(value: unknown): { revision: number; fence: nu
     throw new Error("Production restart handoff publication failed");
   }
   return { revision: value.revision as number, fence: value.fence as number };
+}
+
+function restartCaptureClaim(value: unknown): {
+  revision: number;
+  fence: number;
+  acceptedEpoch: number;
+  operationId: string;
+} {
+  const mutation = restartPublisherMutation(responseRecord(value)?.session);
+  const result = responseRecord(value);
+  if (!result || !Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
+    || typeof result.operationId !== "string" || !UUID.test(result.operationId)) {
+    throw new Error("Production restart capture claim failed");
+  }
+  return {
+    ...mutation,
+    acceptedEpoch: result.acceptedEpoch as number,
+    operationId: result.operationId,
+  };
+}
+
+function restartCaptureClaimProof(value: unknown): { revision: number; fence: number; acceptedEpoch: number } {
+  const result = responseRecord(value);
+  const mutation = restartPublisherMutation(result?.session);
+  if (!result || !Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1) {
+    throw new Error("Production restart capture claim verification failed");
+  }
+  return { ...mutation, acceptedEpoch: result.acceptedEpoch as number };
+}
+
+function optionalPrivateFileSha256(path: string): string | null {
+  try {
+    return hash(readPrivateFile(path, MAX_STATE_BYTES));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export async function persistClaimedLegacyHandoff(
+  worktree: string,
+  binding: ProductionRestartBinding,
+  parent: ProductionRestartParentCandidate,
+  parentSessionId: string,
+  openClient: typeof openMcpToolClient = openMcpToolClient,
+): Promise<void> {
+  if (parent.oldPort !== null || !SAFE_SESSION_ID.test(parentSessionId)) {
+    throw new Error("Production restart durable capture input is invalid");
+  }
+  if (!bindingsMatch(parent.binding, binding)) throw new Error("Production restart durable capture binding changed");
+  const absolutePath = resolve(worktree, LEGACY_HANDOFF_PATH);
+  const beforeSha256 = optionalPrivateFileSha256(absolutePath);
+  const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
+  const identity = {
+    project: binding.project,
+    worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
+    session_id: `session-${hash(randomBytes(32))}`,
+    incarnation: Date.now(),
+  };
+  const ownershipToken = randomBytes(32).toString("base64url");
+  let publisher: RestartHandoffPublisher | undefined;
+  try {
+    const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
+      ...identity,
+      operation: "register",
+      ownership_token: ownershipToken,
+      ttl_ms: 60_000,
+      idempotency_key: randomUUID(),
+    })));
+    const registration = restartPublisherMutation(registered?.session);
+    publisher = { client, identity, ownershipToken, ...registration };
+    const clientClaimKey = randomBytes(32).toString("base64url");
+    const acquired = restartCaptureClaim(mcpToolData(await client.callTool("coordination_claim", {
+      ...identity,
+      expected_revision: registration.revision,
+      fence: registration.fence,
+      ownership_token: ownershipToken,
+      client_claim_key: clientClaimKey,
+      claims: [{
+        claim: { kind: "path", path: LEGACY_HANDOFF_PATH },
+        baseline_sha256: beforeSha256,
+        current_sha256: beforeSha256,
+        repository_sha256: null,
+      }],
+      operation: beforeSha256 === null ? "create" : "edit",
+      idempotency_key: randomUUID(),
+    })));
+    const claim: RestartCaptureClaim = { ...publisher, ...acquired, clientClaimKey };
+    publisher = claim;
+    const retainedPath = persistLegacyRecoveryHandoff(worktree, {
+      project: binding.project,
+      projectId: binding.projectId,
+      workspaceId: binding.workspaceId,
+      launcherWorktree: binding.launcherWorktree,
+      storageMappingHash: binding.storageMappingHash,
+    }, {
+      ...parent.oldProcess,
+      port: null,
+      dataHome: parent.oldDataHome,
+    }, parent.handoff, {
+      sessionIdSha256: hash(identity.session_id),
+      incarnation: identity.incarnation,
+      revision: acquired.revision,
+      fence: acquired.fence,
+      captureClaimEpoch: acquired.acceptedEpoch,
+      captureClaimSha256: hash(`${clientClaimKey}\0${acquired.operationId}`),
+    });
+    const retained = readLegacyRecoveryHandoff(worktree);
+    if (retainedPath !== absolutePath || !retained
+      || hash(JSON.stringify(retained.handoff)) !== hash(JSON.stringify(parent.handoff))
+      || retained.coordination.captureClaimEpoch !== acquired.acceptedEpoch
+      || retained.coordination.captureClaimSha256 !== hash(`${clientClaimKey}\0${acquired.operationId}`)) {
+      throw new Error("Production restart durable capture verification failed");
+    }
+    const verified = restartCaptureClaimProof(mcpToolData(await client.callTool("coordination_claim", {
+      ...identity,
+      expected_revision: acquired.revision,
+      fence: acquired.fence,
+      ownership_token: ownershipToken,
+      client_claim_key: clientClaimKey,
+      accepted_epoch: acquired.acceptedEpoch,
+      action: "verify",
+      idempotency_key: randomUUID(),
+    })));
+    if (verified.acceptedEpoch !== acquired.acceptedEpoch || verified.fence !== acquired.fence) {
+      throw new Error("Production restart capture claim verification failed");
+    }
+    const afterSha256 = optionalPrivateFileSha256(absolutePath);
+    if (!afterSha256) throw new Error("Production restart durable capture verification failed");
+    const completed = restartCaptureClaimProof(mcpToolData(await client.callTool("coordination_claim", {
+      ...identity,
+      expected_revision: verified.revision,
+      fence: verified.fence,
+      ownership_token: ownershipToken,
+      client_claim_key: clientClaimKey,
+      accepted_epoch: acquired.acceptedEpoch,
+      action: "complete",
+      operation_id: acquired.operationId,
+      operation: beforeSha256 === null ? "create" : "edit",
+      footprint: [{
+        path: LEGACY_HANDOFF_PATH,
+        path_sha256: hash(LEGACY_HANDOFF_PATH),
+        before_sha256: beforeSha256,
+        after_sha256: afterSha256,
+      }],
+      idempotency_key: randomUUID(),
+    })));
+    if (completed.acceptedEpoch !== acquired.acceptedEpoch) {
+      throw new Error("Production restart capture claim verification failed");
+    }
+    publisher = { ...publisher, revision: completed.revision, fence: completed.fence };
+  } finally {
+    if (publisher) await closeRestartHandoffPublisher(publisher, true);
+    else await client.close().catch(() => undefined);
+  }
 }
 
 export async function publishRestartHandoff(
@@ -1622,12 +1907,9 @@ async function prepareProductionReplacement(input: {
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
 }, productionRestartScriptSha256: string): Promise<PreparedProductionReplacement<ReplacementSession>> {
-  const executable = processExecutable(input.parent.oldProcess.pid);
-  if (!executable || basename(executable) !== "opencode") throw new Error("Production OpenCode executable is unavailable");
-  const expectedExecutableSha256 = hash(readFileSync(executable));
-  if (expectedExecutableSha256 !== input.parent.oldProcess.executableSha256) {
-    throw new Error("Production OpenCode executable changed");
-  }
+  const selectedExecutable = replacementExecutable(input.parent.oldProcess.pid);
+  if (!selectedExecutable) throw new Error("Production OpenCode executable is unavailable");
+  const { path: executable, sha256: expectedExecutableSha256 } = selectedExecutable;
   const expectedVersion = execFileSync(executable, ["--version"], {
     encoding: "utf8",
     timeout: 5_000,
@@ -1642,8 +1924,10 @@ async function prepareProductionReplacement(input: {
   const parentStateFile = join(root, `selected-candidate-${randomUUID()}.json`);
   writePrivateNewFile(parentStateFile, `${JSON.stringify({ schemaVersion: 1, parentCandidates: [input.parent] })}\n`);
   const parentStateSha256 = hash(readPrivateFile(parentStateFile, MAX_STATE_BYTES));
-  const runtimeRoot = "/tmp/opencode";
-  assertOwnedDirectory(runtimeRoot);
+  const uid = processOwner();
+  if (uid === undefined) throw new Error("Production restart requires process ownership support");
+  const runtimeRoot = `/tmp/opencode-${uid}`;
+  ensurePrivateDirectory(runtimeRoot);
   const runDirectory = join(runtimeRoot, `production-restart-${randomUUID()}`);
   ensurePrivateDirectory(runDirectory);
   const home = join(runDirectory, "home");

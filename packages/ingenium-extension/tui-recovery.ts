@@ -39,7 +39,6 @@ const OWNER_NONCE_ENV = "INGENIUM_RECOVERY_OWNER_NONCE";
 const OWNER_PID_ENV = "INGENIUM_RECOVERY_OWNER_PID";
 const OWNER_START_ENV = "INGENIUM_RECOVERY_OWNER_START_TICKS";
 const PORT_ENV = "INGENIUM_OPENCODE_PORT";
-const processIdentities = new Map<string, RestartProcessIdentity>();
 
 export interface ManagedRecoveryBinding {
   project: string;
@@ -58,8 +57,17 @@ export interface RecoveryServerAuthentication {
 
 export interface ManagedRecoveryEnrollment {
   binding: ManagedRecoveryBinding;
-  parent: RestartProcessIdentity & { port: number; dataHome: string };
+  parent: RestartProcessIdentity & { port: number | null; dataHome: string };
   handoff: RedactedRestartHandoff;
+}
+
+export interface LegacyRecoveryCoordination {
+  sessionIdSha256: string;
+  incarnation: number;
+  revision: number;
+  fence: number;
+  captureClaimEpoch: number;
+  captureClaimSha256: string;
 }
 
 type RecoveryOwnerIdentity = RestartProcessIdentity;
@@ -70,7 +78,7 @@ interface EnrolledParent extends RestartProcessIdentity {
   projectId: string;
   workspaceId: string;
   storageMappingHash: string;
-  port: number;
+  port: number | null;
   dataHome: string;
 }
 
@@ -116,8 +124,13 @@ interface LegacyOwnerBootstrap {
   schemaVersion: 1;
   worktree: string;
   binding: ManagedRecoveryBinding;
-  parent: RestartProcessIdentity & { port: number; dataHome: string };
+  parent: RestartProcessIdentity & { port: number | null; dataHome: string };
   handoff: RedactedRestartHandoff;
+}
+
+export interface LegacyRecoveryHandoff extends ManagedRecoveryEnrollment {
+  schemaVersion: 1;
+  coordination: LegacyRecoveryCoordination;
 }
 
 type RecoveryEventName = "attach_started" | "attach_healthy" | "adoption" | "rollback" | "fence_transition";
@@ -157,24 +170,30 @@ function processStat(pid: number): { parentPid: number; startTimeTicks: number }
 }
 
 function processIdentity(pid: number, nonceSha256: string, fresh = false): RestartProcessIdentity | undefined {
-  const stat = processStat(pid);
-  if (!stat || !HASH.test(nonceSha256)) return undefined;
-  const key = `${pid}:${stat.startTimeTicks}:${nonceSha256}`;
-  const cached = processIdentities.get(key);
-  if (!fresh && cached) return cached;
+  const before = processStat(pid);
+  if (!before || !HASH.test(nonceSha256)) return undefined;
+  let descriptor: number | undefined;
   try {
-    const executable = realpathSync(readlinkSync(`/proc/${pid}/exe`));
+    descriptor = openSync(`/proc/${pid}/exe`, constants.O_RDONLY);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || (opened.mode & 0o111) === 0) return undefined;
+    const executableSha256 = hash(readFileSync(descriptor));
+    const afterDescriptor = fstatSync(descriptor);
+    const after = processStat(pid);
+    if (!after || before.parentPid !== after.parentPid || before.startTimeTicks !== after.startTimeTicks
+      || opened.dev !== afterDescriptor.dev || opened.ino !== afterDescriptor.ino || opened.size !== afterDescriptor.size
+      || opened.mtimeMs !== afterDescriptor.mtimeMs || opened.ctimeMs !== afterDescriptor.ctimeMs) return undefined;
     const identity = {
       pid,
-      startTimeTicks: stat.startTimeTicks,
-      executableSha256: hash(readFileSync(executable)),
+      startTimeTicks: before.startTimeTicks,
+      executableSha256,
       nonceSha256,
     };
-    if (processIdentities.size >= 64) processIdentities.clear();
-    processIdentities.set(key, identity);
     return identity;
   } catch {
     return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 
@@ -438,7 +457,8 @@ function parseState(value: unknown): RecoveryState {
       || typeof activeParent.projectId !== "string" || !UUID.test(activeParent.projectId)
       || typeof activeParent.workspaceId !== "string" || !SAFE_ID.test(activeParent.workspaceId)
       || typeof activeParent.storageMappingHash !== "string" || !HASH.test(activeParent.storageMappingHash)
-      || !Number.isSafeInteger(activeParent.port) || activeParent.port < 1024 || activeParent.port > 65535
+      || (activeParent.port !== null
+        && (!Number.isSafeInteger(activeParent.port) || activeParent.port < 1024 || activeParent.port > 65535))
       || typeof activeParent.dataHome !== "string" || resolve(activeParent.dataHome) !== activeParent.dataHome) {
       throw new Error("TUI recovery parent is invalid");
     }
@@ -607,11 +627,12 @@ export function enrollManagedRecoveryParent(
 ): boolean {
   const owner = ownerFromEnvironment();
   const nonce = process.env.INGENIUM_RESTART_NONCE;
-  const port = Number(process.env[PORT_ENV]);
+  const rawPort = process.env[PORT_ENV];
+  const port = Number(rawPort);
   const dataHome = currentDataHome();
+  const exactBinding = managedBinding(binding, attested);
   if (!owner || !nonce || !/^[A-Za-z0-9_-]{43,128}$/.test(nonce)
     || !Number.isSafeInteger(port) || port < 1024 || port > 65535 || !dataHome) return false;
-  const exactBinding = managedBinding(binding, attested);
   const identity = processIdentity(process.pid, hash(nonce));
   if (!identity) return false;
   const directChild = processStat(process.pid)?.parentPid === owner.identity.pid;
@@ -654,6 +675,80 @@ export function enrollManagedRecoveryParent(
       throw error;
     }
     return false;
+  }
+}
+
+export function persistLegacyRecoveryHandoff(
+  worktree: string,
+  binding: ManagedRecoveryBinding,
+  parent: RestartProcessIdentity & { port: null; dataHome: string },
+  handoff: RedactedRestartHandoff,
+  coordination: LegacyRecoveryCoordination,
+): string {
+  const canonicalWorktree = realpathSync(resolve(worktree));
+  const validatedHandoff = parseRedactedRestartHandoff(handoff);
+  if (binding.launcherWorktree !== canonicalWorktree || !isValidExtensionProjectName(binding.project)
+    || !UUID.test(binding.projectId) || !SAFE_ID.test(binding.workspaceId) || !HASH.test(binding.storageMappingHash)
+    || resolve(parent.dataHome) !== parent.dataHome || !processMatchesAttestedIdentity(parseIdentity(parent), true)
+    || !HASH.test(coordination.sessionIdSha256) || !Number.isSafeInteger(coordination.incarnation)
+    || coordination.incarnation < 1 || !Number.isSafeInteger(coordination.revision) || coordination.revision < 0
+    || !Number.isSafeInteger(coordination.fence) || coordination.fence < 1
+    || !Number.isSafeInteger(coordination.captureClaimEpoch) || coordination.captureClaimEpoch < 1
+    || !HASH.test(coordination.captureClaimSha256)) {
+    throw new Error("Legacy recovery handoff is invalid");
+  }
+  const path = join(recoveryDirectory(canonicalWorktree), "legacy-handoff.json");
+  atomicWrite(path, {
+    schemaVersion: 1,
+    binding,
+    parent,
+    handoff: validatedHandoff,
+    coordination,
+  } satisfies LegacyRecoveryHandoff);
+  return path;
+}
+
+export function readLegacyRecoveryHandoff(worktree: string): LegacyRecoveryHandoff | undefined {
+  try {
+    const canonicalWorktree = realpathSync(resolve(worktree));
+    const value = readJson(join(recoveryDirectory(canonicalWorktree), "legacy-handoff.json"));
+    if (!hasExactKeys(value, ["schemaVersion", "binding", "parent", "handoff", "coordination"])
+      || value.schemaVersion !== 1
+      || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])
+      || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "port", "dataHome"])
+      || !hasExactKeys(value.coordination, [
+        "sessionIdSha256", "incarnation", "revision", "fence", "captureClaimEpoch", "captureClaimSha256",
+      ])) return undefined;
+    const parent = parseIdentity(value.parent);
+    const coordination = value.coordination;
+    if (value.binding.launcherWorktree !== canonicalWorktree || !isValidExtensionProjectName(value.binding.project)
+      || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
+      || typeof value.binding.workspaceId !== "string" || !SAFE_ID.test(value.binding.workspaceId)
+      || typeof value.binding.storageMappingHash !== "string" || !HASH.test(value.binding.storageMappingHash)
+      || value.parent.port !== null || typeof value.parent.dataHome !== "string"
+      || resolve(value.parent.dataHome) !== value.parent.dataHome
+      || typeof coordination.sessionIdSha256 !== "string" || !HASH.test(coordination.sessionIdSha256)
+      || !Number.isSafeInteger(coordination.incarnation) || (coordination.incarnation as number) < 1
+      || !Number.isSafeInteger(coordination.revision) || (coordination.revision as number) < 0
+      || !Number.isSafeInteger(coordination.fence) || (coordination.fence as number) < 1
+      || !Number.isSafeInteger(coordination.captureClaimEpoch) || (coordination.captureClaimEpoch as number) < 1
+      || typeof coordination.captureClaimSha256 !== "string" || !HASH.test(coordination.captureClaimSha256)
+      || !processMatchesAttestedIdentity(parent, true)) return undefined;
+    return {
+      schemaVersion: 1,
+      binding: {
+        project: value.binding.project,
+        projectId: value.binding.projectId,
+        workspaceId: value.binding.workspaceId,
+        launcherWorktree: canonicalWorktree,
+        storageMappingHash: value.binding.storageMappingHash,
+      },
+      parent: { ...parent, port: null, dataHome: value.parent.dataHome },
+      handoff: parseRedactedRestartHandoff(value.handoff),
+      coordination: coordination as unknown as LegacyRecoveryCoordination,
+    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -1190,7 +1285,8 @@ export function parseLegacyRecoveryOwnerPayload(encoded: string): LegacyOwnerBoo
     || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
     || typeof value.binding.workspaceId !== "string" || !SAFE_ID.test(value.binding.workspaceId)
     || typeof value.binding.storageMappingHash !== "string" || !HASH.test(value.binding.storageMappingHash)
-    || !Number.isSafeInteger(value.parent.port) || (value.parent.port as number) < 1024 || (value.parent.port as number) > 65535
+    || (value.parent.port !== null && (!Number.isSafeInteger(value.parent.port)
+      || (value.parent.port as number) < 1024 || (value.parent.port as number) > 65535))
     || typeof value.parent.dataHome !== "string" || resolve(value.parent.dataHome) !== value.parent.dataHome) {
     throw new Error("Legacy recovery owner payload is invalid");
   }
@@ -1204,7 +1300,7 @@ export function parseLegacyRecoveryOwnerPayload(encoded: string): LegacyOwnerBoo
       launcherWorktree: worktree,
       storageMappingHash: value.binding.storageMappingHash,
     },
-    parent: { ...parent, port: value.parent.port as number, dataHome: value.parent.dataHome },
+    parent: { ...parent, port: value.parent.port as number | null, dataHome: value.parent.dataHome },
     handoff: parseRedactedRestartHandoff(value.handoff),
   };
 }
@@ -1250,7 +1346,7 @@ export async function runDetachedRecoveryOwner(encoded: string): Promise<void> {
 export async function bootstrapLegacyRecoveryOwner(
   worktree: string,
   binding: ManagedRecoveryBinding,
-  parent: RestartProcessIdentity & { port: number; dataHome: string },
+  parent: RestartProcessIdentity & { port: number | null; dataHome: string },
   handoff: RedactedRestartHandoff,
 ): Promise<void> {
   const nonce = randomBytes(32).toString("base64url");

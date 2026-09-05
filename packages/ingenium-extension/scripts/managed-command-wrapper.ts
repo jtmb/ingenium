@@ -1,8 +1,21 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+} from "node:fs";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   decodeReplacementFirstRestartRequest,
@@ -10,7 +23,6 @@ import {
   type ReplacementFirstRestartDependencies,
   type ReplacementFirstRestartResult,
 } from "../replacement-first-restart.js";
-import { RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS } from "./recovery-bootstrap.js";
 
 const ARG = /^[A-Za-z0-9_@%+=:,./-]{1,512}$/;
 const BUILD_SCRIPTS = new Set(["build", "typecheck", "test", "lint"]);
@@ -44,7 +56,8 @@ const RECOVERY_ENVIRONMENT = [
   "TERM",
   "TMPDIR",
 ] as const;
-export const MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS = RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS + 30_000;
+// Covers the trusted source build, generated checks/restart, and both cleanup grace periods.
+export const MANAGED_RECOVERY_BOOTSTRAP_TIMEOUT_MS = 1_680_000;
 const GIT_CONFIGURATION = [
   "-c", "core.fsmonitor=false",
   "-c", "core.hooksPath=/dev/null",
@@ -100,6 +113,48 @@ export function managedRecoveryWorktree(moduleUrl: string | URL = import.meta.ur
 
 export function managedRecoveryBootstrapPath(moduleUrl: string | URL = import.meta.url): string {
   return resolve(managedWrapperPackageRoot(moduleUrl), "scripts/recovery-bootstrap.js");
+}
+
+export function normalizeManagedRecoveryBootstrapMode(sourcePath: string, repositoryRoot: string): string {
+  const root = realpathSync(resolve(repositoryRoot));
+  const source = resolve(sourcePath);
+  const relativePath = relative(root, source).replaceAll("\\", "/");
+  if (relativePath !== "packages/ingenium-extension/scripts/recovery-bootstrap.js") {
+    throw new Error("Managed recovery bootstrap path is not canonical");
+  }
+  const env = managedGitEnvironment();
+  assertNonExecutableGitConfiguration(root, env);
+  const reviewed = execFileSync(GIT, ["-C", root, ...GIT_CONFIGURATION, "show", `HEAD:${relativePath}`], {
+    encoding: "buffer", timeout: 10_000, maxBuffer: 1024 * 1024, env,
+  });
+  execFileSync(GIT, ["-C", root, ...GIT_CONFIGURATION, "diff", "--quiet", "HEAD", "--", relativePath], {
+    timeout: 10_000, env,
+  });
+  const reference = lstatSync(source);
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    const mode = opened.mode & 0o777;
+    if (!reference.isFile() || reference.isSymbolicLink() || reference.nlink !== 1 || !opened.isFile() || opened.nlink !== 1
+      || reference.dev !== opened.dev || reference.ino !== opened.ino || reference.uid !== opened.uid
+      || (uid !== undefined && opened.uid !== uid) || (mode & 0o644) !== 0o644
+      || !readFileSync(descriptor).equals(reviewed)) throw new Error("Managed recovery bootstrap is not trusted");
+    if (mode !== 0o644) {
+      fchmodSync(descriptor, 0o644);
+      fsyncSync(descriptor);
+    }
+    const hardened = fstatSync(descriptor);
+    const current = lstatSync(source);
+    if (!hardened.isFile() || hardened.nlink !== 1 || (hardened.mode & 0o777) !== 0o644
+      || hardened.dev !== opened.dev || hardened.ino !== opened.ino || hardened.size !== opened.size
+      || hardened.mtimeMs !== opened.mtimeMs || current.dev !== opened.dev || current.ino !== opened.ino
+      || (current.mode & 0o777) !== 0o644) throw new Error("Managed recovery bootstrap mode normalization failed");
+    return source;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 function isSafeCommitMessage(value: string): boolean {
@@ -463,6 +518,7 @@ export function managedCommand(
   dependencies: {
     runner?: typeof spawnSync;
     terminateTimedOut?: typeof terminateTimedOutManagedProcess;
+    normalizeRecoveryBootstrap?: typeof normalizeManagedRecoveryBootstrapMode;
   } = {},
 ): number {
   const productionRestart = kind === "build" && argv[0] === "deployment" && argv[1] === "production-restart";
@@ -477,7 +533,9 @@ export function managedCommand(
   } else {
     const execution = managedBuildExecution(argv);
     command = execution.command;
-    commandArgv = execution.argv;
+    commandArgv = productionRestart
+      ? [(dependencies.normalizeRecoveryBootstrap ?? normalizeManagedRecoveryBootstrapMode)(execution.argv[0]!, cwd)]
+      : execution.argv;
     env = productionRestart ? managedRecoveryEnvironment() : managedBuildEnvironment();
   }
   const before = kind === "build" ? sourceFingerprint(cwd) : undefined;

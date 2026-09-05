@@ -74,7 +74,7 @@ export interface ReplacementFirstRestartRequest {
     audience: "mcp";
   };
   oldProcess: RestartProcessIdentity;
-  oldPort: number;
+  oldPort: number | null;
   oldDataHome: string;
   replacement: {
     port: number;
@@ -253,7 +253,7 @@ export function isSafeRestartHandoffPath(value: unknown): value is string {
 }
 
 function handoffActions(value: unknown): RedactedRestartHandoff["actions"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_HANDOFF_ACTIONS) throw new Error("handoff.actions is invalid");
+  if (!Array.isArray(value) || value.length > MAX_HANDOFF_ACTIONS) throw new Error("handoff.actions is invalid");
   return value.map((entry) => {
     if (!hasExactKeys(entry, ["kind", "result", "path", "targetHash"])
       || !ACTION_KINDS.includes(entry.kind as typeof ACTION_KINDS[number]) || entry.result !== "succeeded"
@@ -272,7 +272,7 @@ function handoffActions(value: unknown): RedactedRestartHandoff["actions"] {
 }
 
 function handoffChangedPaths(value: unknown): RedactedRestartHandoff["changedPaths"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_HANDOFF_PATHS) throw new Error("handoff.changedPaths is invalid");
+  if (!Array.isArray(value) || value.length > MAX_HANDOFF_PATHS) throw new Error("handoff.changedPaths is invalid");
   return value.map((entry) => {
     if (!hasExactKeys(entry, ["path", "operation", "additions", "deletions", "changeRevision"])
       || !isSafeRestartHandoffPath(entry.path) || !["write", "edit"].includes(entry.operation as string)) {
@@ -289,7 +289,7 @@ function handoffChangedPaths(value: unknown): RedactedRestartHandoff["changedPat
 }
 
 function handoffChecks(value: unknown): RedactedRestartHandoff["checks"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_HANDOFF_CHECKS) throw new Error("handoff.checks is invalid");
+  if (!Array.isArray(value) || value.length > MAX_HANDOFF_CHECKS) throw new Error("handoff.checks is invalid");
   return value.map((entry) => {
     if (!hasExactKeys(entry, ["name", "status", "result", "exitCode", "targetHash"])
       || !CHECK_NAMES.includes(entry.name as typeof CHECK_NAMES[number])
@@ -406,11 +406,11 @@ export function decodeReplacementFirstRestartRequest(
   const oldProcess = processIdentity(parsed.oldProcess, "oldProcess");
   const replacementIdentity = expectedIdentity(parsed.replacement.expectedIdentity);
   if (replacementIdentity.nonceSha256 === oldProcess.nonceSha256) throw new Error("Replacement identity must be distinct");
-  const oldPort = boundedInteger(parsed.oldPort, "oldPort", 1024, 65535);
+  const oldPort = parsed.oldPort === null ? null : boundedInteger(parsed.oldPort, "oldPort", 1024, 65535);
   const replacementPort = boundedInteger(parsed.replacement.port, "replacement.port", 1024, 65535);
   const oldDataHome = canonicalDirectory(parsed.oldDataHome, "oldDataHome", true);
   const replacementDataHome = canonicalDirectory(parsed.replacement.dataHome, "replacement.dataHome", false);
-  if (oldPort === replacementPort || directoriesOverlap(oldDataHome, replacementDataHome)) {
+  if ((oldPort !== null && oldPort === replacementPort) || directoriesOverlap(oldDataHome, replacementDataHome)) {
     throw new Error("Replacement port and data home must be distinct");
   }
 
