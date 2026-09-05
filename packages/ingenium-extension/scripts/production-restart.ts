@@ -29,7 +29,10 @@ import {
   coordinationCredentialPurpose,
   resolveExtensionBinding,
 } from "../extension-binding.js";
-import { CoordinationOutbox } from "../coordination-outbox.js";
+import {
+  COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
+  CoordinationOutbox,
+} from "../coordination-outbox.js";
 import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
   decodeReplacementFirstRestartRequest,
@@ -68,6 +71,8 @@ const UNNONCED_PARENT_SHA256 = "0".repeat(64);
 const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
 const REPLACEMENT_SERVER_USERNAME = "opencode";
 const LEGACY_HANDOFF_PATH = ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json";
+export const PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
+const OVERFLOW_AUTHORIZATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
 export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
@@ -669,7 +674,7 @@ export async function runProductionRestartAdapter<Session>(
   }
 }
 
-function procStat(pid: number): { parentPid: number; startTimeTicks: number } | undefined {
+function procStat(pid: number): { parentPid: number; startTimeTicks: number; state: string } | undefined {
   try {
     const source = readFileSync(`/proc/${pid}/stat`, "utf8");
     const closeParen = source.lastIndexOf(")");
@@ -677,8 +682,9 @@ function procStat(pid: number): { parentPid: number; startTimeTicks: number } | 
     const fields = source.slice(closeParen + 1).trim().split(/\s+/);
     const parentPid = Number(fields[1]);
     const startTimeTicks = Number(fields[19]);
+    const state = fields[0];
     return Number.isSafeInteger(parentPid) && parentPid >= 0 && Number.isSafeInteger(startTimeTicks) && startTimeTicks > 0
-      ? { parentPid, startTimeTicks }
+      && typeof state === "string" && /^[A-Z]$/.test(state) ? { parentPid, startTimeTicks, state }
       : undefined;
   } catch {
     return undefined;
@@ -1665,11 +1671,70 @@ async function terminate(identity: RestartProcessIdentity, role: "old" | "replac
   }
   try {
     process.kill(identity.pid, "SIGTERM");
+    if (procStat(identity.pid)?.state === "T") process.kill(identity.pid, "SIGCONT");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
     throw error;
   }
   while (procStat(identity.pid)) await wait(50, signal);
+}
+
+async function quiesce(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void> {
+  if (!identitiesMatch(inspectExpectedProcessIdentity(identity), identity)) {
+    throw new Error("Old process identity changed before quiescence");
+  }
+  let signaled = false;
+  try {
+    process.kill(identity.pid, "SIGSTOP");
+    signaled = true;
+    while (true) {
+      signal.throwIfAborted();
+      if (!identitiesMatch(inspectExpectedProcessIdentity(identity), identity)) {
+        throw new Error("Old process identity changed during quiescence");
+      }
+      if (procStat(identity.pid)?.state === "T") return;
+      await wait(25, signal);
+    }
+  } catch (error) {
+    if (signaled && identitiesMatch(inspectExpectedProcessIdentity(identity), identity)) {
+      try { process.kill(identity.pid, "SIGCONT"); } catch {}
+    }
+    throw error;
+  }
+}
+
+async function resume(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  if (!identitiesMatch(inspectExpectedProcessIdentity(identity), identity)) {
+    throw new Error("Old process identity changed before resume");
+  }
+  process.kill(identity.pid, "SIGCONT");
+}
+
+function overflowAuthorization(now = Date.now()) {
+  return {
+    schemaVersion: 1 as const,
+    authorizationId: hash(`production-restart-overflow-authorization\0${PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY}`),
+    recordKey: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
+    mode: "abandon_identityless_overflow" as const,
+    authority: "explicit_user_authorization" as const,
+    scope: "exact_key_same_record_family" as const,
+    reason: "nonrecoverable_identityless_overflow" as const,
+    issuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + OVERFLOW_AUTHORIZATION_LIFETIME_MS).toISOString(),
+  };
+}
+
+export function commitProductionRetirement(
+  worktree: string,
+  transactionSha256: string,
+  commit: (subjectWorktree: string, subjectTransactionSha256: string) => void = commitManagedRecoveryReplacement,
+): void {
+  if (new CoordinationOutbox(worktree).unresolved()
+    .some((record) => record.ambiguous || record.kind === "overflow")) {
+    throw new Error("Production restart coordination state changed before retirement");
+  }
+  commit(worktree, transactionSha256);
 }
 
 function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.ProcessEnv {
@@ -1899,9 +1964,22 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
         replacementIdentitySha256: restartIdentitySha256(identity),
       };
     },
-    commitRecoveryOwner: async (transactionSha256, signal) => {
+    quiesceOldProcess: async (identity, signal) => {
+      await quiesce(identity, signal);
+    },
+    resumeOldProcess: async (identity, signal) => {
+      await resume(identity, signal);
+    },
+    prepareRetirement: async (_identity, signal) => {
       signal.throwIfAborted();
-      commitManagedRecoveryReplacement(state.worktree, transactionSha256);
+      const outbox = new CoordinationOutbox(state.worktree);
+      const target = outbox.unresolved().find((record) => record.key === PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY);
+      if (!target) return { rollback() {} };
+      return outbox.prepareIdentitylessOverflowDisposition(overflowAuthorization());
+    },
+    commitRetirement: async (transactionSha256, signal) => {
+      signal.throwIfAborted();
+      commitProductionRetirement(state.worktree, transactionSha256);
       state.serverAuthenticationRetained = true;
     },
     abortRecoveryOwner: (transactionSha256) => {
@@ -2074,7 +2152,10 @@ export function productionRestartDependencies(
   return {
     canonicalWorktree: () => {
       const worktree = productionRestartCanonicalWorktree();
-      if (new CoordinationOutbox(worktree).unresolved().some((record) => record.ambiguous || record.kind === "overflow")) {
+      if (new CoordinationOutbox(worktree).unresolved().some((record) =>
+        (record.ambiguous || record.kind === "overflow")
+        && (record.key !== PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY || record.kind !== "overflow"
+          || !record.ambiguous || !/^0+$/.test(record.sessionHash) || record.mutation !== null))) {
         throw new Error("Production restart coordination state is ambiguous; ESCALATE_USER without exact epoch evidence");
       }
       return worktree;

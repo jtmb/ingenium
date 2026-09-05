@@ -21,6 +21,7 @@ import { dirname, join, resolve } from "node:path";
 export const COORDINATION_OUTBOX_MAX_RECORD_BYTES = 16 * 1024;
 export const COORDINATION_OUTBOX_MAX_RECORDS = 128;
 export const COORDINATION_OUTBOX_MAX_BYTES = 2 * 1024 * 1024;
+export const COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
 
 export type CoordinationOutboxKind =
   | "register"
@@ -91,7 +92,7 @@ export interface CoordinationOutboxRecord {
   mutation: CoordinationOutboxMutationEvidence | null;
 }
 
-export interface CoordinationOutboxDisposition {
+export interface LegacyCoordinationOutboxDisposition {
   schemaVersion: 1;
   recordKey: string;
   recordSha256: string;
@@ -100,6 +101,36 @@ export interface CoordinationOutboxDisposition {
   authority: "explicit_user_authorization";
   reason: "nonrecoverable_identityless_overflow";
   createdAt: string;
+}
+
+export interface CoordinationOutboxDispositionAuthorization {
+  schemaVersion: 1;
+  authorizationId: string;
+  recordKey: string;
+  mode: "abandon_identityless_overflow";
+  authority: "explicit_user_authorization";
+  scope: "exact_key_same_record_family";
+  reason: "nonrecoverable_identityless_overflow";
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface CoordinationOutboxDisposition {
+  schemaVersion: 2;
+  recordKey: string;
+  recordSha256: string;
+  recordCount: number;
+  operationId: string;
+  authorizationSha256: string;
+  decision: "abandoned";
+  authority: "explicit_user_authorization";
+  reason: "nonrecoverable_identityless_overflow";
+  createdAt: string;
+}
+
+export interface PreparedCoordinationOutboxDisposition {
+  disposition: CoordinationOutboxDisposition;
+  rollback(): void;
 }
 
 export interface CoordinationOutboxInput {
@@ -118,8 +149,15 @@ const RECORD_KEYS = [
   "version", "operationId", "key", "kind", "sessionHash", "createdAt", "failure",
   "revision", "cursor", "digest", "ambiguous", "count", "mutation",
 ] as const;
-const DISPOSITION_KEYS = [
+const LEGACY_DISPOSITION_KEYS = [
   "schemaVersion", "recordKey", "recordSha256", "operationId", "decision", "authority", "reason", "createdAt",
+] as const;
+const DISPOSITION_KEYS = [
+  "schemaVersion", "recordKey", "recordSha256", "recordCount", "operationId", "authorizationSha256",
+  "decision", "authority", "reason", "createdAt",
+] as const;
+const AUTHORIZATION_KEYS = [
+  "schemaVersion", "authorizationId", "recordKey", "mode", "authority", "scope", "reason", "issuedAt", "expiresAt",
 ] as const;
 const KINDS = new Set<CoordinationOutboxKind>([
   "register", "claim", "completion", "quarantine", "snapshot", "memory", "publication",
@@ -139,6 +177,12 @@ const MUTATION_OPERATIONS = new Set<CoordinationOutboxMutationOperation>([
 ]);
 const FILESYSTEM_SENTINEL_KEY = hash("coordination-outbox-filesystem-sentinel");
 const FILESYSTEM_SENTINEL_CREATED_AT = new Date(0).toISOString();
+const MAX_AUTHORIZATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
+
+interface CoordinationOutboxRecordSnapshot {
+  record: CoordinationOutboxRecord;
+  sha256: string | undefined;
+}
 
 function hash(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
@@ -210,15 +254,55 @@ function validRecord(value: unknown): value is CoordinationOutboxRecord {
     && (record.mutation === null || validMutation(record.mutation));
 }
 
+function validLegacyDisposition(value: unknown): value is LegacyCoordinationOutboxDisposition {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const disposition = value as Record<string, unknown>;
+  return Object.keys(disposition).length === LEGACY_DISPOSITION_KEYS.length
+    && LEGACY_DISPOSITION_KEYS.every((key) => Object.hasOwn(disposition, key))
+    && disposition.schemaVersion === 1
+    && typeof disposition.recordKey === "string" && HASH.test(disposition.recordKey)
+    && typeof disposition.recordSha256 === "string" && HASH.test(disposition.recordSha256)
+    && typeof disposition.operationId === "string" && HASH.test(disposition.operationId)
+    && disposition.decision === "abandoned"
+    && disposition.authority === "explicit_user_authorization"
+    && disposition.reason === "nonrecoverable_identityless_overflow"
+    && typeof disposition.createdAt === "string" && Number.isFinite(Date.parse(disposition.createdAt));
+}
+
+function validAuthorization(
+  value: unknown,
+  now?: number,
+): value is CoordinationOutboxDispositionAuthorization {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const authorization = value as Record<string, unknown>;
+  if (Object.keys(authorization).length !== AUTHORIZATION_KEYS.length
+    || !AUTHORIZATION_KEYS.every((key) => Object.hasOwn(authorization, key))
+    || authorization.schemaVersion !== 1
+    || typeof authorization.authorizationId !== "string" || !HASH.test(authorization.authorizationId)
+    || typeof authorization.recordKey !== "string" || authorization.recordKey !== COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY
+    || authorization.mode !== "abandon_identityless_overflow"
+    || authorization.authority !== "explicit_user_authorization"
+    || authorization.scope !== "exact_key_same_record_family"
+    || authorization.reason !== "nonrecoverable_identityless_overflow"
+    || typeof authorization.issuedAt !== "string" || typeof authorization.expiresAt !== "string") return false;
+  const issuedAt = Date.parse(authorization.issuedAt);
+  const expiresAt = Date.parse(authorization.expiresAt);
+  return Number.isFinite(issuedAt) && Number.isFinite(expiresAt) && expiresAt > issuedAt
+    && expiresAt - issuedAt <= MAX_AUTHORIZATION_LIFETIME_MS
+    && (now === undefined || (issuedAt <= now && now < expiresAt));
+}
+
 function validDisposition(value: unknown): value is CoordinationOutboxDisposition {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const disposition = value as Record<string, unknown>;
   return Object.keys(disposition).length === DISPOSITION_KEYS.length
     && DISPOSITION_KEYS.every((key) => Object.hasOwn(disposition, key))
-    && disposition.schemaVersion === 1
+    && disposition.schemaVersion === 2
     && typeof disposition.recordKey === "string" && HASH.test(disposition.recordKey)
     && typeof disposition.recordSha256 === "string" && HASH.test(disposition.recordSha256)
+    && safeInteger(disposition.recordCount) && disposition.recordCount >= 1
     && typeof disposition.operationId === "string" && HASH.test(disposition.operationId)
+    && typeof disposition.authorizationSha256 === "string" && HASH.test(disposition.authorizationSha256)
     && disposition.decision === "abandoned"
     && disposition.authority === "explicit_user_authorization"
     && disposition.reason === "nonrecoverable_identityless_overflow"
@@ -288,6 +372,7 @@ function ensurePrivateDirectory(path: string, parent: string): void {
 export class CoordinationOutbox {
   readonly directory: string;
   readonly dispositionDirectory: string;
+  readonly authorizationDirectory: string;
 
   constructor(worktree: string, private readonly now: () => number = Date.now) {
     const root = realpathSync(resolve(worktree));
@@ -299,6 +384,7 @@ export class CoordinationOutbox {
     this.directory = join(protectedIndex, "coordination-outbox");
     ensurePrivateDirectory(this.directory, protectedIndex);
     this.dispositionDirectory = join(protectedIndex, "coordination-outbox-dispositions");
+    this.authorizationDirectory = join(protectedIndex, "coordination-outbox-authorizations");
   }
 
   private path(key: string): string {
@@ -315,47 +401,29 @@ export class CoordinationOutbox {
     }
   }
 
-  private read(path: string): CoordinationOutboxRecord | undefined {
-    let descriptor: number | undefined;
-    try {
-      const stat = lstatSync(path);
-      const uid = owner();
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > COORDINATION_OUTBOX_MAX_RECORD_BYTES
-        || (stat.mode & 0o777) !== 0o600 || (uid !== undefined && stat.uid !== uid)) return undefined;
-      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-      const opened = fstatSync(descriptor);
-      if (!opened.isFile() || opened.nlink !== 1 || opened.size > COORDINATION_OUTBOX_MAX_RECORD_BYTES
-        || (opened.mode & 0o777) !== 0o600 || (uid !== undefined && opened.uid !== uid)) return undefined;
-      const parsed: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
-      if (!validRecord(parsed) || this.path(parsed.key) !== path) return undefined;
-      return parsed.kind === "overflow" || parsed.mutation?.phase === "completion_ambiguous"
-        ? { ...parsed, ambiguous: true }
-        : parsed;
-    } catch {
-      return undefined;
-    } finally {
-      if (descriptor !== undefined) closeSync(descriptor);
-    }
-  }
-
-  private fileSha256(path: string): string | undefined {
+  private readPrivateBuffer(path: string): Buffer | undefined {
     let descriptor: number | undefined;
     try {
       const before = lstatSync(path);
       const uid = owner();
-      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size < 1
         || before.size > COORDINATION_OUTBOX_MAX_RECORD_BYTES || (before.mode & 0o777) !== 0o600
         || (uid !== undefined && before.uid !== uid)) return undefined;
       descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
       const opened = fstatSync(descriptor);
       const content = readFileSync(descriptor);
-      const after = lstatSync(path);
-      if (!opened.isFile() || opened.nlink !== 1 || opened.size > COORDINATION_OUTBOX_MAX_RECORD_BYTES
-        || opened.size !== content.byteLength
-        || (opened.mode & 0o777) !== 0o600 || (uid !== undefined && opened.uid !== uid)
-        || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino
-        || after.size !== opened.size || (after.mode & 0o777) !== 0o600) return undefined;
-      return hash(content);
+      const afterDescriptor = fstatSync(descriptor);
+      const afterPath = lstatSync(path);
+      if (!opened.isFile() || opened.nlink !== 1 || opened.size !== content.byteLength
+        || opened.dev !== before.dev || opened.ino !== before.ino
+        || opened.dev !== afterDescriptor.dev || opened.ino !== afterDescriptor.ino
+        || opened.size !== afterDescriptor.size || opened.mtimeMs !== afterDescriptor.mtimeMs
+        || opened.ctimeMs !== afterDescriptor.ctimeMs || !afterPath.isFile() || afterPath.isSymbolicLink()
+        || afterPath.nlink !== 1 || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino
+        || afterPath.size !== opened.size || (opened.mode & 0o777) !== 0o600
+        || (afterPath.mode & 0o777) !== 0o600 || (uid !== undefined && opened.uid !== uid)
+        || (uid !== undefined && afterPath.uid !== uid)) return undefined;
+      return content;
     } catch {
       return undefined;
     } finally {
@@ -363,120 +431,205 @@ export class CoordinationOutbox {
     }
   }
 
-  private dispositionPath(key: string): string {
-    return join(this.dispositionDirectory, `${key}.json`);
+  private readRecordSnapshot(path: string): CoordinationOutboxRecordSnapshot | undefined {
+    try {
+      const content = this.readPrivateBuffer(path);
+      if (!content) return undefined;
+      const parsed: unknown = JSON.parse(content.toString("utf8"));
+      if (!validRecord(parsed) || this.path(parsed.key) !== path) return undefined;
+      const record = parsed.kind === "overflow" || parsed.mutation?.phase === "completion_ambiguous"
+        ? { ...parsed, ambiguous: true }
+        : parsed;
+      return { record, sha256: hash(content) };
+    } catch {
+      return undefined;
+    }
   }
 
-  private readDisposition(record: CoordinationOutboxRecord): CoordinationOutboxDisposition | undefined {
+  private read(path: string): CoordinationOutboxRecord | undefined {
+    return this.readRecordSnapshot(path)?.record;
+  }
+
+  private dispositionPath(key: string, recordSha256?: string): string {
+    return join(this.dispositionDirectory, `${key}${recordSha256 ? `.${recordSha256}` : ""}.json`);
+  }
+
+  private authorizationPath(key: string): string {
+    return join(this.authorizationDirectory, `${key}.json`);
+  }
+
+  private readDisposition(
+    record: CoordinationOutboxRecord,
+    recordSha256: string | undefined,
+  ): LegacyCoordinationOutboxDisposition | CoordinationOutboxDisposition | undefined {
     if (record.kind !== "overflow" || !record.ambiguous || !/^0+$/.test(record.sessionHash) || record.mutation !== null) {
       return undefined;
     }
     if (!this.exists(this.dispositionDirectory)) return undefined;
     assertDirectory(this.dispositionDirectory, 0o700);
-    const path = this.dispositionPath(record.key);
+    const versionedPath = recordSha256 ? this.dispositionPath(record.key, recordSha256) : undefined;
+    const path = versionedPath && this.exists(versionedPath) ? versionedPath : this.dispositionPath(record.key);
     if (!this.exists(path)) return undefined;
-    let descriptor: number | undefined;
     try {
-      const stat = lstatSync(path);
-      const uid = owner();
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
-        || stat.size > COORDINATION_OUTBOX_MAX_RECORD_BYTES || (stat.mode & 0o777) !== 0o600
-        || (uid !== undefined && stat.uid !== uid)) return undefined;
-      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-      const opened = fstatSync(descriptor);
-      const parsed: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
-      const recordSha256 = this.fileSha256(this.path(record.key));
-      return opened.isFile() && opened.nlink === 1 && opened.size <= COORDINATION_OUTBOX_MAX_RECORD_BYTES
-        && (opened.mode & 0o777) === 0o600 && (uid === undefined || opened.uid === uid)
-        && validDisposition(parsed) && parsed.recordKey === record.key
-        && parsed.operationId === record.operationId && parsed.recordSha256 === recordSha256
+      const content = this.readPrivateBuffer(path);
+      if (!content || !recordSha256) return undefined;
+      const parsed: unknown = JSON.parse(content.toString("utf8"));
+      if (validLegacyDisposition(parsed)) {
+        return parsed.recordKey === record.key && parsed.operationId === record.operationId
+          && parsed.recordSha256 === recordSha256 ? parsed : undefined;
+      }
+      if (!validDisposition(parsed) || parsed.recordKey !== record.key || parsed.operationId !== record.operationId
+        || parsed.recordSha256 !== recordSha256 || parsed.recordCount !== record.count
+        || !this.exists(this.authorizationDirectory)) return undefined;
+      assertDirectory(this.authorizationDirectory, 0o700);
+      const authorizationContent = this.readPrivateBuffer(this.authorizationPath(record.key));
+      if (!authorizationContent || hash(authorizationContent) !== parsed.authorizationSha256) return undefined;
+      const authorization: unknown = JSON.parse(authorizationContent.toString("utf8"));
+      const dispositionTime = Date.parse(parsed.createdAt);
+      return validAuthorization(authorization)
+        && authorization.recordKey === record.key
+        && authorization.authority === parsed.authority
+        && Date.parse(authorization.issuedAt) <= dispositionTime
+        && dispositionTime < Date.parse(authorization.expiresAt)
         ? parsed : undefined;
     } catch {
       return undefined;
-    } finally {
-      if (descriptor !== undefined) closeSync(descriptor);
     }
   }
 
-  list(): CoordinationOutboxRecord[] {
+  private snapshots(): CoordinationOutboxRecordSnapshot[] {
     assertDirectory(this.directory, 0o700);
-    const records: CoordinationOutboxRecord[] = [];
+    const snapshots: CoordinationOutboxRecordSnapshot[] = [];
     let rejected = 0;
     for (const name of readdirSync(this.directory)) {
-      const record = /^[0-9a-f]{64}\.json$/.test(name) ? this.read(join(this.directory, name)) : undefined;
-      if (record) records.push(record);
+      const snapshot = /^[0-9a-f]{64}\.json$/.test(name) ? this.readRecordSnapshot(join(this.directory, name)) : undefined;
+      if (snapshot) snapshots.push(snapshot);
       else rejected += 1;
     }
     if (rejected > 0) {
-      records.push({
-        version: 1,
-        operationId: hash(`operation\0${FILESYSTEM_SENTINEL_KEY}`),
-        key: FILESYSTEM_SENTINEL_KEY,
-        kind: "overflow",
-        sessionHash: "0".repeat(64),
-        createdAt: FILESYSTEM_SENTINEL_CREATED_AT,
-        failure: "invalid_response",
-        revision: null,
-        cursor: null,
-        digest: hash(`coordination-outbox-rejected\0${rejected}`),
-        ambiguous: true,
-        count: rejected,
-        mutation: null,
+      snapshots.push({
+        record: {
+          version: 1,
+          operationId: hash(`operation\0${FILESYSTEM_SENTINEL_KEY}`),
+          key: FILESYSTEM_SENTINEL_KEY,
+          kind: "overflow",
+          sessionHash: "0".repeat(64),
+          createdAt: FILESYSTEM_SENTINEL_CREATED_AT,
+          failure: "invalid_response",
+          revision: null,
+          cursor: null,
+          digest: hash(`coordination-outbox-rejected\0${rejected}`),
+          ambiguous: true,
+          count: rejected,
+          mutation: null,
+        },
+        sha256: undefined,
       });
     }
-    return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt)
-      || left.operationId.localeCompare(right.operationId));
+    return snapshots.sort((left, right) => left.record.createdAt.localeCompare(right.record.createdAt)
+      || left.record.operationId.localeCompare(right.record.operationId));
+  }
+
+  list(): CoordinationOutboxRecord[] {
+    return this.snapshots().map(({ record }) => record);
   }
 
   unresolved(): CoordinationOutboxRecord[] {
-    return this.list().filter((record) => this.readDisposition(record) === undefined);
+    return this.snapshots().filter(({ record, sha256 }) => this.readDisposition(record, sha256) === undefined)
+      .map(({ record }) => record);
   }
 
-  abandonIdentitylessOverflow(recordKey: string, expectedSha256: string): CoordinationOutboxDisposition {
-    if (!HASH.test(recordKey) || !HASH.test(expectedSha256)) throw new Error("Invalid coordination outbox disposition");
-    const path = this.path(recordKey);
-    const record = this.read(path);
-    const recordSha256 = this.fileSha256(path);
-    if (!record || recordSha256 !== expectedSha256 || record.kind !== "overflow" || !record.ambiguous
+  private writeNewPrivateFile(path: string, serialized: string): void {
+    let descriptor: number | undefined;
+    let completed = false;
+    try {
+      descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      writeFileSync(descriptor, serialized, "utf8");
+      fsyncSync(descriptor);
+      completed = true;
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+      if (!completed) try { unlinkSync(path); } catch {}
+    }
+    const directory = openSync(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try { fsyncSync(directory); } finally { closeSync(directory); }
+  }
+
+  prepareIdentitylessOverflowDisposition(
+    requestedAuthorization: CoordinationOutboxDispositionAuthorization,
+  ): PreparedCoordinationOutboxDisposition {
+    const now = this.now();
+    if (!validAuthorization(requestedAuthorization, now)
+      || requestedAuthorization.recordKey !== COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY) {
+      throw new Error("Invalid coordination outbox authorization");
+    }
+    ensurePrivateDirectory(this.authorizationDirectory, dirname(this.authorizationDirectory));
+    const authorizationPath = this.authorizationPath(requestedAuthorization.recordKey);
+    if (!this.exists(authorizationPath)) {
+      this.writeNewPrivateFile(authorizationPath, `${JSON.stringify(requestedAuthorization)}\n`);
+    }
+    const authorizationContent = this.readPrivateBuffer(authorizationPath);
+    if (!authorizationContent) throw new Error("Coordination outbox authorization is unavailable");
+    let authorization: unknown;
+    try { authorization = JSON.parse(authorizationContent.toString("utf8")); } catch {
+      throw new Error("Coordination outbox authorization is unavailable");
+    }
+    if (!validAuthorization(authorization, now)
+      || authorization.authorizationId !== requestedAuthorization.authorizationId
+      || authorization.recordKey !== requestedAuthorization.recordKey
+      || authorization.mode !== requestedAuthorization.mode
+      || authorization.authority !== requestedAuthorization.authority
+      || authorization.scope !== requestedAuthorization.scope
+      || authorization.reason !== requestedAuthorization.reason) {
+      throw new Error("Coordination outbox authorization is unavailable");
+    }
+
+    const snapshot = this.readRecordSnapshot(this.path(authorization.recordKey));
+    const record = snapshot?.record;
+    if (!record || !snapshot.sha256 || record.kind !== "overflow" || !record.ambiguous
       || !/^0+$/.test(record.sessionHash) || record.mutation !== null) {
       throw new Error("Coordination outbox record cannot be abandoned");
     }
-    const existing = this.readDisposition(record);
-    if (existing) return existing;
+    const existing = this.readDisposition(record, snapshot.sha256);
+    if (existing) {
+      if (!validDisposition(existing)) throw new Error("Coordination outbox authorization is unavailable");
+      return { disposition: existing, rollback() {} };
+    }
     ensurePrivateDirectory(this.dispositionDirectory, dirname(this.dispositionDirectory));
+    const dispositionPath = this.dispositionPath(record.key, snapshot.sha256);
+    if (this.exists(dispositionPath)) throw new Error("Coordination outbox disposition is unavailable");
     const disposition: CoordinationOutboxDisposition = {
-      schemaVersion: 1,
-      recordKey,
-      recordSha256,
+      schemaVersion: 2,
+      recordKey: record.key,
+      recordSha256: snapshot.sha256,
+      recordCount: record.count,
       operationId: record.operationId,
+      authorizationSha256: hash(authorizationContent),
       decision: "abandoned",
-      authority: "explicit_user_authorization",
-      reason: "nonrecoverable_identityless_overflow",
-      createdAt: new Date(this.now()).toISOString(),
+      authority: authorization.authority,
+      reason: authorization.reason,
+      createdAt: new Date(now).toISOString(),
     };
     const serialized = `${JSON.stringify(disposition)}\n`;
-    let descriptor: number | undefined;
-    let created = false;
-    try {
-      descriptor = openSync(this.dispositionPath(recordKey), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      created = true;
-      writeFileSync(descriptor, serialized, "utf8");
-      fsyncSync(descriptor);
-      closeSync(descriptor);
-      descriptor = undefined;
-      const directory = openSync(this.dispositionDirectory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      try { fsyncSync(directory); } finally { closeSync(directory); }
-      const retained = this.readDisposition(record);
-      if (!retained) throw new Error("Coordination outbox disposition is unavailable");
-      return retained;
-    } catch (error) {
-      if (created) {
-        try { unlinkSync(this.dispositionPath(recordKey)); } catch {}
-      }
-      throw error;
-    } finally {
-      if (descriptor !== undefined) closeSync(descriptor);
+    this.writeNewPrivateFile(dispositionPath, serialized);
+    const retained = this.readDisposition(record, snapshot.sha256);
+    if (!retained || !validDisposition(retained)) {
+      try { unlinkSync(dispositionPath); } catch {}
+      throw new Error("Coordination outbox disposition is unavailable");
     }
+    const dispositionSha256 = hash(serialized);
+    return {
+      disposition: retained,
+      rollback: () => {
+        const current = this.readPrivateBuffer(dispositionPath);
+        if (!current || hash(current) !== dispositionSha256) {
+          throw new Error("Coordination outbox disposition changed before rollback");
+        }
+        unlinkSync(dispositionPath);
+        const directory = openSync(this.dispositionDirectory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        try { fsyncSync(directory); } finally { closeSync(directory); }
+      },
+    };
   }
 
   private atomicWrite(record: CoordinationOutboxRecord): void {
@@ -507,14 +660,14 @@ export class CoordinationOutbox {
   private overflow(input: CoordinationOutboxInput): CoordinationOutboxRecord {
     let key = hash("coordination-outbox-overflow");
     let path = this.path(key);
-    let existing = this.read(path);
+    let existing = this.readRecordSnapshot(path);
     while (existing) {
-      if (!this.readDisposition(existing)) throw new Error("Coordination outbox is unavailable");
-      const recordSha256 = this.fileSha256(path);
-      if (!recordSha256) throw new Error("Coordination outbox is unavailable");
-      key = hash(`coordination-outbox-overflow\0${key}\0${recordSha256}`);
+      if (!this.readDisposition(existing.record, existing.sha256) || !existing.sha256) {
+        throw new Error("Coordination outbox is unavailable");
+      }
+      key = hash(`coordination-outbox-overflow\0${key}\0${existing.sha256}`);
       path = this.path(key);
-      existing = this.read(path);
+      existing = this.readRecordSnapshot(path);
     }
     if (!existing && this.exists(path)) throw new Error("Coordination outbox is unavailable");
     const digest = hash(`\0${input.kind}\0${input.failure}\0${input.digest ?? ""}`);

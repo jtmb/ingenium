@@ -102,6 +102,7 @@ export type ReplacementFirstRestartPhase =
   | "typed_memory_acknowledged"
   | "terminal_idle_acknowledged"
   | "recovery_owner_ready"
+  | "old_parent_quiesced"
   | "retirement_committed"
   | "old_parent_retired";
 
@@ -185,8 +186,14 @@ export interface ReplacementFirstRestartDependencies<Session> {
     transactionSha256: string,
     signal: AbortSignal,
   ): Promise<{ status: "ready"; transactionSha256: string; replacementIdentitySha256: string }>;
-  commitRecoveryOwner?(transactionSha256: string, signal: AbortSignal): Promise<void>;
+  commitRetirement(transactionSha256: string, signal: AbortSignal): Promise<void>;
   abortRecoveryOwner?(transactionSha256: string): Promise<void> | void;
+  quiesceOldProcess(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
+  resumeOldProcess(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
+  prepareRetirement(
+    identity: RestartProcessIdentity,
+    signal: AbortSignal,
+  ): Promise<{ rollback(): Promise<void> | void }>;
   retireOldProcess(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
   stopReplacement(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
   persistEvidence(evidence: ReplacementFirstRestartEvidence): void | Promise<void>;
@@ -476,6 +483,8 @@ export async function runReplacementFirstRestart<Session>(
   let oldParentRetired = false;
   let replacementStopped = false;
   let retirementCommitted = false;
+  let oldParentQuiesced = false;
+  let retirementPreparation: { rollback(): Promise<void> | void } | undefined;
   const persist = async (phase: ReplacementFirstRestartPhase, committed = retirementCommitted): Promise<void> => {
     await dependencies.persistEvidence({
       phase,
@@ -570,17 +579,22 @@ export async function runReplacementFirstRestart<Session>(
 
     const bindingStillCurrent = await bounded("restart binding", request.timeouts.identityMs, (signal) =>
       dependencies.revalidateBinding(request.binding, request.worktree, signal));
-    const oldStillCurrent = await bounded("old process identity", request.timeouts.identityMs, (signal) =>
-      dependencies.revalidateProcessIdentity(request.oldProcess, "old", signal));
     const replacementStillCurrent = await bounded("replacement process identity", request.timeouts.identityMs, (signal) =>
       dependencies.revalidateProcessIdentity(replacement!, "replacement", signal));
-    if (!bindingStillCurrent || !oldStillCurrent || !replacementStillCurrent) {
+    if (!bindingStillCurrent || !replacementStillCurrent) {
       throw new Error("Binding or process identity changed before retirement");
     }
-    if (dependencies.commitRecoveryOwner) {
-      await bounded("recovery owner commit", request.timeouts.identityMs, (signal) =>
-        dependencies.commitRecoveryOwner!(transaction, signal));
-    }
+    await bounded("old process quiescence", request.timeouts.retirementMs, (signal) =>
+      dependencies.quiesceOldProcess(request.oldProcess, signal));
+    oldParentQuiesced = true;
+    const oldStillCurrent = await bounded("quiesced old process identity", request.timeouts.identityMs, (signal) =>
+      dependencies.revalidateProcessIdentity(request.oldProcess, "old", signal));
+    if (!oldStillCurrent) throw new Error("Old process identity changed after quiescence");
+    await persist("old_parent_quiesced");
+    retirementPreparation = await bounded("retirement preparation", request.timeouts.identityMs, (signal) =>
+      dependencies.prepareRetirement(request.oldProcess, signal));
+    await bounded("retirement commit", request.timeouts.identityMs, (signal) =>
+      dependencies.commitRetirement(transaction, signal));
     retirementCommitted = true;
     await persist("retirement_committed", true);
     await bounded("old process retirement", request.timeouts.retirementMs, (signal) =>
@@ -613,7 +627,20 @@ export async function runReplacementFirstRestart<Session>(
       };
     }
     if (!retirementCommitted && replacement) {
+      if (retirementPreparation) {
+        try { await retirementPreparation.rollback(); } catch {}
+      }
       try { await dependencies.abortRecoveryOwner?.(createHash("sha256").update(handoffDigest).update("\0").update(identitySha256(replacement)).digest("hex")); } catch {}
+      if (oldParentQuiesced) {
+        try {
+          const oldIsCurrent = await bounded("old process resume identity", request.timeouts.identityMs, (signal) =>
+            dependencies.revalidateProcessIdentity(request.oldProcess, "old", signal));
+          if (oldIsCurrent) {
+            await bounded("old process resume", request.timeouts.retirementMs, (signal) =>
+              dependencies.resumeOldProcess(request.oldProcess, signal));
+          }
+        } catch {}
+      }
       try {
         const replacementIsCurrent = await bounded("replacement cleanup identity", request.timeouts.identityMs, (signal) =>
           dependencies.revalidateProcessIdentity(replacement!, "replacement", signal));

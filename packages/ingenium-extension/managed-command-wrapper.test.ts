@@ -21,6 +21,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,6 +74,7 @@ import {
 import {
   appendProductionRestartCandidateRejection,
   appendProductionRestartEvidence,
+  commitProductionRetirement,
   hardenLegacyProductionCredentialPermissions,
   inspectExpectedProcessIdentity,
   openCodeJsonRequest,
@@ -83,6 +85,7 @@ import {
   probeReplacementHealthGate,
   productionRestartCanonicalWorktree,
   productionRestartDependencies,
+  PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
   redactedHandoffFromExport,
   restartHandoffEvidence,
   restartHandoffMemoryEntry,
@@ -304,6 +307,28 @@ function replacementRequest(worktree: string): ReplacementFirstRestartRequest {
 
 function encodedRestart(request: ReplacementFirstRestartRequest | Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(request)).toString("base64url");
+}
+
+function writeIdentitylessOverflow(outbox: CoordinationOutbox, key: string, count = 1): Buffer {
+  const seed = outbox.put({
+    exactKey: `overflow-seed-${key}`,
+    kind: "claim",
+    sessionHash: sha256("legacy-session"),
+    failure: "unavailable",
+  });
+  unlinkSync(join(outbox.directory, `${seed.key}.json`));
+  const serialized = Buffer.from(`${JSON.stringify({
+    ...seed,
+    key,
+    operationId: sha256(`operation\0${key}`),
+    kind: "overflow",
+    sessionHash: "0".repeat(64),
+    ambiguous: true,
+    count,
+    mutation: null,
+  })}\n`);
+  writeFileSync(join(outbox.directory, `${key}.json`), serialized, { mode: 0o600 });
+  return serialized;
 }
 
 describe("managed command wrappers", () => {
@@ -2252,7 +2277,10 @@ describe("managed command wrappers", () => {
                 calls.push("owner-ready");
                 return { status: "ready", transactionSha256, replacementIdentitySha256: recoveryIdentitySha256(identity) };
               },
-              commitRecoveryOwner: async () => { calls.push("owner-commit"); },
+              quiesceOldProcess: async () => { calls.push("quiesce-old"); },
+              resumeOldProcess: async () => { calls.push("resume-old"); },
+              prepareRetirement: async () => { calls.push("prepare-retirement"); return { rollback() {} }; },
+              commitRetirement: async () => { calls.push("retirement-commit"); },
               retireOldProcess: async (identity) => { calls.push("retire-old"); retired.push(identity); },
               stopReplacement: async () => { calls.push("stop-replacement"); },
               persistEvidence: (entry) => { calls.push(`persist:${entry.phase}`); },
@@ -2274,7 +2302,8 @@ describe("managed command wrappers", () => {
         "persist:handoff_published", "launch", "identity:replacement", "persist:replacement_started", "health",
         "persist:replacement_healthy", "session", "persist:session_created", "memory-ack",
         "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged", "owner-ready",
-        "persist:recovery_owner_ready", "binding", "identity:old", "identity:replacement", "owner-commit",
+        "persist:recovery_owner_ready", "binding", "identity:replacement", "quiesce-old", "identity:old",
+        "persist:old_parent_quiesced", "prepare-retirement", "retirement-commit",
         "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
       ]);
     } finally {
@@ -2400,7 +2429,7 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("accepts an exact explicitly abandoned identityless overflow without changing its evidence", () => {
+  it("admits only the contracted exact-key overflow without disposing it before replacement readiness", () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-abandoned-overflow-"));
     const priorCanonicalWorktree = process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
     const priorWorktree = process.env.INGENIUM_WORKTREE;
@@ -2408,23 +2437,42 @@ describe("managed command wrappers", () => {
       process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = worktree;
       process.env.INGENIUM_WORKTREE = worktree;
       const outbox = new CoordinationOutbox(worktree);
-      for (let index = 0; index < 128; index += 1) {
-        outbox.put({
-          exactKey: `abandoned-preflight-${index}`,
-          kind: "claim",
-          sessionHash: sha256("legacy-session"),
-          failure: "unavailable",
-        });
-      }
-      const overflow = outbox.list().find((record) => record.kind === "overflow")!;
-      const overflowPath = join(outbox.directory, `${overflow.key}.json`);
-      const retained = readFileSync(overflowPath);
-      outbox.abandonIdentitylessOverflow(overflow.key, sha256(retained));
+      const retained = writeIdentitylessOverflow(outbox, PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY, 7);
+      const overflowPath = join(outbox.directory, `${PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY}.json`);
 
       const production = productionRestartDependencies(sha256("production-restart-script"));
 
       expect(production.canonicalWorktree()).toBe(worktree);
       expect(readFileSync(overflowPath)).toEqual(retained);
+      expect(outbox.unresolved()).toContainEqual(expect.objectContaining({
+        key: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
+        count: 7,
+        ambiguous: true,
+      }));
+      expect(existsSync(outbox.dispositionDirectory)).toBe(false);
+    } finally {
+      if (priorCanonicalWorktree === undefined) delete process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
+      else process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = priorCanonicalWorktree;
+      if (priorWorktree === undefined) delete process.env.INGENIUM_WORKTREE;
+      else process.env.INGENIUM_WORKTREE = priorWorktree;
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects every non-contracted overflow key before enrollment or signal", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-wrong-overflow-"));
+    const priorCanonicalWorktree = process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
+    const priorWorktree = process.env.INGENIUM_WORKTREE;
+    try {
+      process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = worktree;
+      process.env.INGENIUM_WORKTREE = worktree;
+      const outbox = new CoordinationOutbox(worktree);
+      writeIdentitylessOverflow(outbox, sha256("not-authorized"));
+
+      const production = productionRestartDependencies(sha256("production-restart-script"));
+
+      expect(() => production.canonicalWorktree()).toThrow("coordination state is ambiguous");
+      expect(existsSync(outbox.dispositionDirectory)).toBe(false);
     } finally {
       if (priorCanonicalWorktree === undefined) delete process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
       else process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = priorCanonicalWorktree;
@@ -2486,6 +2534,10 @@ describe("managed command wrappers", () => {
               awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
                 status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
               }),
+              quiesceOldProcess: async () => {},
+              resumeOldProcess: async () => {},
+              prepareRetirement: async () => ({ rollback() {} }),
+              commitRetirement: async () => {},
               retireOldProcess: async () => { retired = true; },
               stopReplacement: async (identity) => { stopped = identity; },
               persistEvidence: async () => {},
@@ -2568,7 +2620,10 @@ describe("managed command wrappers", () => {
           calls.push("owner-ready");
           return { status: "ready", transactionSha256, replacementIdentitySha256: recoveryIdentitySha256(identity) };
         },
-        commitRecoveryOwner: async () => { calls.push("owner-commit"); },
+        quiesceOldProcess: async () => { calls.push("quiesce-old"); },
+        resumeOldProcess: async () => { calls.push("resume-old"); },
+        prepareRetirement: async () => { calls.push("prepare-retirement"); return { rollback() { calls.push("rollback-retirement"); } }; },
+        commitRetirement: async () => { calls.push("retirement-commit"); },
         retireOldProcess: async () => { calls.push("retire-old"); },
         stopReplacement: async () => { calls.push("stop-replacement"); },
         persistEvidence: (entry) => {
@@ -2584,7 +2639,8 @@ describe("managed command wrappers", () => {
         "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
         "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
         "memory-ack", "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged",
-        "owner-ready", "persist:recovery_owner_ready", "binding", "identity:old", "identity:replacement", "owner-commit",
+        "owner-ready", "persist:recovery_owner_ready", "binding", "identity:replacement", "quiesce-old", "identity:old",
+        "persist:old_parent_quiesced", "prepare-retirement", "retirement-commit",
         "persist:retirement_committed", "retire-old", "persist:old_parent_retired",
       ]);
       expect(evidence.at(-1)).toMatchObject({ phase: "old_parent_retired", oldParentRetired: true, replacementStopped: false });
@@ -2623,6 +2679,84 @@ describe("managed command wrappers", () => {
     }
   });
 
+  it("resumes the quiesced old writer and rolls back replacement state when the retirement commit fails", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-precommit-rollback-"));
+    try {
+      const request = replacementRequest(worktree);
+      const replacement: RestartProcessIdentity = {
+        pid: 1052,
+        startTimeTicks: 2052,
+        ...request.replacement.expectedIdentity,
+      };
+      const calls: string[] = [];
+      const dependencies: ReplacementFirstRestartDependencies<object> = {
+        revalidateBinding: async () => { calls.push("binding"); return true; },
+        revalidateProcessIdentity: async (_identity, role) => { calls.push(`identity:${role}`); return true; },
+        persistHandoff: async () => { calls.push("publish"); },
+        launchReplacement: async (input) => { calls.push("launch"); input.bindProvisionalIdentity(replacement); return replacement; },
+        verifyReplacementHealth: async () => { calls.push("health"); },
+        createReplacementSession: async (_identity, _port, transactionSha256) => ({
+          status: "created", transactionSha256, session: {},
+        }),
+        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
+          status: "acknowledged", handoffSha256, transactionSha256,
+        }),
+        awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
+          status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
+        }),
+        prepareRecoveryOwner: async (identity, _session, _handoffSha256, transactionSha256) => {
+          calls.push("owner-ready");
+          return { status: "ready", transactionSha256, replacementIdentitySha256: recoveryIdentitySha256(identity) };
+        },
+        quiesceOldProcess: async () => { calls.push("quiesce-old"); },
+        resumeOldProcess: async () => { calls.push("resume-old"); },
+        prepareRetirement: async () => {
+          calls.push("prepare-retirement");
+          return { rollback() { calls.push("rollback-retirement"); } };
+        },
+        commitRetirement: async () => { calls.push("final-unresolved"); throw new Error("retirement check failed"); },
+        abortRecoveryOwner: async () => { calls.push("abort-owner"); },
+        retireOldProcess: async () => { calls.push("retire-old"); },
+        stopReplacement: async () => { calls.push("stop-replacement"); },
+        persistEvidence: async (entry) => { calls.push(`persist:${entry.phase}`); },
+      };
+
+      await expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree))
+        .rejects.toThrow("retirement check failed");
+
+      expect(calls.indexOf("quiesce-old")).toBeGreaterThan(calls.indexOf("owner-ready"));
+      expect(calls).toContain("rollback-retirement");
+      expect(calls).toContain("resume-old");
+      expect(calls.indexOf("rollback-retirement")).toBeLessThan(calls.indexOf("resume-old"));
+      expect(calls.indexOf("resume-old")).toBeLessThan(calls.indexOf("stop-replacement"));
+      expect(calls).not.toContain("retire-old");
+      expect(calls.slice(calls.indexOf("prepare-retirement"), calls.indexOf("abort-owner") + 1)).toEqual([
+        "prepare-retirement", "final-unresolved", "rollback-retirement", "abort-owner",
+      ]);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the final unresolved recheck immediately before the retirement commitment", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-retirement-order-"));
+    try {
+      const events: string[] = [];
+      const unresolved = vi.spyOn(CoordinationOutbox.prototype, "unresolved").mockImplementation(() => {
+        events.push("unresolved");
+        return [];
+      });
+
+      commitProductionRetirement(worktree, sha256("transaction"), () => { events.push("commit"); });
+
+      expect(events).toEqual(["unresolved", "commit"]);
+      unresolved.mockRestore();
+    } finally {
+      vi.restoreAllMocks();
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the old process active and stops only the re-attested replacement on restart pre-idle-ack failure", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-first-failure-"));
     try {
@@ -2650,6 +2784,10 @@ describe("managed command wrappers", () => {
           return { status: "acknowledged", handoffSha256, transactionSha256 };
         },
         awaitTerminalIdleAcknowledgement: async () => { calls.push("terminal-idle"); throw new Error("idle acknowledgement failed"); },
+        quiesceOldProcess: async () => { calls.push("quiesce-old"); },
+        resumeOldProcess: async () => { calls.push("resume-old"); },
+        prepareRetirement: async () => ({ rollback() { calls.push("rollback-retirement"); } }),
+        commitRetirement: async () => { calls.push("retirement-commit"); },
         retireOldProcess: async () => { calls.push("retire-old"); },
         stopReplacement: async (identity) => {
           expect(identity).toEqual(replacement);
@@ -2708,6 +2846,10 @@ describe("managed command wrappers", () => {
         awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
           status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
         }),
+        quiesceOldProcess: async () => {},
+        resumeOldProcess: async () => {},
+        prepareRetirement: async () => ({ rollback() {} }),
+        commitRetirement: async () => {},
         retireOldProcess: async () => {},
         stopReplacement: async (identity) => { stopped = identity; },
         persistEvidence: async () => {},
@@ -2759,6 +2901,10 @@ describe("managed command wrappers", () => {
             transactionSha256,
             assistantResult: variant === "failed-assistant" ? "error" : "completed",
           } as any),
+          quiesceOldProcess: async () => {},
+          resumeOldProcess: async () => {},
+          prepareRetirement: async () => ({ rollback() {} }),
+          commitRetirement: async () => {},
           retireOldProcess: async () => { retired = true; },
           stopReplacement: async () => { stopped = true; },
           persistEvidence: async () => {},
@@ -2803,6 +2949,10 @@ describe("managed command wrappers", () => {
         awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
           status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
         }),
+        quiesceOldProcess: async () => {},
+        resumeOldProcess: async () => {},
+        prepareRetirement: async () => ({ rollback() {} }),
+        commitRetirement: async () => {},
         retireOldProcess: async () => { retired = true; },
         stopReplacement: async () => { stopped = true; },
         persistEvidence: async (entry) => {

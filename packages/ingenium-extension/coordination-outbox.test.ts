@@ -10,6 +10,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COORDINATION_OUTBOX_MAX_RECORD_BYTES,
   COORDINATION_OUTBOX_MAX_RECORDS,
+  COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
   CoordinationOutbox,
 } from "./coordination-outbox.js";
 
@@ -68,6 +70,42 @@ function worktree(): string {
   const root = mkdtempSync(join(tmpdir(), "ingenium-coordination-outbox-"));
   mkdirSync(join(root, ".opencode"), { mode: 0o700 });
   return root;
+}
+
+function dispositionAuthorization(recordKey: string, now = Date.parse("2026-09-05T00:00:00.000Z")) {
+  return {
+    schemaVersion: 1 as const,
+    authorizationId: createHash("sha256").update(`authorization\0${recordKey}`).digest("hex"),
+    recordKey,
+    mode: "abandon_identityless_overflow" as const,
+    authority: "explicit_user_authorization" as const,
+    scope: "exact_key_same_record_family" as const,
+    reason: "nonrecoverable_identityless_overflow" as const,
+    issuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(),
+  };
+}
+
+function writeAuthorizedOverflow(outbox: CoordinationOutbox, count = 1) {
+  const seed = outbox.put({
+    exactKey: "authorized-overflow-seed",
+    kind: "publication",
+    sessionHash: "a".repeat(64),
+    failure: "unavailable",
+  });
+  unlinkSync(join(outbox.directory, `${seed.key}.json`));
+  const record = {
+    ...seed,
+    key: COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
+    operationId: createHash("sha256").update(`operation\0${COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY}`).digest("hex"),
+    kind: "overflow" as const,
+    sessionHash: "0".repeat(64),
+    ambiguous: true,
+    count,
+    mutation: null,
+  };
+  writeFileSync(join(outbox.directory, `${record.key}.json`), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  return record;
 }
 
 describe("protected coordination outbox", () => {
@@ -440,31 +478,25 @@ describe("protected coordination outbox", () => {
     }
   });
 
-  it("preserves and excludes only an explicitly abandoned identityless overflow", () => {
+  it("binds a fresh exact-key authorization to one descriptor snapshot and rolls the disposition back safely", () => {
     const root = worktree();
     try {
       const outbox = new CoordinationOutbox(root, () => Date.parse("2026-09-05T00:00:00.000Z"));
-      for (let index = 0; index < COORDINATION_OUTBOX_MAX_RECORDS; index += 1) {
-        outbox.put({
-          exactKey: `abandon-overflow-${index}`,
-          kind: "publication",
-          sessionHash: "a".repeat(64),
-          failure: "unavailable",
-        });
-      }
-      const overflow = outbox.list().find((record) => record.kind === "overflow")!;
+      const overflow = writeAuthorizedOverflow(outbox);
       const overflowPath = join(outbox.directory, `${overflow.key}.json`);
-      const original = readFileSync(overflowPath);
-      const originalSha256 = createHash("sha256").update(original).digest("hex");
+      const changed = `${JSON.stringify({ ...overflow, count: overflow.count + 1 })}\n`;
+      writeFileSync(overflowPath, changed, { mode: 0o600 });
+      const changedSha256 = createHash("sha256").update(changed).digest("hex");
 
-      expect(() => outbox.abandonIdentitylessOverflow(overflow.key, "0".repeat(64)))
-        .toThrow("Coordination outbox record cannot be abandoned");
-      const disposition = outbox.abandonIdentitylessOverflow(overflow.key, originalSha256);
+      expect(() => outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization("0".repeat(64))))
+        .toThrow("Invalid coordination outbox authorization");
+      const prepared = outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key));
 
-      expect(disposition).toMatchObject({
-        schemaVersion: 1,
+      expect(prepared.disposition).toMatchObject({
+        schemaVersion: 2,
         recordKey: overflow.key,
-        recordSha256: originalSha256,
+        recordSha256: changedSha256,
+        recordCount: overflow.count + 1,
         operationId: overflow.operationId,
         decision: "abandoned",
         authority: "explicit_user_authorization",
@@ -472,20 +504,51 @@ describe("protected coordination outbox", () => {
       });
       expect(outbox.list()).toContainEqual(expect.objectContaining({ key: overflow.key, ambiguous: true }));
       expect(outbox.unresolved()).not.toContainEqual(expect.objectContaining({ key: overflow.key }));
-      expect(readFileSync(overflowPath)).toEqual(original);
+      expect(readFileSync(overflowPath, "utf8")).toBe(changed);
+      expect(lstatSync(outbox.authorizationDirectory).mode & 0o777).toBe(0o700);
+      expect(lstatSync(join(outbox.authorizationDirectory, `${overflow.key}.json`)).mode & 0o777).toBe(0o600);
       expect(lstatSync(outbox.dispositionDirectory).mode & 0o777).toBe(0o700);
-      expect(lstatSync(join(outbox.dispositionDirectory, `${overflow.key}.json`)).mode & 0o777).toBe(0o600);
+      expect(lstatSync(join(outbox.dispositionDirectory, `${overflow.key}.${changedSha256}.json`)).mode & 0o777).toBe(0o600);
 
-      outbox.put({
-        exactKey: "later-overflow",
-        kind: "publication",
-        sessionHash: "b".repeat(64),
-        failure: "unavailable",
-      });
-      expect(readFileSync(overflowPath)).toEqual(original);
-      expect(outbox.unresolved()).toContainEqual(expect.objectContaining({ kind: "overflow", ambiguous: true }));
+      const changedAgain = `${JSON.stringify({ ...overflow, count: overflow.count + 2 })}\n`;
+      writeFileSync(overflowPath, changedAgain, { mode: 0o600 });
+      const preparedAgain = outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key));
+      expect(preparedAgain.disposition).toMatchObject({ recordKey: overflow.key, recordCount: overflow.count + 2 });
+      expect(readdirSync(outbox.dispositionDirectory)).toHaveLength(2);
+
+      preparedAgain.rollback();
+      prepared.rollback();
+      expect(outbox.unresolved()).toContainEqual(expect.objectContaining({ key: overflow.key, count: overflow.count + 2 }));
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["malformed", "stale", "mode", "symlink"] as const)("fails closed for %s authorization evidence", (variant) => {
+    const root = worktree();
+    const outside = mkdtempSync(join(tmpdir(), "ingenium-coordination-authorization-outside-"));
+    try {
+      const now = Date.parse("2026-09-05T00:00:00.000Z");
+      const outbox = new CoordinationOutbox(root, () => now);
+      const overflow = writeAuthorizedOverflow(outbox);
+      const authorization = dispositionAuthorization(overflow.key, variant === "stale" ? now - 120_000 : now);
+      mkdirSync(outbox.authorizationDirectory, { mode: 0o700 });
+      const path = join(outbox.authorizationDirectory, `${overflow.key}.json`);
+      if (variant === "symlink") {
+        const target = join(outside, "authorization.json");
+        writeFileSync(target, `${JSON.stringify(authorization)}\n`, { mode: 0o600 });
+        symlinkSync(target, path);
+      } else {
+        writeFileSync(path, variant === "malformed" ? "{\n" : `${JSON.stringify(authorization)}\n`, { mode: 0o600 });
+        if (variant === "mode") chmodSync(path, 0o640);
+      }
+
+      expect(() => outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key, now)))
+        .toThrow("Coordination outbox authorization is unavailable");
+      expect(outbox.unresolved()).toContainEqual(expect.objectContaining({ key: overflow.key, ambiguous: true }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 
