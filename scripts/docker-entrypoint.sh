@@ -690,6 +690,12 @@ if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
 # identities access to the mounted workspace.
 setfacl -R -m u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX /workspace
 setfacl -R -m d:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX /workspace
+# Collaboration ACLs must not make protected runtime records group-readable.
+# Revisit only known index roots instead of traversing the whole workspace twice.
+for protected_index in /workspace/.opencode/protected-runtime-index /workspace/*/.opencode/protected-runtime-index; do
+  [ -e "$protected_index" ] || continue
+  secure_persistent_path tree "$protected_index" - - - 0600
+done
 # Seed OpenCode config with Ingenium MCP on first start
 OC_CONFIG="/home/ingenium-opencode/.config/opencode/opencode.jsonc"
 if [ ! -f "$OC_CONFIG" ]; then
