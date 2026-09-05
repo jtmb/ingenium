@@ -879,6 +879,27 @@ export function commitManagedRecoveryReplacement(worktree: string, transactionSh
   });
 }
 
+export type ManagedRecoveryRetirementOutcome = "committed" | "not_committed" | "unknown";
+
+export function reconcileManagedRecoveryReplacement(
+  worktree: string,
+  transactionSha256: string,
+): ManagedRecoveryRetirementOutcome {
+  if (!HASH.test(transactionSha256)) return "unknown";
+  try {
+    return withRecoveryMutation(worktree, () => {
+      const state = readState(worktree);
+      if (state.phase === "replacement_committed"
+        && state.replacement?.transactionSha256 === transactionSha256) return "committed";
+      if (state.phase === "replacement_prepared"
+        && state.replacement?.transactionSha256 === transactionSha256) return "not_committed";
+      return "unknown";
+    });
+  } catch {
+    return "unknown";
+  }
+}
+
 export function abortManagedRecoveryReplacement(worktree: string, transactionSha256: string): void {
   const owner = ownerFromEnvironment();
   withRecoveryMutation(worktree, () => {

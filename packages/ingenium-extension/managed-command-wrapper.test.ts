@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -67,6 +68,7 @@ import {
   readLegacyRecoveryHandoff,
   readManagedRecoveryEnrollment,
   readRecoveryServerAuthentication,
+  reconcileManagedRecoveryReplacement,
   recordManagedRecoveryAttachEvent,
   recoveryServerAuthenticationPath,
   stopTimedOutLegacyRecoveryOwner,
@@ -86,6 +88,7 @@ import {
   productionRestartCanonicalWorktree,
   productionRestartDependencies,
   PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
+  readPrivateProductionRestartFile,
   redactedHandoffFromExport,
   restartHandoffEvidence,
   restartHandoffMemoryEntry,
@@ -114,6 +117,7 @@ const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toStr
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const mcpResult = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
 const recoverySource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "tui-recovery.ts")).href;
+const coordinationOutboxSource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "coordination-outbox.ts")).href;
 const tsxLoader = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/tsx/dist/loader.mjs")).href;
 const repositoryRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), "../.."));
 const recoveryBootstrapSource = join(dirname(fileURLToPath(import.meta.url)), "scripts", "recovery-bootstrap.ts");
@@ -509,7 +513,10 @@ describe("managed command wrappers", () => {
         transaction,
         new AbortController().signal,
       );
+      expect(reconcileManagedRecoveryReplacement(worktree, transaction)).toBe("not_committed");
       commitManagedRecoveryReplacement(worktree, transaction);
+      expect(reconcileManagedRecoveryReplacement(worktree, transaction)).toBe("committed");
+      expect(reconcileManagedRecoveryReplacement(worktree, sha256("other-transaction"))).toBe("unknown");
       const adopted = await waitForRecoveryState(
         paths.state,
         (state) => state.phase === "enrolled" && state.activeParent?.pid === successor!.pid,
@@ -2152,6 +2159,7 @@ describe("managed command wrappers", () => {
         parent: { pid: process.pid, port: null, dataHome },
         handoff,
         coordination: {
+          sessionIdSha256: sha256(sessionId),
           incarnation: expect.any(Number),
           revision: 1,
           fence: 3,
@@ -2205,6 +2213,26 @@ describe("managed command wrappers", () => {
     })), sessionId, worktree)).toThrow("Production session export identity is invalid");
     expect(() => parseProductionSessionExport(Buffer.from([0x7b, 0xff, 0x7d]), sessionId, worktree))
       .toThrow("Production session export framing is invalid");
+  });
+
+  it("rejects a private capture that grows beyond its limit after the descriptor opens", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-production-capture-growth-"));
+    const path = join(directory, "capture.json");
+    try {
+      writeFileSync(path, "small\n", { mode: 0o600 });
+      expect(() => readPrivateProductionRestartFile(path, 16, {
+        closeSync,
+        fstatSync,
+        lstatSync,
+        openSync,
+        readSync(descriptor, buffer, offset, length, position) {
+          if (offset === 0) writeFileSync(path, "x".repeat(17), { mode: 0o600 });
+          return readSync(descriptor, buffer, offset, length, position);
+        },
+      })).toThrow("Production restart state is unavailable");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("fixed deployment reconciles dead and active unnonced candidates before replacement-first bootstrap", async () => {
@@ -2679,7 +2707,7 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("resumes the quiesced old writer and rolls back replacement state when the retirement commit fails", async () => {
+  it("reconciles noncommit before cleanup and surfaces rollback and owner-abort failures", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-replacement-precommit-rollback-"));
     try {
       const request = replacementRequest(worktree);
@@ -2712,17 +2740,25 @@ describe("managed command wrappers", () => {
         resumeOldProcess: async () => { calls.push("resume-old"); },
         prepareRetirement: async () => {
           calls.push("prepare-retirement");
-          return { rollback() { calls.push("rollback-retirement"); } };
+          return { rollback() { calls.push("rollback-retirement"); throw new Error("rollback failed"); } };
         },
         commitRetirement: async () => { calls.push("final-unresolved"); throw new Error("retirement check failed"); },
-        abortRecoveryOwner: async () => { calls.push("abort-owner"); },
+        reconcileRetirement: async () => { calls.push("reconcile-retirement"); return "not_committed"; },
+        abortRecoveryOwner: async () => { calls.push("abort-owner"); throw new Error("owner abort failed"); },
         retireOldProcess: async () => { calls.push("retire-old"); },
         stopReplacement: async () => { calls.push("stop-replacement"); },
         persistEvidence: async (entry) => { calls.push(`persist:${entry.phase}`); },
       };
 
-      await expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree))
-        .rejects.toThrow("retirement check failed");
+      let failure: unknown;
+      try {
+        await managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).errors.map((entry) => (entry as Error).message))
+        .toEqual(["retirement check failed", "rollback failed", "owner abort failed"]);
 
       expect(calls.indexOf("quiesce-old")).toBeGreaterThan(calls.indexOf("owner-ready"));
       expect(calls).toContain("rollback-retirement");
@@ -2731,27 +2767,125 @@ describe("managed command wrappers", () => {
       expect(calls.indexOf("resume-old")).toBeLessThan(calls.indexOf("stop-replacement"));
       expect(calls).not.toContain("retire-old");
       expect(calls.slice(calls.indexOf("prepare-retirement"), calls.indexOf("abort-owner") + 1)).toEqual([
-        "prepare-retirement", "final-unresolved", "rollback-retirement", "abort-owner",
+        "prepare-retirement", "final-unresolved", "reconcile-retirement", "rollback-retirement", "abort-owner",
       ]);
     } finally {
       rmSync(worktree, { recursive: true, force: true });
     }
   });
 
-  it("runs the final unresolved recheck immediately before the retirement commitment", () => {
+  it.each(["committed", "unknown"] as const)(
+    "keeps the old parent fenced when a throwing retirement commit reconciles as %s",
+    async (outcome) => {
+      const worktree = mkdtempSync(join(tmpdir(), `ingenium-replacement-${outcome}-recovery-`));
+      try {
+        const request = replacementRequest(worktree);
+        const replacement: RestartProcessIdentity = {
+          pid: 1062,
+          startTimeTicks: 2062,
+          ...request.replacement.expectedIdentity,
+        };
+        const calls: string[] = [];
+        const evidence: ReplacementFirstRestartEvidence[] = [];
+        const dependencies: ReplacementFirstRestartDependencies<object> = {
+          revalidateBinding: async () => true,
+          revalidateProcessIdentity: async () => true,
+          persistHandoff: async () => {},
+          launchReplacement: async (input) => { input.bindProvisionalIdentity(replacement); return replacement; },
+          verifyReplacementHealth: async () => {},
+          createReplacementSession: async (_identity, _port, transactionSha256) => ({
+            status: "created", transactionSha256, session: {},
+          }),
+          acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
+            status: "acknowledged", handoffSha256, transactionSha256,
+          }),
+          awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
+            status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
+          }),
+          prepareRecoveryOwner: async (identity, _session, _handoffSha256, transactionSha256) => ({
+            status: "ready", transactionSha256, replacementIdentitySha256: recoveryIdentitySha256(identity),
+          }),
+          quiesceOldProcess: async () => { calls.push("quiesce-old"); },
+          resumeOldProcess: async () => { calls.push("resume-old"); },
+          prepareRetirement: async () => ({ rollback() { calls.push("rollback-retirement"); } }),
+          commitRetirement: async () => { calls.push("retirement-commit"); throw new Error("commit outcome lost"); },
+          reconcileRetirement: async () => { calls.push("reconcile-retirement"); return outcome; },
+          abortRecoveryOwner: async () => { calls.push("abort-owner"); },
+          retireOldProcess: async () => { calls.push("retire-old"); },
+          stopReplacement: async () => { calls.push("stop-replacement"); },
+          persistEvidence: async (entry) => { evidence.push(entry); },
+        };
+
+        const restart = managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree);
+        if (outcome === "committed") {
+          await expect(restart).resolves.toMatchObject({ recoveryState: "retirement_committed" });
+          expect(evidence.at(-1)).toMatchObject({ phase: "committed_recovery", retirementOutcome: "committed" });
+        } else {
+          await expect(restart).rejects.toThrow("commit outcome lost");
+          expect(evidence.at(-1)).toMatchObject({ phase: "uncertain_recovery", retirementOutcome: "unknown" });
+        }
+        expect(calls).toEqual(["quiesce-old", "retirement-commit", "reconcile-retirement"]);
+      } finally {
+        rmSync(worktree, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("holds the final unresolved check and retirement commit against a concurrent outbox writer", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-retirement-order-"));
+    let writer: ChildProcess | undefined;
     try {
       const events: string[] = [];
+      const started = join(worktree, "writer-started");
+      const result = join(worktree, "writer-result.json");
+      const exactKey = "concurrent-final-check";
       const unresolved = vi.spyOn(CoordinationOutbox.prototype, "unresolved").mockImplementation(() => {
         events.push("unresolved");
         return [];
       });
 
-      commitProductionRetirement(worktree, sha256("transaction"), () => { events.push("commit"); });
+      commitProductionRetirement(worktree, sha256("transaction"), () => {
+        events.push("commit");
+        const script = `
+          import { writeFileSync } from "node:fs";
+          import { CoordinationOutbox } from ${JSON.stringify(coordinationOutboxSource)};
+          writeFileSync(${JSON.stringify(started)}, "started");
+          try {
+            new CoordinationOutbox(${JSON.stringify(worktree)}).put({
+              exactKey: ${JSON.stringify(exactKey)}, kind: "snapshot", sessionHash: "a".repeat(64), failure: "unavailable",
+            });
+            writeFileSync(${JSON.stringify(result)}, JSON.stringify({ status: "written" }));
+          } catch (error) {
+            writeFileSync(${JSON.stringify(result)}, JSON.stringify({ status: "failed", message: String(error) }));
+          }
+        `;
+        writer = spawn(process.execPath, ["--import", tsxLoader, "--input-type=module", "--eval", script], {
+          cwd: worktree,
+          stdio: "ignore",
+        });
+        const deadline = Date.now() + 2_000;
+        while (!existsSync(started) && Date.now() < deadline) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
+        expect(existsSync(started)).toBe(true);
+        expect(new CoordinationOutbox(worktree).list()).not.toContainEqual(expect.objectContaining({ key: sha256(exactKey) }));
+      });
+
+      if (!writer) throw new Error("Concurrent writer did not start");
+      if (writer.exitCode === null && writer.signalCode === null) {
+        await new Promise<void>((resolvePromise, reject) => {
+          writer!.once("error", reject);
+          writer!.once("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`Concurrent writer exited ${code}`)));
+        });
+      }
+      expect(writer.exitCode).toBe(0);
 
       expect(events).toEqual(["unresolved", "commit"]);
+      expect(JSON.parse(readFileSync(result, "utf8"))).toEqual({ status: "written" });
+      expect(new CoordinationOutbox(worktree).list()).toContainEqual(expect.objectContaining({ key: sha256(exactKey) }));
       unresolved.mockRestore();
     } finally {
+      if (writer) await stopRecoveryProcess(writer);
       vi.restoreAllMocks();
       rmSync(worktree, { recursive: true, force: true });
     }

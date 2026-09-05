@@ -107,7 +107,7 @@ export type ReplacementFirstRestartPhase =
   | "old_parent_retired";
 
 export interface ReplacementFirstRestartEvidence {
-  phase: ReplacementFirstRestartPhase | "committed_recovery" | "failed";
+  phase: ReplacementFirstRestartPhase | "committed_recovery" | "uncertain_recovery" | "failed";
   lastCompletedPhase: ReplacementFirstRestartPhase | null;
   handoffSha256: string;
   actionCount: number;
@@ -115,6 +115,7 @@ export interface ReplacementFirstRestartEvidence {
   checkCount: number;
   replacementIdentitySha256: string | null;
   transactionSha256: string | null;
+  retirementOutcome: "not_started" | "not_committed" | "committed" | "unknown";
   retirementCommitted: boolean;
   oldParentRetired: boolean;
   replacementStopped: boolean;
@@ -187,6 +188,10 @@ export interface ReplacementFirstRestartDependencies<Session> {
     signal: AbortSignal,
   ): Promise<{ status: "ready"; transactionSha256: string; replacementIdentitySha256: string }>;
   commitRetirement(transactionSha256: string, signal: AbortSignal): Promise<void>;
+  reconcileRetirement?(
+    transactionSha256: string,
+    signal: AbortSignal,
+  ): Promise<"committed" | "not_committed" | "unknown">;
   abortRecoveryOwner?(transactionSha256: string): Promise<void> | void;
   quiesceOldProcess(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
   resumeOldProcess(identity: RestartProcessIdentity, signal: AbortSignal): Promise<void>;
@@ -456,13 +461,15 @@ function matchesExpectedIdentity(identity: RestartProcessIdentity, expected: Rep
   return identity.executableSha256 === expected.executableSha256 && identity.nonceSha256 === expected.nonceSha256;
 }
 
+class BoundedOperationTimeoutError extends Error {}
+
 async function bounded<T>(name: string, timeoutMs: number, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
-      reject(new Error(`${name} timed out`));
+      reject(new BoundedOperationTimeoutError(`${name} timed out`));
     }, timeoutMs);
   });
   try {
@@ -483,6 +490,9 @@ export async function runReplacementFirstRestart<Session>(
   let oldParentRetired = false;
   let replacementStopped = false;
   let retirementCommitted = false;
+  let retirementOutcome: ReplacementFirstRestartEvidence["retirementOutcome"] = "not_started";
+  let retirementCommitAttempted = false;
+  let retirementCommitSettled = false;
   let oldParentQuiesced = false;
   let retirementPreparation: { rollback(): Promise<void> | void } | undefined;
   const persist = async (phase: ReplacementFirstRestartPhase, committed = retirementCommitted): Promise<void> => {
@@ -495,6 +505,7 @@ export async function runReplacementFirstRestart<Session>(
       checkCount: request.handoff.checks.length,
       replacementIdentitySha256: replacement ? identitySha256(replacement) : null,
       transactionSha256: transactionDigest ?? null,
+      retirementOutcome: committed ? "committed" : retirementOutcome,
       retirementCommitted: committed,
       oldParentRetired,
       replacementStopped,
@@ -593,9 +604,17 @@ export async function runReplacementFirstRestart<Session>(
     await persist("old_parent_quiesced");
     retirementPreparation = await bounded("retirement preparation", request.timeouts.identityMs, (signal) =>
       dependencies.prepareRetirement(request.oldProcess, signal));
-    await bounded("retirement commit", request.timeouts.identityMs, (signal) =>
-      dependencies.commitRetirement(transaction, signal));
+    retirementCommitAttempted = true;
+    try {
+      await bounded("retirement commit", request.timeouts.identityMs, (signal) =>
+        dependencies.commitRetirement(transaction, signal));
+      retirementCommitSettled = true;
+    } catch (error) {
+      retirementCommitSettled = !(error instanceof BoundedOperationTimeoutError);
+      throw error;
+    }
     retirementCommitted = true;
+    retirementOutcome = "committed";
     await persist("retirement_committed", true);
     await bounded("old process retirement", request.timeouts.retirementMs, (signal) =>
       dependencies.retireOldProcess(request.oldProcess, signal));
@@ -603,6 +622,20 @@ export async function runReplacementFirstRestart<Session>(
     await persist("old_parent_retired");
     return { handoffSha256: handoffDigest, replacementIdentitySha256: identitySha256(replacement) };
   } catch (error) {
+    if (retirementCommitAttempted && !retirementCommitted && replacement && transactionDigest) {
+      let reconciled: "committed" | "not_committed" | "unknown" = "unknown";
+      try {
+        reconciled = dependencies.reconcileRetirement
+          ? await bounded("retirement reconciliation", request.timeouts.identityMs, (signal) =>
+              dependencies.reconcileRetirement!(transactionDigest!, signal))
+          : "unknown";
+      } catch {
+        reconciled = "unknown";
+      }
+      retirementOutcome = reconciled === "committed" ? "committed"
+        : reconciled === "not_committed" && retirementCommitSettled ? "not_committed" : "unknown";
+      retirementCommitted = retirementOutcome === "committed";
+    }
     if (retirementCommitted && replacement) {
       try {
         await dependencies.persistEvidence({
@@ -614,6 +647,7 @@ export async function runReplacementFirstRestart<Session>(
           checkCount: request.handoff.checks.length,
           replacementIdentitySha256: identitySha256(replacement),
           transactionSha256: transactionDigest ?? null,
+          retirementOutcome: "committed",
           retirementCommitted: true,
           oldParentRetired,
           replacementStopped: false,
@@ -626,11 +660,36 @@ export async function runReplacementFirstRestart<Session>(
         recoveryState: "retirement_committed",
       };
     }
+    if (retirementOutcome === "unknown" && replacement) {
+      try {
+        await dependencies.persistEvidence({
+          phase: "uncertain_recovery",
+          lastCompletedPhase,
+          handoffSha256: handoffDigest,
+          actionCount: request.handoff.actions.length,
+          changedPathCount: request.handoff.changedPaths.length,
+          checkCount: request.handoff.checks.length,
+          replacementIdentitySha256: identitySha256(replacement),
+          transactionSha256: transactionDigest ?? null,
+          retirementOutcome: "unknown",
+          retirementCommitted: false,
+          oldParentRetired,
+          replacementStopped: false,
+          occurredAt: new Date().toISOString(),
+        });
+      } catch {}
+      throw error;
+    }
+    const cleanupFailures: unknown[] = [];
     if (!retirementCommitted && replacement) {
       if (retirementPreparation) {
-        try { await retirementPreparation.rollback(); } catch {}
+        try { await retirementPreparation.rollback(); } catch (cleanupError) { cleanupFailures.push(cleanupError); }
       }
-      try { await dependencies.abortRecoveryOwner?.(createHash("sha256").update(handoffDigest).update("\0").update(identitySha256(replacement)).digest("hex")); } catch {}
+      try {
+        await dependencies.abortRecoveryOwner?.(
+          transactionDigest ?? createHash("sha256").update(handoffDigest).update("\0").update(identitySha256(replacement)).digest("hex"),
+        );
+      } catch (cleanupError) { cleanupFailures.push(cleanupError); }
       if (oldParentQuiesced) {
         try {
           const oldIsCurrent = await bounded("old process resume identity", request.timeouts.identityMs, (signal) =>
@@ -639,7 +698,7 @@ export async function runReplacementFirstRestart<Session>(
             await bounded("old process resume", request.timeouts.retirementMs, (signal) =>
               dependencies.resumeOldProcess(request.oldProcess, signal));
           }
-        } catch {}
+        } catch (cleanupError) { cleanupFailures.push(cleanupError); }
       }
       try {
         const replacementIsCurrent = await bounded("replacement cleanup identity", request.timeouts.identityMs, (signal) =>
@@ -649,7 +708,7 @@ export async function runReplacementFirstRestart<Session>(
             dependencies.stopReplacement(replacement!, signal));
           replacementStopped = true;
         }
-      } catch {}
+      } catch (cleanupError) { cleanupFailures.push(cleanupError); }
     }
     try {
       await dependencies.persistEvidence({
@@ -661,12 +720,16 @@ export async function runReplacementFirstRestart<Session>(
         checkCount: request.handoff.checks.length,
         replacementIdentitySha256: replacement ? identitySha256(replacement) : null,
         transactionSha256: transactionDigest ?? null,
+        retirementOutcome,
         retirementCommitted,
         oldParentRetired,
         replacementStopped,
         occurredAt: new Date().toISOString(),
       });
     } catch {}
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError([error, ...cleanupFailures], error instanceof Error ? error.message : "Replacement-first restart failed");
+    }
     throw error;
   }
 }

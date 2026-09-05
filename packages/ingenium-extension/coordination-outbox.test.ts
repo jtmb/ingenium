@@ -8,26 +8,34 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COORDINATION_OUTBOX_MAX_RECORD_BYTES,
   COORDINATION_OUTBOX_MAX_RECORDS,
   COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
+  COORDINATION_OUTBOX_LEGACY_DISPOSITION_KEY,
+  COORDINATION_OUTBOX_LEGACY_DISPOSITION_OPERATION_ID,
+  COORDINATION_OUTBOX_LEGACY_DISPOSITION_RECORD_SHA256,
+  COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_IDENTITY,
+  COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
   CoordinationOutbox,
 } from "./coordination-outbox.js";
 
 type StatFault = (subject: string | number, stat: Stats) => Stats;
+type OpenFault = (path: string | Buffer | URL) => void;
 
 const fsFaults = vi.hoisted(() => ({
   lstat: undefined as StatFault | undefined,
   fstat: undefined as StatFault | undefined,
+  open: undefined as OpenFault | undefined,
   rejectFchmod: false,
 }));
 
@@ -43,6 +51,10 @@ vi.mock("node:fs", async (importOriginal) => {
       const stat = actual.fstatSync(descriptor);
       return fsFaults.fstat?.(descriptor, stat) ?? stat;
     },
+    openSync(path: string | Buffer | URL, flags: number, mode?: number) {
+      fsFaults.open?.(path);
+      return actual.openSync(path, flags, mode);
+    },
     fchmodSync(descriptor: number, mode: number) {
       if (fsFaults.rejectFchmod) throw new Error("unexpected fchmod");
       actual.fchmodSync(descriptor, mode);
@@ -53,6 +65,7 @@ vi.mock("node:fs", async (importOriginal) => {
 afterEach(() => {
   fsFaults.lstat = undefined;
   fsFaults.fstat = undefined;
+  fsFaults.open = undefined;
   fsFaults.rejectFchmod = false;
 });
 
@@ -75,7 +88,7 @@ function worktree(): string {
 function dispositionAuthorization(recordKey: string, now = Date.parse("2026-09-05T00:00:00.000Z")) {
   return {
     schemaVersion: 1 as const,
-    authorizationId: createHash("sha256").update(`authorization\0${recordKey}`).digest("hex"),
+    authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
     recordKey,
     mode: "abandon_identityless_overflow" as const,
     authority: "explicit_user_authorization" as const,
@@ -425,6 +438,68 @@ describe("protected coordination outbox", () => {
     }
   });
 
+  it("does not let a valid legacy disposition resolve an arbitrary wrong-key overflow", () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root);
+      const record = {
+        version: 1,
+        operationId: COORDINATION_OUTBOX_LEGACY_DISPOSITION_OPERATION_ID,
+        key: COORDINATION_OUTBOX_LEGACY_DISPOSITION_KEY,
+        kind: "overflow",
+        sessionHash: "0".repeat(64),
+        createdAt: "2026-09-03T20:53:18.005Z",
+        failure: "unavailable",
+        revision: null,
+        cursor: null,
+        digest: "9a1a4af66380af9f8a77c3feff5d16cbbe22c7ad4385fad69a825da99560eb8b",
+        ambiguous: true,
+        count: 6852,
+        mutation: null,
+      };
+      const wrongKey = createHash("sha256").update("wrong legacy disposition key").digest("hex");
+      const path = join(outbox.directory, `${record.key}.json`);
+      const serializedRecord = `${JSON.stringify(record)}\n`;
+      expect(createHash("sha256").update(serializedRecord).digest("hex"))
+        .toBe(COORDINATION_OUTBOX_LEGACY_DISPOSITION_RECORD_SHA256);
+      writeFileSync(path, serializedRecord, { mode: 0o600 });
+      mkdirSync(outbox.dispositionDirectory, { mode: 0o700 });
+      const historicalDisposition = {
+        schemaVersion: 1,
+        recordKey: COORDINATION_OUTBOX_LEGACY_DISPOSITION_KEY,
+        recordSha256: COORDINATION_OUTBOX_LEGACY_DISPOSITION_RECORD_SHA256,
+        operationId: COORDINATION_OUTBOX_LEGACY_DISPOSITION_OPERATION_ID,
+        decision: "abandoned",
+        authority: "explicit_user_authorization",
+        reason: "nonrecoverable_identityless_overflow",
+        createdAt: "2026-09-05T03:07:55.899Z",
+      };
+      const historicalPath = join(outbox.dispositionDirectory, `${record.key}.json`);
+      writeFileSync(historicalPath, `${JSON.stringify(historicalDisposition)}\n`, { mode: 0o600 });
+      expect(outbox.unresolved()).not.toContainEqual(expect.objectContaining({ key: record.key }));
+      unlinkSync(historicalPath);
+
+      const wrongRecord = { ...record, key: wrongKey, operationId: createHash("sha256").update(`operation\0${wrongKey}`).digest("hex") };
+      const serialized = `${JSON.stringify(wrongRecord)}\n`;
+      unlinkSync(path);
+      writeFileSync(join(outbox.directory, `${wrongKey}.json`), serialized, { mode: 0o600 });
+      writeFileSync(join(outbox.dispositionDirectory, `${wrongKey}.json`), `${JSON.stringify({
+        schemaVersion: 1,
+        recordKey: wrongKey,
+        recordSha256: createHash("sha256").update(serialized).digest("hex"),
+        operationId: wrongRecord.operationId,
+        decision: "abandoned",
+        authority: "explicit_user_authorization",
+        reason: "nonrecoverable_identityless_overflow",
+        createdAt: "2026-09-05T00:00:00.000Z",
+      })}\n`, { mode: 0o600 });
+
+      expect(outbox.unresolved()).toContainEqual(expect.objectContaining({ key: wrongKey, ambiguous: true }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it.each(["missing", "stale", "malformed"] as const)("preserves bounded overflow with a %s disposition", (dispositionState) => {
     const root = worktree();
     try {
@@ -478,7 +553,7 @@ describe("protected coordination outbox", () => {
     }
   });
 
-  it("binds a fresh exact-key authorization to one descriptor snapshot and rolls the disposition back safely", () => {
+  it("binds standing authorization to one disposition until rollback and rejects post-success replay", () => {
     const root = worktree();
     try {
       const outbox = new CoordinationOutbox(root, () => Date.parse("2026-09-05T00:00:00.000Z"));
@@ -488,6 +563,15 @@ describe("protected coordination outbox", () => {
       writeFileSync(overflowPath, changed, { mode: 0o600 });
       const changedSha256 = createHash("sha256").update(changed).digest("hex");
 
+      expect(createHash("sha256").update(COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_IDENTITY).digest("hex"))
+        .toBe(COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256);
+      expect(dispositionAuthorization(overflow.key).authorizationId)
+        .toBe(COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256);
+
+      expect(() => outbox.prepareIdentitylessOverflowDisposition({
+        ...dispositionAuthorization(overflow.key),
+        authorizationId: "f".repeat(64),
+      })).toThrow("Invalid coordination outbox authorization");
       expect(() => outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization("0".repeat(64))))
         .toThrow("Invalid coordination outbox authorization");
       const prepared = outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key));
@@ -512,13 +596,77 @@ describe("protected coordination outbox", () => {
 
       const changedAgain = `${JSON.stringify({ ...overflow, count: overflow.count + 2 })}\n`;
       writeFileSync(overflowPath, changedAgain, { mode: 0o600 });
+      expect(() => outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key)))
+        .toThrow("authorization was already used");
+      expect(readdirSync(outbox.dispositionDirectory)).toHaveLength(1);
+
+      prepared.rollback();
       const preparedAgain = outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key));
       expect(preparedAgain.disposition).toMatchObject({ recordKey: overflow.key, recordCount: overflow.count + 2 });
-      expect(readdirSync(outbox.dispositionDirectory)).toHaveLength(2);
+      expect(readdirSync(outbox.dispositionDirectory)).toHaveLength(1);
 
       preparedAgain.rollback();
-      prepared.rollback();
       expect(outbox.unresolved()).toContainEqual(expect.objectContaining({ key: overflow.key, count: overflow.count + 2 }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("anchors disposition creation when its protected ancestor is replaced", () => {
+    const root = worktree();
+    const outside = mkdtempSync(join(tmpdir(), "ingenium-coordination-disposition-swap-"));
+    try {
+      const outbox = new CoordinationOutbox(root, () => Date.parse("2026-09-05T00:00:00.000Z"));
+      const overflow = writeAuthorizedOverflow(outbox);
+      const protectedIndex = dirname(outbox.directory);
+      const originalIndex = `${protectedIndex}.original`;
+      let swapped = false;
+      fsFaults.open = (path) => {
+        if (swapped || !String(path).match(/\/[0-9a-f]{64}\.[0-9a-f]{64}\.json$/)) return;
+        swapped = true;
+        renameSync(protectedIndex, originalIndex);
+        mkdirSync(protectedIndex, { mode: 0o700 });
+        symlinkSync(outside, outbox.dispositionDirectory);
+      };
+
+      expect(() => outbox.prepareIdentitylessOverflowDisposition(dispositionAuthorization(overflow.key)))
+        .toThrow("Coordination outbox is unavailable");
+      expect(readdirSync(outside)).toEqual([]);
+      expect(readdirSync(join(originalIndex, "coordination-outbox-dispositions"))).toEqual([]);
+    } finally {
+      fsFaults.open = undefined;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed without taking over a stale mutation lock or dropping evidence", () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root);
+      const retained = outbox.put({
+        exactKey: "retained-before-stale-lock",
+        kind: "snapshot",
+        sessionHash: "a".repeat(64),
+        failure: "unavailable",
+      });
+      const lockPath = join(dirname(outbox.directory), "coordination-outbox-mutation.lock");
+      const staleLock = `${JSON.stringify({
+        schemaVersion: 1,
+        pid: 2 ** 31 - 1,
+        startTimeTicks: 1,
+        nonce: "00000000-0000-4000-8000-000000000001",
+      })}\n`;
+      writeFileSync(lockPath, staleLock, { mode: 0o600 });
+
+      expect(() => outbox.put({
+        exactKey: "blocked-by-stale-lock",
+        kind: "snapshot",
+        sessionHash: "b".repeat(64),
+        failure: "unavailable",
+      })).toThrow("mutation lock has a stale owner");
+      expect(readFileSync(lockPath, "utf8")).toBe(staleLock);
+      expect(outbox.list()).toEqual([expect.objectContaining({ key: retained.key })]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

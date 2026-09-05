@@ -31,6 +31,7 @@ import {
 } from "../extension-binding.js";
 import {
   COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
+  COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
   CoordinationOutbox,
 } from "../coordination-outbox.js";
 import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
@@ -55,6 +56,7 @@ import {
   readLegacyRecoveryHandoff,
   readManagedRecoveryEnrollment,
   readRecoveryServerAuthentication,
+  reconcileManagedRecoveryReplacement,
   recoveryServerAuthenticationPath,
   type RecoveryServerAuthentication,
 } from "../tui-recovery.js";
@@ -383,23 +385,65 @@ function ensurePrivateDirectory(path: string): void {
   assertPrivateDirectory(path);
 }
 
-function readPrivateFile(path: string, maximumBytes: number): Buffer {
-  const before = lstatSync(path);
+interface PrivateFileReader {
+  closeSync(descriptor: number): void;
+  fstatSync(descriptor: number): Stats;
+  lstatSync(path: string): Stats;
+  openSync(path: string, flags: number): number;
+  readSync(descriptor: number, buffer: Buffer, offset: number, length: number, position: number | null): number;
+}
+
+export function readPrivateProductionRestartFile(
+  path: string,
+  maximumBytes: number,
+  fileSystem: PrivateFileReader = {
+    closeSync,
+    fstatSync,
+    lstatSync,
+    openSync,
+    readSync,
+  },
+): Buffer {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > MAX_SESSION_EXPORT_BYTES) {
+    throw new Error("Production restart state is unavailable");
+  }
+  const before = fileSystem.lstatSync(path);
   const uid = processOwner();
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size < 1
     || before.size > maximumBytes || !exactMode(before.mode, 0o600) || (uid !== undefined && before.uid !== uid)) {
     throw new Error("Production restart state is unavailable");
   }
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const descriptor = fileSystem.openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    const opened = fstatSync(descriptor);
+    const opened = fileSystem.fstatSync(descriptor);
     if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink !== 1
-      || opened.size !== before.size || !exactMode(opened.mode, 0o600) || (uid !== undefined && opened.uid !== uid)) {
+      || opened.size < 1 || opened.size > maximumBytes || opened.size !== before.size
+      || !exactMode(opened.mode, 0o600) || (uid !== undefined && opened.uid !== uid)) {
       throw new Error("Production restart state is unavailable");
     }
-    return readFileSync(descriptor);
+    const buffer = Buffer.allocUnsafe(maximumBytes + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const length = fileSystem.readSync(descriptor, buffer, offset, buffer.length - offset, null);
+      if (length === 0) break;
+      offset += length;
+    }
+    const content = buffer.subarray(0, offset);
+    const afterDescriptor = fileSystem.fstatSync(descriptor);
+    const afterPath = fileSystem.lstatSync(path);
+    if (content.byteLength < 1 || content.byteLength > maximumBytes || content.byteLength !== opened.size
+      || afterDescriptor.dev !== opened.dev || afterDescriptor.ino !== opened.ino || afterDescriptor.size !== opened.size
+      || afterDescriptor.mtimeMs !== opened.mtimeMs || afterDescriptor.ctimeMs !== opened.ctimeMs
+      || !afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.nlink !== 1
+      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size
+      || afterPath.mtimeMs !== opened.mtimeMs || afterPath.ctimeMs !== opened.ctimeMs
+      || !exactMode(afterDescriptor.mode, 0o600) || !exactMode(afterPath.mode, 0o600)
+      || (uid !== undefined && (afterDescriptor.uid !== uid || afterPath.uid !== uid))) {
+      throw new Error("Production restart state is unavailable");
+    }
+    return content;
   } finally {
-    closeSync(descriptor);
+    fileSystem.closeSync(descriptor);
   }
 }
 
@@ -556,7 +600,7 @@ function stateCandidate(value: unknown): ProductionRestartParentCandidate | unde
 export function readProtectedProductionRestartState(worktree: string): unknown[] {
   let serialized: string;
   try {
-    serialized = readPrivateFile(join(stateDirectory(worktree), "state.json"), MAX_STATE_BYTES).toString("utf8");
+    serialized = readPrivateProductionRestartFile(join(stateDirectory(worktree), "state.json"), MAX_STATE_BYTES).toString("utf8");
   } catch (error) {
     if (isRecord(error) && error.code === "ENOENT") return [];
     throw error;
@@ -1453,7 +1497,7 @@ function restartCaptureClaimProof(value: unknown): { revision: number; fence: nu
 
 function optionalPrivateFileSha256(path: string): string | null {
   try {
-    return hash(readPrivateFile(path, MAX_STATE_BYTES));
+    return hash(readPrivateProductionRestartFile(path, MAX_STATE_BYTES));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -1521,7 +1565,7 @@ export async function persistClaimedLegacyHandoff(
       port: null,
       dataHome: parent.oldDataHome,
     }, parent.handoff, {
-      sessionIdSha256: hash(identity.session_id),
+      sessionIdSha256: hash(parentSessionId),
       incarnation: identity.incarnation,
       revision: acquired.revision,
       fence: acquired.fence,
@@ -1714,7 +1758,7 @@ async function resume(identity: RestartProcessIdentity, signal: AbortSignal): Pr
 function overflowAuthorization(now = Date.now()) {
   return {
     schemaVersion: 1 as const,
-    authorizationId: hash(`production-restart-overflow-authorization\0${PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY}`),
+    authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
     recordKey: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
     mode: "abandon_identityless_overflow" as const,
     authority: "explicit_user_authorization" as const,
@@ -1730,11 +1774,13 @@ export function commitProductionRetirement(
   transactionSha256: string,
   commit: (subjectWorktree: string, subjectTransactionSha256: string) => void = commitManagedRecoveryReplacement,
 ): void {
-  if (new CoordinationOutbox(worktree).unresolved()
-    .some((record) => record.ambiguous || record.kind === "overflow")) {
-    throw new Error("Production restart coordination state changed before retirement");
-  }
-  commit(worktree, transactionSha256);
+  const outbox = new CoordinationOutbox(worktree);
+  outbox.withRetirementFreeze(() => {
+    if (outbox.unresolved().some((record) => record.ambiguous || record.kind === "overflow")) {
+      throw new Error("Production restart coordination state changed before retirement");
+    }
+    commit(worktree, transactionSha256);
+  });
 }
 
 function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.ProcessEnv {
@@ -1778,7 +1824,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       try {
         const binding = await resolveProductionBinding(worktree);
         return bindingsMatch(expected, binding)
-          && hash(readPrivateFile(state.parentStateFile, MAX_STATE_BYTES)) === state.parentStateSha256;
+          && hash(readPrivateProductionRestartFile(state.parentStateFile, MAX_STATE_BYTES)) === state.parentStateSha256;
       } catch {
         return false;
       }
@@ -1887,7 +1933,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
         session: {
           id: session.id,
           initialMessageCount: initial.length,
-          captureOffset: readPrivateFile(state.captureFile, MAX_STATE_BYTES).length,
+          captureOffset: readPrivateProductionRestartFile(state.captureFile, MAX_STATE_BYTES).length,
           transactionSha256,
         },
       };
@@ -1982,6 +2028,12 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       commitProductionRetirement(state.worktree, transactionSha256);
       state.serverAuthenticationRetained = true;
     },
+    reconcileRetirement: async (transactionSha256, signal) => {
+      signal.throwIfAborted();
+      const outcome = reconcileManagedRecoveryReplacement(state.worktree, transactionSha256);
+      if (outcome !== "not_committed") state.serverAuthenticationRetained = true;
+      return outcome;
+    },
     abortRecoveryOwner: (transactionSha256) => {
       abortManagedRecoveryReplacement(state.worktree, transactionSha256);
     },
@@ -2051,7 +2103,7 @@ async function prepareProductionReplacement(input: {
   const root = createStateDirectory(input.worktree);
   const parentStateFile = join(root, `selected-candidate-${randomUUID()}.json`);
   writePrivateNewFile(parentStateFile, `${JSON.stringify({ schemaVersion: 1, parentCandidates: [input.parent] })}\n`);
-  const parentStateSha256 = hash(readPrivateFile(parentStateFile, MAX_STATE_BYTES));
+  const parentStateSha256 = hash(readPrivateProductionRestartFile(parentStateFile, MAX_STATE_BYTES));
   const uid = processOwner();
   if (uid === undefined) throw new Error("Production restart requires process ownership support");
   const runtimeRoot = `/tmp/opencode-${uid}`;
@@ -2069,7 +2121,7 @@ async function prepareProductionReplacement(input: {
     join(home, ".local", "state"),
     join(home, ".cache"),
   ]) ensurePrivateDirectory(directory);
-  const authSource = readPrivateFile(currentAuthFile(input.parent.oldDataHome), MAX_AUTH_BYTES);
+  const authSource = readPrivateProductionRestartFile(currentAuthFile(input.parent.oldDataHome), MAX_AUTH_BYTES);
   const authDestination = join(dataHome, "opencode", "auth.json");
   writePrivateBuffer(authDestination, authSource);
   const captureFile = join(runDirectory, "coordination-capture.jsonl");
