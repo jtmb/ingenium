@@ -1740,7 +1740,7 @@ export function productionRestartDependencies(
   return {
     canonicalWorktree: () => {
       const worktree = productionRestartCanonicalWorktree();
-      if (new CoordinationOutbox(worktree).list().some((record) => record.ambiguous || record.kind === "overflow")) {
+      if (new CoordinationOutbox(worktree).unresolved().some((record) => record.ambiguous || record.kind === "overflow")) {
         throw new Error("Production restart coordination state is ambiguous; ESCALATE_USER without exact epoch evidence");
       }
       return worktree;

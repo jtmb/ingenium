@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   type Stats,
@@ -405,6 +406,55 @@ describe("protected coordination outbox", () => {
       expect(records).toContainEqual(expect.objectContaining({
         kind: "overflow", sessionHash: "0".repeat(64), ambiguous: true, count: 21,
       }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves and excludes only an explicitly abandoned identityless overflow", () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root, () => Date.parse("2026-09-05T00:00:00.000Z"));
+      for (let index = 0; index < COORDINATION_OUTBOX_MAX_RECORDS; index += 1) {
+        outbox.put({
+          exactKey: `abandon-overflow-${index}`,
+          kind: "publication",
+          sessionHash: "a".repeat(64),
+          failure: "unavailable",
+        });
+      }
+      const overflow = outbox.list().find((record) => record.kind === "overflow")!;
+      const overflowPath = join(outbox.directory, `${overflow.key}.json`);
+      const original = readFileSync(overflowPath);
+      const originalSha256 = createHash("sha256").update(original).digest("hex");
+
+      expect(() => outbox.abandonIdentitylessOverflow(overflow.key, "0".repeat(64)))
+        .toThrow("Coordination outbox record cannot be abandoned");
+      const disposition = outbox.abandonIdentitylessOverflow(overflow.key, originalSha256);
+
+      expect(disposition).toMatchObject({
+        schemaVersion: 1,
+        recordKey: overflow.key,
+        recordSha256: originalSha256,
+        operationId: overflow.operationId,
+        decision: "abandoned",
+        authority: "explicit_user_authorization",
+        reason: "nonrecoverable_identityless_overflow",
+      });
+      expect(outbox.list()).toContainEqual(expect.objectContaining({ key: overflow.key, ambiguous: true }));
+      expect(outbox.unresolved()).not.toContainEqual(expect.objectContaining({ key: overflow.key }));
+      expect(readFileSync(overflowPath)).toEqual(original);
+      expect(lstatSync(outbox.dispositionDirectory).mode & 0o777).toBe(0o700);
+      expect(lstatSync(join(outbox.dispositionDirectory, `${overflow.key}.json`)).mode & 0o777).toBe(0o600);
+
+      outbox.put({
+        exactKey: "later-overflow",
+        kind: "publication",
+        sessionHash: "b".repeat(64),
+        failure: "unavailable",
+      });
+      expect(readFileSync(overflowPath)).toEqual(original);
+      expect(outbox.unresolved()).toContainEqual(expect.objectContaining({ kind: "overflow", ambiguous: true }));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

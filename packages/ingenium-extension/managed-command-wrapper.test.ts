@@ -2137,6 +2137,40 @@ describe("managed command wrappers", () => {
     }
   });
 
+  it("accepts an exact explicitly abandoned identityless overflow without changing its evidence", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-abandoned-overflow-"));
+    const priorCanonicalWorktree = process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
+    const priorWorktree = process.env.INGENIUM_WORKTREE;
+    try {
+      process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = worktree;
+      process.env.INGENIUM_WORKTREE = worktree;
+      const outbox = new CoordinationOutbox(worktree);
+      for (let index = 0; index < 128; index += 1) {
+        outbox.put({
+          exactKey: `abandoned-preflight-${index}`,
+          kind: "claim",
+          sessionHash: sha256("legacy-session"),
+          failure: "unavailable",
+        });
+      }
+      const overflow = outbox.list().find((record) => record.kind === "overflow")!;
+      const overflowPath = join(outbox.directory, `${overflow.key}.json`);
+      const retained = readFileSync(overflowPath);
+      outbox.abandonIdentitylessOverflow(overflow.key, sha256(retained));
+
+      const production = productionRestartDependencies(sha256("production-restart-script"));
+
+      expect(production.canonicalWorktree()).toBe(worktree);
+      expect(readFileSync(overflowPath)).toEqual(retained);
+    } finally {
+      if (priorCanonicalWorktree === undefined) delete process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
+      else process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = priorCanonicalWorktree;
+      if (priorWorktree === undefined) delete process.env.INGENIUM_WORKTREE;
+      else process.env.INGENIUM_WORKTREE = priorWorktree;
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
   it("fixed deployment rejects absent, ambiguous, malformed, foreign, or unattested parents before launch", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-adapter-failure-"));
     try {
