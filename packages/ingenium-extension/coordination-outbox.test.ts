@@ -221,7 +221,7 @@ describe("protected coordination outbox", () => {
         kind: "completion",
         sessionHash: "b".repeat(64),
         failure: "conflict",
-        ambiguous: true,
+        ambiguous: false,
         mutation: {
           phase: "completion_ambiguous",
           operation: "write",
@@ -258,7 +258,7 @@ describe("protected coordination outbox", () => {
     }
   });
 
-  it("ignores symlink, hardlink, oversized, unknown-key, and interrupted temporary records", () => {
+  it("retains malformed entries behind a path-free ambiguous sentinel without deleting them", async () => {
     const root = worktree();
     const outside = mkdtempSync(join(tmpdir(), "ingenium-coordination-outbox-record-"));
     try {
@@ -275,9 +275,22 @@ describe("protected coordination outbox", () => {
       writeFileSync(join(outbox.directory, `${"3".repeat(64)}.json`), `${"x".repeat(COORDINATION_OUTBOX_MAX_RECORD_BYTES + 1)}\n`, { mode: 0o600 });
       writeFileSync(join(outbox.directory, `${"4".repeat(64)}.json`), JSON.stringify({ ...record, key: "4".repeat(64), secret: "Bearer private" }), { mode: 0o600 });
       writeFileSync(join(outbox.directory, `.${"5".repeat(64)}.interrupted.tmp`), "partial", { mode: 0o600 });
+      const wrongMode = join(outbox.directory, `${"6".repeat(64)}.json`);
+      writeFileSync(wrongMode, `${JSON.stringify({ ...record, key: "6".repeat(64) })}\n`, { mode: 0o600 });
+      chmodSync(wrongMode, 0o640);
 
-      expect(outbox.list()).toEqual([]);
-      expect(JSON.stringify(outbox.list())).not.toContain("private");
+      const entries = readdirSync(outbox.directory).sort();
+      const listed = outbox.list();
+      expect(listed).toEqual([expect.objectContaining({
+        kind: "overflow", failure: "invalid_response", ambiguous: true, count: 7, mutation: null,
+      })]);
+      const serialized = JSON.stringify(listed);
+      expect(serialized).not.toContain("private");
+      for (const entry of entries) expect(serialized).not.toContain(entry);
+      const delivered = vi.fn(async () => true);
+      await outbox.replay(delivered);
+      expect(delivered).not.toHaveBeenCalled();
+      expect(readdirSync(outbox.directory).sort()).toEqual(entries);
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
@@ -294,6 +307,29 @@ describe("protected coordination outbox", () => {
       expect(() => outbox.put({ ...base, sessionHash: "e".repeat(16) })).toThrow("Invalid coordination outbox record");
       expect(() => outbox.put({ ...base, sessionHash: "private-session" })).toThrow("Invalid coordination outbox record");
       expect(readdirSync(outbox.directory)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replace malformed exact-key evidence", () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root);
+      const input = {
+        exactKey: "preserved-record",
+        kind: "snapshot" as const,
+        sessionHash: "e".repeat(64),
+        failure: "unavailable" as const,
+      };
+      const stored = outbox.put(input);
+      const path = join(outbox.directory, `${stored.key}.json`);
+      const retained = readFileSync(path, "utf8");
+      chmodSync(path, 0o640);
+
+      expect(outbox.put(input)).toMatchObject({ kind: "overflow", ambiguous: true });
+      expect(readFileSync(path, "utf8")).toBe(retained);
+      expect(lstatSync(path).mode & 0o777).toBe(0o640);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -343,7 +379,7 @@ describe("protected coordination outbox", () => {
       })}\n`);
 
       expect(new CoordinationOutbox(root).list()).toEqual([
-        expect.objectContaining({ kind: "overflow", sessionHash: "0".repeat(16) }),
+        expect.objectContaining({ kind: "overflow", sessionHash: "0".repeat(16), ambiguous: true }),
       ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -361,6 +397,7 @@ describe("protected coordination outbox", () => {
           sessionHash: "c".repeat(64),
           failure: "unavailable",
           digest: index.toString(16).padStart(64, "0"),
+          ambiguous: false,
         });
       }
       const records = outbox.list();

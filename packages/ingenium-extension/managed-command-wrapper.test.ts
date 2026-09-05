@@ -56,6 +56,7 @@ import type {
   RestartProcessIdentity,
 } from "./replacement-first-restart.js";
 import { CoordinationOutbox } from "./coordination-outbox.js";
+import type { McpToolClient } from "./mcp-client.js";
 import {
   commitManagedRecoveryReplacement,
   parseLegacyRecoveryOwnerPayload,
@@ -72,6 +73,7 @@ import {
   hardenLegacyProductionCredentialPermissions,
   openCodeJsonRequest,
   parseListeningLoopbackPorts,
+  publishRestartHandoff,
   probeReplacementHealthGate,
   productionRestartCanonicalWorktree,
   productionRestartDependencies,
@@ -99,6 +101,7 @@ const {
 
 const hash = (value: string) => Buffer.from(value.repeat(64).slice(0, 64)).toString("hex").slice(0, 64);
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+const mcpResult = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
 const recoverySource = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "tui-recovery.ts")).href;
 const tsxLoader = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/tsx/dist/loader.mjs")).href;
 const repositoryRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), "../.."));
@@ -2011,6 +2014,64 @@ describe("managed command wrappers", () => {
         "persist:recovery_owner_ready", "binding", "identity:old", "identity:replacement", "owner-commit",
         "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
       ]);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["handoff and status requests fail", "request", 0],
+    ["handoff status is malformed", "malformed", 1],
+  ] as const)("closes a registered restart publisher when %s", async (_title, failure, expectedRevision) => {
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-publisher-"));
+    try {
+      const request = replacementRequest(worktree);
+      const binding: ProductionRestartBinding = {
+        ...request.binding,
+        apiUrl: "http://127.0.0.1:4097/api/v1",
+        project: "production-project",
+        credentialFile: join(worktree, ".opencode", ".ingenium-mcp-credential"),
+      };
+      const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+        if (name === "coordination_update" && args.operation === "register") {
+          return mcpResult({ data: { session: { revision: 0, fence: 7 } } });
+        }
+        if (name === "coordination_handoff") {
+          if (failure === "request") throw new Error("handoff failed");
+          return mcpResult({ data: { session: { revision: "invalid", fence: 7 } } });
+        }
+        if (name === "coordination_status") {
+          if (failure === "request") throw new Error("status failed");
+          return mcpResult({ data: { session: { revision: 1, fence: 7 } } });
+        }
+        if (name === "coordination_update" && args.operation === "close") return mcpResult({ data: {} });
+        throw new Error(`Unexpected MCP call: ${name}`);
+      });
+      const close = vi.fn(async () => {});
+      const client = { callTool, close } satisfies McpToolClient;
+      const openClient = vi.fn(async () => client);
+
+      await expect(publishRestartHandoff(worktree, binding, request.handoff, openClient))
+        .rejects.toThrow(failure === "request" ? "handoff failed" : "handoff publication failed");
+
+      const register = callTool.mock.calls.find(([, args]) => args.operation === "register")![1];
+      const closed = callTool.mock.calls.find(([, args]) => args.operation === "close")![1];
+      expect(callTool.mock.calls.map(([name, args]) => `${name}:${String(args.operation ?? "status")}`)).toEqual([
+        "coordination_update:register",
+        "coordination_handoff:memory",
+        "coordination_status:status",
+        "coordination_update:close",
+      ]);
+      expect(closed).toMatchObject({
+        worktree_id: register.worktree_id,
+        session_id: register.session_id,
+        incarnation: register.incarnation,
+        ownership_token: register.ownership_token,
+        expected_revision: expectedRevision,
+        fence: 7,
+      });
+      expect(openClient).toHaveBeenCalledWith(worktree, { project: binding.project, credentialPurpose: "general" });
+      expect(close).toHaveBeenCalledOnce();
     } finally {
       rmSync(worktree, { recursive: true, force: true });
     }

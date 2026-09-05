@@ -123,6 +123,8 @@ const OPAQUE_ID = /^(?:session|worktree)-[0-9a-f]{64}$/;
 const MUTATION_OPERATIONS = new Set<CoordinationOutboxMutationOperation>([
   "write", "edit", "create", "delete", "rename", "apply_patch", "repository", "build",
 ]);
+const FILESYSTEM_SENTINEL_KEY = hash("coordination-outbox-filesystem-sentinel");
+const FILESYSTEM_SENTINEL_CREATED_AT = new Date(0).toISOString();
 
 function hash(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -272,6 +274,16 @@ export class CoordinationOutbox {
     return join(this.directory, `${key}.json`);
   }
 
+  private exists(path: string): boolean {
+    try {
+      lstatSync(path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   private read(path: string): CoordinationOutboxRecord | undefined {
     let descriptor: number | undefined;
     try {
@@ -284,7 +296,10 @@ export class CoordinationOutbox {
       if (!opened.isFile() || opened.nlink !== 1 || opened.size > COORDINATION_OUTBOX_MAX_RECORD_BYTES
         || (opened.mode & 0o777) !== 0o600 || (uid !== undefined && opened.uid !== uid)) return undefined;
       const parsed: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
-      return validRecord(parsed) && this.path(parsed.key) === path ? parsed : undefined;
+      if (!validRecord(parsed) || this.path(parsed.key) !== path) return undefined;
+      return parsed.kind === "overflow" || parsed.mutation?.phase === "completion_ambiguous"
+        ? { ...parsed, ambiguous: true }
+        : parsed;
     } catch {
       return undefined;
     } finally {
@@ -294,11 +309,32 @@ export class CoordinationOutbox {
 
   list(): CoordinationOutboxRecord[] {
     assertDirectory(this.directory, 0o700);
-    return readdirSync(this.directory)
-      .filter((name) => /^[0-9a-f]{64}\.json$/.test(name))
-      .map((name) => this.read(join(this.directory, name)))
-      .filter((record): record is CoordinationOutboxRecord => record !== undefined)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.operationId.localeCompare(right.operationId));
+    const records: CoordinationOutboxRecord[] = [];
+    let rejected = 0;
+    for (const name of readdirSync(this.directory)) {
+      const record = /^[0-9a-f]{64}\.json$/.test(name) ? this.read(join(this.directory, name)) : undefined;
+      if (record) records.push(record);
+      else rejected += 1;
+    }
+    if (rejected > 0) {
+      records.push({
+        version: 1,
+        operationId: hash(`operation\0${FILESYSTEM_SENTINEL_KEY}`),
+        key: FILESYSTEM_SENTINEL_KEY,
+        kind: "overflow",
+        sessionHash: "0".repeat(64),
+        createdAt: FILESYSTEM_SENTINEL_CREATED_AT,
+        failure: "invalid_response",
+        revision: null,
+        cursor: null,
+        digest: hash(`coordination-outbox-rejected\0${rejected}`),
+        ambiguous: true,
+        count: rejected,
+        mutation: null,
+      });
+    }
+    return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt)
+      || left.operationId.localeCompare(right.operationId));
   }
 
   private atomicWrite(record: CoordinationOutboxRecord): void {
@@ -328,7 +364,9 @@ export class CoordinationOutbox {
 
   private overflow(input: CoordinationOutboxInput): CoordinationOutboxRecord {
     const key = hash("coordination-outbox-overflow");
-    const existing = this.read(this.path(key));
+    const path = this.path(key);
+    const existing = this.read(path);
+    if (!existing && this.exists(path)) throw new Error("Coordination outbox is unavailable");
     const digest = hash(`${existing?.digest ?? ""}\0${input.kind}\0${input.failure}\0${input.digest ?? ""}`);
     const record: CoordinationOutboxRecord = {
       version: 1,
@@ -359,8 +397,10 @@ export class CoordinationOutbox {
       throw new Error("Invalid coordination outbox record");
     }
     const key = hash(input.exactKey);
-    const prior = this.read(this.path(key));
-    const records = this.list();
+    const path = this.path(key);
+    const prior = this.read(path);
+    if (!prior && this.exists(path)) return this.overflow(input);
+    const records = this.list().filter((record) => record.key !== FILESYSTEM_SENTINEL_KEY);
     const existingBytes = prior ? statSync(this.path(key)).size : 0;
     const currentBytes = records.reduce((total, record) => total + statSync(this.path(record.key)).size, 0);
     const record: CoordinationOutboxRecord = {
@@ -374,7 +414,7 @@ export class CoordinationOutbox {
       revision: input.revision ?? null,
       cursor: input.cursor ?? null,
       digest: input.digest ?? hash(`${input.kind}\0${input.sessionHash}`),
-      ambiguous: input.ambiguous ?? false,
+      ambiguous: input.mutation?.phase === "completion_ambiguous" || (input.ambiguous ?? false),
       count: Math.min(Number.MAX_SAFE_INTEGER, (prior?.count ?? 0) + 1),
       mutation: input.mutation ?? null,
     };
@@ -390,6 +430,7 @@ export class CoordinationOutbox {
 
   async replay(deliver: (record: CoordinationOutboxRecord) => Promise<boolean>): Promise<void> {
     for (const record of this.list()) {
+      if (record.key === FILESYSTEM_SENTINEL_KEY) continue;
       if (!(await deliver(record).catch(() => false))) continue;
       unlinkSync(this.path(record.key));
       const directory = openSync(this.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);

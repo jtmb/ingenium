@@ -129,7 +129,7 @@ interface ReplacementSession {
   transactionSha256: string;
 }
 
-interface RestartHandoffPublisher {
+export interface RestartHandoffPublisher {
   client: McpToolClient;
   identity: {
     project: string;
@@ -1237,12 +1237,13 @@ function restartPublisherMutation(value: unknown): { revision: number; fence: nu
   return { revision: value.revision as number, fence: value.fence as number };
 }
 
-async function publishRestartHandoff(
+export async function publishRestartHandoff(
   worktree: string,
   binding: ProductionRestartBinding,
   handoff: RedactedRestartHandoff,
+  openClient: typeof openMcpToolClient = openMcpToolClient,
 ): Promise<RestartHandoffPublisher> {
-  const client = await openMcpToolClient(worktree, { project: binding.project, credentialPurpose: "general" });
+  const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
   const identity = {
     project: binding.project,
     worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
@@ -1250,6 +1251,8 @@ async function publishRestartHandoff(
     incarnation: Date.now(),
   };
   const ownershipToken = randomBytes(32).toString("base64url");
+  let registeredPublisher: RestartHandoffPublisher | undefined;
+  let published = false;
   try {
     const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
       ...identity,
@@ -1259,7 +1262,8 @@ async function publishRestartHandoff(
       idempotency_key: randomUUID(),
     })));
     const registeredSession = restartPublisherMutation(registered?.session);
-    const published = responseRecord(mcpToolData(await client.callTool("coordination_handoff", {
+    registeredPublisher = { client, identity, ownershipToken, ...registeredSession };
+    const response = responseRecord(mcpToolData(await client.callTool("coordination_handoff", {
       ...identity,
       operation: "memory",
       ownership_token: ownershipToken,
@@ -1270,21 +1274,35 @@ async function publishRestartHandoff(
         ...restartHandoffMemoryEntry(handoff),
       },
     })));
-    const publishedSession = restartPublisherMutation(published?.session);
+    const publishedSession = restartPublisherMutation(response?.session);
+    published = true;
     return { client, identity, ownershipToken, ...publishedSession };
-  } catch (error) {
-    await client.close().catch(() => undefined);
-    throw error;
+  } finally {
+    if (!published) {
+      if (registeredPublisher) await closeRestartHandoffPublisher(registeredPublisher, true);
+      else await client.close().catch(() => undefined);
+    }
   }
 }
 
-async function closeRestartHandoffPublisher(publisher: RestartHandoffPublisher): Promise<void> {
+async function closeRestartHandoffPublisher(publisher: RestartHandoffPublisher, refresh = false): Promise<void> {
+  let revision = publisher.revision;
+  let fence = publisher.fence;
+  if (refresh) {
+    try {
+      const status = responseRecord(mcpToolData(await publisher.client.callTool("coordination_status", {
+        ...publisher.identity,
+        ownership_token: publisher.ownershipToken,
+      })));
+      ({ revision, fence } = restartPublisherMutation(status?.session));
+    } catch {}
+  }
   await publisher.client.callTool("coordination_update", {
     ...publisher.identity,
     operation: "close",
     ownership_token: publisher.ownershipToken,
-    expected_revision: publisher.revision,
-    fence: publisher.fence,
+    expected_revision: revision,
+    fence,
     idempotency_key: randomUUID(),
   }).catch(() => undefined);
   await publisher.client.close().catch(() => undefined);
@@ -1723,7 +1741,7 @@ export function productionRestartDependencies(
     canonicalWorktree: () => {
       const worktree = productionRestartCanonicalWorktree();
       if (new CoordinationOutbox(worktree).list().some((record) => record.ambiguous || record.kind === "overflow")) {
-        throw new Error("Production restart coordination state is ambiguous");
+        throw new Error("Production restart coordination state is ambiguous; ESCALATE_USER without exact epoch evidence");
       }
       return worktree;
     },
