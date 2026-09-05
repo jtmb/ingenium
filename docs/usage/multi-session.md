@@ -156,7 +156,12 @@ Terminal B: start a second OpenCode process from the same checkout; label the se
 
 Before either session mutates a file, confirm that its Ingenium MCP connection is
 connected and that its project/workspace/worktree binding is the intended one.
-If MCP is unavailable, stop; local file activity is not shared-memory evidence.
+After initialization and `tools/list`, invoke `ingenium_coordination_status` with
+the current exact session identity to prove an authorized state-bearing read.
+Check `GET /api/v1/health` separately. The coordination credential intentionally
+lacks installation-wide `health:read`, so `ingenium_health_check` is not this
+workflow's transport canary. If MCP is unavailable, stop; local file activity is
+not shared-memory evidence.
 
 ### Launch internal C
 

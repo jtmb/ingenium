@@ -624,6 +624,12 @@ limited to 300 per minute per attested credential and 600 per minute per
 project/worktree; failed authentication or attestation is charged to the
 strict 100-per-minute pre-authentication bucket.
 
+Coordination transport acceptance therefore uses MCP initialization,
+`tools/list`, and an exact-identity `ingenium_coordination_status` call. It checks
+the credential-free `GET /api/v1/health` route separately. The installation-wide
+`ingenium_health_check` tool requires an explicit `health:read` scope and is not
+required from the fixed four-scope coordination credential.
+
 The common `lease` fields are `worktree_id`, `session_id`, `incarnation`,
 `expected_revision`, `fence`, and `ownership_token`, plus the idempotency key.
 `incarnation` and `fence` are positive integers; revisions are nonnegative.

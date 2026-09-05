@@ -90,10 +90,14 @@ authority. The child MCP environment does not propagate to parent OpenCode
 plugins, so plugins use this same resolver rather than relying on the child
 environment. Run
 `npm run build --workspace=packages/ingenium-extension` after changing the
-launcher or transport. A safe read smoke test is `ingenium_health_check`; it
-does not require a project argument. Authentication, unavailable transport, and
-unrecognized status failures are reported with fixed diagnostics that do not
-include bearer tokens or upstream error text.
+launcher or transport. After initialization and `tools/list`, select a read that
+the scoped credential already authorizes. Coordination acceptance uses the
+state-bearing `ingenium_coordination_status` tool with the current exact identity
+and verifies `GET /api/v1/health` separately. `ingenium_health_check` needs no
+project argument but does require `health:read`; do not broaden a least-privilege
+credential solely to use it as a transport smoke test. Authentication,
+unavailable transport, and unrecognized status failures are reported with fixed
+diagnostics that do not include bearer tokens or upstream error text.
 
 ### MCP API error boundary
 
@@ -316,7 +320,9 @@ pipeline status.
 
 ## HEALTH — API health check
 
-`ingenium_health_check` — Quick health check. **No project param needed.**
+`ingenium_health_check` — Quick health check. Requires `health:read`; **no project
+param is needed**. This installation-wide tool is separate from exact-binding
+coordination canaries and the credential-free API `GET /api/v1/health` route.
 
 ## OPENCODE — Message access
 

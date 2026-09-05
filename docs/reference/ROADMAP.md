@@ -5274,8 +5274,10 @@ separate TodoWrite/roadmap reconciliation. No credential rotation is authorized.
   classified under this contract. Premium rebuilds the current merged source and
   performs one full parent OpenCode restart; child-MCP restart alone is
   insufficient. The post-restart exact-binding MCP canary proves successful MCP
-  initialization, successful `tools/list`, and successful `ingenium_health_check`.
-  Actual API routes and TUI routes are also verified. Real TUI evidence proves
+  initialization, successful `tools/list`, and a successful state-bearing
+  `ingenium_coordination_status` read with the current exact identity. The
+  credential-free `GET /api/v1/health` route and actual TUI routes are verified
+  separately. Real TUI evidence proves
   both link and fork flows, transcript backfill/cursor/replay/loop behavior, and
   TodoWrite/roadmap reconciliation; no evidence class substitutes for another.
 - **Evidence classes:**
@@ -5285,10 +5287,11 @@ separate TodoWrite/roadmap reconciliation. No credential rotation is authorized.
     and restart-replay tests; and the targeted canonical-doc/marker checks.
   - **Deployed runtime:** The authorized Premium rebuild and full parent restart,
     source/image provenance, API and TUI route health, connected MCP
-  initialization/tool listing, binding/auth behavior, and the post-restart
-  exact-binding MCP canary's successful initialization, `tools/list`, and
-  `ingenium_health_check`; also retain explicit proof that ordinary startup did
-  not run test/build tooling or open a test database.
+    initialization/tool listing, binding/auth behavior, and the post-restart
+    exact-binding MCP canary's successful initialization, `tools/list`, and
+    authorized state-bearing `ingenium_coordination_status` read; separately
+    verify `GET /api/v1/health` and retain explicit proof that ordinary startup
+    did not run test/build tooling or open a test database.
   - **Model/session:** Actual linked and forked TUI sessions with the authorized
     project/workspace identity, transcript backfill and incremental cursor
     exchange, duplicate/loop suppression, restart replay, bounded prompt
@@ -5336,10 +5339,11 @@ separate TodoWrite/roadmap reconciliation. No credential rotation is authorized.
   full-authorized retrieval, redaction, and failure recovery; one targeted QA
   report; one bounded security report; deployed API/TUI/MCP health and startup
   process/database inspection; the post-restart exact-binding MCP canary with
-  successful initialization, `tools/list`, and `ingenium_health_check`; actual
-  linked/forked TUI model/session artifacts; and final TodoWrite/roadmap marker
-  reconciliation. No broad suite is part of this contract unless separately
-  authorized by its acceptance boundary.
+  successful initialization, `tools/list`, and an authorized state-bearing
+  `ingenium_coordination_status` read, plus a separate successful
+  `GET /api/v1/health`; actual linked/forked TUI model/session artifacts; and
+  final TodoWrite/roadmap marker reconciliation. No broad suite is part of this
+  contract unless separately authorized by its acceptance boundary.
 - **Docs:** After behavior is source-verified, update only [OpenCode usage](../usage/opencode.md),
   [Multi-session OpenCode](../usage/multi-session.md), [API Reference](../develop/api.md),
   and [MCP Tools Reference](./mcp-tools.md) for launcher/auth/startup,
@@ -5372,8 +5376,9 @@ separate TodoWrite/roadmap reconciliation. No credential rotation is authorized.
   non-empty evidence, and reconciled TodoWrite/roadmap state, deploy the current
   merged source through the authorized Premium rebuild/full parent restart;
   prove the post-restart exact-binding MCP canary with successful initialization,
-  `tools/list`, and `ingenium_health_check`; health-check actual routes, run
-  exactly one QA report and one security report, and exercise real TUI link/fork
+  `tools/list`, and an authorized state-bearing `ingenium_coordination_status`
+  read; verify `GET /api/v1/health` and the actual routes separately, run exactly
+  one QA report and one security report, and exercise real TUI link/fork
   sessions. Capture backfill, cursors, dedupe, loop prevention, restart replay,
   bounded injection, and full authorized retrieval. Clean only owned state,
   reconcile TodoWrite separately from the append-only roadmap markers, and append
@@ -5457,7 +5462,11 @@ source/config retirement nor restarted-runtime proof.
   unchanged. A full parent OpenCode restart, not a child-MCP restart, then
   loads the changed source. Post-restart actual skill-list output and actual
   loaded active/compatibility profile evidence prove that the retired skill is
-  absent. File inspection or source tests do not substitute for restarted
+  absent. Transport acceptance uses successful MCP initialization, `tools/list`,
+  and an authorized state-bearing `ingenium_coordination_status` read with the
+  current exact identity, while `GET /api/v1/health` is verified separately; it
+  does not require `ingenium_health_check` from a credential without
+  `health:read`. File inspection or source tests do not substitute for restarted
   runtime evidence.
 - **Evidence classes:** **Source/config evidence** is the scoped Git change,
   absent-directory result, zero-reference inventory over active loading

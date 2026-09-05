@@ -83,6 +83,14 @@ explicit locators and unsafe basenames (including `/workspace`) fail closed; the
 API-authorized project UUID remains authoritative. The project must exist before
 credential issuance because its immutable UUID is part of the credential grant.
 
+After MCP initialization and `tools/list`, use a read that the credential is
+already authorized to perform. Coordination acceptance uses the state-bearing
+`ingenium_coordination_status` tool with the current exact project, worktree,
+session, incarnation, and ownership identity. Verify `GET /api/v1/health`
+separately. `ingenium_health_check` is available only when the credential has
+`health:read`; do not widen or rotate a least-privilege credential merely to use
+that tool as a transport canary.
+
 OpenCode loads plugins in the parent process; the `environment` block on the
 `ingenium` MCP entry belongs only to the child MCP process and does not supply
 binding variables to parent plugins. Parent plugins resolve the unique local
