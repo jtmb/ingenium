@@ -77,6 +77,7 @@ import {
   inspectExpectedProcessIdentity,
   openCodeJsonRequest,
   parseListeningLoopbackPorts,
+  parseProductionSessionExport,
   persistClaimedLegacyHandoff,
   publishRestartHandoff,
   probeReplacementHealthGate,
@@ -2143,6 +2144,37 @@ describe("managed command wrappers", () => {
       else process.env.INGENIUM_RESTART_NONCE = priorNonce;
       rmSync(worktree, { recursive: true, force: true });
     }
+  });
+
+  it("autonomous-recovery accepts only one exact incumbent export object", () => {
+    const sessionId = "legacy-session";
+    const worktree = "/home/test/ingenium";
+    const exported = { info: { id: sessionId, directory: worktree }, messages: [] };
+    const document = JSON.stringify(exported);
+
+    expect(parseProductionSessionExport(Buffer.from(`\n${document}\n`), sessionId, worktree)).toEqual(exported);
+    for (const invalid of [
+      `status\n${document}`,
+      `${document}\nstatus`,
+      `${document}\n${document}`,
+      document.slice(0, -1),
+      `\u001b[32m${document}`,
+      `\uFEFF${document}`,
+      JSON.stringify([exported]),
+    ]) {
+      expect(() => parseProductionSessionExport(Buffer.from(invalid), sessionId, worktree))
+        .toThrow("Production session export framing is invalid");
+    }
+    expect(() => parseProductionSessionExport(Buffer.from(JSON.stringify({
+      ...exported,
+      info: { ...exported.info, id: "other-session" },
+    })), sessionId, worktree)).toThrow("Production session export identity is invalid");
+    expect(() => parseProductionSessionExport(Buffer.from(JSON.stringify({
+      ...exported,
+      info: { ...exported.info, directory: "/home/test/other" },
+    })), sessionId, worktree)).toThrow("Production session export identity is invalid");
+    expect(() => parseProductionSessionExport(Buffer.from([0x7b, 0xff, 0x7d]), sessionId, worktree))
+      .toThrow("Production session export framing is invalid");
   });
 
   it("fixed deployment reconciles dead and active unnonced candidates before replacement-first bootstrap", async () => {

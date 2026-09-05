@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -11,6 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -57,6 +58,9 @@ import {
 
 const MAX_STATE_BYTES = 64 * 1024;
 const MAX_AUTH_BYTES = 1024 * 1024;
+const MAX_SESSION_EXPORT_BYTES = 32 * 1024 * 1024;
+// Node does not expose Linux O_TMPFILE; the anonymous tmpfs inode keeps the export off disk and gives OpenCode a synchronous stdout.
+const LINUX_O_TMPFILE = 0o20000000 | constants.O_DIRECTORY;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -1181,24 +1185,70 @@ function readDurableParentHandoff(
 ): RedactedRestartHandoff | undefined {
   const environment = processEnvironment(parent.pid);
   if (!environment?.HOME || !isAbsolute(environment.HOME)) return undefined;
+  let raw: Buffer | undefined;
   try {
     if (!identitiesMatch(inspectExpectedProcessIdentity(parent), parent)) return undefined;
-    const exported: unknown = JSON.parse(execFileSync(`/proc/${parent.pid}/exe`, ["export", sessionId, "--pure"], {
-      cwd: worktree,
-      encoding: "utf8",
-      timeout: 10_000,
-      maxBuffer: 32 * 1024 * 1024,
-      env: {
-        HOME: environment.HOME,
-        XDG_DATA_HOME: dataHome,
-        PATH: "/usr/local/bin:/usr/bin:/bin",
-      },
-    }));
+    const descriptor = openSync("/dev/shm", constants.O_RDWR | constants.O_EXCL | LINUX_O_TMPFILE, 0o600);
+    let stderr: Buffer | undefined;
+    try {
+      const result = spawnSync(`/proc/${parent.pid}/exe`, ["export", sessionId, "--pure"], {
+        cwd: worktree,
+        encoding: null,
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+        stdio: ["ignore", descriptor, "pipe"],
+        env: {
+          HOME: environment.HOME,
+          XDG_DATA_HOME: dataHome,
+          PATH: "/usr/local/bin:/usr/bin:/bin",
+        },
+      });
+      stderr = Buffer.isBuffer(result.stderr) ? result.stderr : undefined;
+      if (result.error || result.signal || result.status !== 0) return undefined;
+      const opened = fstatSync(descriptor);
+      if (!opened.isFile() || opened.size < 1 || opened.size > MAX_SESSION_EXPORT_BYTES
+        || (opened.mode & 0o077) !== 0 || (typeof process.getuid === "function" && opened.uid !== process.getuid())) return undefined;
+      raw = Buffer.alloc(opened.size);
+      let offset = 0;
+      while (offset < raw.length) {
+        const count = readSync(descriptor, raw, offset, raw.length - offset, offset);
+        if (count === 0) return undefined;
+        offset += count;
+      }
+    } finally {
+      stderr?.fill(0);
+      closeSync(descriptor);
+    }
+    const exported = parseProductionSessionExport(raw, sessionId, worktree);
     if (!identitiesMatch(inspectExpectedProcessIdentity(parent), parent)) return undefined;
     return redactedHandoffFromExport(exported, sessionId, worktree);
   } catch {
     return undefined;
+  } finally {
+    raw?.fill(0);
   }
+}
+
+export function parseProductionSessionExport(raw: Buffer, sessionId: string, worktree: string): unknown {
+  if (raw.length < 1 || raw.length > MAX_SESSION_EXPORT_BYTES || !SAFE_SESSION_ID.test(sessionId)
+    || !isAbsolute(worktree) || resolve(worktree) !== worktree) {
+    throw new Error("Production session export framing is invalid");
+  }
+  const text = raw.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(raw)) throw new Error("Production session export framing is invalid");
+  let exported: unknown;
+  try {
+    exported = JSON.parse(text);
+  } catch {
+    throw new Error("Production session export framing is invalid");
+  }
+  if (!hasExactKeys(exported, ["info", "messages"]) || !isRecord(exported.info) || !Array.isArray(exported.messages)) {
+    throw new Error("Production session export framing is invalid");
+  }
+  if (exported.info.id !== sessionId || exported.info.directory !== worktree) {
+    throw new Error("Production session export identity is invalid");
+  }
+  return exported;
 }
 
 async function readLiveParentHandoff(
