@@ -508,7 +508,8 @@ export class CoordinationOutbox {
     let key = hash("coordination-outbox-overflow");
     let path = this.path(key);
     let existing = this.read(path);
-    while (existing && this.readDisposition(existing)) {
+    while (existing) {
+      if (!this.readDisposition(existing)) throw new Error("Coordination outbox is unavailable");
       const recordSha256 = this.fileSha256(path);
       if (!recordSha256) throw new Error("Coordination outbox is unavailable");
       key = hash(`coordination-outbox-overflow\0${key}\0${recordSha256}`);
@@ -516,20 +517,20 @@ export class CoordinationOutbox {
       existing = this.read(path);
     }
     if (!existing && this.exists(path)) throw new Error("Coordination outbox is unavailable");
-    const digest = hash(`${existing?.digest ?? ""}\0${input.kind}\0${input.failure}\0${input.digest ?? ""}`);
+    const digest = hash(`\0${input.kind}\0${input.failure}\0${input.digest ?? ""}`);
     const record: CoordinationOutboxRecord = {
       version: 1,
       operationId: hash(`operation\0${key}`),
       key,
       kind: "overflow",
       sessionHash: "0".repeat(64),
-      createdAt: existing?.createdAt ?? new Date(this.now()).toISOString(),
+      createdAt: new Date(this.now()).toISOString(),
       failure: "unavailable",
       revision: null,
       cursor: null,
       digest,
       ambiguous: true,
-      count: Math.min(Number.MAX_SAFE_INTEGER, (existing?.count ?? 0) + 1),
+      count: 1,
       mutation: null,
     };
     this.atomicWrite(record);

@@ -1765,7 +1765,9 @@ describe("SessionCoordinatorPlugin hooks", () => {
     await hooks["tool.execute.after"]!(restartInput, { title: "", output: "", metadata: {} });
     evidence.callID = "premium-typecheck";
     evidence.args = { command: `ingenium-build ${Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")}` };
-    const verificationInput = { tool: "bash", sessionID, callID: evidence.callID, args: evidence.args };
+    const verificationInput = {
+      tool: "bash", sessionID, callID: evidence.callID, args: { ...evidence.args, workdir: process.worktree },
+    };
     await hooks["tool.execute.before"]!(verificationInput, { args: verificationInput.args });
     await hooks["tool.execute.after"]!(verificationInput, { title: "", output: "", metadata: {} });
 

@@ -387,11 +387,11 @@ describe("protected coordination outbox", () => {
     }
   });
 
-  it("coalesces bounded overflow instead of blocking when the record cap is reached", () => {
+  it.each(["missing", "stale", "malformed"] as const)("preserves bounded overflow with a %s disposition", (dispositionState) => {
     const root = worktree();
     try {
       const outbox = new CoordinationOutbox(root);
-      for (let index = 0; index < COORDINATION_OUTBOX_MAX_RECORDS + 20; index += 1) {
+      for (let index = 0; index < COORDINATION_OUTBOX_MAX_RECORDS; index += 1) {
         outbox.put({
           exactKey: `record-${index}`,
           kind: "publication",
@@ -401,11 +401,40 @@ describe("protected coordination outbox", () => {
           ambiguous: false,
         });
       }
-      const records = outbox.list();
-      expect(records.length).toBeLessThanOrEqual(COORDINATION_OUTBOX_MAX_RECORDS);
-      expect(records).toContainEqual(expect.objectContaining({
-        kind: "overflow", sessionHash: "0".repeat(64), ambiguous: true, count: 21,
-      }));
+      const overflow = outbox.list().find((record) => record.kind === "overflow")!;
+      const overflowPath = join(outbox.directory, `${overflow.key}.json`);
+      const original = readFileSync(overflowPath);
+      const originalSha256 = createHash("sha256").update(original).digest("hex");
+
+      if (dispositionState !== "missing") {
+        mkdirSync(outbox.dispositionDirectory, { mode: 0o700 });
+        const dispositionPath = join(outbox.dispositionDirectory, `${overflow.key}.json`);
+        const disposition = dispositionState === "malformed" ? "{" : JSON.stringify({
+          schemaVersion: 1,
+          recordKey: overflow.key,
+          recordSha256: "0".repeat(64),
+          operationId: overflow.operationId,
+          decision: "abandoned",
+          authority: "explicit_user_authorization",
+          reason: "nonrecoverable_identityless_overflow",
+          createdAt: "2026-09-05T00:00:00.000Z",
+        });
+        writeFileSync(dispositionPath, `${disposition}\n`, { mode: 0o600 });
+      }
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        expect(() => outbox.put({
+          exactKey: `overflow-repeat-${attempt}`,
+          kind: "publication",
+          sessionHash: "d".repeat(64),
+          failure: "unavailable",
+        })).toThrow("Coordination outbox is unavailable");
+      }
+
+      const retained = readFileSync(overflowPath);
+      expect(retained).toEqual(original);
+      expect(createHash("sha256").update(retained).digest("hex")).toBe(originalSha256);
+      expect(outbox.list().find((record) => record.key === overflow.key)?.count).toBe(overflow.count);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

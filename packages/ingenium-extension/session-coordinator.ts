@@ -545,6 +545,12 @@ function isTrustedManagedWrapperArgs(worktree: string, args: Record<string, unkn
     && (args.timeout as number) <= MCP_LIVE_RELOAD_MAX_TIMEOUT_MS);
 }
 
+function comparableTrustedToolArgs(worktree: string, args: unknown): unknown {
+  if (!isRecord(args) || typeof args.workdir !== "string" || resolve(args.workdir) !== resolve(worktree)) return args;
+  const { workdir: _workdir, ...comparable } = args;
+  return comparable;
+}
+
 function boundBrowserWrapperCommand(worktree: string, args: unknown): string | undefined {
   if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return undefined;
   let descriptor: number | undefined;
@@ -1404,7 +1410,10 @@ export class SessionCoordinator {
         return entry.parts.some((part) => isRecord(part) && part.type === "tool" && part.sessionID === sessionId
           && part.messageID === info.id && part.callID === callId && part.tool === tool && isRecord(part.state)
           && (part.state.status === "pending" || part.state.status === "running")
-          && isDeepStrictEqual(part.state.input, args));
+          && isDeepStrictEqual(
+            comparableTrustedToolArgs(this.ctx.worktree, part.state.input),
+            comparableTrustedToolArgs(this.ctx.worktree, args),
+          ));
       });
     } catch {
       return false;

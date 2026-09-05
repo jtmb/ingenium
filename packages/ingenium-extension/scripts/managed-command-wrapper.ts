@@ -26,7 +26,11 @@ import {
 
 const ARG = /^[A-Za-z0-9_@%+=:,./-]{1,512}$/;
 const BUILD_SCRIPTS = new Set(["build", "typecheck", "test", "lint"]);
-const EXTENSION_TEST_FILES = new Set(["managed-command-wrapper.test.ts", "session-coordinator.test.ts"]);
+const EXTENSION_TEST_FILES = new Set([
+  "coordination-outbox.test.ts",
+  "managed-command-wrapper.test.ts",
+  "session-coordinator.test.ts",
+]);
 const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart"]);
 const REPOSITORY_INSPECTIONS = new Set(["status", "staged-paths", "recent-log", "head"]);
 const REPOSITORY_PATH_INSPECTIONS = new Set(["diff", "staged-diff"]);

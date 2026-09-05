@@ -696,6 +696,11 @@ describe("managed command wrappers", () => {
     ])).toString("base64url"))).toEqual([
       "run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "identity",
     ]);
+    expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify([
+      "run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts", "-t", "overflow",
+    ])).toString("base64url"))).toEqual([
+      "run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts", "-t", "overflow",
+    ]);
     expect(() => decodeManagedArgv(Buffer.from(JSON.stringify(["add", "src/file.ts;rm"])).toString("base64url")))
       .toThrow("Invalid managed command payload");
     expect(decodeManagedRepositoryArgv(Buffer.from(JSON.stringify(["status"])).toString("base64url")))
