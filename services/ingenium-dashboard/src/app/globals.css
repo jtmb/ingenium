@@ -1,0 +1,325 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+@theme {
+  /* Surface colors — cards, panels, containers */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f9fafb;
+  --color-surface-hover: #f3f4f6;
+  --color-surface-selected: #eff6ff;
+  --color-surface-raised: #ffffff;
+
+  /* Selection states — for active/selected items in lists, trees, toggles */
+  --color-selection-bg: #eff6ff;
+  --color-selection-text: #1e3a5f;
+
+  /* Border colors */
+  --color-border: #e5e7eb;
+  --color-border-muted: #f3f4f6;
+  --color-border-hover: #d1d5db;
+
+  /* Text colors */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-text-link: #2563eb;
+  --color-text-link-hover: #1d4ed8;
+
+  /* State colors — backgrounds */
+  --color-error-bg: #fef2f2;
+  --color-error-text: #dc2626;
+  --color-error-border: #fecaca;
+  --color-warning-bg: #fffbeb;
+  --color-warning-text: #d97706;
+  --color-warning-border: #fde68a;
+  --color-success-bg: #f0fdf4;
+  --color-success-text: #16a34a;
+  --color-success-border: #bbf7d0;
+  --color-info-bg: #eff6ff;
+  --color-info-text: #2563eb;
+  --color-info-border: #bfdbfe;
+
+  /* Accent / brand */
+  --color-accent: #2563eb;
+
+  /* Navigation */
+  --color-nav-bg: #ffffff;
+  --color-nav-border: #e5e7eb;
+  --color-nav-text: #6b7280;
+  --color-nav-text-hover: #111827;
+  --color-nav-text-active: #2563eb;
+  --color-nav-scrollbar-thumb: #cbd5e1;
+
+  /* Code / pre blocks */
+  --color-code-bg: #f3f4f6;
+  --color-code-text: #111827;
+  --color-code-border: #e5e7eb;
+}
+
+.dark {
+  /* Surface colors — neutral charcoal matching OpenCode */
+  --color-surface: #171717;
+  --color-surface-muted: #0f0f0f;
+  --color-surface-hover: #262626;
+  --color-surface-selected: #333333;
+  --color-surface-raised: #1f1f1f;
+
+  /* Selection states — for active/selected items in lists, trees, toggles */
+  --color-selection-bg: #333333;
+  --color-selection-text: #e5e5e5;
+
+  /* Border colors */
+  --color-border: #2a2a2a;
+  --color-border-muted: #1f1f1f;
+  --color-border-hover: #404040;
+
+  /* Text colors */
+  --color-text-primary: #e5e5e5;
+  --color-text-secondary: #a0a0a0;
+  --color-text-muted: #707070;
+  --color-text-link: #60a5fa;
+  --color-text-link-hover: #93bbfd;
+
+  /* State colors — backgrounds */
+  --color-error-bg: #7f1d1d33;
+  --color-error-text: #fca5a5;
+  --color-error-border: #991b1b66;
+  --color-warning-bg: #78350f33;
+  --color-warning-text: #fcd34d;
+  --color-warning-border: #92400e66;
+  --color-success-bg: #14532d33;
+  --color-success-text: #86efac;
+  --color-success-border: #16653466;
+  --color-info-bg: #1e3a5f33;
+  --color-info-text: #93c5fd;
+  --color-info-border: #1e40af66;
+
+  /* Accent / brand — keep blue */
+  --color-accent: #3b82f6;
+
+  /* Navigation */
+  --color-nav-bg: #111111;
+  --color-nav-border: #2a2a2a;
+  --color-nav-text: #a0a0a0;
+  --color-nav-text-hover: #e5e5e5;
+  --color-nav-text-active: #e5e5e5;
+  --color-nav-scrollbar-thumb: #525252;
+
+  /* Code / pre blocks */
+  --color-code-bg: #1f1f1f;
+  --color-code-text: #e5e5e5;
+  --color-code-border: #2a2a2a;
+}
+
+@layer base {
+  *, ::before, ::after {
+    border-color: var(--color-border);
+  }
+}
+
+:root {
+  --edge-drawer-duration: 240ms;
+  --edge-drawer-easing: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The prepaint script sets the root attribute before hydration. The rail
+   remains a real flex item, so content follows its width instead of being
+   moved by a transform and flashing at the end of the transition. */
+html[data-nav-compact="true"] .desktop-navigation {
+  width: 3.5rem;
+}
+
+.desktop-navigation {
+  transition-property: width;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.desktop-navigation .desktop-nav-item {
+  transition-property: color, gap, padding-inline;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.desktop-navigation .desktop-nav-group-control {
+  transition-property: color, justify-content, padding-inline;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.desktop-navigation .nav-label,
+.desktop-navigation .nav-badge {
+  max-width: 16rem;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition-property: max-width, opacity;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+html[data-nav-compact="true"] .desktop-navigation .desktop-nav-item {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .desktop-nav-group-control {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .nav-label,
+html[data-nav-compact="true"] .desktop-navigation .nav-badge {
+  max-width: 0;
+  opacity: 0;
+}
+
+.edge-drawer-panel {
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  transition-property: transform;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.edge-drawer-panel[data-edge-drawer-state="opening"][data-edge-drawer-side="left"],
+.edge-drawer-panel[data-edge-drawer-state="closing"][data-edge-drawer-side="left"] {
+  transform: translate3d(-100%, 0, 0);
+}
+
+.edge-drawer-panel[data-edge-drawer-state="opening"][data-edge-drawer-side="right"],
+.edge-drawer-panel[data-edge-drawer-state="closing"][data-edge-drawer-side="right"] {
+  transform: translate3d(100%, 0, 0);
+}
+
+.edge-drawer-backdrop {
+  opacity: 1;
+  transition-property: opacity;
+  transition-duration: var(--edge-drawer-duration);
+  transition-timing-function: var(--edge-drawer-easing);
+}
+
+.edge-drawer-backdrop[data-edge-drawer-state="opening"],
+.edge-drawer-backdrop[data-edge-drawer-state="closing"] {
+  opacity: 0;
+}
+
+html[data-nav-compact="true"] .desktop-navigation .nav-divider {
+  margin-right: 0.5rem;
+  margin-left: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-navigation,
+  .desktop-navigation .desktop-nav-item,
+  .desktop-navigation .desktop-nav-group-control,
+  .desktop-navigation .nav-label,
+  .desktop-navigation .nav-badge,
+  .nav-group-items,
+  .mobile-navigation-drawer,
+  .edge-drawer-panel,
+  .edge-drawer-backdrop {
+    transition: none;
+  }
+}
+
+/* The left navigation keeps a stable, narrow scrollbar gutter without adding
+   idle chrome. Hover changes only the thumb color, so the reserved geometry
+   never changes while scrolling or moving the pointer over the sidebar. */
+.nav-scroll-area {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.nav-scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.nav-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nav-scroll-area::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+.nav-scroll-area::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (hover: hover) {
+  .nav-scroll-area:hover {
+    scrollbar-color: var(--color-nav-scrollbar-thumb) transparent;
+  }
+
+  .nav-scroll-area:hover::-webkit-scrollbar-thumb {
+    background-color: var(--color-nav-scrollbar-thumb);
+  }
+}
+
+/* Touch browsers can keep :hover latched after a tap; keep the scrollbar
+   chrome hidden there instead of turning a desktop hover affordance permanent. */
+@media (hover: none) {
+  .nav-scroll-area:hover {
+    scrollbar-color: transparent transparent;
+  }
+
+  .nav-scroll-area:hover::-webkit-scrollbar-thumb {
+    background-color: transparent;
+  }
+}
+
+/* Callout blocks for DocsEditor markdown renderer */
+.callout {
+  border-left: 4px solid;
+  padding: 0.5rem 1rem;
+  margin: 0.75rem 0;
+  background: var(--color-surface-hover);
+  border-radius: 0 4px 4px 0;
+}
+.callout-note { border-left-color: #3b82f6; }
+.callout-warning { border-left-color: #f59e0b; }
+.callout-danger { border-left-color: #ef4444; }
+.callout-info { border-left-color: #06b6d4; }
+.callout-tip { border-left-color: #10b981; }
+.callout-success { border-left-color: #22c55e; }
+
+/* Chat renders provider output as plain flow. Docs retains the callout chrome
+   above; these overrides are deliberately scoped to ChatMarkdown only. */
+.chat-markdown .callout,
+.chat-markdown :where(pre, code) {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+.chat-markdown .callout {
+  padding: 0 !important;
+  margin: 0.75rem 0 !important;
+}
+.chat-markdown :where(pre) {
+  padding: 0 !important;
+}
+.chat-markdown :where(blockquote) {
+  border-left: 0 !important;
+  padding-left: 0 !important;
+  color: var(--color-text-secondary);
+}
+.chat-markdown :where(hr, table, th, td) {
+  border: 0 !important;
+}

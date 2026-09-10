@@ -1,4 +1,4 @@
-# ── Environment / Secrets ─────────────────────────────────
+# Environment and secrets
 .env
 .env.*
 !.env.example
@@ -8,22 +8,101 @@ credentials.json
 *.cred
 *.credential
 
-# ── AI-generated files ────────────────────────────────────
+# Local AI state
 .agents/skills/*/SKILL.md.bak
+.agents.old/
+.ingenium/
 
-# ── Dependencies ──────────────────────────────────────────
+# Dependencies
 node_modules/
 __pycache__/
 *.pyc
 
-# ── OS Files ──────────────────────────────────────────────
+# Operating-system files
 .DS_Store
 Thumbs.db
 
-# ── Kaban board (local state) ─────────────────────────────
+# Local Kaban board state
 .kaban/
 
-# ── Existing entries ──────────────────────────────────────
+# Playwright cache and reports
+playwright-report/
+playwright/.cache/
+
+# Build output
+.next/
+.ingenium-dashboard-fixtures/
+dist/
+build/
+*.tsbuildinfo
+
+# Local learning fallback files
+.agents/skills/learnings.md
+.opencode/skills/learnings.md
+
+# Local resource-sync state
+.opencode/.ingenium-sync-state.json
+.opencode/.ingenium-api-token
+.opencode/.ingenium-mcp-credential
+.opencode/.ingenium-coordination-owner-provider.json
+.opencode/coordination-owner-input/
+.opencode/.ingenium-learning-credential
+.opencode/.ingenium-repository-sync-credential
+.opencode/.ingenium-runtime-credential
+.opencode/.ingenium-sync-recovery/
+.opencode/.ingenium-sync-lock*/
+.opencode/protected-runtime-index/
+.opencode/skills/mcp-tooling/references/site-recipes/
+**/.opencode/.ingenium-learning-credential
+
+# Editor and temporary files
 .agents/.lm-studio-env
 .vscode
 temp
+
+# SQLite runtime data
+/data*
+*.db
+*.db-shm
+*.db-wal
+
+# Keep database migrations tracked
+!/packages/ingenium-core/data/migrations/
+
+# Local backups
+personal-space-backup.json
+
+# OpenCode session logs
+session-*.md
+session_*.md
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# YAML page snapshots
+*.snapshot.yml
+
+# Plans and scratch notes
+next-steps-plan/
+email-plan.md
+*.plan.md
+plan.md
+!.opencode/agents/**/plan.md
+servers-page.yml
+# Repository-root screenshots
+/*.png
+
+# QA snapshots and accessibility outputs
+*-snapshot.md
+*-accessibility.md
+
+# Generated test artifacts
+/test-results/
+tests/artifacts/
+/tests/artifacts/test-runs/.retention-control/
+/tests/artifacts/test-runs/.retention-control/plans/
+/tests/artifacts/test-runs/.retention-control/reports/
+/tests/artifacts/test-runs/.retention-control/receipts/
+/tests/artifacts/test-runs/.retention-control/quarantine/
+tests/qa-screenshots/
+tests/test-results/

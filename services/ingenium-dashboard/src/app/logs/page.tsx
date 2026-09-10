@@ -1,0 +1,483 @@
+"use client";
+export const dynamic = "force-dynamic";
+
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useProject } from "../../lib/ProjectContext";
+import { api, ApiError, type LogEntry } from "../../lib/api";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+
+// 500-entry cap prevents unbounded memory growth in long-running sessions.
+// A one-shot timer starts only after the previous request settles.
+const MAX_ENTRIES = 500;
+const POLL_MS = 2_000;
+
+const ALL_LEVELS = ["debug", "info", "warn", "error"] as const;
+type Level = (typeof ALL_LEVELS)[number];
+
+function sourceBadgeColor(src: string): string {
+  const hues: Record<string, string> = {
+    agent: "blue",
+    plugin: "purple",
+    scheduler: "purple",
+    observer: "teal",
+    "auto-observer": "pink",
+    synthesis: "orange",
+    api: "blue",
+    configs: "teal",
+    skills: "slate",
+    email: "indigo",
+  };
+  return badgeTones(hues[src] ?? "gray");
+}
+
+const LEVEL_DOT: Record<string, string> = {
+  debug: "bg-gray-400",
+  info: "bg-[var(--color-accent)]",
+  warn: "bg-amber-500 dark:bg-amber-400",
+  error: "bg-red-500 dark:bg-red-400",
+};
+
+const LEVEL_BADGE: Record<string, string> = {
+  debug: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
+  info: badgeTones("blue") + " border-[var(--color-info-border)]",
+  warn: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
+  error: "bg-[var(--color-error-bg)] text-[var(--color-error-text)] border-[var(--color-error-border)]",
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  agent: "Agent",
+  plugin: "Plugin",
+  scheduler: "Scheduler",
+  observer: "Observer",
+  "auto-observer": "Auto-Observer",
+  synthesis: "Synthesis",
+  api: "API",
+  configs: "Configs",
+  skills: "Skills",
+  email: "Email",
+};
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString("en-GB", { hour12: false });
+}
+
+function fmtFull(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
+function dedupeKey(e: LogEntry): string {
+  return `${e.timestamp}|${e.source}|${e.level}|${e.message}`;
+}
+
+/**
+ * LogsPage — Live system log stream with source/level filters and search.
+ *
+ * Uses timestamp-based cursor pagination (`since` param) for the polling
+ * loop rather than page numbers, ensuring no gaps or duplicates when logs
+ * arrive between poll cycles. The `seenKeys` deduplication set provides a
+ * second safety net against duplicate entries.
+ *
+ * Default filters show only info/warn/error to reduce noise; debug is
+ * opt-in via the level checkboxes.
+ */
+export default function LogsPage() {
+  const project = useProject();
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [sources, setSources] = useState<string[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set(["all"]));
+  const [selectedLevels, setSelectedLevels] = useState<Set<Level>>(new Set(["info", "warn", "error"]));
+  const [searchText, setSearchText] = useState("");
+
+  const [paused, setPaused] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScroll = useRef(true);
+  const seenKeys = useRef(new Set<string>());
+  const lastTimestampRef = useRef<string>("");
+
+  useEffect(() => {
+    let disposed = false;
+    let hidden = document.hidden;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let controller: AbortController | null = null;
+
+    const clearTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    const abortRequest = () => {
+      const activeController = controller;
+      controller = null;
+      activeController?.abort();
+    };
+
+    const canPoll = () => !disposed && !paused && !hidden;
+
+    const schedule = (delay: number) => {
+      if (!canPoll()) return;
+      clearTimer();
+      timer = setTimeout(() => {
+        timer = null;
+        void poll();
+      }, delay);
+    };
+
+    const poll = async (): Promise<void> => {
+      if (!canPoll() || controller) return;
+
+      const requestController = new AbortController();
+      controller = requestController;
+      try {
+        const response = await api.logs.list(
+          project,
+          lastTimestampRef.current || undefined,
+          200,
+          requestController.signal,
+        );
+        if (!canPoll() || requestController.signal.aborted) return;
+
+        const data = response.data || response;
+        const newEntries: LogEntry[] = data.entries || [];
+        const newSources: string[] = data.sources || [];
+
+        if (newEntries.length > 0) {
+          const unseen = newEntries.filter((entry) => {
+            const key = dedupeKey(entry);
+            if (seenKeys.current.has(key)) return false;
+            seenKeys.current.add(key);
+            return true;
+          });
+
+          if (unseen.length > 0) {
+            setEntries((prev) => {
+              const merged = [...prev, ...unseen];
+              return merged.length > MAX_ENTRIES
+                ? merged.slice(merged.length - MAX_ENTRIES)
+                : merged;
+            });
+            lastTimestampRef.current = unseen[unseen.length - 1]!.timestamp;
+          }
+        }
+
+        setSources(newSources);
+        setTotal(data.total ?? 0);
+        setLastUpdate(new Date().toISOString());
+        setError(null);
+        setLoading(false);
+        schedule(POLL_MS);
+      } catch (err: unknown) {
+        if (disposed || requestController.signal.aborted) return;
+
+        setLoading(false);
+        if (err instanceof ApiError && err.status === 429) {
+          if (err.retryAfterStatus === "valid" && err.retryAfterSeconds !== null) {
+            setError(`${err.message} Retrying in ${err.retryAfterSeconds}s.`);
+            schedule(err.retryAfterSeconds * 1_000);
+          } else {
+            const retryMessage = err.retryAfterStatus === "excessive"
+              ? "The server supplied an excessive Retry-After delay."
+              : err.retryAfterStatus === "invalid"
+                ? "The server supplied an invalid Retry-After delay."
+                : "The server did not supply a valid Retry-After delay.";
+            setError(`${err.message} ${retryMessage} Polling stopped.`);
+            clearTimer();
+          }
+          return;
+        }
+
+        setError(err instanceof Error ? err.message || "Failed to fetch logs" : "Failed to fetch logs");
+        schedule(POLL_MS);
+      } finally {
+        if (controller === requestController) controller = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      hidden = document.hidden;
+      if (hidden) {
+        clearTimer();
+        abortRequest();
+      } else if (!paused) {
+        schedule(0);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!hidden && !paused) void poll();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearTimer();
+      abortRequest();
+    };
+  }, [paused, project]);
+
+  useEffect(() => {
+    if (shouldAutoScroll.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [entries]);
+
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    // If within 4px of bottom, resume auto-scroll; otherwise pause it
+    shouldAutoScroll.current = scrollHeight - scrollTop - clientHeight < 4;
+  }, []);
+
+  const filteredEntries = useMemo(() => {
+    const showAllSources = selectedSources.has("all");
+    return entries.filter((e) => {
+      if (!showAllSources && !selectedSources.has(e.source)) return false;
+      if (!selectedLevels.has(e.level as Level)) return false;
+      if (
+        searchText &&
+        !e.message.toLowerCase().includes(searchText.toLowerCase())
+      )
+        return false;
+      return true;
+    });
+  }, [entries, selectedSources, selectedLevels, searchText]);
+
+  const activeSourcesCount = useMemo(
+    () => new Set(entries.map((e) => e.source)).size,
+    [entries],
+  );
+
+  const toggleSource = (src: string) => {
+    setSelectedSources((prev) => {
+      const next = new Set(prev);
+      if (src === "all") {
+        // Selecting "All" clears individual selections
+        return new Set(["all"]);
+      }
+      // Remove "all" from the set first
+      next.delete("all");
+      if (next.has(src)) {
+        next.delete(src);
+        // If nothing left, fall back to "all"
+        if (next.size === 0) next.add("all");
+      } else {
+        next.add(src);
+      }
+      return next;
+    });
+  };
+
+  const toggleLevel = (lvl: Level) => {
+    setSelectedLevels((prev) => {
+      const next = new Set(prev);
+      if (next.has(lvl)) {
+        next.delete(lvl);
+      } else {
+        next.add(lvl);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="space-y-4 min-w-0">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="min-w-0">
+          <h1 className="break-words text-3xl font-bold">System Logs</h1>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+            Live log stream from the Ingenium server
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--color-text-secondary)] sm:w-auto sm:justify-end">
+          <span>
+            Total: <strong>{total}</strong>
+          </span>
+          <span>
+            Sources:{" "}
+            <strong className="text-[var(--color-text-link)]">{activeSourcesCount}</strong>
+          </span>
+          <span>
+            Displayed:{" "}
+            <strong className="text-emerald-600">
+              {filteredEntries.length}
+            </strong>
+          </span>
+          <span className="text-[var(--color-text-muted)]">
+            {lastUpdate ? `Updated ${fmtTime(lastUpdate)}` : "—"}
+          </span>
+          <button
+            onClick={() => setPaused((p) => !p)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+              paused
+                ? "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-[var(--color-surface-hover)]"
+                : "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+            }`}
+          >
+            {paused ? "▶ Resume" : "⏸ Paused"} —{" "}
+            {paused ? "PAUSED" : "LIVE"}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 hover:shadow-md transition-shadow space-y-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-[var(--color-text-muted)] mr-1 font-medium">
+            Sources:
+          </span>
+          <button
+            onClick={() => toggleSource("all")}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+              selectedSources.has("all")
+                ? "bg-gray-800 text-white shadow-sm"
+                : "bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+            }`}
+          >
+            All
+          </button>
+          {sources.map((src) => {
+            const badge = sourceBadgeColor(src);
+            const isSelected = selectedSources.has(src);
+            return (
+              <button
+                key={src}
+                onClick={() => toggleSource(src)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  isSelected
+                    ? `${badge} shadow-sm ring-1 ring-[var(--color-border)] ring-offset-1 ring-offset-[var(--color-surface)]`
+                    : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+                }`}
+              >
+                {SOURCE_LABEL[src] ?? src}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+          <span className="text-xs text-[var(--color-text-muted)] font-medium">Levels:</span>
+          {ALL_LEVELS.map((lvl) => {
+            const isSelected = selectedLevels.has(lvl);
+            const dot = LEVEL_DOT[lvl] ?? "bg-gray-400";
+            return (
+              <label
+                key={lvl}
+                className={`flex items-center gap-1.5 text-xs cursor-pointer select-none ${
+                  isSelected ? "text-[var(--color-text-primary)] font-medium" : "text-[var(--color-text-muted)]"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleLevel(lvl)}
+                  className="sr-only"
+                />
+                <span
+                  className={`w-2.5 h-2.5 rounded-full inline-block ${dot} ${
+                    isSelected ? "ring-2 ring-offset-1 ring-offset-[var(--color-surface)] ring-gray-300" : "opacity-40"
+                  }`}
+                />
+                {lvl.toUpperCase()}
+              </label>
+            );
+          })}
+          <div className="w-full min-w-0 sm:min-w-[200px] sm:flex-1">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search messages..."
+              className="w-full border border-[var(--color-border)] rounded text-xs px-3 py-1.5 focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+            />
+          </div>
+        </div>
+      </div>
+
+      {loading && entries.length === 0 && (
+        <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
+          Loading logs...
+        </div>
+      )}
+
+      {error && (
+        <div role="alert" className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && filteredEntries.length === 0 && (
+        <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
+          <p className="text-lg font-medium mb-1">No log entries yet.</p>
+          <p className="text-sm">System is running. Logs will appear here as events occur.</p>
+        </div>
+      )}
+
+      {filteredEntries.length > 0 && (
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          role="region"
+          aria-label="System logs table"
+          tabIndex={0}
+          className="min-w-0 max-w-full overflow-x-auto overflow-y-auto overscroll-x-contain rounded border border-[var(--color-border)] bg-[var(--color-surface)] max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
+        >
+          <table className="w-full min-w-[680px] text-sm font-mono">
+            <thead className="sticky top-0 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] z-10">
+              <tr className="text-left text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
+                <th className="px-4 py-2 whitespace-nowrap w-[80px]">Time</th>
+                <th className="px-4 py-2 whitespace-nowrap w-[110px]">Source</th>
+                <th className="px-4 py-2 whitespace-nowrap w-[60px]">Level</th>
+                <th className="px-4 py-2">Message</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--color-border-muted)]">
+              {filteredEntries.map((entry, idx) => {
+                const sourceBadge = sourceBadgeColor(entry.source);
+                const levelDot = LEVEL_DOT[entry.level] ?? "bg-gray-400";
+                const levelBadge =
+                  LEVEL_BADGE[entry.level] ??
+                  "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]";
+                return (
+                  <tr
+                    key={`${entry.timestamp}-${idx}`}
+                    className="hover:bg-[var(--color-surface-hover)] transition-colors"
+                    title={fmtFull(entry.timestamp)}
+                  >
+                    <td className="px-4 py-1.5 text-xs text-[var(--color-text-muted)] whitespace-nowrap">
+                      {fmtTime(entry.timestamp)}
+                    </td>
+                    <td className="px-4 py-1.5 whitespace-nowrap">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded border ${sourceBadge}`}
+                      >
+                        {SOURCE_LABEL[entry.source] ?? entry.source}
+                      </span>
+                    </td>
+                    <td className="px-4 py-1.5 whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border ${levelBadge}`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${levelDot}`}
+                        />
+                        {entry.level.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-1.5 text-xs text-[var(--color-text-primary)] break-all">
+                      {entry.message}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,133 @@
+import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { PipelineEvent } from "../schema.js";
+
+/**
+ * Log a pipeline event. Returns the created event.
+ *
+ * The `data` object is JSON-serialized for storage in a TEXT column.
+ * Events form a parent-child tree via `parentEventId`, used by getTimeline()
+ * to reconstruct grouped views of pipeline activity.
+ */
+export function logEvent(
+  projectId: string,
+  eventType: PipelineEvent["event_type"],
+  eventSource: PipelineEvent["event_source"],
+  title: string,
+  description?: string,
+  data?: object,
+  parentEventId?: number,
+  sessionId?: string,
+  importance?: number,
+  scope?: { ownerUserId?: string | null; visibility?: "private" | "organization" },
+): PipelineEvent {
+  const event = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      `INSERT INTO pipeline_events (project_id, organization_id, owner_user_id, visibility, event_type, event_source, title, description, data, parent_event_id, session_id, importance, created_at)
+       SELECT id, organization_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM projects WHERE id = ?`
+    ).run(
+      scope?.ownerUserId ?? null,
+      scope?.visibility ?? (scope?.ownerUserId ? "private" : "organization"),
+      eventType,
+      eventSource,
+      title,
+      description ?? null,
+      data ? JSON.stringify(data) : null,
+      parentEventId ?? null,
+      sessionId ?? null,
+      importance ?? 5,
+      now,
+      projectId,
+    );
+    return db.prepare("SELECT * FROM pipeline_events WHERE id = ?").get(result.lastInsertRowid) as PipelineEvent;
+  });
+  checkpointAfterWrite();
+  return event;
+}
+
+/**
+ * Get pipeline events with optional filters.
+ * Dynamically builds the WHERE clause from the provided options — each optional
+ * filter appends a clause to avoid hard-coding every combination.
+ */
+export function getEvents(
+  projectId: string,
+  options?: {
+    source?: PipelineEvent["event_source"];
+    type?: PipelineEvent["event_type"];
+    limit?: number;
+    since?: string;        // ISO timestamp — only events after this
+    parentEventId?: number; // only children of a specific event
+    ownerUserId?: string | null;
+  },
+): PipelineEvent[] {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+  const clauses: string[] = ["project_id = ?"];
+  const params: any[] = [projectId];
+
+  if (options?.source) {
+    clauses.push("event_source = ?");
+    params.push(options.source);
+  }
+  if (options?.type) {
+    clauses.push("event_type = ?");
+    params.push(options.type);
+  }
+  if (options?.since) {
+    clauses.push("created_at >= ?");
+    params.push(options.since);
+  }
+  if (options?.parentEventId !== undefined) {
+    clauses.push("parent_event_id = ?");
+    params.push(options.parentEventId);
+  }
+  if (options?.ownerUserId !== undefined) {
+    clauses.push(options.ownerUserId === null ? "visibility = 'organization'" : "(visibility = 'organization' OR owner_user_id = ?)");
+    if (options.ownerUserId !== null) params.push(options.ownerUserId);
+  }
+
+  const limit = options?.limit ?? 100;
+  params.push(limit);
+
+  return db.prepare(
+    `SELECT * FROM pipeline_events WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT ?`
+  ).all(...params) as PipelineEvent[];
+}
+
+/**
+ * Get a flat timeline with parent events and their children grouped.
+ * Returns events ordered by created_at DESC with children nested in `data.children`.
+ *
+ * NOTE: This performs N+1 queries (one for parents, one per parent for children).
+ * Acceptable because parent counts are bounded by the limit (default 50).
+ * If the pipeline produces thousands of events per interval, consider a
+ * single-query approach with a window function instead.
+ */
+export function getTimeline(
+  projectId: string,
+  options?: {
+    source?: PipelineEvent["event_source"];
+    limit?: number;
+    since?: string;
+    ownerUserId?: string | null;
+  },
+): PipelineEvent[] {
+  const parents = getEvents(projectId, {
+    ...options,
+    limit: options?.limit ?? 50,
+  });
+
+  for (const parent of parents) {
+    const children = getEvents(projectId, { parentEventId: parent.id, ownerUserId: options?.ownerUserId });
+    if (children.length > 0) {
+      const parsed = parent.data ? JSON.parse(parent.data) : {};
+      parsed.children = children;
+      parent.data = JSON.stringify(parsed);
+    }
+  }
+
+  return parents;
+}
+
+export { logEvent as logPipelineEvent };

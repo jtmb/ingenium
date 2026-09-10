@@ -1,0 +1,457 @@
+"use client";
+
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  startTransition,
+} from "react";
+import type { OpenCodeSession } from "./opencode";
+import { useOpenCodeClient } from "./RuntimeContext";
+
+const ACTIVE_SESSION_KEY = "opencode-chat-active-session";
+
+export interface UseOpenCodeSessionsReturn {
+  /** All active sessions filtered by searchQuery, sorted by updatedAt desc. */
+  sessions: OpenCodeSession[];
+  /** Archived sessions (empty array when archive not supported by API). */
+  archivedSessions: OpenCodeSession[];
+  /** Currently selected session ID. */
+  activeId: string | null;
+  /** True while initial fetch or refresh is in-flight. */
+  isLoading: boolean;
+  /** Last captured error message, or null. */
+  error: string | null;
+  /** Client-side search filter — applied to session titles (case-insensitive). */
+  searchQuery: string;
+  /** Set the search filter (wrapped in startTransition). */
+  setSearchQuery: (q: string) => void;
+
+  /** Create a new session and auto-select it. Returns the new session ID or null on error. */
+  create: (title: string) => Promise<string | null>;
+  /** Rename a session with optimistic local update. */
+  rename: (id: string, title: string) => Promise<void>;
+  /** Delete a session. If it was active, selects the next available. */
+  remove: (id: string) => Promise<void>;
+  /** Set the active session ID and persist to localStorage. */
+  select: (id: string) => void;
+  /** Fork a session (optionally at a specific message). Returns the forked session ID. */
+  fork: (id: string, messageId?: string) => Promise<string | null>;
+  /** Share a session and return the share URL. */
+  share: (id: string) => Promise<string | null>;
+  /** Remove the share link from a session. */
+  unshare: (id: string) => Promise<void>;
+  /** Re-fetch the session list from the server. */
+  refresh: () => Promise<void>;
+  /** Archive a session (falls back to delete when API lacks archive support). */
+  archive: (id: string) => Promise<void>;
+  /** Un-archive a session (no-op when API lacks archive support). */
+  unarchive: (id: string) => Promise<void>;
+  /** True while auto-creating the initial session when the list is empty. */
+  autoCreated: boolean;
+  /** True while one session creation request owns the creation slot. */
+  isCreating: boolean;
+}
+
+function persistActive(id: string | null): void {
+  if (typeof window === "undefined") return;
+  if (id) {
+    localStorage.setItem(ACTIVE_SESSION_KEY, id);
+  } else {
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+  }
+}
+
+function readPersistedActive(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(ACTIVE_SESSION_KEY);
+}
+
+/** Check whether the session shape includes a V2 archive field. */
+function supportsArchive(session: OpenCodeSession): boolean {
+  return "archived" in (session.time as Record<string, unknown>);
+}
+
+/**
+ * React hook managing OpenCode session CRUD.
+ *
+ * - Fetches sessions from the OpenCode API on mount
+ * - Sorts by `time.updated` descending (epoch millis)
+ * - Persists `activeId` to localStorage under `opencode-chat-active-session`
+ * - Supports create, rename, remove, select, fork, share, unshare
+ * - Client-side search filtering via `searchQuery` (case-insensitive title match)
+ * - Archive/unarchive with graceful fallback when API lacks archive support
+ */
+export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
+  const opencode = useOpenCodeClient();
+  const [allSessions, setAllSessions] = useState<OpenCodeSession[]>([]);
+  // A persisted ID is untrusted until the current session list confirms it.
+  // Starting without an active session prevents a stale localStorage value from
+  // issuing a messages request before that validation completes.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, _setSearchQuery] = useState("");
+
+  const mountedRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+  const refreshGenerationRef = useRef(0);
+  const selectionIntentRef = useRef(0);
+  const creationPendingRef = useRef(false);
+  /** Snapshot of previous sessions for optimistic rollback in rename. */
+  const renameSnapshotRef = useRef<OpenCodeSession[]>([]);
+  /** Guards against duplicate auto-creation when the session list is empty. */
+  const autoCreatedRef = useRef(false);
+  const [autoCreated, setAutoCreated] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const sessions = useMemo(() => {
+    if (!searchQuery.trim()) return allSessions;
+    const q = searchQuery.toLowerCase();
+    return allSessions.filter((s) => s.title.toLowerCase().includes(q));
+  }, [allSessions, searchQuery]);
+
+  /** Archive is not supported in the V1.18.9 API — always empty. */
+  const archivedSessions: OpenCodeSession[] = [];
+
+  const setSearchQuery = useCallback((q: string) => {
+    startTransition(() => _setSearchQuery(q));
+  }, []);
+
+  const refresh = useCallback(async () => {
+    // Cancel any in-flight request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const refreshGeneration = ++refreshGenerationRef.current;
+    const selectionIntent = selectionIntentRef.current;
+
+    try {
+      setError(null);
+      setIsLoading(true);
+      const data = await opencode.sessions.list("/workspace");
+      if (!mountedRef.current
+        || refreshGeneration !== refreshGenerationRef.current
+        || selectionIntent !== selectionIntentRef.current) return;
+
+      // Sort by updatedAt descending (newest first)
+      const sorted = [...data].sort(
+        (a, b) => b.time.updated - a.time.updated,
+      );
+      setAllSessions(sorted);
+
+      // Auto-create session when the list is empty (once per mount)
+      if (
+        sorted.length === 0 &&
+        !autoCreatedRef.current &&
+        !creationPendingRef.current &&
+        mountedRef.current
+      ) {
+        autoCreatedRef.current = true;
+        creationPendingRef.current = true;
+        setAutoCreated(true);
+        setIsCreating(true);
+        try {
+          const createdSession = await opencode.sessions.create({
+            title: "New conversation",
+            directory: "/workspace",
+          });
+          if (!mountedRef.current || refreshGeneration !== refreshGenerationRef.current) return;
+          if (selectionIntent === selectionIntentRef.current) {
+            setAllSessions([createdSession]);
+            selectionIntentRef.current += 1;
+            setActiveId(createdSession.id);
+            persistActive(createdSession.id);
+          } else {
+            setAllSessions((current) => [createdSession, ...current.filter(({ id }) => id !== createdSession.id)]);
+          }
+        } catch (createErr: unknown) {
+          if (!mountedRef.current) return;
+          if (
+            (createErr as Error)?.name === "AbortError"
+          )
+            return;
+          const message =
+            createErr instanceof Error
+              ? createErr.message
+              : "Failed to create a new conversation. Please try again.";
+          setError(message);
+        } finally {
+          creationPendingRef.current = false;
+          if (mountedRef.current) {
+            setAutoCreated(false);
+            setIsCreating(false);
+          }
+        }
+      } else {
+        // Prefer the persisted session only after this response confirms it.
+        // If it was removed elsewhere, select and persist the current fallback.
+        const persistedActive = readPersistedActive();
+        setActiveId((prev) => {
+          const preferred = prev ?? persistedActive;
+          if (preferred && sorted.some((s) => s.id === preferred)) return preferred;
+          const fallback = sorted[0]?.id ?? null;
+          if (preferred) persistActive(fallback);
+          return fallback;
+        });
+      }
+    } catch (err: unknown) {
+      if (!mountedRef.current
+        || refreshGeneration !== refreshGenerationRef.current
+        || selectionIntent !== selectionIntentRef.current) return;
+      const message =
+        err instanceof Error ? err.message : "Failed to load sessions";
+      if (message === "AbortError" || (err as Error)?.name === "AbortError")
+        return;
+      setError(message);
+    } finally {
+      if (mountedRef.current && refreshGeneration === refreshGenerationRef.current) setIsLoading(false);
+    }
+  }, [opencode]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    refresh();
+
+    return () => {
+      mountedRef.current = false;
+      refreshGenerationRef.current += 1;
+      abortRef.current?.abort();
+    };
+  }, [refresh]);
+
+  const create = useCallback(async (title: string): Promise<string | null> => {
+    if (creationPendingRef.current) return null;
+    creationPendingRef.current = true;
+    setIsCreating(true);
+    const selectionIntent = selectionIntentRef.current;
+    try {
+      setError(null);
+      const session = await opencode.sessions.create({
+        title,
+        directory: "/workspace",
+      });
+      if (!mountedRef.current) return null;
+      setAllSessions((current) => [session, ...current.filter(({ id }) => id !== session.id)]);
+      if (selectionIntent === selectionIntentRef.current) {
+        selectionIntentRef.current += 1;
+        setActiveId(session.id);
+        persistActive(session.id);
+      }
+
+      await opencode.sessions
+        .list("/workspace")
+        .then((data) => {
+          if (!mountedRef.current) return;
+          const sorted = [...data].sort(
+            (a, b) => b.time.updated - a.time.updated,
+          );
+          setAllSessions(sorted.some(({ id }) => id === session.id)
+            ? sorted
+            : [session, ...sorted]);
+        })
+        .catch(() => {
+          /* refresh failure is non-critical */
+        });
+      return session.id;
+    } catch (err: unknown) {
+      if (!mountedRef.current) return null;
+      const message =
+        err instanceof Error ? err.message : "Failed to create session";
+      setError(message);
+      return null;
+    } finally {
+      creationPendingRef.current = false;
+      if (mountedRef.current) setIsCreating(false);
+    }
+  }, [opencode]);
+
+  const rename = useCallback(async (id: string, title: string) => {
+    try {
+      setError(null);
+
+      // Optimistic update
+      setAllSessions((prev) => {
+        renameSnapshotRef.current = prev;
+        return prev.map((s) =>
+          s.id === id
+            ? { ...s, title, time: { ...s.time, updated: Date.now() } }
+            : s,
+        );
+      });
+
+      await opencode.sessions.update(id, { title });
+    } catch (err: unknown) {
+      // Rollback on error
+      if (renameSnapshotRef.current.length > 0) {
+        setAllSessions(renameSnapshotRef.current);
+      }
+      const message =
+        err instanceof Error ? err.message : "Failed to rename session";
+      setError(message);
+    }
+  }, [opencode]);
+
+  const remove = useCallback(
+    async (id: string) => {
+      try {
+        setError(null);
+        await opencode.sessions.delete(id);
+
+        if (!mountedRef.current) return;
+
+        setAllSessions((prev) => {
+          const remaining = prev.filter((s) => s.id !== id);
+          // If the removed session was active, select the next available
+          if (activeId === id) {
+            const first = remaining[0];
+            const nextId = first ? first.id : null;
+            setActiveId(nextId);
+            persistActive(nextId);
+          }
+          return remaining;
+        });
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : "Failed to delete session";
+        setError(message);
+      }
+    },
+    [activeId, opencode],
+  );
+
+  const select = useCallback((id: string) => {
+    selectionIntentRef.current += 1;
+    setActiveId(id);
+    persistActive(id);
+  }, []);
+
+  const fork = useCallback(
+    async (id: string, messageId?: string): Promise<string | null> => {
+      try {
+        setError(null);
+        const forked = await opencode.sessions.fork(id, messageId);
+
+        // Refresh the list
+        try {
+          const data = await opencode.sessions.list("/workspace");
+          if (mountedRef.current) {
+            const sorted = [...data].sort(
+              (a, b) => b.time.updated - a.time.updated,
+            );
+            setAllSessions(sorted);
+          }
+        } catch {
+          /* non-critical */
+        }
+
+        setActiveId(forked.id);
+        persistActive(forked.id);
+        return forked.id;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : "Failed to fork session";
+        setError(message);
+        return null;
+      }
+    },
+    [opencode],
+  );
+
+  const share = useCallback(
+    async (id: string): Promise<string | null> => {
+      try {
+        setError(null);
+        const result = await opencode.sessions.share(id);
+        const url = result.share?.url ?? null;
+
+        // Update local session with share URL
+        if (url) {
+          setAllSessions((prev) =>
+            prev.map((s) => (s.id === id ? { ...s, share: { url } } : s)),
+          );
+        }
+
+        return url;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : "Failed to share session";
+        setError(message);
+        return null;
+      }
+    },
+    [opencode],
+  );
+
+  const unshare = useCallback(async (id: string) => {
+    try {
+      setError(null);
+      await opencode.sessions.unshare(id);
+
+      setAllSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, share: undefined } : s)),
+      );
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to unshare session";
+      setError(message);
+    }
+  }, [opencode]);
+
+  const archive = useCallback(
+    async (id: string) => {
+      const session = allSessions.find((s) => s.id === id);
+
+      if (session && supportsArchive(session)) {
+        // V2: archive endpoint would go here — not available in V1.18.9
+        // Placeholder for when the API is upgraded
+        setError("Archive not supported by current API version");
+        return;
+      }
+
+      // V1 fallback: treat as delete
+      await remove(id);
+    },
+    [allSessions, remove],
+  );
+
+  const unarchive = useCallback(
+    async (id: string) => {
+      const session = allSessions.find((s) => s.id === id);
+
+      if (session && supportsArchive(session)) {
+        // V2: unarchive endpoint would go here
+        setError("Unarchive not supported by current API version");
+        return;
+      }
+
+      // V1 fallback: cannot recover deleted sessions — no-op
+      setError("Unarchive not supported by current API version");
+    },
+    [allSessions],
+  );
+
+  return {
+    sessions,
+    archivedSessions,
+    activeId,
+    isLoading,
+    error,
+    searchQuery,
+    setSearchQuery,
+    create,
+    rename,
+    remove,
+    select,
+    fork,
+    share,
+    unshare,
+    refresh,
+    archive,
+    unarchive,
+    autoCreated,
+    isCreating,
+  };
+}

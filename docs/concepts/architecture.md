@@ -1,0 +1,1515 @@
+---
+title: Architecture
+description: System architecture, project identity model, data flow, and component overview of the Ingenium system.
+---
+
+# Architecture
+
+## Project Identity Model
+
+Ingenium uses a **two-project identity model** distinguishing between server/public and external sessions:
+
+### Server/Public Project (`global-default`)
+- **Project name**: `global-default` (with `is_global=1`)
+- **Used by**: The compatibility container's own `opencode-web` session, email service, and dashboard default; the production control plane retains the namespace without running a local OpenCode process
+- **Global config location**: `/home/ingenium-opencode/.config/opencode/opencode.jsonc` in Docker (set by `scripts/docker-entrypoint.sh`)
+- **Plugin target**: Extension plugins inside the container use `INGENIUM_PROJECT=global-default` (set in `opencode.jsonc` at line 32 of the entrypoint)
+- **Created automatically** in two contexts:
+  1. **Docker deployment** — API startup, launched by `scripts/docker-entrypoint.sh`, calls `ensureGlobalProject()` before schedulers or mail maintenance use it
+  2. **Local development** — The API server (`api-server.ts`) calls `ensureGlobalProject()` before the scheduler or email engine starts. This is idempotent: if the project already exists, it is a no-op.
+- If the global project cannot be created (DB error, permissions), the API logs a warning and degrades gracefully — the health endpoint and non-global routes still work, but the mail sync scheduler skips with the log message `Skipping mail sync — no global project configured`
+
+### External Sessions
+- **Project name**: A display locator that must resolve to an immutable project UUID granted by the scoped credential
+- **Used by**: External OpenCode sessions (CLI, VS Code) that connect via the `@ingenium/extension` plugins
+- **Plugin target**: Explicit `--project` or `INGENIUM_PROJECT` locators take precedence; otherwise extension plugins use the validated worktree basename
+- **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the canonical `resource-sync`, `observer`, `auto-observer`, `session-coordinator`, and Ponytail adapter plugins
+
+### External Worktree Project Initialization
+
+When an external OpenCode session (CLI, VS Code) loads the `@ingenium/extension` plugins, the extension's **resource-sync** module (`packages/ingenium-extension/resource-sync.ts`) calls `ensureExtensionProject()` which:
+
+1. Resolves a safe display locator from explicit `--project`, `INGENIUM_PROJECT`, or the validated worktree basename, in that order, while requiring workspace and exact launcher-worktree bindings.
+2. Authenticates the scoped credential and receives the server-derived principal, organization, immutable project grants, scopes, and audience.
+3. Resolves the display locator to the immutable UUID already granted to the credential; mismatched or missing targets remain `404`.
+
+> 🔴 **A basename is only a locator, never authority.** Server-issued UUID grants authorize, and `/workspace` or any unsafe basename fails closed.
+
+### Global-Default Semantics
+
+The `global-default` project carries `is_global=1` and serves as the sole server/public namespace. The database permits at most one active global project (an archived global does not count). Runtime resolution does not silently choose among duplicate active globals; ambiguity is an integrity failure that must be repaired before shared resources or mail operations continue:
+
+- **Docker deployment**: Created by API startup, launched by `scripts/docker-entrypoint.sh`, via `ensureGlobalProject()`
+- **Local development**: Created by `ensureGlobalProject()` in the API server before the scheduler or email engine start — idempotent no-op if already present
+- **Shared resources**: Skills, plugins, configs, and settings written to `global-default` are accessible from every project via `resolveProjectBase()` path resolution
+- **Global config path**: `/home/ingenium-opencode/.config/opencode/opencode.jsonc` in Docker
+- **Auto-loading**: When a new project is created, global skills from `global-default` are automatically copied into it via `copySkills()`
+- **Graceful degradation**: If `global-default` cannot be created, the API logs a warning and skips mail sync with `"Skipping mail sync — no global project configured"`
+
+Do not run a live global-project or mail-settings migration before deploying
+the release that contains its schema and runtime guards. Deploy the application,
+run the migration preflight against the target database, and only then permit
+runtime reconciliation.
+
+### Project-Name Safety Validation
+
+All project names pass through `isValidProjectName()` which enforces:
+
+| Check | Rejected Examples |
+|-------|-------------------|
+| Empty or whitespace-only | `""`, `" "` |
+| Exceeds 64 characters | `"a".repeat(65)` |
+| Leading/trailing whitespace | `" name"`, `"name "` |
+| Dot segments | `"."`, `".."` |
+| Path separators | `"a/b"`, `"a\\b"` |
+| Control characters | `"a\u0000b"` |
+
+This check is applied in the API route handler (`services/ingenium-api/lib/routes/projects.ts`) and the extension project resolver (`packages/ingenium-extension/project-resolver.ts`). Project creation returns `422 Unprocessable Entity` with a `VALIDATION_ERROR` code when the name is invalid.
+
+### Resolution & Switching
+- The **dashboard** resolves the default project dynamically by fetching the `is_global=1` project from the API (`GET /api/v1/projects` with `is_global` filter)
+- Users can switch projects via:
+  - The **ProjectDropdown** (folder icon + chevron) in the nav bar, positioned before the settings gear — available on all pages except `/mail` and `/opencode`, where it is disabled (`opacity-50 cursor-not-allowed`)
+  - The `/projects` page, which shows an ACTIVE badge on the current project and a "Set Active" button on others
+  - MCP tools like `ingenium_project_init`; global designation remains a trusted
+    server-lifecycle operation rather than a caller-selected project setting
+- When writing shared resources (skills, plugins, configs, settings), use `global-default`. External sessions resolve explicit `--project`, then `INGENIUM_PROJECT`, then a validated worktree basename; the credential-authorized UUID remains authoritative
+
+### Key Rule
+> **Never assume a worktree-derived project name is the shared namespace.** The `global-default` project (with `is_global=1`) is the sole server/public namespace for shared resources. External sessions (like this repo's worktree-derived project) have their own isolated workspace — shared resources (skills, plugins, configs, settings) must be written to `global-default` explicitly, never to the worktree-derived project.
+
+### DB-Only Workspace Project Migration
+
+A historical artifact created an invalid `/workspace` project in the database (from the container mount point). The migration is **DB-only** — it never reads, renames, or deletes the `/workspace` filesystem path.
+
+#### Migration Flow
+
+1. **Dry run** (`POST /api/v1/projects/migrate-workspace` with `dry_run: true`):
+   - Counts source skills (expects exactly 10)
+   - Computes SHA-256 content hashes for each skill
+   - Counts child rows in every table with a `project_id` column (skills, tasks, observations, etc.)
+   - Detects name collisions with existing `global-default` skills
+   - Returns a `WorkspaceMigrationResult` without mutating any data
+
+2. **Execute** (`POST /api/v1/projects/migrate-workspace` with `dry_run: false` or omitted):
+   - Creates a `project_migration_manifests` record (status `prepared`) containing source skill hashes and child row counts
+   - Renames any colliding skills in the source project with a `migrated-<sha256[:16]>` suffix
+   - Reassigns all child rows from `/workspace` → `global-default`
+   - Verifies SHA-256 content hash integrity for every migrated skill
+   - Checks no child rows remain in the source project
+   - Runs `PRAGMA foreign_key_check` — rejects if any violations
+   - Deletes the `/workspace` project row
+   - Updates the manifest status to `completed`
+
+#### Validation Guards
+
+| Guard | Action on Failure |
+|-------|-------------------|
+| Source skills ≠ exactly 10 | Throws `MIGRATION_REFUSED` |
+| Skill content hash mismatch after move | Throws `MIGRATION_REFUSED` — refuse project deletion |
+| Child rows remain in `/workspace` | Throws `MIGRATION_REFUSED` |
+| Foreign key violations | Throws `MIGRATION_REFUSED` |
+
+#### Rollback Expectations
+
+The entire migration is **transactional** (wrapped in `execTransaction()`). If any validation guard fails, the transaction aborts, all changes are rolled back, and the source `/workspace` project remains untouched. Once committed, rollback is a manual operation: create a new project, move child rows back, and restore the `/workspace` project row from the `project_migration_manifests` audit record.
+
+#### Audit Table: `project_migration_manifests`
+
+Created by migration `049_workspace_project_migration.sql`. Stores:
+
+| Column | Content |
+|--------|---------|
+| `id` | UUID primary key |
+| `source_project_id` | The `/workspace` project UUID |
+| `destination_project_id` | The `global-default` project UUID |
+| `source_skill_count` | Number of skills in source (expects 10) |
+| `source_hashes` | JSON array of `{name, sha256}` for every source skill |
+| `child_counts` | JSON object of logical repaired-component names → copied row counts |
+| `status` | One of `prepared`, `completed`, `failed` |
+
+The manifest is created **before** data movement and updated **after** successful completion, providing a durable audit trail.
+
+#### API Endpoint & MCP Tool
+
+| Interface | Endpoint | Purpose |
+|-----------|----------|---------|
+| REST API | `POST /api/v1/projects/migrate-workspace` | Trigger migration with optional `dry_run` |
+| MCP Tool | `ingenium_project_migrate_workspace` | Same, accessible from OpenCode |
+
+Both return a `WorkspaceMigrationResult` containing `{ migrated, dryRun, manifestId, sourceSkillCount, sourceHashes, movedChildRows, collisions }`. Name `collisions` are reported with their `sha256`, not skill content.
+
+#### MCP Tool Registration
+
+| Field | Value |
+|-------|-------|
+| Tool name | `ingenium_project_migrate_workspace` |
+| Category | Projects |
+| Project scope | `global` |
+| Default enabled | Yes |
+| Input schema | `{ dryRun?: boolean }` |
+
+---
+
+## Data Flow
+
+```
+Dashboard → HTTP → API → Core → SQLite
+MCP Server → HTTP → API → Core → SQLite
+Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
+```
+
+- `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
+- `ingenium-server` runs as an MCP stdio transport with **289 server registrations** across **31 baseline categories**. Two extension-registered tools bring the built-in catalog to **291**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **24 primary navigation routes plus the 19-tab Settings overlay**. It talks to the API over HTTP.
+
+### Resource tenancy (AUTH-104)
+
+Projects belong to organizations. Migrations 096 and 097 add explicit ownership
+to vault folders/items, provider connections, mail accounts, credentials, OAuth
+attempts, and organization-qualified mail cache state. Existing identifiers and
+encrypted values are preserved; compatibility rows are assigned to their
+project organization, while ambiguous provider state remains installation-owned.
+
+Organization resources use organization/project roles. User-private resources
+require the owner or an explicit resource grant; organization administrators do
+not receive private plaintext access by role alone. Foreign resource lookups
+return the same not-found response as absent resources. Native and managed
+provider credentials may enter shared OpenCode only when installation-owned;
+private provider ownership fails closed until an isolated provider runtime exists.
+
+### Automation tenancy (AUTH-106)
+
+Migration 099 gives every job and task an immutable organization/project owner.
+Jobs execute as explicit organization service principals backed by revisioned
+project execution grants. Manual runs retain the delegator; trusted-event runs
+retain source actor and delivery/attempt provenance; cron runs atomically claim
+a unique `(job, schedule revision, scheduled minute)`.
+
+Cron and trusted-event dispatch use durable organization round-robin cursors.
+At most two automation runs are active globally, while each organization and
+service principal may occupy one slot. Every attempt uses a run-local pure
+OpenCode runtime containing exactly one explicitly service-granted organization
+or installation provider; no shared OpenCode config/auth state is inherited.
+
+Run, event-delivery, vault-reference, and recovery records snapshot the job,
+service-principal, and grant revisions used for execution. Recovery revalidates
+those snapshots before secret resolution or process handling. Revoked principals
+and stale job, execution-grant, or vault-grant revisions fail closed. User-private
+jobs and tasks remain owner-only, while raw run logs/process surfaces remain
+installation-admin operations.
+
+### MCP credential tenancy (AUTH-107)
+
+External MCP and extension processes use hash-only, 256-bit credentials bound to
+one audience, organization, immutable project grant set, workspace, exact launcher
+worktree, expiry, scopes, and service-principal security epoch. Plaintext is returned
+only at issue/rotation. Revocation, rotation, expiry, and epoch changes take effect on
+the next API call. The installation bearer remains available only to explicit internal
+services and is not projected into user runtimes.
+
+Repository-sync credentials contain exactly `repository:sync` and `projects:read`.
+They cannot reach vault, mail, backups, or other product resources. Tool discovery is
+filtered by authorization as an optimization; API policy remains final authority.
+Dynamic child MCP tools inherit the parent's exact project and scope ceiling; plaintext
+runtime handoff additionally requires the dedicated `runtime` audience and
+`child-mcp:runtime`.
+
+### Per-user/workspace runtime isolation (AUTH-108)
+
+Migration 101 binds each authorized workspace and runtime to one organization,
+project, owner, immutable storage mapping, security epoch, and revisioned lifecycle.
+Runtime capabilities are hash-only AUTH-107 credentials and resolve only while their
+binding, workspace, service principal, epoch, expiry, and runtime state all remain
+valid. Provisioning failure and explicit revoke invalidate the capability immediately.
+
+The production Compose profile separates the control plane, the private runtime
+manager, and the `user-runtime` image. Only the manager receives the Docker socket.
+It accepts an owner-only manager credential, validates an operator-maintained exact
+workspace map against dedicated bind mounts, and creates one dedicated Docker network
+and container per runtime. The control plane is attached to each runtime network for
+private API/OpenCode traffic; user runtimes never share a network with each other and
+publish no host ports.
+
+Each runtime mounts only its approved worktree at `/workspace`. Its root filesystem is
+read-only; HOME, XDG, OpenCode, VS Code, temporary, and capability state are private
+tmpfs mounts. CPU, memory, PID, process, and tmpfs-disk limits are mandatory. Web,
+CLI, and VS Code processes within one runtime intentionally share that runtime's state.
+Migration 101 also provides hash-only, audience-bound launch-ticket storage and
+one-time, at-most-60-second issue/consume primitives. Browser exchange, origin binding,
+runtime-specific roots, and launch UI are completed by AUTH-109 migration 102. The
+unprivileged HTTPS gateway has a narrow credential and no Docker socket. Host-only
+audience cookies and generation-checked sessions bind the runtime root to the
+originating dashboard auth session. Migration 103 persists that exact launcher
+origin so gateway health and proxied CSP responses permit only that dashboard
+origin. Migration 105 preserves exact HTTPS audience origins and permits HTTP only
+when the persisted audience origin exactly matches a special-use `.localhost` host;
+logout/revoke closes streams and reconnects.
+
+### Content tenancy (AUTH-105)
+
+Migration 098 makes Docs spaces, templates, and tags organization roots. Pages,
+drafts, versions, comments, attachments, backlinks, project links, repository
+page identities, and page tags inherit the root organization; SQL triggers reject
+cross-organization parents and links. Existing Docs content belongs to the
+bootstrap organization, and each organization receives a default organization
+space. There is no automatic global Personal-space fallback.
+
+RAG sources and pending chunked-upload sessions carry organization ownership and
+`organization`, `project`, or `restricted` visibility. Authenticated Context
+uploads are restricted to their user from session creation through retrieval;
+chunk mutation, search, listing, and current-learning snapshots apply the same
+owner filter. Retrieval no longer includes the
+global project implicitly. Published Docs pages index into their owning organization, and
+checkpoint links must match the immutable conversation scope at the SQL boundary.
+
+Immutable context conversation roots carry organization, owner, and
+`private`/`organization`/`project` visibility. Messages, checkpoints, restores,
+and RAG bindings inherit that root; restore-as-new preserves ownership. Existing
+conversation content is private to the claimed bootstrap owner, while missing
+private ownership fails the migration probe closed. Normalized content shares
+are explicit and content-free audit records cover sharing, archive, restore,
+export, and delete operations.
+
+Behavior observations and personality traits are user-private by default, with
+explicit organization scope for automation. Pipeline events carry bounded scope
+metadata and observation events no longer copy private observation text into
+their title or description.
+
+### Git-authoritative external-worktree synchronization
+
+Automatic external-worktree synchronization follows exactly:
+
+```text
+Git worktree files → @ingenium/extension resource-sync plugin → configured
+Ingenium MCP stdio transport → authenticated Ingenium API → database
+```
+
+Git is authoritative. Extension plugins, CLIs, and agents never read or write
+the database and never call mutation REST endpoints directly. `ingenium-core` is
+the API's internal DB implementation and cannot be imported by runtime
+consumers. Administrative skill CRUD/sync tools are repair/import operations
+only; they are not automatic worktree synchronization.
+
+## Restore Plan and Executor Boundary (RESTORE-100/101)
+
+Backups are server-global and use signed v2 fixed-name bundles for the Ingenium
+and OpenCode databases. The manifest binds component hashes, sizes, required
+tables, schema fingerprints, and SQLite versions; a persistent owner-only HMAC
+key file is kept outside the bundle directory. Migration 083 provides immutable
+plan/revision identity, one-time authorization, append-only audit, stage
+integrity, and idempotency receipts. RESTORE-101 adds a distinct one-time
+15-minute execution authorization, an append-only fenced run ledger, and a
+fixed one-shot Supervisor program. API and MCP can only authorize and queue
+that static executor; they never apply database bytes. The executor stops DB
+users, verifies holders and both databases, creates a `pre_restore` snapshot,
+performs the journaled two-file swap, rehydrates the approval ledger, and
+restarts healthy users. Its root-only maintenance root and separate root-only
+HMAC journal key drive crash recovery and fail-closed rollback; API/MCP never
+read either. UI, off-host, and other-resource restores remain out of scope.
+
+## Task and Session Coordination Boundary (COORD-100/101)
+
+Task coordination is cooperative and managed-agent-only: the guarantee applies
+when agents use the same project and canonical worktree. It explicitly excludes
+manual editors and external processes, so it is not a filesystem write-enforcement
+mechanism. Task access remains project-scoped; foreign-project task IDs are
+treated as absent, and mutations use expected-revision CAS plus request-hash
+idempotency.
+
+Reservations use atomic reserve/release operations for an owner/worktree pair.
+The caller supplies a 32–512-character URL-safe opaque token; the database
+stores only its SHA-256 hash and public task results never return the token or
+hash. Legacy non-available reservations are quarantined transactionally by
+migration 074 because they cannot prove token possession. Exact supported claim
+forms are relative `path`, relative `tree`, and reserved `@build`/`@repository`
+claims; globs, absolute paths, traversal, `.git` paths, and secret-like paths
+are rejected.
+
+COORD-101 adds a project/worktree/session/incarnation registry. Each worktree
+has a durable, monotonic fence allocator; recovery advances the fence and
+rotates the caller-held ownership token, whose SHA-256 hash is the only stored
+form. Session mutations require the expected revision, fence, token, and an
+immutable request-hash receipt. Heartbeats extend only an unexpired active
+lease, so an expired session cannot be resurrected by heartbeat.
+
+Claims are exact `path`, `tree`, or reserved `@build`/`@repository` values with
+optional SHA-256 baselines. Claim batches and releases are atomic, and claims
+may be `active`, `released`, `dirty`, `quarantined`, or `collision`. Bounded
+credential-free operational snapshots are retained with optional project-owned
+task/revision and context-conversation/revision pointers. Closing releases
+active claims while retaining the session, claim, receipt, and fence evidence.
+All coordination writes checkpoint only after their transaction commits.
+
+## Usage Telemetry
+
+Usage telemetry is provider-neutral and project-scoped. The API reads OpenCode
+assistant `step-finish` parts and joins only their usage metadata with assistant
+message and session metadata. Persisted records contain request identifiers,
+raw provider/model IDs, nullable assistant-agent attribution, timestamps, status,
+token counters (including nullable numeric reasoning tokens), nullable cache
+counters, and reported cost state. They never contain prompts, message text,
+reasoning content, tool payloads, or credentials.
+
+OpenCode project IDs require an explicit mapping to an Ingenium project. An
+unmapped source project is quarantined and is never assigned to
+`global-default` by fallback. Replay safety is provided by a unique
+`source_instance + source_part_id` upsert key. Per-project sync state uses a
+composite cursor plus a five-minute session-update lookback so revised or
+late-arriving step data is replayed safely.
+
+The collector runs on the API scheduler (default five minutes; configurable with
+`USAGE_SYNC_INTERVAL_MS`) and can be triggered with the project-scoped usage
+sync API. Cost is reported as `known`, `partial`, or `unavailable`; cache
+read/write and reasoning-token counts remain nullable when OpenCode does not
+report them. The system does not calculate a cache-hit rate or infer provider
+billing.
+
+The dashboard `/usage` view consumes the same project-scoped summary,
+breakdown, freshness, and export contracts. It treats omitted cost/cache data
+as unknown rather than zero and preserves provider/model IDs for all supported
+providers.
+
+USAGE-100 adds a project-scoped advisory threshold layer over those existing
+aggregates. Migration 078 stores nullable request, total-token,
+provider-reported-cost, cache-read, and cache-write thresholds with revisioned
+CAS updates. Evaluation is read-only and uses either caller-supplied UTC
+`from`/`to` bounds or explicit all-history aggregation when both are omitted;
+there is no implicit reporting period. Results distinguish `disabled`,
+`unknown`, `below`, `equal`, and `above`, preserving known zero versus partial
+or unavailable subtotal. Reported cost is an amount only, with no currency or
+pricing inference. The layer is advisory: it does not block, throttle, route,
+or otherwise alter request execution, ledger production, mappings, or scheduler
+sync cursors. The API remains bearer-authenticated and project-scoped, with no
+MCP surface for this contract.
+
+USAGE-101 adds migration 079's durable attention lifecycle over the explicit
+all-history evaluation. It maintains one stable condition key per metric:
+request count, total tokens, provider-reported cost, cache-read tokens, and
+cache-write tokens. `unknown`, `equal`, and `above` remain active with
+`info`, `warning`, and `critical` severity; `below` and `disabled` resolve.
+Repeated unchanged evaluations emit no transition, while material evaluation,
+severity, freshness, or threshold-revision changes emit an immutable event and
+clear acknowledgement. A resolved condition reopens the same row;
+acknowledgement is revision-CAS and never resolves an item. Freshness uses
+successful mapped-source sync evidence (`disabled`, `unknown`, `fresh`, or
+`stale`), not event recency. The API scheduler reconciles mapped projects on
+`USAGE_SYNC_INTERVAL_MS` (five minutes by default), including failed or no-new
+data cycles for freshness; zero disables scheduled sync and attention
+evaluation. REST list/evaluate/ack routes are bearer-authenticated and
+project-scoped, with no MCP surface or request-execution enforcement.
+
+## Provider Adapter Layer
+
+The email client uses a **provider adapter** pattern to decouple sync logic from backend specifics:
+
+```
+Engine → MailProvider interface → GmailProvider (REST API)
+                                   ImapProvider (future — IMAP fallback)
+```
+
+### Architecture
+
+- **`MailProvider` interface** (`packages/ingenium-email/lib/providers/mail-provider.ts`) — defines the contract: `listFolders()`, `listMessages()`, `changesSince()`, `getBody()`, `getAttachment()`, `send()`, `modifyFolders()`.
+- **`GmailProvider`** (`packages/ingenium-email/lib/providers/gmail.ts`) — implements the interface via the Gmail REST API using a thin `fetch()` client (`gmail-api.ts`). No heavy `googleapis` dependency.
+- **`ImapProvider`** (future) — planned IMAP fallback for non-Gmail accounts.
+
+### Key Properties
+
+- **Stateless** — The provider is stateless HTTPS. No persistent connections, no connection pools, no IDLE watchers. The sync engine calls provider methods as needed.
+- **Delta sync via cursor** — `changesSince(cursor)` returns only what changed since the last poll. For Gmail this uses `history.list(startHistoryId)`. Empty response when nothing new.
+- **Pluggable** — Adding a new provider (e.g., Microsoft Graph API) requires only implementing the `MailProvider` interface. The sync engine, cache layer, and routes remain unchanged.
+- **Token refresh** — `getFreshGmailToken()` auto-refreshes OAuth tokens 60s before expiry via `google-auth-library`. Called at the top of every provider method.
+
+## Skill System
+
+Skills are loaded from canonical Git worktree files at `.opencode/skills/<name>/`
+with a split-skill format (SKILL.md + metadata.json + references/). The
+resource-sync plugin projects those files through MCP and the authenticated API
+for persistence; runtime consumers do not access SQLite directly.
+
+### file_tree Column
+
+The `skills` table has a `file_tree` column (TEXT, stores JSON map of relative paths → content). This enables complete data round-trips:
+
+- The API stores the synchronized `file_tree` representation for persistence and
+  repair. It is not the authority for external worktree files.
+
+This means a skill can contain any number of auxiliary files (reference docs, examples, configs) that are fully preserved in the DB's `file_tree` and round-tripped to disk.
+
+### Resource Sync Engine
+
+The resource sync engine (`packages/ingenium-extension/resource-sync.ts`) provides
+the Git-authoritative projection of repository Markdown, skills, agents, and
+plugins from the local worktree through the configured MCP stdio transport and
+authenticated API. It supersedes the former `skill-sync.ts` and
+`onboarding-sync.ts`; commands and config are intentionally outside this
+repository-sync lifecycle.
+
+#### Architecture
+
+- **Change detection**: SHA-256 content hashes enable three-way comparison (API vs disk vs manifest baseline)
+- **Sync manifest**: Stored at `.opencode/.ingenium-sync-state.json` — maps resource names to their last-known SHA-256 hash
+- **Conflict resolution**: Three-way merge using manifest baseline as the common ancestor:
+  - Git worktree changed → project the worktree payload through MCP → API
+  - API/database state differs → report or repair through the authenticated
+    boundary; never overwrite Git automatically
+  - Both changed → preserve the Git worktree and require explicit repair
+
+- **Cross-process safety**: An owner-only worktree lock serializes local
+  scan/apply/manifest-save lifecycles. The API tracks a per-project/worktree
+  repository generation and applies expected-generation compare-and-swap; local
+  state advances only after the API confirms the apply.
+
+#### Sync Hooks
+
+The `ResourceSyncPlugin` hooks into OpenCode session events:
+
+| Event | Action | Throttle |
+|-------|--------|----------|
+| `session.created` | Full sync of all resources | None |
+| `session.idle` | Incremental sync (hash mismatch only) | 60s max 1 after a successful reconciliation; failed passes remain eligible for the next idle event |
+
+Lifecycle events are queued per worktree; a pending full sync supersedes a queued
+incremental sync, and a failed incremental reconciliation does not advance the
+success throttle.
+
+Before its first project-provisioning request, the extension performs a bounded
+authenticated API preflight. Transient API unavailability is retried a finite
+number of times; authentication failures fail closed without exposing the
+token, API URL, response body, or HTTP detail. A later successful lifecycle
+attempt emits a safe recovery diagnostic. The container additionally waits for
+an authenticated API readiness probe before OpenCode starts, reducing the
+cold-start race without introducing a background retry loop.
+
+#### Registration
+
+The plugin is self-registering — the `@ingenium/extension` package exports `ResourceSyncPlugin` which is loaded by OpenCode's plugin system. Registration requires the plugin to be in the `opencode.json` `plugin` array and the corresponding `.ts` file at `.opencode/plugins/`.
+
+#### Restart Requirement
+
+When the sync engine detects changes to **plugins** or **config** (opencode.json), the response includes `restartRequired: true`. A human-readable message is logged: `"⚡ OpenCode restart required (plugin/config changes)"`. This is because OpenCode loads plugins and config at startup — runtime changes to the plugin array or config content do not take effect until the next session restart.
+
+#### Repository-authoritative initialization
+
+`ingenium-init-project` provides a deterministic repository-to-API projection
+for onboarding and reconciliation. It resolves validated `--project` first,
+then `INGENIUM_PROJECT`, then the validated worktree basename; it never invents
+a `global-default` fallback. The production image exposes the command on
+`PATH` at `/usr/local/bin/ingenium-init-project`, independent of the prunable
+workspace `.bin` directory.
+
+- `--dry-run` previews the docs/resource operations without provisioning a
+  project, mutating remote state, or writing the local repository baseline.
+- `--apply` provisions the validated project when needed and advances the
+  `.opencode/.ingenium-sync-state.json` repository baseline only after the API
+  confirms the corresponding apply.
+- The default scope covers `docs/**/*.md`, `.opencode/skills/**`,
+  `.opencode/agents/**` (including linked compatibility mirrors), and configured
+  local plugin sources under `.opencode/plugins/**`.
+- `--docs-only` limits the projection to repository Markdown.
+
+Commands, MCP server definitions, project/global configuration, and manual or
+unmanaged remote resources are excluded from this initialization contract.
+The presence of this procedure is not a claim that live onboarding has been
+performed.
+
+The dashboard sync log captures this condition and prompts the user to restart OpenCode. Projection alone is not activation evidence: changes to loaded agent profiles, skills, plugins, or configuration require a full safe parent OpenCode restart. Restarting only the MCP child is insufficient.
+
+### Skill Seeds
+
+8 active canonical skill directories (plus surviving legacy source indexes under
+`references/sources/`) live at `.opencode/skills/` and are projected by the
+Git-authoritative resource-sync path. The Phase 3 migration (2026-07-16)
+consolidated 36 legacy skills into the canonical skill system; the immutable
+consolidation map records that provenance. The current active set is 8 skills,
+and 19 source indexes survive under active skills. Agent behavior lives in each
+respective `.opencode/agents/**` profile. Retired skill targets are not active
+authorities.
+
+The MCP server provides 28 skill tools (12 core + 16 governance). The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
+
+### Skill Governance & Lifecycle Architecture
+
+Skills use an **archive-only deletion** model — no hard-delete is possible. The `deleteSkill()` function delegates to `archiveSkill()`, which sets `archived_at`, removes only SKILL.md from disk, and preserves metadata.json + all file_tree auxiliary files for restoration.
+
+**Three-layer lifecycle system implemented in Phase 2B:**
+
+1. **Versions (migration 042):** A new skill starts at non-negative revision 0 and an `AFTER INSERT` trigger snapshots that initial state. Subsequent update, enable, disable, archive, restore, rollback, and existing-row upsert operations increment revision; an `AFTER UPDATE` trigger snapshots each changed revision in `skill_versions`. `rollbackSkill()` loads a snapshot and applies it as a new revision — append-only, byte-equivalent. Changes are revertible without data loss.
+
+2. **Lineage (migration 043):** Provenance records in `skill_lineage` link source skills to targets via `(sourceProjectId, sourceName) → targetSkillId` (UUID). Tracks merges, copies, and derivations with optional `sourceHash`, `mergedFilePaths`, `tombstonePath`, and `reason`. Cycle detection via depth-limited BFS (max 100 depth).
+
+3. **Proposals (migration 044):** A review workflow of `draft → pending → applied | rejected | stale`, followed by `applied → rolledBack` in governance DTOs (`rolled_back` in storage/status filters). Proposal IDs are UUIDs. Approval stale-checks revision conflicts and missing or archived targets before applying; merge approvals create lineage where applicable. Automatic and cross-project synthesis create and submit governed create/update proposals; approval applies the skill change.
+
+**Wire compatibility boundary**: The API routes layer (`services/ingenium-api/lib/routes/skills.ts`) separates legacy Skill rows from governance DTOs:
+- Legacy CRUD routes (list, get, create, update, delete, enable, disable) return raw `snake_case` DB rows with `file_tree` as a JSON string, `enabled` as numeric 0/1.
+- Governance routes (versions, lineage, proposals) return `camelCase` DTOs with parsed JSON `fileTree`, `enabled` mapped to boolean.
+- Lock DTOs explicitly strip `owner_token` from the response.
+
+For complete reference, see [../configure/agents.md](../configure/agents.md).
+
+## Plugin System
+
+Plugins are stored in the `plugins` SQLite table and synced to disk as `.ts` files under `.opencode/plugins/`. The `opencode.json` plugin array is auto-populated.
+
+- **Path resolution**: `getProjectRoot()` helper in `packages/ingenium-core/lib/tools/plugins.ts` resolves from `INGENIUM_CORE_DB_PATH` (`../../`), replacing all `process.cwd()` calls so paths work consistently across services (API, MCP server, dashboard).
+- **Config sync**: `addPluginToConfig()` / `removePluginFromConfig()` auto-update `opencode.json` whenever plugins are enabled, disabled, created, deleted, or seeded — preventing the "disconnected config" bug where DB and opencode.json fell out of sync.
+- **Seeding**: `seedPlugins()` writes `.ts` files to `.opencode/plugins/`, inserts into the `plugins` table with `enabled = 1`, and syncs `opencode.json`. Uses `INSERT OR IGNORE` for idempotency.
+- **MCP tools**: `ingenium_plugin_list`, `ingenium_plugin_get`, `ingenium_plugin_enable`, `ingenium_plugin_disable`, `ingenium_plugin_create`, `ingenium_plugin_delete`, `ingenium_plugin_update`.
+
+### Ponytail checkout integration
+
+The extension ships an official Ponytail OpenCode adapter as an immutable,
+MIT-provenance checkout at `packages/ingenium-extension/ponytail/`, pinned to
+upstream SHA `16f29800fd2681bdf24f3eb4ccffe38be3baec6b`. Local projects register
+the project-relative plugin path once; the container registers the equivalent
+`/app/.../ponytail.mjs` path once in its global config. The published npm
+package `@dietrichgebert/ponytail@4.8.4` is excluded because its named export
+does not match the OpenCode 1.18.9 loader contract.
+
+The adapter's boundary is prompt-only: it appends the Ponytail ruleset to chat
+system prompts and registers six commands, but adds no MCP tools or execution
+permissions. Its mode state is stored beside the OpenCode config in
+`.ponytail-active`; plugin or config changes require an OpenCode restart. The
+checkout's `PROVENANCE.md` records upstream file hashes for update review.
+
+### Agent profile and model authority
+
+OpenCode agent configuration has two separate authorities:
+
+1. Root `opencode.json` contains the case-sensitive `agent.<name>` runtime
+   mappings, limited to `model` and `variant`, with the built-in Plan entry's
+   inline permission block as the sole root-mapping permission exception.
+2. The uniquely named native Markdown profile under
+   `.opencode/agents/<category>/` owns prompt content, lifecycle metadata,
+   named skills, and tool permissions. Resource sync requires default-deny
+   permissions, explicit lifecycle booleans, and rejects orphan or duplicate
+   profiles.
+
+Every user-facing active profile explicitly loads `@ponytail` during preflight. The
+Scout profile is retrieval-only for genuine Docs RAG/context work. The hidden
+`ingenium-llm-broker` is the exception: its managed prompt reference is
+protected, while the profile remains immutable, unmapped in the repository
+root, and wildcard-denied with no tools. A profile, mapping, plugin, MCP, or
+OpenCode configuration change requires a full parent restart; restarting only
+the child MCP process does not reload the parent configuration.
+
+### CLI session evidence boundary
+
+A named `opencode export <session-id>` is a read-only snapshot of the installed
+CLI's returned JSON. Require one complete JSON document and identity-check the
+session and worktree before using it. A successful pipe exit, a recent update
+field, or a complete export does not prove liveness, complete history, deployment,
+or actual model/session acceptance. The retained 2026-09-09 capture is recorded in
+the [CLI session-context audit](../reference/session-context-audit-2026-09-09.md).
+
+## Self-Learning Pipeline
+
+The self-learning pipeline enables agents to learn from user interactions through three phases:
+
+- **Phase 0 — Extraction Engine**: Server-side extraction reads OpenCode messages via the mounted DB (`/var/opencode/opencode.db`), with watermark-gated deduplication. A regex pre-filter selects candidate messages, and the synthesis LLM extracts durable user behavior rules as observations. Runs in the 15-minute scheduler BEFORE synthesis.
+
+- **Phase 1 — Trait Consolidation**: `consolidateTraits()` sends observations + existing traits to the LLM, which returns CONFIRM/CREATE/IGNORE decisions. Traits are normalized statements (not verbatim copies). Confidence model: start 0.10–0.15, +0.15 per confirmation, cap 0.95, display threshold ≥0.30.
+
+- **Phase 2 — LLM Skill Synthesis**: Groups 3+ related observations and sends them to the LLM with existing skills/traits as context. Creates and submits governed create/update proposals through the API with LLM evidence; approval applies the skill change. Scheduled and manual per-project runs use one explicitly authorized runtime executor and fail closed when it is unavailable; they do not fall back to a global or user runtime. Per-project runs hold a project `skills` lease; cross-project synthesis holds the global `skills` lease.
+
+- **Auto-Observer Plugin**: Thin trigger (~62 lines) that calls Ingenium MCP on `session.idle`; MCP invokes the authenticated extraction API route. The 15-minute scheduler covers extraction if the plugin fails to load.
+
+See [self-learning.md](self-learning.md) for full detail.
+
+## Config Management Architecture
+
+The `configs` table stores `opencode.json` (project-level) and `opencode.jsonc` (global) content in the DB, enabling round-trip editing through the dashboard and MCP tools.
+
+### Global Config Path Resolution
+
+Global projects write skills, plugins, and commands to `INGENIUM_GLOBAL_CONFIG_PATH` instead of the project root. Docker sets it to `/home/ingenium-opencode/.config/opencode/`. This is handled by `packages/ingenium-core/lib/tools/paths.ts`:
+
+- **`resolveProjectBase(projectId?)`** — Checks if a project has `is_global=1`. If so, returns `INGENIUM_GLOBAL_CONFIG_PATH` (non-container default: `/home/appuser/.config/opencode/`). Otherwise returns the project root derived from `INGENIUM_CORE_DB_PATH`.
+- **`getSkillsBase()`**, **`getPluginsBase()`**, **`getCommandsBase()`** — Resolve the appropriate `.opencode/` subdirectory based on project type.
+- **`getConfigPath()`** — Resolves to `opencode.jsonc` for global projects (JSONC supports comments) and `opencode.json` for regular projects.
+
+### Data Flow
+
+```
+Dashboard /config page  ──HTTP──▶  API (PUT /api/v1/config)
+                                          |
+                                   writes to DB (configs table)
+                                          |
+                                   writes to disk (opencode.json/jsonc)
+```
+
+### API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/config` | Get project config |
+| GET | `/api/v1/config/global` | Get global config |
+| PUT | `/api/v1/config` | Update project config (writes DB + disk) |
+| PUT | `/api/v1/config/global` | Update global config |
+| POST | `/api/v1/config/sync` | Sync project config from disk to DB |
+| POST | `/api/v1/config/global/sync` | Sync global config from disk to DB |
+
+## Dashboard Summary API
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/dashboard/summary` | Aggregated home dashboard endpoint — returns learning stats, task counts, job counts, and mail status in a single response. Each module is independently resolved; failed modules appear in `unavailable[]`. Returns 200 with partial data unless ALL modules fail (500). |
+
+### Vault-backed job execution (VAULT-101)
+
+Vault references are reauthorized immediately before each individual child
+attempt. Sealed, missing, deleted, foreign-project, revoked, expired, or
+version-stale authorization fails closed before spawn; retries resolve fresh
+authorization and never auto-unseal. Secret values cross the runner boundary
+only as run-owned UUID files in protected tmpfs (`0700` directory, `0600`
+files), accompanied by the non-secret `INGENIUM_VAULT_SECRET_FILES` ID-to-path
+map. Values are absent from environment variables, argv, prompts, logs,
+database, API, MCP, and output surfaces.
+
+OpenCode-backed execution uses ephemeral state: a run-owned HOME/XDG tree and
+pure state are discarded with the run rather than shared with the service or
+persisted in the database. Cleanup verifies ownership and emptiness before
+removing files; process-group recovery covers descendants. Partial cleanup,
+unsafe directories, stale/expired/revoked authorization, and nonce races fail
+closed and retain bounded recovery metadata. Same-UID external processes are
+outside the isolation guarantee.
+
+## Jobs API
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/jobs/suggest` | Derive job config (prompt_template, schedule_cron, trigger_event) from a natural-language description using the Synthesis LLM. Returns `{ prompt_template, schedule_cron, trigger_event, configured }`. Requires a configured Synthesis LLM in Settings. |
+
+### Trusted Job Events and Delivery (JOB-100/JOB-101)
+
+The v1 trusted-event catalog is deliberately exact and limited to
+`context.conversation.archived`, `context.conversation.unarchived`, and
+`context.checkpoint.restored_as_new`. Events are project-scoped, schema version
+1, produced by `context.maintenance`, and contain only bounded identifiers and
+revision values. Their provenance is the immutable Context maintenance audit
+row; `source_audit_event_id` is also the dedupe identity within a project.
+
+The event rows are immutable, append-only, and retained indefinitely until an
+explicit authorized project lifecycle action. API validation and SQL triggers
+reject unknown values, while preserving historical `jobs.trigger_event` rows.
+There is no user append endpoint. JOB-101 snapshots each event once, including
+zero-match snapshots, and creates one delivery per exact event/job match for an
+enabled job in the same project. Enqueue is exactly-once; execution is bounded
+at-least-once for at most five attempts with 30/60/120/300/600-second backoffs.
+Leases persist only a SHA-256 owner hash and CAS revision. Process proof is
+hash-only and records PID/PGID, start time, executable, and nonce hash; an
+ambiguous identity is dead-lettered rather than duplicated. There is no payload
+or prompt interpolation and no manual replay. Event and delivery reads, plus
+run/log/cancel operations, are project-scoped and bounded; durable text is
+redacted. Deleting a job returns `409` while its delivery is active, then
+disables/hides the job while preserving delivery history.
+
+## Pipeline Observability Architecture
+
+Every pipeline event is logged to the `pipeline_events` table and displayed at `/pipeline` in the dashboard:
+
+### Event Sources
+
+| Source | Events Emitted |
+|--------|---------------|
+| `observations.ts` — `storeObservation()` | `observation_created` |
+| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `proposal_created`, `synthesis_completed`, `synthesis_failed` |
+| `observer.ts` plugin | `session_created`, `session_idle`, `plugin_initialized`, `plugin_error` |
+| `observer-core.ts` | `observation_imported`, `synthesis_triggered` |
+| API Server (scheduled) | Runs extraction → synthesis every 15 minutes; approved proposal mutations persist their own disk representation |
+
+### Timeline Architecture
+
+The `/pipeline` dashboard page uses a Git-workflow-style vertical timeline:
+
+1. **Client polls** every 3 seconds via `GET /api/v1/pipeline/timeline`
+2. **Parent-child nesting**: Synthesis run is parent, individual trait operations are children linked via `parent_event_id`
+3. **Collapsing**: Events within the same 60-second window are grouped into +N collapsible cards
+4. **Filtering**: Source filter pills (All/Agent/Plugin/Synthesis/Trait) filter client-side
+5. **Detail overlays**: Click any event to show raw JSON payload in a modal overlay
+
+Event colors map to sources: orange (agent), blue (plugin), green (synthesis), purple (trait), gray (system).
+
+## Cross-Project Synthesis Flow
+
+Cross-project synthesis evaluates observations and skills across multiple projects:
+
+1. **`ingenium_synthesis_cross_project`** iterates all active projects
+2. **Pattern detection**: Compares observations across projects, looking for shared patterns
+3. **Promotion**: Shared patterns create and submit skill proposals in the `global-default` project; approval applies the shared skill
+4. **Resolution**: Approved global skills are accessible from every project via `resolveProjectBase()` path resolution
+5. **Global designation** is maintained by the trusted server lifecycle; external project lifecycle requests cannot promote, demote, rename, archive, or restore the protected canonical global
+
+This runs as part of the scheduled 15-minute maintenance cycle or can be triggered manually.
+
+## Plugin Source Auto-Populate Architecture
+
+When creating a plugin via `ingenium_plugin_create(project, name, filePath)` without `sourceContent`, the API:
+
+1. Reads the file at `filePath` from disk
+2. Sets `sourceContent` to the file contents automatically
+3. Stores it in the DB alongside the reference
+
+This allows plugins to be created by path reference alone. The dashboard Edit button similarly fetches source from `GET /plugins/:name/source` when DB content is empty.
+
+### Auto-Config Sync
+
+Every plugin lifecycle operation (create, enable, disable, delete, update) triggers:
+1. Write/remove `.opencode/plugins/<file>.ts` on disk
+2. Sync `opencode.json`'s `plugin` array
+3. This prevents "disconnected config" bugs
+
+## Backup LLM Provider Architecture
+
+The system uses two parallel LLM dispatch modes for fault tolerance:
+
+### Direct Mode (Explicit Endpoint Consumers)
+
+Explicit direct consumers (`callSynthesisLLM`/`safeLlmFetch` in
+`synthesis-llm.ts`) make direct HTTP calls to a configured LLM endpoint:
+
+1. **Primary provider**: Configured via Settings (provider, model, API key, endpoint) with 60s timeout
+2. **Backup provider**: Optional failover (same configuration shape) with 60s timeout
+
+If the primary LLM call fails during Phase 2 skill synthesis:
+1. The pipeline retries once with a slightly reworded prompt (same model)
+2. If the retry also fails, the error is logged and trait results from Phase 1 are still saved
+3. Provider saves validate configured base URLs via `validateEndpointUrl()` before persisting changes
+
+### Broker Mode (Interactive Features)
+
+Docs AI, RAG Ask, and Job Suggestions use `executeSynthesisBroker()` which routes through OpenCode's provider infrastructure:
+
+1. For callers without a validated explicit selection, reads primary (`synthesis_provider` + `synthesis_model`) and secondary (`synthesis_backup_provider` + `synthesis_backup_model`) from settings
+2. Deduplicates identical `(providerID, modelID)` pairs
+3. For callers without an explicit selection, tries primary first and falls back to secondary on failure; an explicit selection is attempted exactly once
+4. **Bounded timeout policy**: interactive broker consumers remain hard-capped
+    at 30 seconds by default; the server-owned `docs-ai` policy alone permits
+    60 seconds. Background extraction and synthesis use a separate policy that
+    preserves the pipeline's 60-second request budget and may explicitly extend
+    only to a finite 180-second maximum. Every broker policy deletes its
+    ephemeral OpenCode session in `finally`, including timeout and retry paths.
+5. Creates ephemeral OpenCode sessions using only `ingenium-llm-broker`, whose
+   wildcard-deny profile has no tool allowances; the request also carries an
+   empty `tools: {}` selection as defense in depth
+
+Per-project background extraction and synthesis use a separate API-owned broker
+executor. It resolves exactly one ready or idle runtime with an active capability,
+service principal, and project execute grant. If no such runtime exists, the
+operation returns an unavailable result without probing providers and never uses a
+global OpenCode target or another user's runtime.
+
+The broker profile's `hidden` frontmatter is persisted in the agent record and
+restored by agent disk sync and enable/disable lifecycle writes. This prevents
+the broker from becoming selectable after restart or agent lifecycle changes;
+the broker is permanently enabled and immutable, and the wildcard deny remains
+the authoritative capability boundary. Direct SQL writes cannot disable,
+rewrite, rename, claim, replace, or delete the reserved row while its project
+exists; broker repair is performed from trusted persisted state.
+
+Docs AI first resolves the unique active global project on the server. Chat
+persists a non-secret provider/model selection only through an authenticated
+server endpoint that validates the exact pair against that global catalog. Docs
+uses the persisted server-owned pair when it remains valid, otherwise its safe
+server-derived global Chat default. Provider/model fields from Docs browser
+requests are not used to select the broker.
+
+### Same-Provider Different-Model Support
+
+The broker allows primary and backup to share the same provider with different models (e.g., primary `deepseek:fast-model`, backup `deepseek:thorough-model`). Only identical `(providerID, modelID)` pairs are suppressed.
+
+## Chat Provider Architecture
+
+The Chat page (`/chat`) uses a **dual-source** provider model that merges user-managed providers with runtime-discovered OpenCode Zen free models. The architecture follows a three-layer projection with an additional runtime discovery loop:
+
+### Data Flow
+
+```
+                                      ┌─────────────────────────────────────┐
+                                      │  OpenCode Zen (runtime)            │
+                                      │  GET /api/v1/opencode/builtin-     │
+                                      │  providers                         │
+                                      └──────────┬──────────────────────────┘
+                                                 │ Filters to free (input=0,
+                                                 │ output=0) models only
+                                                 ▼
+Settings (Providers tab) ──PUT───▶  API (/api/v1/settings/provider-configs)
+                                          │
+                                     Saves to settings table
+                                      (ordered provider metadata + separate keys;
+                                       mirrors selected primary/backup roles into
+                                       legacy synthesis settings)
+                                          │
+                                     Projects into OpenCode global config.jsonc
+                                      as OpenCode ProviderConfig entries keyed by
+                                      each user-managed provider ID
+                                          │
+Chat page (/chat)  ◀──GET──  API (/api/v1/opencode/chat-config)
+                                      Returns sanitized config:
+                                      { primary, backup, agents,
+                                        providers: [...], defaultSelection }
+                                      OpenCode live-reloads provider config
+                                      changes — no restart required
+```
+
+The Chat page fetches `chat-config`, which internally:
+1. Reads **managed providers** from the settings DB (`llm_provider_configs`)
+2. Calls **`GET /builtin-providers`** against OpenCode's runtime provider catalog with a free-model filter
+3. **Merges** the two into a single `providers[]` array (managed entries first, builtin entry last)
+4. Computes a `defaultSelection` based on the priority hierarchy
+
+### Default Selection Logic
+
+The `defaultSelection` field tells the Chat page which provider+model to pre-select in the dropdown:
+
+| Priority | Candidate | Condition |
+|----------|-----------|-----------|
+| 1st | Persisted Chat selection | The server-owned `chat_selection` pair, only when it exactly matches the active catalog |
+| 2nd | Managed primary provider | Whichever managed block has `roles` containing `"primary"` |
+| 3rd | Valid legacy primary | The legacy `synthesis_provider` + `synthesis_model` pair, only when it exactly matches the active catalog |
+| 4th | OpenCode Zen default | The runtime `default.opencode` model (e.g., `"big-pickle"`) if it is a free model |
+
+No arbitrary managed provider is selected. If no valid selection/default exists,
+`defaultSelection` is `null` and the Chat page shows the "No LLM" banner. A
+non-network catalog failure returns the fixed `503 LLM_CATALOG_UNAVAILABLE`
+contract without upstream diagnostics. A recognized OpenCode network-startup
+failure retains the fixed `503 OPENCODE_UNAVAILABLE` startup message; neither
+case returns an empty catalog as though no providers were configured.
+
+### Key Properties
+
+- **Atomic save**: `PUT /api/v1/settings/provider-configs` saves any number of provider blocks in one transaction. Omitting `apiKey` preserves the credential; an empty value clears it. Responses expose only `apiKeySet: boolean`.
+- **OpenCode projection**: Enabled blocks are written to the global `provider` object using OpenCode's `npm`, `options.baseURL`, and `models` schema. Removed managed IDs are removed without changing unrelated config entries. API keys are synchronized through OpenCode auth and never written to config files.
+- **Ingenium roles**: One block can be primary and one can be backup. Those selections are mirrored into the existing synthesis settings consumed by Chat and the synthesis engine; additional blocks remain available in OpenCode.
+- **Sanitized response**: `GET /api/v1/opencode/chat-config` uses an allowlisted DTO. Chat receives provider/model IDs, display labels, source, and default selection only; it never receives API keys, provider endpoints, base URLs, headers, packages, or internal topology. The `providers[]` array includes both managed entries (`source: "managed"`) and the discovered builtin entry (`source: "builtin"`).
+- **Runtime builtin discovery**: `GET /api/v1/opencode/builtin-providers` queries OpenCode's runtime provider list and filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. The response shape is `{ providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`.
+- **Builtin providers are read-only**: The OpenCode Zen entry in the `providers[]` array has `source: "builtin"` to distinguish it from managed providers. It is never persisted to the DB, never written to OpenCode config, and is recomputed on every `chat-config` request. The Chat page treats it as a non-editable runtime option.
+- **Catalog errors are sanitized**: Catalog failures are normalized to fixed `503` contracts (`OPENCODE_UNAVAILABLE` for recognized network startup failures, otherwise `LLM_CATALOG_UNAVAILABLE`). Upstream error codes, messages, endpoints, and credentials are not returned to Chat or Docs AI.
+- **"No LLM" state**: When no provider is configured and no builtin is available, the response returns `{ configured: false }` with `defaultSelection: null`. The Chat page shows a banner linking to Settings → Providers.
+- **Live reload**: Saving provider blocks triggers an OpenCode config reload in-process — no restart required. Provider changes take effect for new sessions immediately.
+
+### Agent Model and Chat Selection
+
+The `ingenium-chat` Markdown profile intentionally has no `model` field. The
+root `opencode.json` supplies its runtime mapping (`deepseek/deepseek-v4-flash`,
+variant `max`), while the Dashboard Chat page sends the validated provider/model
+pair selected from `chat-config` with each prompt. The profile also sets
+`hidden: true`, keeping it out of OpenCode's general agent selectors.
+
+| Property | Value | Reason |
+|----------|-------|--------|
+| Markdown `model` | (not set) | Profile metadata does not own model assignment |
+| Root mapping | `deepseek/deepseek-v4-flash`, `max` | Runtime model/variant mapping |
+| Chat turn | Selected `providerID`/`modelID` | ChatShell sends the catalog-validated pair |
+| `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
+
+## Chat Project Context (CHAT-100)
+
+Chat's optional project-context grounding is an explicit per-send choice. The
+control starts off and resets after an accepted send. ProjectProvider validates
+the selected dashboard project before Chat mounts; that selected project is the
+Context search authority. This does not change Chat's global authority for
+Chat-owned tools or provider/model selection.
+
+Each requested search is bounded to at most 5 sources and a 512-character
+query. Excerpts are deduplicated and placed only in a provider system-context
+block capped at 5,000 characters. The block is delimited and explicitly marked
+as untrusted reference data, so excerpts are never rendered in the Chat UI.
+The UI retains only source metadata for live citations.
+
+No matches produce an ungrounded send rather than blocking the prompt. A
+retrieval error prevents that send while preserving the prompt and context
+choice for retry. Live citation metadata is not durable across reload; stable
+citation identity and reproducibility are owned by CTX-101.
+
+## Native Provider OAuth Integration
+
+Native OpenCode provider integrations use two OAuth modes, both handled by the
+exact unauthenticated `GET /auth/callback` allowlist inside the auth middleware:
+
+- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455` inside the container. The host's `127.0.0.1:1455` reaches the Nginx callback listener, which forwards only `GET /auth/callback` to private Express `4096`. Express validates the state from the `pendingOAuthAttempts` Map (10-min TTL), consumes the state (preventing replay), and forwards the callback to OpenCode's internal listener. The user sees an "Authorization received" page.
+- **Code mode**: The API receives the OAuth code and state, validates and consumes the state, then calls `opencodeClient.completeIntegrationAttempt()` with the code. The user sees an "Authorization complete" page.
+
+> 🔴 Both modes consume the state parameter before forwarding or exchanging, preventing redirect replay. Malformed states (>1024 chars or containing control characters) are rejected with 400.
+
+### Integration States
+
+| State | Storage | Lifecycle |
+|-------|---------|-----------|
+| Pending OAuth attempt | `pendingOAuthAttempts` Map (in-memory) | Created on `POST /integrations/:id/connect/oauth`. 10-min TTL. Pruned on every callback. |
+| Integration credentials | OpenCode internal DB | Managed by OpenCode auth API, not exposed to Ingenium DB. |
+| Connected provider models | OpenCode runtime catalog | Auto-discovered after successful connection. |
+
+## Settings Provider Panel (PipelinePanel)
+
+The Settings overlay's Providers tab (`PipelinePanel.tsx`) manages both native OpenCode provider connections and custom OpenAI-compatible endpoints:
+
+### Native Provider Cards
+
+Connected native providers render as a **Connected providers** list (cards with name, model count, and Disconnect button). Available native providers render in a **Native providers** grid with Connect buttons. Each card shows provider name, model count, and connection state. Clicking Connect opens a modal dialog (`Connect {providerName}`) with:
+
+- **Login method selector** — drops down available auth methods (API key vs OAuth) when multiple exist
+- **Prompt inputs** — dynamic form fields per the integration's method prompts (region selector, etc.)
+- **API key field** — for key-based connections
+- **OAuth flow** — "Continue in browser" button opens the OAuth URL in a new tab. Auto-mode polls for completion; code-mode shows an Authorization code input field with "Complete connection" button
+
+### Custom Provider Cards
+
+Custom (managed) providers render as collapsible sections with fields for: display name, provider ID, package selector (OpenAI-compatible, Anthropic, etc.), base URL, API key (show/hide toggle, clear, keep-saved-key), and a models list with radio-button default model selection. Providers can be reordered (↑/↓), collapsed, removed, and toggled on/off.
+
+### Synthesis Provider Selectors
+
+Two separate dropdown selectors below the custom provider list let users designate **Primary** and **Secondary** (backup) synthesis providers from the enabled custom providers. Primary selection automatically excludes it from the Secondary options (mutual exclusion enforced client-side). A synthesis interval selector (5 min to Disabled) controls the scheduled extraction → synthesis cycle.
+
+## Broker Execution
+
+The **broker execution** system (`brokerExecute()` in `services/ingenium-api/lib/opencode-client.ts`) provides a generic LLM-call mechanism that routes requests through OpenCode's provider infrastructure:
+
+```
+RAG Ask / other features  ──▶  brokerExecute()
+                                     │
+                             Creates ephemeral OpenCode session
+                             (ingenium-llm-broker, wildcard deny,
+                              no tool allowances)
+                                     │
+                            Sends prompt via /prompt endpoint
+                                     │
+                            Returns { ok, content, error }
+```
+
+### Architecture
+
+- **Multi-provider routing**: `brokerExecute()` uses the OpenCode session API to dispatch prompts against any configured provider/model combination — not just the synthesis LLM.
+- **Ephemeral sessions**: Each call creates a temporary OpenCode session with the named `ingenium-llm-broker` agent. That profile has a wildcard-deny permission rule and no allow exceptions, so no default, caller-selected, or future tool can execute. The API constructs the empty `tools: {}` selection itself; callers cannot supply a tool override. The session is not persisted or listed in the session catalog.
+- **Synchronous response**: The function waits for the prompt response and returns `{ ok: true, content }` on success, or `{ ok: false, error }` on failure.
+- **Timeout**: Configurable via `timeoutMs` parameter (default 30s).
+
+### Consumers
+
+| Feature | Consumer | Provider Resolution |
+|---------|----------|---------------------|
+| **Docs AI** | `POST /api/v1/docs/ai` | Server-owned validated global Chat selection, or the server-derived global Chat default; no browser override or broker fallback |
+| **RAG Ask** | `POST /api/v1/rag/ask` | Synthesis primary/backup |
+| **Job Suggestions** | `POST /api/v1/jobs/suggest` | Synthesis primary/backup |
+
+The broker is used wherever a feature needs to make an LLM call without going through the synthesis pipeline's provider resolution. It treats OpenCode's provider config as the universal LLM gateway.
+
+### 30-Second Hard Cap
+
+Every broker call is capped at **30 seconds maximum** regardless of the `timeoutMs` argument passed:
+
+```typescript
+const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 30_000, 0), 30_000);
+```
+
+The function creates an ephemeral OpenCode session, sends the prompt, and polls for completion with exponential backoff (500ms base, 30s max delay). If the deadline is exceeded, it returns `{ ok: false, error: "timeout" }` and immediately deletes the broker session. This prevents LLM calls from hanging indefinitely in interactive contexts.
+
+### Fallback Chain
+
+`executeSynthesisBroker()` iterates through deduplicated `(providerID, modelID)` choices in order: primary first, then secondary. If a provider returns `{ ok: false }`, the next choice is tried. If all configured choices fail, it returns `{ ok: false, error: "all configured synthesis providers failed" }` with no further retry.
+
+## Context Memory Architecture (Phase 3)
+
+The context memory system provides canonical agent memory that persists working context across sessions. It supersedes the legacy `plan_*` tools with a full CRUD surface while maintaining backward compatibility.
+
+### Data Flow
+
+```
+Agent (MCP tool) ──▶ ingenium_context_get / ingenium_context_update
+                             │
+                    HTTP to /api/v1/context/*
+                             │
+                    context.createContext() / context.searchContext()
+                             │
+                    context_entries table (FTS5-indexed)
+```
+
+### Core Model
+
+- **Table**: `context_entries` — project-scoped, FTS5 virtual table (`context_fts`) for full-text search
+- **Entry fields**: `id`, `project_id`, `content`, `tags` (JSON string array), `priority` (integer 0–10, default 5), `session_id`, `source` (manual/agent/import/system), `metadata` (JSON object), `created_at`, `updated_at`
+- **Validation**: content required and trimmed; priority validated as integer 0–10 (default 5); tags deduplicated, sorted, max 64 chars per tag; `source` must be one of `manual`, `agent`, `import`, `system`; `sessionId` optional, max 128 chars
+
+### API Endpoints
+
+| Method | `/api/v1/context/...` | Purpose |
+|--------|----------------------|---------|
+| GET | `/` | List recent entries (paginated, default 20) |
+| GET | `/search?q=` | FTS5 search, BM25-ranked, limit-clamped (max 100) |
+| POST | `/` | Create entry (201) |
+| POST | `/batch` | Retrieve multiple by ID (max 100) |
+| GET | `/:id` | Get single entry (404 if not found) |
+| PATCH | `/:id` | Partial update |
+| DELETE | `/:id` | Delete (204) |
+
+### MCP Tools
+
+| Tool | Transport Name | Description |
+|------|---------------|-------------|
+| `ingenium_plan_save` | `plan_save` | Legacy — saves context (delegates to `createContext`) |
+| `ingenium_plan_search` | `plan_search` | Legacy — FTS5 search |
+| `ingenium_plan_list` | `plan_list` | Legacy — list recent entries |
+| `ingenium_context_get` | `context_get` | Canonical — get single entry by ID |
+| `ingenium_context_update` | `context_update` | Canonical — partial update |
+| `ingenium_context_delete` | `context_delete` | Canonical — delete entry |
+| `ingenium_context_batch_get` | `context_batch_get` | Canonical — batch retrieve |
+
+The `plan_*` tools remain supported for backward compatibility. The `context_*` tools provide the canonical CRUD surface. Both read/write the same `context_entries` table.
+
+### WAL Safety
+
+All context operations follow the HARD RULE `checkpointAfterWrite()` must be called OUTSIDE `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED`.
+
+### Context RAG Sources (CTX-100)
+
+Context sources are a separate, project-scoped corpus. They never inherit the
+generic RAG route's optional global-project fallback, and a source owned by
+another project is absent from list, get, and search results.
+
+| Input | Route | Bound and lifecycle |
+|-------|-------|---------------------|
+| Direct source | `POST /api/v1/context/sources` (alias: `/uploads`) | UTF-8 content ≤1 MiB; SHA-256 deduplicated per project; allowed MIME types are `text/plain`, `text/markdown`, `application/json`, and `application/x-ndjson`. |
+| Chunked source | `POST /api/v1/context/uploads/chunked`, then `.../:id/chunks` and `.../:id/complete` | Total ≤2 MiB, ≤32 chunks, each ≤64 KiB; staged chunks are not searchable until contiguous order, byte size, and SHA-256 verification succeed atomically. |
+
+Source metadata accepts priority (integer 0–10, default 5), up to 64
+deduplicated/sorted tags (each 1–64 characters; serialized tags ≤4 KiB), and a
+bounded JSON-object metadata value (≤16 KiB, with bounded depth/nodes and no
+path, credential, or secret-bearing keys/values). `sourceReference` is optional,
+opaque, path-free, control-character-free, and at most 256 characters. Upload
+requests reject path-bearing fields such as `file`, `filePath`, and
+`sourcePath`.
+
+The durable `context_rag_uploads` rows retain a source hash, provenance
+(`direct_upload` or `chunked_upload` for CTX-100), and optional source reference.
+`GET /api/v1/context/sources` lists metadata, `GET
+/api/v1/context/sources/:sourceId` gets one source, and `GET
+/api/v1/context/sources/search?q=` searches source metadata. These responses
+contain no document bodies, chunk excerpts, or source paths; they expose only
+metadata such as title, hash, MIME type, byte size, chunk count, provenance,
+source reference, priority, tags, metadata, and timestamps.
+
+Source and chunk rows are immutable after publication. Incomplete chunk sessions
+remain outside the index; completed source/chunk/index/provenance writes commit
+together, and database guards reject source or chunk updates/deletes and chunk
+reassignment. Content retrieval and LLM grounding are not enabled by this
+metadata contract; chat grounding/default behavior belongs to CHAT-100.
+
+When a source is attached to an immutable checkpoint, migration 065 freezes its
+source and chunks at the database layer. A companion
+`context_checkpoint_rag_source_snapshots` row preserves the title, hash, path,
+MIME type, provenance, and source reference seen at checkpoint creation.
+`GET /context/conversations/:conversationId/checkpoints/:checkpointId/rag/search`
+therefore searches only that frozen source set and returns historical citations.
+
+### Context RAG Citations (CTX-101)
+
+Each Context RAG citation is evidence for one immutable persisted chunk:
+`citationId` is exactly the chunk's UUID (`rag_chunks.id`), while `sourceId`,
+`sourceHash`, and `chunkIndex` identify the owning immutable source, its SHA-256
+content hash, and the chunk's position. Retrieval currently reports
+`availability: "available"`. Search uses a total deterministic order:
+priority descending, BM25 rank ascending, source `updated_at` descending, source
+ID ascending, chunk index ascending, then chunk ID ascending. Because published
+sources and chunks are immutable, repeating the same retrieval returns the same
+citation identity and ordering while the source remains available. Foreign or
+missing sources produce neutral absence (no cross-project disclosure or
+substitute citation), rather than an error that reveals their existence.
+
+Generic RAG re-ingest or delete cannot mutate a published Context source; those
+attempts return `409 RAG_SOURCE_IMMUTABLE`.
+
+### Context checkpoint governance (CTX-004)
+
+Maintenance is a project-scoped, two-step workflow: a bounded, content-free
+candidate preview is reviewed first, then an authorization operation issues a
+single-use 15-minute confirmation token bound to a concrete target and observed
+conversation revision. Archive and unarchive append audit events rather than
+changing conversation rows. A derived archive state hides archived
+conversations from ordinary lists and rejects new messages/checkpoints; an
+unarchive event reverses that visibility state without changing history.
+
+Checkpoint restoration stays restore-as-new. It validates the source revision,
+checkpoint state hash, and confirmation token, copies the checkpoint stream to
+a new immutable conversation, and appends an audit event connecting source
+conversation/checkpoint, source state hash, authorization, and target
+conversation. Audit APIs return IDs, event types, revisions, hashes, and
+timestamps only—never message bodies, free-form metadata, or raw tokens.
+There is no checkpoint deletion path; database immutability triggers protect
+checkpoints and maintenance audit rows even from direct SQL mutation.
+
+### Context-native OpenCode file snapshots (CTX-005)
+
+The canonical OpenCode import path is the `ingenium_context_upload_file` MCP
+tool. It accepts `project`, `session`, and `file_path`, plus optional
+`conversation_id`, `tags`, and `priority`. The launcher accepts only a private
+regular file under the verified project-bound `.ingenium/context-uploads` root,
+performs one descriptor-safe `O_NOFOLLOW` read with pre/post identity checks,
+and supports OpenCode export JSON, simple JSON, JSONL/NDJSON, Markdown, and
+text. Only visible `user` and completed `assistant` content is retained;
+synthetic, ignored, hidden, non-text, and other-role entries are filtered.
+
+The MCP side builds one bounded snapshot and performs one protected internal
+handoff to the API. The API validates that snapshot and invokes one protected
+transactional import; this route is an internal transport boundary, not a
+public bulk API. New snapshots create a conversation. A requested existing
+conversation is adopted only after project ownership and prefix verification.
+Matching replays are idempotent, matching extensions append only the suffix and
+refresh its mapping, while shorter or divergent snapshots fail without partial
+writes.
+
+Imported conversations are visible in the dashboard Context workspace. The UI
+uses the existing project-scoped conversation list/get and message
+list/search/retrieve/batch surfaces for metadata, search, and explicit content
+loading. No external Thread service or bridge exists, and the retired
+current-session/OpenCode-session import surfaces are not part of the system.
+
+## RAG Indexing Architecture (Phase 3)
+
+The RAG (Retrieval-Augmented Generation) system provides two indexing paths feeding a unified search index.
+
+### Two Indexing Paths
+
+**Path 1 — Canonical Repo Files:**
+```
+POST /api/v1/rag/ingest
+       │
+  indexConfiguredDocs(globalProjectId, INGENIUM_DOCS_ROOT)
+       │
+  Walks {root}/docs/**/*.md (skips symlinks, realpath containment check)
+       │
+  ingestCanonicalSource() — SHA-256 hash-idempotent (unchanged files skipped)
+       │
+  replaceSourceContent() — atomically replaces chunks (ingestion_state tracking)
+       │
+  Sources with source_type='file', source_path='docs/relative/path.md'
+```
+
+| Guard | Behavior |
+|-------|----------|
+| Symlink skip | `lstatSync().isSymbolicLink()` — symlinks never followed |
+| Root escape prevention | Realpath containment: `docsRoot` must start with `{rootReal}/` |
+| Hash idempotency | Same hash → `unchanged++`, no DB write |
+| Stale removal | Sources with `source_type='file'` and path `docs/%` not in current file set are deleted |
+
+**Path 2 — Docs Workspace Pages (lifecycle-bound):**
+```
+publishPage() ──▶ indexPublishedDoc(page) ──▶ source_path = "docs-page:{id}"
+updatePage()  ──▶ indexPublishedDoc(page)    (only if status === "published")
+archivePage() ──▶ indexPublishedDoc({status:"archived"})  ──▶ source deletion
+restorePage() ──▶ indexPublishedDoc(page)    ──▶ source creation
+```
+
+- Pages are indexed as `source_type='text'` with metadata `{ kind: "docs_page", pageId, slug, provenance: "docs-workspace" }`
+- Archive triggers source deletion from RAG (cascade cleanup)
+- No duplicated editable docs pages — canonical `docs/**/*.md` files are indexed directly
+
+**Path 3 — Manual:**
+- `POST /rag/sources` + `POST /rag/sources/:id/ingest` for arbitrary text
+
+**Path 4 — Context documents (project-local):**
+- `POST /context/uploads` and the chunked-upload lifecycle create durable RAG
+  sources only after all validation and indexing work commits.
+- `POST /context/learning/ingest` is an explicit snapshot of durable learning
+  records rather than an automatic raw-observation export.
+
+### Atomic Canonical Ingestion
+
+Every canonical ingestion (`ingestCanonicalSource()`) is fully atomic within a single `execTransaction()`:
+
+1. **Idempotency gate** — SHA-256 hash of the incoming content is compared against the stored `source_hash`. If unchanged, the function returns the existing source without any DB writes.
+2. **Path uniqueness** — A `UNIQUE INDEX` on `rag_sources(project_id, source_path) WHERE source_path IS NOT NULL` (migration 050) guarantees at most one source per canonical path per project. Re-ingesting the same path replaces the existing source.
+3. **Lifecycle state tracking** — The `rag_ingestion_state` table records the transition `in_progress → completed` within the same transaction. Partial state is never visible to readers: if the transaction fails during source or chunk indexing, all changes roll back and the state remains at its previous value.
+4. **Content replacement** — Existing chunks are deleted before new ones are inserted, all in the same transaction. SQLite FTS5 triggers keep `rag_chunks_fts` synchronized with `rag_chunks`; the source's `chunk_count`, `source_hash`, and `byte_size` are updated atomically.
+
+This guarantees that querying the index during an ingest operation sees either the complete previous version or the complete new version — never a partially-indexed source.
+
+### Environment Variable
+
+`INGENIUM_DOCS_ROOT` — Required for canonical repo indexing. Must point to the repository root (the parent of the `docs/` directory). `indexConfiguredDocs()` throws if unset. Verified by `context-rag-phase3.test.ts`.
+
+### FTS5 Indexing Strategy
+
+| Property | Value |
+|----------|-------|
+| Index | `rag_chunks_fts` |
+| Algorithm | SQLite FTS5 with Porter/unicode61 tokenization and prefix indexes |
+| Ranking | BM25 |
+| Storage | FTS5 index backed by `rag_chunks`; source metadata remains in `rag_sources` |
+
+Canonical RAG, Context, and Docs retrieval is FTS5-only. No vector embeddings are generated or stored; migration 070 removes the legacy `rag_embeddings` table.
+
+### Chunker
+
+`rag-chunker.ts` auto-detects format and applies the appropriate chunking strategy:
+
+| Format | Strategy | Max Tokens |
+|--------|----------|------------|
+| Markdown (`##`) | Split by `##` headings, heading-context preserved | 2000 |
+| Plain text | Double-newline paragraphs, short para merging | 2000 |
+| JSON (`{entries:[]}`) | One chunk per entry | content-length |
+| JSONL | One chunk per line (Copilot transcript format) | content-length |
+
+### Search
+
+Two functions in `rag.ts`:
+
+| Function | Algorithm | Use Case |
+|----------|-----------|----------|
+| `searchChunks()` | BM25 FTS5 only, snippet-generation, cross-project (include global) | `/search` route, `/ask` route, MCP search |
+| `searchContextUploadChunks()` | BM25 FTS5 only, constrained by `context_rag_uploads` | Context current retrieval; never includes global sources |
+| `searchChunksBySourceIds()` | BM25 FTS5 only, constrained to checkpoint-linked source IDs | Context historical checkpoint retrieval |
+
+Both cap at 20 results by default. `searchChunks()` accepts `limit` (max configurable via API query param up to 100).
+
+### Citations
+
+The `POST /api/v1/rag/ask` endpoint returns:
+
+```typescript
+{
+  answer: string;              // LLM-grounded answer with [1], [2] markers
+  citations: Array<{
+    id: string;                // Source UUID
+    title: string;             // Source name
+    path: string | null;       // Source file path or docs-page slug
+    heading: string | null;    // Section heading from chunk
+    snippet: string;           // BM25 snippet with <mark> highlights
+    kind: string;              // Source type: "file" | "text" | "url"
+    score: number;             // Negative BM25 rank
+  }>;
+}
+```
+
+Citations are deduplicated by source ID. The LLM prompt includes `"Answer with citations like [1], [2]."` The Dashboard AskDocsPanel renders `[N]` as superscript links with title tooltip and a source list.
+
+## Dataset Reference
+
+| Package | Description | DB Access |
+|---------|-------------|-----------|
+| `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
+| `services/ingenium-api/` | Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole database authority. | Yes |
+| `services/ingenium-server/` | MCP stdio server with 289 server registrations. Two extension tools bring the built-in catalog to 291; project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 24 primary navigation routes plus the 19-tab Settings overlay. Calls API via HTTP. Zero DB access. | No |
+| `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
+
+## Status Page Architecture
+
+The `/status` page renders two distinct card types from separate data sources:
+
+- **Service cards** — supervisord-managed processes. Compatibility exposes the API, API boundary, dashboard, gateway, OpenCode Web, OpenCode CLI, and VS Code processes; the production control plane exposes its required control-plane subset. Data is sourced from `GET /api/v1/services/:name`, which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
+- **Application cards** — in-process scheduled tasks and stateful modules (email-client, synthesis-engine, docs-workspace, tasks-board) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries the respective module directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders, doc/task counts).
+
+> **Service cards in local dev**: When running without supervisord, the supervisord XML-RPC endpoint is unreachable, so **service cards will not appear**. Application cards (in-process modules) remain fully available since they query the API process directly. Both card types render the same `ServiceOverlay` detail modal when clicked; the overlay correctly handles the absence of supervisord data.
+
+The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnostics grid based on the `type` prop (`"service"` vs. `"application"`). The `handleServiceClick()` function on the page determines the card type by checking which array the name appears in. See `services/ingenium-api/lib/routes/services.ts` for the API implementation and `services/ingenium-dashboard/src/app/status/page.tsx` for the frontend split.
+
+## Dashboard Pages
+
+The Ingenium Dashboard (http://localhost:3000) provides 24 primary navigation routes plus the Settings overlay (19 tabs):
+
+| Page | Purpose |
+|------|---------|
+| `/` | Home — operational home dashboard with live metrics (learning stats, task counts, job counts, mail status) via `/api/v1/dashboard/summary` in a 2×2 card grid |
+| `/chat` | Ingenium Chat — standalone conversational agent interface |
+| `/opencode` | Embedded OpenCode Web/CLI iframes (no native chat) |
+| `/vscode` | Embedded VS Code workspace through the local/runtime audience gateway |
+| `/projects` | Project management (create, rename, archive, restore) |
+| `/organizations` | Organization membership, invitations, roles, and project access |
+| `/skills` | Skills grid with detail overlay, syntax highlighting |
+| `/docs` | Documentation workspace with spaces, page tree, editor (autoFocus on rename inline bar for immediate typing), search, templates, metadata, history, and trash |
+| `/secrets` | Encrypted secrets vault with scrypt key derivation, AES-256-GCM, and audit trail |
+| `/backups` | Backup and restore management with snapshots, scheduling, and fixed-executor handoff |
+| `/jobs` | Job queue and background task monitoring — create/edit modal with 2-column responsive layout (metadata left, prompt_template right) and magic-wand button for AI job config generation from description |
+| `/logs` | Structured logging and event viewer |
+| `/mail` | Mail (inbox, compose, reader, auto-responses) — email client interface |
+| `/status` | Supervisord process and in-process application status |
+| `/tasks` | Kanban board (todo → in_progress → review → done) |
+| `/plugins` | Plugin lifecycle (enable, disable, configure) |
+| `/agents` | Agent profiles (model, mode, enable/disable) |
+| `/mcp-servers` | MCP servers + Tool Manager (Servers/Tools tabs, per-tool enable/disable toggles) |
+| `/config` | OpenCode project/global configuration editor and disk sync |
+| `/observations` | Self-learning observations with FTS5 search + type/status filters |
+| `/personality` | Personality traits with confidence bars, enable/disable |
+| `/context` | Immutable context conversation memory |
+| `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
+| `/usage` | Project-scoped provider-neutral usage totals, breakdowns, freshness, and export |
+| Settings (overlay) | Full-screen, URL-driven overlay with 19 panels opened with `?settings=<tab>`; route-linked panels reuse their dedicated workspaces, while compact panels provide focused settings forms; `/settings` redirects to `/?settings=general` |
+
+Additional `page.tsx` entrypoints support `/account`, the `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. The dashboard talks to the API layer only — zero direct DB access.
+
+### MCP Tool Count
+
+The built-in system catalog exposes **291 tools** across **31 baseline
+categories** (**289 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
+and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
+
+| Category | Count | Tools |
+|----------|-------|-------|
+| Settings | 3 | get, set, test_llm |
+| Skills | 28 (12 core + 16 governance) | **Core:** list, load, search, create, update, delete, enable, disable, sync, consolidate, sync_all, sync_all_preview. **Governance:** archive, restore, list_archived, versions, rollback, lineage_create, lineage_list, proposal_create, proposal_list, proposal_page, proposal_counts, proposal_get, proposal_submit, proposal_approve, proposal_reject, proposal_rollback |
+| Observe | 1 | observe |
+| Observations | 8 | search, list, stats, get, update, enrich, delete, delete_by_source |
+| Personality | 7 | personality, personality_traits, set_trait, trait_dismiss, trait_disable, trait_delete, traits_delete_all |
+| Synthesis | 4 | run, status, cross_project, synthesize_observations |
+| Extraction | 2 | extraction_run, auto_observe_now |
+| Pipeline | 3 | events, timeline, event_log |
+| Status | 4 | service_status, service_application_detail, service_process_detail, service_process_logs |
+| Health | 1 | health_check |
+| OpenCode | 1 | opencode_messages |
+| Tasks | 32 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_memory_read, coordination_update, coordination_claim, coordination_release, coordination_handoff |
+| Plans (Context) | 3 | save, search, list |
+| Projects | 10 | list, init, delete, restore, list_archived, purge, set_global, rename, detail, migrate_workspace |
+| Plugins | 8 | list, get, enable, disable, create, delete, update, source |
+| Commands | 5 | list, get, create, update, delete |
+| Config | 3 | get, set, sync |
+| Servers | 5 | list, add, remove, update, sync_all |
+| Agents | 8 | list, get, create, update, delete, enable, disable, sync |
+| Email | 27 | list, search, read, send, draft, folders, accounts, triage, suggest, draft_response, patterns, watch_start, watch_status, account_create, account_delete, account_test, oauth_url, oauth_exchange, summarize, review_draft, move, set_flags, delete, sync, sync_status, watch_stop, attachment_get |
+| Logs | 2 | list, sources |
+| Jobs | 10 | list, create, update, delete, run, runs, run_logs, run_cancel, get, suggest |
+| Dashboard | 1 | dashboard_summary |
+| Documentation | 48 | list_spaces, get_space, create_space, update_space, delete_space, list_pages, get_page_tree, get_page, create_page, update_page, delete_page, restore_page, move_page, search, get_draft, save_draft, delete_draft, list_versions, get_version, restore_version, list_comments, create_comment, resolve_comment, delete_comment, list_tags, get_page_tags, add_tag, remove_tag, get_backlinks, list_attachments, delete_attachment, list_templates, get_template, create_template, update_template, delete_template, link_project, unlink_project, get_projects, toggle_favorite, get_favorites, import_pages, export_space, get_stats, publish_page, trash_list, trash_purge, attachment_download |
+
+The category table counts server registrations; the two extension tools are
+`synthesize_observations` and `auto_observe_now`.
+
+---
+
+## API Configuration
+
+The Express API uses `express.json({ limit: "2mb" })` for request body parsing. This allows large skill payloads (when uploading skills with file_tree data) without hitting the default 100KB limit. Other middleware includes helmet for security headers, CORS and browser CSRF using the same exact `DASHBOARD_ALLOWED_ORIGINS` allowlist, and mandatory bearer token auth behind the loopback `4097` boundary.
+
+## Dashboard Features
+
+### OpenCode Web/CLI Embedded in Dashboard
+The dashboard includes an embedded OpenCode experience at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
+
+- **Trusted profile descriptor** — The API returns only browser-safe `mode`, `status`,
+  and `reason`. Compatibility uses fixed Web/CLI/VS Code aliases without invoking the
+  dynamic manager. Production never falls back to those aliases or a singleton.
+- **Production workspace picker** — A read lists only owned, authorized workspaces with
+  current organization/project membership and has no start/authorization side effect.
+  Explicit start/resume is idempotent and concurrency-coalesced. Even one candidate
+  requires a choice; last-used is only a revalidated preference.
+- **Web mode** — After the selected runtime is ready, the browser redeems a one-time
+  `web` proof for its exact runtime HTTPS root.
+  - The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path.
+- **CLI mode** — Shares runtime state with Web while retaining a distinct audience
+  cookie. Compatibility alone uses `http://cli.localhost:3000/`.
+- **Mode switch** — A right-edge glass tab toggles between Web and CLI modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
+- **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
+- **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
+- **Sandbox**: The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). Only `allow="clipboard-write"` (Permissions Policy) is retained.
+- The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+
+Runtime gateway validation rechecks session generation before use. Accepted HTTP and
+WebSocket connections and generation start/finish events update counters and renew the
+idle lease up to—but never beyond—the absolute lease. Health/status reads do not count.
+Close, logout/revoke, stop, and crash transitions reconcile counters.
+
+### Project Management
+The Projects page at `/projects` features Active/Archived tab views. Users can:
+- View active projects or toggle to see archived projects
+- Rename projects inline (PATCH /projects/:name)
+- Archive projects (soft-delete with timestamp)
+- Restore archived projects
+- Purge expired projects (configurable retention via Settings)
+
+### Skill File Tree Navigation
+When viewing a skill detail overlay, a split-pane layout is used:
+- **Left sidebar** (`FileTree` component) — renders the skill's `file_tree` JSON as a navigable tree with SKILL.md, metadata.json, and any reference files/folders. Supports collapsible tree navigation.
+- **Right pane** (`MarkdownViewer` component) — displays file content with Preview/Source toggle and highlight.js syntax highlighting
+- **Inline editing** — click Edit to modify any file (SKILL.md or reference files) directly in the overlay, with Save persisting to the DB via PATCH
+
+### Syntax Highlighting
+highlight.js is used in two modes:
+- **Preview mode** — auto-highlights `<code>` blocks inside rendered markdown
+- **Source mode** — highlights the entire code block content based on file extension
+Styles: `github.css` for light theme, `hljs-dark.css` for dark variant.
+
+### Shared Markdown Renderer
+Dashboard document and skill previews use the shared `MarkdownDocument` component (`components/MarkdownDocument.tsx`), which wraps `marked` (with GFM) and `DOMPurify` for safety, with `prose dark:prose-invert` for typography. `ChatMarkdown` uses the same module's `renderMarkdown` helper while adding chat-specific classes. The proposal comparison view intentionally bypasses Markdown rendering — both Current and Proposed panels show raw source text in matching `<pre>` blocks.
+
+## Docker Deployment
+
+The compatibility profile ships as a single Docker container via `Dockerfile`
+(multi-stage glibc build with a root bootstrap entrypoint that assigns distinct
+non-login service identities) and `docker-compose.yml`. The production profile
+uses the same image family as separate control-plane, runtime-manager,
+runtime-gateway, and per-workspace runtime containers. The `runtime-build` profile
+builds the `user-runtime` image independently and does not start an application
+service:
+
+```yaml
+services:
+  ingenium:
+    build: .
+    ports:
+      - "3000:3000"             # Local dashboard and gateway roots; WSL-forwardable
+      - "127.0.0.1:4097:4097"   # Bearer-authenticated host-loopback API boundary
+      - "127.0.0.1:1455:1455"   # Exact OAuth callback listener (host loopback only)
+    volumes:
+      - ingenium-data:/app/.ingenium
+```
+
+Inside the container, root **supervisord** assigns a distinct non-login identity to
+each program. Both profiles run private API (`ingenium-api`), API boundary
+(`ingenium-boundary`), Dashboard (`ingenium-dashboard`), Nginx
+(`ingenium-gateway`), and restore handoff/maintenance (`ingenium-restore`).
+Compatibility additionally runs OpenCode and its authenticated internal proxy
+(`ingenium-opencode`), ttyd (`ingenium-ttyd`), and code-server
+(`ingenium-vscode`). Restore maintenance is disabled until the fixed Unix-socket
+handoff starts it.
+
+Compatibility grants only the three interactive identities workspace ACLs on
+`~/repos` → `/workspace`. Docker volumes `opencode-config` and `opencode-data`
+persist dedicated OpenCode state across rebuilds.
+
+In production, the control plane publishes the dashboard gateway, loopback API
+boundary, and OAuth callback on the same ports as compatibility. The runtime
+manager listens privately on `4110` and owns the Docker socket; the unprivileged
+runtime gateway publishes `127.0.0.1:80` to its `8080` listener by default, or
+the explicitly configured remote HTTPS `443` to `8443` mapping.
+
+The builder and runtime stages both use glibc-based `node:22-slim`, keeping native
+Node module artifacts compatible with the runtime libc. The image verifies that
+`better-sqlite3` loads in the runtime stage. Nginx runs as `ingenium-gateway`; its PID,
+lock, and temporary paths are recreated as owner-writable directories
+under ephemeral `/run/ingenium-gateway` on each start.
+
+> 🔴 **Docker git**: The Dockerfile installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
+
+Start the local compatibility profile with:
+```bash
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose --profile compatibility up --build
+```
+
+### Port Mappings
+
+| Host Port | Service | Description |
+|-----------|---------|-------------|
+| `3000` | Nginx gateway | Local dashboard and root gateways without HTTP Basic Auth; supports default Windows-to-WSL localhost forwarding |
+| internal `3001` | Dashboard | Next.js frontend behind the local gateway |
+| `127.0.0.1:4097` | API boundary | Authenticated bearer boundary for host MCP and in-container OpenCode traffic; the Dashboard server rewrites to private Express `4096` |
+| internal `4096` | Express API | Private REST gateway and sole DB authority |
+| internal `4101` | OpenCode internal auth proxy | Private API-only Basic-auth proxy to OpenCode Web |
+| internal `4098` | opencode-web | OpenCode Web upstream behind local `opencode.localhost:3000` |
+| internal `4099` | ttyd-opencode | OpenCode CLI upstream behind local `cli.localhost:3000` |
+| internal `4100` | code-server | VS Code upstream behind local `vscode.localhost:3000` |
+| internal `4110` | runtime-manager | Private Docker-socket-owning runtime control service; never host-published |
+| `127.0.0.1:80:8080` by default, or configured `443:8443` | runtime-gateway | Unprivileged runtime audience gateway; remote HTTPS uses the explicit wildcard certificate/key |
+| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → Nginx listener → private Express `:4096`; only exact `GET /auth/callback` is forwarded, and the auth middleware allowlists it without a bearer token. |
+
+> Note: 4098, 4099, and 4100 are internal container listeners and are not browser-facing host ports. The loopback-only 4097 boundary requires a bearer credential; the local 3000 gateway has no HTTP Basic Auth and never receives a browser bearer token.
+
+### Volume Configurations
+
+| Volume Name | Mount Path | Purpose |
+|-------------|------------|---------|
+| `ingenium-data` | `/app/.ingenium` | SQLite databases, learnings, tasks, projects, commands |
+| `opencode-config` | `/home/ingenium-opencode/.config` | OpenCode configuration (persists across rebuilds) |
+| `opencode-data` | `/home/ingenium-opencode/.local` | OpenCode user data and session state |
+
+**Workspace bind-mount:** Your local `~/repos` is mounted at `/workspace` for file editing.

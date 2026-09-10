@@ -1,0 +1,230 @@
+"use client";
+export const dynamic = "force-dynamic";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useProject } from "../../lib/ProjectContext";
+import { api, Observation } from "../../lib/api";
+import { buildProjectNavigationHref } from "../../lib/project-navigation";
+import Overlay from "../components/Overlay";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import Select from "../components/Select";
+
+function typeColors(type: string): string {
+  const hues: Record<string, string> = {
+    correction: "red",
+    preference: "purple",
+    pattern: "green",
+    insight: "blue",
+    feedback: "amber",
+    behavior: "orange",
+    terminology: "indigo",
+    workflow: "teal",
+    error: "red",
+    goal: "pink",
+  };
+  return badgeTones(hues[type] ?? "gray");
+}
+
+function statusColors(status: string): string {
+  if (status === "skipped") return "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]";
+  const hues: Record<string, string> = {
+    pending: "warning",
+    processed: "success",
+    failed: "error",
+  };
+  return badgeTones(hues[status] ?? "gray");
+}
+
+function safeParseJson(raw: string | undefined | null): object | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ObservationsPage — Browse and inspect self-learning observations.
+ *
+ * Observations are the raw input to the synthesis pipeline. They have a
+ * lifecycle: pending → processed/skipped/failed. The two filter selectors
+ * (status + type) are applied server-side via the API, not client-side,
+ * because the observation set can grow large. FTS5-backed search is
+ * available via the API but this list page uses structured filters only.
+ */
+export default function ObservationsPage() {
+  const router = useRouter();
+  const project = useProject();
+  const [observations, setObservations] = useState<Observation[]>([]);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [selected, setSelected] = useState<any>(null);
+  const [stats, setStats] = useState<{ total: number; pending: number } | null>(null);
+  const [observationsState, setObservationsState] = useState<"loading" | "success" | "error">("loading");
+  const [statsState, setStatsState] = useState<"loading" | "success" | "error">("loading");
+  const [observationsError, setObservationsError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setObservations([]);
+    setStats(null);
+    setObservationsState("loading");
+    setStatsState("loading");
+    setObservationsError(null);
+    setStatsError(null);
+
+    api.observations.list(project, statusFilter, typeFilter)
+      .then((response) => {
+        if (cancelled) return;
+        setObservations(Array.isArray(response.data) ? response.data : []);
+        setObservationsState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setObservationsError(error instanceof Error ? error.message : "API may be unreachable");
+        setObservationsState("error");
+      });
+    api.observations.stats(project)
+      .then((response) => {
+        if (cancelled) return;
+        const data = response.data;
+        if (!data || !Number.isFinite(data.total) || !Number.isFinite(data.pending)) {
+          throw new Error("Invalid observation stats response");
+        }
+        setStats(data);
+        setStatsState("success");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setStatsError(error instanceof Error ? error.message : "Unable to load observation stats");
+        setStatsState("error");
+      });
+
+    return () => { cancelled = true; };
+  }, [project, statusFilter, typeFilter]);
+
+  return (
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Observations</h1>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]">
+          {statsState === "loading" && <span aria-busy="true">Loading stats...</span>}
+          {statsState === "error" && <span role="alert">Stats unavailable: {statsError}</span>}
+          {statsState === "success" && stats && (
+            <>
+              <span>Total: <strong>{stats.total}</strong></span>
+              <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Select wrapperClassName="w-full min-w-0 sm:w-auto" aria-label="Filter observations by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="processed">Processed</option>
+          <option value="skipped">Skipped</option>
+          <option value="failed">Failed</option>
+        </Select>
+        <Select wrapperClassName="w-full min-w-0 sm:w-auto" aria-label="Filter observations by type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
+          <option value="">All types</option>
+          <option value="correction">Correction</option>
+          <option value="preference">Preference</option>
+          <option value="pattern">Pattern</option>
+          <option value="insight">Insight</option>
+          <option value="feedback">Feedback</option>
+          <option value="behavior">Behavior</option>
+          <option value="terminology">Terminology</option>
+          <option value="workflow">Workflow</option>
+          <option value="error">Error</option>
+          <option value="goal">Goal</option>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        {observationsState === "loading" && (
+          <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-6 text-center text-sm text-[var(--color-text-muted)]" aria-busy="true">
+            Loading observations...
+          </div>
+        )}
+        {observationsState === "error" && (
+          <div className="rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-6 text-center text-sm text-[var(--color-error-text)]" role="alert">
+            Failed to load observations — {observationsError}
+          </div>
+        )}
+        {observationsState === "success" && observations.length === 0 && (
+          <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
+            No observations yet. The agent will record observations automatically during interactions.
+          </div>
+        )}
+        {observationsState === "success" && observations.map((o: Observation) => (
+          <div
+            key={o.id}
+            className="group min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                onClick={() => setSelected(o)}
+                aria-label={`View observation ${o.id}`}
+              >
+                <span className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className={`${BADGE_BASE} ${typeColors(o.observation_type)}`}>{o.observation_type}</span>
+                  <span className={`${BADGE_BASE} ${statusColors(o.status)}`}>{o.status}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">{new Date(o.created_at).toLocaleString()}</span>
+                  {o.importance && <span className="text-xs text-[var(--color-text-muted)]">Importance: {o.importance}/10</span>}
+                </span>
+                <span className="block break-words text-sm">{o.content}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(buildProjectNavigationHref(`/observations/${o.id}`, project))}
+                className="shrink-0 text-xs text-[var(--color-text-link)] underline hover:text-blue-800"
+                title="View full details"
+              >
+                Open
+              </button>
+            </div>
+            {o.context && <pre className="mt-1 break-all whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">{o.context}</pre>}
+          </div>
+        ))}
+      </div>
+
+      <Overlay isOpen={selected !== null} onClose={() => setSelected(null)} title={`Observation #${selected?.id ?? ""}`}
+        subtitle={selected?.observation_type ? `Type: ${selected.observation_type}` : undefined}>
+        {selected && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              <div className="break-words"><span className="font-semibold">Type:</span> <span className={`inline-block ${BADGE_BASE} ${typeColors(selected.observation_type)}`}>{selected.observation_type}</span></div>
+              <div className="break-words"><span className="font-semibold">Status:</span> <span className={`inline-block ${BADGE_BASE} ${statusColors(selected.status)}`}>{selected.status}</span></div>
+              <div className="break-words"><span className="font-semibold">Importance:</span> <span className="text-[var(--color-text-secondary)]">{selected.importance ?? 5}/10</span></div>
+              <div className="break-words"><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selected.source || "agent"}</span></div>
+              <div className="break-words"><span className="font-semibold">Created:</span> <span className="text-[var(--color-text-secondary)]">{new Date(selected.created_at).toLocaleString()}</span></div>
+            </div>
+            <div>
+              <h3 className="font-semibold mb-1">Content</h3>
+              <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
+            </div>
+            {selected.context && (
+              <div>
+                <h3 className="font-semibold mb-1">Context</h3>
+                {(() => {
+                  const parsed = safeParseJson(selected.context);
+                  return parsed ? (
+                    <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
+                  ) : (
+                    <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        )}
+      </Overlay>
+    </div>
+  );
+}

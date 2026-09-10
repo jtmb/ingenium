@@ -1,0 +1,6 @@
+{
+  "name": "sqlite-wal-safety",
+  "description": "SQLite WAL mode transaction safety rules — checkpointAfterWrite must never run inside execTransaction to avoid SQLITE_LOCKED errors.",
+  "tags": ["llm-synthesized", "auto-generated"],
+  "alwaysApply": true
+}

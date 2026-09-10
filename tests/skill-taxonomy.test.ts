@@ -1,0 +1,420 @@
+/**
+ * Skill Taxonomy Validation Tests
+ *
+ * Validates the canonical taxonomy and its preserved source mappings by checking:
+ *   - Active canonical SKILL.md count (8)
+ *   - MIGRATED-TO.md marker count (0 after automatic cleanup)
+ *   - Surviving source-index.md count (19); immutable historical mappings (28)
+ *   - All canonical SKILL.md files have valid YAML frontmatter (name + description)
+ *   - consolidation-map.json integrity (version, mappings, source/target consistency)
+ *   - metadata.json agrees with source-proven SKILL.md frontmatter fields
+ *
+ * Run:  npx vitest run tests/skill-taxonomy.test.ts
+ */
+
+import { describe, it, expect, beforeAll } from "vitest";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
+
+const PROJECT_ROOT = resolve(import.meta.dirname, "..");
+const SKILLS_DIR = resolve(PROJECT_ROOT, ".opencode", "skills");
+
+const EXPECTED_CANONICAL = 8;
+const EXPECTED_MIGRATED = 28;
+const EXPECTED_TOMBSTONES = 0;
+const EXPECTED_SOURCES = 19;
+const HISTORICAL_RETIRED_SKILLS = new Set(["engineering-workflow", "local-models"]);
+const CONSOLIDATION_MAP_VERSION = "1.0.0";
+const DEVELOPMENT_CONVENTIONS_DIR = resolve(
+  SKILLS_DIR,
+  "development-conventions"
+);
+
+/** Recursively find files matching a name under a root directory. */
+function findFiles(root: string, fileName: string): string[] {
+  const results: string[] = [];
+  try {
+    const entries = readdirSync(root, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = resolve(root, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...findFiles(fullPath, fileName));
+      } else if (entry.name === fileName) {
+        results.push(fullPath);
+      }
+    }
+  } catch {
+    // Directory may not exist — skip
+  }
+  return results;
+}
+
+/** Get immediate subdirectories of a path (non-recursive). */
+function getSubdirs(root: string): string[] {
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => resolve(root, e.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Extract YAML frontmatter fields from the string content. */
+function parseFrontmatter(content: string): Record<string, string> {
+  // Match YAML frontmatter delimited by ---
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+
+  const yaml = match[1];
+  const fields: Record<string, string> = {};
+
+  // Simple YAML key-value pair extraction (handles quoted and unquoted values)
+  const keyValRe = /^(\w[\w-]*)\s*:\s*(.+)$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = keyValRe.exec(yaml)) !== null) {
+    let value = m[2].trim();
+    // Strip surrounding quotes (single or double)
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    fields[m[1]] = value;
+  }
+  return fields;
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate);
+  return (
+    relativePath === "" ||
+    (!isAbsolute(relativePath) &&
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${sep}`))
+  );
+}
+
+describe("recursive relative Markdown links", () => {
+  it("walks development-conventions links without leaving the skill directory", () => {
+    const skillDir = realpathSync(DEVELOPMENT_CONVENTIONS_DIR);
+    const start = realpathSync(resolve(skillDir, "SKILL.md"));
+    const pending = [start];
+    const visited = new Set<string>();
+
+    while (pending.length > 0) {
+      const source = pending.pop()!;
+      if (visited.has(source)) continue;
+      visited.add(source);
+
+      const content = readFileSync(source, "utf-8");
+      const links = /\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+[^)]*)?\)/g;
+      let match: RegExpExecArray | null;
+
+      while ((match = links.exec(content)) !== null) {
+        const rawLink = (match[1] ?? match[2])!;
+        const line = content.slice(0, match.index).split("\n").length;
+        if (
+          /^(?:https?:|mailto:)/i.test(rawLink) ||
+          rawLink.startsWith("#") ||
+          rawLink.startsWith("//")
+        ) {
+          continue;
+        }
+
+        const pathPart = rawLink.replace(/[?#].*$/, "");
+        if (!pathPart) continue;
+
+        let decodedPath: string;
+        try {
+          decodedPath = decodeURIComponent(pathPart);
+        } catch {
+          const resolvedPath = resolve(dirname(source), pathPart);
+          throw new Error(
+            `source ${relative(skillDir, source)}, line ${line}, raw link ${JSON.stringify(rawLink)}, resolved path ${resolvedPath}: URI decode failed`
+          );
+        }
+
+        if (!decodedPath.toLowerCase().endsWith(".md")) continue;
+
+        const resolvedPath = resolve(dirname(source), decodedPath);
+        const context = `source ${relative(skillDir, source)}, line ${line}, raw link ${JSON.stringify(rawLink)}, resolved path ${resolvedPath}`;
+        const targetExists = existsSync(resolvedPath);
+        expect(targetExists, `${context}: target does not exist`).toBe(true);
+        if (!targetExists) continue;
+
+        const canonicalTarget = realpathSync(resolvedPath);
+        const targetIsInside = isPathInside(skillDir, canonicalTarget);
+        expect(
+          targetIsInside,
+          `${context}, canonical path ${canonicalTarget}: target leaves skill directory`
+        ).toBe(true);
+        if (targetIsInside && !visited.has(canonicalTarget)) {
+          pending.push(canonicalTarget);
+        }
+      }
+    }
+
+    const requiredRecursiveFiles = [
+      "references/sources/api-aggregation-patterns/source-index.md",
+      "references/sources/api-aggregation-patterns/references/getProjectDetail-pattern.md",
+      "references/sources/ingenium-ops/source-index.md",
+      "references/sources/language-conventions/source-index.md",
+      "references/sources/mail-app-ui-conventions/source-index.md",
+      "references/sources/visual-standards-conventions/source-index.md",
+    ];
+
+    for (const file of requiredRecursiveFiles) {
+      expect(
+        visited.has(realpathSync(resolve(skillDir, file))),
+        `recursive link walk did not visit ${file}`
+      ).toBe(true);
+    }
+  });
+});
+
+describe("Canonical SKILL.md files", () => {
+  let canonicalFiles: string[];
+
+  beforeAll(() => {
+    const allSkillMd = findFiles(SKILLS_DIR, "SKILL.md");
+    canonicalFiles = allSkillMd.filter(f => !f.includes("/references/"));
+    // Stable ordering keeps failures reproducible across filesystems.
+    canonicalFiles.sort();
+  });
+
+  it(`finds exactly ${EXPECTED_CANONICAL} canonical SKILL.md files`, () => {
+    expect(canonicalFiles).toHaveLength(EXPECTED_CANONICAL);
+  });
+
+  it("every canonical SKILL.md has valid YAML frontmatter with non-empty name", () => {
+    for (const file of canonicalFiles) {
+      const content = readFileSync(file, "utf-8");
+      const fm = parseFrontmatter(content);
+
+      expect(
+        fm.name,
+        `${file}: name field missing or empty in frontmatter`
+      ).toBeTruthy();
+      expect(
+        fm.name.trim().length,
+        `${file}: name field is non-empty`
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("every canonical SKILL.md has valid YAML frontmatter with non-empty description", () => {
+    for (const file of canonicalFiles) {
+      const content = readFileSync(file, "utf-8");
+      const fm = parseFrontmatter(content);
+
+      expect(
+        fm.description,
+        `${file}: description field missing in frontmatter`
+      ).toBeTruthy();
+      expect(
+        fm.description.trim().length,
+        `${file}: description field is non-empty (found: "${fm.description}")`
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("canonical name matches the directory name", () => {
+    for (const file of canonicalFiles) {
+      const dirName = basename(resolve(file, ".."));
+      const content = readFileSync(file, "utf-8");
+      const fm = parseFrontmatter(content);
+
+      expect(
+        fm.name,
+        `${file}: name field matches directory "${dirName}"`
+      ).toBe(dirName);
+    }
+  });
+});
+
+describe("MIGRATED-TO.md markers", () => {
+  let migratedFiles: string[];
+
+  beforeAll(() => {
+    migratedFiles = findFiles(SKILLS_DIR, "MIGRATED-TO.md");
+    migratedFiles.sort();
+  });
+
+  it(`finds exactly ${EXPECTED_TOMBSTONES} MIGRATED-TO.md markers`, () => {
+    expect(migratedFiles).toHaveLength(EXPECTED_TOMBSTONES);
+  });
+});
+
+describe("source-index.md preserved sources", () => {
+  let sourceFiles: string[];
+
+  beforeAll(() => {
+    sourceFiles = findFiles(SKILLS_DIR, "source-index.md");
+    sourceFiles.sort();
+  });
+
+  it(`finds exactly ${EXPECTED_SOURCES} source-index.md preserved sources`, () => {
+    expect(sourceFiles).toHaveLength(EXPECTED_SOURCES);
+  });
+
+  it("every source-index.md exists under a valid canonical target's references/sources/", () => {
+    const map = JSON.parse(readFileSync(resolve(SKILLS_DIR, "consolidation-map.json"), "utf-8"));
+    const mappedTargets = new Map(
+      (map.mappings as Array<{ source: string; target: string }>).map(mapping => [mapping.source, mapping.target])
+    );
+    const canonicalDirs = new Set(
+      getSubdirs(SKILLS_DIR)
+        .filter(d => existsSync(resolve(d, "SKILL.md")))
+        .map(d => basename(d))
+    );
+
+    for (const file of sourceFiles) {
+      const parts = file.split("/");
+      const skillsIdx = parts.indexOf("skills");
+      expect(skillsIdx).toBeGreaterThan(-1);
+
+      const canonicalDir = parts[skillsIdx + 1];
+      expect(
+        canonicalDirs.has(canonicalDir),
+        `${file}: canonical parent "${canonicalDir}" is not a valid skill directory`
+      ).toBe(true);
+
+      expect(parts[skillsIdx + 2]).toBe("references");
+      expect(parts[skillsIdx + 3]).toBe("sources");
+
+      const sourceName = parts[skillsIdx + 4];
+      expect(
+        mappedTargets.get(sourceName),
+        `${file}: source "${sourceName}" is not retained in consolidation-map.json`
+      ).toBe(canonicalDir);
+    }
+  });
+});
+
+describe("consolidation-map.json integrity", () => {
+  let map: any;
+
+  beforeAll(() => {
+    const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
+    expect(existsSync(mapPath), "consolidation-map.json must exist").toBe(true);
+    map = JSON.parse(readFileSync(mapPath, "utf-8"));
+  });
+
+  it(`version is "${CONSOLIDATION_MAP_VERSION}"`, () => {
+    expect(map.version).toBe(CONSOLIDATION_MAP_VERSION);
+  });
+
+  it(`has exactly ${EXPECTED_MIGRATED} mappings`, () => {
+    expect(Array.isArray(map.mappings)).toBe(true);
+    expect(map.mappings).toHaveLength(EXPECTED_MIGRATED);
+  });
+
+  it("all mapping target names belong to the historical canonical set", () => {
+    const canonicalFiles = findFiles(SKILLS_DIR, "SKILL.md").filter(
+      f => !f.includes("/references/")
+    );
+    const canonicalNames = new Set(
+      canonicalFiles.map(f => {
+        const fm = parseFrontmatter(readFileSync(f, "utf-8"));
+        return fm.name;
+      })
+    );
+
+    for (const mapping of map.mappings) {
+      expect(
+        canonicalNames.has(mapping.target) || HISTORICAL_RETIRED_SKILLS.has(mapping.target),
+        `Mapping target "${mapping.target}" (source: "${mapping.source}") not found in canonical set [${[...canonicalNames].join(", ")}]`
+      ).toBe(true);
+    }
+  });
+
+  it("all mapping source names are unique and their tombstone directories are absent", () => {
+    const sources = new Set<string>();
+    for (const mapping of map.mappings) {
+      expect(sources.has(mapping.source), `duplicate mapping source "${mapping.source}"`).toBe(false);
+      sources.add(mapping.source);
+      expect(
+        existsSync(resolve(SKILLS_DIR, mapping.source)),
+        `cleaned tombstone directory still exists for mapping source "${mapping.source}"`
+      ).toBe(false);
+    }
+  });
+
+  it("active sourcePath entries exist and retired target files remain absent", () => {
+    for (const mapping of map.mappings) {
+      const fullPath = resolve(PROJECT_ROOT, mapping.sourcePath);
+      expect(
+        existsSync(fullPath),
+        `sourcePath "${mapping.sourcePath}" (source: "${mapping.source}") does not exist at ${fullPath}`
+      ).toBe(!HISTORICAL_RETIRED_SKILLS.has(mapping.target));
+    }
+  });
+
+  it("every mapping has required fields (source, target, sourcePath, sourceHash)", () => {
+    for (const mapping of map.mappings) {
+      expect(mapping.source).toBeTruthy();
+      expect(mapping.target).toBeTruthy();
+      expect(mapping.sourcePath).toBeTruthy();
+      expect(mapping.sourceHash).toBeTruthy();
+      // sourceHash should be 64-char SHA-256 hex
+      expect(mapping.sourceHash).toMatch(/^[a-f0-9]{64}$/);
+    }
+  });
+});
+
+describe("Cross-consistency checks", () => {
+  it("source-index.md count equals mappings to active targets", () => {
+    const sourceCount = findFiles(SKILLS_DIR, "source-index.md").length;
+    const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
+    if (!existsSync(mapPath)) return;
+    const map = JSON.parse(readFileSync(mapPath, "utf-8"));
+    expect(sourceCount).toBe(map.mappings.filter((mapping: { target: string }) => !HISTORICAL_RETIRED_SKILLS.has(mapping.target)).length);
+  });
+
+  it("historical canonical skills equal active directories plus explicitly retired skills", () => {
+    const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
+    if (!existsSync(mapPath)) return;
+    const map = JSON.parse(readFileSync(mapPath, "utf-8"));
+    const mapCanonical: string[] = map.canonicalSkills || [];
+    expect(mapCanonical).toHaveLength(EXPECTED_CANONICAL + HISTORICAL_RETIRED_SKILLS.size);
+
+    const canonicalDirs = getSubdirs(SKILLS_DIR)
+      .filter(d => existsSync(resolve(d, "SKILL.md")))
+      .map(d => basename(d));
+
+    const mapCanonicalSet = new Set(mapCanonical);
+    expect([...mapCanonicalSet].sort()).toEqual([...canonicalDirs, ...HISTORICAL_RETIRED_SKILLS].sort());
+    for (const dir of canonicalDirs) {
+      expect(
+        mapCanonicalSet.has(dir),
+        `Directory "${dir}" has a SKILL.md but is not in consolidation-map.canonicalSkills`
+      ).toBe(true);
+    }
+  });
+});
+
+describe("canonical metadata parity", () => {
+  it("matches source-proven SKILL.md name, description, and alwaysApply fields", () => {
+    for (const skillDir of getSubdirs(SKILLS_DIR).filter(dir => existsSync(resolve(dir, "SKILL.md")))) {
+      const metadataPath = resolve(skillDir, "metadata.json");
+      if (!existsSync(metadataPath)) continue;
+      const frontmatter = parseFrontmatter(readFileSync(resolve(skillDir, "SKILL.md"), "utf-8"));
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf-8"));
+      for (const field of ["name", "description"] as const) {
+        if (metadata[field] !== undefined) expect(metadata[field], `${metadataPath}: ${field}`).toBe(frontmatter[field]);
+      }
+      if (metadata.alwaysApply !== undefined) {
+        expect(metadata.alwaysApply, `${metadataPath}: alwaysApply`).toBe(frontmatter.alwaysApply === "true");
+      }
+    }
+  });
+});

@@ -1,0 +1,6 @@
+{
+  "name": "git-history-hygiene",
+  "description": "Prevent build artifacts and large files from polluting Git history via strict ignore rules and cleanup protocols.",
+  "tags": ["llm-synthesized", "auto-generated"],
+  "alwaysApply": true
+}

@@ -1,0 +1,30 @@
+---
+title: Usage Guides
+description: User guides for the Ingenium dashboard, email client, tasks, and docs workspace.
+---
+
+# Usage Guides
+
+Step-by-step guides for using the Ingenium dashboard features.
+
+## Pages
+
+| Guide | Description |
+|-------|-------------|
+| [Dashboard](dashboard.md) | Full dashboard user guide with all features |
+| [Chat](chat.md) | Standalone Ingenium Chat interface |
+| [Usage Telemetry](usage.md) | Project-scoped usage totals, freshness, mappings, and export |
+| [OpenCode](opencode.md) | OpenCode Web/CLI dual-mode interface |
+| [Multi-session OpenCode](multi-session.md) | External A/B and internal C coordination workflow |
+| [Mail](mail.md) | Email client usage — reading, composing, searching |
+| [Secrets](secrets.md) | Encrypted secrets vault usage and recovery |
+| [Tasks](tasks.md) | Kanban task board workflow |
+| [Docs Workspace](docs-workspace.md) | Documentation workspace — creating, editing, managing docs |
+
+For the current installed-CLI session snapshot and its limits, see the [CLI
+session-context audit](../reference/session-context-audit-2026-09-09.md).
+
+## Related
+
+- [Configure MCP Servers](../configure/mcp-servers.md) — Server and tool management
+- [Configure Email Setup](../configure/email-setup.md) — Email account setup and OAuth2

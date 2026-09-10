@@ -1,0 +1,6 @@
+{
+  "name": "documentation-audit-workflow",
+  "description": "Systematic documentation audit methodology — agent exploration, issue categorization, and systematic fixes for AGENTS.md and related docs.",
+  "tags": ["llm-synthesized", "auto-generated"],
+  "alwaysApply": true
+}

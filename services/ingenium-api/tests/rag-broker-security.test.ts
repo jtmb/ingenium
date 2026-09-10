@@ -1,0 +1,126 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import express from "express";
+import { createServer, type Server } from "node:http";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
+
+const mocks = vi.hoisted(() => ({
+  executeSynthesisBroker: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock("ingenium-core", () => ({
+  projects: {
+    getProject: (name: string) => name === "rag-security-test" ? { id: "rag-project" } : undefined,
+    isValidProjectName: (name: unknown): name is string => typeof name === "string" && name.length > 0 && name.length <= 64 && name === name.trim() && name !== "." && name !== ".." && !/[\\/\u0000-\u001f\u007f]/.test(name),
+  },
+  rag: {
+    searchChunks: () => [{
+      id: "chunk-1",
+      source_id: "source-1",
+      source_name: "Security Test Source",
+      source_path: null,
+      source_type: "text",
+      chunk_index: 0,
+      content: "A context document that is sufficient to invoke the broker.",
+      token_count: 10,
+      heading_path: null,
+      priority: 5,
+      tags: "[]",
+      created_at: "2026-01-01T00:00:00.000Z",
+      rank: -1,
+      snippet: "A context document that is sufficient to invoke the broker.",
+    }],
+  },
+  logger: { warn: mocks.warn, error: mocks.error },
+  getDb: vi.fn(),
+  execTransaction: vi.fn(),
+  checkpointAfterWrite: vi.fn(),
+  ragChunker: { chunkText: vi.fn() },
+}));
+
+vi.mock("../lib/opencode-client.js", () => ({ executeSynthesisBroker: mocks.executeSynthesisBroker }));
+
+const nativeFetch = globalThis.fetch;
+let server: Server | null = null;
+let baseUrl: string;
+
+beforeAll(async () => {
+  const { ragRouter } = await import("../lib/routes/rag.js");
+  const app = express();
+  app.use(express.json());
+  app.use("/api/v1/rag", ragRouter);
+  server = createServer(app);
+  baseUrl = await listenOnLoopback(server);
+});
+
+afterEach(() => vi.clearAllMocks());
+
+afterAll(async () => {
+  if (server) await closeHttpServer(server);
+});
+
+function ask(): Promise<Response> {
+  return nativeFetch(`${baseUrl}/api/v1/rag/ask?project=rag-security-test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: "What does the context say?" }),
+  });
+}
+
+describe("POST /rag/ask broker failures", () => {
+  it("uses the server-resolved broker path for a Zen-only request and ignores provider/model body fields", async () => {
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: true, content: "Zen answer. [1]" });
+
+    const response = await nativeFetch(`${baseUrl}/api/v1/rag/ask?project=rag-security-test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: "What does the context say?",
+        providerID: "attacker-provider",
+        modelID: "attacker-model",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.answer).toBe("Zen answer. [1]");
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "rag-project",
+      timeoutMs: 30_000,
+    }));
+    expect(mocks.executeSynthesisBroker.mock.calls[0]![0]).not.toHaveProperty("selection");
+  });
+
+  it("returns a generic error and structured diagnostics without upstream text", async () => {
+    const upstreamMessage = "provider rejected credential=secret-value";
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: upstreamMessage });
+
+    const response = await ask();
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({
+      error: { code: "LLM_FAILED", message: "Unable to generate an answer right now. Please try again." },
+    });
+    expect(JSON.stringify(body)).not.toContain(upstreamMessage);
+    expect(mocks.warn).toHaveBeenCalledWith("rag-routes", "Broker execution failed", {
+      projectId: "rag-project",
+      outcome: "failed",
+    });
+  });
+
+  it("does not log or return thrown upstream text", async () => {
+    const upstreamMessage = "provider endpoint https://private.example failed";
+    mocks.executeSynthesisBroker.mockRejectedValue(new Error(upstreamMessage));
+
+    const response = await ask();
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(JSON.stringify(body)).not.toContain(upstreamMessage);
+    expect(mocks.error).toHaveBeenCalledWith("rag-routes", "Ask failed", {
+      projectId: "rag-project",
+      outcome: "exception",
+    });
+  });
+});

@@ -1,0 +1,6 @@
+{
+  "name": "browsing-the-web",
+  "description": "Drive the user's real Chrome browser via dev-browser to interact with websites — navigate, fill forms, extract data, take screenshots, and handle site-specific patterns. Use when the user asks to browse the web, visit a website, search for something, check prices, fill out a form, view a page, or any browser-based task.",
+  "tags": ["browser", "dev-browser", "automation", "web", "site-recipes", "amazon", "youtube"],
+  "alwaysApply": false
+}

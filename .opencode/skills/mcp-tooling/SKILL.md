@@ -1,0 +1,120 @@
+---
+name: mcp-tooling
+description: "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Docs RAG persistent memory (context save/retrieve and documentation upload), email client tools (list, search, read, send, draft, triage, suggest response, auto-draft, IMAP watcher), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow."
+alwaysApply: true
+---
+
+# MCP Tooling — MCP Tool Integration & Automation
+
+> This skill uses a split-skill architecture. The index below lists all 🔴 HARD RULEs, followed by a Table of Contents linking to reference files.
+
+## When to Use
+
+- "review the website UI at localhost:3000"
+- "take a screenshot of the homepage"
+- "check responsive design at mobile width"
+- "debug layout issues on this page"
+- "inspect the DOM for element problems"
+- "check console errors on the page"
+- "verify the page renders correctly"
+- "save this decision"
+- "search documentation context"
+- "retrieve documentation context"
+- Any task involving MCP tool interaction, browser automation, or persistent memory
+
+## 🔴 HARD RULEs
+
+### 🔴 Always Clean Up Browser Sessions
+
+After taking screenshots or inspecting a page, close the browser session. Leaving sessions open wastes resources and can interfere with subsequent tool calls.
+
+### 🔴 Never Automate Real Credentials
+
+Do not use Playwright to log into services with real user credentials or submit forms with sensitive data. Use test accounts or mock data.
+
+### 🔴 Save Screenshots Under `tests/artifacts/`
+
+Save ALL screenshots under `tests/artifacts/visual-qa/<run-id>/` or `tests/artifacts/manual/<date>/`. Use paths that describe what they contain: `tests/artifacts/visual-qa/run-20260719/homepage-mobile.png`, `tests/artifacts/manual/2026-07-19/error-state.png`. Avoid generic names like `screenshot1.png`. 🔴 **Do NOT save screenshots to repo root (`./`), home root (`~/`), or `/tmp/opencode/`.**
+
+### 🔴 Verify MCP Server is Running Before Tool Calls
+
+Before calling any MCP tool, verify that the MCP server is configured in `opencode.json` and the server process is running. Check `.opencode/agents/*.md` for tool permissions.
+
+### 🔴 Ingenium MCP Tool Naming — Use Correct Prefix
+
+All Ingenium MCP tools use a **single `ingenium_` prefix** (OpenCode prepends the server key automatically):
+
+| ✅ Correct | ❌ Wrong |
+|-----------|---------|
+| `ingenium_observation_stats` | `ingenium_ingenium_observation_stats` (double prefix) |
+| `ingenium_skill_load` | `ingenium_skill_load` (typo: missing `i`) |
+| `ingenium_observe` | `ingenium_ingenium_observe` (double prefix) |
+
+The pattern is: `ingenium_<noun>_<verb>`. Double-check the prefix before calling — the `ingenium_` prefix appears once, not twice.
+
+### 🔴 Repository Documentation Is the Normal Authority
+
+Repository Markdown under `docs/**/*.md` is the normal documentation authority. The
+repository sync workflow projects those files into the Docs Workspace; agents must
+not automatically create, update, export, or otherwise mutate Docs Workspace pages
+after code changes or at session end. Use Docs Workspace read/search tools for
+context when useful.
+
+Direct Docs Workspace mutation is allowed only when the user explicitly requests a
+Workspace mutation (or explicitly requests the documented repository-sync process).
+For ordinary documentation work, edit the requested repository Markdown and run the
+focused repository/static checks. Never treat a silent save, session export, or
+workspace page as a required completion step.
+
+### 🔴 Never Ask Permission to Use MCP Tools
+
+Use MCP tools (Playwright, Docs, etc.) proactively and silently. Never ask "can I take a screenshot?" or "should I save this?" — just do it.
+
+### 🔴 No Automatic Session Export
+
+Do not write conversation transcripts or session summaries to the Docs Workspace or
+to `/tmp/opencode/` automatically. Perform an export only when the user explicitly
+requests one, using the documented process and scope they specify.
+
+## Reference Files
+
+| File | Content |
+|------|---------|
+| [`references/playwright/setup.md`](references/playwright/setup.md) | Playwright MCP server configuration, prerequisites, troubleshooting |
+| [`references/playwright/tools.md`](references/playwright/tools.md) | Complete catalog of Playwright MCP browser automation tools |
+| [`references/playwright/patterns.md`](references/playwright/patterns.md) | Common workflows: page review, responsive check, error capture, click debugging |
+| [`references/dev-browser/setup.md`](references/dev-browser/setup.md) | Dev Browser setup — installation, modes (headless/connect), WSL→Windows Chrome launch, HARD RULEs, troubleshooting |
+| [`references/dev-browser/tools.md`](references/dev-browser/tools.md) | Complete catalog of dev-browser API methods — browser control, page actions, CUA tools, DOM CUA tools, screenshots |
+| [`references/dev-browser/patterns.md`](references/dev-browser/patterns.md) | Common workflows: navigate+screenshot, form fill+submit, snapshot for AI analysis, WSL Chrome launch |
+
+## Email Tools (13 tools)
+
+The Ingenium email client provides MCP tools for IMAP/SMTP email operations:
+
+- \`ingenium_email_list\` — List emails with filters
+- \`ingenium_email_search\` — Search emails across folders
+- \`ingenium_email_read\` — Read individual email content and headers
+- \`ingenium_email_send\` — Send new email via SMTP
+- \`ingenium_email_draft\` — Create draft email for later sending
+- \`ingenium_email_folders\` — Manage IMAP folder structure (create, delete, rename)
+- \`ingenium_email_accounts\` — List and configure email accounts
+- \`ingenium_email_triage\` — Auto-classify emails by priority/category
+- \`ingenium_email_suggest_response\` — Suggested responses for incoming messages
+- \`ingenium_email_draft_response\` — Create draft reply to selected email
+- \`ingenium_email_patterns\` — Email interaction patterns and templates
+- \`ingenium_email_watch_start\` — Start IMAP polling watcher (background)
+- \`ingenium_email_watch_status\` — Check/watcher status for active watchers
+
+## Migrated Sources (Phase 3 Taxonomy)
+
+| Source | Content Preserved At |
+|--------|---------------------|
+| `browsing-the-web` | [`references/sources/browsing-the-web/`](references/sources/browsing-the-web/source-index.md) |
+| `dashboard-screenshots` | [`references/sources/dashboard-screenshots/`](references/sources/dashboard-screenshots/source-index.md) |
+
+## Cross-References
+
+- **`@development-conventions`** — Web design review workflow that uses Playwright for visual inspection
+- **`@devops-conventions`** — Shell scripts for launching dev servers before testing
+
+(End of file - total 89 lines)

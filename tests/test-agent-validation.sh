@@ -1,586 +1,3405 @@
 #!/usr/bin/env bash
-# ───────────────────────────────────────────────────────────
-# test-agent-validation.sh — Validate ALL 11 agent .md files
-# under .opencode/agents/.
-#
-# Tests:
-#   1. Agent frontmatter validity (name, description, model)
-#   2. Permission completeness (edit and write)
-#   3. No stale skill references (every skill listed exists)
-#   4. No duplicate skills within the same agent
-#   5. Task block safety (read-only agents can't spawn
-#      write-capable subagents)
-#   6. No stale git-workflows references
-#   7. Skill count consistency (filesystem vs SKILL-INDEX.md)
-#
-# Usage:
-#   tests/test-agent-validation.sh           # run all tests
-#   tests/test-agent-validation.sh -v        # verbose output
-# ───────────────────────────────────────────────────────────
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
-SKILLS_DIR="$REPO_ROOT/.agents/skills"
-SKILL_INDEX="$REPO_ROOT/SKILL-INDEX.md"
-VERBOSE=false
-PASSED=0
+CONFIG="$REPO_ROOT/opencode.json"
+QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
+EXPECTED_LOGICAL_AGENT_COUNT=11
+EXPECTED_USER_FACING_AGENT_COUNT=10
+EXPECTED_CUSTOM_SUBAGENT_COUNT=8
+EXPECTED_WRITER_COUNT=4
+EXPECTED_CATEGORIZED_PROFILE_COUNT=12
+ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
+ROADMAP_ARCHIVE_DIR="$REPO_ROOT/docs/reference/archive"
 FAILED=0
-TEST_FAILED=false
+ALLOCATION_FIXTURE_DIR=""
+ROLE_MATRIX_ONLY=0
+SKILL_ONLY=0
+PERMISSION_PARITY_ONLY=0
 
-# ── Parse args ────────────────────────────────────────────
-for arg in "$@"; do
-    case "$arg" in
-        --verbose|-v) VERBOSE=true ;;
-    esac
+if [[ "${1:-}" == "--role-matrix" && "$#" -eq 1 ]]; then
+  ROLE_MATRIX_ONLY=1
+elif [[ "${1:-}" == "--skill-only" && "$#" -eq 1 ]]; then
+  SKILL_ONLY=1
+elif [[ "${1:-}" == "--permission-parity" && "$#" -eq 1 ]]; then
+  PERMISSION_PARITY_ONLY=1
+elif [[ "$#" -ne 0 ]]; then
+  printf 'Usage: %s [--role-matrix|--skill-only|--permission-parity]\n' "$0" >&2
+  exit 2
+fi
+
+cleanup_allocation_fixtures() {
+  if [[ -n "$ALLOCATION_FIXTURE_DIR" && -d "$ALLOCATION_FIXTURE_DIR" ]]; then
+    rm -rf "$ALLOCATION_FIXTURE_DIR"
+  fi
+}
+
+trap cleanup_allocation_fixtures EXIT
+
+pass() { printf 'PASS: %s\n' "$1"; }
+fail() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
+
+# A profile is a writer when either edit or write grants any allow rule.  The
+# permission may be a scalar (`edit: allow`) or a map (`edit: {"*": allow}`),
+# so checking only the scalar form misses profiles such as ingenium-docs.
+profile_has_writer_permission() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  (edit|write):[[:space:]]*("?allow"?)[[:space:]]*$/ { found = 1; next }
+    /^  (edit|write):.*allow/ { found = 1; next }
+    /^  (edit|write):[[:space:]]*$/ { nested_permission = 1; next }
+    nested_permission && /^    / {
+      if ($0 ~ /:[[:space:]]*"?allow"?[[:space:]]*$/) found = 1
+      next
+    }
+    nested_permission { nested_permission = 0 }
+
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_exact_ponytail_skill_permission() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  skill:[[:space:]]*$/ { in_skill = 1; next }
+    in_skill && /^  [^[:space:]]/ { in_skill = 0 }
+    in_skill && /^    ponytail:[[:space:]]*allow[[:space:]]*$/ {
+      entries++
+      allowed++
+      next
+    }
+    in_skill && /^    ponytail:/ { entries++ }
+
+    END { exit(entries == 1 && allowed == 1 ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_exact_question_deny() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  question:[[:space:]]*deny[[:space:]]*$/ { denied++; next }
+    /^  question:/ { other++ }
+
+    END { exit(denied == 1 && other == 0 ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_exact_todowrite_allow() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  todowrite:[[:space:]]*allow[[:space:]]*$/ { allowed++; next }
+    /^  todowrite:/ { other++ }
+
+    END { exit(allowed == 1 && other == 0 ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_todowrite_permission() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  todowrite:/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
+profile_has_broker_wildcard_deny_only() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^permission:[[:space:]]*$/ { in_permission = 1; next }
+    in_permission && /^[^[:space:]]/ { in_permission = 0; next }
+    !in_permission { next }
+    /^[[:space:]]*$/ || /^  #/ { next }
+    /^  "\*": deny[[:space:]]*$/ { wildcard_denies++; next }
+    /^[[:space:]]/ { exceptions++ }
+
+    END { exit(wildcard_denies == 1 && exceptions == 0 ? 0 : 1) }
+  ' "$1"
+}
+
+run_dynamic_skill_validation() {
+node - "$AGENTS_DIR" "$CONFIG" "$REPO_ROOT" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const [agentsDir, configPath, repoRoot] = process.argv.slice(2);
+const skillsDir = path.join(repoRoot, ".opencode", "skills");
+const brokerName = "ingenium-llm-broker";
+const denyOnlyNative = new Set(["build", "general", "explore"]);
+const approvedSkillNames = new Set([
+  "development-conventions", "devops-conventions", "database-conventions",
+  "mcp-tooling", "security-audit", "documentation",
+  "self-learning", "skill-maintenance", "ponytail",
+]);
+const errors = [];
+
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function tryLstat(filePath) {
+  try {
+    return fs.lstatSync(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function isRegularFile(filePath) {
+  const stat = tryLstat(filePath);
+  return Boolean(stat && stat.isFile() && !stat.isSymbolicLink());
+}
+
+function readText(filePath, label) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    errors.push(`${label} is missing or unreadable: ${filePath} (${error.message})`);
+    return null;
+  }
+}
+
+function listDirectory(directoryPath, label) {
+  try {
+    return fs.readdirSync(directoryPath, { withFileTypes: true });
+  } catch (error) {
+    errors.push(`${label} is missing or unreadable: ${directoryPath} (${error.message})`);
+    return [];
+  }
+}
+
+function collectReferenceFiles(directoryPath, result) {
+  for (const entry of listDirectory(directoryPath, "skill references directory")) {
+    const filePath = path.join(directoryPath, entry.name);
+    const stat = tryLstat(filePath);
+    if (!stat) {
+      errors.push(`skill reference is missing or unreadable: ${filePath}`);
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      errors.push(`skill reference must be a regular file or directory, not a symlink: ${filePath}`);
+    } else if (stat.isDirectory()) {
+      collectReferenceFiles(filePath, result);
+    } else if (stat.isFile()) {
+      result.push(filePath);
+    } else {
+      errors.push(`skill reference has an unsupported file type: ${filePath}`);
+    }
+  }
+}
+
+function collectSkillTrees() {
+  const skills = [];
+  for (const entry of listDirectory(skillsDir, "skills directory")) {
+    const skillDirectory = path.join(skillsDir, entry.name);
+    const stat = tryLstat(skillDirectory);
+    if (!stat) {
+      errors.push(`skill entry is missing or unreadable: ${skillDirectory}`);
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      errors.push(`skill entry must be a real directory: ${skillDirectory}`);
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+
+    const skillMd = path.join(skillDirectory, "SKILL.md");
+    if (entry.name === "engineering-workflow") {
+      if (tryLstat(skillMd)) errors.push("retired engineering-workflow must not contain SKILL.md");
+      continue;
+    }
+    if (!isRegularFile(skillMd)) {
+      errors.push(`skill directory must contain a regular SKILL.md: ${skillDirectory}`);
+      continue;
+    }
+
+    const referencesDirectory = path.join(skillDirectory, "references");
+    const referencesStat = tryLstat(referencesDirectory);
+    const referenceFiles = [];
+    if (referencesStat) {
+      if (referencesStat.isSymbolicLink() || !referencesStat.isDirectory()) {
+        errors.push(`skill references must be a real directory: ${referencesDirectory}`);
+      } else {
+        collectReferenceFiles(referencesDirectory, referenceFiles);
+      }
+    }
+
+    skills.push({
+      name: entry.name,
+      directory: skillDirectory,
+      skillMd,
+      referenceFiles,
+    });
+  }
+
+  if (skills.length === 0) errors.push("no real skill directories with SKILL.md were found");
+  return skills;
+}
+
+function collectExternalSkillRefs() {
+  const externalSkillsDir = path.join(repoRoot, "packages", "ingenium-extension", "ponytail", "skills");
+  const refs = new Set();
+  const stat = tryLstat(externalSkillsDir);
+  if (!stat) return refs;
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    errors.push(`external Ponytail skills directory must be a real directory: ${externalSkillsDir}`);
+    return refs;
+  }
+
+  for (const entry of listDirectory(externalSkillsDir, "external skills directory")) {
+    const directory = path.join(externalSkillsDir, entry.name);
+    const directoryStat = tryLstat(directory);
+    if (!directoryStat || directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) continue;
+    if (isRegularFile(path.join(directory, "SKILL.md"))) refs.add(entry.name);
+  }
+  return refs;
+}
+
+function collectProfiles(directoryPath) {
+  const profiles = [];
+  for (const entry of listDirectory(directoryPath, "agent directory")) {
+    const filePath = path.join(directoryPath, entry.name);
+    const stat = tryLstat(filePath);
+    if (!stat) {
+      errors.push(`agent entry is missing or unreadable: ${filePath}`);
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      errors.push(`active agent profile must be a real file: ${filePath}`);
+      continue;
+    }
+    if (stat.isDirectory()) {
+      profiles.push(...collectProfiles(filePath));
+      continue;
+    }
+    if (!stat.isFile() || !entry.name.endsWith(".md")) continue;
+
+    const source = readText(filePath, "agent profile");
+    if (source === null || !source.startsWith("---\n") && !source.startsWith("---\r\n")) continue;
+    const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+    if (!match) {
+      errors.push(`active agent profile has malformed frontmatter: ${filePath}`);
+      continue;
+    }
+    const rawName = match[1].match(/^name:\s*(.+)$/m)?.[1]?.trim();
+    const name = rawName?.replace(/^("|')|("|')$/g, "");
+    if (!name) {
+      errors.push(`active agent profile has no name: ${filePath}`);
+      continue;
+    }
+    profiles.push({
+      name,
+      filePath,
+      source,
+      frontmatter: match[1],
+    });
+  }
+  return profiles;
+}
+
+function parseSkillPermissions(frontmatter) {
+  const lines = frontmatter.split(/\r?\n/);
+  let inPermission = false;
+  let inSkill = false;
+  let present = false;
+  const entries = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === "permission:") {
+      inPermission = true;
+      inSkill = false;
+      continue;
+    }
+    if (!inPermission) continue;
+    if (/^[^\s]/.test(line)) {
+      inPermission = false;
+      inSkill = false;
+      continue;
+    }
+    if (/^  skill:\s*$/.test(line)) {
+      present = true;
+      inSkill = true;
+      continue;
+    }
+    if (inSkill && /^  \S/.test(line)) {
+      inSkill = false;
+      continue;
+    }
+    if (!inSkill || /^\s*$/.test(line) || /^\s*#/.test(line)) continue;
+
+    const match = line.match(/^    (?:"((?:[^"\\]|\\.)*)"|([^:]+)):\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))\s*$/);
+    if (!match) {
+      entries.push({ malformed: true, line: index + 1, raw: line });
+      continue;
+    }
+    const key = match[1] ?? match[2].trim();
+    const action = match[3] ?? match[4] ?? match[5];
+    entries.push({ key, action, line: index + 1 });
+  }
+
+  return { present, entries };
+}
+
+function validateSkillEntries(owner, permission, skillByName, externalSkillRefs, legacyRefs, coveredSkills, coveredReferences) {
+  const { entries } = permission;
+  const grantedSkills = new Set();
+  const wildcardEntries = entries.filter((entry) => !entry.malformed && entry.key === "*");
+  if (wildcardEntries.length > 0) errors.push(`${owner} skill permission must not use a wildcard rule`);
+
+  const seen = new Set();
+  for (const entry of entries) {
+    if (entry.malformed) {
+      errors.push(`${owner} skill permission contains a malformed rule at frontmatter line ${entry.line}: ${entry.raw}`);
+      continue;
+    }
+    if (entry.key === "*") continue;
+    if (entry.key.startsWith("@")) {
+      errors.push(`${owner} skill permission must use the literal loader name without @: ${entry.key}`);
+      continue;
+    }
+    if (entry.action !== "allow") {
+      errors.push(`${owner} explicit skill ${entry.key} must be allow, found ${String(entry.action)}`);
+      continue;
+    }
+    if (seen.has(entry.key)) {
+      errors.push(`${owner} skill permission contains a duplicate rule: ${entry.key}`);
+      continue;
+    }
+    seen.add(entry.key);
+    if (legacyRefs.has(entry.key)) {
+      errors.push(`${owner} references a legacy skill: ${entry.key}`);
+      continue;
+    }
+
+    if (!approvedSkillNames.has(entry.key)) {
+      errors.push(`${owner} grants an unapproved skill: ${entry.key}`);
+      continue;
+    }
+    const localSkill = skillByName.get(entry.key);
+    if (localSkill) {
+      grantedSkills.add(localSkill.name);
+      coveredSkills.add(localSkill.name);
+      for (const referenceFile of localSkill.referenceFiles) coveredReferences.add(referenceFile);
+    } else if (entry.key !== "ponytail" || !externalSkillRefs.has(entry.key)) {
+      errors.push(`${owner} references a skill without a real SKILL.md: ${entry.key}`);
+    }
+  }
+
+  for (const skillName of approvedSkillNames) {
+    if (!seen.has(skillName)) errors.push(`${owner} must explicitly allow approved skill ${skillName}`);
+  }
+
+  return grantedSkills;
+}
+
+const skills = collectSkillTrees();
+const skillByName = new Map(skills.map((skill) => [skill.name, skill]));
+const externalSkillRefs = collectExternalSkillRefs();
+const legacyRefs = new Set();
+const consolidationMapPath = path.join(skillsDir, "consolidation-map.json");
+const consolidationMapSource = readText(consolidationMapPath, "consolidation map");
+if (consolidationMapSource !== null) {
+  try {
+    const consolidationMap = JSON.parse(consolidationMapSource);
+    for (const mapping of consolidationMap.mappings ?? []) {
+      if (typeof mapping.source === "string") legacyRefs.add(mapping.source);
+    }
+  } catch (error) {
+    errors.push(`consolidation map is not valid JSON: ${consolidationMapPath} (${error.message})`);
+  }
+}
+
+const profiles = collectProfiles(agentsDir);
+const profileByPath = new Map(profiles.map((profile) => [path.resolve(profile.filePath), profile]));
+const profilesByName = new Map();
+for (const profile of profiles) {
+  const existing = profilesByName.get(profile.name) ?? [];
+  existing.push(profile);
+  profilesByName.set(profile.name, existing);
+}
+
+const coveredSkills = new Set();
+const coveredReferences = new Set();
+const profileSkillSets = new Map();
+for (const profile of profiles) {
+  if (profile.name === brokerName || profile.name === "plan" || denyOnlyNative.has(profile.name)) continue;
+  const permission = parseSkillPermissions(profile.frontmatter);
+  if (!permission.present) {
+    errors.push(`${profile.name} (${profile.filePath}) must define a permission.skill block`);
+    continue;
+  }
+  const grantedSkills = validateSkillEntries(profile.filePath, permission, skillByName, externalSkillRefs, legacyRefs, coveredSkills, coveredReferences);
+  const existingSkills = profileSkillSets.get(profile.name) ?? new Set();
+  for (const skillName of grantedSkills) existingSkills.add(skillName);
+  profileSkillSets.set(profile.name, existingSkills);
+}
+
+const brokerProfiles = profilesByName.get(brokerName) ?? [];
+if (brokerProfiles.length !== 1) {
+  errors.push(`protected broker must have exactly one active profile, found ${brokerProfiles.length}`);
+} else {
+  const brokerPermission = parseSkillPermissions(brokerProfiles[0].frontmatter);
+  if (brokerPermission.present || brokerPermission.entries.length > 0) {
+    errors.push("protected broker must not define any skill permission or grant");
+  }
+}
+
+const chatProfiles = profilesByName.get("ingenium-chat") ?? [];
+const chatCanonicalPath = path.resolve(agentsDir, "chat", "ingenium-chat.md");
+const chatMirrorPath = path.resolve(agentsDir, "ingenium-chat.md");
+if (chatProfiles.length !== 1 || !profileByPath.has(chatCanonicalPath) || profileByPath.has(chatMirrorPath)) {
+  errors.push("ingenium-chat must have exactly one canonical categorized profile and no root-level orphan");
+}
+
+let config = null;
+const configSource = readText(configPath, "OpenCode config");
+if (configSource !== null) {
+  try {
+    config = JSON.parse(configSource);
+  } catch (error) {
+    errors.push(`OpenCode config is not valid JSON: ${configPath} (${error.message})`);
+  }
+}
+
+const mappedNames = new Set();
+if (!isRecord(config?.agent)) {
+  errors.push("OpenCode config must define an agent mapping object");
+} else {
+  for (const [name, projection] of Object.entries(config.agent)) {
+    if (name === brokerName) {
+      errors.push("protected broker must remain absent from root agent mappings");
+      continue;
+    }
+    mappedNames.add(name);
+    if (!isRecord(projection)) {
+      errors.push(`${name} root mapping must be an object`);
+      continue;
+    }
+    const extraKeys = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
+    if (extraKeys.length > 0) errors.push(`${name} root mapping may contain only model and variant, found: ${extraKeys.join(", ")}`);
+    if ((profilesByName.get(name) ?? []).length !== 1) errors.push(`${name} root mapping must resolve to exactly one recursively discovered profile`);
+  }
+}
+
+for (const [name, nameProfiles] of profilesByName) {
+  if (name === brokerName) continue;
+  if (nameProfiles.length > 1) errors.push(`active profile name is duplicated: ${name}`);
+  if (!mappedNames.has(name)) errors.push(`active profile has no model mapping: ${name}`);
+}
+for (const name of mappedNames) {
+  if (!profilesByName.has(name)) errors.push(`root mapping has no active profile: ${name}`);
+}
+
+for (const skill of skills) {
+  if (!coveredSkills.has(skill.name)) {
+    errors.push(`real skill has no user-facing active permission grant: @${skill.name}`);
+  }
+  for (const referenceFile of skill.referenceFiles) {
+    if (!coveredReferences.has(referenceFile)) {
+      errors.push(`real skill reference has no user-facing active permission coverage: ${path.relative(repoRoot, referenceFile)}`);
+    }
+  }
+}
+
+const userFacingSkillSets = [...profilesByName.entries()]
+  .filter(([name]) => name !== brokerName && !denyOnlyNative.has(name))
+  .map(([name]) => ({ name, skills: profileSkillSets.get(name) ?? new Set() }));
+const maximalSkillSets = userFacingSkillSets.filter(({ skills: candidate }) => userFacingSkillSets.every(({ skills: other }) => {
+  if (other.size <= candidate.size) return true;
+  for (const skillName of candidate) if (!other.has(skillName)) return true;
+  return false;
+}));
+
+if (maximalSkillSets.length === 0) {
+  errors.push("no user-facing active profile provides a maximal skill-access set");
+} else {
+  for (const skill of skills) {
+    for (const { name, skills: grantedSkills } of maximalSkillSets) {
+      if (!grantedSkills.has(skill.name)) {
+        errors.push(`broadest user-facing profile ${name} does not cover real skill @${skill.name} and its ${skill.referenceFiles.length} references`);
+      }
+    }
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+
+const referenceCount = skills.reduce((count, skill) => count + skill.referenceFiles.length, 0);
+console.log(`PASS: dynamically validated ${skills.length} real skill trees and ${referenceCount} references across profile-owned grants, model-only root mappings, unique categorized profiles, and broker isolation`);
+NODE
+}
+
+run_permission_parity_validation() {
+  node - "$AGENTS_DIR" "$CONFIG" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const [agentsDir, configPath] = process.argv.slice(2);
+const errors = [];
+const brokerName = "ingenium-llm-broker";
+const removedBrowserName = "browser-agent";
+
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function readText(filePath, label) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    errors.push(`${label} is missing or unreadable: ${filePath} (${error.message})`);
+    return null;
+  }
+}
+
+function parseScalar(rawValue) {
+  const value = rawValue.trim();
+  if (value.startsWith("\"") && value.endsWith("\"")) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+  if (value === "true" || value === "false" || value === "null") return JSON.parse(value);
+  if (/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value)) return Number(value);
+  return value;
+}
+
+function parseKeyAndValue(line) {
+  const match = line.trim().match(/^(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([^:]+)):\s*(.*)$/);
+  if (!match) return null;
+  let key;
+  if (match[1] !== undefined) {
+    try {
+      key = JSON.parse(`"${match[1]}"`);
+    } catch {
+      key = match[1];
+    }
+  } else {
+    key = match[2] !== undefined ? match[2].replace(/''/g, "'") : match[3].trim();
+  }
+  return { key, rawValue: match[4] ?? "" };
+}
+
+function parsePermission(source, label) {
+  const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+  if (frontmatter === undefined) {
+    errors.push(`${label} has malformed or missing frontmatter`);
+    return { present: false, value: null };
+  }
+
+  const lines = frontmatter.split(/\r?\n/);
+  const permissionLine = lines.findIndex((line) => /^permission:\s*(.*)$/.test(line));
+  if (permissionLine === -1) return { present: false, value: null };
+
+  const permissionMatch = lines[permissionLine].match(/^permission:\s*(.*)$/);
+  if (permissionMatch?.[1]?.trim()) return { present: true, value: parseScalar(permissionMatch[1]) };
+
+  const value = {};
+  const stack = [{ indent: -1, value }];
+  for (let index = permissionLine + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent === 0) break;
+    if (indent < 2 || indent % 2 !== 0) {
+      errors.push(`${label} has an invalid permission indentation at frontmatter line ${index + 1}`);
+      continue;
+    }
+
+    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+    const parent = stack[stack.length - 1]?.value;
+    const entry = parseKeyAndValue(line);
+    if (!isRecord(parent) || !entry) {
+      errors.push(`${label} has a malformed permission rule at frontmatter line ${index + 1}: ${line}`);
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(parent, entry.key)) {
+      errors.push(`${label} has a duplicate permission rule: ${entry.key}`);
+      continue;
+    }
+
+    if (entry.rawValue.trim()) {
+      parent[entry.key] = parseScalar(entry.rawValue);
+    } else {
+      parent[entry.key] = {};
+      stack.push({ indent, value: parent[entry.key] });
+    }
+  }
+  return { present: true, value };
+}
+
+function same(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function profileName(source) {
+  return source.match(/^name:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "";
+}
+
+function isRegularFile(filePath) {
+  try {
+    const stat = fs.lstatSync(filePath);
+    return stat.isFile() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+let config;
+const configSource = readText(configPath, "OpenCode config");
+if (configSource !== null) {
+  try { config = JSON.parse(configSource); }
+  catch (error) { errors.push(`OpenCode config is not valid JSON: ${configPath} (${error.message})`); }
+}
+
+function collectProfiles(directory, profiles = []) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) collectProfiles(filePath, profiles);
+    else if (entry.isFile() && entry.name.endsWith(".md")) {
+      const source = readText(filePath, "agent profile");
+      if (source?.startsWith("---")) profiles.push({ name: profileName(source), filePath, source });
+    }
+  }
+  return profiles;
+}
+
+const profiles = collectProfiles(agentsDir);
+const byName = new Map();
+for (const profile of profiles) {
+  const group = byName.get(profile.name) ?? [];
+  group.push(profile);
+  byName.set(profile.name, group);
+}
+for (const [name, group] of byName) {
+  if (!name) errors.push(`profile without a name: ${group[0].filePath}`);
+  if (group.length !== 1) errors.push(`profile identity must be unique: ${name}`);
+}
+
+const browserCanonicalPath = path.join(agentsDir, "execution", `${removedBrowserName}.md`);
+if (fs.existsSync(browserCanonicalPath)) errors.push(`removed browser profile must be absent: ${browserCanonicalPath}`);
+if (byName.has(removedBrowserName)) errors.push("removed browser-agent must have no active profile");
+
+const expectedProfileNames = new Set([
+  "plan",
+  "ingenium-docs",
+  "ingenium-qa", "ingenium-software-engineer-fast",
+  "ingenium-software-engineer-premium", "ingenium-recovery-engineer",
+  "ingenium-orchestrator", "ingenium-explore", "ingenium-scout", "ingenium-chat",
+  "ingenium-security-auditor", brokerName,
+]);
+for (const name of expectedProfileNames) {
+  if ((byName.get(name) ?? []).length !== 1) errors.push(`missing unique profile: ${name}`);
+}
+for (const name of byName.keys()) {
+  if (!expectedProfileNames.has(name)) errors.push(`unexpected agent profile: ${name}`);
+}
+
+if (isRecord(config?.permission)) errors.push("root permission authority must be absent");
+if (!isRecord(config?.agent)) {
+  errors.push("OpenCode config must define model mappings");
+} else {
+  if (Object.prototype.hasOwnProperty.call(config.agent, removedBrowserName)) {
+    errors.push("removed browser-agent must remain absent from root agent mappings");
+  }
+  for (const [name, projection] of Object.entries(config.agent)) {
+    if (name === brokerName) errors.push("protected broker must remain absent from root agent mappings");
+    if (!isRecord(projection)) {
+      errors.push(`${name} root mapping must be an object`);
+      continue;
+    }
+    const extra = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
+    if (extra.length > 0) errors.push(`${name} root mapping has profile-owned fields: ${extra.join(", ")}`);
+    if ((byName.get(name) ?? []).length !== 1) errors.push(`${name} root mapping has no unique recursively discovered profile`);
+  }
+}
+
+const approvedSkills = [
+  "development-conventions", "devops-conventions", "database-conventions",
+  "mcp-tooling", "security-audit", "documentation",
+  "self-learning", "skill-maintenance", "ponytail",
+];
+const nativeNames = new Set(["build", "general", "explore"]);
+const userFacing = new Set([...expectedProfileNames].filter((name) => name !== brokerName));
+const permissions = new Map();
+for (const [name, group] of byName) {
+  if (group.length !== 1) continue;
+  const profile = group[0];
+  const parsed = parsePermission(profile.source, profile.filePath);
+  permissions.set(name, parsed.value);
+  if (!parsed.present || !isRecord(parsed.value) || Object.keys(parsed.value)[0] !== "*" || parsed.value["*"] !== "deny") {
+    errors.push(`${name} profile permission must start with wildcard deny`);
+    continue;
+  }
+  if (name === brokerName) {
+    if (!same(parsed.value, { "*": "deny" })) errors.push("protected broker must remain wildcard-deny only");
+    continue;
+  }
+  const frontmatter = profile.source.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
+  if (!/^disable:\s*(?:true|false)$/m.test(frontmatter)) errors.push(`${name} must define explicit disable state`);
+  if (!/^hidden:\s*(?:true|false)$/m.test(frontmatter)) errors.push(`${name} must define explicit hidden state`);
+  if (userFacing.has(name) && name !== "plan") {
+    if (!profile.source.includes("@ponytail")) errors.push(`${name} prompt must explicitly load @ponytail`);
+    if (!isRecord(parsed.value.skill)
+      || !same(Object.keys(parsed.value.skill), approvedSkills)
+      || Object.values(parsed.value.skill).some((value) => value !== "allow")) {
+      errors.push(`${name} must explicitly allow exactly the nine approved skill loader names (eight repository skills and Ponytail)`);
+    }
+  }
+}
+
+const roleMatrix = {
+  "ingenium-docs": { read: "allow", edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-software-engineer-fast": { read: "allow", edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
+  "ingenium-software-engineer-premium": { read: "allow", edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
+  "ingenium-recovery-engineer": { read: "allow", edit: "object", write: "object", bash: "object", glob: "allow", grep: "allow", todowrite: "allow" },
+  "ingenium-orchestrator": { read: "allow", edit: "deny", write: "deny", bash: "object", glob: "deny", grep: "deny", todowrite: "allow" },
+  "ingenium-qa": { read: "allow", edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-security-auditor": { read: "allow", edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-explore": { read: "allow", edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
+  "ingenium-scout": { read: "deny", edit: "deny", write: "deny", bash: "deny", glob: "deny", grep: "deny", todowrite: "deny" },
+  "ingenium-chat": { read: "allow", edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
+};
+function effectiveRule(permission, tool) {
+  const value = permission[tool];
+  if (value === undefined) return "deny";
+  if (isRecord(value) && value["*"] === "allow") return "allow";
+  if (isRecord(value)) return "object";
+  return value;
+}
+for (const [name, expected] of Object.entries(roleMatrix)) {
+  const permission = permissions.get(name);
+  if (!isRecord(permission)) continue;
+  for (const [tool, value] of Object.entries(expected)) {
+    const actual = effectiveRule(permission, tool);
+    if (actual !== value) errors.push(`${name} permission.${tool} must be ${value}, found ${String(actual)}`);
+  }
+}
+
+const orchestratorProfile = (byName.get("ingenium-orchestrator") ?? [])[0];
+const expectedRecoveryBash = {
+  "*": "deny",
+  "ingenium-build deployment production-restart": "allow",
+  "git status": "allow",
+  "git diff -- docs/reference/ROADMAP.md": "allow",
+  "git diff -- tests/artifacts/tui-recovery/*": "allow",
+  "git diff --cached -- docs/reference/ROADMAP.md": "allow",
+  "git diff --cached -- tests/artifacts/tui-recovery/*": "allow",
+  "git log --oneline -10": "allow",
+  "git blame *": "allow",
+  "git ls-files *": "allow",
+  "git ls-tree *": "allow",
+  "git rev-parse *": "allow",
+  "git add -- docs/reference/ROADMAP.md": "allow",
+  "git add -- tests/artifacts/tui-recovery/*": "allow",
+  "git commit -m 'recovery evidence checkpoint'": "allow",
+};
+if (!same(permissions.get("ingenium-recovery-engineer")?.bash, expectedRecoveryBash)) {
+  errors.push("Recovery Bash must retain exactly its fixed recovery commands and read-only Git inspection rules, denying unlisted commands");
+} else {
+  console.log("PASS: Recovery exact Bash map allows read-only Git inspection and denies unlisted mutation/config/network commands");
+}
+const orchestratorPermission = permissions.get("ingenium-orchestrator");
+if (orchestratorPermission?.bash?.["git show *"] === "allow") {
+  errors.push("orchestrator must not allow git show --output file mutation");
+}
+if (!isRecord(orchestratorPermission?.task)) {
+  errors.push("orchestrator must retain an explicit task permission map");
+} else if (Object.prototype.hasOwnProperty.call(orchestratorPermission.task, removedBrowserName)) {
+  errors.push("orchestrator must not grant task access to removed browser-agent");
+}
+if (orchestratorProfile?.source.includes("@browser-agent")) {
+  errors.push("orchestrator must not retain an active @browser-agent routing reference");
+}
+
+for (const name of nativeNames) {
+  if (byName.has(name)) errors.push(`${name} is native OpenCode and must not have a repository profile`);
+}
+
+const planProfile = (byName.get("plan") ?? [])[0];
+if (planProfile?.filePath !== path.join(agentsDir, "primary", "plan.md")
+  || !/^mode: primary$/m.test(planProfile?.source ?? "")
+  || !/^disable: false$/m.test(planProfile?.source ?? "")
+  || !/^hidden: false$/m.test(planProfile?.source ?? "")) {
+  errors.push("Plan must have an enabled, visible canonical primary/plan.md profile");
+}
+const plan = permissions.get("plan");
+const expectedPlanPermission = {
+  "*": "deny", read: "allow", glob: "allow", grep: "allow", question: "allow",
+  edit: "deny", write: "deny", bash: "deny", todowrite: "deny",
+  ingenium_coordination_status: "allow", skill: { "*": "allow" },
+  task: { "*": "deny", "ingenium-explore": "allow" },
+};
+if (!require("node:util").isDeepStrictEqual(plan, expectedPlanPermission)) {
+  errors.push("Plan profile must retain its exact read-only permissions and Explore-only task grant");
+} else {
+  console.log("PASS: Plan profile permission has the exact key set and Explore-only task map");
+}
+if (!isRecord(plan?.task) || plan.task["ingenium-explore"] !== "allow"
+  || Object.entries(plan.task).some(([target, rule]) => target !== "ingenium-explore" && rule === "allow")) {
+  errors.push("Plan task permission must allow ingenium-explore and no other target");
+}
+
+const scout = permissions.get("ingenium-scout");
+const scoutProfile = (byName.get("ingenium-scout") ?? [])[0];
+if (!isRecord(scout) || effectiveRule(scout, "read") !== "deny") errors.push("Scout must deny generic filesystem read access");
+if (!scoutProfile?.source.includes("No generic repository source reviews, edits, or writes")) {
+  errors.push("Scout prompt must explicitly reject generic repository source review");
+}
+for (const tool of ["glob", "grep", "webfetch", "websearch", "task", "todowrite"]) {
+  if (isRecord(scout) && scout[tool] === "allow") errors.push(`Scout must not allow ${tool}`);
+}
+for (const tool of ["ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page", "ingenium_coordination_status", "ingenium_coordination_memory_read"]) {
+  if (!isRecord(scout) || scout[tool] !== "allow") errors.push(`Scout must allow ${tool}`);
+}
+const scoutAllowedTools = new Set([
+  "ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page",
+  "ingenium_coordination_status", "ingenium_coordination_memory_read",
+]);
+if (isRecord(scout)) {
+  for (const [tool, rule] of Object.entries(scout)) {
+    if (rule === "allow" && !scoutAllowedTools.has(tool)) errors.push(`Scout has an unexpected allow grant: ${tool}`);
+    if (isRecord(rule) && tool !== "skill") errors.push(`Scout has an unexpected scoped grant: ${tool}`);
+  }
+}
+
+const memoryReads = ["ingenium_memory_read", "ingenium_memory_list", "ingenium_memory_search", "ingenium_memory_operation_status"];
+const coordination = ["ingenium_coordination_status", "ingenium_coordination_memory_read", "ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"];
+const docsReads = ["ingenium_docs_search", "ingenium_docs_get_page"];
+const designatedMcp = {
+  "ingenium-orchestrator": [...coordination, ...memoryReads, ...docsReads],
+  "ingenium-software-engineer-premium": [...coordination, ...memoryReads, ...docsReads, "ingenium_docs_list_spaces", "ingenium_docs_get_page_tree"],
+  "ingenium-software-engineer-fast": docsReads,
+  "ingenium-explore": docsReads,
+  "ingenium-recovery-engineer": coordination,
+  "ingenium-qa": [...docsReads, "ingenium_docs_get_page_tree", "ingenium_docs_list_comments", "ingenium_playwright_*"],
+  "ingenium-security-auditor": [...docsReads, "ingenium_docs_list_comments"],
+  "ingenium-scout": [...docsReads, "ingenium_docs_search_semantic", "ingenium_coordination_status", "ingenium_coordination_memory_read"],
+};
+for (const [name, expected] of Object.entries(designatedMcp)) {
+  const actual = Object.entries(permissions.get(name) ?? {}).filter(([key, rule]) => key.startsWith("ingenium_") && rule === "allow").map(([key]) => key);
+  if (!same(actual.sort(), [...expected].sort())) errors.push(`${name} must allow exactly its designated MCP tools: ${expected.join(", ")}`);
+}
+for (const tool of [...memoryReads, "ingenium_memory_save", "ingenium_memory_update", "ingenium_memory_forget", ...docsReads]) {
+  if (permissions.get("ingenium-chat")?.[tool] !== "allow") errors.push(`Chat must allow designated tool ${tool}`);
+}
+for (const tool of ["ingenium_task_create", "ingenium_docs_create_page", "ingenium_email_send", "ingenium_config_set", "ingenium_coordination_update"]) {
+  if (effectiveRule(permissions.get("ingenium-chat") ?? {}, tool) !== "deny") errors.push(`Chat must deny ${tool} outside saved memory`);
+}
+
+const catalogSource = readText(path.join(path.dirname(configPath), "packages/ingenium-core/lib/tools/mcp-tool-catalog.ts"), "MCP catalog");
+const catalog = [...(catalogSource ?? "").matchAll(/\bname: "([^"]+)",\s*category: "([^"]+)"/g)].map(([, name, category]) => ({ name, category }));
+const catalogNames = new Set(catalog.map(({ name }) => name));
+if (catalog.length !== 291 || catalogNames.size !== 291) errors.push("MCP designation audit requires 291 unique catalog entries");
+const categoryCounts = {};
+for (const { category } of catalog) categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+if (categoryCounts.Tasks !== 32 || categoryCounts.Memory !== 7 || Object.keys(categoryCounts).length !== 31) {
+  errors.push("MCP designation audit requires 32 Tasks, 7 Memory tools, and 31 categories");
+}
+console.log(`MCP catalog categories: ${JSON.stringify(categoryCounts)}`);
+const owners = new Map(catalog.map(({ name }) => [name, []]));
+for (const [agent, permission] of permissions) {
+  for (const [tool, rule] of Object.entries(permission ?? {})) {
+    if (!tool.startsWith("ingenium_") && !catalogNames.has(tool)) continue;
+    if (tool === "ingenium_playwright_*" && agent === "ingenium-qa" && rule === "allow") continue;
+    if (!catalogNames.has(tool)) errors.push(`${agent} has an unknown MCP permission key: ${tool}`);
+    if (rule === "allow") owners.get(tool)?.push(agent);
+  }
+}
+const unowned = {};
+for (const { name, category } of catalog) {
+  if (owners.get(name).length === 0) (unowned[category] ??= []).push(name);
+}
+// These non-agent workflows must not acquire model grants merely to raise coverage.
+const internalOnlyCounts = {
+  "Repository Sync": 1, Settings: 2, Skills: 20, Observe: 1, Observations: 4,
+  Personality: 5, Synthesis: 3, Extraction: 2, Tasks: 17, Plans: 1, Context: 22,
+  Projects: 7, Plugins: 5, Providers: 4, Servers: 5, Agents: 6, Commands: 3,
+  Config: 2, Email: 16, Jobs: 5, Pipeline: 1, Vault: 10, Backups: 14,
+  RAG: 7, Documentation: 8,
+};
+for (const category of new Set([...Object.keys(unowned), ...Object.keys(internalOnlyCounts)])) {
+  if ((unowned[category]?.length ?? 0) !== internalOnlyCounts[category]) errors.push(`${category} internal/operator-only designation changed; review exact tool ownership`);
+}
+console.log(`MCP designation coverage: ${catalog.length - Object.values(unowned).flat().length}/${catalog.length} catalog tools have profile owners; intentionally internal/operator-only (no model grants):`);
+console.log(JSON.stringify(unowned, null, 2));
+
+for (const name of userFacing) {
+  const permission = name === "plan" ? plan : permissions.get(name);
+  const expectedQuestion = name === "plan" ? "allow" : "deny";
+  if (!isRecord(permission) || permission.question !== expectedQuestion) errors.push(`${name} question permission must be ${expectedQuestion}`);
+}
+
+if (isRegularFile(path.join(agentsDir, "ingenium-chat.md"))) errors.push("legacy root-level chat profile must be absent");
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: profile-owned default-deny authority, exact skill grants, native profile absence, Scout limits, and model-only root mappings hold");
+NODE
+}
+
+if [[ "$SKILL_ONLY" -eq 1 ]]; then
+  if ! run_dynamic_skill_validation; then
+    FAILED=1
+  fi
+  exit "$FAILED"
+fi
+
+if [[ "$PERMISSION_PARITY_ONLY" -eq 1 ]]; then
+  if ! run_permission_parity_validation; then
+    FAILED=1
+  fi
+  exit "$FAILED"
+fi
+
+if ! run_permission_parity_validation; then
+  FAILED=1
+fi
+
+if [[ "$ROLE_MATRIX_ONLY" -eq 0 ]]; then
+if ! run_dynamic_skill_validation; then
+  FAILED=1
+fi
+
+mapfile -t AGENT_FILES < <(find "$AGENTS_DIR" -type f -name '*.md' -print | sort)
+mapfile -t AGENT_FILES < <(for file in "${AGENT_FILES[@]}"; do [[ "$(head -n 1 "$file")" == '---' ]] && printf '%s\n' "$file"; done)
+
+if [[ "${#AGENT_FILES[@]}" -eq 0 ]]; then
+  fail "no active agent profiles found"
+  exit 1
+fi
+if [[ "${#AGENT_FILES[@]}" -ne "$EXPECTED_CATEGORIZED_PROFILE_COUNT" ]]; then
+  fail "expected $EXPECTED_CATEGORIZED_PROFILE_COUNT categorized profiles, found ${#AGENT_FILES[@]}"
+else
+  pass "$EXPECTED_CATEGORIZED_PROFILE_COUNT categorized profiles are present"
+fi
+
+# Every user-facing profile explicitly opts in with the literal loader name.
+ponytail_permissions_valid=1
+for file in "${AGENT_FILES[@]}"; do
+  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  case "$profile_name" in ingenium-llm-broker|plan|build|general|explore) continue ;; esac
+  if ! profile_has_exact_ponytail_skill_permission "$file"; then
+    fail "$profile_name must define exactly one allowed ponytail skill permission"
+    ponytail_permissions_valid=0
+  fi
+done
+if [[ "$ponytail_permissions_valid" -eq 1 ]]; then
+  pass "all user-facing profiles explicitly allow ponytail"
+fi
+
+question_permissions_valid=1
+for file in "${AGENT_FILES[@]}"; do
+  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  case "$profile_name" in ingenium-llm-broker|build|general|explore) continue ;; esac
+  if [[ "$profile_name" == "plan" ]]; then
+    if ! grep -q '^  question: allow$' "$file"; then
+      fail "plan must define question: allow"
+      question_permissions_valid=0
+    fi
+    continue
+  fi
+  if ! profile_has_exact_question_deny "$file"; then
+    fail "$profile_name must define exactly one scalar question: deny permission"
+    question_permissions_valid=0
+  fi
+done
+if [[ "$question_permissions_valid" -eq 1 ]]; then
+  pass "custom profiles deny question and Plan alone allows it"
+fi
+
+declare -A TODOWRITE_OWNER_NAMES=(
+  [ingenium-orchestrator]=1
+  [ingenium-recovery-engineer]=1
+  [ingenium-software-engineer-fast]=1
+  [ingenium-software-engineer-premium]=1
+)
+todowrite_permissions_valid=1
+for file in "${AGENT_FILES[@]}"; do
+  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  if [[ -n "${TODOWRITE_OWNER_NAMES[$profile_name]:-}" ]]; then
+    if ! profile_has_exact_todowrite_allow "$file"; then
+      fail "$profile_name must define exactly one scalar todowrite: allow permission"
+      todowrite_permissions_valid=0
+    fi
+  elif [[ "$profile_name" != "plan" ]] && profile_has_todowrite_permission "$file"; then
+    fail "$profile_name must not receive TodoWrite permission"
+    todowrite_permissions_valid=0
+  fi
+done
+if [[ "$todowrite_permissions_valid" -eq 1 ]]; then
+  pass "TodoWrite is allowed only for the orchestrator and three implementation/recovery writers"
+fi
+
+node - \
+  "$AGENTS_DIR/primary/ingenium-orchestrator.md" \
+  "$AGENTS_DIR/execution/ingenium-recovery-engineer.md" \
+  "$AGENTS_DIR/execution/ingenium-software-engineer-fast.md" \
+  "$AGENTS_DIR/execution/ingenium-software-engineer-premium.md" <<'NODE' || FAILED=1
+const fs = require("fs");
+const errors = [];
+const requiredLanguage = [
+  "Immediately on every nonterminal task, initialize a nonempty TodoWrite",
+  "before any dispatch, edit, or command.",
+  "Update TodoWrite after every implementation or evidence transition.",
+  "Reconcile every item against retained evidence before any terminal response.",
+  "If TodoWrite fails or is unavailable, report the exact failure explicitly; never silently replace unavailable TodoWrite with prose.",
+];
+
+for (const profilePath of process.argv.slice(2)) {
+  const normalized = fs.readFileSync(profilePath, "utf8").replace(/\s+/g, " ");
+  for (const phrase of requiredLanguage) {
+    if (!normalized.includes(phrase)) errors.push(`${profilePath} is missing mandatory TodoWrite language: ${phrase}`);
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: TodoWrite owners require initialize, update, reconcile, and explicit failure reporting");
+NODE
+
+BROKER_PROFILE="$AGENTS_DIR/execution/ingenium-llm-broker.md"
+if [[ ! -r "$BROKER_PROFILE" ]] || ! profile_has_broker_wildcard_deny_only "$BROKER_PROFILE"; then
+  fail "broker must retain exactly one wildcard deny permission with no exceptions"
+else
+  pass "broker retains its wildcard-denied permission boundary"
+fi
+fi
+
+if [[ "$ROLE_MATRIX_ONLY" -eq 1 ]]; then
+  if ! bash "$REPO_ROOT/tests/test-orchestrator-scheduler-policy.sh"; then
+    FAILED=1
+  fi
+  exit "$FAILED"
+fi
+
+# Logical Ingenium agents exclude native policy overrides.
+declare -A NAMES=()
+declare -A HIDDEN_NAMES=()
+declare -A WRITER_NAMES=()
+declare -A NON_WRITER_NAMES=()
+for file in "${AGENT_FILES[@]}"; do
+  name="$(basename "$file" .md)"
+
+  fm_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  [[ -z "$fm_name" ]] && fm_name="$name"
+
+  if ! grep -q '^name:' "$file" || ! grep -q '^description:' "$file" || ! grep -q '^permission:' "$file"; then
+    fail "$fm_name has incomplete frontmatter"
+  fi
+
+  if grep -q '^model:' "$file"; then
+    fail "$fm_name has markdown model frontmatter"
+  fi
+
+  case "$fm_name" in plan|build|general|explore) continue ;; esac
+
+  if grep -q '^hidden:.*true' "$file"; then
+    HIDDEN_NAMES["$fm_name"]=1
+  fi
+
+  if profile_has_writer_permission "$file"; then
+    WRITER_NAMES["$fm_name"]=1
+  fi
+
+  if [[ -n "${NAMES[$fm_name]:-}" ]]; then
+    fail "logical agent profile is duplicated: $fm_name"
+  fi
+  NAMES["$fm_name"]=1
 done
 
-# ── Helpers ───────────────────────────────────────────────
-green()  { echo -e "\033[32m$*\033[0m"; }
-red()    { echo -e "\033[31m$*\033[0m"; }
-yellow() { echo -e "\033[33m$*\033[0m"; }
-dim()    { echo -e "\033[2m$*\033[0m"; }
+# Dispatchable agents are active subagents, excluding the two primary agents
+# and the hidden system-internal broker.  Writer status is intentionally not
+# hard-coded here: it is derived from each profile's edit/write permissions.
+declare -A DISPATCHABLE_NAMES=()
+for name in "${!NAMES[@]}"; do
+  case "$name" in
+    ingenium-orchestrator|ingenium-chat|ingenium-llm-broker) ;;
+    *) DISPATCHABLE_NAMES["$name"]=1 ;;
+  esac
+  if [[ -z "${WRITER_NAMES[$name]:-}" ]]; then
+    NON_WRITER_NAMES["$name"]=1
+  fi
+done
 
-pass() {
-    PASSED=$((PASSED + 1))
-    green "  ✓ PASS: $1"
+if [[ "$FAILED" -eq 0 ]]; then pass "active profiles have required frontmatter and no markdown models"; fi
+
+# Writer classification is derived from every profile's permission block, not
+# from a hard-coded list of implementation agents.  Keep explicit regression
+# guards for profiles that use nested permission maps and must remain writers.
+for expected_writer in \
+  ingenium-software-engineer-fast \
+  ingenium-software-engineer-premium \
+  ingenium-recovery-engineer \
+  ingenium-docs; do
+  if [[ -n "${WRITER_NAMES[$expected_writer]:-}" ]]; then
+    pass "$expected_writer is recognized as a write-capable profile"
+  else
+    fail "$expected_writer has edit/write permissions but was not recognized as a writer"
+  fi
+done
+if [[ "${#WRITER_NAMES[@]}" -ne "$EXPECTED_WRITER_COUNT" ]]; then
+  fail "expected $EXPECTED_WRITER_COUNT permission-derived writers, found ${#WRITER_NAMES[@]}"
+else
+  pass "$EXPECTED_WRITER_COUNT permission-derived writers are present"
+fi
+if [[ "${#WRITER_NAMES[@]}" -gt 0 ]]; then
+  writer_list="$(printf '%s\n' "${!WRITER_NAMES[@]}" | sort | paste -sd ',' -)"
+  pass "all edit/write-capable profiles are indexed as writers: $writer_list"
+else
+  fail "no edit/write-capable profiles were recognized"
+fi
+
+if [[ "${#NAMES[@]}" -ne "$EXPECTED_LOGICAL_AGENT_COUNT" ]]; then
+  fail "expected $EXPECTED_LOGICAL_AGENT_COUNT logical agent profiles, found ${#NAMES[@]}"
+else
+  pass "$EXPECTED_LOGICAL_AGENT_COUNT logical custom agent profiles, including the broker, are preserved with one canonical chat profile"
+fi
+
+if [[ "${#DISPATCHABLE_NAMES[@]}" -ne "$EXPECTED_CUSTOM_SUBAGENT_COUNT" ]]; then
+  fail "expected $EXPECTED_CUSTOM_SUBAGENT_COUNT dispatchable custom subagents, found ${#DISPATCHABLE_NAMES[@]}"
+else
+  pass "$EXPECTED_CUSTOM_SUBAGENT_COUNT dispatchable custom subagents are present"
+fi
+
+for file in "${AGENT_FILES[@]}"; do
+  base="$(basename "$file" .md)"
+  if [[ "$base" == "ingenium-prompt-engineer" ]]; then
+    fail "Prompt Engineer agent file found at $file — must be absent"
+  fi
+  if [[ "$base" == "ingenium-software-engineer-terra" ]]; then
+    fail "Terra agent file found at $file — must be absent"
+  fi
+done
+if [[ "$FAILED" -eq 0 ]]; then pass "Prompt Engineer and Terra agent files are absent"; fi
+
+declare -a CHECK_NAMES=()
+for name in "${!NAMES[@]}"; do
+  [[ "$name" == "ingenium-llm-broker" ]] && continue
+  CHECK_NAMES+=("$name")
+done
+if [[ "${#CHECK_NAMES[@]}" -gt 0 ]]; then
+  if [[ "${#CHECK_NAMES[@]}" -ne "$EXPECTED_USER_FACING_AGENT_COUNT" ]]; then
+    fail "expected $EXPECTED_USER_FACING_AGENT_COUNT user-facing logical profiles with centralized model mappings, found ${#CHECK_NAMES[@]}"
+  else
+    pass "$EXPECTED_USER_FACING_AGENT_COUNT user-facing logical profiles require centralized model mappings"
+  fi
+  node - "$CONFIG" "$REPO_ROOT" "${CHECK_NAMES[@]}" <<'NODE' || FAILED=1
+const fs = require("fs");
+const path = require("path");
+const [configPath, repoRoot, ...activeNames] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const agent = config.agent || {};
+const errors = [];
+const expected = {
+  "ingenium-docs": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-qa": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-software-engineer-fast": ["openai/gpt-5.6-sol", "medium"],
+  "ingenium-software-engineer-premium": ["openai/gpt-6-astra", "medium"],
+  "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "high"],
+  "ingenium-orchestrator": ["deepseek/deepseek-v4-flash", "max"],
+  "ingenium-explore": ["openai/gpt-5.6-sol", "medium"],
+  "ingenium-scout": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-chat": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-security-auditor": ["openai/gpt-6-astra", "high"],
+};
+
+const repositoryMappedNames = Object.keys(expected);
+if (activeNames.length !== repositoryMappedNames.length || activeNames.some((name) => !repositoryMappedNames.includes(name))) {
+  errors.push(`active non-broker profile set does not match the ${repositoryMappedNames.length} repository-owned mappings`);
+}
+const expectedMappedNames = new Set(["plan", ...Object.keys(expected)]);
+for (const name of Object.keys(agent)) {
+  if (!expectedMappedNames.has(name)) errors.push(`unexpected root agent mapping: ${name}`);
+}
+for (const [name, [model, variant]] of Object.entries(expected)) {
+  const projection = agent[name];
+  if (!projection) {
+    errors.push(`canonical agent "${name}" is missing from opencode.json`);
+    continue;
+  }
+  if (projection.model !== model) errors.push(`${name} model must be ${model}, found ${projection.model}`);
+  if (projection.variant !== variant) errors.push(`${name} variant must be ${variant}, found ${projection.variant}`);
+  const extra = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
+  if (extra.length > 0) errors.push(`${name} mapping must contain only model/variant, found ${extra.join(", ")}`);
+}
+if (agent.explore !== undefined && Object.keys(agent.explore).some((key) => key !== "model" && key !== "variant")) {
+  errors.push("optional built-in explore mapping must remain model-only");
+}
+if (!agent.plan || Object.keys(agent.plan).some((key) => !["model", "variant"].includes(key))
+  || agent.plan.model !== "openai/gpt-6-astra" || agent.plan.variant !== "max") {
+  errors.push("Plan root mapping must contain only its exact model/variant");
+}
+if (agent["ingenium-llm-broker"] !== undefined) {
+  errors.push("protected hidden broker must remain absent from root agent mappings");
 }
 
-fail() {
-    FAILED=$((FAILED + 1))
-    TEST_FAILED=true
-    if [[ -n "${2:-}" ]]; then
-        red "  ✗ FAIL: $1 — $2"
+// Allowed variants by provider (case-sensitive)
+const VARIANT_RULES = {
+  openai:  new Set(["low", "medium", "high", "xhigh", "max"]),
+  deepseek: new Set(["high", "max"]),
+};
+
+for (const name of activeNames) {
+  if (!agent[name]) {
+    errors.push(`active agent "${name}" is missing from opencode.json agent config`);
+    continue;
+  }
+  if (!agent[name].model) {
+    errors.push(`active agent "${name}" lacks a model mapping in opencode.json`);
+    continue;
+  }
+
+  // Case-sensitive variant validation by provider
+  const model = agent[name].model;
+  const variant = agent[name].variant;
+
+  // Determine provider from model string
+  const provider = model.startsWith("openai/") ? "openai"
+    : model.startsWith("deepseek/") ? "deepseek"
+    : model.startsWith("opencode/") && model.endsWith("-free") ? "opencode-free"
+    : "other";
+
+  if (provider === "opencode-free") {
+    // OpenCode free models must NOT have a variant
+    if (variant !== undefined) {
+      errors.push(`active agent "${name}" uses opencode-free model "${model}" but has variant "${variant}" — opencode free must have no variant`);
+    }
+  } else if (provider !== "other") {
+    // Known provider with variant rules
+    const allowed = VARIANT_RULES[provider];
+    if (!allowed) {
+      errors.push(`active agent "${name}" uses unknown provider for model "${model}" — no variant rules defined`);
+    } else if (variant !== undefined && !allowed.has(variant)) {
+      errors.push(`active agent "${name}" has invalid variant "${variant}" for ${provider} model "${model}" — allowed: ${[...allowed].join(", ")}`);
+    }
+  }
+  // "other" providers (e.g. qwen/): no variant restrictions
+}
+
+if (errors.length) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: exact centralized model/variant-only mappings, broker exception, and variant validation");
+NODE
+else
+  pass "no active non-hidden agents to check (skipped)"
+fi
+
+ORCHESTRATOR="$AGENTS_DIR/primary/ingenium-orchestrator.md"
+
+DOCUMENTED_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+)
+
+extract_task_allow_names() {
+  awk '
+    /^  task:/ { in_task = 1; next }
+    in_task && /^  [^[:space:]]/ { exit }
+    in_task && /^    "[^"]+": *"allow"/ {
+      name = $0
+      sub(/^    "/, "", name)
+      sub(/".*$/, "", name)
+      print name
+    }
+  ' "$1"
+}
+
+validate_orchestrator_bash_permissions() {
+  local errors=0
+  local bash_header_count
+  local rule command action
+  local -a bash_rules=()
+  declare -A expected_rules=(
+    ["*"]='deny'
+    ['git *']='deny'
+    ['git status']='allow'
+    ['git status *']='allow'
+    ['git diff']='allow'
+    ['git diff *']='allow'
+    ['git log']='allow'
+    ['git log *']='allow'
+    ['git diff * --output*']='deny'
+    ['git diff --output*']='deny'
+    ['git log * --output*']='deny'
+    ['git log --output*']='deny'
+    ['git add *']='allow'
+    ['git blame *']='allow'
+    ['git ls-files *']='allow'
+    ['git ls-tree *']='allow'
+    ['git rev-parse *']='allow'
+    ['git branch --list']='allow'
+    ['git branch --list *']='allow'
+    ['git tag --list']='allow'
+    ['git tag --list *']='allow'
+    ['git remote -v']='allow'
+    ['git commit -m *']='allow'
+    ['gh *']='allow'
+    ['git commit --amend*']='deny'
+    ['git commit-tree']='deny'
+    ['git commit-tree *']='deny'
+    ['git update-ref']='deny'
+    ['git update-ref *']='deny'
+    ['git push']='deny'
+    ['git push *']='deny'
+    ['git reset']='deny'
+    ['git reset *']='deny'
+    ['git config']='deny'
+    ['git config *']='deny'
+    ['git hook']='deny'
+    ['git hook *']='deny'
+    ['git update-index']='deny'
+    ['git update-index *']='deny'
+    ['npm test*']='allow'
+    ['npm run test*']='allow'
+    ['npm run build*']='allow'
+    ['npm run typecheck*']='allow'
+    ['npx tsc*']='allow'
+    ['npx playwright test*']='allow'
+    ['python -m pytest*']='allow'
+    ['pytest*']='allow'
+    ['go test*']='allow'
+    ['go build*']='allow'
+    ['cargo test*']='allow'
+    ['cargo check*']='allow'
+    ['cargo build*']='allow'
+  )
+  declare -A seen_rules=()
+
+  bash_header_count="$(awk '/^  bash:[[:space:]]*$/ { count++ } END { print count + 0 }' "$ORCHESTRATOR")"
+  if [[ "$bash_header_count" -ne 1 ]]; then
+    fail "orchestrator must define exactly one granular bash permission object"
+    errors=1
+  fi
+
+  if ! awk '
+    /^  bash:[[:space:]]*$/ { in_bash = 1; next }
+    in_bash && /^  [^[:space:]]/ { exit }
+    in_bash && /^    "\*"[[:space:]]*:[[:space:]]*"?deny"?[[:space:]]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$ORCHESTRATOR"; then
+    fail "orchestrator bash permissions must deny arbitrary commands with a wildcard rule"
+    errors=1
+  fi
+
+  if ! awk '
+    /^  edit:[[:space:]]*/ {
+      edit_count++
+      if ($0 ~ /^  edit:[[:space:]]*deny[[:space:]]*$/) edit_denied = 1
+    }
+    /^  write:[[:space:]]*/ {
+      write_count++
+      if ($0 ~ /^  write:[[:space:]]*deny[[:space:]]*$/) write_denied = 1
+    }
+    END {
+      exit(edit_count == 1 && edit_denied && write_count == 1 && write_denied ? 0 : 1)
+    }
+  ' "$ORCHESTRATOR"; then
+    fail "orchestrator edit and write permissions must remain scalar deny rules"
+    errors=1
+  fi
+
+  mapfile -t bash_rules < <(awk '
+    /^  bash:[[:space:]]*$/ { in_bash = 1; next }
+    in_bash && /^  [^[:space:]]/ { exit }
+    in_bash && /^[[:space:]]*$/ { next }
+    in_bash && /^    "[^"]+":[[:space:]]*"?(allow|deny)"?[[:space:]]*$/ {
+      key = $0
+      sub(/^    "/, "", key)
+      sub(/".*$/, "", key)
+      value = $0
+      sub(/^.*":[[:space:]]*/, "", value)
+      gsub(/[[:space:]]/, "", value)
+      gsub(/"/, "", value)
+      print key "\t" value
+      next
+    }
+    in_bash && /^    / { print "__MALFORMED__\t" $0 }
+  ' "$ORCHESTRATOR")
+
+  for rule in "${bash_rules[@]}"; do
+    command="${rule%%$'\t'*}"
+    action="${rule#*$'\t'}"
+    if [[ "$command" == "__MALFORMED__" ]]; then
+      fail "orchestrator bash permissions contain a malformed nested rule: $action"
+      errors=1
+    elif [[ "${expected_rules[$command]:-}" == "$action" ]]; then
+      if [[ -n "${seen_rules[$command]:-}" ]]; then
+        fail "orchestrator bash permissions contain duplicate rule: $command"
+        errors=1
+      else
+        seen_rules["$command"]=1
+      fi
     else
-        red "  ✗ FAIL: $1"
+      fail "orchestrator bash permissions contain an unexpected rule: $command ($action)"
+      errors=1
     fi
-}
+  done
 
-info() {
-    $VERBOSE && dim "  · $*" || true
-}
+  local git_command args candidate pattern effective
+  for git_command in diff log; do
+    for args in '--output path' '--output=path' '--stat --output path' '--stat --output=path'; do
+      candidate="git $git_command $args"
+      effective=deny
+      for rule in "${bash_rules[@]}"; do
+        pattern="${rule%%$'\t'*}"
+        if [[ "$candidate" == $pattern ]]; then
+          effective="${rule#*$'\t'}"
+        fi
+      done
+      if [[ "$effective" != deny ]]; then
+        fail "orchestrator must deny file mutation with last-match-wins permissions: $candidate"
+        errors=1
+      fi
+    done
+  done
 
-section() {
-    echo ""
-    echo "━━━ $1 ━━━"
-}
-
-# ── Agent File Discovery ──────────────────────────────────
-# Returns all agent .md files sorted by path
-find_agent_files() {
-    find "$AGENTS_DIR" -name "*.md" -type f | sort
-}
-
-# Returns just the agent name (basename without .md)
-agent_name_from_path() {
-    basename "$1" .md
-}
-
-# ── Frontmatter Extraction ────────────────────────────────
-# Extract YAML frontmatter from a .md file (content between --- fences)
-extract_frontmatter() {
-    local file="$1"
-    awk '/^---$/ { count++; next } count == 1 { print } count == 2 { exit }' "$file"
-}
-
-# Extract a top-level YAML block from frontmatter (content after key: until
-# next top-level key at column 0).
-extract_yaml_block() {
-    local key="$1"
-    awk -v key="^${key}:" '$0 ~ key{found=1; next} found && /^[a-zA-Z]/{exit} found{print}'
-}
-
-# Extract a value for a top-level field in the frontmatter (e.g. name, model)
-get_field_value() {
-    local fm="$1"
-    local field="$2"
-    echo "$fm" | grep "^${field}:" | head -1 | sed 's/^'"${field}"': *//'
-}
-
-# ── Agent Capability Detection ────────────────────────────
-# Check if an agent is write-capable (edit:allow OR write:allow)
-is_agent_write_capable() {
-    local agent_name="$1"
-
-    # Search all subdirectories for this agent file
-    local file
-    file=$(find "$AGENTS_DIR" -name "${agent_name}.md" -type f 2>/dev/null | head -1)
-
-    if [[ -z "$file" ]]; then
-        # If agent file doesn't exist, assume not write-capable (conservative)
-        return 1
+  for command in "${!expected_rules[@]}"; do
+    if [[ -z "${seen_rules[$command]:-}" ]]; then
+      fail "orchestrator bash permissions are missing intended rule: $command (${expected_rules[$command]})"
+      errors=1
     fi
+  done
 
-    local fm
-    fm=$(extract_frontmatter "$file")
-    local perm_block
-    perm_block=$(extract_yaml_block "permission" <<< "$fm")
+  if [[ "$errors" -eq 0 ]]; then
+    pass "orchestrator has deny-by-default bash permissions limited to ordinary Git/GitHub coordination and verification"
+    return 0
+  fi
+  return 1
+}
 
-    local edit_val
-    edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
-    local write_val
-    write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
+validate_coordination_tool_permissions() {
+  local premium_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+  local recovery_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-recovery-engineer.md"
+  local scout_profile="$REPO_ROOT/.opencode/agents/research/ingenium-scout.md"
 
-    if [[ "$edit_val" == "allow" || "$write_val" == "allow" ]]; then
-        return 0
+  if ! node - "$ORCHESTRATOR" "$premium_profile" "$recovery_profile" "$scout_profile" "$CONFIG" <<'NODE'
+const fs = require("fs");
+
+const [orchestratorPath, premiumPath, recoveryPath, scoutPath] = process.argv.slice(2);
+const expected = new Map([
+  [orchestratorPath, {
+    required: ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
+    forbidden: [],
+  }],
+  [premiumPath, {
+    required: ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
+    forbidden: [],
+  }],
+  [recoveryPath, {
+    required: [
+      "ingenium_coordination_status",
+      "ingenium_coordination_memory_read",
+      "ingenium_coordination_update",
+      "ingenium_coordination_claim",
+      "ingenium_coordination_release",
+    ],
+    forbidden: ["ingenium_coordination_handoff"],
+  }],
+  [scoutPath, {
+    required: ["ingenium_docs_search_semantic", "ingenium_coordination_status", "ingenium_coordination_memory_read"],
+    forbidden: ["ingenium_coordination_handoff", "ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
+  }],
+]);
+const errors = [];
+
+for (const [profilePath, tools] of expected) {
+  const source = fs.readFileSync(profilePath, "utf8");
+  const match = source.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) {
+    errors.push(`${profilePath} has no readable frontmatter`);
+    continue;
+  }
+
+  const topLevel = new Map();
+  const bash = new Map();
+  let inPermission = false;
+  let inBash = false;
+  for (const line of match[1].split(/\r?\n/)) {
+    if (line === "permission:") {
+      inPermission = true;
+      inBash = false;
+      continue;
+    }
+    if (!inPermission) continue;
+    if (/^[^\s]/.test(line)) {
+      inPermission = false;
+      inBash = false;
+      continue;
+    }
+    if (/^  bash:\s*$/.test(line)) {
+      inBash = true;
+      continue;
+    }
+    if (/^  \S/.test(line)) inBash = false;
+
+    const topLevelMatch = line.match(/^  (?:"([^"]+)"|([A-Za-z0-9_.:-]+)):\s*(allow|deny)\s*$/);
+    if (topLevelMatch) {
+      const name = topLevelMatch[1] ?? topLevelMatch[2];
+      topLevel.set(name, [...(topLevel.get(name) ?? []), topLevelMatch[3]]);
+      continue;
+    }
+    if (inBash) {
+      const bashMatch = line.match(/^    "([^"]+)":\s*(allow|deny)\s*$/);
+      if (bashMatch) bash.set(bashMatch[1], [...(bash.get(bashMatch[1]) ?? []), bashMatch[2]]);
+    }
+  }
+
+  for (const tool of tools.required) {
+    const grants = topLevel.get(tool) ?? [];
+    if (grants.length !== 1 || grants[0] !== "allow") {
+      errors.push(`${profilePath} must grant ${tool} once at top-level permission`);
+    }
+    if ((bash.get(tool) ?? []).length > 0) {
+      errors.push(`${profilePath} must reject ${tool} under the bash permission block`);
+    }
+  }
+  for (const tool of tools.forbidden) {
+    if ((topLevel.get(tool) ?? []).includes("allow")) {
+      errors.push(`${profilePath} must not grant mixed or mutating coordination tool ${tool}`);
+    }
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: coordination tools use top-level grants; Recovery has only required recovery operations; Scout remains read-only");
+NODE
+  then
+    return 0
+  fi
+  return 1
+}
+
+if ! validate_coordination_tool_permissions; then
+  FAILED=1
+fi
+
+# The orchestrator's profile owns its non-interactive question boundary.
+validate_orchestrator_question_boundary() {
+  local errors=0
+  local -a question_rules=()
+
+  mapfile -t question_rules < <(awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    in_frontmatter && /^  question:[[:space:]]*/ {
+      value = $0
+      sub(/^  question:[[:space:]]*/, "", value)
+      gsub(/[[:space:]]/, "", value)
+      gsub(/["'"'"']/, "", value)
+      print value
+    }
+  ' "$ORCHESTRATOR")
+
+  if [[ "${#question_rules[@]}" -ne 1 || "${question_rules[0]:-}" != "deny" ]]; then
+    fail "orchestrator must define exactly one scalar question: deny permission"
+    errors=1
+  fi
+
+  if ! node - "$ORCHESTRATOR" "$CONFIG" <<'NODE'
+const fs = require("fs");
+const [profilePath, configPath] = process.argv.slice(2);
+const profile = fs.readFileSync(profilePath, "utf8");
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const errors = [];
+const frontmatter = profile.match(/^---\n([\s\S]*?)\n---/);
+
+if (!frontmatter) {
+  errors.push("orchestrator profile has no readable frontmatter");
+} else {
+  const permissionGrants = frontmatter[1].match(/^\s*question:\s*(?:allow|ask)\s*$/gmi) ?? [];
+  if (permissionGrants.length > 0) {
+    errors.push(`orchestrator profile grants question permission: ${permissionGrants.join(", ")}`);
+  }
+}
+
+const projection = config.agent?.["ingenium-orchestrator"];
+if (!projection || typeof projection !== "object") {
+  errors.push("orchestrator is missing from the centralized agent config");
+} else {
+  const projectedQuestionPermissions = [
+    ["agent.question", projection.question],
+    ["agent.permission.question", projection.permission?.question],
+  ];
+  for (const [label, value] of projectedQuestionPermissions) {
+    if (value !== undefined && value !== "deny") {
+      errors.push(`${label} must be absent or deny, found ${JSON.stringify(value)}`);
+    }
+  }
+  const extraProjectionKeys = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
+  if (extraProjectionKeys.length > 0) errors.push(`orchestrator root mapping contains profile-owned fields: ${extraProjectionKeys.join(", ")}`);
+}
+
+const body = profile.slice(profile.indexOf("---", 3) + 3);
+for (const line of body.split(/\r?\n/)) {
+  if (/question\s+tool/i.test(line) && !/\b(?:never|must not|does not|do not)\b/i.test(line)) {
+    errors.push(`orchestrator contains a non-denial question-tool instruction: ${line.trim()}`);
+  }
+  if (/ask(?:s)?\s+(?:the\s+)?user\s+(?:for\s+)?permission/i.test(line)
+    && /(?:test|verification|remediation)/i.test(line)
+    && !/\b(?:never|must not|does not|do not)\b/i.test(line)) {
+    errors.push(`orchestrator contains a permission-seeking verification instruction: ${line.trim()}`);
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: orchestrator profile denies the question tool and its root mapping remains model-only");
+NODE
+  then
+    errors=1
+  fi
+
+  if [[ "$errors" -eq 0 ]]; then
+    pass "orchestrator has an explicit non-interactive question-tool boundary"
+    return 0
+  fi
+  return 1
+}
+
+validate_reporting_agent_task_denial() {
+  local profile="$1"
+  local label="$2"
+  if awk '
+    /^  task:[[:space:]]*$/ { in_task = 1; next }
+    in_task && /^  [^[:space:]]/ { exit }
+    in_task && /^    "\*"[[:space:]]*:[[:space:]]*"?deny"?[[:space:]]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$profile"; then
+    pass "$label denies task delegation"
+  else
+    fail "$label must deny task delegation to prevent automatic reviewer handoffs"
+  fi
+}
+
+extract_declared_agent_list() {
+  local source="$1"
+  local heading="$2"
+  awk -v heading="$heading" 'index($0, heading) == 1 { print; exit }' "$source" \
+    | grep -Eo '@[[:alnum:]-]+' | sed 's/^@//' || true
+}
+
+if [[ ! -f "$ORCHESTRATOR" ]]; then
+  fail "orchestrator profile not found at $ORCHESTRATOR"
+else
+  HAS_STALE=0
+  if grep -q 'ingenium-software-engineer-terra' "$ORCHESTRATOR"; then
+    fail "orchestrator has stale task allow entry for Terra (ingenium-software-engineer-terra)"
+    HAS_STALE=1
+  fi
+  if grep -q 'ingenium-prompt-engineer' "$ORCHESTRATOR"; then
+    fail "orchestrator has stale task allow entry for Prompt Engineer"
+    HAS_STALE=1
+  fi
+  if [[ "$HAS_STALE" -eq 0 ]]; then
+    pass "orchestrator has no stale Terra/Prompt Engineer task allow entries"
+  fi
+  # Still validate the standard delegation pattern and the granular bash
+  # permission boundary independently.
+  task_delegation_valid=0
+  if ! grep -q '^  task:' "$ORCHESTRATOR" || ! grep -q '"\*": "deny"' "$ORCHESTRATOR"; then
+    fail "orchestrator agent permissions or task delegation are invalid"
+  else
+    task_delegation_valid=1
+  fi
+  bash_permissions_valid=0
+  if validate_orchestrator_bash_permissions; then
+    bash_permissions_valid=1
+  fi
+  question_boundary_valid=0
+  if validate_orchestrator_question_boundary; then
+    question_boundary_valid=1
+    pass "scenario: orchestrator has no question-tool permission"
+  fi
+  if [[ "$task_delegation_valid" -eq 1 && "$bash_permissions_valid" -eq 1 && "$question_boundary_valid" -eq 1 ]]; then
+    pass "orchestrator has delegation permissions with task deny-all pattern"
+  fi
+
+  # The task allow-list, writer list, and read-only list are three views of
+  # the same dispatchable topology.  Compare all three against the active
+  # profiles and derive writer status from permissions rather than prose.
+  declare -A TASK_ALLOW_NAMES=()
+  declare -A DECLARED_WRITER_NAMES=()
+  declare -A DECLARED_READ_ONLY_NAMES=()
+  mapfile -t TASK_ALLOW_LIST < <(extract_task_allow_names "$ORCHESTRATOR")
+  mapfile -t DECLARED_WRITER_LIST < <(
+    extract_declared_agent_list "$ORCHESTRATOR" "Writers (counted by"
+  )
+  mapfile -t DECLARED_READ_ONLY_LIST < <(
+    extract_declared_agent_list "$ORCHESTRATOR" "Read-only:"
+  )
+  for name in "${TASK_ALLOW_LIST[@]}"; do TASK_ALLOW_NAMES["$name"]=1; done
+  for name in "${DECLARED_WRITER_LIST[@]}"; do DECLARED_WRITER_NAMES["$name"]=1; done
+  for name in "${DECLARED_READ_ONLY_LIST[@]}"; do DECLARED_READ_ONLY_NAMES["$name"]=1; done
+
+  topology_errors=0
+  for name in "${!TASK_ALLOW_NAMES[@]}"; do
+    if [[ -z "${NAMES[$name]:-}" ]]; then
+      fail "orchestrator task allow-list contains stale or unknown agent: $name"
+      topology_errors=1
+    elif [[ -z "${DISPATCHABLE_NAMES[$name]:-}" ]]; then
+      fail "orchestrator task allow-list contains non-dispatchable agent: $name"
+      topology_errors=1
     fi
+  done
+  for name in "${!DISPATCHABLE_NAMES[@]}"; do
+    if [[ -z "${TASK_ALLOW_NAMES[$name]:-}" ]]; then
+      fail "orchestrator task allow-list is missing active dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+
+  for name in "${!DISPATCHABLE_NAMES[@]}"; do
+    if [[ -n "${WRITER_NAMES[$name]:-}" ]]; then
+      if [[ -z "${DECLARED_WRITER_NAMES[$name]:-}" ]]; then
+        fail "writer list is missing permissions-derived writer: $name"
+        topology_errors=1
+      fi
+      if [[ -n "${DECLARED_READ_ONLY_NAMES[$name]:-}" ]]; then
+        fail "$name appears in both writer and read-only lists"
+        topology_errors=1
+      fi
+    else
+      if [[ -z "${DECLARED_READ_ONLY_NAMES[$name]:-}" ]]; then
+        fail "read-only list is missing permissions-derived non-writer: $name"
+        topology_errors=1
+      fi
+      if [[ -n "${DECLARED_WRITER_NAMES[$name]:-}" ]]; then
+        fail "$name is permission-derived non-writer but appears in writer list"
+        topology_errors=1
+      fi
+    fi
+  done
+  for name in "${!DECLARED_WRITER_NAMES[@]}"; do
+    if [[ -z "${DISPATCHABLE_NAMES[$name]:-}" ]]; then
+      fail "writer list contains stale or non-dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+  for name in "${!DECLARED_READ_ONLY_NAMES[@]}"; do
+    if [[ -z "${DISPATCHABLE_NAMES[$name]:-}" ]]; then
+      fail "read-only list contains stale or non-dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+
+  # Every task-allowed agent must appear in exactly one documented list, and
+  # every listed agent must be task-allowed.  This catches stale list/task
+  # drift even when both lists happen to contain plausible names.
+  for name in "${!TASK_ALLOW_NAMES[@]}"; do
+    listed=0
+    [[ -n "${DECLARED_WRITER_NAMES[$name]:-}" ]] && listed=$((listed + 1))
+    [[ -n "${DECLARED_READ_ONLY_NAMES[$name]:-}" ]] && listed=$((listed + 1))
+    if [[ "$listed" -ne 1 ]]; then
+      fail "task allow-list/list classification mismatch for $name"
+      topology_errors=1
+    fi
+  done
+  for name in "${!DECLARED_WRITER_NAMES[@]}" "${!DECLARED_READ_ONLY_NAMES[@]}"; do
+    if [[ -z "${TASK_ALLOW_NAMES[$name]:-}" ]]; then
+      fail "documented dispatch list contains agent not task-allowed: $name"
+      topology_errors=1
+    fi
+  done
+  if [[ "$topology_errors" -eq 0 ]]; then
+    pass "task allow-list and permissions-derived writer/read-only lists agree"
+  fi
+fi
+
+for policy_source in "${DOCUMENTED_POLICY_SOURCES[@]}"; do
+  if [[ -r "$policy_source" ]]; then
+    pass "canonical policy source is available for safe inspection: ${policy_source#"$REPO_ROOT"/}"
+  else
+    fail "canonical policy source is missing or unreadable: $policy_source"
+  fi
+done
+
+policy_errors=0
+
+check_policy_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  if grep -qE "$pattern" "$source"; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    policy_errors=1
+  fi
+}
+
+contains_normalized_phrase() {
+  local normalized_source normalized_phrase
+  normalized_source="$(printf '%s' "$1" | tr -s '[:space:]' ' ')"
+  normalized_phrase="$(printf '%s' "$2" | tr -s '[:space:]' ' ')"
+  [[ "$normalized_source" == *"$normalized_phrase"* ]]
+}
+
+if contains_normalized_phrase $'a complete\ncontract, before dispatch.' 'complete contract' &&
+   contains_normalized_phrase 'a complete contract.' 'complete contract' &&
+   ! contains_normalized_phrase 'an incomplete contract.' 'complete task contract'; then
+  pass "normalized phrase matcher accepts line wrapping and punctuation but rejects missing policy"
+else
+  fail "normalized phrase matcher regression"
+fi
+
+check_normalized_policy_pattern() {
+  local source="$1"
+  local label="$2"
+  local phrase="$3"
+  local description="$4"
+  if contains_normalized_phrase "$(< "$source")" "$phrase"; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    policy_errors=1
+  fi
+}
+
+check_normalized_policy_regex_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  local normalized_source
+
+  normalized_source="$(tr -s '[:space:]' ' ' < "$source" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$normalized_source" =~ $pattern ]]; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    policy_errors=1
+  fi
+}
+
+if node - "$ORCHESTRATOR" "${AGENT_FILES[@]}" <<'NODE'
+const fs = require("fs");
+const assert = require("node:assert/strict");
+const [orchestrator, ...profiles] = process.argv.slice(2);
+
+function hasDelegationInstruction(source) {
+  const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
+  return body.split(/[.!?;]\s+|\n\s*\n|\b(?:but|however|instead)\b/i).some((clause) => {
+    const normalized = clause.replace(/[`*_]/g, "").replace(/\s+/g, " ").toLowerCase();
+    const instruction = /\b(?:you\s+)?may delegate\b|\bdelegate research\b|\bvia (?:the )?task tool\b/.exec(normalized);
+    return instruction !== null && !/\b(?:do not|don't|never|cannot|can not|must not|may not)\b/.test(normalized.slice(0, instruction.index));
+  });
+}
+
+for (const phrase of ["You may delegate research", "For complex work, delegate research to @ingenium-scout", "You may\n**delegate**", "@ingenium-docs (via Task tool)"]) {
+  assert.equal(hasDelegationInstruction(phrase), true, phrase);
+}
+for (const phrase of ["The orchestrator spawns you", "Do not delegate research", "Never dispatch or request another subagent", "You cannot spawn another subagent", "Never delegate via Task tool", "You may not delegate research"]) {
+  assert.equal(hasDelegationInstruction(phrase), false, phrase);
+}
+console.log("PASS: delegation matcher distinguishes positive instructions from descriptions and prohibitions");
+let failed = false;
+for (const profile of profiles) {
+  if (profile === orchestrator) continue;
+  if (hasDelegationInstruction(fs.readFileSync(profile, "utf8"))) {
+    console.error(`FAIL: non-orchestrator profile contains positive delegation instructions: ${profile}`);
+    failed = true;
+  }
+}
+process.exit(failed ? 1 : 0);
+NODE
+then
+  pass "only the orchestrator profile contains positive delegation instructions"
+else
+  fail "delegation instruction ownership must remain exclusive to the orchestrator profile"
+  policy_errors=1
+fi
+
+HUMAN_RESPONSE_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+)
+for policy_source in "${HUMAN_RESPONSE_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  if [[ ! -r "$policy_source" ]]; then
+    fail "$policy_label is missing for human-readable response validation"
+    policy_errors=1
+    continue
+  fi
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'plain-language[[:space:]-]+introduction|one[[:space:]]+to[[:space:]]+three[[:space:]]+plain[[:space:]]+sentences.{0,180}(goal|why).{0,120}immediate[[:space:]]+approach' \
+    "a plain-language introduction"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'plain-language[[:space:]-]+post-phase[[:space:]]+explanation|after every implementation or evidence transition.{0,240}what happened.{0,100}what changed.{0,100}(result|next dependency)' \
+    "interpreted implementation/evidence transition summaries"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'human-readable execution summary.{0,120}headings|terminal responses use.{0,220}status.{0,180}what i did.{0,180}where the proof is' \
+    "terminal human-readable response headings"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'source behavior.{0,180}(not deployed|runtime).{0,180}proof|distinguish evidence.{0,300}source tests prove.{0,300}deployed canaries prove.{0,300}actual model/session artifacts prove' \
+    "the source/runtime/model proof boundary"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'raw[[:space:]]+(subagent|agent)[[:space:]]+json.{0,120}(tool|output)|avoid raw[[:space:]]+agent[[:space:]]+json.{0,80}tool dumps|raw[[:space:]]+subagent[[:space:]]+json.{0,80}tool output' \
+    "the prohibition on raw subagent/tool dumps as final responses"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'pre-dispatch[[:space:]]+task contract|structured task contract.{0,100}mandatory' \
+    "the structured task contract"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'in_scope.{0,300}out_of_scope.{0,300}acceptance criteria.{0,300}stop_condition.{0,300}verification plan.{0,300}escalation rule' \
+    "the structured task contract fields"
+done
+
+# Broad suites are safe only when the task names their acceptance role; these
+# guards keep routine writer verification tied to the changed feature.
+WRITER_VERIFICATION_PROFILES=(
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-fast.md"
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+)
+for writer_profile in "${WRITER_VERIFICATION_PROFILES[@]}"; do
+  writer_label="$(basename "$writer_profile")"
+  check_normalized_policy_pattern "$writer_profile" "$writer_label" \
+    'Never delegate, spawn, reassign, or request another subagent; return research or documentation needs to the orchestrator.' \
+    "the exact no-subagent delegation boundary"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    '[Oo]rdinary work.*affected workspace.*typecheck/lint.*directly affected test file' \
+    "affected-work verification scope"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'FULL_ACCEPTANCE.*declared acceptance checks.*not every repository test' \
+    "explicit full-acceptance boundary"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    '[Aa] focused Playwright.*fixture.*(containment[[:space:]-]+audit|suite-containment-audit)' \
+    "fixture containment audit requirement"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'Before source edits.*useful-comments/guidelines\.md' \
+    "useful-comments guideline read requirement"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'self-explanatory code.*comments only for non-obvious why/constraints' \
+    "why-focused comment policy"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'never to narrate what.*record history.*commented-out code' \
+    "comment anti-pattern policy"
+  check_policy_pattern "$writer_profile" "$writer_label" \
+    'minimal reproduction.*first actionable error.*root cause.*smallest proving regression' \
+    "agent-local reproduction/root-cause/regression sequence"
+  if grep -Eqi 'after[[:space:]]+(any|every)[[:space:]]+implementation.*npm test' "$writer_profile"; then
+    fail "$writer_label prescribes root npm test after implementation"
+    policy_errors=1
+  else
+    pass "$writer_label does not prescribe root npm test after implementation"
+  fi
+done
+
+check_policy_pattern "$QA_PROFILE" "QA profile" \
+  'Review changed files only' \
+  "changed-file-only review boundary"
+check_policy_pattern "$QA_PROFILE" "QA profile" \
+  '\.opencode/skills/development-conventions/references/useful-comments/guidelines\.md' \
+  "useful-comments guideline path"
+check_policy_pattern "$QA_PROFILE" "QA profile" \
+  'not a separate or broad pass' \
+  "no separate or broad comment pass"
+
+RECOVERY_PROFILE="$AGENTS_DIR/execution/ingenium-recovery-engineer.md"
+check_normalized_policy_pattern "$RECOVERY_PROFILE" 'recovery profile' \
+  'Git inspection is limited to `git status`, exact recovery-evidence or roadmap diffs, `git log --oneline -10`, and read-only object/tree inspection via `git blame`, `git ls-files`, `git ls-tree`, and `git rev-parse`.' \
+  'the curated read-only Git command boundary'
+for recovery_phrase in 'read-only preflight' 'nonce' 'Durable accepted handoff' \
+  'external supervisor' 'Replacement health' 'Reconnect' 'rollback' 'fenced' \
+  'TodoWrite replay' 'without replaying an uncertain mutation'; do
+  check_policy_pattern "$RECOVERY_PROFILE" 'recovery profile' "$recovery_phrase" 'agent-local recovery proof requirement'
+done
+
+# FULL_ACCEPTANCE must remain a named contract of checks, not a trigger for a
+# repository-wide test sweep that ordinary feature work can inherit.
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'FULL_ACCEPTANCE.*declared acceptance checks.*not automatically all repository tests' \
+  "declared-acceptance-not-all-tests rule"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'Ordinary feature work must not expand into broad suites' \
+  "ordinary-work broad-suite prohibition"
+
+# Orchestration is non-interactive: it remediates reproducible in-scope defects
+# autonomously and returns ESCALATE_USER only for the permitted hard boundaries.
+AUTONOMY_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+)
+for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  check_normalized_policy_pattern "$policy_source" "$policy_label" \
+    'Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope.' \
+    "autonomous scoped source-fix and deployment policy"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'Only Plan mode may use interactive decision questions\.|The built-in Plan mode is the sole explicit override and may use interactive decision questions; custom agents may not\.|The built-in Plan mode is the deliberate analysis exception:.*Custom agents may not use interactive questions\.' \
+    "Plan-mode-only interactive decision policy"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'Orchestration never invokes the `question` tool' \
+    "question-tool prohibition"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'external credential.*access.*(attempted configured path|configured path was attempted)' \
+    "configured credential/access escalation boundary"
+done
+
+# QA and security can report bounded findings, but their permissions and policy
+# prose must not allow them to hand work to one another or revive a closed task.
+QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
+SECURITY_PROFILE="$AGENTS_DIR/security/ingenium-security-auditor.md"
+validate_reporting_agent_task_denial "$QA_PROFILE" "QA profile"
+validate_reporting_agent_task_denial "$SECURITY_PROFILE" "security profile"
+
+REVIEWER_HANDOFF_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$QA_PROFILE"
+  "$SECURITY_PROFILE"
+)
+for policy_source in "${REVIEWER_HANDOFF_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  if [[ ! -r "$policy_source" ]]; then
+    fail "$policy_label is missing for reviewer-handoff validation"
+    policy_errors=1
+    continue
+  fi
+  stale_handoff="$(grep -Ein \
+    'QA[[:space:]]+and[[:space:]]+security[[:space:]]+(must|will|automatically)[[:space:]]+(spawn|dispatch|trigger|schedule)' \
+    "$policy_source" || true)"
+  if [[ -n "$stale_handoff" ]]; then
+    fail "$policy_label contains unbounded QA/security handoff wording: $stale_handoff"
+    policy_errors=1
+  else
+    pass "$policy_label contains no unbounded QA/security handoff wording"
+  fi
+done
+
+for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    'exactly one qa report.{0,120}at most one security report|qa.{0,320}security.{0,320}(once.{0,160}(implementation|wave|review)|wait.{0,200}(finalized|implementation)|post[-[:space:]]+wave)' \
+    "bounded QA/security post-wave reporting policy"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'minimum targeted regression' \
+    "reviewer-blocker targeted-regression policy"
+done
+
+# These patterns intentionally vary by document format.  That makes this a
+# real cross-source check instead of merely checking that the files exist.
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'User-Requested Concurrency Scheduler' \
+  "the user-requested scheduler declaration"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'no fixed active-agent or writer ceiling' \
+  "the absence of a fixed concurrency ceiling"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'Phase Declaration Protocol' \
+  "the phase declaration protocol"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'Reject the dispatch before invoking `Task` unless the prompt is nonempty and real' \
+  "the pre-dispatch real-prompt guard"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'finalized input manifest before dispatch and a finalized output manifest before review' \
+  "the finalized input/output manifest boundary"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'A missing, stale, partial, canceled, or transport-aborted output is an unknown outcome' \
+  "the stale and unknown-output rejection boundary"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'reconcile durable status, claims, and the coordination outbox before any retry or replay' \
+  "the unknown-outcome reconciliation order"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'Never replay an uncertain mutation' \
+  "the uncertain-mutation replay prohibition"
+
+for policy_source in "$ORCHESTRATOR"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  check_normalized_policy_pattern "$policy_source" "$policy_label" \
+    'one distinct subagent per open TodoWrite/roadmap item' \
+    "the user-requested item-to-agent allocation"
+  check_normalized_policy_pattern "$policy_source" "$policy_label" \
+    '20 simultaneous subagents' \
+    "the requested concurrency example"
+done
+
+check_normalized_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  'Current delegation policy follows the explicit user request and the active orchestrator profile' \
+  "the scheduler policy ownership boundary"
+check_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  'Phase Declaration' \
+  "the phase declaration protocol"
+check_normalized_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  'one distinct subagent per selected item' \
+  "the documented item-to-agent allocation"
+
+if ! bash "$REPO_ROOT/tests/test-orchestrator-scheduler-policy.sh"; then
+  FAILED=1
+fi
+
+STALE_POLICY_PATTERN='UNUSED_CAPACITY|single-Todo fan-out|multi-Todo exact pairing'
+for policy_source in "${DOCUMENTED_POLICY_SOURCES[@]}"; do
+  stale_policy="$(grep -Ein "$STALE_POLICY_PATTERN" "$policy_source" || true)"
+  if [[ -n "$stale_policy" ]]; then
+    fail "$(basename "$policy_source") contains obsolete scheduler allocation text: $stale_policy"
+    policy_errors=1
+  else
+    pass "$(basename "$policy_source") contains no obsolete scheduler allocation text"
+  fi
+done
+
+# Writer references in policy prose are checked against the permissions-derived
+# writer index instead of a hard-coded subset of implementation agents.
+writer_agents="$(grep -Ei 'Writers[[:space:]]*\(count|\(writer([,)]|[[:space:]])' "$ORCHESTRATOR" | grep -Eo '@[[:alnum:]-]+' | sort -u || true)"
+unexpected_writers=""
+while IFS= read -r writer_ref; do
+  [[ -z "$writer_ref" ]] && continue
+  writer_name="${writer_ref#@}"
+  if [[ -z "${WRITER_NAMES[$writer_name]:-}" ]]; then
+    unexpected_writers+="$writer_ref\n"
+  fi
+done <<< "$writer_agents"
+if [[ -n "$unexpected_writers" ]]; then
+  fail "orchestrator references non-writer profiles as writers: $(printf '%b' "$unexpected_writers")"
+  policy_errors=1
+else
+  pass "orchestrator writer references match permissions-derived writer profiles"
+fi
+
+capture_example() {
+  local source="$1"
+  local start_marker="$2"
+  local end_marker="$3"
+  awk -v start="$start_marker" -v end="$end_marker" '
+    index($0, start) { capture = 1 }
+    capture { print }
+    capture && index($0, end) { exit }
+  ' "$source"
+}
+
+allocation_is_valid() {
+  local active_count="$1"
+  local writer_count="$2"
+  local non_writer_count="$3"
+
+  if ! [[ "$active_count" =~ ^[0-9]+$ &&
+          "$writer_count" =~ ^[0-9]+$ &&
+          "$non_writer_count" =~ ^[0-9]+$ ]]; then
     return 1
+  fi
+
+  (( writer_count + non_writer_count == active_count ))
 }
 
-# ── Skill List Extraction ─────────────────────────────────
-# Extract skill names from the skills: block in frontmatter
-# Returns one skill name per line
-extract_skill_list() {
-    local fm="$1"
+todo_allocation_is_valid() {
+  local allocation="$1"
+  local todo_agents
+  local -a todo_allocations=()
 
-    # Check for inline empty list
-    if echo "$fm" | grep -q '^skills: \[\]' 2>/dev/null; then
-        return 0
+  [[ "$allocation" =~ ^[0-9]+(,[0-9]+)*$ ]] || return 1
+  IFS=',' read -r -a todo_allocations <<< "$allocation"
+  if (( ${#todo_allocations[@]} == 0 )); then
+    return 1
+  fi
+
+  for todo_agents in "${todo_allocations[@]}"; do
+    if (( todo_agents != 1 )); then
+      return 1
     fi
+  done
 
-    # Check for inline list: skills: [a, b, c] — uncommon, handle gracefully
-    local inline_list
-    inline_list=$(echo "$fm" | grep '^skills: \[' 2>/dev/null | sed 's/^skills: \[//;s/\]$//' | tr ',' '\n' | sed 's/^ *"//;s/" *$//' || true)
-    if [[ -n "$inline_list" ]]; then
-        echo "$inline_list" | sed 's/^ *//;s/ *$//'
-        return 0
-    fi
-
-    # Extract multi-line skills block
-    local skills_block
-    skills_block=$(extract_yaml_block "skills" <<< "$fm")
-
-    # If no skills block was found or it's empty, return success
-    if [[ -z "$skills_block" ]]; then
-        return 0
-    fi
-
-    # Parse YAML list items: "  - skillname" or "- skillname"
-    # Strip inline YAML comments (# ...) and trim whitespace
-    echo "$skills_block" | grep -- '- ' 2>/dev/null \
-        | sed 's/^[[:space:]]*- //' \
-        | sed 's/[[:space:]]*#.*//' \
-        | sed 's/[[:space:]]*$//' || true
+  return 0
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 1 — Agent Frontmatter Validity
-# Check every agent file has --- fences and required fields.
-# ═══════════════════════════════════════════════════════════
-test_frontmatter_validity() {
-    section "TEST 1 — Agent Frontmatter Validity"
+structural_todo_allocation_is_valid() {
+  local fixture="$1"
 
-    local errors=0
-    local files
-    files=$(find_agent_files)
-    local count=0
+  printf '%s\n' "$fixture" | awk -F'|' '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return value
+    }
 
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-        count=$((count + 1))
+    function finish_pair() {
+      if (!in_pair) {
+        valid = 0
+        return
+      }
+      if (pair_agents != 1 || pair_dependencies != 1 ||
+          pair_territories != pair_writers) valid = 0
+      in_pair = 0
+    }
 
-        # Check opening fence
-        if [[ "$(head -1 "$file")" != "---" ]]; then
-            fail "$name" "Missing opening --- frontmatter fence"
-            errors=$((errors + 1))
-            continue
+    function territories_overlap(left, right) {
+      return left == right || index(left, right "/") == 1 ||
+        index(right, left "/") == 1
+    }
+
+    BEGIN { valid = 1 }
+
+    /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+
+    {
+      record = trim($1)
+
+      if (record == "TODO_PAIR") {
+        if (in_pair) {
+          valid = 0
+          finish_pair()
+        }
+        pair_name = trim($2)
+        if (NF != 2 || pair_name == "" || seen_todo[pair_name]++) valid = 0
+        pair_count++
+        pair_agents = 0
+        pair_writers = 0
+        pair_dependencies = 0
+        pair_territories = 0
+        in_pair = 1
+        next
+      }
+
+      if (record == "AGENT") {
+        agent = trim($2)
+        role = trim($3)
+        key = pair_count SUBSEP agent
+        if (!in_pair || NF != 3 || agent == "" ||
+            (role != "writer" && role != "read-only") || seen_agent[key]++) {
+          valid = 0
+          next
+        }
+        agent_role[key] = role
+        pair_agents++
+        active_count++
+        if (role == "writer") {
+          pair_writers++
+          writer_count++
+        }
+        next
+      }
+
+      if (record == "DEPENDENCY") {
+        dependency = trim($2)
+        if (!in_pair || NF != 2 || dependency == "") valid = 0
+        pair_dependencies++
+        next
+      }
+
+      if (record == "TERRITORY") {
+        agent = trim($2)
+        territory = trim($3)
+        gsub(/\/+$/, "", territory)
+        key = pair_count SUBSEP agent
+        if (!in_pair || NF != 3 || territory == "" ||
+            agent_role[key] != "writer" || declared_territory[key]++) {
+          valid = 0
+          next
+        }
+        for (index_value = 1; index_value <= territory_count; index_value++) {
+          if (territories_overlap(territory, territories[index_value])) valid = 0
+        }
+        territories[++territory_count] = territory
+        pair_territories++
+        next
+      }
+
+      if (record == "END_TODO_PAIR") {
+        if (NF != 1) valid = 0
+        finish_pair()
+        next
+      }
+
+      if (record == "TOTALS") {
+        declared_todos = trim($2)
+        declared_active = trim($3)
+        declared_writers = trim($4)
+        if (in_pair || NF != 4 || totals_seen++ ||
+            declared_todos !~ /^[0-9]+$/ ||
+            declared_active !~ /^[0-9]+$/ ||
+            declared_writers !~ /^[0-9]+$/) valid = 0
+        next
+      }
+
+      valid = 0
+    }
+
+    END {
+      if (in_pair) {
+        valid = 0
+        finish_pair()
+      }
+      if (totals_seen != 1 || pair_count < 1 ||
+          declared_todos + 0 != pair_count ||
+          declared_active + 0 != active_count ||
+          declared_writers + 0 != writer_count) valid = 0
+      exit(valid ? 0 : 1)
+    }
+  '
+}
+
+extract_pair_heading_name() {
+  local line="$1"
+  if [[ "$line" =~ ^[[:space:]]*(Pair|Assignment[[:space:]]for)[[:space:]]\"([^\"]+)\"[[:space:]]*: ]]; then
+    printf '%s\n' "${BASH_REMATCH[2]}"
+  fi
+  return 0
+}
+
+extract_pair_assignment_lines() {
+  local block="$1"
+  printf '%s\n' "$block" | grep -E '^[[:space:]]+@[[:alnum:]-]+[[:space:]]+(→|->)' || true
+}
+
+validate_parsed_pair_blocks() {
+  local label="$1"
+  local block="$2"
+  local expected_pairs="${3:-}"
+  local line pair_name="" pair_block="" next_pair_name
+  local pair_count=0
+  local errors=0
+  local -a assignments=()
+
+  while IFS= read -r line; do
+    next_pair_name="$(extract_pair_heading_name "$line")"
+    if [[ -n "$next_pair_name" ]]; then
+      if [[ -n "$pair_name" ]]; then
+        mapfile -t assignments < <(extract_pair_assignment_lines "$pair_block")
+        if [[ "${#assignments[@]}" -ne 1 ]]; then
+          fail "$label item $pair_name must contain exactly one agent assignment, found ${#assignments[@]}"
+          errors=1
         fi
+        pair_count=$((pair_count + 1))
+      fi
+      pair_name="$next_pair_name"
+      pair_block="$line"
+    elif [[ -n "$pair_name" ]]; then
+      pair_block+=$'\n'"$line"
+    fi
+  done <<< "$block"
 
-        # Check closing fence
-        local fence_count
-        fence_count=$(grep -c '^---' "$file" || true)
-        if [[ "$fence_count" -lt 2 ]]; then
-            fail "$name" "Missing closing --- frontmatter fence (found $fence_count)"
-            errors=$((errors + 1))
-            continue
-        fi
+  if [[ -n "$pair_name" ]]; then
+    mapfile -t assignments < <(extract_pair_assignment_lines "$pair_block")
+    if [[ "${#assignments[@]}" -ne 1 ]]; then
+      fail "$label item $pair_name must contain exactly one agent assignment, found ${#assignments[@]}"
+      errors=1
+    fi
+    pair_count=$((pair_count + 1))
+  fi
 
-        local fm
-        fm=$(extract_frontmatter "$file")
-        if [[ -z "$fm" ]]; then
-            fail "$name" "Empty frontmatter section"
-            errors=$((errors + 1))
-            continue
-        fi
+  if [[ "$pair_count" -eq 0 ]]; then
+    fail "$label contains no parsed Pair blocks"
+    return 1
+  fi
+  if [[ -n "$expected_pairs" && "$pair_count" -ne "$expected_pairs" ]]; then
+    fail "$label declares $expected_pairs Todo pairs but contains $pair_count parsed Pair blocks"
+    errors=1
+  fi
+  if [[ "$errors" -eq 0 ]]; then
+    pass "$label contains $pair_count parsed Todo blocks with exactly one agent assignment each"
+    return 0
+  fi
+  return 1
+}
 
-        # Check required fields
-        local missing_fields=""
+expect_structural_todo_fixture() {
+  local label="$1"
+  local expected="$2"
+  local fixture="$3"
+  local actual
 
-        if ! echo "$fm" | grep -q "^name:"; then
-            missing_fields="${missing_fields}name "
-        fi
-        if ! echo "$fm" | grep -q "^description:"; then
-            missing_fields="${missing_fields}description "
-        fi
-        if ! echo "$fm" | grep -q "^model:"; then
-            missing_fields="${missing_fields}model "
-        fi
+  if structural_todo_allocation_is_valid "$fixture"; then
+    actual='accept'
+  else
+    actual='reject'
+  fi
 
-        if [[ -n "$missing_fields" ]]; then
-            fail "$name" "Missing required frontmatter field(s): $missing_fields"
-            errors=$((errors + 1))
-            continue
-        fi
+  if [[ "$actual" == "$expected" ]]; then
+    pass "structural Todo fixture $label is $actual"
+  else
+    fail "structural Todo fixture $label expected $expected but was $actual"
+  fi
+}
 
-        # Validate name matches file basename
-        local fm_name
-        fm_name=$(get_field_value "$fm" "name" | tr -d '[:space:]')
-        if [[ "$fm_name" != "$name" ]]; then
-            fail "$name" "Frontmatter name '$fm_name' doesn't match filename '$name'"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        info "$name — frontmatter valid (name: $fm_name)"
+run_structural_todo_fixture_tests() {
+  local count index fixture expected
+  for count in 0 1 2 20; do
+    fixture=$'TODO_PAIR|todo-a\n'
+    for ((index = 1; index <= count; index++)); do
+      fixture+="AGENT|reader-$index|read-only"$'\n'
     done
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All $count agent files have valid frontmatter (--- fences + name, description, model)"
-    fi
+    fixture+=$'DEPENDENCY|none\nEND_TODO_PAIR\nTOTALS|1|'"$count|0"
+    expected=reject
+    if (( count == 1 )); then expected=accept; fi
+    expect_structural_todo_fixture "single-todo-$count-agents" "$expected" "$fixture"
+  done
+  fixture=""
+  for ((index = 1; index <= 20; index++)); do
+    fixture+="TODO_PAIR|todo-$index"$'\n'"AGENT|writer-$index|writer"$'\nDEPENDENCY|none\n'"TERRITORY|writer-$index|src/item-$index"$'\nEND_TODO_PAIR\n'
+  done
+  fixture+='TOTALS|20|20|20'
+  expect_structural_todo_fixture 'twenty-items-twenty-writers' accept "$fixture"
+  expect_structural_todo_fixture 'single-todo-one-agent' accept $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nTERRITORY|writer-a|src/a\nEND_TODO_PAIR\nTOTALS|1|1|1'
+  expect_structural_todo_fixture 'declared-total-mismatch' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nTERRITORY|writer-a|src/a\nEND_TODO_PAIR\nTOTALS|1|2|1'
+  expect_structural_todo_fixture 'missing-dependency-declaration' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nTERRITORY|writer-a|src/a\nEND_TODO_PAIR\nTOTALS|1|1|1'
+  expect_structural_todo_fixture 'missing-territory-declaration' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nEND_TODO_PAIR\nTOTALS|1|1|1'
+  expect_structural_todo_fixture 'overlapping-writer-territories' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nTERRITORY|writer-a|services/api\nEND_TODO_PAIR\nTODO_PAIR|todo-b\nAGENT|writer-b|writer\nDEPENDENCY|none\nTERRITORY|writer-b|services/api/routes\nEND_TODO_PAIR\nTOTALS|2|2|2'
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 2 — Permission Completeness
-# Every agent must have explicit edit: and write: in permission.
-# ═══════════════════════════════════════════════════════════
-test_permission_completeness() {
-    section "TEST 2 — Permission Completeness"
+validate_wave_block() {
+  local label="$1"
+  local block="$2"
+  local active_count=0
+  local writer_count=0
+  local non_writer_count=0
+  local agent_line agent_ref agent_name
+  local -a agent_lines=()
+  mapfile -t agent_lines < <(
+    printf '%s\n' "$block" | grep -E '^[[:space:]]+@[[:alnum:]-]+' || true
+  )
 
-    local errors=0
-    local files
-    files=$(find_agent_files)
-    local count=0
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-        count=$((count + 1))
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Check permission block exists
-        if ! echo "$fm" | grep -q "^permission:"; then
-            fail "$name" "Missing 'permission:' block in frontmatter"
-            errors=$((errors + 1))
-            continue
+  for agent_line in "${agent_lines[@]}"; do
+    active_count=$((active_count + 1))
+    while IFS= read -r agent_ref; do
+      [[ -z "$agent_ref" ]] && continue
+      agent_name="${agent_ref#@}"
+      if [[ -z "${DISPATCHABLE_NAMES[$agent_name]:-}" ]]; then
+        fail "$label references unknown agent $agent_ref"
+        policy_errors=1
+      elif [[ -n "${WRITER_NAMES[$agent_name]:-}" ]]; then
+        writer_count=$((writer_count + 1))
+        if [[ "$agent_line" != *"(writer"* ]]; then
+          fail "$label omits writer annotation for permissions-derived writer $agent_ref"
+          policy_errors=1
         fi
+      elif [[ "$agent_line" == *"(writer"* ]]; then
+        fail "$label marks permissions-derived non-writer $agent_ref as a writer"
+        policy_errors=1
+      else
+        non_writer_count=$((non_writer_count + 1))
+      fi
+    done < <(printf '%s\n' "$agent_line" | grep -Eo '@[[:alnum:]-]+' || true)
+  done
 
-        # Extract permission block
-        local perm_block
-        perm_block=$(extract_yaml_block "permission" <<< "$fm")
+  if allocation_is_valid "$active_count" "$writer_count" "$non_writer_count"; then
+    pass "$label accounts for every active agent by permission-derived role ($active_count/$writer_count/$non_writer_count)"
+  else
+    fail "$label has an unclassified active agent ($active_count/$writer_count/$non_writer_count)"
+    policy_errors=1
+  fi
 
-        # Check edit: field
-        if ! echo "$perm_block" | grep -q "^  edit:"; then
-            fail "$name" "Missing 'edit:' in permission block"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        # Check write: field
-        if ! echo "$perm_block" | grep -q "^  write:"; then
-            fail "$name" "Missing 'write:' in permission block"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        local edit_val
-        edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
-        local write_val
-        write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
-
-        info "$name — edit: $edit_val, write: $write_val"
-    done
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All $count agent files have explicit edit: and write: in permission block"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 3 — No Stale Skill References
-# Every skill referenced in an agent's skills: list must exist
-# as .agents/skills/<skillname>/SKILL.md.
-# ═══════════════════════════════════════════════════════════
-test_stale_skill_references() {
-    section "TEST 3 — No Stale Skill References"
-
-    local total_refs=0
-    local stale_refs=0
-    local files
-    files=$(find_agent_files)
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Extract skill list
-        local skill_list
-        skill_list=$(extract_skill_list "$fm")
-
-        if [[ -z "$skill_list" ]]; then
-            info "$name — no skills to check (empty list)"
-            continue
-        fi
-
-        while IFS= read -r skill; do
-            [[ -z "$skill" ]] && continue
-            total_refs=$((total_refs + 1))
-
-            local skill_file="$SKILLS_DIR/$skill/SKILL.md"
-            if [[ ! -f "$skill_file" ]]; then
-                fail "$name" "References non-existent skill '$skill' (expected $skill_file)"
-                stale_refs=$((stale_refs + 1))
-            else
-                info "$name → $skill ✓"
-            fi
-        done <<< "$skill_list"
-    done
-
-    if [[ "$stale_refs" -eq 0 ]]; then
-        if [[ "$total_refs" -gt 0 ]]; then
-            pass "$total_refs skill references checked — all valid"
-        else
-            pass "No stale skill references (no agent has a non-empty skills list)"
-        fi
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 4 — No Duplicate Skills
-# Within a single agent's skills: list, no skill may appear
-# more than once.
-# ═══════════════════════════════════════════════════════════
-test_no_duplicate_skills() {
-    section "TEST 4 — No Duplicate Skills"
-
-    local duplicate_count=0
-    local files
-    files=$(find_agent_files)
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-        local skill_list
-        skill_list=$(extract_skill_list "$fm")
-
-        if [[ -z "$skill_list" ]]; then
-            info "$name — no skills to check for duplicates"
-            continue
-        fi
-
-        # Find duplicates
-        local dupes
-        dupes=$(echo "$skill_list" | sort | uniq -d)
-
-        if [[ -n "$dupes" ]]; then
-            while IFS= read -r dup; do
-                [[ -z "$dup" ]] && continue
-                fail "$name" "Duplicate skill '$dup' appears multiple times"
-                duplicate_count=$((duplicate_count + 1))
-            done <<< "$dupes"
-        else
-            info "$name — no duplicate skills"
-        fi
-    done
-
-    if [[ "$duplicate_count" -eq 0 ]]; then
-        pass "No duplicate skill references in any agent"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 5 — Task Block Safety
-# Read-only agents (edit: deny + write: deny) must not be able
-# to spawn write-capable subagents (edit: allow or write: allow)
-# via their task: allow list.
-# ═══════════════════════════════════════════════════════════
-test_task_block_safety() {
-    section "TEST 5 — Task Block Safety"
-
-    local files
-    files=$(find_agent_files)
-
-    # ── Phase 1: Build write-capable agent index ──
-    declare -A WRITE_CAPABLE_AGENTS
-    local all_agent_names=""
-
-    for file in $files; do
-        local agent_name
-        agent_name=$(agent_name_from_path "$file")
-        all_agent_names="$all_agent_names $agent_name"
-
-        if is_agent_write_capable "$agent_name"; then
-            WRITE_CAPABLE_AGENTS["$agent_name"]=1
-            info "$agent_name — write-capable (indexed)"
-        else
-            info "$agent_name — read-only (indexed)"
-        fi
-    done
-
-    # ── Phase 2: Check every read-only agent's task block ──
-    local violations=0
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Determine if this agent is read-only
-        local perm_block
-        perm_block=$(extract_yaml_block "permission" <<< "$fm")
-
-        local edit_val
-        edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
-        local write_val
-        write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
-
-        # Only check read-only agents (edit: deny AND write: deny)
-        if [[ "$edit_val" != "deny" || "$write_val" != "deny" ]]; then
-            info "$name — write-capable, skipping task block safety check"
-            continue
-        fi
-
-        # Extract allowed subagents from task block
-        # Lines in the permission block between "  task:" and next 2-space key
-        local task_allows
-        task_allows=$(echo "$perm_block" | sed -n '/^  task:/,/^  [a-z]/p' \
-            | grep '": "allow"' \
-            | sed 's/.*"\(.*\)": "allow".*/\1/' \
-            | grep -v '^\*$' || true)
-
-        local local_violations=0
-
-        while IFS= read -r allowed_agent; do
-            [[ -z "$allowed_agent" ]] && continue
-
-            # Trim whitespace
-            allowed_agent=$(echo "$allowed_agent" | tr -d '[:space:]')
-
-            if [[ -n "${WRITE_CAPABLE_AGENTS[$allowed_agent]:-}" ]]; then
-                fail "$name" "Read-only agent can spawn write-capable subagent '$allowed_agent'"
-                violations=$((violations + 1))
-                local_violations=$((local_violations + 1))
-            fi
-        done <<< "$task_allows"
-
-        if [[ "$local_violations" -eq 0 ]]; then
-            info "$name — task block is safe (no write-capable subagent allowed)"
-        fi
-    done
-
-    if [[ "$violations" -eq 0 ]]; then
-        pass "All read-only agents have safe task blocks"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 6 — No Stale git-workflows References
-# The git-workflows skill was deleted — ensure no agent
-# references it.
-# ═══════════════════════════════════════════════════════════
-test_no_git_workflows() {
-    section "TEST 6 — No Stale git-workflows References"
-
-    local files
-    files=$(find_agent_files)
-    local found=false
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        if grep -q "git-workflows" "$file"; then
-            fail "$name" "Contains stale reference to 'git-workflows' (skill deleted)"
-            found=true
-        fi
-    done
-
-    if ! $found; then
-        pass "No agent references the deleted 'git-workflows' skill"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 7 — Skill Count Consistency
-# Compare actual skill directories against SKILL-INDEX.md count.
-# ═══════════════════════════════════════════════════════════
-test_skill_count_consistency() {
-    section "TEST 7 — Skill Count Consistency"
-
-    # Count actual skill directories (dirs with SKILL.md)
-    local actual_count
-    actual_count=$(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l)
-
-    # Extract count from SKILL-INDEX.md
-    # Look for "Total: N items" or count entries in the "# Skills" table
-    local index_count=0
-    local total_line
-    total_line=$(grep "^\\*\\*Total:" "$SKILL_INDEX" 2>/dev/null | head -1 || true)
-
-    if [[ -n "$total_line" ]]; then
-        # Extract number from "**Total: N items**"
-        index_count=$(echo "$total_line" | sed 's/.*Total: *//;s/ *items.*//')
-    fi
-
-    # Fallback: count entries in the skills table at the bottom
-    if [[ "$index_count" -eq 0 ]]; then
-        index_count=$(grep -c '^| [0-9]' "$SKILL_INDEX" 2>/dev/null || true)
-        info "Falling back to counting table entries in SKILL-INDEX.md"
-    fi
-
-    info "Actual skill directories: $actual_count"
-    info "SKILL-INDEX.md reported:  $index_count"
-
-    local diff=$(( actual_count - index_count ))
-    local abs_diff=${diff#-}
-
-    if [[ "$abs_diff" -eq 0 ]]; then
-        pass "Skill count matches: $actual_count directories = $index_count in SKILL-INDEX.md"
-    elif [[ "$abs_diff" -le 2 ]]; then
-        yellow "  ⚠ WARNING: Skill count mismatch ($actual_count actual vs $index_count index — diff: $diff)"
-        pass "Skill count mismatch within tolerance (diff=$abs_diff, tolerance=2)"
+  local declared_active="" declared_writers="" declared_non_writers=""
+  if [[ "$block" =~ \(([0-9]+)[[:space:]]+active,[[:space:]]*([0-9]+)[[:space:]]+writers?,[[:space:]]*([0-9]+)[[:space:]]+non[-[:space:]]writers? ]]; then
+    declared_active="${BASH_REMATCH[1]}"
+    declared_writers="${BASH_REMATCH[2]}"
+    declared_non_writers="${BASH_REMATCH[3]}"
+  elif [[ "$block" =~ Active:[[:space:]]*([0-9]+),[[:space:]]*Writers:[[:space:]]*([0-9]+),[[:space:]]*Non[-[:space:]]writers:[[:space:]]*([0-9]+) ]]; then
+    declared_active="${BASH_REMATCH[1]}"
+    declared_writers="${BASH_REMATCH[2]}"
+    declared_non_writers="${BASH_REMATCH[3]}"
+  fi
+  if [[ -n "$declared_active" ]]; then
+    if [[ "$declared_active" -eq "$active_count" && \
+          "$declared_writers" -eq "$writer_count" && \
+          "$declared_non_writers" -eq "$non_writer_count" ]]; then
+      pass "$label declaration matches observed agents ($declared_active/$declared_writers/$declared_non_writers)"
     else
-        fail "Skill count mismatch" "$actual_count actual vs $index_count in SKILL-INDEX.md (diff=$diff)"
+      fail "$label declares $declared_active/$declared_writers/$declared_non_writers but contains $active_count/$writer_count/$non_writer_count"
+      policy_errors=1
     fi
+  fi
+  return 0
 }
 
-# ═══════════════════════════════════════════════════════════
-# Main
-# ═══════════════════════════════════════════════════════════
-main() {
-    echo "═══════════════════════════════════════════════════════"
-    echo "  Agent Validation Tests"
-    echo "  Agents dir: $AGENTS_DIR"
-    echo "  Skills dir: $SKILLS_DIR"
-    echo "═══════════════════════════════════════════════════════"
+validate_example_block() {
+  local source="$1"
+  local label="$2"
+  local start_marker="$3"
+  local end_marker="$4"
+  local expected_pairs="${5:-}"
+  local block
+  block="$(capture_example "$source" "$start_marker" "$end_marker")"
 
-    test_frontmatter_validity
-    test_permission_completeness
-    test_stale_skill_references
-    test_no_duplicate_skills
-    test_task_block_safety
-    test_no_git_workflows
-    test_skill_count_consistency
+  if [[ -z "$block" ]]; then
+    fail "$label is missing or unreadable"
+    policy_errors=1
+    return
+  fi
 
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "  Results: $(green "$PASSED passed"), $(red "$FAILED failed")"
-    echo "═══════════════════════════════════════════════════════"
-
-    if $TEST_FAILED; then
-        exit 1
+  # A single captured example can contain several serialized waves.  Validate
+  # each wave independently so actual assignments are counted concurrently, while
+  # still checking every dispatch line in the example.
+  local line wave_block="" wave_index=0 saw_wave=0
+  while IFS= read -r line; do
+    if [[ "$line" == Phase:*Wave* || "$line" == "Post-writer wave:"* || "$line" =~ ^[[:space:]]*Wave[[:space:]][0-9]+ || "$line" =~ ^[[:space:]]*Post-writer ]]; then
+      if [[ "$saw_wave" -eq 1 ]]; then
+        wave_index=$((wave_index + 1))
+        validate_wave_block "$label wave $wave_index" "$wave_block"
+      fi
+      saw_wave=1
+      wave_block="$line"
+    elif [[ "$saw_wave" -eq 1 ]]; then
+      wave_block+=$'\n'"$line"
+    else
+      wave_block+="$line"$'\n'
     fi
+  done <<< "$block"
+  if [[ "$saw_wave" -eq 1 ]]; then
+    wave_index=$((wave_index + 1))
+    validate_wave_block "$label wave $wave_index" "$wave_block"
+  else
+    validate_wave_block "$label" "$wave_block"
+  fi
+
+  if [[ -n "$expected_pairs" ]] || grep -Eq '^[[:space:]]*(Pair|Assignment for) "' <<< "$block"; then
+    if ! validate_parsed_pair_blocks "$label" "$block" "$expected_pairs"; then
+      policy_errors=1
+    fi
+  fi
 }
 
-main "$@"
+run_allocation_fixture_tests() {
+  local fixture_file
+  local label expected active_count writer_count non_writer_count actual
+
+  ALLOCATION_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ingenium-agent-validation.XXXXXX")"
+  fixture_file="$ALLOCATION_FIXTURE_DIR/allocations.tsv"
+  printf '%s\n' \
+    'zero-writers-six-read-only|accept|6|0|6' \
+    'one-writer-five-read-only|accept|6|1|5' \
+    'two-writers-four-read-only|accept|6|2|4' \
+    'three-writers-three-read-only|accept|6|3|3' \
+    'three-writers-four-read-only|accept|7|3|4' \
+    'four-writers|accept|4|4|0' \
+    'twenty-writers|accept|20|20|0' \
+    'unclassified-active-agent|reject|6|1|4' \
+    > "$fixture_file"
+
+  while IFS='|' read -r label expected active_count writer_count non_writer_count; do
+    if allocation_is_valid "$active_count" "$writer_count" "$non_writer_count"; then
+      actual='accept'
+    else
+      actual='reject'
+    fi
+
+    if [[ "$actual" == "$expected" ]]; then
+      pass "allocation fixture $label is $actual"
+    else
+      fail "allocation fixture $label expected $expected but was $actual"
+    fi
+  done < "$fixture_file"
+
+  ALLOCATION_FIXTURE_DIR=""
+  cleanup_allocation_fixtures
+}
+
+run_todo_allocation_fixture_tests() {
+  local fixture_file
+  local label expected allocation actual
+
+  ALLOCATION_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ingenium-agent-validation.XXXXXX")"
+  fixture_file="$ALLOCATION_FIXTURE_DIR/todo-allocations.tsv"
+  printf '%s\n' \
+    'one-selected-todo-two-agents|reject|2' \
+    'two-selected-todos-four-agents|reject|2,2' \
+    'three-selected-todos-six-agents|reject|2,2,2' \
+    'single-one-agent|accept|1' \
+    'single-three-agents|reject|3' \
+    'single-four-agents|reject|4' \
+    'single-five-agents|reject|5' \
+    'single-six-agents|reject|6' \
+    'single-zero-agents|reject|0' \
+    'single-seven-agents|reject|7' \
+    'multi-zero-agents|reject|0,2' \
+    'multi-singleton|reject|1,2' \
+    'multi-third-agent|reject|2,3' \
+    'multi-three-uneven|reject|2,1,3' \
+    'six-agents-on-six-todos|accept|1,1,1,1,1,1' \
+    'twenty-agents-on-twenty-todos|accept|1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1' \
+    'uneven-four-agent-allocation|reject|3,1' \
+    'four-todo-pairs|reject|2,2,2,2' \
+    > "$fixture_file"
+
+  while IFS='|' read -r label expected allocation; do
+    if todo_allocation_is_valid "$allocation"; then
+      actual='accept'
+    else
+      actual='reject'
+    fi
+
+    if [[ "$actual" == "$expected" ]]; then
+      pass "Todo allocation fixture $label is $actual"
+    else
+      fail "Todo allocation fixture $label expected $expected but was $actual"
+    fi
+  done < "$fixture_file"
+
+  ALLOCATION_FIXTURE_DIR=""
+  cleanup_allocation_fixtures
+}
+
+run_allocation_fixture_tests
+run_todo_allocation_fixture_tests
+run_structural_todo_fixture_tests
+
+if [[ -f "$ORCHESTRATOR" ]]; then
+  validate_example_block "$ORCHESTRATOR" \
+    "orchestrator bounded dispatch example" \
+    'Phase: "Validation message"' \
+    '→ The writer completes the declared implementation and self-verification.' \
+    1
+fi
+
+if [[ "$policy_errors" -eq 0 ]]; then
+  pass "all canonical policy sources and recognizable examples passed"
+fi
+
+CHAT_FILE="$AGENTS_DIR/chat/ingenium-chat.md"
+if [[ ! -f "$CHAT_FILE" ]]; then
+  fail "no chat agent profile found at $CHAT_FILE"
+elif ! grep -q '^  edit: deny$' "$CHAT_FILE" || ! grep -q '^  write: deny$' "$CHAT_FILE" || ! grep -q '^  bash: deny$' "$CHAT_FILE" || ! grep -q '"\*": "deny"' "$CHAT_FILE"; then
+  fail "canonical chat safety boundary is invalid"
+else
+  pass "canonical chat denies file/shell mutation and delegation; only explicit saved-memory writes are permitted"
+fi
+
+QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
+DOCS_PROFILE="$AGENTS_DIR/execution/ingenium-docs.md"
+VISION_POLICY="$ORCHESTRATOR"
+SECURITY_PROFILE="$AGENTS_DIR/security/ingenium-security-auditor.md"
+SECURITY_POLICY="$REPO_ROOT/.opencode/skills/security-audit/SKILL.md"
+CAUSAL_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+)
+RECURSION_POLICY_SOURCES=(
+  "${CAUSAL_POLICY_SOURCES[@]}"
+  "$QA_PROFILE"
+  "$DOCS_PROFILE"
+  "$VISION_POLICY"
+  "$SECURITY_PROFILE"
+  "$SECURITY_POLICY"
+)
+
+causal_policy_errors=0
+
+require_contract_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  if grep -Eqi "$pattern" "$source"; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    causal_policy_errors=1
+  fi
+}
+
+require_normalized_contract_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  local normalized_source
+
+  normalized_source="$(tr '\n' ' ' < "$source" | tr -s '[:space:]' ' ' | tr '[:upper:]' '[:lower:]')"
+  if [[ "$normalized_source" =~ $pattern ]]; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    causal_policy_errors=1
+  fi
+}
+
+# Roadmap terminal-state guard: an active append-only start marker means work is
+# still open. The roadmap may describe per-task PASS criteria, but it must not
+# claim final completion until every active marker is closed and reconciled.
+validate_roadmap_terminal_state() {
+  local active_ids
+  active_ids="$(awk '
+    /<!-- \(work-started\)/ { active[$3] = 1 }
+    /<!-- \(work-complete\)/ { delete active[$3] }
+    END { for (id in active) print id }
+  ' "$ROADMAP_FILE" | sort)"
+
+  if [[ -n "$active_ids" ]]; then
+    if grep -Eqi 'final[[:space:]-]+completion|terminal[[:space:]-]+PASS|Only[[:space:]]+`?PASS`?' "$ROADMAP_FILE" && \
+       ! grep -Eqi 'no final completion may be|does not end the turn with a progress or completion response' "$ROADMAP_FILE"; then
+      fail "ROADMAP.md claims final completion while active work markers remain"
+      causal_policy_errors=1
+    else
+      pass "ROADMAP.md blocks final PASS/completion while active markers remain"
+    fi
+    require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'TodoWrite.*(reconcil|live checklist)' 'active-marker/TodoWrite separation and reconciliation requirement'
+  else
+    pass "ROADMAP.md has no unreconciled active work markers"
+  fi
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'explicit user.*STOP.*CANCELLED.*terminal|STOP.*CANCELLED.*only on an explicit user request|Only.*PASS.*ESCALATE_USER.*STOP.*CANCELLED' \
+    'explicit-user-request STOP/CANCELLED task contracts'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'Deployment owner|named authorized writer deployment owner.*Docker/Compose permission' \
+    'task-level/runtime deployment owner requirement'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'open-roadmap rule|active markers block terminal completion' \
+    'open-roadmap terminal guard'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'roadmap task or TodoWrite item is open' \
+    'open-roadmap work detection'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+    'immediately dispatches the next declared phase|autonomous resumption' \
+    'open-roadmap synchronous resumption'
+}
+
+# Require a task-level deployment-owner field. Runtime tasks name an
+# authorized Docker/Compose writer; documentation-only tasks explicitly use
+# N/A rather than inheriting a document-wide statement.
+validate_roadmap_task_deployment_owners() {
+  local task=""
+  local block=""
+  local missing=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^#{3,4}[[:space:]]+[A-Z][A-Z0-9]*-[0-9]{3}[[:space:]]+[-—] ]]; then
+      if [[ -n "$task" && "$block" != *"**Deployment owner:**"* ]]; then
+        fail "ROADMAP.md task $task is missing a task-level Deployment owner"
+        causal_policy_errors=1
+        missing=1
+      fi
+      task="$line"
+      block="$line"
+    else
+      block+=$'\n'$line
+    fi
+  done < "$ROADMAP_FILE"
+  if [[ -n "$task" && "$block" != *"**Deployment owner:**"* ]]; then
+    fail "ROADMAP.md task $task is missing a task-level Deployment owner"
+    causal_policy_errors=1
+    missing=1
+  fi
+  if [[ "$missing" -eq 0 ]]; then
+    pass "ROADMAP.md declares a task-level Deployment owner for every task"
+  fi
+}
+
+# The roadmap is the source of truth for task identity.  Do not maintain a
+# second hard-coded allow-list here: new families (for example USAGE-*) must
+# receive the same contract checks as the original BUG/MCP/CTX/DOC families.
+validate_roadmap_task_contracts() {
+  local task=""
+  local block=""
+  local line
+  local errors=0
+  local graph_block
+  local token
+  local prefix
+  local start_number
+  local end_number
+  local number
+  local next_task
+  local -a required_fields=(
+    '\*\*IN_SCOPE:\*\*'
+    '\*\*OUT_OF_SCOPE:\*\*'
+    '\*\*Owner:\*\*'
+    '\*\*Dependencies:\*\*'
+    '\*\*Acceptance:\*\*'
+    '\*\*STOP_CONDITION:\*\*'
+    '\*\*Escalation:\*\*'
+    '\*\*Verification owner:\*\*'
+    '\*\*Deployment owner:\*\*'
+    '\*\*Rollback/safety:\*\*'
+    '\*\*Tests:\*\*'
+    '\*\*Docs:\*\*'
+    '\*\*Exclusive writer territory:\*\*'
+    '\*\*Phase/counts:\*\*'
+    '\*\*Verification plan:\*\*'
+    '\*\*Causal remediation rule:\*\*'
+    '\*\*Finding classification:\*\*'
+  )
+  declare -A task_ids=()
+  declare -A graph_task_ids=()
+  declare -A standalone_task_ids=()
+
+  validate_task_block() {
+    local task_id="$1"
+    local task_block="$2"
+    local field
+    for field in "${required_fields[@]}"; do
+      if ! grep -Eqi -- "$field" <<<"$task_block"; then
+        fail "ROADMAP.md task $task_id is missing contract field matching $field"
+        causal_policy_errors=1
+        errors=1
+      fi
+    done
+
+    local dependencies
+    dependencies="$(awk '
+      /^- \*\*Dependencies:\*\*/ { capture = 1 }
+      capture && /^- \*\*/ && !/^- \*\*Dependencies:\*\*/ { exit }
+      capture { print }
+    ' <<< "$task_block" | tr -s '[:space:]' ' ')"
+    if [[ "$dependencies" == *"\`$task_id\` neither blocks nor waits on unrelated"* ]]; then
+      standalone_task_ids["$task_id"]=1
+    fi
+
+    local phase_counts
+    phase_counts="$(tr '\n' ' ' <<<"$task_block" | grep -Eio -- '-[[:space:]]+\*\*Phase/counts:\*\*[[:space:]]+.*' | head -n 1 || true)"
+    if [[ "$phase_counts" =~ A=([0-9]+)\`?,[[:space:]]*\`?W=([0-9]+) ]]; then
+      if (( BASH_REMATCH[2] > BASH_REMATCH[1] )); then
+        fail "ROADMAP.md task $task_id has more writers than active agents"
+        causal_policy_errors=1
+        errors=1
+      fi
+    elif [[ ! "$phase_counts" =~ ([0-9]+)[[:space:]]+writers?[[:space:]]*/[[:space:]]*([0-9]+)[[:space:]]+non[-[:space:]]*writers? ]]; then
+      fail "ROADMAP.md task $task_id has an invalid Phase/counts allocation"
+      causal_policy_errors=1
+      errors=1
+    fi
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    next_task=""
+    if [[ "$line" =~ ^#{3,4}[[:space:]]+([A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[0-9]{3})([[:space:]]+[-—]) ]]; then
+      next_task="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^#{2,4}[[:space:]]+.*\(([A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[0-9]{3})\)[[:space:]]*$ ]]; then
+      next_task="${BASH_REMATCH[1]}"
+    fi
+    if [[ -n "$next_task" ]]; then
+      if [[ -n "$task" ]]; then
+        validate_task_block "$task" "$block"
+      fi
+      task="$next_task"
+      block="$line"
+      if [[ -n "${task_ids[$task]:-}" ]]; then
+        fail "ROADMAP.md repeats approved task ID $task"
+        causal_policy_errors=1
+        errors=1
+      fi
+      task_ids["$task"]=1
+    elif [[ -n "$task" ]]; then
+      block+=$'\n'"$line"
+    fi
+  done < "$ROADMAP_FILE"
+
+  if [[ -n "$task" ]]; then
+    validate_task_block "$task" "$block"
+  fi
+  if [[ "${#task_ids[@]}" -eq 0 ]]; then
+    fail "ROADMAP.md has no approved task contracts"
+    causal_policy_errors=1
+    errors=1
+  fi
+
+  graph_block="$(awk '
+    /^## Phase dependency graph and allocations$/ || /^### Allocated task IDs and dependency graph$/ { capture = 1; next }
+    capture && /^##+ / { capture = 0 }
+    capture { print }
+  ' "$ROADMAP_FILE")"
+  if [[ -z "$graph_block" ]]; then
+    fail "ROADMAP.md is missing the approved phase dependency graph"
+    causal_policy_errors=1
+    errors=1
+  else
+    while IFS= read -r token; do
+      [[ -z "$token" ]] && continue
+      if [[ "$token" =~ ^([A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*)-([0-9]{3})\.\.([0-9]{3})$ ]]; then
+        prefix="${BASH_REMATCH[1]}"
+        start_number=$((10#${BASH_REMATCH[3]}))
+        end_number=$((10#${BASH_REMATCH[4]}))
+        if [[ "$start_number" -gt "$end_number" ]]; then
+          fail "ROADMAP.md has a descending approved task range: $token"
+          causal_policy_errors=1
+          errors=1
+          continue
+        fi
+        for ((number = start_number; number <= end_number; number++)); do
+          graph_task_ids["$prefix-$(printf '%03d' "$number")"]=1
+        done
+      else
+        graph_task_ids["$token"]=1
+      fi
+    done < <(grep -Eo '[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[0-9]{3}(\.\.[0-9]{3})?' <<<"$graph_block" | sort -u || true)
+
+    if [[ "${#graph_task_ids[@]}" -eq 0 ]]; then
+      fail "ROADMAP.md approved phase dependency graph declares no task IDs"
+      causal_policy_errors=1
+      errors=1
+    fi
+    for token in "${!graph_task_ids[@]}"; do
+      if [[ -z "${task_ids[$token]:-}" ]]; then
+        fail "ROADMAP.md phase graph references task without a contract: $token"
+        causal_policy_errors=1
+        errors=1
+      fi
+    done
+    for token in "${!task_ids[@]}"; do
+      if [[ -z "${graph_task_ids[$token]:-}" && -z "${standalone_task_ids[$token]:-}" ]]; then
+        fail "ROADMAP.md task is not present in the approved phase graph: $token"
+        causal_policy_errors=1
+        errors=1
+      fi
+    done
+  fi
+
+  if [[ "$errors" -eq 0 ]]; then
+    pass "ROADMAP.md approved task IDs and contract fields are dynamic and complete (${#task_ids[@]} tasks)"
+  fi
+}
+
+# The active roadmap may be replaced, but its dated archive and checksum sidecar
+# must remain present.  Byte-level hash verification belongs to the append-only
+# test; keep this policy test focused on the canonical artifact contract.
+validate_roadmap_archive() {
+  local archive
+  local sidecar
+  local recorded_hash
+  local archive_errors=0
+  local -a archives=()
+
+  if [[ ! -d "$ROADMAP_ARCHIVE_DIR" ]]; then
+    fail "roadmap archive directory is missing: $ROADMAP_ARCHIVE_DIR"
+    causal_policy_errors=1
+    return
+  fi
+
+  mapfile -t archives < <(find "$ROADMAP_ARCHIVE_DIR" -maxdepth 1 -type f -name 'ROADMAP-*.md' -print | sort)
+  if [[ "${#archives[@]}" -eq 0 ]]; then
+    fail "no canonical ROADMAP archive exists in $ROADMAP_ARCHIVE_DIR"
+    causal_policy_errors=1
+    return
+  fi
+
+  for archive in "${archives[@]}"; do
+    sidecar="${archive}.sha256"
+    if [[ ! -r "$sidecar" ]]; then
+      fail "roadmap archive is missing its checksum sidecar: ${sidecar#"$REPO_ROOT"/}"
+      causal_policy_errors=1
+      archive_errors=1
+      continue
+    fi
+
+    recorded_hash="$(awk 'NF { print $1; exit }' "$sidecar")"
+    if [[ ! "$recorded_hash" =~ ^[[:xdigit:]]{64}$ ]]; then
+      fail "roadmap archive checksum sidecar is malformed: ${sidecar#"$REPO_ROOT"/}"
+      causal_policy_errors=1
+      archive_errors=1
+      continue
+    fi
+
+  done
+
+  if [[ "$archive_errors" -eq 0 ]]; then
+    pass "canonical roadmap archive(s) have SHA-256 sidecars (${#archives[@]})"
+  fi
+}
+
+if [[ ! -r "$ROADMAP_FILE" ]]; then
+  fail "ROADMAP.md is missing or unreadable"
+else
+  validate_roadmap_archive
+  validate_roadmap_terminal_state
+  validate_roadmap_task_deployment_owners
+  validate_roadmap_task_contracts
+fi
+
+# Dependency barriers and exclusive territories remain independent of concurrency.
+SYNCHRONOUS_PHASE_POLICY_SOURCES=(
+  "$ROADMAP_FILE"
+)
+for policy_source in "${SYNCHRONOUS_PHASE_POLICY_SOURCES[@]}"; do
+  if [[ ! -r "$policy_source" ]]; then
+    fail "synchronous phase policy source is missing or unreadable: $policy_source"
+    causal_policy_errors=1
+    continue
+  fi
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'synchron|serialized' \
+    'synchronous phase execution'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'phase.*barrier|barrier.*(phase|wave|subwave)|(phase|wave).*(finish|complete|verif).*(before|prior to).*(next[[:space:]-]*)?(phase|wave)' \
+    'synchronous phase barrier'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'zero[[:space:]-]+overlap|overlap.*zero|write territory overlap.*0|exclusive[[:space:]-]+territor' \
+    'zero-overlap exclusive territory rule'
+done
+
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'Deployment owner' 'deployment-owner contract coverage'
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'visual|1440x900|390x844' 'visual-gate contract coverage'
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'QA/security.*once|QA.*security.*once|QA/security report' 'bounded QA/security review coverage'
+require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" \
+  'security-auditor|security' 'security-review contract coverage'
+
+for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
+  if [[ ! -r "$policy_source" ]]; then
+    fail "causal policy source is missing or unreadable: $policy_source"
+    causal_policy_errors=1
+    continue
+  fi
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" 'IN_SCOPE' 'IN_SCOPE declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'OUT_OF_SCOPE' 'OUT_OF_SCOPE declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'acceptance criteria' 'acceptance criteria declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'STOP_CONDITION' 'STOP_CONDITION declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'verification plan' 'verification plan declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'escalation rule' 'escalation rule declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'bounded diagnosis' 'bounded diagnosis declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'external credential.*destructive.*mutually exclusive product.*genuinely ambiguous.*reproducible root cause' 'five-condition escalation taxonomy'
+  require_contract_pattern "$policy_source" "$policy_label" 'root.?cause.*(regression|remediation)' 'causal remediation/proving-regression link'
+  require_contract_pattern "$policy_source" "$policy_label" 'BLOCKING' 'BLOCKING finding classification'
+  require_contract_pattern "$policy_source" "$policy_label" 'FOLLOW_UP' 'FOLLOW_UP finding classification'
+  require_contract_pattern "$policy_source" "$policy_label" 'INFORMATIONAL' 'INFORMATIONAL finding classification'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'stop.{0,80}cancelled.{0,180}terminal' \
+    'terminal STOP/CANCELLED handling'
+done
+
+# Autonomous-completion contract regressions: policy text must retain the
+# roadmap state machine and all release gates, not merely source-test guidance.
+for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'roadmap execution continues autonomously.*every scoped roadmap task.*evidence-backed completion' \
+    'autonomous evidence-backed roadmap completion'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'never report completion from source tests alone' \
+    'source-tests-alone completion prohibition'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'runtime-impacting changes require.*deployment owner.*deployment (owner|wave)' \
+    'deployment owner/wave requirement'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'rebuild.*restart.*current merged source.*health-check.*actual routes' \
+    'current-source deployment and route health-check loop'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'visual/ui gates and full acceptance are mandatory' \
+    'visual/UI and full-acceptance terminal gates'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'roadmap markers.*TodoWrite' \
+    'roadmap-marker/TodoWrite reconciliation'
+done
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'exactly one QA report and at most one security report' \
+  'single QA/optional-security implementation boundary'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'writer remediation receives only its named minimum targeted regression.*proceeds directly to deploy and acceptance' \
+  'targeted-only writer recheck'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'STOP.*CANCELLED.*only when explicitly requested.*remediation request' \
+  'explicit-request STOP/CANCELLED boundary'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'named.*authorized.*deployment owner.*writer.*Docker/Compose' \
+  'named authorized writer Docker/Compose deployment owner'
+
+# Open-roadmap turn boundary: open roadmap/TodoWrite work requires immediate
+# continuation, and context pressure or partial/unverified work is not terminal.
+OPEN_ROADMAP_TURN_SOURCES=(
+  "$ORCHESTRATOR"
+)
+for policy_source in "${OPEN_ROADMAP_TURN_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'roadmap task or.*TodoWrite.*item remains open.*must not emit a normal final/progress response.*end a turn as a status update.*require a user reprompt.*immediately dispatch the next declared phase' \
+    'open-roadmap immediate-dispatch turn rule'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'token/turn pressure.*partial agent completion.*unverified source changes are never terminal reasons' \
+    'non-terminal pressure/partial/unverified conditions'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Only .*PASS.*ESCALATE_USER.*explicit user-requested.*STOP.*explicit user-requested.*CANCELLED.*end a turn' \
+    'exclusive terminal response states'
+done
+
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'Only an .*in-scope.*BLOCKING.*reopen' 'in-scope blocker-only reopening'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'never auto-dispatch' 'out-of-scope dispatch prohibition'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'exactly one QA report.*declared implementation boundary' 'single targeted QA report'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'sole owner.*full E2E.*container suite' 'single full-suite owner'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'never dispatch remediation, Docs, another QA pass' 'no recursive QA/Docs dispatch'
+require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'directly affected canonical documentation or the user explicitly requests' 'conditional documentation scope'
+require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'never dispatch or request QA, Docs' 'no recursive Docs dispatch'
+require_contract_pattern "$VISION_POLICY" "Vision policy" 'one changed-route visual gate.*final UI change' 'post-final-change route gate'
+require_contract_pattern "$VISION_POLICY" "Vision policy" 'one passive full-site sweep.*user-requested UI batch' 'one batch sweep'
+require_contract_pattern "$VISION_POLICY" "Vision policy" 'smallest route recheck.*root cause fixed|visual failure.*reproducible in-scope root cause.*causal source remediation.*smallest route recheck' 'causal visual recheck'
+require_contract_pattern "$VISION_POLICY" "Vision policy" 'Docs-only and non-UI work never opens or reopens' 'non-UI visual-gate prohibition'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'current diff.*relevant dependency' 'current-diff/dependency default'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'history scan may run.*once' 'one-time history scan'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'confirmed secret exposure.*critical explicit trigger' 'history-scan trigger boundary'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'outside scope.*FOLLOW_UP.*immediately exploitable' 'out-of-scope security classification'
+require_contract_pattern "$SECURITY_POLICY" "security policy" 'history scan may run.*once' 'one-time history scan'
+
+# Reviewer policy is intentionally asserted only against the four canonical
+# sources changed by this contract. Other policy copies are outside this task.
+for policy_source in "$ORCHESTRATOR"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'exactly one QA report and at most one security report' \
+    'one-QA/optional-security implementation boundary'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Security.*only.*predeclare.*changed security surface.*ordinary harness or test changes' \
+    'predeclared changed-security-surface dispatch gate'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Reviewers cannot add acceptance criteria or expand scope|Neither reviewer can add acceptance criteria, expand scope' \
+    'immutable reviewer scope and acceptance criteria'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
+    'strict BLOCKING classification'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'orchestrator cannot promote.*FOLLOW_UP.*INFORMATIONAL.*BLOCKING' \
+    'FOLLOW_UP/INFORMATIONAL promotion prohibition'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Non-exploitable hardening.*test-hygiene suggestions are.*FOLLOW_UP' \
+    'non-exploitable hardening/test-hygiene FOLLOW_UP classification'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'urgency does not waive.*functional tests.*forbids speculative hardening loops' \
+    'urgency functional-test and anti-hardening-loop rule'
+done
+
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'No reviewer rerun is permitted after writer remediation.*named minimum targeted regression.*proceeds directly to deploy and acceptance' \
+  'post-remediation reviewer-rerun prohibition'
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'Do not add acceptance criteria, expand scope' \
+  'immutable reviewer scope and acceptance criteria'
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
+  'strict BLOCKING classification'
+require_contract_pattern "$QA_PROFILE" "QA profile" \
+  'FOLLOW_UP.*non-exploitable hardening and test-hygiene suggestions|non-exploitable hardening and test-hygiene suggestions.*FOLLOW_UP' \
+  'non-exploitable hardening/test-hygiene FOLLOW_UP classification'
+
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'at most one.*security report per declared implementation boundary' \
+  'optional single security report boundary'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'Ordinary harness or test changes are not a security surface and must not trigger security review' \
+  'ordinary harness/test security-review exclusion'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'add acceptance criteria, or expand scope' \
+  'immutable reviewer scope and acceptance criteria'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
+  'strict BLOCKING classification'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'non-exploitable hardening, test-hygiene.*FOLLOW_UP|FOLLOW_UP.*non-exploitable hardening, test-hygiene' \
+  'non-exploitable hardening/test-hygiene FOLLOW_UP classification'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" \
+  'No reviewer rerun is permitted after writer remediation.*named minimum targeted regression.*proceeds directly to deploy and acceptance' \
+  'post-remediation reviewer-rerun prohibition'
+
+REVIEWER_RERUN_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$QA_PROFILE"
+  "$SECURITY_PROFILE"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$ROADMAP_FILE"
+)
+STALE_REVIEWER_EXCEPTION_PATTERN='(rerun|re-run)[^.!?]{0,240}(unless|only[[:space:]]+when|when)[^.!?]{0,180}(reviewer|review|security|boundary)|(unless|only[[:space:]]+when|when)[^.!?]{0,240}(reviewer|review|security|boundary)[^.!?]{0,180}(rerun|re-run)'
+
+active_reviewer_policy_text() {
+  local source="$1"
+  if [[ "$source" == "$ROADMAP_FILE" ]]; then
+    # Roadmap evidence is historical execution data, not an active policy claim.
+    awk '
+      /<!-- \(work-(started|complete)\)/ { next }
+      /^[[:space:]]*Evidence[[:space:]]/ {
+        in_evidence = 1
+        next
+      }
+      in_evidence {
+        if ($0 ~ /^[[:space:]]*$/) {
+          in_evidence = 0
+          next
+        }
+        if ($0 !~ /^#{1,6}[[:space:]]/) next
+        in_evidence = 0
+      }
+      { print }
+    ' "$source"
+  else
+    awk '/<!-- \(work-(started|complete)\)/ { next } { print }' "$source"
+  fi
+}
+
+for policy_source in "${REVIEWER_RERUN_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  if [[ ! -r "$policy_source" ]]; then
+    fail "$policy_label is missing for reviewer-rerun validation"
+    causal_policy_errors=1
+    continue
+  fi
+  stale_reviewer_exception="$(active_reviewer_policy_text "$policy_source" | grep -Ein "$STALE_REVIEWER_EXCEPTION_PATTERN" || true)"
+  if [[ -n "$stale_reviewer_exception" ]]; then
+    fail "$policy_label permits a reviewer rerun after remediation: $stale_reviewer_exception"
+    causal_policy_errors=1
+  else
+    pass "$policy_label contains no post-remediation reviewer-rerun exception in active policy text"
+  fi
+done
+
+# Documentation authority is repository-first. Direct Docs Workspace mutation is
+# an explicit-user-request path, never an automatic post-change/session action.
+DOC_AUTHORITY_SOURCES=(
+  "$REPO_ROOT/.opencode/skills/mcp-tooling/SKILL.md"
+  "$REPO_ROOT/.opencode/skills/documentation/SKILL.md"
+  "$DOCS_PROFILE"
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-fast.md"
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$REPO_ROOT/docs/reference/docs-workspace.md"
+)
+for policy_source in "${DOC_AUTHORITY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" 'normal documentation authority' 'repository-first documentation authority'
+  require_contract_pattern "$policy_source" "$policy_label" 'explicit(ly)? (user )?request' 'explicit-request Workspace boundary'
+done
+
+if grep -Eqi 'save context to the Ingenium Docs workspace|Full Export at Session End|MUST:.*session summary|Do NOT ask permission.*save' "$REPO_ROOT/.opencode/skills/mcp-tooling/SKILL.md"; then
+  fail "mcp-tooling retains an automatic Docs Workspace write/session-export mandate"
+  causal_policy_errors=1
+else
+  pass "mcp-tooling has no automatic Docs Workspace write/session-export mandate"
+fi
+
+for engineer_profile in \
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-fast.md" \
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"; do
+  if grep -Eq '^  ingenium_docs_(create|update|delete|restore|move|save_draft|import_pages|add_tag|remove_tag|create_comment|resolve_comment|delete_comment|create_space):' "$engineer_profile"; then
+    fail "$(basename "$engineer_profile") grants unnecessary direct Docs Workspace mutation"
+    causal_policy_errors=1
+  else
+    pass "$(basename "$engineer_profile") denies direct Docs Workspace mutation by default"
+  fi
+done
+
+# Scenario regressions: ordinary in-scope failures must remain actionable, while
+# the five real decision/access boundaries remain the only normal escalation.
+require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
+  'compile, test, package, scanner, configuration, or runtime defect.*concrete reproducible root cause' \
+  'recognizes scanner rejection as autonomous remediation work'
+require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
+  'source fix.*targeted test.*deploy.*acceptance' \
+  'continues the planned feature pipeline after a source fix'
+require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
+  'After a writer remediates a reviewer-reported BLOCKING root cause.*minimum targeted regression' \
+  'runs only the proving regression'
+require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
+  'never rerun QA or security.*minimum targeted regression.*proceed directly.*deploy and acceptance' \
+  'prevents reviewer reruns and resumes deploy/acceptance'
+require_contract_pattern "$ORCHESTRATOR" "scenario: unavailable external credential" \
+  'required external credential or access.*attempted configured path' \
+  'is a permitted ESCALATE_USER boundary'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'destructive or irreversible.*authorization' \
+  'covers unauthorized destructive work'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'mutually exclusive product decision' \
+  'covers product decisions'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'genuinely ambiguous' \
+  'covers genuine ambiguity'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'bounded diagnosis.*reproducible root cause' \
+  'covers unreproduced causes after diagnosis'
+require_contract_pattern "$SECURITY_PROFILE" "scenario: unrelated security finding" \
+  'outside scope.*FOLLOW_UP.*immediately exploitable' \
+  'is classified FOLLOW_UP rather than blocking release'
+
+# Reject both recursive reviewer instructions and the old retry-count terminal
+# rule. Keep this narrowly scoped to policy language; historical/security
+# terminology outside these canonical sources is not an execution instruction.
+STALE_POLICY_PATTERNS=(
+  'after[[:space:]]+every[[:space:]]+(subagent[[:space:]]+)?(task|change)'
+  'mandatory[[:space:]]+after[[:space:]]+every[[:space:]]+change'
+  'all[[:space:]]+sub-agent[[:space:]]+outputs[[:space:]]+must[[:space:]]+be[[:space:]]+audited'
+  'every[[:space:]]+sub-agent[[:space:]]+finding[[:space:]]+must[[:space:]]+be[[:space:]]+added'
+  'iterative[[:space:]]+testing[[:space:]]+required[[:space:]]+until'
+  'before[[:space:]]+final[[:space:]]+completion[[:space:]]+or[[:space:]]+commit.*full-site'
+  'automatically[[:space:]]+escalate.*git[[:space:]-]*history'
+  'automatically[[:space:]]+scan[[:space:]]+git[[:space:]-]*history'
+  'maximum[[:space:]]+(of[[:space:]]+)?3[[:space:]]+verification[[:space:]]+phases'
+  'each[[:space:]]+individual[[:space:]]+check.*(at[[:space:]]+most|may[[:space:]]+execute).*2'
+  'one[[:space:]]+writer[[:space:]]+remediation[[:space:]]+round'
+  'second[[:space:]]+failed.*is[[:space:]]+terminal'
+  'second[[:space:]]+failed.*return.*ESCALATE_USER'
+  'if[[:space:]]+the[[:space:]]+recheck.*ESCALATE_USER'
+  'STOP[[:space:]]+and[[:space:]]+CANCELLED[[:space:]]+are[[:space:]]+terminal:'
+)
+for policy_source in "${RECURSION_POLICY_SOURCES[@]}"; do
+  [[ -r "$policy_source" ]] || continue
+  for stale_pattern in "${STALE_POLICY_PATTERNS[@]}"; do
+    stale_match="$(grep -Ein "$stale_pattern" "$policy_source" || true)"
+    if [[ -n "$stale_match" ]]; then
+      fail "$(basename "$policy_source") contains stale recursive or premature-escalation policy text: $stale_match"
+      causal_policy_errors=1
+    fi
+  done
+done
+
+if [[ "$causal_policy_errors" -eq 0 ]]; then
+  pass "causal task contracts, bounded diagnosis, cancellation, and non-recursive policy invariants hold"
+fi
+
+for removed_phase_path in \
+  "$REPO_ROOT/scripts/phase-commit.sh" \
+  "$REPO_ROOT/config/phase-commit.conf" \
+  "$REPO_ROOT/tests/test-phase-commit.sh"; do
+  if [[ -e "$removed_phase_path" ]]; then
+    fail "obsolete phase commit path still exists: ${removed_phase_path#"$REPO_ROOT"/}"
+  fi
+done
+
+ORDINARY_GIT_POLICY_SOURCES=(
+  "${DOCUMENTED_POLICY_SOURCES[@]}"
+  "$REPO_ROOT/docs/develop/testing.md"
+)
+
+if grep -Eqi 'phase-commit|Phase ID|Begin SHA|Expected end commit owner|verify-history|active phase|phase boundary' "${ORDINARY_GIT_POLICY_SOURCES[@]}"; then
+  fail "active workflow authority still contains obsolete phase commit machinery"
+elif ! grep -Fq "Manual and user-created commits are valid" "${DOCUMENTED_POLICY_SOURCES[@]}" || \
+     ! grep -Fq "ordinary non-interactive Git" "${DOCUMENTED_POLICY_SOURCES[@]}" || \
+     ! grep -Fq '`gh`' "${DOCUMENTED_POLICY_SOURCES[@]}" || \
+     ! grep -Fq "never block continued" "${DOCUMENTED_POLICY_SOURCES[@]}"; then
+  fail "active workflow authority does not document the ordinary Git/GitHub workflow"
+else
+  pass "phase commit machinery is removed and ordinary Git/GitHub workflow is authoritative"
+fi
+
+PLAYWRIGHT_PROFILES=("$QA_PROFILE")
+if grep -Eq '^  playwright_' "${PLAYWRIGHT_PROFILES[@]}"; then
+  fail "QA profiles retain an unmanaged Playwright permission namespace"
+elif ! grep -Fq '  ingenium_playwright_*: allow' "$QA_PROFILE"; then
+  fail "QA profile is missing the managed Playwright permission namespace"
+else
+  pass "QA profiles grant only the managed Playwright namespace"
+fi
+
+if ! bash "$REPO_ROOT/tests/test-doc-config-audit.sh"; then
+  FAILED=1
+fi
+
+if [[ "$FAILED" -ne 0 ]]; then exit 1; fi

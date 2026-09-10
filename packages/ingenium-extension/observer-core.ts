@@ -1,0 +1,202 @@
+/**
+ * Observer Core — Self-learning pipeline core.
+ *
+ * On session start: imports locally-saved observations (API-down fallback) into the DB.
+ * On session idle: triggers synthesis if the check-interval timer has elapsed.
+ *
+ * Extension events always resolve an explicit worktree-derived project. They never fall
+ * back to global-default, which is reserved for the container's own session.
+ */
+
+import { callMcpTool, McpBridgeError, mcpToolData } from "./mcp-client.js";
+import { resolveExtensionBinding } from "./extension-binding.js";
+
+function learningProject(worktree: string): string {
+  return resolveExtensionBinding(worktree, { purpose: "learning" }).project;
+}
+
+/** Stable, credential-free diagnostics emitted by observer lifecycle hooks. */
+export type ObserverRequestFailure = "authentication" | "not_found" | "locked" | "timeout" | "request_failed";
+export type ObserverFailureReporter = (
+  operation: "pipeline_event_rejected" | "import_observations" | "trigger_synthesis",
+  reason: ObserverRequestFailure,
+) => void;
+
+/** Map HTTP responses without propagating a status, body, URL, or credential. */
+export function classifyObserverHttpFailure(status: number): ObserverRequestFailure {
+  if (status === 401 || status === 403) return "authentication";
+  if (status === 404) return "not_found";
+  if (status === 423) return "locked";
+  return "request_failed";
+}
+
+export function classifyObserverFailure(error: unknown): ObserverRequestFailure {
+  const bridgeFailure = error instanceof McpBridgeError
+    ? error.failure
+    : typeof error === "object" && error !== null && "failure" in error
+      ? (error as { failure?: unknown }).failure
+      : undefined;
+  if (bridgeFailure === "authentication") return "authentication";
+  if (bridgeFailure === "timeout") return "timeout";
+  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+    return "timeout";
+  }
+  return "request_failed";
+}
+
+/**
+ * Log a pipeline lifecycle event to the Ingenium MCP server for dashboard timeline observability.
+ * Non-fatal on failure — observability must never block pipeline operations.
+ */
+export async function logPipelineEvent(
+  eventType: string,
+  eventSource: string,
+  title: string,
+  worktree: string,
+  description?: string,
+  data?: any,
+  sessionId?: string,
+  onFailure?: ObserverFailureReporter,
+): Promise<void> {
+  try {
+    const project = learningProject(worktree);
+    await callMcpTool(worktree, "pipeline_event_log", {
+      project,
+      eventType,
+      eventSource,
+      title,
+      description,
+      data,
+      sessionId,
+      importance: 5,
+    });
+  } catch (error) {
+    // Non-fatal — observability should never block pipeline. The reporter receives
+    // only the stable category; it must not receive API text, URLs, or credentials.
+    try {
+      onFailure?.("pipeline_event_rejected", classifyObserverFailure(error));
+    } catch {
+      // A rejected logger must not turn observability into a lifecycle failure.
+    }
+  }
+}
+
+/**
+ * Import observations from the local file fallback.
+ *
+ * When the API is unreachable, observations are saved to observations.md (pipe-delimited).
+ * On the next session start, this imports any that don't have the [IMPORTED] marker.
+ * The file format: YYYY-MM-DD | type | content | importance | source
+ */
+export async function importObservationsFromFile(
+  worktree: string,
+  onFailure?: ObserverFailureReporter,
+): Promise<{ imported: number; skipped: number }> {
+  const project = learningProject(worktree);
+  const pathModule = require("path");
+  const fs = require("fs");
+
+  const obsPath = pathModule.join(worktree, ".opencode", "skills", "observations.md");
+  if (!fs.existsSync(obsPath)) return { imported: 0, skipped: 0 };
+
+  const content = fs.readFileSync(obsPath, "utf-8");
+  const lines = content.split("\n");
+  const unprocessed: string[] = [];
+  const lineIndices: number[] = [];
+
+  lines.forEach((line: string, i: number) => {
+    // Match lines starting with a date but lacking the [IMPORTED] marker
+    if (/^\d{4}-\d{2}-\d{2}/.test(line) && !line.includes("[IMPORTED]")) {
+      unprocessed.push(line);
+      lineIndices.push(i);
+    }
+  });
+
+  if (unprocessed.length === 0) return { imported: 0, skipped: 0 };
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const entry of unprocessed) {
+    try {
+      // Parse pipe-delimited format: date | type | content | importance | source
+      const parts = entry.split(" | ");
+      const obsType = parts[1]?.trim() || "insight";
+      const obsContent = parts[2]?.trim() || entry;
+      const importance = parseInt(parts[3]?.trim() || "5");
+      
+      await callMcpTool(worktree, "observe", {
+        project,
+        observation_type: obsType,
+        content: obsContent,
+        importance,
+        source: "import",
+      });
+      imported++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  // Mark successfully imported entries so they aren't re-imported on next restart
+  if (imported > 0) {
+    const updatedLines = lines.map((line: string, i: number) => {
+      if (lineIndices.includes(i) && !line.includes("[IMPORTED]")) {
+        return line + " [IMPORTED]";
+      }
+      return line;
+    });
+    fs.writeFileSync(obsPath, updatedLines.join("\n"), "utf-8");
+
+    // Log import event for dashboard observability
+    await logPipelineEvent(
+      "observation_imported",
+      "plugin",
+      `Imported ${imported} observation(s) from file fallback`,
+      worktree,
+      `${skipped} skipped`,
+      { imported, skipped },
+      undefined,
+      onFailure,
+    );
+  }
+
+  return { imported, skipped };
+}
+
+/**
+ * Trigger the synthesis pipeline via MCP.
+ * The API processes pending observations into personality traits and skill updates.
+ */
+export async function triggerSynthesis(
+  worktree: string,
+  sessionId?: string,
+  onFailure?: ObserverFailureReporter,
+): Promise<{
+  triggered: boolean;
+  message: string;
+  failure?: ObserverRequestFailure;
+}> {
+  try {
+    const project = learningProject(worktree);
+    await logPipelineEvent(
+      "synthesis_triggered",
+      "plugin",
+      "Synthesis pipeline triggered",
+      worktree,
+      "",
+      {},
+      undefined,
+      onFailure,
+    );
+
+    const result = mcpToolData(await callMcpTool(worktree, "synthesis_run", { project, sessionId }));
+    return { triggered: true, message: JSON.stringify(result) };
+  } catch (error) {
+    return {
+      triggered: false,
+      message: "Synthesis request failed",
+      failure: classifyObserverFailure(error),
+    };
+  }
+}

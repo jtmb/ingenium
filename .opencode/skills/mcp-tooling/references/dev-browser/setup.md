@@ -1,0 +1,103 @@
+---
+title: "Dev Browser Setup — Installation, Configuration, WSL-to-Windows Chrome Launch"
+impact: HIGH
+impactDescription: "Ensures dev-browser is installed, modes are understood, and agents can launch visible Chrome from WSL"
+tags: [dev-browser, setup, configuration, wsl, chrome]
+---
+
+## Dev Browser Setup
+
+**Pattern intent:** Provide a real Chrome/Chromium browser that agents can drive via bash — no MCP server required, no Playwright headless quirks, no `--remote-debugging-port` required.
+
+`dev-browser` ([SawyerHood/dev-browser](https://github.com/SawyerHood/dev-browser), 6.4k stars) lets OpenCode agents drive a real Chrome/Chromium browser via bash — no MCP server, no Playwright headless quirks, no `--remote-debugging-port` required.
+
+It solves the WSL Chrome problem: Playwright MCP runs headless and can't leverage your logged-in Chrome state. Dev-browser can either launch its own sandboxed Chromium or attach to your running Windows Chrome.
+
+### 🔴 HARD RULEs
+
+- **Always use `--headless` mode on WSL** unless you specifically need your logged-in Chrome session
+- **Never use `--connect` without verifying Chrome remote debugging is enabled** — it will fail silently
+- **Save screenshots via `saveScreenshot()`** — they land in `~/.dev-browser/tmp/` and the path is returned
+
+### Installation
+
+```bash
+npm install -g dev-browser
+dev-browser install    # installs Playwright + Chromium (one-time)
+```
+
+Verify:
+```bash
+dev-browser --version
+```
+
+### Two Modes
+
+#### Mode 1: Headless (Recommended for WSL)
+
+Launches its own sandboxed Chromium. No Chrome installation required, no port forwarding, no extension.
+
+```bash
+dev-browser --headless <<'EOF'
+const page = await browser.getPage("main");
+await page.goto("https://example.com", { waitUntil: "domcontentloaded" });
+console.log(await page.title());
+EOF
+```
+
+#### Mode 2: Connect (Attach to Real Chrome)
+
+Drives your actual Chrome window — useful for debugging with your logged-in sessions, cookies, and extensions.
+
+**On Windows host, run Chrome with remote debugging:**
+```powershell
+chrome.exe --remote-debugging-port=9222
+```
+
+**Then from WSL/Linux:**
+```bash
+.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json <<'EOF'
+const tabs = await browser.listPages();
+console.log(JSON.stringify(tabs, null, 2));
+EOF
+```
+
+Use `--json` for evidence-producing helper calls and emit one JSON value with
+`JSON.stringify(...)`. Non-evidence helper calls may omit the flag and print
+plain text; empty stdout does not authenticate a page.
+
+> **WSL note:** Chrome runs on the Windows host. Chrome 150+ binds only to `127.0.0.1` — `--remote-debugging-address=0.0.0.0` is ignored. WSL2 cannot reach Windows `127.0.0.1:9222` directly. To drive Chrome from WSL, use `wsl-chrome-connect.sh`; it runs `dev-browser` directly on Windows via `cmd.exe`. If you're inside Docker, use `host.docker.internal` as the Chrome host.
+
+### Troubleshooting
+
+#### Port 9222 already in use
+Kill the existing Chrome instance:
+```bash
+kill $(lsof -ti:9222) 2>/dev/null; "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" --remote-debugging-port=9222
+```
+
+#### Chrome remote debugging not reachable from WSL
+Chrome 150+ binds only to `127.0.0.1` — WSL2 cannot reach this directly. Verify Chrome is running from Windows side:
+```powershell
+powershell.exe -Command "Invoke-WebRequest -Uri 'http://127.0.0.1:9222/json/version' -UseBasicParsing -TimeoutSec 5"
+```
+
+If empty, restart Chrome with:
+```bash
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=* \
+  --user-data-dir="C:\Users\james\AppData\Local\Temp\chrome-debug" \
+  --no-first-run \
+  --new-window about:blank &
+```
+
+To drive Chrome from WSL, use `wsl-chrome-connect.sh` after installing `dev-browser` on Windows (see Pattern 5 in patterns.md).
+
+#### "Cannot find browser" error
+Run `dev-browser install` to download Chromium.
+
+## Cross-References
+
+- See [`references/dev-browser/tools.md`](tools.md) for the complete browser API catalog
+- See [`references/dev-browser/patterns.md`](patterns.md) for common agent workflows
